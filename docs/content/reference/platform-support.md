@@ -58,4 +58,4 @@ No release binary, no package and no CI. Some may [build from source](/getting-s
 | 32-bit x86 and ARM Linux | No gori build |
 | 32-bit Windows | No gori build |
 | FreeBSD, OpenBSD | Untested from source |
-| Other BSDs, Android, Solaris | Untested from source |
+| Other BSDs, Android, Solaris | Untested from source. Routing an Android device or emulator *through* gori is supported: see [`gori run android`](/reference/cli/#run-android) |

@@ -40,7 +40,7 @@ group = "워크벤치"
 
 성공하면 필드가 찾아낸 secret으로 바뀌고 결과가 `✓`로 뒤집혀, 그대로 Forge 렌즈로 이어갈 수 있습니다.
 
-> Django **세션** 쿠키(`django.contrib.sessions`)는 기본이 아닌 salt로 서명되므로, 기본 salt로 크랙하면 실패합니다. 포맷이 Django로 해석되면 **OPTIONS**에 ` salt:signing ` 배지가 나타납니다. 이 배지를 클릭하면(또는 `Space` → **Toggle Django salt**) salt 필드가 `django.contrib.sessions.backends.signed_cookies`로 바뀌고, verify·crack·forge가 모두 그 salt로 서명됩니다. 직접 아무 salt나 입력할 수도 있습니다. CLI의 `--salt`도 마찬가지입니다.
+> Django **세션** 쿠키(`django.contrib.sessions`)는 기본이 아닌 salt로 서명되므로, 기본 salt로 크랙하면 실패합니다. 포맷이 Django로 해석되면 **OPTIONS**에 ` salt:signing ` 배지가 나타납니다. 이 배지를 클릭하면(또는 `Space` → **Toggle Django salt**) salt 필드가 `django.contrib.sessions.backends.signed_cookies`로 바뀌고, verify·crack·forge가 모두 그 salt로 서명됩니다. 직접 아무 salt나 입력할 수도 있습니다. CLI의 `--salt`도 마찬가지이며, 기본 salt로 Django `--verify`나 `--crack`이 실패하면 세션 salt를 알려 주는 힌트가 출력됩니다.
 
 ## 헤드리스 {#headless}
 

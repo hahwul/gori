@@ -60,7 +60,7 @@ Openers exist where a section needs more than a row of fields: the theme list, t
 
 Notifications fire on background results from the Miner, Fuzzer, Probe, and Discover. The [Statusline](/guide/statusline/) runs a shell command on an interval and renders its stdout as the bottom row; the command reads a [JSON context](/guide/statusline/#context) describing the live session on stdin, and there are [ready-made commands](/guide/statusline/#presets) to paste into it.
 
-**Reset** is the whole file, not one section. `↵` (or `Ctrl-P` → **Settings: Reset**) asks, then puts `settings.json` back to a fresh install's state and applies it live: theme, keymap, tab bar, list and preview prefs, and the proxy bind. It also drops the data that lives in the same file: your global env values, hostname overrides, global OAST providers, saved decoder chains, global rewriter, colormarker and Probe rules, saved views, redaction profiles, upstream rules, outbound TLS settings, extra listeners, and the User-Agent list. Projects and their captures are untouched, and so are a project's own pinned bind and env.
+**Reset** is the whole file, not one section. `↵` (or `Ctrl-P` → **Settings: Reset**) asks, then puts `settings.json` back to a fresh install's state and applies it live: theme, keymap, tab bar, list and preview prefs, and the proxy bind. It also drops the data that lives in the same file: your global env values, hostname overrides, global OAST providers, saved decoder chains, global rewriter, colormarker and Probe rules, saved views, redaction profiles, upstream rules, outbound TLS settings, extra listeners, and the User-Agent list. MCP permissions go back to every group on, and Channel delivery back to off. Projects and their captures are untouched, and so are a project's own pinned bind and env.
 
 Two things survive on purpose. The redaction salt is kept, because discarding it would break every placeholder in an artifact already written. And so are the global rule-id counters. A project can override a global rewriter or colormarker rule by id, and those overrides live in the project's own database, which a settings reset never opens. Rewinding the counter would hand a fresh rule an id an old override still names, so it keeps counting up and `settings.json` keeps a rules-less block to remember where it got to.
 
@@ -96,7 +96,7 @@ Placement decides what she costs *in a session* (the picker has only the one spo
 | **User-Agents** | Opener: your own list for `$GEN.USER_AGENT`, one per line. It replaces the built-in browser list; empty means the built-in one |
 | **Hotkeys** | Opener: rebind any shortcut, or pick an OS default profile |
 
-**External editor** is what `^E` opens in editable fields; blank falls back to `$VISUAL` / `$EDITOR` / `vi`.
+**External editor** is what `^E` opens in editable fields; blank falls back to `$VISUAL` / `$EDITOR` / `vi` (`notepad` on Windows).
 
 **Mouse** covers the pointer. Turning it off restores your terminal's own text selection; gori stops claiming click, wheel and drag entirely. **Drag release** decides what letting go of a drag over a text pane does: `select only` leaves the band highlighted and waits for the copy key (`y` in READ, `^Y` while typing), which is how gori has always behaved; `select + copy` also puts it on the clipboard there and then, the way a terminal's own primary selection does. A plain click selects nothing, so under `select + copy` it still copies nothing. The mode only ever acts on a band a drag actually built, and it copies through the same path the copy key uses, so the toast and the per-tab meaning of "copy" are identical either way.
 
@@ -116,11 +116,11 @@ Network here is the **global default**. A project can pin its own bind address, 
 | Section | Fields |
 |---------|--------|
 | **Agent messaging** | Channel delivery (off) |
-| **MCP permissions** | Send traffic, Intercept control, Edit project data, Change scope & sandbox, Manage projects, Run local commands (all on) |
+| **MCP permissions** | Send traffic, Intercept control, Edit project data, Change scope & sandbox, Manage projects, Run local commands (each `on`, `ask` or `off`; all `on` by default) |
 
 How `gori mcp` delivers a "Tell the agent…" message to an attached agent. The inbox-socket, Codex-queue, tool-result and `operator_messages`-poll layers always run; **Channel delivery** adds the `claude/channel` push *behind* them, tried only when no route that can confirm delivery has answered. It is off by default because it is a research preview that needs Claude Code launched with a development-channels flag. It is read when a `gori mcp` process starts, so an agent already running keeps the answer it was given. See [Messages from gori](/guide/mcp/#messages-from-gori).
 
-**MCP permissions** decides what an agent attached over `gori mcp` may do, one group at a time; reading the capture is always allowed, and like Channel delivery it is read when the server starts. See [Permissions from Preferences](/guide/mcp/#permissions-from-preferences).
+**MCP permissions** decides what an agent attached over `gori mcp` may do, one group at a time: `off` withholds the group, and `ask` holds each of its calls for your approval on the TUI's `ask:` card. Reading the capture is always allowed, and like Channel delivery it is read when the server starts. See [Permissions from Preferences](/guide/mcp/#permissions-from-preferences).
 
 ## In the Project Picker
 

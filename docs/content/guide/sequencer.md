@@ -30,7 +30,7 @@ Extract the token from any of these locations:
 | Cookie | A `Set-Cookie` value by name |
 | Header | A response header value |
 | Regex | Capture group 1 of a body regex |
-| Position | A fixed byte range of the body (`A:B`) |
+| Position | A fixed byte range of the body (`A:B`; an empty, reversed or negative range is refused before anything is sent) |
 | JSONPath | A value at a JSON body path (`$.data.token`) |
 
 Live collection defaults to **concurrency 1**, because session tokens are often stateful (each request advances a server-side counter). Raise it only when the endpoint is stateless.

@@ -41,7 +41,7 @@ HMAC (`HS256` / `HS384` / `HS512`) signs with a secret you type. The asymmetric 
 | **EdDSA** | `EdDSA` | an Ed25519 key |
 | **Unsigned** | `none` | none: the auth-bypass shape, offered deliberately |
 
-A key is either inline PEM text or a path to a `.pem` file. Verification additionally accepts an X.509 **certificate** (what an IdP publishes as `x5c`) or the private key itself.
+A key is either inline PEM text or a path to a `.pem` file. A file that holds no PEM block is refused as `<file> is not a PEM key`: an HMAC secret kept in a file belongs in `--secret`, not `--key`. Verification additionally accepts an X.509 **certificate** (what an IdP publishes as `x5c`) or the private key itself.
 
 ## Encrypted Tokens (JWE)
 
@@ -80,7 +80,7 @@ cat token.txt | gori run jwt --attacks         # token from stdin
 
 The token comes from the argument or stdin; there is no project or capture involved (it is pure local compute). `--format` is `text` or `json`. On `--encode`, `--set KEY=VALUE` patches one claim (repeatable; the value is JSON when it parses, so `admin=true` is a boolean and `role=admin` a string) and `--payload JSON` replaces the whole claims object; the two are mutually exclusive. `--set-header FIELD=VALUE` and `--header JSON` do the same to the **header** — the seam for the `kid` / `jku` / `jwk` header-injection payloads — with `alg` always taken from `--alg`. Given both `--header` and `--payload`, `--encode` mints a fresh token and reads none; given only one, the other half still comes from the token (pass `""` or `</dev/null` to start it from `{}`). `--secret` and `--key` fill the same slot, so pass one. `--verify` needs `--secret` or `--key` (pass `--secret ''` to check the empty secret), prints `verified: yes|no` with a `reason` on a no, and exits 1 unless the token verifies, as `gori run cookie --verify` does. With `--format json` the no also carries a `code` to branch on: only after `signature_mismatch` or `key_mismatch` (a key of the wrong type for the token's alg) might another key succeed, while `unsigned`, `alg_unsupported`, `signature_malformed`, `jwe` and the rest mean no key will. Passing both `--secret` and `--key` is refused, `--secret ''` included. See the [CLI Reference](/reference/cli/#run-jwt).
 
-Over MCP, `jwt_decode` / `jwt_verify` / `jwt_encode` / `jwt_attacks` are read tools available even under `--read-only`: they touch no network and write nothing. `jwt_encode` takes the same `set` / `payload` claim edits and the same `key`; `jwt_attacks` takes `public_key`. Note that `key` / `public_key` accept a **path**, so those two arguments read a file the caller names. Pass the PEM inline if the client should not reach the filesystem.
+Over MCP, `jwt_decode` / `jwt_verify` / `jwt_encode` / `jwt_attacks` are read tools available even under `--read-only`: they touch no network and write nothing. `jwt_encode` takes the same `header`, `set` / `payload` edits and the same `key`, and mints with no `token` when `header` or `payload` is given; `jwt_attacks` takes `public_key`. Note that `key` / `public_key` accept a **path**, so those two arguments read a file the caller names. Pass the PEM inline if the client should not reach the filesystem.
 
 ## Next Steps
 

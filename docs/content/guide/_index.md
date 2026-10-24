@@ -14,7 +14,7 @@ gori is organized into tabs; move between them with `[` / `]` or jump with numbe
 
 | Tab | Purpose |
 |-----|---------|
-| **Project** | Home: scope, host overrides, env vars, description, network |
+| **Project** | Home: scope, host overrides, env vars, description and tags, network |
 | **Target** | Sitemap (host → path endpoint tree) + Discover (spider & directory brute-force) + Diff (retest: two projects at endpoint scale) + Params (parameter inventory per endpoint) |
 | **History** | Captured (and imported) flows with full request/response detail |
 | **Intercept** | Hold requests/responses for a manual decision |

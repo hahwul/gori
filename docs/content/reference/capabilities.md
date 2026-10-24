@@ -21,8 +21,8 @@ does once the project has a scope, and the TUI does not ask).
 |----------|---------|-----------|--------|------|
 | **HTTP/1.1** | Full request and response flows | Requests and finite responses; upgrades, SSE, and close-delimited responses stream through | Yes | Yes |
 | **HTTP/2** | Per-stream flows plus raw frame log | Per stream; a declared body up to 1 MiB can be edited, otherwise the hold is head-only | Yes, over a real h2 connection | Yes |
-| **WebSocket over HTTP/1.1** | Handshake and message transcript | Messages when the filter explicitly contains `proto:ws` | Yes, message scripts | Yes, handshake and message positions |
-| **WebSocket over HTTP/2 (RFC 8441)** | Handshake, h2 frames, and message transcript | Handshake only; messages are not held | Yes, message scripts; the socket is reopened with the capture's own extended `CONNECT` | Yes, handshake and message positions |
+| **WebSocket over HTTP/1.1** | Handshake and message transcript | Messages when the filter explicitly contains `proto:ws`; a frame can be injected into a socket the proxy still relays | Yes, message scripts or a live session kept open | Yes, handshake and message positions |
+| **WebSocket over HTTP/2 (RFC 8441)** | Handshake, h2 frames, and message transcript | Handshake only; messages are not held or injected | Yes, message scripts (no live session); the socket is reopened with the capture's own extended `CONNECT` | Yes, handshake and message positions |
 | **gRPC over HTTP/2** | Framed messages, trailers, and protobuf projections | Unary/small declared bodies can be edited; streaming bodies are head-only | Yes; unary calls can be schema-aware | Yes; schema-known unary fields or raw request positions |
 | **Server-Sent Events** | The response is captured and projected as events, live while the stream is open | The request can be held; the streaming response cannot | As an HTTP request | As an HTTP request |
 | **HTTP/3** | No | No | No | No |
@@ -38,6 +38,8 @@ byte-exact after the cap and the flow reports both captured and wire sizes.
 | Start a capture proxy | Yes | `gori run capture` | No |
 | Own the live intercept queue | Yes | No; headless capture never holds messages | No |
 | Inspect or decide a live intercept item | Directly | `gori run intercept`, while a capturing TUI publishes the queue | Intercept tools, while a capturing TUI publishes the queue |
+| Inject a frame into a live proxied WebSocket | History's **Inject frame…** | `gori run intercept inject`, while a capturing TUI holds the socket | `ws_inject`, while a capturing TUI holds the socket |
+| Keep a WebSocket session open and talk on it | Repeater's **Live session (keep open)** | `gori run repeater ws` | `ws_session_open` / `ws_session_send` |
 | Read History, Sitemap, Probe findings, Issues, and Notes | Yes | Yes | Yes |
 | Replay and active-send requests | Yes | Yes | Yes |
 | Run Fuzzer, Miner, Discover, Sequencer, and Authorize engines | Yes | Yes | Yes |

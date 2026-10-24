@@ -60,7 +60,7 @@ Some choices are variations of one intent: *send this flow to some tool*, *chang
 |-----|-------|----------|
 | `>` **Send flow to…** | Hand the selected flow to another tool: `r` Repeater, `f` Fuzzer, `c` Comparer, `m` Miner, `s` Sequencer, `a` Authorize, `D` Discover, `b` open the response in a browser | tabs where a flow is selected: History, the flow detail, the Sitemap, the Repeater, Fuzzer results, … |
 | `Z` **Display…** | Toggles for how the pane draws: hex, pretty, diff, follow, columns, folds, … | lists and request/response panes |
-| `P` **Protocol…** | What a request sends: HTTP/2, SNI, auto Content-Length, gRPC, TLS fingerprint | Repeater, Fuzzer |
+| `P` **Protocol…** | What a request sends: HTTP/2, SNI, auto Content-Length, gRPC, TLS fingerprint, and a WebSocket's key reuse, live session and Engine.IO heartbeat | Repeater, Fuzzer |
 | `T` **Sub-tabs…** | New, close, duplicate, rename, mark and find sub-tabs | a pane on the nine tabs with a sub-tab strip (Repeater, Fuzzer, Notes, …) |
 
 Three things make them quick:

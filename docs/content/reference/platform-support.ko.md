@@ -58,4 +58,4 @@ Windows 릴리스 바이너리는 v0.8.0부터 제공됩니다.
 | 32비트 x86·ARM Linux | gori 빌드 없음 |
 | 32비트 Windows | gori 빌드 없음 |
 | FreeBSD, OpenBSD | 소스 빌드 미검증 |
-| 그 밖의 BSD, Android, Solaris | 소스 빌드 미검증 |
+| 그 밖의 BSD, Android, Solaris | 소스 빌드 미검증. Android 기기나 에뮬레이터의 트래픽을 gori로 *보내는* 것은 지원합니다. [`gori run android`](/ko/reference/cli/#run-android)를 참고하세요 |

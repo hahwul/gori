@@ -62,7 +62,7 @@ A Discover finding is more than a URL. gori stores the request it framed and the
 
 As you triage, mark the paths that matter with `t` (a run of `t` marks consecutive rows), and use the `Space` menu to tag them or add the host to scope from right here, so the endpoints you care about survive the next capture. Nothing sends traffic on its own; you decide what to open and what to chase.
 
-The tree reads two more ways. `p` on a host or subtree lists every parameter name its requests carried, where it appeared and whether a value came back reflected (**Target → Params**, `gori run sitemap params`). `⇧E` writes the selected host or subtree as an OpenAPI 3.0.3 document, with templated paths and inferred schemas but never a credential value (`gori run sitemap export`).
+The tree reads two more ways. `p` on a host or subtree lists every parameter name its requests carried, where it appeared and whether a value came back reflected (**Target → Params**, `gori run sitemap params`). `⇧E` writes the selected host or subtree as an OpenAPI 3.0.3 document, with templated paths and inferred schemas but never a credential value (`gori run sitemap export`). Once testing starts, `gori run sitemap --untested` (MCP `list_sitemap{untested:true}`) keeps only the endpoints no active tool has tested yet, judged from the flows Repeater, Fuzzer, Miner, Sequencer, Authorize, Probe and Retest recorded in History and from saved fuzz runs.
 
 **Checkpoint.** You can open a discovered endpoint, read its real response, and send it onward to the Repeater.
 

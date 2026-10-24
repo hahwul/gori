@@ -98,6 +98,10 @@ Match & Replace는 홀드보다 **먼저** 돌기 때문에, 편집기에서 보
 
 샌드박스는 gori가 직접 보내는 요청도 막습니다. Repeater, Fuzzer, Miner, `gori run`, MCP가 허용 목록 밖의 호스트로 보내는 요청은 `--allow-unscoped` / `allow_unscoped:true`로 스코프 검사를 면제받았더라도 거부됩니다. 그 사전 스코프 검사는 표면마다 다릅니다. MCP는 스코프에 들지 않는 대상을 모두 `SCOPE_BLOCKED`로 거부하며, 프로젝트에 스코프가 아직 없어도 마찬가지입니다. `gori run`은 설정된 스코프 밖의 대상을 거부합니다. TUI의 Repeater와 스윕에는 사전 검사가 없으므로 샌드박스와 명시적 제외 규칙만이 이들을 막습니다. HTTPS는 요청 URL을 확인하기 위해 TLS 인터셉트에 의존합니다. 스코프에 들 수 없는 호스트는 `CONNECT` 단계에서 거부되고, 통과한 호스트의 요청은 하나씩 개별 검사합니다. 이 검사는 HTTP/2에서도 스트림 단위로 동작하므로, 샌드박스 때문에 연결이 HTTP/1.1로 내려가지 않고 gRPC 클라이언트도 계속 동작합니다. `CONNECT` 안에 들어오는 평문 HTTP/2(h2c, 드묾)도 다른 HTTP/2 연결과 똑같이 스트림 단위로 검사합니다. 터널은 열리고, 그 위에서 스코프를 벗어난 스트림만 개별적으로 취소됩니다.
 
+### 요청 예산 {#request-budget}
+
+스코프가 gori가 *어디로* 보내도 되는지를 정한다면, **프로젝트 요청 예산**은 *얼마나*를 정합니다. `gori run project network set outbound_max_rps=10`과 `outbound_max_requests=5000`은 gori가 보내는 요청의 초당 수와 총량을 프로젝트의 모든 실행·표면·프로세스(Repeater, Fuzzer, Miner, Sequencer, Discover, Authorize, retest, 액티브 Probe, 프레임 주입, `gori run`, MCP)에 걸쳐 함께 제한합니다. 그래서 병렬 스윕과 에이전트가 동시에 돌아도 engagement에서 합의한 상한을 지킵니다. 송신은 속도 슬롯을 기다리고, 총량이 소진되면 실행은 `budget_exhausted`로 끝나며 거부된 송신은 재시도 가능한 네트워크 오류가 아니라 `BUDGET_EXHAUSTED`로 표시됩니다. 프록시를 거치는 클라이언트 트래픽은 세지도 지연시키지도 않습니다. [프로젝트별 오버라이드](/ko/reference/config/#per-project-overrides)를 참고하세요.
+
 ## Sitemap {#sitemap}
 
 **Sitemap** 탭은 History를 중복 제거된 `host → path` 엔드포인트 트리로 접어, 메서드 칩과 스코프 마커를 함께 보여줍니다. 대상의 공격 표면을 한눈에 파악하기 좋습니다. 루트 하나는 **오리진** 하나로, 기본 포트를 뺀 `scheme://host:port` 형태입니다(`https://acme.test`, `http://127.0.0.1:19021`). 그래서 한 호스트의 서로 다른 서비스나 HTTP와 HTTPS 쪽은 서로 다른 트리로 나뉘고, 행에서 보내기·열기·Params·Discover·내보내기를 하면 그 오리진에서만 동작합니다. 경로 태그는 호스트에 붙으므로 그 호스트의 모든 오리진 아래에 보입니다. 경로 파라미터의 id는 기본으로 접혀 있어 `/user/1`과 `/user/2`가 한 노드를 공유하고, `/user/<uuid>`는 `{uuid}` 하나로 모입니다. `g`를 누르면 실제 id를 그대로 보여 줍니다. 쿼리 문자열은 별개의 축으로 접힙니다. `/search?q=widgets`와 `/search?q=<payload>`는 `/search` 한 줄이 되고(펼치면 원래 변형이 보입니다), `⇧G`로 끌 수 있습니다.
@@ -812,6 +816,8 @@ gori run project import acme-api.gori
 | **Global** | Preferences(`Ctrl-,`) → **Network & Tabs** → **Network** → **Hostname overrides**, `Ctrl-P` → **Settings: Hostnames**, 또는 `settings.json`의 `hostname_overrides` | 폴백 |
 
 스테이징 호스트, IP 기반 가상 호스트, 또는 `Host` 헤더를 그대로 유지하면서 프로덕션 호스트명을 랩 박스로 향하게 할 때 유용합니다.
+
+바뀌는 것은 TCP 접속 대상뿐이며, SNI, 인증서 호스트명, `Host` 헤더는 원래 이름을 유지합니다. 값은 `IP`, `IP:PORT`, `[v6]:PORT` 중 하나입니다. 포트 없는 IP는 요청의 포트를 그대로 쓰고, 대괄호 없는 IPv6 값은 그 자체가 주소입니다(`::1:18190`은 거부되므로 `[::1]:18190`으로 씁니다). 저장된 값을 해석할 수 없으면 호스트의 실제 주소로 폴백하지 않고 접속을 거부합니다. [`hostname_overrides`](/ko/reference/config/#hostname-overrides)를 참고하세요.
 
 ## 업스트림 프록시 {#upstream-proxy}
 

@@ -207,6 +207,7 @@ exactly as before, and Help names the route: the key, or `^P → <name>` for an 
 |-----|--------|-----|
 | Repeater | Mark word · Edit decoder chain · Pretty-print request | `Ctrl-K` · `Ctrl-Q` · `Ctrl-U` |
 | Repeater | Minimize request · Use as refresh for slot… · GraphQL: insert introspection query · GraphQL: insert legacy introspection query | palette |
+| Repeater | GraphQL: multiply operation (batched array) · GraphQL: multiply operation (aliased) · Edit gRPC message as JSON · Add gRPC field · Send WS message as binary (hex) | palette |
 | Fuzzer | Mark word · Edit decoder chain · Pretty-print template | `Ctrl-K` · `Ctrl-Q` · `Ctrl-U` |
 | Fuzzer | Add List payload set · Save results | `Ctrl-L` · `⇧E` |
 | Fuzzer | Run history | palette |
@@ -357,10 +358,10 @@ and stays out of both cards.
 | `x` | Hex (History detail, both Repeater panes) | `2` | HTTP/2 |
 | `p` · `u` · `b` | Pretty · Unicode escapes · whitespace | `s` | SNI override |
 | `d` · `e` | Response diff · envelope/decoded | `c` | Auto Content-Length |
-| `s` · `f` · `c` | Static assets · follow · Columns… | `w` | Reuse Sec-WebSocket-Key |
+| `s` · `f` · `c` | Static assets · follow · Columns… (the Fuzzer's Extractors…) | `w` | Reuse Sec-WebSocket-Key |
 | `g` · `q` · `J` | Fold ids · fold queries · JS references | `r` · `f` | gRPC reframe · gRPC field editor |
 | `m` · `v` · `G` | Fuzzer: matched only · distribution · group by shape | `t` | TLS fingerprint |
-| `t` · `z` | Comparer: requests/responses · fold unchanged | | |
+| `t` · `z` | Comparer: requests/responses · fold unchanged | `o` · `b` | WebSocket live session · Engine.IO heartbeat |
 | `a` | Show all: Probe's closed issues, the Params tab's standard headers | | |
 
 Both cards are **sticky**. After a row runs, the card comes back at the same row, so you can

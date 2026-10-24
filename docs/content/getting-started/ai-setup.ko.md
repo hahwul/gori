@@ -73,7 +73,9 @@ gori mcp --db /path/to/project.db --install-claude-code   # 특정 데이터베�
 gori mcp --read-only --install-claude-code
 ```
 
-읽기 전용은 `list_history`, `get_flow`, `list_sitemap` 등 검사 도구를 유지하면서 `send_request`, 이슈 쓰기, 인터셉트 변경 도구를 비활성화합니다. `decode`, `jwt_decode` 같은 순수 계산 헬퍼는 네트워크나 데이터를 절대 건드리지 않으므로 그대로 사용할 수 있습니다.
+읽기 전용은 `list_history`, `get_flow`, `list_sitemap` 등 검사 도구를 유지하면서 `send_request`, 이슈 쓰기, 인터셉트 변경 도구를 비활성화합니다. `decode`, `jwt_decode` 같은 순수 계산 헬퍼는 네트워크나 데이터를 절대 건드리지 않으므로 그대로 사용할 수 있습니다. gori 안에서 정하려면 **Settings → AI → MCP permissions**에서 도구 묶음(트래픽 전송, 인터셉트 제어, 프로젝트 데이터 편집, 스코프, 프로젝트)마다 **on**, **ask**, **off**를 고르면 다음 `gori mcp` 시작부터 적용됩니다. **ask**는 호출마다 승인 카드로 먼저 물어봅니다([Preferences에서 권한 정하기](/ko/guide/mcp/#permissions-from-preferences)).
+
+전체 카탈로그는 컨텍스트도 차지합니다. 클라이언트는 첫 질문 전에 모든 도구의 스키마를 읽어 세션 내내 들고 있습니다. `--tools=@recon`(캡처 읽기와 매핑, 요청 재전송, 이슈·노트 기록)이나 `--tools=@minimal`(History와 플로우 읽기, 운영자와 대화)은 작은 이름 붙은 묶음만 제공하며 `--read-only`와 함께 쓸 수 있습니다. 크기 비교는 [노출할 도구 고르기](/ko/guide/mcp/#choosing-which-tools-are-exposed)에 있습니다.
 
 ## 4. 첫 요청 보내기 {#4-drive-your-first-request}
 

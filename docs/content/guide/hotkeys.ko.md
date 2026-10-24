@@ -198,6 +198,7 @@ space 메뉴는 자주 누르는 것을 위한 곳이고, 드물게 쓰는 것�
 |-----|--------|-----|
 | Repeater | Mark word · Edit decoder chain · Pretty-print request | `Ctrl-K` · `Ctrl-Q` · `Ctrl-U` |
 | Repeater | Minimize request · Use as refresh for slot… · GraphQL: insert introspection query · GraphQL: insert legacy introspection query | 팔레트 |
+| Repeater | GraphQL: multiply operation (batched array) · GraphQL: multiply operation (aliased) · Edit gRPC message as JSON · Add gRPC field · Send WS message as binary (hex) | 팔레트 |
 | Fuzzer | Mark word · Edit decoder chain · Pretty-print template | `Ctrl-K` · `Ctrl-Q` · `Ctrl-U` |
 | Fuzzer | Add List payload set · Save results | `Ctrl-L` · `⇧E` |
 | Fuzzer | Run history | 팔레트 |
@@ -344,10 +345,10 @@ Rewriter와 Colormarker의 **Enable/disable everywhere**가 `T`인 이유가 이
 | `x` | 헥스 (History 상세, Repeater 두 패널) | `2` | HTTP/2 |
 | `p` · `u` · `b` | Pretty · Unicode 이스케이프 · 공백 | `s` | SNI 재정의 |
 | `d` · `e` | 응답 diff · envelope/decoded | `c` | Content-Length 자동 계산 |
-| `s` · `f` · `c` | 정적 자산 · follow · Columns… | `w` | Sec-WebSocket-Key 재사용 |
+| `s` · `f` · `c` | 정적 자산 · follow · Columns… (Fuzzer는 Extractors…) | `w` | Sec-WebSocket-Key 재사용 |
 | `g` · `q` · `J` | id 접기 · 쿼리 접기 · JS 참조 | `r` · `f` | gRPC reframe · gRPC 필드 편집기 |
 | `m` · `v` · `G` | Fuzzer: 매치만 · 분포 · 응답 모양별 묶기 | `t` | TLS 지문 |
-| `t` · `z` | Comparer: 요청/응답 · 변경 없는 구간 접기 | | |
+| `t` · `z` | Comparer: 요청/응답 · 변경 없는 구간 접기 | `o` · `b` | WebSocket 라이브 세션 · Engine.IO 하트비트 |
 | `a` | 모두 보기: Probe의 닫힌 이슈, Params 탭의 표준 헤더 | | |
 
 두 카드는 **sticky**입니다. 행을 실행하면 카드가 같은 행에서 다시 열리므로 한 번에 두세 개를

@@ -26,9 +26,25 @@ Everything lives under `GORI_HOME` (`$GORI_HOME` if set and non-empty, otherwise
 | `spool/` | A running fuzz sweep's full results, until they are saved or discarded |
 | `preview/` | Temporary files handed to an external viewer |
 
+## Environment Variables {#environment-variables}
+
+| Variable | Effect |
+|----------|--------|
+| `GORI_HOME` | The home tree above. Empty or unset means `~/.gori` (`%USERPROFILE%\.gori` on Windows) |
+| `GORI_CONFIG` | The `settings.json` to use instead of `$GORI_HOME/settings.json`; `--config PATH` wins over it |
+| `GORI_SSLKEYLOGFILE`, `SSLKEYLOGFILE` | Append TLS session secrets for both legs to that file, for Wireshark. The `GORI_` name wins, and set empty it turns the log off. See [Decrypting the wire](/guide/proxy/#tls-key-log) |
+| `GORI_MCP_PROJECT`, `GORI_MCP_DB` | The project (by name) or database file `gori mcp` binds at start. See [Choosing a Project](/guide/mcp/#choosing-a-project) |
+| `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY` | The upstream route when `network.upstream_proxy` is blank (lowercase spellings too). See [upstream_rules](#upstream-rules) |
+| `SSL_CERT_FILE`, `SSL_CERT_DIR` | The CA trust `verify_upstream` checks origins against, in place of the system store's standard locations |
+| `VISUAL`, `EDITOR` | The external editor when `editor.command` is blank, then `vi` (`notepad` on Windows) |
+| `GORI_GITHUB_TOKEN`, `GITHUB_TOKEN`, `GH_TOKEN` | Authenticate `gori update` and the installer to the GitHub API. See [the rate limit](/getting-started/installation/#if-you-hit-a-github-rate-limit) |
+| `ANDROID_HOME`, `ANDROID_SDK_ROOT` | Where [`gori run android`](/reference/cli/#run-android) looks for `platform-tools/adb` when `adb` is not on `PATH` |
+
 ## settings.json
 
 `settings.json` is JSON. Find or edit it with `gori settings` / `gori settings --edit`.
+
+A file that is not valid JSON does not stop gori: it says so on stderr (and in a TUI notice), runs that session on defaults, keeps the original as `settings.json.corrupt` before anything is saved over it, and still reads the `env.syntax` it states.
 
 Its location resolves as `--config PATH` → `$GORI_CONFIG` → `$GORI_HOME/settings.json`, so a run can use a different configuration without relocating the CA, project databases, themes and wordlists. Sections can be moved between configs with [`gori settings export` / `import`](/reference/cli/#profiles). Five of them (`rewriter`, `scan_rules`, `decoder`, `statusline` and `editor`) can carry a command rather than data, so a profile can carry code; both ends of a transfer [say so](/reference/cli/#profiles-that-carry-commands).
 

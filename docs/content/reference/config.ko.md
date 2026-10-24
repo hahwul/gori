@@ -26,9 +26,25 @@ gori는 전역 환경설정을 `settings.json`에, 각 프로젝트를 자체 SQ
 | `spool/` | 실행 중인 fuzz 스윕의 전체 결과(저장하거나 버릴 때까지) |
 | `preview/` | 외부 뷰어에 넘기는 임시 파일 |
 
+## 환경 변수 {#environment-variables}
+
+| Variable | Effect |
+|----------|--------|
+| `GORI_HOME` | 위의 홈 트리. 비어 있거나 설정되지 않으면 `~/.gori`(Windows에서는 `%USERPROFILE%\.gori`) |
+| `GORI_CONFIG` | `$GORI_HOME/settings.json` 대신 쓸 `settings.json`. `--config PATH`가 이보다 우선합니다 |
+| `GORI_SSLKEYLOGFILE`, `SSLKEYLOGFILE` | 양쪽 구간의 TLS 세션 비밀을 그 파일에 덧붙여 Wireshark가 읽게 합니다. `GORI_` 이름이 우선하고, 빈 값으로 두면 로그를 끕니다. [Wireshark로 와이어 복호화하기](/ko/guide/proxy/#tls-key-log)를 참고하세요 |
+| `GORI_MCP_PROJECT`, `GORI_MCP_DB` | `gori mcp`가 시작할 때 바인딩할 프로젝트(이름) 또는 데이터베이스 파일. [프로젝트 선택](/ko/guide/mcp/#choosing-a-project)을 참고하세요 |
+| `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY` | `network.upstream_proxy`가 비어 있을 때의 업스트림 경로(소문자 표기도 인정). [upstream_rules](#upstream-rules)를 참고하세요 |
+| `SSL_CERT_FILE`, `SSL_CERT_DIR` | `verify_upstream`이 오리진을 검증할 CA 신뢰 저장소. 시스템 저장소의 표준 위치 대신 쓰입니다 |
+| `VISUAL`, `EDITOR` | `editor.command`가 비어 있을 때의 외부 편집기. 둘 다 없으면 `vi`(Windows에서는 `notepad`) |
+| `GORI_GITHUB_TOKEN`, `GITHUB_TOKEN`, `GH_TOKEN` | `gori update`와 설치 스크립트가 GitHub API에 인증할 토큰. [rate limit](/ko/getting-started/installation/#if-you-hit-a-github-rate-limit)을 참고하세요 |
+| `ANDROID_HOME`, `ANDROID_SDK_ROOT` | `adb`가 `PATH`에 없을 때 [`gori run android`](/ko/reference/cli/#run-android)가 `platform-tools/adb`를 찾는 곳 |
+
 ## settings.json {#settingsjson}
 
 `settings.json`은 JSON입니다. `gori settings` / `gori settings --edit`로 찾거나 편집합니다.
+
+유효한 JSON이 아닌 파일이 있어도 gori는 멈추지 않습니다. stderr(와 TUI 알림)로 그 사실을 알리고, 그 세션은 기본값으로 실행하며, 무언가를 덮어 저장하기 전에 원본을 `settings.json.corrupt`로 보관하고, 파일에 적힌 `env.syntax`는 그대로 읽어 냅니다.
 
 위치는 `--config PATH` → `$GORI_CONFIG` → `$GORI_HOME/settings.json` 순으로 결정되므로, CA·프로젝트 DB·테마·워드리스트를 옮기지 않고도 다른 설정으로 실행할 수 있습니다. 섹션 단위 이동은 [`gori settings export` / `import`](/ko/reference/cli/#profiles)로 합니다. 그중 `rewriter`·`scan_rules`·`decoder`·`statusline`·`editor` 다섯 섹션은 데이터가 아니라 명령을 담을 수 있어 프로필이 코드를 실어 나를 수 있습니다. 전달 양쪽 끝에서 [그 사실을 알려줍니다](/ko/reference/cli/#profiles-that-carry-commands).
 

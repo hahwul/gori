@@ -60,7 +60,7 @@ gori에 저장되는 모든 환경설정은 하나의 화면, **Preferences** �
 
 알림은 Miner, Fuzzer, Probe, Discover의 백그라운드 결과에서 발생합니다. [Statusline](/ko/guide/statusline/)은 셸 명령을 일정 간격으로 실행해 그 stdout를 맨 아래 줄에 표시합니다. 명령은 라이브 세션을 설명하는 [JSON 컨텍스트](/ko/guide/statusline/#context)를 stdin으로 받으며, 그대로 붙여 넣을 수 있는 [프리셋](/ko/guide/statusline/#presets)도 있습니다.
 
-**Reset**은 한 섹션이 아니라 파일 전체입니다. `↵`(또는 `Ctrl-P` → **Settings: Reset**)로 확인을 거치면 `settings.json`이 갓 설치한 상태로 돌아가고, 테마·키맵·탭 바·목록과 미리보기 설정·프록시 바인드까지 즉시 반영됩니다. 같은 파일에 들어 있는 데이터도 함께 사라집니다. 전역 env 값, 호스트네임 오버라이드, 전역 OAST 프로바이더, 저장한 디코더 체인, 전역 Rewriter·Colormarker·Probe 규칙, 저장한 뷰, 리댁션 프로필, 업스트림 규칙, 아웃바운드 TLS 설정, 추가 리스너, User-Agent 목록이 그렇습니다. 프로젝트와 캡처, 그리고 프로젝트가 고정한 바인드와 env는 그대로 남습니다.
+**Reset**은 한 섹션이 아니라 파일 전체입니다. `↵`(또는 `Ctrl-P` → **Settings: Reset**)로 확인을 거치면 `settings.json`이 갓 설치한 상태로 돌아가고, 테마·키맵·탭 바·목록과 미리보기 설정·프록시 바인드까지 즉시 반영됩니다. 같은 파일에 들어 있는 데이터도 함께 사라집니다. 전역 env 값, 호스트네임 오버라이드, 전역 OAST 프로바이더, 저장한 디코더 체인, 전역 Rewriter·Colormarker·Probe 규칙, 저장한 뷰, 리댁션 프로필, 업스트림 규칙, 아웃바운드 TLS 설정, 추가 리스너, User-Agent 목록이 그렇습니다. MCP 권한은 모든 묶음이 켜진 상태로, Channel delivery는 꺼진 상태로 돌아갑니다. 프로젝트와 캡처, 그리고 프로젝트가 고정한 바인드와 env는 그대로 남습니다.
 
 의도적으로 두 가지가 남습니다. 리댁션 salt는 버리면 이미 쓴 산출물의 자리표시자가 모두 깨지므로 유지됩니다. 그리고 전역 규칙 id 카운터도 남습니다. 프로젝트는 전역 Rewriter·Colormarker 규칙을 id로 오버라이드할 수 있고, 그 오버라이드는 설정 초기화가 열지 않는 프로젝트 DB에 남습니다. 카운터를 1로 되돌리면 새로 만든 규칙이 옛 오버라이드가 가리키던 id를 받게 되므로, 카운터는 계속 올라가고 `settings.json`에는 규칙 없는 블록만 그 숫자를 기억하려고 남습니다.
 
@@ -96,7 +96,7 @@ Placement는 *세션에서의* 비용을 결정합니다 (선택 화면에는 �
 | **User-Agents** | 오프너: `$GEN.USER_AGENT`가 쓰는 직접 만든 목록(한 줄에 하나). 내장 브라우저 목록을 대체하며, 비워 두면 내장 목록을 씁니다 |
 | **Hotkeys** | 오프너: 단축키 재지정, OS 기본 프로파일 선택 |
 
-**External editor**는 편집 가능한 필드에서 `^E`가 여는 프로그램입니다. 비워 두면 `$VISUAL` / `$EDITOR` / `vi` 순으로 넘어갑니다.
+**External editor**는 편집 가능한 필드에서 `^E`가 여는 프로그램입니다. 비워 두면 `$VISUAL` / `$EDITOR` / `vi`(Windows에서는 `notepad`) 순으로 넘어갑니다.
 
 **Mouse**는 포인터 전반을 다룹니다. 끄면 gori가 클릭·휠·드래그를 아예 가져가지 않으므로 터미널 고유의 텍스트 선택이 돌아옵니다. **Drag release**는 텍스트 패널 위에서 드래그를 놓았을 때 무엇을 할지 정합니다. `select only`는 선택 영역만 남기고 복사 키(READ에서는 `y`, 입력 중에는 `^Y`)를 기다립니다. 지금까지의 동작입니다. `select + copy`는 놓는 순간 클립보드에도 넣습니다. 터미널의 기본 선택 동작과 같은 방식입니다. 그냥 클릭하면 선택되는 것이 없으므로 `select + copy`에서도 아무것도 복사되지 않습니다. 이 모드는 드래그가 실제로 만든 영역에만 작동하고, 복사 키와 완전히 같은 경로를 지나므로 토스트 문구와 탭별 "복사"의 의미가 양쪽에서 동일합니다.
 
@@ -116,11 +116,11 @@ Placement는 *세션에서의* 비용을 결정합니다 (선택 화면에는 �
 | 섹션 | 필드 |
 |------|------|
 | **Agent messaging** | Channel delivery (off) |
-| **MCP permissions** | Send traffic, Intercept control, Edit project data, Change scope & sandbox, Manage projects, Run local commands (all on) |
+| **MCP permissions** | Send traffic, Intercept control, Edit project data, Change scope & sandbox, Manage projects, Run local commands (각각 `on`·`ask`·`off`, 기본값은 모두 `on`) |
 
 `gori mcp`가 "Tell the agent…" 메시지를 붙어 있는 에이전트에게 전달하는 방식입니다. inbox socket, Codex queue, tool-result, `operator_messages` poll 계층은 항상 동작하고, **Channel delivery**는 그 *뒤에* `claude/channel` push를 놓습니다. 전달을 확인할 수 있는 경로가 하나도 답하지 않았을 때에만 시도합니다. 개발 채널 플래그로 Claude Code를 띄워야 하는 research preview라 기본은 off입니다. 이 값은 `gori mcp` 프로세스가 시작할 때 읽으므로, 이미 떠 있는 에이전트는 받았던 답을 그대로 유지합니다. [gori가 보내는 메시지](/ko/guide/mcp/#messages-from-gori)를 참고하세요.
 
-**MCP permissions**는 `gori mcp`로 붙은 에이전트가 무엇을 할 수 있는지 묶음 단위로 정합니다. 캡처를 읽는 것은 항상 허용되고, Channel delivery처럼 서버가 시작할 때 읽습니다. [Preferences에서 권한 정하기](/ko/guide/mcp/#permissions-from-preferences)를 참고하세요.
+**MCP permissions**는 `gori mcp`로 붙은 에이전트가 무엇을 할 수 있는지 묶음 단위로 정합니다. `off`는 그 묶음을 막고, `ask`는 각 호출을 TUI의 `ask:` 카드에 올려 승인을 기다리게 합니다. 캡처를 읽는 것은 항상 허용되고, Channel delivery처럼 서버가 시작할 때 읽습니다. [Preferences에서 권한 정하기](/ko/guide/mcp/#permissions-from-preferences)를 참고하세요.
 
 ## 프로젝트 선택기에서 {#in-the-project-picker}
 

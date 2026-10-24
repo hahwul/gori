@@ -98,6 +98,10 @@ Because it is an allowlist, a scope with no include rules blocks all traffic, so
 
 The sandbox also stops gori's own sends: a Repeater, Fuzzer, Miner, `gori run` or MCP request to a host outside the allowlist is refused, even when the scope check was waived with `--allow-unscoped` / `allow_unscoped:true`. That up-front scope check is per surface: MCP refuses any target that is not in scope with `SCOPE_BLOCKED`, even when the project has no scope yet; `gori run` refuses a target outside a configured scope; the TUI's Repeater and sweeps have no up-front check, so only the sandbox and explicit excludes stop them. For HTTPS the sandbox relies on TLS interception to read request URLs: a host that can't be in scope is refused at the `CONNECT` step, and every request on a host that gets through is checked individually. That per-request check runs on HTTP/2 as well, per stream, so the sandbox no longer costs a host its protocol and gRPC clients keep working while it's on. Cleartext HTTP/2 tunnelled inside `CONNECT` (h2c, rare) gets the same per-stream check as any other HTTP/2 connection: the tunnel opens, and each out-of-scope stream on it is cancelled individually.
 
+### Request budget {#request-budget}
+
+Scope says *where* gori may send; the **project request budget** says *how much*. `gori run project network set outbound_max_rps=10` and `outbound_max_requests=5000` cap gori-originated requests per second and in total, across every run, surface and process on the project (Repeater, Fuzzer, Miner, Sequencer, Discover, Authorize, retest, active Probe, frame injection, `gori run`, MCP), so parallel sweeps and an agent together keep the ceiling an engagement agreed to. A send waits for its rate slot; once the total is spent a run ends `budget_exhausted` and a refused send reads `BUDGET_EXHAUSTED`, not a retryable network error. Proxied client traffic is never counted or delayed. See [Per-Project Overrides](/reference/config/#per-project-overrides).
+
 ## Sitemap
 
 The **Sitemap** tab collapses History into a deduplicated tree of `host → path` endpoints, with method chips and scope markers. It's a quick way to see the shape of a target's attack surface. Each root is an **origin**, `scheme://host:port` with the default port left out (`https://acme.test`, `http://127.0.0.1:19021`), so two services on one host, or its HTTP and HTTPS sides, stay separate trees, and sending, opening, Params, Discover and the export from a row stay on that origin. A path tag belongs to the host and shows under each of its origins. Path-param ids are folded by default, so `/user/1` and `/user/2` share one node and `/user/<uuid>` collapses into a single `{uuid}`; press `g` to show the literal ids. Query strings fold on their own axis: `/search?q=widgets` and `/search?q=<payload>` are one `/search` row, expandable to the variants, and `⇧G` turns that off.
@@ -814,6 +818,8 @@ Host overrides are a `/etc/hosts`-style map: dial a specific IP (or `IP:PORT`) f
 | **Global** | Preferences (`Ctrl-,`) → **Network & Tabs** → **Network** → **Hostname overrides**, `Ctrl-P` → **Settings: Hostnames**, or `hostname_overrides` in `settings.json` | Fallback |
 
 Useful for staging hosts, IP-based virtual hosts, or pointing a production hostname at a lab box while keeping the `Host` header intact.
+
+Only the TCP connect target moves: SNI, the certificate hostname and the `Host` header keep the original name. The value is `IP`, `IP:PORT` or `[v6]:PORT`; a bare IP keeps the request's own port, and an unbracketed IPv6 value is an address by itself (`::1:18190` is refused, write `[::1]:18190`). A stored value that does not parse refuses the dial rather than falling back to the host's real address. See [`hostname_overrides`](/reference/config/#hostname-overrides).
 
 ## Upstream Proxy {#upstream-proxy}
 

@@ -60,7 +60,7 @@ gori에는 수백 가지 동작이 있지만, 그 키를 미리 외울 필요는
 |-----|---------|---------|
 | `>` **Send flow to…** | 선택한 플로우를 다른 도구로 넘기기: `r` Repeater, `f` Fuzzer, `c` Comparer, `m` Miner, `s` Sequencer, `a` Authorize, `D` Discover, `b` 응답을 브라우저로 열기 | 플로우를 고를 수 있는 탭: History, 플로우 상세, Sitemap, Repeater, Fuzzer 결과, … |
 | `Z` **Display…** | 패널을 그리는 방식의 토글: hex, pretty, diff, follow, 열, 접기, … | 목록과 요청/응답 패널 |
-| `P` **Protocol…** | 요청이 보내는 방식: HTTP/2, SNI, 자동 Content-Length, gRPC, TLS 지문 | Repeater, Fuzzer |
+| `P` **Protocol…** | 요청이 보내는 방식: HTTP/2, SNI, 자동 Content-Length, gRPC, TLS 지문, 그리고 WebSocket 키 재사용·라이브 세션·Engine.IO 하트비트 | Repeater, Fuzzer |
 | `T` **Sub-tabs…** | 서브탭 새로 만들기, 닫기, 복제, 이름 바꾸기, 표시, 찾기 | 서브탭 스트립이 있는 아홉 탭(Repeater, Fuzzer, Notes, …)의 패널 |
 
 빠르게 쓰는 요령 세 가지:

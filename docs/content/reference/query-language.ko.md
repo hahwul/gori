@@ -234,7 +234,7 @@ show --format json`과 MCP `get_flow`의 `json_rpc` 키에서 봅니다.
 - 괄호로 묶을 수 있습니다. 우선순위는 `NOT`, `AND`, `OR` 순입니다.
 - `field:`가 없는 단순 단어는 method, host, target을 대상으로 하는 자유 텍스트 검색입니다.
 - 콜론을 빼먹은 비교 모양의 단어(`status>=400`, `host=api`)도 자유 텍스트로 남기 때문에 대개 아무것도 매치하지 않습니다. 이때 History·Sitemap의 빈 화면, `gori run history`, MCP `ql_explain`이 콜론 형태(`status:>=400`)를 알려 줍니다. 따옴표로 묶거나 부정한 단어는 의도한 것으로 봅니다.
-- 존재하지 않는 `field:` 이름은 자유 텍스트가 아니라 오타로 봅니다. `gori run history`, `gori run sitemap`(과 그 `params`, `js`, `export` 동사), `gori run probe`는 이를 **거절**하고 가장 가까운 실제 필드를 알려준 뒤 0이 아닌 코드로 종료합니다. `--lenient`를 주면 그 토큰을 텍스트로 검색합니다(예전에 모든 표면이 조용히 하던 동작으로, `methd:GET`은 아무것도 매칭하지 않아 프로젝트가 비어 보였습니다). TUI 필터 바는 타이핑 중인 이름을 그대로 받습니다.
+- 존재하지 않는 `field:` 이름은 자유 텍스트가 아니라 오타로 봅니다. `gori run history`, `gori run sitemap`(과 그 `params`, `js`, `export` 동사), `gori run probe`, `gori run diff`, `gori run authorize`는 이를 **거절**하고 가장 가까운 실제 필드를 알려준 뒤 0이 아닌 코드로 종료하며, MCP 쿼리 툴은 `QUERY_SYNTAX`로 거절합니다. `--lenient`(MCP `lenient:true`)를 주면 그 토큰을 텍스트로 검색합니다(예전에 모든 표면이 조용히 하던 동작으로, `methd:GET`은 아무것도 매칭하지 않아 프로젝트가 비어 보였습니다). TUI 필터 바는 타이핑 중인 이름을 그대로 받습니다.
 
 ```text
 host:example.com status:5xx           둘 다 매칭되어야 함

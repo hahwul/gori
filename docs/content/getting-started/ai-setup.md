@@ -73,7 +73,9 @@ By default the server also exposes action tools that send live requests and writ
 gori mcp --read-only --install-claude-code
 ```
 
-Read-only keeps `list_history`, `get_flow`, `list_sitemap`, and the other inspection tools while disabling `send_request`, issue writes, and the intercept mutators. Pure-compute helpers like `decode` and `jwt_decode` stay available because they never touch the network or your data.
+Read-only keeps `list_history`, `get_flow`, `list_sitemap`, and the other inspection tools while disabling `send_request`, issue writes, and the intercept mutators. Pure-compute helpers like `decode` and `jwt_decode` stay available because they never touch the network or your data. To decide from gori itself instead, **Settings → AI → MCP permissions** turns each group of tools (sending traffic, intercept control, editing project data, scope, projects) **on**, **ask** or **off** for the next `gori mcp` start; **ask** puts each call in front of you as an approval card ([Permissions from Preferences](/guide/mcp/#permissions-from-preferences)).
+
+The full catalogue also costs context: a client loads every tool's schema before the first question and keeps it for the session. `--tools=@recon` (read and map the capture, replay a request, record issues and notes) or `--tools=@minimal` (read History and flows, talk to you) serves a small named set instead, and combines with `--read-only`; [Choosing Which Tools Are Exposed](/guide/mcp/#choosing-which-tools-are-exposed) compares their sizes.
 
 ## 4. Drive your first request
 

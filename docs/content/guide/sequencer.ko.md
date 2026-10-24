@@ -30,7 +30,7 @@ session cookie, CSRF token, 비밀번호 리셋 코드, API key가 예측 가능
 | Cookie | 이름으로 지정한 `Set-Cookie` 값 |
 | Header | 응답 헤더 값 |
 | Regex | 본문 regex의 캡처 그룹 1 |
-| Position | 본문의 고정 바이트 범위(`A:B`) |
+| Position | 본문의 고정 바이트 범위(`A:B`. 비었거나, 거꾸로거나, 음수인 범위는 아무것도 보내기 전에 거부합니다) |
 | JSONPath | JSON 본문 경로의 값(`$.data.token`) |
 
 라이브 수집의 기본 **concurrency는 1**입니다. session token은 종종 상태를 가지기 때문입니다(각 요청이 서버 측 카운터를 진행시킴). 엔드포인트가 stateless일 때만 값을 올리세요.

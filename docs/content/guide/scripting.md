@@ -245,7 +245,9 @@ answerable in a script because there is no prompt.
 | Replay and diff a request | `repeater`, `compare` |
 | Sweep payloads or hunt hidden params | `fuzz`, `mine` |
 | Crawl and brute-force endpoints | `discover`, `sitemap` |
-| Test access control across identities | `authorize` |
+| Test access control across identities | `authorize`, `session` |
+| Catch out-of-band callbacks | `oast` |
+| Read a gRPC or GraphQL API's schema | `grpc`, `graphql` |
 | Scan and triage | `probe`, `issues`, `notes` |
 | Pure compute, no project needed | `decoder`, `jwt`, `cookie` |
 | Manage projects, scope, env, network, rules | `project`, `rewriter`, `colormarker` |
