@@ -842,26 +842,16 @@ module Gori::Tui
     # count moves, so set_text_keeping_eols cannot cover it.
     def pretty_print_template : String?
       text = @editor.wire_text
-      crlf = text.index("\r\n\r\n")
-      lf = text.index("\n\n")
-      # First blank line wins, whichever form it is (an LF head whose BODY holds a CRLFCRLF
-      # must not be split at the body's) — same rule as Env.head_body_separator.
-      sep, sep_w = if crlf && (lf.nil? || crlf <= lf)
-                     {crlf, 4}
-                   elsif lf
-                     {lf, 2}
-                   else
-                     {nil, 0}
-                   end
-      return "no request body" unless sep
-
-      head = text[0, sep]
-      eol = sep_w == 4 ? "\r\n" : "\n"
-      body = text[sep + sep_w..]
+      # `Env.head_body_separator`, the one boundary rule (the mixed `\n\r\n` included), in
+      # BYTES: the separator is spliced back verbatim around the reformatted body.
+      sep, sep_w = Env.head_body_separator(text.to_slice) || return "no request body"
+      head = text.byte_slice(0, sep)
+      separator = text.byte_slice(sep, sep_w)
+      body = text.byte_slice(sep + sep_w)
       return "request body is empty" if body.strip.empty?
 
       if formatted_body = Pretty.format_request(head, body)
-        new_text = "#{head}#{eol}#{eol}#{formatted_body}"
+        new_text = "#{head}#{separator}#{formatted_body}"
         @editor.set_text(new_text)
         @dirty = true
         nil # success
