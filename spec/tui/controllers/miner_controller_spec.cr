@@ -41,6 +41,21 @@ private def drain_until_landed(ctl : MinerController) : Nil
   end
 end
 
+describe "MinerController#build_seed_from_flow" do
+  # A fronted / vhost-routed capture (SNI != Host) is mined under its own SNI, as the Fuzzer
+  # and Sequencer seeds already carry it.
+  it "carries the captured SNI when it differs from the host" do
+    with_miner_controller do |ctl, session|
+      id = session.store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "origin.test", port: 443,
+        method: "GET", target: "/x", http_version: "HTTP/1.1",
+        head: "GET /x HTTP/1.1\r\nHost: origin.test\r\n\r\n".to_slice,
+        sni: "front.test", source: Gori::FlowSource::Kind::Proxy))
+      (ctl.build_seed_from_flow(id) || raise "no seed").sni.should eq("front.test")
+    end
+  end
+end
+
 # One restored miner session holding 50 findings, on FINDINGS. The session row needs real
 # request bytes: `insert_miner_session` binds them to a `BLOB NOT NULL` column.
 private def with_findings(&)

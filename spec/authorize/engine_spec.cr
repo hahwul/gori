@@ -45,7 +45,7 @@ end
 private def engine(responses : Hash(String, Gori::Repeater::Result)) : Gori::Authorize::Engine
   origin = Gori::Fuzz::Origin.new("https", "api.example.com", 443)
   fake = FakeBackend.new(responses, origin)
-  Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { fake.as(Gori::Fuzz::Backend) })
+  Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool, _s : String?) { fake.as(Gori::Fuzz::Backend) })
 end
 
 describe Gori::Authorize::Engine do
@@ -104,7 +104,7 @@ describe Gori::Authorize::Engine do
 
     origin = Gori::Fuzz::Origin.new("http", "127.0.0.1", 19311)
     fake = FakeBackend.new({"*" => ok_resp(200, "ok")}, origin)
-    eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { fake.as(Gori::Fuzz::Backend) })
+    eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool, _s : String?) { fake.as(Gori::Fuzz::Backend) })
     eng.run(captured, [Identity.as_captured, Identity.new("anon", remove_headers: ["Cookie"])])
 
     fake.sent.size.should eq(2)
@@ -215,7 +215,7 @@ describe Gori::Authorize::Engine do
     it "is NoEffect, not Same, and is never sent" do
       fake = FakeBackend.new({"*" => ok_resp(200, "page"), "X-Id: nokey" => ok_resp(401, "no")},
         Gori::Fuzz::Origin.new("https", "api.example.com", 443))
-      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { fake.as(Gori::Fuzz::Backend) })
+      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool, _s : String?) { fake.as(Gori::Fuzz::Backend) })
       target = eng.run(detail, [
         Identity.new("admin", baseline: true),
         Identity.new("anonymous", remove_headers: ["Authorization"]),
@@ -264,7 +264,7 @@ describe Gori::Authorize::Engine do
     it "sends no further identities once it fires, and claims no Target" do
       origin = Gori::Fuzz::Origin.new("https", "api.example.com", 443)
       fake = FakeBackend.new({"*" => ok_resp(200, "page")}, origin)
-      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { fake.as(Gori::Fuzz::Backend) })
+      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool, _s : String?) { fake.as(Gori::Fuzz::Backend) })
       ids = [Identity.new("a", baseline: true), Identity.new("b"), Identity.new("c")]
 
       # Stop after the first identity has gone out.
@@ -284,7 +284,7 @@ describe Gori::Authorize::Engine do
     it "still completes when the predicate only fires after the last identity" do
       origin = Gori::Fuzz::Origin.new("https", "api.example.com", 443)
       fake = FakeBackend.new({"*" => ok_resp(200, "page")}, origin)
-      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { fake.as(Gori::Fuzz::Backend) })
+      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool, _s : String?) { fake.as(Gori::Fuzz::Backend) })
       polls = 0
       # "b" must change the request, or it is NoEffect and never sent.
       target = eng.run(detail, [Identity.new("a", baseline: true), Identity.new("b", remove_headers: ["Cookie"])],
@@ -364,7 +364,7 @@ private class ConditionalOrigin < Gori::Fuzz::Backend
 end
 
 private def conditional_engine(fake : ConditionalOrigin) : Gori::Authorize::Engine
-  Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { fake.as(Gori::Fuzz::Backend) })
+  Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool, _s : String?) { fake.as(Gori::Fuzz::Backend) })
 end
 
 # ── conditional GET ─────────────────────────────────────────────────────────────────────
@@ -379,7 +379,7 @@ describe Gori::Authorize::Engine do
     it "drops If-None-Match / If-Modified-Since from a safe request's replay" do
       origin = Gori::Fuzz::Origin.new("https", "api.example.com", 443)
       fake = FakeBackend.new({"*" => ok_resp(200, "page content here for both identities alike")}, origin)
-      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { fake.as(Gori::Fuzz::Backend) })
+      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool, _s : String?) { fake.as(Gori::Fuzz::Backend) })
       seed = detail_with("GET", "If-None-Match: \"v1\"\r\nIf-Modified-Since: Mon, 01 Jan 2024 00:00:00 GMT\r\n")
 
       eng.run(seed, [Identity.new("a", baseline: true), Identity.new("b", remove_headers: ["Cookie"])])
@@ -402,7 +402,7 @@ describe Gori::Authorize::Engine do
     it "keeps them on an unsafe method, where they guard the write" do
       origin = Gori::Fuzz::Origin.new("https", "api.example.com", 443)
       fake = FakeBackend.new({"*" => ok_resp(200, "written")}, origin)
-      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { fake.as(Gori::Fuzz::Backend) })
+      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool, _s : String?) { fake.as(Gori::Fuzz::Backend) })
       seed = detail_with("PUT", "If-None-Match: *\r\n")
 
       eng.run(seed, [Identity.new("a", baseline: true), Identity.new("b", remove_headers: ["Cookie"])])
@@ -421,7 +421,7 @@ describe Gori::Authorize::Engine do
       }
       origin = Gori::Fuzz::Origin.new("https", "api.example.com", 443)
       fake = FakeBackend.new(responses, origin)
-      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { fake.as(Gori::Fuzz::Backend) })
+      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool, _s : String?) { fake.as(Gori::Fuzz::Backend) })
       seed = detail_with("GET", "If-None-Match: \"v1\"\r\n")
 
       target = eng.run(seed, [
@@ -440,7 +440,7 @@ describe Gori::Authorize::Engine do
     it "drops If-Match / If-Unmodified-Since / If-Range too, and keeps Range" do
       origin = Gori::Fuzz::Origin.new("https", "api.example.com", 443)
       fake = FakeBackend.new({"*" => ok_resp(200, "page content here for both identities alike")}, origin)
-      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { fake.as(Gori::Fuzz::Backend) })
+      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool, _s : String?) { fake.as(Gori::Fuzz::Backend) })
       seed = detail_with("GET",
         "If-Match: \"v1\"\r\nIf-Unmodified-Since: Mon, 01 Jan 2024 00:00:00 GMT\r\n" \
         "Range: bytes=1024-\r\nIf-Range: \"v1\"\r\n")
@@ -518,7 +518,7 @@ describe Gori::Authorize::Engine do
     it "keeps all five on an unsafe method, where they guard the write" do
       origin = Gori::Fuzz::Origin.new("https", "api.example.com", 443)
       fake = FakeBackend.new({"*" => ok_resp(204, "")}, origin)
-      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { fake.as(Gori::Fuzz::Backend) })
+      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool, _s : String?) { fake.as(Gori::Fuzz::Backend) })
       seed = detail_with("DELETE", "If-Match: \"v1\"\r\nIf-Unmodified-Since: Mon, 01 Jan 2024 00:00:00 GMT\r\n")
 
       eng.run(seed, [Identity.new("a", baseline: true), Identity.new("b", remove_headers: ["Cookie"])])
@@ -546,7 +546,7 @@ describe Gori::Authorize::Engine do
       }
       origin = Gori::Fuzz::Origin.new("https", "api.example.com", 443)
       fake = FakeBackend.new(responses, origin)
-      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { fake.as(Gori::Fuzz::Backend) })
+      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool, _s : String?) { fake.as(Gori::Fuzz::Backend) })
 
       target = eng.run(detail_with("HEAD", ""), [
         Identity.new("as-captured", baseline: true),
@@ -564,7 +564,7 @@ describe Gori::Authorize::Engine do
       }
       origin = Gori::Fuzz::Origin.new("https", "api.example.com", 443)
       fake = FakeBackend.new(responses, origin)
-      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { fake.as(Gori::Fuzz::Backend) })
+      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool, _s : String?) { fake.as(Gori::Fuzz::Backend) })
 
       target = eng.run(detail_with("HEAD", ""), [
         Identity.new("as-captured", baseline: true),
@@ -624,7 +624,7 @@ describe Gori::Authorize::Engine do
 
     origin = Gori::Fuzz::Origin.new("https", "api.example.com", 443)
     fake = FakeBackend.new({"*" => ok_resp(200, "page")}, origin)
-    eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { fake.as(Gori::Fuzz::Backend) })
+    eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool, _s : String?) { fake.as(Gori::Fuzz::Backend) })
     eng.run(seed, [Identity.as_captured])
 
     fake.sent[0].should eq(wire)
@@ -670,5 +670,35 @@ describe Gori::Authorize::Target do
       .should eq({full.same_count, full.uncompared?, full.fully_blocked?, full.baseline_denied?})
     Gori::CLI::Output.authorize_target_json(lean).should eq(Gori::CLI::Output.authorize_target_json(full))
     Gori::CLI::Output.authorize_target_text(lean).should eq(Gori::CLI::Output.authorize_target_text(full))
+  end
+end
+
+describe "Gori::Authorize::Engine replay fidelity and stops" do
+  # The captured SNI reaches the sender when it is not just the host (vhost routing, fronting).
+  it "hands the captured SNI to the backend factory" do
+    row = Gori::Store::FlowRow.new(1_i64, 0_i64, "https", "GET", "203.0.113.7", 443,
+      "/admin", 200, 100_i64, Gori::Store::FlowState::Complete)
+    head = "GET /admin HTTP/1.1\r\nHost: api.example.com\r\n\r\n".to_slice
+    captured = Gori::Store::FlowDetail.new(row, "HTTP/1.1", head, nil, nil, nil, sni: "api.example.com")
+    fake = FakeBackend.new({"*" => ok_resp(200, "ok")}, Gori::Fuzz::Origin.new("https", "203.0.113.7", 443))
+    seen = [] of String?
+    eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool, s : String?) {
+      seen << s
+      fake.as(Gori::Fuzz::Backend)
+    })
+    eng.run(captured, [Identity.as_captured])
+    seen.should eq(["api.example.com"])
+  end
+
+  # A stop that ends the last identity's wait for the project budget sent nothing: the set is
+  # partial, so there is no Target — not one completed by an Error trial.
+  it "returns no target when the stop lands in the last identity's budget wait" do
+    responses = {
+      "*"          => ok_resp(200, "baseline body content that is perfectly fine and served here"),
+      "X-Id: user" => Gori::Repeater::Result.new(Bytes.empty, nil, nil, 0_i64, Gori::Outbound::BUDGET_STOPPED_ERROR),
+    }
+    ids = [Identity.new("admin", baseline: true), Identity.new("user", set_headers: [{"X-Id", "user"}])]
+    # Both polls before a send answer "not stopped": the stop arrives during "user"'s wait.
+    engine(responses).run(detail, ids, -> { false }).should be_nil
   end
 end

@@ -122,7 +122,7 @@ describe Gori::CacheDeception do
   it "sends an anonymous cache-busted control through the shared replay engine" do
     origin = Gori::Fuzz::Origin.new("https", "h.test", 443)
     backend = CacheDeceptionBackend.new(origin)
-    engine = AZ::Engine.new(->(_origin : Gori::Fuzz::Origin, _http2 : Bool) {
+    engine = AZ::Engine.new(->(_origin : Gori::Fuzz::Origin, _http2 : Bool, _sni : String?) {
       backend.as(Gori::Fuzz::Backend)
     })
     row = Gori::Store::FlowRow.new(1_i64, 1_i64, "https", "GET", "h.test", 443,
@@ -143,7 +143,7 @@ describe Gori::CacheDeception do
   it "reports REVIEW when a cache ignores the query buster and serves the private body again" do
     origin = Gori::Fuzz::Origin.new("https", "h.test", 443)
     backend = CacheDeceptionBackend.new(origin, query_ignored: true)
-    engine = AZ::Engine.new(->(_origin : Gori::Fuzz::Origin, _http2 : Bool) {
+    engine = AZ::Engine.new(->(_origin : Gori::Fuzz::Origin, _http2 : Bool, _sni : String?) {
       backend.as(Gori::Fuzz::Backend)
     })
     row = Gori::Store::FlowRow.new(1_i64, 1_i64, "https", "GET", "h.test", 443,
@@ -163,7 +163,7 @@ describe Gori::CacheDeception do
   it "skips the control when the anonymous response has no cache-hit evidence" do
     origin = Gori::Fuzz::Origin.new("https", "h.test", 443)
     backend = CacheDeceptionBackend.new(origin, cache_hit: false)
-    engine = AZ::Engine.new(->(_origin : Gori::Fuzz::Origin, _http2 : Bool) {
+    engine = AZ::Engine.new(->(_origin : Gori::Fuzz::Origin, _http2 : Bool, _sni : String?) {
       backend.as(Gori::Fuzz::Backend)
     })
     row = Gori::Store::FlowRow.new(1_i64, 1_i64, "https", "GET", "h.test", 443,

@@ -332,6 +332,16 @@ describe Gori::Retest::Engine do
     RT.verdict(results).blocked?.should be_true
   end
 
+  # A stop that ends a step's wait for the project budget is the operator's stop, not a refusal.
+  it "skips a step the stop ended at the project budget, and reads no refusal into it" do
+    backend = TableBackend.new({1_i64 => obs(blocked: Gori::Outbound::BUDGET_STOPPED_ERROR)})
+    plan = [planned(1_i64, :baseline, "status:200"), planned(2_i64, :variant, "status:403")]
+    results = RT::Engine.new(backend).run(plan, stop: -> { !backend.sent.empty? })
+    backend.sent.should eq([1_i64])
+    results.map(&.outcome.skipped?).should eq([true, true])
+    RT.verdict(results).blocked?.should be_false
+  end
+
   it "runs cleanup after a refusal only when the operator says so" do
     backend = TableBackend.new({1_i64 => obs(blocked: "out of the project scope")})
     plan = [planned(1_i64, :baseline), planned(2_i64, :cleanup, method: "DELETE")]

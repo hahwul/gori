@@ -572,6 +572,9 @@ module Gori
       private def judge(p : Planned, obs : Observation, baseline : Observation?,
                         baseline_note : String? = nil) : {Outcome, String}
         if reason = obs.blocked_reason
+          # The stop ended this step's wait for the project budget: nothing was sent, and it is
+          # the operator's stop, not a refusal that blocks the run and its cleanup.
+          return {Outcome::Skipped, "stopped before this step ran"} if reason == Gori::Outbound::BUDGET_STOPPED_ERROR
           return {Outcome::Blocked, Retest.clip("refused before the send: #{reason}")}
         end
         assertion = p.assertion

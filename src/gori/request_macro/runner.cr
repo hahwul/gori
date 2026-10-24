@@ -331,6 +331,10 @@ module Gori::RequestMacro
     private def failed(total : Int32, sent : Int32, n : Int32?, label : String?, reason : String,
                        status : Int32?, flows : Array(Int64),
                        rebound : Array(String) = [] of String) : Outcome
+      # A stop that ended a step's project-budget wait is the run's stop, not a failed step.
+      if reason == Outbound::BUDGET_STOPPED_ERROR
+        return Outcome.new(false, total, sent, n, label, nil, "the run was stopped", [] of String, flows, stopped: true)
+      end
       Outcome.new(false, total, sent, n, label, status, reason, rebound, flows)
     end
 

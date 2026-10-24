@@ -251,6 +251,10 @@ module Gori::Sequencer
 
     private def process_one(backend : Fuzz::CappedBackend) : Nil
       raw = send_with_retries(backend, @request)
+      # A stop that ended the wait for the project budget sent nothing: no sample, no error, no
+      # send (the Fuzzer's `candidate_send` makes the same call). A retry's earlier failure was
+      # sent, and `send_with_retries` answers with it instead.
+      return if raw.error == Gori::Outbound::BUDGET_STOPPED_ERROR
       @sent += 1
       token = Extract.extract(raw, @config.token_loc, @token_re)
       # An EMPTY extraction is a MISS, not a collected token. `Set-Cookie: SID=` — what an
@@ -288,8 +292,16 @@ module Gori::Sequencer
         # A retry the budget refused put nothing on the wire: the answer is the failure it was
         # retrying, not "the budget ran out" — every caller reads the cap as a budget, so the
         # connect error vanished and a dead origin read as a run with nothing wrong.
-        return failed if failed && raw.error == Fuzz::CappedBackend::CAP_ERROR
-        return raw if raw.error.nil? || permanent_refusal?(raw.error) || attempts >= @config.retries
+        # A stop during the budget wait is the same: nothing went out.
+        if failed && (raw.error == Fuzz::CappedBackend::CAP_ERROR || raw.error == Gori::Outbound::BUDGET_STOPPED_ERROR)
+          return failed
+        end
+        # A DELIVERED result is never retried: response bytes came back, so the origin acted on
+        # the request and may have issued a token. The token sequence is this tool's whole
+        # output, and a re-send would consume another and report it in this sample's place,
+        # hiding the gap from the analysis.
+        return raw if raw.error.nil? || raw.delivered? || permanent_refusal?(raw.error) ||
+                      attempts >= @config.retries
         failed = raw
         attempts += 1
         # A STOP ends the retry chain. It was honoured everywhere else in the run — the

@@ -123,6 +123,25 @@ describe "Gori::Discover finding exchanges" do
     end
   end
 
+  # A finding from an `--http2` crawl was filed as HTTP/1.1, so its re-send went over h1.
+  it "files an h2 crawl's finding as HTTP/2, so its re-send goes over h2" do
+    ex = D::Exchange.new(
+      request_head: "GET /admin HTTP/1.1\r\nHost: t.example\r\nAccept: */*\r\n\r\n".to_slice,
+      response: Gori::Proxy::Codec::Http1.parse_response_head(
+        "HTTP/2 200\r\nContent-Length: 2\r\n\r\n".to_slice),
+      body: "ok".to_slice, body_size: 2_i64, incomplete: false, duration_us: 1_i64, http2: true)
+    f = D::Finding.new("https://t.example/admin", "GET", 200, 2_i64, nil, D::Source::Seed, 0, 0.95, nil)
+
+    with_store do |store|
+      pair = D::Persist.flow_pair(f, 4_i64, ex, surface: Gori::FlowSource::Surface::Cli)
+      id = store.insert_import_batch_ids([{pair.request, pair.response}]).first
+      detail = store.get_flow(id).not_nil!
+      detail.http_version.should eq("HTTP/2")
+      Gori::Repeater::FlowRequest.build(detail).http2.should be_true
+    end
+    Gori::Discover::CappedBackend.new(Gori::Discover::Sender.new(verify: true, http2: true), nil).http2?.should be_true
+  end
+
   it "reads the SNI off the send seam, not off a copy the engine keeps" do
     # The backend owns the wire decision; the default Backend presents no override.
     HeaderBackend.new(->(_t : String) { notfound }).sni.should be_nil

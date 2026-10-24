@@ -3,6 +3,7 @@ require "json"
 require "mime/multipart"
 require "./types" # Location, which apply's own signature names
 require "../fuzz/content_length"
+require "../env"
 require "../ascii_bytes"
 require "../process_hook"
 require "../json_spans"
@@ -106,24 +107,34 @@ module Gori::Miner
       {synced, spans}
     end
 
-    # ── head/body split (own copy of Fuzz::ContentLength's left-to-right scan) ────────
+    # ── head/body split ──────────────────────────────────────────────────────────────
 
     # {head bytes (no trailing blank line), body bytes, line ending}. A request with no
     # blank line is treated as all-head with an empty body.
     def self.split(request : Bytes) : {Bytes, Bytes, String}
-      sep, sep_w, eol = boundary(request)
-      if sep.nil?
+      head, body, eol, _ = split_sep(request)
+      {head, body, eol}
+    end
+
+    # `split` plus the head/body separator bytes VERBATIM, for the injectors that rebuild the
+    # request (`head + sep + body` is the input again). The boundary is `Env.head_body_separator`,
+    # the rule `Fuzz::ContentLength.sync_at` and the send path use: a local LFLF/CRLFCRLF scan
+    # missed a mixed `\n\r\n` terminator, read the whole request as head, and so put a Headers
+    # candidate after the body and a Form candidate nowhere (the body read empty).
+    private def self.split_sep(request : Bytes) : {Bytes, Bytes, String, Bytes}
+      unless found = Env.head_body_separator(request)
         # "no trailing blank line" is this method's stated contract, and the no-boundary
         # branch was breaking it: the whole request came back INCLUDING its last line
         # terminator, so `inject_headers`/`inject_cookies` (which append `head + eol + line`)
         # completed a blank line and wrote their header into the BODY. `inject_query` rewrites
         # the request line in place, which is why the three disagreed on the same input.
-        return {chomp_eol(request), Bytes.empty, "\r\n"}
+        return {chomp_eol(request), Bytes.empty, "\r\n", "\r\n\r\n".to_slice}
       end
-      head = request[0, sep]
+      sep, sep_w = found
+      # CRLF only for CRLFCRLF: LFLF and `\n\r\n` both end the last header line with a bare LF.
+      eol = sep_w == 4 ? "\r\n" : "\n"
       body_start = sep + sep_w
-      body = request[body_start, request.size - body_start]
-      {head, body, eol}
+      {request[0, sep], request[body_start, request.size - body_start], eol, request[sep, sep_w]}
     end
 
     # `bytes` without ONE trailing CRLF or LF. Byte-level and single: the head's own last line
@@ -143,19 +154,6 @@ module Gori::Miner
         end
       end
       nil
-    end
-
-    private def self.boundary(bytes : Bytes) : {Int32?, Int32, String}
-      i = 0
-      while i + 1 < bytes.size
-        return {i, 2, "\n"} if bytes[i] == 0x0a_u8 && bytes[i + 1] == 0x0a_u8 # LFLF
-        if i + 3 < bytes.size && bytes[i] == 0x0d_u8 && bytes[i + 1] == 0x0a_u8 &&
-           bytes[i + 2] == 0x0d_u8 && bytes[i + 3] == 0x0a_u8 # CRLFCRLF
-          return {i, 4, "\r\n"}
-        end
-        i += 1
-      end
-      {nil, 0, "\r\n"}
     end
 
     # ── query ───────────────────────────────────────────────────────────────────────
@@ -204,7 +202,7 @@ module Gori::Miner
     # a body with no Content-Length and no Content-Type header at all. Bail out unmodified
     # instead, same as inject_multipart/inject_json do when their location doesn't apply.
     private def self.inject_form(request : Bytes, params : Array({String, String})) : {Bytes, Array({Int32, Int32})}
-      head, body, eol = split(request)
+      head, body, _, sep = split_sep(request)
       return {request, [] of {Int32, Int32}} if body.empty?
       ct = (header_value(request, "content-type") || "").downcase
       return {request, [] of {Int32, Int32}} unless ct.includes?("x-www-form-urlencoded")
@@ -212,9 +210,9 @@ module Gori::Miner
       # The body is spliced through as bytes. It used to be copied into a String, then again by
       # the interpolation that joined it to `extra`, then a third time into the IO — and the
       # trailing-'&' test is a single byte compare that needs no String at all.
-      io = IO::Memory.new(head.size + body.size + extra.bytesize + eol.bytesize * 2 + 1)
+      io = IO::Memory.new(head.size + body.size + extra.bytesize + sep.size + 1)
       io.write(head)
-      io << eol << eol
+      io.write(sep)
       unless body.empty?
         io.write(body)
         io << '&' unless body[body.size - 1] == 0x26_u8 # '&'
@@ -254,10 +252,10 @@ module Gori::Miner
       additions = build_multipart_parts(boundary, params)
       return {request, [] of {Int32, Int32}} if additions.empty?
 
-      head, body, eol = split(request)
-      io = IO::Memory.new(head.size + body.size + additions.bytesize + eol.bytesize * 2 + 16)
+      head, body, _, sep = split_sep(request)
+      io = IO::Memory.new(head.size + body.size + additions.bytesize + sep.size + 16)
       io.write(head)
-      io << eol << eol
+      io.write(sep)
 
       # The whole injected `additions` block is candidate content (Content-Disposition
       # framing gori wrote plus the injected names/values) — mark it all verbatim: no injected
@@ -342,16 +340,16 @@ module Gori::Miner
     # ── json (object + nested objects + array roots) ─────────────────────────────────
 
     private def self.inject_json(request : Bytes, params : Array({String, String})) : {Bytes, Array({Int32, Int32})}
-      head, body, eol = split(request)
+      head, body, _, sep = split_sep(request)
       new_body = inject_json_body(body, params)
       return {request, [] of {Int32, Int32}} unless new_body
-      io = IO::Memory.new(head.size + new_body.size + eol.bytesize * 2)
+      io = IO::Memory.new(head.size + new_body.size + sep.size)
       io.write(head)
-      io << eol << eol
+      io.write(sep)
       io.write(new_body)
       out = io.to_slice
 
-      body_off = head.size + eol.bytesize * 2
+      body_off = head.size + sep.size
       {out, merge_spans(json_spans(new_body, body_off, params))}
     end
 
@@ -546,7 +544,7 @@ module Gori::Miner
     # split it into a String per line, then rebuild joined them back into another full copy
     # before writing — three passes over the head to append to it.
     private def self.inject_headers(request : Bytes, params : Array({String, String})) : {Bytes, Array({Int32, Int32})}
-      head, body, eol = split(request)
+      head, body, eol, sep = split_sep(request)
       io = IO::Memory.new(head.size + params.size * 48 + body.size + eol.bytesize * 2)
       io.write(head)
       spans = [] of {Int32, Int32}
@@ -557,7 +555,7 @@ module Gori::Miner
         io << n << ": " << sanitize_value(v)
         spans << {start, io.pos.to_i32}
       end
-      io << eol << eol
+      io.write(sep)
       io.write(body) unless body.empty?
       {io.to_slice, spans}
     end
@@ -565,7 +563,7 @@ module Gori::Miner
     # ── cookies ──────────────────────────────────────────────────────────────────────
 
     private def self.inject_cookies(request : Bytes, params : Array({String, String})) : {Bytes, Array({Int32, Int32})}
-      head, body, eol = split(request)
+      head, body, eol, sep = split_sep(request)
       lines = String.new(head).split(eol)
       additions = params.compact_map { |(n, v)| valid_cookie_name?(n) ? "#{n}=#{sanitize_value(v)}" : nil }
       return {request, [] of {Int32, Int32}} if additions.empty?
@@ -600,7 +598,7 @@ module Gori::Miner
         io << joined
         stop = io.pos.to_i32
       end
-      io << eol << eol
+      io.write(sep)
       io.write(body) unless body.empty?
       {io.to_slice, [{start, stop}]}
     end

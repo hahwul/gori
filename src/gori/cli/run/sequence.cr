@@ -113,7 +113,10 @@ module Gori
         # literally. Explicit and identical to cmd_fuzz, rather than relying on the store that
         # `cli_host_overrides` happens to open below (see run.cr's open_store).
         hydrate_project_env(proj.name, proj.db) if project_named?(proj.name, proj.db)
-        bytes, default_target, src_h2, evidence = sequence_source(flow_id, request_file, proj.name, proj.db)
+        bytes, default_target, src_h2, evidence, src_sni = sequence_source(flow_id, request_file, proj.name, proj.db)
+        # A capture's SNI (when it is not just the host) is a default: an explicit --sni wins, and
+        # it goes with the capture's origin, never onto a `--target` (as `run fuzz --flow` has it).
+        sni ||= src_sni unless target_override
         # A blank request dialled empty connections, as `mine`'s did; MCP refuses it too.
         abort "gori run sequence: the request must not be empty" if bytes.all?(&.unsafe_chr.ascii_whitespace?)
         token_loc = build_token_loc(k, selector)
@@ -257,9 +260,9 @@ module Gori
       # captured bytes, and only that branch may skip the draft-time passes (see
       # `Sequencer::PlanOptions#evidence?`).
       private def self.sequence_source(flow_id : Int64?, request_file : String?,
-                                       project_name : String?, db_path : String?) : {Bytes, String?, Bool, Bool}
+                                       project_name : String?, db_path : String?) : {Bytes, String?, Bool, Bool, String?}
         if file = request_file
-          {read_input_file(file, "gori run sequence").to_slice, nil, false, false}
+          {read_input_file(file, "gori run sequence").to_slice, nil, false, false, nil}
         elsif id = flow_id
           detail = with_store(resolve_read_project(project_name, db_path)) do |store|
             store.get_flow(id)
@@ -270,9 +273,9 @@ module Gori
           # `warn_request_line_rewrite`.
           warn_request_line_rewrite(built, "gori run sequence",
             "replay it with `gori run repeater #{id} --keep-request-line` to keep it")
-          {built.bytes, built.target, built.http2, true}
+          {built.bytes, built.target, built.http2, true, Repeater::FlowRequest.seed_sni(detail)}
         elsif !STDIN.tty?
-          {read_stdin_fallback(STDIN, "gori run sequence", "request").to_slice, nil, false, false}
+          {read_stdin_fallback(STDIN, "gori run sequence", "request").to_slice, nil, false, false, nil}
         else
           abort "gori run sequence: no source — give a <flow-id>, --request FILE, or pipe a request on stdin"
         end

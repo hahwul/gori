@@ -84,7 +84,7 @@ private def pseudo_header_seed(store : Gori::Store) : Int64
 end
 
 private def fake_engine(backend : FakeBackend) : Gori::Authorize::Engine
-  Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { backend.as(Gori::Fuzz::Backend) })
+  Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool, _s : String?) { backend.as(Gori::Fuzz::Backend) })
 end
 
 describe Gori::Authorize::Plan do

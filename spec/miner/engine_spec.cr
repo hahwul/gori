@@ -376,6 +376,43 @@ private class EchoRequestBackend < F::Backend
   end
 end
 
+# Answers a stable baseline until a probe carries `name`; then the run is stopped while that
+# probe waits for the project budget, and it comes back the way `Outbound#admit` answers it.
+private class BudgetStopBackend < F::Backend
+  getter origin : F::Origin
+  getter stopped_sends : Int32 = 0
+  property engine : M::Engine?
+
+  def initialize(@origin : F::Origin, @name : String)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    if String.new(bytes).includes?(@name)
+      @stopped_sends += 1
+      @engine.try(&.stop)
+      return Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, Gori::Outbound::BUDGET_STOPPED_ERROR)
+    end
+    body = "BASELINE BODY CONTENT"
+    head = "HTTP/1.1 200 OK\r\nContent-Length: #{body.bytesize}\r\n\r\n".to_slice
+    Gori::Repeater::Result.new(head, body.to_slice, Gori::Proxy::Codec::Http1.parse_response_head(head), 1000_i64)
+  end
+end
+
+describe "a miner stop during a wait for the project budget" do
+  it "counts no error for the probe that was never sent" do
+    backend = BudgetStopBackend.new(F::Origin.new("http", "h", 80), "zzhidden")
+    engine = M::Engine.new("GET /api HTTP/1.1\r\nHost: h\r\n\r\n".to_slice, http2: false,
+      names: ["zzhidden"], backend: backend, config: cfg)
+    backend.engine = engine
+    done = nil.as(M::DoneEvent?)
+    engine.run { |ev| done = ev if ev.is_a?(M::DoneEvent) }
+    backend.stopped_sends.should be > 0
+    done.should_not be_nil
+    done.try(&.progress.errors).should eq(0)
+    engine.first_error.should be_nil
+  end
+end
+
 # Errors the first `fail_first` sends, then answers a stable baseline — a target that was
 # unreachable for the calibration wave and healthy by the time the buckets went out.
 private class DeadThenAliveBackend < F::Backend

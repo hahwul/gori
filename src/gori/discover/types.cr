@@ -108,7 +108,8 @@ module Gori
     # `sni` is the ClientHello name the run dialed under (`--sni` / `discover_start{sni}`),
     # carried because the stored flow is re-sendable: `Repeater::FlowRequest.build` seeds a
     # repeater from `FlowDetail#sni`, so dropping it here would make an IP-direct sweep of a
-    # name-based vhost find an endpoint that its own re-send cannot reach.
+    # name-based vhost find an endpoint that its own re-send cannot reach. `http2` is the same
+    # argument for the protocol (`FlowRequest.build` reads it off `http_version`).
     record Exchange,
       request_head : Bytes,
       response : Proxy::Codec::RawResponse,
@@ -116,7 +117,8 @@ module Gori
       body_size : Int64?,
       incomplete : Bool,
       duration_us : Int64,
-      sni : String? = nil
+      sni : String? = nil,
+      http2 : Bool = false
 
     # Live counters. `est_total` is a MOVING estimate that RISES as discovery proceeds
     # (a live crawl has no stable denominator), nil early — frontends render

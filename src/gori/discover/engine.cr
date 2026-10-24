@@ -88,6 +88,12 @@ module Gori::Discover
       nil
     end
 
+    # Whether `fetch` frames HTTP/2 — stored on the finding's flow for the reason `sni` is: a
+    # re-send seeds its protocol from the flow's `http_version`.
+    def http2? : Bool
+      false
+    end
+
     # Release any transport the backend is holding open (the keep-alive pools' parked
     # sockets). Called once when a run ends — including a stopped or failed one, or the
     # sockets sit open until GC. A no-op by default so the spec doubles stay three-line
@@ -386,7 +392,7 @@ module Gori::Discover
       @inner.fetch(scheme, host, port, target)
     end
 
-    delegate request_head, sni, close, to: @inner
+    delegate request_head, sni, http2?, close, to: @inner
   end
 
   # A unit of work owned by the orchestrator frontier.
@@ -2073,7 +2079,7 @@ module Gori::Discover
       # exact wire on the Result; spec/custom backends keep the old pure reconstruction fallback.
       request = raw.wire || @capped.request_head(p.scheme, p.host, p.port, target)
       Exchange.new(request,
-        resp, body, size, raw.incomplete?, raw.duration_us, @capped.sni)
+        resp, body, size, raw.incomplete?, raw.duration_us, @capped.sni, @capped.http2?)
     end
 
     private def send_with_retries(url : String) : Repeater::Result

@@ -14,17 +14,22 @@ module Gori::Miner
       _, body, _ = Inject.split(request)
       ct = (Inject.header_value(request, "content-type") || "").downcase
       has_body = !body.empty?
+      # Form and Multipart splice into the body without re-framing chunks: on a
+      # Transfer-Encoding body the candidate lands after the terminating chunk (or inside a
+      # chunk whose size no longer matches), never reaches the app, and leaves stray bytes on
+      # a kept-alive connection. Json needs no gate here: the chunk-size line fails its parse.
+      splices = has_body && !transfer_encoded?(request)
 
       applicable = [Location::Query]
       default = [Location::Query]
 
-      if has_body && ct.includes?("x-www-form-urlencoded")
+      if splices && ct.includes?("x-www-form-urlencoded")
         applicable << Location::Form
         default << Location::Form
       end
       # Multipart is applicable but default OFF: a captured file-upload re-sends its (possibly
       # multi-MB) file part on every bucket/bisect/confirm request. Opt in — as with Headers/Cookies.
-      if has_body && multipart_form?(request, ct)
+      if splices && multipart_form?(request, ct)
         applicable << Location::Multipart
       end
       if has_body && json_injectable?(ct, body)
@@ -55,7 +60,14 @@ module Gori::Miner
           return "the body is not valid UTF-8 and cannot round-trip through JSON"
         end
       end
+      if (loc.form? || loc.multipart?) && transfer_encoded?(request)
+        return "the body is Transfer-Encoding framed (chunked); an appended parameter would land outside its chunks"
+      end
       "not applicable to this request (no matching existing body)"
+    end
+
+    private def self.transfer_encoded?(request : Bytes) : Bool
+      !Inject.header_value(request, "transfer-encoding").nil?
     end
 
     # JSON location when the body carries at least one injectable object node — a root object,

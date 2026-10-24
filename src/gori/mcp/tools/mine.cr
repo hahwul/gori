@@ -212,7 +212,7 @@ module Gori
       # Build a ready-to-run mining engine + its origin + name count. Raises FuzzArgError
       # (clean message) on malformed input. Reuses the fuzz timeout helper.
       private def build_mine_job(h, ob : Outbound) : Miner::Plan
-        text, default_target, src_h2, evidence = mine_template_source(h)
+        text, default_target, src_h2, evidence, src_sni = mine_template_source(h)
         config = Miner::Config.new
         config.concurrency = clamp(optional_int_arg(h, "concurrency"), 10, MINE_MAX_CONCURRENCY)
         config.rps = optional_float_arg(h, "rate")
@@ -250,7 +250,7 @@ module Gori
           # `Miner::PlanOptions` and `gori run mine --sni` have always carried it; MCP had no
           # route to it at all, so a param-mine against a vhost whose SNI must differ from the
           # Host header — exactly what this tool exists for — was unreachable from an agent.
-          sni: str(h, "sni"),
+          sni: seeded_sni(h, src_sni),
           overrides: HostOverrides.load(store),
           # Candidate names read from the project's own captured data (#1352), tested after
           # `names` and before the built-in list and `wordlist`. Resolved by the plan builder.
@@ -305,6 +305,12 @@ module Gori
         end
       end
 
+      # The SNI a mine/sequence run dials with: an explicit `sni` wins, and a flow seed's captured
+      # one goes with the capture's origin, never onto a caller's `url` (as `fuzz_start` has it).
+      private def seeded_sni(h, seed : String?) : String?
+        str(h, "sni").presence || (seed unless str(h, "url").presence)
+      end
+
       # {raw request text (BEFORE Env expansion — Miner::Plan owns that), default target,
       # http2}. The target is handed over raw too: expanding it here as well as in the plan
       # builder was a double pass, so a var whose value contained a token resolved one level
@@ -318,7 +324,8 @@ module Gori
       # aborts on. Returning on the FIRST of template → flow_id mined the template and never
       # said the flow seed was dropped — on a tool that makes real outbound requests, and
       # against a CLI sibling that refuses the identical pair (#906).
-      private def mine_template_source(h) : {String, String?, Bool, Bool}
+      # The 5th is the capture's SNI when it is not just the host (`FlowRequest.seed_sni`).
+      private def mine_template_source(h) : {String, String?, Bool, Bool, String?}
         given = [] of String
         given << "template" if str(h, "template").try(&.presence)
         given << "flow_id" if optional_int_arg(h, "flow_id")
@@ -326,13 +333,13 @@ module Gori
           raise FuzzArgError.new("pass ONE template source, got #{given.join(" + ")} — they describe different requests and only one can be mined")
         end
         if t = str(h, "template")
-          return {t, nil, false, false} unless t.strip.empty?
+          return {t, nil, false, false, nil} unless t.strip.empty?
         end
         if id = optional_int_arg(h, "flow_id")
           detail = store.get_flow(id)
           raise FuzzArgError.new("no flow with id #{id}") unless detail
           built = Repeater::FlowRequest.build(detail)
-          return {String.new(built.bytes), built.target, built.http2, true}
+          return {String.new(built.bytes), built.target, built.http2, true, Repeater::FlowRequest.seed_sni(detail)}
         end
         raise FuzzArgError.new("provide a 'template' (raw request) or a 'flow_id'")
       end

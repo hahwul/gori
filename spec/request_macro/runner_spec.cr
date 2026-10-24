@@ -153,6 +153,25 @@ describe Gori::RequestMacro::Runner do
     origin.close
   end
 
+  # The stop that ends a step's wait for the project rate is the same stop, not a failed step.
+  it "reports a stop during a step's project-budget wait as stopped" do
+    origin = MacroTokenOrigin.new
+    with_macro_project(origin) do |store, _, csrf|
+      store.set_settings([{Gori::Settings::PROJECT_OUTBOUND_MAX_RPS_KEY, "1"}] of {String, String?})
+      second = store.insert_repeater("http://127.0.0.1:#{origin.port}",
+        "GET /form?b=1 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice, false, true, nil, 1)
+      ob = Gori::Outbound.interactive(Gori::Scope.load(store))
+      started = Time.instant
+      # Still running at the check between the steps; stopped while step 2 waits its ~1s slot.
+      res = runner_for(store, ["#{csrf}", "#{second}"], ob).run(nil, nil, -> { Time.instant - started > 300.milliseconds })
+      res.stopped.should be_true
+      res.ok.should be_false
+      res.requests.should eq(1)
+      origin.paths.should eq(["/form"])
+    end
+    origin.close
+  end
+
   describe "which bindings it looks at" do
     it "sees the unclaimed rules and the active slot's, and no other slot's" do
       origin = MacroTokenOrigin.new

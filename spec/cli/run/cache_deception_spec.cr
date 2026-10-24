@@ -78,7 +78,7 @@ describe "gori run cache-deception — per-flow failures" do
       pseudo = cli_cd_flow(store, "ok.test", ":method: GET\r\n:path: /account\r\n\r\n")
       last = cli_cd_flow(store, "ok.test", "GET /account HTTP/1.1\r\nHost: ok.test\r\nCookie: sid=1\r\n\r\n")
       store.flush
-      engine = AZ::Engine.new(->(origin : Gori::Fuzz::Origin, _http2 : Bool) {
+      engine = AZ::Engine.new(->(origin : Gori::Fuzz::Origin, _http2 : Bool, _sni : String?) {
         raise Gori::Error.new("backend unavailable") if origin.host == "boom.test"
         CliCacheBackend.new(origin).as(Gori::Fuzz::Backend)
       })

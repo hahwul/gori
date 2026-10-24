@@ -592,3 +592,16 @@ describe "Gori::Miner::Inject.existing_names" do
     M::Inject.existing_names(base, M::Location::Json).should be_empty
   end
 end
+
+# The head/body boundary is `Env.head_body_separator`'s, as on the send path: a local
+# LFLF/CRLFCRLF scan missed a `\n\r\n` terminator and read the whole request as head, so a
+# Headers candidate landed after the body and a Form candidate was never injected at all.
+describe "Gori::Miner::Inject on a mixed LF/CRLF head terminator" do
+  it "injects into the head and the body, keeping the separator bytes verbatim" do
+    base = "POST /a HTTP/1.1\nHost: h\nContent-Type: application/x-www-form-urlencoded\nContent-Length: 3\n\r\nx=1"
+    text(M::Inject.apply(req(base), M::Location::Headers, [{"X-P", "v"}])).should eq(
+      "POST /a HTTP/1.1\nHost: h\nContent-Type: application/x-www-form-urlencoded\nContent-Length: 3\nX-P: v\n\r\nx=1")
+    text(M::Inject.apply(req(base), M::Location::Form, [{"p", "v"}])).should eq(
+      "POST /a HTTP/1.1\nHost: h\nContent-Type: application/x-www-form-urlencoded\nContent-Length: 7\n\r\nx=1&p=v")
+  end
+end

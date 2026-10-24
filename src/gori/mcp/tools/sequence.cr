@@ -213,7 +213,7 @@ module Gori
       # Normalize the tool args into `Sequencer::PlanOptions` and let the shared builder
       # assemble the run. Raises FuzzArgError (clean message) on any malformed input.
       private def build_sequence_plan(h, ob : Outbound) : Sequencer::Plan
-        bytes, default_target, src_h2, evidence = sequence_request_source(h)
+        bytes, default_target, src_h2, evidence, src_sni = sequence_request_source(h)
         config = Sequencer::Config.new(mode: Sequencer::Mode::LiveReplay,
           token_loc: sequence_token_loc(h), goal: clamp(optional_int_arg(h, "count"), 500, SEQUENCE_MAX_GOAL),
           concurrency: clamp(optional_int_arg(h, "concurrency"), 1, SEQUENCE_MAX_CONCURRENCY))
@@ -244,7 +244,7 @@ module Gori
           # and a token-randomness sweep against such a vhost had NO route through MCP at all
           # (`send_request` at least has create_repeater{sni} → send_request{repeater_id}).
           # `Sequencer::PlanOptions` and `gori run sequence --sni` have always carried it.
-          sni: str(h, "sni"),
+          sni: seeded_sni(h, src_sni), # mine.cr
           overrides: HostOverrides.load(store))
         Sequencer::Plan.build(options, ob)
       rescue ex : Sequencer::PlanError
@@ -282,7 +282,8 @@ module Gori
       # ONE seed only, for the reason `mine_template_source` and `fuzz_template_source` state:
       # returning on the FIRST of template → flow_id swept the template and never said the flow
       # seed was dropped, where `gori run sequence` aborts on the same pair (#906).
-      private def sequence_request_source(h) : {Bytes, String?, Bool, Bool}
+      # The 5th is the capture's SNI when it is not just the host (`FlowRequest.seed_sni`).
+      private def sequence_request_source(h) : {Bytes, String?, Bool, Bool, String?}
         given = [] of String
         given << "template" if str(h, "template").try(&.presence)
         given << "flow_id" if optional_int_arg(h, "flow_id")
@@ -290,13 +291,13 @@ module Gori
           raise FuzzArgError.new("pass ONE template source, got #{given.join(" + ")} — they describe different requests and only one can be swept")
         end
         if t = str(h, "template")
-          return {t.to_slice, nil, false, false} unless t.strip.empty?
+          return {t.to_slice, nil, false, false, nil} unless t.strip.empty?
         end
         if id = optional_int_arg(h, "flow_id")
           detail = store.get_flow(id)
           raise FuzzArgError.new("no flow with id #{id}") unless detail
           built = Repeater::FlowRequest.build(detail)
-          return {built.bytes, built.target, built.http2, true}
+          return {built.bytes, built.target, built.http2, true, Repeater::FlowRequest.seed_sni(detail)}
         end
         raise FuzzArgError.new("provide a 'template' (raw request) or a 'flow_id'")
       end

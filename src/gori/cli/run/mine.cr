@@ -100,7 +100,10 @@ module Gori
         # Always, not only when `flow_id` is nil: `--request` + `--flow` used to skip
         # this and then skip `open_store`, so `--slot` lied about no project.
         hydrate_project_env(proj.name, proj.db) if project_named?(proj.name, proj.db)
-        text, default_target, src_h2, evidence = mine_source(flow_id, request_file, proj.name, proj.db)
+        text, default_target, src_h2, evidence, src_sni = mine_source(flow_id, request_file, proj.name, proj.db)
+        # A capture's SNI (when it is not just the host) is a default: an explicit --sni wins, and
+        # it goes with the capture's origin, never onto a `--target` (as `run fuzz --flow` has it).
+        sni ||= src_sni unless target_override
         # A blank request dialled empty connections and waited out each server's timeout; MCP
         # `mine_start` refuses a blank template the same way.
         abort "gori run mine: the request must not be empty" if text.strip.empty?
@@ -222,9 +225,9 @@ module Gori
       # PROVENANCE, not a knob: only the `--flow` branch hands back captured bytes, and only
       # that branch may therefore skip the draft-time passes (see `Miner::PlanOptions#evidence?`).
       private def self.mine_source(flow_id : Int64?, request_file : String?,
-                                   project_name : String?, db_path : String?) : {String, String?, Bool, Bool}
+                                   project_name : String?, db_path : String?) : {String, String?, Bool, Bool, String?}
         if file = request_file
-          {read_input_file(file, "gori run mine"), nil, false, false}
+          {read_input_file(file, "gori run mine"), nil, false, false, nil}
         elsif id = flow_id
           detail = with_store(resolve_read_project(project_name, db_path)) do |store|
             store.get_flow(id)
@@ -235,9 +238,9 @@ module Gori
           # `warn_request_line_rewrite`.
           warn_request_line_rewrite(built, "gori run mine",
             "replay it with `gori run repeater #{id} --keep-request-line` to keep it")
-          {String.new(built.bytes), built.target, built.http2, true}
+          {String.new(built.bytes), built.target, built.http2, true, Repeater::FlowRequest.seed_sni(detail)}
         elsif !STDIN.tty?
-          {read_stdin_fallback(STDIN, "gori run mine", "request"), nil, false, false}
+          {read_stdin_fallback(STDIN, "gori run mine", "request"), nil, false, false, nil}
         else
           abort "gori run mine: no source — give a <flow-id>, --request FILE, or pipe a request on stdin"
         end

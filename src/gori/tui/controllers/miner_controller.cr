@@ -307,7 +307,9 @@ module Gori::Tui
       built = Repeater::FlowRequest.build(detail)
       appl = Miner::Plan.applicable_locations(built.bytes)
       summary = SeededSession.request_summary(built.bytes)
-      MineSeed.new(built.target, built.bytes, built.http2, nil, id, summary, appl.applicable, appl.default)
+      # The capture's SNI when it is not just the host (`FlowRequest.seed_sni`), as the Fuzzer seeds it.
+      MineSeed.new(built.target, built.bytes, built.http2, Repeater::FlowRequest.seed_sni(detail), id, summary,
+        appl.applicable, appl.default)
     end
 
     # Bumped by every `scan_seed_names` and by `cancel_seed_scan`: a scan whose generation

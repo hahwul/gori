@@ -551,7 +551,7 @@ module Gori::Miner
           # was dropped with no finding, no error counted and no reason retained, so a target
           # that died right after the bucket probes ended "0 found · 0 errors". Same cap
           # exemption `process_bucket` makes — a budget refusal is not a network failure.
-          unless err == Fuzz::CappedBackend::CAP_ERROR
+          unless uncounted?(err)
             @errors += 1
             @first_error ||= err
           end
@@ -852,13 +852,13 @@ module Gori::Miner
 
     # ── sending / pacing ────────────────────────────────────────────────────────────
 
-    # An errored probe ends the bucket. A stop that landed while it waited at the macro gate
-    # sent nothing, so the names stay untested and uncounted — the bar is left short on purpose.
-    # A cap refusal is not a network error. Anything else is counted, then marked done so the
-    # bar stays monotonic for an inconclusive bucket.
+    # An errored probe ends the bucket. A stop that landed while it waited at the macro gate or
+    # for the project budget sent nothing, so the names stay untested and uncounted — the bar is
+    # left short on purpose. A cap refusal is not a network error. Anything else is counted,
+    # then marked done so the bar stays monotonic for an inconclusive bucket.
     private def bucket_untested?(raw : Repeater::Result, task : Task) : Bool
       return false unless err = raw.error
-      unless Gori::RequestMacro.stopped_unsent?(err)
+      unless stopped_unsent?(err)
         unless err == Fuzz::CappedBackend::CAP_ERROR
           @errors += 1
           @first_error ||= err
@@ -868,14 +868,25 @@ module Gori::Miner
       true
     end
 
+    # The run's stop ended a wait — at the macro gate, or for the project budget — before the
+    # probe left gori.
+    private def stopped_unsent?(err : String?) : Bool
+      Gori::RequestMacro.stopped_unsent?(err) || err == Gori::Outbound::BUDGET_STOPPED_ERROR
+    end
+
+    # Not a network failure: the cap refused it, or a stop ended its wait before it was sent.
+    private def uncounted?(err : String?) : Bool
+      err == Fuzz::CappedBackend::CAP_ERROR || stopped_unsent?(err)
+    end
+
     private def send_with_retries(bytes : Bytes, verbatim : Array({Int32, Int32})?) : Repeater::Result
       attempts = 0
       failed = nil.as(Repeater::Result?)
       loop do
         raw = @backend.send(bytes, verbatim)
-        # A retry the budget refused sent nothing: answer with the failure it was retrying
-        # (see `Sequencer::Engine#send_with_retries`).
-        return failed if failed && raw.error == Fuzz::CappedBackend::CAP_ERROR
+        # A retry the budget refused, or a stop ended waiting for, sent nothing: answer with the
+        # failure it was retrying (see `Sequencer::Engine#send_with_retries`).
+        return failed if failed && uncounted?(raw.error)
         if raw.error.nil?
           @successful_sends += 1
           return raw

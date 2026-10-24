@@ -166,3 +166,18 @@ describe "Gori::Miner::Detect.inapplicable_reason" do
     M::Detect.inapplicable_reason(M::Location::Form, req_with_body(head, Bytes[0xFF, 0xFE, 0x01, 0x02])).should eq(generic)
   end
 end
+
+# Form and Multipart splice into the body without re-framing chunks, so on a Transfer-Encoding
+# body the candidate would land after the terminating chunk and never reach the app.
+describe "Gori::Miner::Detect on a Transfer-Encoding body" do
+  it "offers neither form nor multipart, and says the chunked body is why" do
+    form = req("POST /a HTTP/1.1\r\nHost: h\r\nContent-Type: application/x-www-form-urlencoded\r\n" \
+               "Transfer-Encoding: chunked\r\n\r\n3\r\nx=1\r\n0\r\n\r\n")
+    M::Detect.detect(form).applicable.should_not contain(M::Location::Form)
+    M::Detect.inapplicable_reason(M::Location::Form, form).should contain("chunked")
+    body = "--B\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--B--\r\n"
+    multipart = req("POST /u HTTP/1.1\r\nHost: h\r\nContent-Type: multipart/form-data; boundary=B\r\n" \
+                    "Transfer-Encoding: chunked\r\n\r\n#{body.bytesize.to_s(16)}\r\n#{body}\r\n0\r\n\r\n")
+    M::Detect.detect(multipart).applicable.should_not contain(M::Location::Multipart)
+  end
+end

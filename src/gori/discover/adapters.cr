@@ -153,7 +153,18 @@ module Gori::Discover
                                    surface : FlowSource::Surface,
                                    source_ref : String?) : Import::Builder::FlowPair
       scheme, host, port, _ = Import::Builder.endpoint(f.url)
-      req = Proxy::Codec::Http1.parse_request_head(ex.request_head)
+      head = ex.request_head
+      # Over h2 the h1 text was only the encoder's input: file the fields that went out, on an
+      # `HTTP/2` request line, as `Repeater::HistoryRecord` does — a flow filed as HTTP/1.1
+      # re-sends over h1 (`FlowRequest.build` reads the protocol off `http_version`).
+      if ex.http2
+        head = begin
+          Repeater::H2Engine.encoded_request(head, scheme: scheme, host: host, port: port)
+        rescue Gori::Error
+          head
+        end
+      end
+      req = Proxy::Codec::Http1.parse_request_head(head)
       request = FlowMapper.request(req, scheme: scheme, host: host, port: port,
         created_at: created_at, sni: ex.sni,
         source: FlowSource::Kind::Discover, source_surface: surface, source_ref: source_ref)

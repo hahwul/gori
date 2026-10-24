@@ -168,7 +168,7 @@ module Gori
     # `Fuzz::Sender` (scope-gated, capture-bypassing — exactly Probe active's path), while a
     # spec passes a factory returning a fake `Fuzz::Backend`.
     class Engine
-      alias BackendFactory = Proc(Fuzz::Origin, Bool, Fuzz::Backend)
+      alias BackendFactory = Proc(Fuzz::Origin, Bool, String?, Fuzz::Backend)
 
       # The live engine's Outbound, so a run's `stop` also ends a wait for the project budget.
       def initialize(@backend_factory : BackendFactory, @outbound : Gori::Outbound? = nil)
@@ -208,8 +208,8 @@ module Gori
         # a finding manufactured entirely out of the operator having picked a send context in
         # another tab. `Fuzz::Backend.all_verbatim` cannot express this: it excludes bytes
         # from SUBSTITUTION, and the overlay writes whole header lines.
-        new(->(origin : Fuzz::Origin, http2 : Bool) {
-          Fuzz::Sender.new(origin, outbound, http2, verify_upstream, timeout: timeout,
+        new(->(origin : Fuzz::Origin, http2 : Bool, sni : String?) {
+          Fuzz::Sender.new(origin, outbound, http2, verify_upstream, sni, timeout: timeout,
             slot_overlay: false, overrides: overrides).as(Fuzz::Backend)
         }, outbound)
       end
@@ -251,13 +251,17 @@ module Gori
                      end
         base_bytes = drop_conditional_headers(base_bytes, row.method)
         head_request = row.method.upcase == "HEAD"
-        backend = @backend_factory.call(origin, http2)
+        # The captured SNI when it is not just the host (vhost routing, fronting): a replay without
+        # it reaches a different virtual host and judges a request the capture never made.
+        backend = @backend_factory.call(origin, http2, Repeater::FlowRequest.seed_sni(detail))
         baseline_trial = nil.as(Trial?)
         trials = [] of Trial
         begin
           ordered.each do |id|
             break if stop.try(&.call)
-            trial = send_one(base_bytes, id, backend, baseline_trial, head_request, origin)
+            # nil: the stop ended this identity's wait for the project budget, so it was never
+            # sent and the set is partial (an Error trial here completed it).
+            trial = send_one(base_bytes, id, backend, baseline_trial, head_request, origin) || break
             baseline_trial ||= trial if id.baseline?
             trials << trial
           end
@@ -312,7 +316,7 @@ module Gori
 
       private def send_one(base_bytes : Bytes, id : Identity,
                            backend : Fuzz::Backend, baseline_trial : Trial?,
-                           head_request : Bool, origin : Fuzz::Origin) : Trial
+                           head_request : Bool, origin : Fuzz::Origin) : Trial?
         # RESOLVED first: a `$NAME` in this identity's own header value expands out of this
         # identity's binding table. Nothing downstream will do it — `all_verbatim` below stops
         # the message-level pass, and `Engine.live` turns the active-slot overlay off precisely
@@ -338,6 +342,7 @@ module Gori
         # expansion must not ALSO rewrite these bytes (the same reason Probe active marks its
         # probes evidence — see `Fuzz::Backend.all_verbatim`).
         result = backend.send(bytes, Fuzz::Backend.all_verbatim(bytes))
+        return nil if result.error == Gori::Outbound::BUDGET_STOPPED_ERROR
         summary = ResponseSummary.of(result, head_request)
         status = result.response.try(&.status) || summary.status
         # Wire size for the readout (raw body), not the decoded size the verdict uses.

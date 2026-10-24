@@ -147,6 +147,45 @@ private class PoolRetryBackend < F::Backend
   end
 end
 
+# Issues one token; every later send is stopped while it waits for the project budget, and
+# comes back the way `Outbound#admit` answers it.
+private class BudgetStopBackend < F::Backend
+  getter origin : F::Origin
+  property engine : Q::Engine?
+  @calls = 0
+
+  def initialize(@origin : F::Origin)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @calls += 1
+    if @calls > 1
+      @engine.try(&.stop)
+      return Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, Gori::Outbound::BUDGET_STOPPED_ERROR)
+    end
+    head = "HTTP/1.1 200 OK\r\nSet-Cookie: SID=1000; Path=/\r\nContent-Length: 2\r\n\r\n"
+    Gori::Repeater::Result.new(head.to_slice, "ok".to_slice,
+      Gori::Proxy::Codec::Http1.parse_response_head(head.to_slice), 100_i64)
+  end
+end
+
+# The origin answered (a token included) and then the read failed: a DELIVERED errored result.
+private class DeliveredErrorBackend < F::Backend
+  getter origin : F::Origin
+  getter sent : Int32 = 0
+
+  def initialize(@origin : F::Origin)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @sent += 1
+    head = "HTTP/1.1 200 OK\r\nSet-Cookie: SID=#{1000 + @sent}; Path=/\r\nContent-Length: 10\r\n\r\n"
+    Gori::Repeater::Result.new(head.to_slice, "ok".to_slice,
+      Gori::Proxy::Codec::Http1.parse_response_head(head.to_slice), 100_i64,
+      "upstream closed before the body finished", true, delivered: true)
+  end
+end
+
 private def collect_done(engine : Q::Engine) : Q::DoneEvent
   done = nil.as(Q::DoneEvent?)
   engine.run { |ev| done = ev if ev.is_a?(Q::DoneEvent) }
@@ -400,5 +439,35 @@ describe Gori::Sequencer::Engine do
     # a full collection of unusable tokens.
     backend.sent.should eq(config.max_sends)
     engine.first_error.should be_nil
+  end
+
+  # A stop that ends a wait for the project budget sent nothing: no sample, no error, no send.
+  it "counts nothing for a sample a stop ended at the project budget" do
+    backend = BudgetStopBackend.new(F::Origin.new("http", "h", 80))
+    config = Q::Config.new(token_loc: Q::TokenLoc.cookie("SID"), goal: 5, concurrency: 1, retries: 0)
+    engine = Q::Engine.new("GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice, http2: false, backend: backend, config: config)
+    backend.engine = engine
+    samples = [] of Q::Sample
+    done = nil.as(Q::DoneEvent?)
+    engine.run do |ev|
+      samples << ev.sample if ev.is_a?(Q::SampleEvent)
+      done = ev if ev.is_a?(Q::DoneEvent)
+    end
+    samples.size.should eq(1)
+    done.try(&.sent).should eq(1)
+    engine.errors.should eq(0)
+    engine.first_error.should be_nil
+  end
+
+  # The origin acted on a delivered request and may have issued a token; a retry would consume
+  # another one and report it in that sample's place, hiding the gap from the sequence analysis.
+  it "does not retry a result whose response arrived" do
+    backend = DeliveredErrorBackend.new(F::Origin.new("http", "h", 80))
+    config = Q::Config.new(token_loc: Q::TokenLoc.cookie("SID"), goal: 2, concurrency: 1,
+      retries: 3, retry_pause: 1.millisecond)
+    samples = drain(Q::Engine.new("GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice, http2: false, backend: backend, config: config))
+    samples.should_not be_empty
+    backend.sent.should eq(samples.size) # one request per sample, no retry
+    samples.all?(&.error).should be_true
   end
 end
