@@ -5196,3 +5196,11 @@ The last two rule terms in `Tls::Tunnel#h2_downgrade_reason` came out, and with 
   offers head and body at END_STREAM. A padded frame, an event stream or a copy past
   `MAX_REWRITE_BODY` (shared across the connection's copies) is offered as no body, as h1 offers
   a streaming response.
+
+### 2026-10-24: a draft WebSocket frame's unresolved `$ENV.X` is refused too (#1666)
+
+Closes one of the gaps the 2026-10-21 #1666 entry left open. A TEXT frame of a draft session takes
+the same refusal as the handshake (`UrlRequest.expand` headless, `RepeaterView#ws_env_refusal` in
+the TUI), scripted or live: MCP `send_websocket`/`ws_session_send`, `gori run repeater send`/`ws`.
+A flow-seeded session's stored frames are evidence and still go out as captured; a bare `$name`
+and `verbatim` stay literal.

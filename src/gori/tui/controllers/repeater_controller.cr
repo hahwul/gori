@@ -2734,8 +2734,12 @@ module Gori::Tui
         @host.status("not connected — turn on the live session and ^R to connect first")
         return
       end
-      lines.each { |(idx, _)| view.mark_ws_sent(idx) }
       texts = lines.map(&.[1])
+      if why = view.ws_env_refusal(texts)
+        @host.status(why)
+        return
+      end
+      lines.each { |(idx, _)| view.mark_ws_sent(idx) }
       @host.status(texts.size == 1 ? "sending on the socket…" : "sending #{texts.size} lines on the socket…", :busy)
       spawn(name: "gori-ws-send") do
         # A refused send ENDS the session inside `WsSession#send`; the live tick then draws the
@@ -2798,6 +2802,10 @@ module Gori::Tui
         # Inline, not through @ws_results — see the invariant on #apply_refusal.
         apply_refusal { view.apply_ws(Repeater::WsEngine::Result.new(Bytes.new(0), [] of Repeater::WsEngine::Message, 0_i64, reason)) }
         @host.status("ws repeater: #{reason}")
+        return
+      end
+      if why = view.ws_env_refusal
+        @host.status(why)
         return
       end
       messages = view.ws_out_messages

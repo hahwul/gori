@@ -2062,8 +2062,12 @@ module Gori
                                             persist : Bool = true) : Nil
         abort_if_blocked!(plan, "gori run repeater send")
 
-        out_messages = with_store(project, read_only: true) do |store|
-          ws_out_messages(store, id, message_override, verbatim, evidence)
+        out_messages = begin
+          with_store(project, read_only: true) do |store|
+            ws_out_messages(store, id, message_override, verbatim, evidence)
+          end
+        rescue ex : Repeater::PlanError
+          repeater_plan_abort("gori run repeater send", ex, "session ##{id}'s messages")
         end
 
         idle = (idle_ms || 3000_i64).clamp(100_i64, 60_000_i64).milliseconds
@@ -2381,7 +2385,13 @@ module Gori
           end
           Repeater::WsEngine::OutMsg.new(Proxy::WS::OP_BIN.to_i, parsed)
         else
-          payload = (verbatim ? line : Env.expand(line)).to_slice
+          payload = begin
+            (verbatim ? line : Repeater::UrlRequest.expand(line)).to_slice
+          rescue ex : Repeater::PlanError
+            stderr.puts repeater_plan_error("gori run repeater ws", ex, "this line (not sent)")
+            stderr.flush
+            return nil
+          end
           Repeater::WsEngine::OutMsg.new(Proxy::WS::OP_TEXT.to_i, payload)
         end
       end
@@ -2445,7 +2455,7 @@ module Gori
                  end
         seeded = stored && evidence
         source.map do |m|
-          payload = m.text? && !verbatim && !seeded ? Env.expand(String.new(m.payload)).to_slice : m.payload
+          payload = m.text? && !verbatim && !seeded ? Repeater::UrlRequest.expand(String.new(m.payload)).to_slice : m.payload
           Repeater::WsEngine::OutMsg.new(m.opcode, payload, m.shape, seeded)
         end
       end

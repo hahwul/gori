@@ -148,7 +148,9 @@ module Gori
         wait_ms = optional_int_arg(h, "wait_ms").try(&.clamp(0_i64, WS_SESSION_MAX_WAIT_MS)) || 0_i64
         session = job.session
         before = session.transcript.last?.try(&.seq) || 0_i64
-        sent, error, stopped = ws_send_each(session, ws_out_msgs(source, job.verbatim?))
+        frames = ws_out_msgs(source, job.verbatim?)
+        return frames if frames.is_a?(Result)
+        sent, error, stopped = ws_send_each(session, frames)
         ws_wait_for_reply(session, before, wait_ms) if wait_ms > 0 && error.nil? && !stopped
         payload = JSON.build do |j|
           j.object do

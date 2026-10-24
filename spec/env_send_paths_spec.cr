@@ -348,3 +348,46 @@ describe "Minimize (#524)" do
     end
   end
 end
+
+# The #1666 refusal reaches the frames: under the namespaced grammar an `$ENV.X` in a DRAFT frame
+# is a reference by construction, so one with no value is refused as `send_request` refuses it in a
+# body, on all three surfaces. A bare `$name` stays literal (above), and evidence is never asked.
+describe "WebSocket draft frames naming an unset $ENV var (#1666)" do
+  it "MCP send_websocket refuses before the dial" do
+    with_env_store do |store|
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        rid = store.insert_repeater("ws://127.0.0.1:1", WS_UPGRADE.to_slice, false, true, nil, 0)
+        r = env_tools(store).call("send_websocket",
+          JSON.parse(%({"repeater_id":#{rid},"messages":["u=$ENV.NOPE"],"allow_unscoped":true})))
+        r.is_error.should be_true
+        r.text.should contain("unresolved env $ENV.NOPE")
+      end
+    end
+  end
+
+  it "gori run repeater send refuses a stored frame" do
+    with_env_store do |store|
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        id = store.insert_repeater("ws://x.test", WS_UPGRADE.to_slice, false, true, nil, 0)
+        expect_raises(Gori::Repeater::PlanError, "unresolved env $ENV.NOPE") do
+          Gori::CLI::Run.ws_out_messages_env_for_spec(store, id, ["u=$ENV.NOPE"])
+        end
+      end
+    end
+  end
+
+  it "the TUI refuses a hand-authored frame, scripted or live, and never a captured one" do
+    with_no_vars do
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        view = RepeaterView.new
+        view.restore("ws://ws.test", WS_UPGRADE, false, false,
+          ws_messages: [Gori::Store::WsOutMessage.text("u=$ENV.NOPE")])
+        view.ws_env_refusal.not_nil!.should contain("$ENV.NOPE")
+        view.ws_env_refusal(["ok"]).should be_nil
+        view.ws_env_refusal(["u=$ENV.NOPE"]).should_not be_nil
+        Gori::Settings.env_vars = [{"NOPE", "set"}]
+        view.ws_env_refusal.should be_nil
+      end
+    end
+  end
+end

@@ -162,6 +162,19 @@ class Gori::Tui::RepeaterView
     end
   end
 
+  # `env_refusal` for the frames: a draft TEXT frame naming an `$ENV` var with no value is
+  # refused as the handshake is (#1666). `texts` are live lines; nil asks the scripted list.
+  def ws_env_refusal(texts : Array(String)? = nil) : String?
+    return nil if @evidence
+    texts ||= ws_out_messages_raw.select(&.text?).map { |m| String.new(m.payload) }
+    texts.each do |text|
+      if detail = Env.unresolved_env(text)
+        return Tui.unresolved_env_status(detail)
+      end
+    end
+    nil
+  end
+
   # One live-session frame built the SAME way as the scripted `ws_out_messages` (#1630): a
   # TEXT payload takes `Env.expand` unless the tab is a captured flow (`@evidence`), and the
   # `evidence` flag rides along so the SEND SEAM's binding pass leaves a capture's bytes alone

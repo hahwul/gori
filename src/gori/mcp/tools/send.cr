@@ -1189,6 +1189,7 @@ module Gori
         # test case — reaches the wire as the operator captured it. Scrubbing rewrote it to
         # U+FFFD, changing 9 bytes into 13, and sent that with no warning.
         out_messages = ws_out_msgs(source, seeded || verbatim, seeded)
+        return out_messages if out_messages.is_a?(Result)
 
         # The session's stored setting, overridable per call — a handshake test wants to run
         # it both ways against the same session without editing the session. Read up here with
@@ -1323,14 +1324,17 @@ module Gori
         end
       end
 
-      # The frames to hand the engine: TEXT payloads take `Env.expand` unless `literal`.
+      # The frames to hand the engine: TEXT payloads take `Env.expand` unless `literal`, refusing an
+      # `$ENV.X` with no value as `send_request` does (#1666) rather than framing it literally.
       # `evidence` marks captured bytes, which the send seam's binding pass leaves alone.
       private def ws_out_msgs(source : Array(Store::WsOutMessage), literal : Bool,
-                              evidence : Bool = false) : Array(Repeater::WsEngine::OutMsg)
+                              evidence : Bool = false) : Array(Repeater::WsEngine::OutMsg) | Result
         source.map do |m|
-          payload = m.text? && !literal ? Env.expand(String.new(m.payload)).to_slice : m.payload
+          payload = m.text? && !literal ? Repeater::UrlRequest.expand(String.new(m.payload)).to_slice : m.payload
           Repeater::WsEngine::OutMsg.new(m.opcode, payload, m.shape, evidence)
         end
+      rescue ex : Repeater::PlanError
+        send_plan_error(ex, "messages")
       end
 
       # The repeater's handshake as a plan, through Layer 1 (scope) and Layer 2 (sandbox), or
