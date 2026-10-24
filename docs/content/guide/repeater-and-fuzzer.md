@@ -253,6 +253,20 @@ gori run fuzz delete RUN_ID --yes
 
 The ordinary `gori run fuzz …` command remains ephemeral. Over MCP, pass `save_results: true` to `fuzz_start`, then use `list_fuzz_runs`, `get_fuzz_run`, and `delete_fuzz_run`. Permanent runs are separate from History flows: `--record-history` / `record_history` still controls whether individual sends also appear in History.
 
+### What "verbatim" turns off
+
+`--verbatim` (MCP `verbatim: true`) means the same thing on the Repeater and the Fuzzer: the bytes you wrote are what the socket gets. `--no-update-content-length` (MCP `update_content_length: false`) is the Content-Length subset — the one switch for a CL / CL-TE desync payload that still uses `$ENV`/`$BIND`/`$GEN`. One axis separates them, the `$VAR` row:
+
+| What gori would otherwise do | `--verbatim` | `--no-update-content-length` |
+| --- | --- | --- |
+| recompute / insert `Content-Length` | off | off |
+| expand `$ENV` / `$BIND` / `$GEN` (and refuse an unresolved one) | off (left literal) | on |
+| promote a bare-LF head line to CRLF | off | on |
+| lowercase an HTTP/2 field name | off | on |
+| add `chrome` client hints | off | on |
+
+The session slot's header overlay still applies under both, and the URL of a `send_request{url}` still expands — those are the request's destination, not its bytes. `spec/verbatim_semantics_spec.cr` pins this table so the two flags cannot drift back into one.
+
 ### Framing a Sweep
 
 `Content-Length` is recomputed after every payload is spliced in, and one is **added** when the template carries a body but declares no length at all, so an ordinary sweep stays self-consistent; `--no-update-content-length` (MCP `update_content_length: false`, or turning off **Auto Content-Length** on the Fuzzer's ADVANCED card) turns both halves off, because a length that disagrees with the body is the whole point of a CL / CL-TE desync test. `--verbatim` (MCP `verbatim: true`) goes further, as on the Repeater: the template is sent as written, with no token expansion (`$ENV.KEY`, `$BIND.NAME` and `$GEN.*` stay literal and `$$` is not consumed), no bare-LF promotion and no client hints, so the `§…§` splice is the only change a payload makes. The TUI Fuzzer has no such toggle yet.

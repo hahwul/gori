@@ -252,6 +252,20 @@ gori run fuzz delete RUN_ID --yes
 
 평범한 `gori run fuzz …`는 계속 일회성입니다. MCP에서는 `fuzz_start`에 `save_results: true`를 넘긴 뒤 `list_fuzz_runs`, `get_fuzz_run`, `delete_fuzz_run`을 쓰세요. 영구 실행은 History 플로우와 별개입니다. 개별 전송이 History에도 나타날지는 `--record-history` / `record_history`가 계속 결정합니다.
 
+### `verbatim`이 끄는 것 {#what-verbatim-turns-off}
+
+`--verbatim`(MCP `verbatim: true`)은 Repeater와 Fuzzer에서 같은 뜻입니다. 쓴 바이트가 소켓에 그대로 나갑니다. `--no-update-content-length`(MCP `update_content_length: false`)는 그중 Content-Length 부분만 끄며, `$ENV`/`$BIND`/`$GEN`을 그대로 쓰는 CL / CL-TE 디싱크 페이로드를 위한 스위치입니다. 둘을 가르는 축은 `$VAR` 행 하나입니다.
+
+| gori가 평소에 하는 처리 | `--verbatim` | `--no-update-content-length` |
+| --- | --- | --- |
+| `Content-Length` 재계산 / 삽입 | 끔 | 끔 |
+| `$ENV` / `$BIND` / `$GEN` 확장(미해결 시 거부) | 끔(리터럴로 둠) | 켬 |
+| 단독 LF 헤더 줄을 CRLF로 승격 | 끔 | 켬 |
+| HTTP/2 필드명 소문자화 | 끔 | 켬 |
+| `chrome` 클라이언트 힌트 추가 | 끔 | 켬 |
+
+세션 슬롯의 헤더 오버레이는 둘 다에서 계속 적용되고, `send_request{url}`의 URL도 여전히 확장됩니다. 그것은 요청의 바이트가 아니라 목적지이기 때문입니다. `spec/verbatim_semantics_spec.cr`가 이 표를 고정하므로 두 플래그가 다시 하나로 합쳐질 수 없습니다.
+
 ### 스윕의 프레이밍 {#framing-a-sweep}
 
 `Content-Length`는 페이로드가 삽입될 때마다 다시 계산되고, 템플릿에 본문은 있는데 길이 선언이 아예 없으면 **추가**되므로, 일반적인 스윕은 항상 일관된 상태를 유지합니다. `--no-update-content-length`(MCP `update_content_length: false`, 또는 Fuzzer ADVANCED 카드의 **Auto Content-Length** 끄기)는 이 두 가지를 모두 끕니다. 본문과 어긋나는 길이 자체가 CL / CL-TE 디싱크 테스트의 목적이기 때문입니다. `--verbatim`(MCP `verbatim: true`)은 Repeater에서처럼 한발 더 나아가 템플릿을 쓰인 그대로 보냅니다. 토큰을 확장하지 않고(`$ENV.KEY`, `$BIND.NAME`, `$GEN.*`는 리터럴로 남고 `$$`도 소비되지 않음), 단독 LF를 승격하지 않으며, 클라이언트 힌트도 붙이지 않으므로 페이로드가 바꾸는 것은 `§…§` 삽입뿐입니다. TUI Fuzzer에는 아직 이 토글이 없습니다.
