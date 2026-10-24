@@ -250,7 +250,7 @@ describe Gori::MCP::Server do
       end
     end
 
-    it "reports an error (not updated:true) when update_issue has no fields" do
+    it "reports an error (not updated:true) when update_issue has nothing to change" do
       with_store do |store|
         store.insert_issue("f", Gori::Store::Severity::Info, nil, nil)
         store.flush
@@ -258,7 +258,7 @@ describe Gori::MCP::Server do
         upd = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"update_issue","arguments":{"id":#{id}}}})
         resp = mcp_drive(store, upd)[0]
         resp["result"]["isError"].as_bool.should be_true
-        resp["result"]["content"][0]["text"].as_s.should contain("no fields to update")
+        resp["result"]["content"][0]["text"].as_s.should contain("nothing to change")
       end
     end
 

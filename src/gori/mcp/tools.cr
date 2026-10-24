@@ -1385,6 +1385,44 @@ module Gori
         "intercept_toggle"     => {"enabled" => "enable"},
       }
 
+      # Each `update_*` tool's SELECTOR arguments: the ones that pick the row rather than change
+      # it. A call that gives nothing else is refused by `nothing_to_change` before dispatch.
+      # The tools used to disagree on that call — some refused, update_rule/update_extract_rule
+      # rewrote the row and answered `updated:true`, others answered ok — and `gori run
+      # repeater update` refuses it. A guard spec holds every advertised `update_*` tool to an
+      # entry here.
+      UPDATE_SELECTORS = {
+        "update_color_rule"    => {"id", "scope"},
+        "update_custom_color"  => {"name"},
+        "update_extract_rule"  => {"id"},
+        "update_host_override" => {"id"},
+        "update_issue"         => {"id"},
+        "update_note"          => {"id"},
+        "update_oast_provider" => {"id"},
+        "update_probe_rule"    => {"id"},
+        "update_repeater"      => {"id"},
+        "update_repeaters"     => {"ids"},
+        "update_retest_step"   => {"id"},
+        "update_rule"          => {"id", "scope"},
+        "update_scope_rule"    => {"id"},
+        "update_session_slot"  => {"name"},
+        "update_view"          => {"name", "scope"},
+      }
+
+      # The refusal for an `update_*` call that names only its row, or nil. Run on the
+      # alias-folded arguments. Any other key counts as a change, JSON null included: on
+      # update_issue `flow_id: null` clears the link, so null is not "absent" here.
+      private def nothing_to_change(name : String, h : Hash(String, JSON::Any)) : Result?
+        return nil unless selectors = UPDATE_SELECTORS[name]?
+        # No row named at all is the handler's "missing required" refusal, not this one.
+        return nil unless h.has_key?(selectors.first)
+        return nil if h.each_key.any? { |k| !selectors.includes?(k) && !k.starts_with?('_') }
+        aliases = ARG_ALIASES[name]?
+        declared = declared_args[name]? || return nil
+        fields = declared.reject { |k| selectors.includes?(k) || aliases.try(&.has_key?(k)) }
+        err("nothing to change — pass at least one of #{fields.join(", ")}", "INVALID_ARGUMENT")
+      end
+
       # Fold each alias the call used into its real name, or the refusal for a call that spelled
       # both with different values. A JSON null is absent, as everywhere else here; equal values
       # under both names are one argument said twice, not a conflict.
@@ -1625,6 +1663,9 @@ module Gori
         h = resolved
         if missing = missing_aliased(name, h)
           return missing
+        end
+        if unchanged = nothing_to_change(name, h)
+          return unchanged
         end
         # After every argument check, so a call that could never run puts no card in front of
         # the operator, and on the arguments as they will run.
