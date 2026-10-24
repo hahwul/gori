@@ -217,8 +217,10 @@ module Gori
           ex.message.to_s # names the host it could not parse, or the scheme it refused
         in Sequencer::PlanError::Reason::NoTokenLoc
           "token location selector is empty"
-        in Sequencer::PlanError::Reason::BadPosition
-          "--position #{ex.detail} extracts nothing — A must be 0 or more and B greater than A"
+        in Sequencer::PlanError::Reason::BadTokenLoc
+          # No detail = a regex/jsonpath that cannot extract; the builder's sentence names it.
+          return ex.message.to_s unless range = ex.detail
+          "--position #{range} extracts nothing — A must be 0 or more and B greater than A"
         in Sequencer::PlanError::Reason::NoTokens
           # Unreachable here: --tokens is handled above and never builds a plan.
           "no tokens to analyze"

@@ -96,7 +96,7 @@ describe Gori::Tui::SequencerView do
         engine.should be_nil
         err.should eq("set a token location first")
 
-        # BadPosition — a range typo is not a missing location, and saying it is sends the
+        # BadTokenLoc — a range typo is not a missing location, and saying it is sends the
         # operator to the wrong row (the overlay's `invalid_hint` says the same sentence).
         view = Gori::Tui::SequencerView.new
         view.load("http://t.test", req.to_slice, false, nil,

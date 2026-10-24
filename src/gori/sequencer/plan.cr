@@ -25,10 +25,12 @@ module Gori::Sequencer
       # A token location whose kind needs a selector (cookie / header / regex / jsonpath)
       # was left blank, so every response would miss and the run would only burn requests.
       NoTokenLoc
-      # A `position` descriptor whose byte range is empty or reversed (`40:8`), which
+      # A descriptor that can never extract anything, so every response would miss. Two shapes:
+      # a `position` byte range that is empty or reversed (`40:8`), which
       # `TokenExtract.position` answers nil for on EVERY response (`detail` = the range as
-      # `A:B`, for surfaces that quote it back).
-      BadPosition
+      # `A:B`, for surfaces that quote it back); or a regex that does not compile / a jsonpath
+      # `JsonPath` refuses (`detail` nil, `message` = `TokenExtract.selector_error`'s sentence).
+      BadTokenLoc
       # Manual mode with nothing to analyze: no pasted token, or all of them blank.
       NoTokens
       # The request or the target still names an env var that resolves to nothing, so
@@ -237,11 +239,17 @@ module Gori::Sequencer
       if loc.kind.position?
         return if loc.pos_start >= 0 && loc.pos_end > loc.pos_start
         range = "#{loc.pos_start}:#{loc.pos_end}"
-        raise PlanError.new(PlanError::Reason::BadPosition,
+        raise PlanError.new(PlanError::Reason::BadTokenLoc,
           "token byte range #{range} is empty", range)
       end
-      return unless loc.selector.strip.empty?
-      raise PlanError.new(PlanError::Reason::NoTokenLoc, "no token location selector")
+      if loc.selector.strip.empty?
+        raise PlanError.new(PlanError::Reason::NoTokenLoc, "no token location selector")
+      end
+      # A regex that does not compile or a jsonpath that does not parse used to pass here and
+      # fail only after start: the regex at the engine's compile, the jsonpath by missing every
+      # sample and spending the whole budget.
+      return unless bad = TokenExtract.selector_error(loc.kind, loc.selector)
+      raise PlanError.new(PlanError::Reason::BadTokenLoc, bad)
     end
 
     # A manual run: the pasted tokens are replayed into the same event stream with no

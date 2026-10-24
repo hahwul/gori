@@ -487,8 +487,9 @@ module Gori::Tui
         "invalid target — use scheme://host[:port]/path"
       in Sequencer::PlanError::Reason::NoTokenLoc
         "set a token location first"
-      in Sequencer::PlanError::Reason::BadPosition
-        "set a byte range as A:B (A 0 or more, B greater than A)"
+      in Sequencer::PlanError::Reason::BadTokenLoc
+        # No detail = a regex/jsonpath that cannot extract; the builder's sentence names it.
+        ex.detail ? "set a byte range as A:B (A 0 or more, B greater than A)" : ex.message.to_s
       in Sequencer::PlanError::Reason::UnresolvedEnv
         Tui.unresolved_env_status(ex.detail)
       end

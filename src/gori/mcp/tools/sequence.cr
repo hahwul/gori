@@ -261,8 +261,10 @@ module Gori
           ex.message.to_s # names the host it could not parse, or the scheme it refused
         in Sequencer::PlanError::Reason::NoTokenLoc
           "provide exactly one token location: cookie|header|regex|position|jsonpath"
-        in Sequencer::PlanError::Reason::BadPosition
-          "'position' #{(ex.detail || "").inspect} extracts nothing — A must be 0 or more and B greater than A"
+        in Sequencer::PlanError::Reason::BadTokenLoc
+          # No detail = a regex/jsonpath that cannot extract; the builder's sentence names it.
+          return ex.message.to_s unless range = ex.detail
+          "'position' #{range.inspect} extracts nothing — A must be 0 or more and B greater than A"
         in Sequencer::PlanError::Reason::NoTokens
           # Unreachable here: a pasted token list goes to sequence_analyze, which builds no plan.
           "provide a non-empty 'tokens' array"

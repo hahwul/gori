@@ -479,14 +479,29 @@ describe Gori::Sequencer::Plan do
     # integers, asked nothing about their order, and started a real collection that spent its
     # whole max-sends budget and reported `CRITICAL · 0 usable / N total · no usable tokens` —
     # a verdict about the origin's entropy from a descriptor that read none of it.
-    it "reports BadPosition for a byte range that can never match" do
+    it "reports BadTokenLoc for a byte range that can never match" do
       [{40, 8}, {8, 8}, {0, 0}, {-10, -2}, {-5, 20}, {-5, 0}].each do |(lo, hi)|
         ex = expect_raises(Q::PlanError) do
           Q::Plan.build(Q::PlanOptions.new(RAW.to_slice, target: "http://t.test",
             config: live_config(Q::TokenLoc.new(Q::ExtractKind::Position, "", lo, hi), 5)), ungated_outbound)
         end
-        ex.reason.should eq(Q::PlanError::Reason::BadPosition)
+        ex.reason.should eq(Q::PlanError::Reason::BadTokenLoc)
         ex.detail.should eq("#{lo}:#{hi}")
+      end
+    end
+
+    # A regex that does not compile failed only after start, and a jsonpath JsonPath refuses
+    # started a real collection that missed every sample and spent the budget.
+    it "reports BadTokenLoc for a regex or jsonpath selector that can never extract" do
+      [{Q::ExtractKind::Regex, "tok=(", "does not compile"},
+       {Q::ExtractKind::JsonPath, "$.a[", "jsonpath:"}].each do |(kind, sel, says)|
+        ex = expect_raises(Q::PlanError) do
+          Q::Plan.build(Q::PlanOptions.new(RAW.to_slice, target: "http://t.test",
+            config: live_config(Q::TokenLoc.new(kind, sel), 5)), ungated_outbound)
+        end
+        ex.reason.should eq(Q::PlanError::Reason::BadTokenLoc)
+        ex.detail.should be_nil
+        ex.message.to_s.should contain(says)
       end
     end
 
