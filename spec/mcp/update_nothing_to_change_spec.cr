@@ -33,7 +33,7 @@ describe "MCP update_* with nothing to change" do
       r = tools.call("update_rule", JSON.parse(%({"id":#{id},"scope":"project"})))
       r.is_error.should be_true
       r.error_code.should eq("INVALID_ARGUMENT")
-      r.text.should start_with("nothing to change — pass at least one of ")
+      r.text.should start_with("nothing to change — this call names only its row; the fields it takes: ")
       r.text.should contain("pattern")
       r.text.should_not contain("scope")
 
@@ -47,7 +47,7 @@ describe "MCP update_* with nothing to change" do
     end
   end
 
-  it "lets a real change through, a null that clears included, and leaves a missing row to the handler" do
+  it "lets a real change through, a null that clears included, and leaves a missing selector to the handler" do
     with_store do |store|
       tools = tools_for(store)
       id = mcp_ok_json(tools, "create_rule", %({"pattern":"ORIGINAL","replacement":"x"}))["id"].as_i64

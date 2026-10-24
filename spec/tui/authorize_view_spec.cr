@@ -210,6 +210,7 @@ describe AuthorizeView do
     v.entry_by_id(a).not_nil!.verdict.should eq(:error)
     v.unanswered_in(Set{a}).should eq(1)
     v.unanswered_reason_in(Set{a}).should eq("connection refused")
+    v.baseline_only_answered_in(Set{a}).should eq(1) # its baseline answered 200
     # …and it is not counted as a finding either way.
     v.bypasses_in(v.entries.map(&.id).to_set).should eq(0)
     render(v)

@@ -1422,7 +1422,8 @@ module Gori
         aliases = ARG_ALIASES[name]?
         declared = declared_args[name]? || return nil
         fields = declared.reject { |k| selectors.includes?(k) || aliases.try(&.has_key?(k)) }
-        err("nothing to change — pass at least one of #{fields.join(", ")}", "INVALID_ARGUMENT")
+        # "the fields it takes", not "at least one of": update_host_override needs host AND ip.
+        err("nothing to change — this call names only its row; the fields it takes: #{fields.join(", ")}", "INVALID_ARGUMENT")
       end
 
       # Fold each alias the call used into its real name, or the refusal for a call that spelled

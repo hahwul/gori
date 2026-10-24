@@ -880,7 +880,9 @@ module Gori::Tui
       end
       if unanswered > 0
         why = @view.unanswered_reason_in(@batch_ids)
-        parts << "#{unanswered} whose every send failed#{why ? " (#{why})" : ""}"
+        only_baseline = @view.baseline_only_answered_in(@batch_ids)
+        what = only_baseline == unanswered ? "whose baseline answered but every other identity's send failed" : "whose every send failed"
+        parts << "#{unanswered} #{what}#{why ? " (#{why})" : ""}"
       end
       "authorize: nothing was compared — #{Gori.plural(done, "request")} · " \
       "#{parts.join(" · ")} · this is not a result"

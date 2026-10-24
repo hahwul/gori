@@ -364,6 +364,12 @@ module Gori::Tui
       @entries.count { |e| ids.includes?(e.id) && (t = e.target) && t.unanswered? }
     end
 
+    # The `unanswered_in` rows whose BASELINE answered (`Target#baseline_only_answered?`):
+    # "every send failed" is not true of them, only every other identity's.
+    def baseline_only_answered_in(ids : Set(Int32)) : Int32
+      @entries.count { |e| ids.includes?(e.id) && (t = e.target) && t.baseline_only_answered? }
+    end
+
     # Requests in `ids` whose BASELINE was itself refused (4xx/5xx). Counted beside the two
     # above and for the same reason: nothing on such a request could be judged against
     # anything, so it contributes no bypass and no `different`, and the summary's "no identity
