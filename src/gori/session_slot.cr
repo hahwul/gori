@@ -425,20 +425,14 @@ module Gori
       overlay_request(head, body, slot)
     end
 
-    # Bytes up to and including the head's terminating blank line: CRLFCRLF or LFLF, whichever
-    # comes FIRST (a body carrying a CRLFCRLF must not move the boundary — the same rule
-    # `Rules#split_message` states). The whole buffer when there is no blank line at all.
+    # Bytes up to and including the head's terminating blank line, whichever spelling comes
+    # FIRST (a body carrying a CRLFCRLF must not move the boundary). The whole buffer when
+    # there is no blank line at all. `Env.head_body_boundary`, not a local scan: the CRLFCRLF /
+    # LFLF copy this replaced missed a mixed `\n\r\n` head, so the overlay (and the client
+    # hints) went into the BODY of a multipart request the send path itself split correctly.
     # Public for `ClientHints.apply`, the other header-only writer on the send seam.
     def self.head_length(wire : Bytes) : Int32
-      crlf = AsciiBytes.index(wire, "\r\n\r\n".to_slice)
-      lf = AsciiBytes.index(wire, "\n\n".to_slice)
-      if crlf && (lf.nil? || crlf < lf)
-        crlf + 4
-      elsif lf
-        lf + 2
-      else
-        wire.size
-      end
+      Env.head_body_boundary(wire)
     end
 
     # The head alone, with the overlay applied. Removes run before sets so a slot that both

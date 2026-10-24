@@ -204,6 +204,10 @@ module Gori
           # Rewriting an EXISTING Content-Length keeps its pre-existing behaviour: this guard is
           # only about ADDING framing to bytes we could not parse.
           return bytes if lines.any?(&.includes?('\n'))
+          # …and only into a head that HAS a start line. Leading blank lines (RFC 9112 §2.2:
+          # a recipient ignores them) put the separator at offset 0, so the real request reads
+          # as "body" and a Content-Length over it would turn it into one.
+          return bytes if lines.all?(&.empty?)
           lines << "Content-Length: #{body.bytesize}"
         else
           return bytes
@@ -599,13 +603,14 @@ module Gori
       # editor's default LF). A captured multipart always carries CRLF (RFC 2046 §5.1.1
       # delimits parts with it and the part headers are CRLF-terminated), so it is left
       # byte-exact. ^X hex mode remains the byte-exact escape hatch either way.
+      #
+      # Split at `Env.head_body_separator`, a BYTE offset: a `String#index` here is a CHAR index,
+      # so one `é` in the head moved the cut a byte early and normalized the head's own `\r\n`.
       def self.normalize_multipart_body(bytes : Bytes) : Bytes
-        text = String.new(bytes)
-        sep = text.index("\r\n\r\n")
-        return bytes unless sep
-        body_at = sep + 4
+        sep, width = Env.head_body_separator(bytes) || return bytes
+        body_at = sep + width
         return bytes if body_at >= bytes.size
-        return bytes unless multipart_head?(text[0, sep])
+        return bytes unless multipart_head?(String.new(bytes[0, sep]))
         body = bytes[body_at..]
         return bytes if crlf?(body) # already wire-form — these bytes are evidence, not a draft
         head = bytes[0, body_at]

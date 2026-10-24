@@ -63,6 +63,25 @@ describe F::ContentLength do
     end
   end
 
+  # A malformed length is a probe: found (so nothing is added beside it) but never rewritten,
+  # the rule `FlowRequest.resync_content_length` applies through the same predicate.
+  describe "a Content-Length that rewriting would change the meaning of" do
+    it "leaves an obs-fold, a non-decimal value and whitespace before the colon alone" do
+      {
+        "POST / HTTP/1.1\r\nX-A: 1\r\n Content-Length: 99\r\n\r\nabc",
+        "POST / HTTP/1.1\r\nContent-Length: 0abc\r\n\r\nabc",
+        "POST / HTTP/1.1\r\nContent-Length : 99\r\n\r\nabc",
+      }.each do |req|
+        String.new(F::ContentLength.sync(req.to_slice, add_when_missing: true)).should eq(req)
+      end
+    end
+
+    it "adds nothing when only blank lines precede the separator" do
+      req = "\r\n\r\nGET / HTTP/1.1\r\nHost: h\r\n\r\n"
+      String.new(F::ContentLength.sync(req.to_slice, add_when_missing: true)).should eq(req)
+    end
+  end
+
   describe "mixed `\\n\\r\\n` head/body separator" do
     it "recomputes the CL and splices the mixed separator back verbatim" do
       # Last header line ended in a bare LF, the blank line itself was CRLF: the separator is

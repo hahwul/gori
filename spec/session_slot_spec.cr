@@ -155,6 +155,17 @@ describe Gori::SessionSlot do
       sent.should end_with("a=1")
     end
 
+    # A bare-LF last header followed by a CRLF blank line (`\n\r\n`): the send path splits
+    # it there, and so must the overlay, or the header lands in a multipart body.
+    it "finds a mixed \\n\\r\\n head terminator, so the header never enters the body" do
+      body = "--b\r\nContent-Disposition: form-data; name=\"x\"\r\n\r\nv\r\n--b--\r\n"
+      wire = ("POST / HTTP/1.1\r\nHost: a\r\nContent-Type: multipart/form-data; boundary=b\n\r\n" + body).to_slice
+      slot = Slot.new("s", set_headers: [{"Authorization", "Bearer T"}])
+      sent = String.new(Gori::SessionSlot.overlay_wire(wire, slot))
+      sent.should end_with("\n\r\n" + body)
+      sent.index("Authorization: Bearer T").not_nil!.should be < sent.index("--b").not_nil!
+    end
+
     it "replaces the value of a bare-LF-terminated header instead of appending a duplicate" do
       wire = "GET /a HTTP/1.1\r\nHost: t\nCookie: victim=1\r\n\r\n".to_slice
       slot = Slot.new("admin", set_headers: [{"Cookie", "admin=1"}])

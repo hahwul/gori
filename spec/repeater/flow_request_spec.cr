@@ -57,6 +57,12 @@ describe Gori::Repeater::FlowRequest do
       out.should contain("Content-Length: 10\r\n")
     end
 
+    # Leading blank lines put the separator at offset 0: the real request is not a body.
+    it "adds nothing when no start line precedes the separator" do
+      wire = "\r\n\r\nGET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+      Gori::Repeater::FlowRequest.resync_content_length(wire).should eq(wire)
+    end
+
     it "adds no header to a BODYLESS request (a GET with no Content-Length is untouched)" do
       wire = "GET /x HTTP/1.1\r\nHost: t\r\n\r\n".to_slice
       Gori::Repeater::FlowRequest.resync_content_length(wire).should eq(wire)
@@ -434,6 +440,14 @@ describe Gori::Repeater::FlowRequest do
       raw = "POST /u HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=B\r\n\r\n--B\nX: 1\n\nhi\n--B--\n".to_slice
       String.new(Gori::Repeater::FlowRequest.normalize_multipart_body(raw))
         .should eq("POST /u HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=B\r\n\r\n--B\r\nX: 1\r\n\r\nhi\r\n--B--\r\n")
+    end
+
+    # A multibyte char in the head used to shift the CHAR-indexed split a byte early, so the
+    # head's own `\r\n` came back `\r\r\n`.
+    it "splits at the byte offset when the head carries a multibyte char" do
+      raw = "POST /u HTTP/1.1\r\nX-N: é\r\nContent-Type: multipart/form-data; boundary=B\r\n\r\n--B\nhi\n--B--\n".to_slice
+      String.new(Gori::Repeater::FlowRequest.normalize_multipart_body(raw))
+        .should eq("POST /u HTTP/1.1\r\nX-N: é\r\nContent-Type: multipart/form-data; boundary=B\r\n\r\n--B\r\nhi\r\n--B--\r\n")
     end
 
     it "is idempotent on a body that already has CRLF" do

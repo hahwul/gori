@@ -106,8 +106,9 @@ module Gori::Fuzz
         # operator never wrote, on every request of the sweep. Adding is not correcting: a
         # header gori makes up has to clear a higher bar than one it recomputes.
         # `FlowRequest.resync_content_length` refuses on exactly these terms (any
-        # `transfer-encoding:` line, added or existing), and the two are the same rule.
-        return {bytes, 0, 0} if transfer_encoding?(bytes, sep)
+        # `transfer-encoding:` line, added or existing), and the two are the same rule. Nor
+        # into a head with no start line (`blank_head?`).
+        return {bytes, 0, 0} if transfer_encoding?(bytes, sep) || blank_head?(bytes, sep)
         # The insertion goes in at `sep`, so everything from the head/body separator on has
         # moved by the line it added (its own eol + name + digits).
         return {append_cl(bytes, sep, sep_w, body_start, body_len, eol), sep,
@@ -117,9 +118,7 @@ module Gori::Fuzz
       # CL present: a chunked request keeps its (unused) header verbatim (out of scope).
       return {bytes, 0, 0} if chunked?(bytes, sep, eol)
       ls, le = cl
-      # `le + 1`: an EMPTY payload in the value is the span `[le, le)`, and an empty
-      # Content-Length is a wordlist staple, not a no-op to overwrite.
-      return {bytes, 0, 0} if touches?(payloads, ls, le + 1)
+      return {bytes, 0, 0} if keep_cl_line?(bytes, payloads, ls, le)
       # Skip the rebuild when the line is already exactly the canonical form we'd emit —
       # same early-out as the old `lines[idx] == "Content-Length: #{body_len}"` guard.
       canon = "#{CL_CANON}#{body_len}"
@@ -129,6 +128,28 @@ module Gori::Fuzz
       # is what this pass overwrites, and the caller is told the region ends at `le`.
       {replace_cl(bytes, ls, le, sep, sep_w, body_start, body_len, canon), le,
        canon.bytesize - (le - ls)}
+    end
+
+    # Must the Content-Length line `[ls, le)` stay as written?
+    #
+    # When a payload is in it: `le + 1`, because an EMPTY payload in the value is the span
+    # `[le, le)`, and an empty Content-Length is a wordlist staple, not a no-op to overwrite.
+    #
+    # And when rewriting would change its meaning. The line is FOUND leniently (an obs-folded
+    # ` Content-Length`, a `Content-Length : 9`) so nothing is added beside it, but REWRITTEN
+    # only by the rule `FlowRequest.resync_content_length` applies, from the same predicate.
+    # Replacing the whole line turned a fold into a real header and a `0abc` probe into an
+    # ordinary length.
+    private def self.keep_cl_line?(bytes : Bytes, payloads : Array({Int32, Int32}), ls : Int32, le : Int32) : Bool
+      touches?(payloads, ls, le + 1) ||
+        !Proxy::Codec::Http1.rewritable_length_header?(String.new(bytes[ls, le - ls]))
+    end
+
+    # Is the head `[0, sep)` only CR/LF bytes, i.e. no start line at all? Nothing but blank
+    # lines before the separator (RFC 9112 §2.2 lets a recipient skip them) means the "body"
+    # is the real request, and a Content-Length over it would make it one.
+    private def self.blank_head?(bytes : Bytes, sep : Int32) : Bool
+      bytes[0, sep].all? { |b| b == 0x0d_u8 || b == 0x0a_u8 }
     end
 
     # Does any `[a, b)` span overlap `[lo, hi)`?

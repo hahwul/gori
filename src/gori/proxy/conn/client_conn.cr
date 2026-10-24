@@ -3328,13 +3328,15 @@ module Gori::Proxy
       io.to_slice
     end
 
-    # Split a forwarded message back into head (through CRLFCRLF) + body remainder. A RESPONSE
-    # head ends where `read_response_head_result` would end it — the earliest blank line, a
-    # bare-LF one included (`Http1.response_head_end`) — so a held bare-LF response is recorded
-    # with the head the client reads, not the whole message (or a head cut at a CRLFCRLF that
-    # sits in its body).
+    # Split a forwarded message back into head + body remainder. A RESPONSE head ends where
+    # `read_response_head_result` would end it — the earliest blank line, a bare-LF one
+    # included (`Http1.response_head_end`) — so a held bare-LF response is recorded with the
+    # head the client reads, not the whole message (or a head cut at a CRLFCRLF that sits in
+    # its body). A REQUEST is the operator's edit, forwarded byte-exact whatever its spelling:
+    # it splits at `Env.head_body_separator` like every other send seam, so a bare-LF or
+    # `\n\r\n` head is recorded as head + body instead of all head (the wire is the same).
     private def split_message(raw : Bytes, *, response : Bool = false) : {Bytes, Bytes?}
-      head_end = response ? Codec::Http1.response_head_end(raw) : AsciiBytes.index(raw, "\r\n\r\n".to_slice).try(&.+(4))
+      head_end = response ? Codec::Http1.response_head_end(raw) : Env.head_body_separator(raw).try { |(at, width)| at + width }
       return {raw, nil} unless head_end
       body = head_end < raw.size ? raw[head_end..].dup : nil
       {raw[0, head_end].dup, body}

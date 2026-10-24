@@ -216,9 +216,10 @@ private def start_head_origin(seen : Channel(String)) : Int32
 end
 
 # Sends `request` through a proxy with intercept on, answering each held REQUEST with `drop`
-# (drop it) or forwarding it unedited; a held response is always forwarded. Returns the sink.
+# (drop it), with `edit` (forward those bytes instead), or forwarding it unedited; a held
+# response is always forwarded. Returns the sink.
 private def through_hold(request : String, drop : Bool = false,
-                         rewriter : Gori::Proxy::HeadRewriter? = nil) : CaptureSink
+                         rewriter : Gori::Proxy::HeadRewriter? = nil, edit : String? = nil) : CaptureSink
   done = Channel(Nil).new(1)
   sink = CaptureSink.new(done)
   with_store do |store|
@@ -230,7 +231,13 @@ private def through_hold(request : String, drop : Bool = false,
     spawn do
       while running
         interceptor.pending.each do |it|
-          it.kind.request? && drop ? interceptor.drop(it.id) : interceptor.forward(it.id)
+          if it.kind.request? && drop
+            interceptor.drop(it.id)
+          elsif it.kind.request? && edit
+            interceptor.forward(it.id, edit.to_slice)
+          else
+            interceptor.forward(it.id)
+          end
         end
         sleep 0.01.seconds
       end
@@ -306,6 +313,31 @@ describe "Gori::Proxy request-line capture fidelity off the streaming path (#142
     req.target.should eq("http://127.0.0.1:#{origin_port}/ab")
     String.new(req.head).should start_with("GET http://127.0.0.1:#{origin_port}/ab HTTP/1.1\r\n")
     req.intercept_original.should be_nil # unedited: nothing to keep beside it
+  end
+
+  # The edit goes upstream byte-exact either way; what it is RECORDED as must split at the same
+  # blank line every other send seam uses, a bare-LF or `\n\r\n` one included.
+  it "records an edited bare-LF or \\n\\r\\n request as head + body, not all head" do
+    {"\n\n", "\n\r\n"}.each do |sep|
+      origin = TCPServer.new("127.0.0.1", 0)
+      origin_port = origin.local_address.port
+      spawn do
+        if conn = origin.accept?
+          conn.read(Bytes.new(4096))
+          conn << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi"
+          conn.close
+        end
+      rescue
+      end
+      edit = "POST /e HTTP/1.1\nHost: 127.0.0.1:#{origin_port}\nContent-Length: 3#{sep}abc"
+      sink = through_hold("GET http://127.0.0.1:#{origin_port}/ab HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n",
+        edit: edit)
+      origin.close
+
+      req = sink.requests.first
+      String.new(req.head).should end_with("Content-Length: 3#{sep}")
+      String.new(req.body.not_nil!).should eq("abc")
+    end
   end
 
   it "records the same line for a dropped hold as for a forwarded one" do
