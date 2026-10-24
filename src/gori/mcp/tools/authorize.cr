@@ -428,6 +428,11 @@ module Gori
           j.field "duration_us", tr.meta.duration_us
           j.field "delta", Serialize.text(tr.delta)
           j.field "error", Serialize.text(tr.meta.errored? ? tr.summary.error : nil)
+          # Every other field is null on such a trial; say why (`Verdict::NoEffect`).
+          if tr.verdict.no_effect?
+            j.field "note", "this identity's overlay left the request byte-identical to the baseline, " \
+                            "so it was not sent — its answer would be the baseline's by construction"
+          end
         end
       end
 

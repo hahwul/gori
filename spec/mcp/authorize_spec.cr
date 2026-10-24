@@ -553,6 +553,24 @@ describe "MCP authorize tools" do
       end
     end
 
+    it "explains a no_effect trial instead of leaving it all nulls" do
+      port = start_authz_origin(enforce: true)
+      with_store do |store|
+        flow = seed_authz_flow(store, port) # carries Cookie only
+        tools = tools_for(store)
+        ids = anon + [{"name" => "nokey", "remove" => ["Authorization"]} of String => String | Array(String)]
+        start = call_json(tools, "authorize_start",
+          {"flow_ids" => [flow], "identities" => ids, "allow_unscoped" => true}.to_json)
+        job_id = start["job_id"].as_s
+        drain_job(tools, job_id)
+        trials = call_json(tools, "authorize_results", %({"job_id":#{job_id.to_json}}))["results"][0]["trials"].as_a
+        nokey = trials.find! { |t| t["identity"].as_s == "nokey" }
+        nokey["verdict"].as_s.should eq("no_effect")
+        nokey["note"].as_s.should contain("byte-identical to the baseline, so it was not sent")
+        trials.find! { |t| t["identity"].as_s == "anonymous" }["note"]?.should be_nil
+      end
+    end
+
     it "says the baseline answered when only the other identities' sends failed" do
       port, _ = start_half_answering_origin
       with_store do |store|
