@@ -2465,11 +2465,14 @@ module Gori
       end
 
       # Emits scope_decision / matched scope_rule_id / effective_host onto an
-      # active tool's result object so the send's scope evidence is self-contained.
+      # active tool's result object so the send's scope evidence is self-contained — and the
+      # active `session_slot` it went out as, the line `gori run` prints as `slot: sending as NAME`.
+      # (authorize_start does not call this: an Authorize run wears no active slot.)
       private def emit_scope(j : JSON::Builder, sc : ScopeCheck) : Nil
         j.field "scope_decision", sc.decision
         j.field "scope_rule_id", sc.rule_id if sc.rule_id
         j.field "effective_host", Serialize.text(sc.host)
+        Env.active_slot_name.try { |slot| j.field "session_slot", Serialize.text(slot) }
       end
 
       # A string-shaped argument, held to the same "lenient, but never SILENT" contract every

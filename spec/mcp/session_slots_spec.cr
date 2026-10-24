@@ -219,6 +219,32 @@ describe "MCP set_active_session_slot" do
     end
   end
 
+  # `gori run` prints `slot: sending as NAME`; an action reply names the same thing.
+  it "names the active slot on an action reply, and nothing with none active" do
+    server = TCPServer.new("127.0.0.1", 0)
+    spawn do
+      while conn = server.accept?
+        Gori::Proxy::Codec::Http1.read_head(conn) rescue nil
+        conn << "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n" rescue nil
+        conn.close rescue nil
+      end
+    end
+    send = %({"url":"http://127.0.0.1:#{server.local_address.port}/","allow_unscoped":true,"record_history":false})
+    with_store do |store|
+      previous = Gori::Env.layer
+      begin
+        t = tools_for(store)
+        call_json(t, "send_request", send)["session_slot"]?.should be_nil
+        call_json(t, "create_session_slot", %({"name":"admin","set_headers":["X-Who: admin"]}))
+        call_json(t, "set_active_session_slot", %({"name":"admin"}))
+        call_json(t, "send_request", send)["session_slot"].as_s.should eq("admin")
+      ensure
+        Gori::Env.layer = previous
+        server.close
+      end
+    end
+  end
+
   it "refuses an unknown name instead of silently keeping the previous identity" do
     with_store do |store|
       previous = Gori::Env.layer
