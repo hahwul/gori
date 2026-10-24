@@ -64,6 +64,8 @@ module Gori
             # absent refusal: `allowlist` means an unscoped host was already dropped from the
             # selection (and named in `skipped`), `waived` means the caller took that off.
             j.field "scope_gate", allow_unscoped ? "waived" : "allowlist"
+            # The query filled `limit`: matching flows past it were not looked at.
+            j.field "query_capped", true if plan.query_capped?
             emit_authorize_skipped(j, plan.skipped)
           end
         end)

@@ -553,6 +553,23 @@ describe "MCP authorize tools" do
       end
     end
 
+    it "says query_capped on a started job whose query filled `limit`" do
+      port = start_authz_origin(enforce: true)
+      with_store do |store|
+        seed_authz_flow(store, port, target: "/a")
+        seed_authz_flow(store, port, target: "/b")
+        tools = tools_for(store)
+        capped = call_json(tools, "authorize_start", {"query" => "host:127.0.0.1", "limit" => 1,
+                                                      "identities" => anon, "allow_unscoped" => true}.to_json)
+        capped["query_capped"].as_bool.should be_true
+        drain_job(tools, capped["job_id"].as_s)
+        whole = call_json(tools, "authorize_start", {"query" => "host:127.0.0.1", "limit" => 5,
+                                                     "identities" => anon, "allow_unscoped" => true}.to_json)
+        whole["query_capped"]?.should be_nil
+        drain_job(tools, whole["job_id"].as_s)
+      end
+    end
+
     it "explains a no_effect trial instead of leaving it all nulls" do
       port = start_authz_origin(enforce: true)
       with_store do |store|

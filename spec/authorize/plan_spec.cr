@@ -343,6 +343,27 @@ describe Gori::Authorize::Plan do
         ex.detail.should eq("2 not a safe method to repeat")
       end
     end
+
+    # The cap took the rows that were then skipped, so a sendable match past it was never seen.
+    it "NothingToSend names the query cap when the query filled `limit`" do
+      with_store do |store|
+        seed(store, method: "POST", target: "/transfer")
+        seed(store, method: "DELETE", target: "/orders/1")
+        ex = expect_raises(PlanError) { Plan.build(options(store, query: "host:acme.test", limit: 2), ungated_outbound) }
+        ex.reason.should eq(Reason::NothingToSend)
+        ex.detail.not_nil!.should contain("the query was capped at 2 rows (`limit`/`--limit`)")
+        ex = expect_raises(PlanError) { Plan.build(options(store, query: "host:acme.test", limit: 5), ungated_outbound) }
+        ex.detail.should eq("2 not a safe method to repeat")
+      end
+    end
+
+    it "remembers its limit, so a surface can ask query_capped? with no argument" do
+      with_store do |store|
+        seed(store, target: "/admin")
+        Plan.build(options(store, query: "host:acme.test", limit: 1), ungated_outbound).query_capped?.should be_true
+        Plan.build(options(store, query: "host:acme.test", limit: 5), ungated_outbound).query_capped?.should be_false
+      end
+    end
   end
 
   describe "skip reporting" do

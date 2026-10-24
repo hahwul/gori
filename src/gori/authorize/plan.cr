@@ -201,14 +201,18 @@ module Gori::Authorize
 
     def initialize(@engine : Engine, @identities : Array(Identity),
                    @targets : Array(Store::FlowDetail), @skipped : Array(Skipped),
-                   @query_rows : Int32 = 0)
+                   @query_rows : Int32 = 0, @limit : Int32 = 0)
     end
 
     # Did `--limit` cut the query's contribution short? True only when a query ran and filled
     # the cap exactly — there may or may not have been more, and "may have been" is the honest
     # warning. Nil query, or fewer rows than the cap, is a selection the operator saw whole.
-    def query_capped?(limit : Int32) : Bool
-      limit > 0 && @query_rows >= limit
+    def query_capped?(limit : Int32 = @limit) : Bool
+      Plan.query_capped?(limit, @query_rows)
+    end
+
+    def self.query_capped?(limit : Int32, query_rows : Int32) : Bool
+      limit > 0 && query_rows >= limit
     end
 
     # How many requests this run will put on the wire if nothing stops it.
@@ -281,11 +285,19 @@ module Gori::Authorize
       targets, skipped = partition(details, identities, options, outbound)
       skipped = missing + skipped
       if targets.empty?
+        detail = skip_tally(skipped)
+        # The cap took these rows, so matching flows past it were never looked at — and one
+        # of those may have been sendable. Said in the detail, so every surface carries it.
+        if query_capped?(options.limit, query_rows)
+          detail += "; the query was capped at #{options.limit} rows (`limit`/`--limit`), so " \
+                    "matching flows past that were not looked at — raise it to include them"
+        end
         raise PlanError.new(PlanError::Reason::NothingToSend,
-          "every selected flow was skipped", skip_tally(skipped), skipped)
+          "every selected flow was skipped", detail, skipped)
       end
       new(engine: Engine.live(outbound, options.verify?, options.timeout, overrides: options.overrides),
-        identities: identities, targets: targets, skipped: skipped, query_rows: query_rows)
+        identities: identities, targets: targets, skipped: skipped, query_rows: query_rows,
+        limit: options.limit)
     end
 
     # The identity set the run replays under: the explicit JSON when the surface has one,
