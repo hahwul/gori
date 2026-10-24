@@ -272,8 +272,10 @@ module Gori
             # stop that did not take, so say how to see it land.
             if status == "running"
               poll = job_kind_of(job.id).try { |k| suggest_job_tool(k, "status") } || "get_job"
+              # After a wait that ran out, the same call again would only time out again.
+              wait = waited_out ? "a longer wait_timeout_ms" : "stop_job{job_id, wait:true}"
               j.field "note", "stop requested; the run is still winding down — poll #{poll}, " \
-                              "or stop_job{job_id, wait:true} to block until it ends"
+                              "or #{wait} to block until it ends"
             end
           end
         end)

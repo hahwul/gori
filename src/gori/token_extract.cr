@@ -219,7 +219,9 @@ module Gori
         return steps.is_a?(String) ? "jsonpath: #{steps}" : nil
       end
       return nil unless kind.regex?
-      Regex.new(selector)
+      # The compile its runners use (the Sequencer engine, extract rules): a pattern that
+      # compiles bare but cannot carry the match budget must be refused here too.
+      SafeRegexp.budgeted(selector)
       nil
     rescue ex : ArgumentError | Regex::Error
       "regex #{selector.inspect} does not compile: #{ex.message}"
