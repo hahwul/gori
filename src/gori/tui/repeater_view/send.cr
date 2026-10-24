@@ -131,7 +131,7 @@ class Gori::Tui::RepeaterView
   def terminate_head_in_editor : Nil
     return if @req_hex_edit || @grpc_mode || ws_mode? || @decode_kind
     wire = @editor.wire_text
-    return if has_head_terminator?(text_wire_form(wire))
+    return if wire.strip.empty? || has_head_terminator?(text_wire_form(wire))
     @editor.replace_all("#{wire.rstrip("\r\n")}\n\n", @editor.cursor_offset)
     @dirty = true
   end

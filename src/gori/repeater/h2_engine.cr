@@ -1524,12 +1524,24 @@ module Gori
       # the fields/body split, rather than one layer up, because `encoded_request` — the
       # projection MCP's `effective_request` and `run show --format raw` report the wire
       # through — parses the identical request, so the bytes shown stay the bytes sent.
+      # Where the text head ends. `Env.split_head_body`'s rule for a bare-LF request — a
+      # CRLFCRLF-only scan read its body as header lines and sent no DATA — but only when the
+      # head is not CRLF-framed: in a CRLF head an earlier `\n\n` / `\n\r\n` is a payload's
+      # bare LF at the end of a header VALUE (a fuzz `x\n`), which used to be refused as
+      # uncarriable and must not quietly end the head and send the real headers as DATA.
+      private def self.h2_split(request : Bytes) : {Bytes, Bytes?}
+        sep = Gori::Env.head_body_separator(request)
+        return Gori::Env.split_head_body(request) unless sep && sep[1] != 4
+        crlf = AsciiBytes.index(request, "\r\n".to_slice)
+        return Gori::Env.split_head_body(request) unless crlf && crlf < sep[0]
+        at = AsciiBytes.index(request, "\r\n\r\n".to_slice) || return {request, nil}
+        {request[0, at + 4], at + 4 < request.size ? request[at + 4, request.size - at - 4] : nil}
+      end
+
       def self.parse_request(request : Bytes, scheme : String, host : String,
                              port : Int32, preserve_field_case : Bool = false,
                              reframe_grpc : Bool = false) : {Array({String, String}), Bytes?}
-        # `Env.split_head_body`, the one boundary rule: a CRLFCRLF-only scan read a bare-LF
-        # request's body as header lines and sent no DATA at all.
-        head_bytes, body = Gori::Env.split_head_body(request)
+        head_bytes, body = h2_split(request)
         # At most ONE trailing CR — the line terminator's. `rstrip` ate every one, so
         # `X: v\r\r\n` went out as `x: v` while a mid-value CR is refused below; a CR that is
         # part of the value is refused the same way wherever it sits.

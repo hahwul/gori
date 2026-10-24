@@ -834,8 +834,9 @@ describe "Gori::Repeater::WsEngine frame shapes" do
     end
   end
 
-  # `keep_key` promises the block goes out as written; the extension line was stripped anyway.
-  it "strips Sec-WebSocket-Extensions by default but sends it as written under keep_key" do
+  # gori cannot decode permessage-deflate, so the offer is stripped under `keep_key` too: that
+  # flag's contract is the key.
+  it "strips Sec-WebSocket-Extensions, keep_key or not" do
     typed = ("GET /ws HTTP/1.1\r\nHost: h\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" \
              "Sec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA==\r\n" \
              "Sec-WebSocket-Extensions: permessage-deflate\r\n\r\n").to_slice
@@ -849,7 +850,7 @@ describe "Gori::Repeater::WsEngine frame shapes" do
       Gori::Repeater::WsEngine.send(typed, [] of Gori::Repeater::WsEngine::OutMsg,
         scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false,
         idle: 100.milliseconds, keep_key: true)
-      head.receive.should contain("Sec-WebSocket-Extensions: permessage-deflate\r\n")
+      head.receive.should_not contain("Sec-WebSocket-Extensions")
     end
   end
 

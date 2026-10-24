@@ -46,7 +46,10 @@ module Gori::Repeater
       return wire unless fields
 
       authority = Proxy::H2::HeadCodec.pseudo(fields, ":authority") || FlowRequest.authority(scheme, host, port)
-      head = Proxy::H2::HeadCodec.synth_request(fields, authority)
+      # `authority_line` when the fields carry an `:authority`, as `H2Engine.encoded_request` files a
+      # text send: beside a `host` field it was dropped, and a replay sent the host's value.
+      head = Proxy::H2::HeadCodec.synth_request(fields, authority,
+        authority_line: !Proxy::H2::HeadCodec.pseudo(fields, ":authority").nil?)
       boundary = Env.head_body_boundary(wire)
       body_size = wire.size - boundary
       return head if body_size <= 0

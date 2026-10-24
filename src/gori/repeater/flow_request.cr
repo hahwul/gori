@@ -104,10 +104,15 @@ module Gori
       # captured body was capped (the same rule a replay uses), else the head as captured. A
       # copied command that kept the original, larger Content-Length waited on bytes that were
       # never stored.
+      #
+      # For the DERIVED exports only (cURL and the code clients): a "Raw request" copy is the
+      # captured bytes, CL.TE pair and all.
+      def self.export_head(head : Bytes, body : Bytes?, truncated : Bool) : Bytes
+        truncated ? resync_truncated_head(head, body.try(&.size) || 0) : head
+      end
+
       def self.export_head(detail : Store::FlowDetail) : Bytes
-        head = detail.request_head
-        return head unless detail.request_body_truncated?
-        resync_truncated_head(head, detail.request_body.try(&.size) || 0)
+        export_head(detail.request_head, detail.request_body, detail.request_body_truncated?)
       end
 
       # Make a TRUNCATED request self-framed so the repeater can't hang. Used ONLY when the

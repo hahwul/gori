@@ -506,7 +506,9 @@ module Gori
       idx = pairs.rindex { |(content, _)| content.empty? }
       idx = nil if idx == 0 # index 0 is the start line, never the terminator
       if idx
-        pairs.insert(idx, {line, pairs[idx][1]})
+        # The PREVIOUS line's terminator, not the blank line's: on a mixed `X: v\n\r\n` head
+        # the new line takes `\n` and the head still ends `\n\r\n`, the shape the operator sent.
+        pairs.insert(idx, {line, pairs[idx - 1][1]})
       else
         last = pairs[-1]
         if last[1].empty?

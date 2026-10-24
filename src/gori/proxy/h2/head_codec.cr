@@ -68,7 +68,7 @@ module Gori::Proxy::H2
       path = pseudo(fields, ":path") || "/"
       String.build do |io|
         io << line_safe(method) << ' ' << line_safe(path) << " HTTP/2\r\n"
-        # `authority_line` (only `H2Engine.encoded_request`) writes `:authority` as the first
+        # `authority_line` (the send-side projections only) writes `:authority` as the first
         # `Host:` line even when empty or beside an explicit `host` — the shape that engine's
         # text parse reads back into `:authority`, so a recorded send replays as itself.
         if authority_line || (!authority.empty? && !explicit_host?(fields))

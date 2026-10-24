@@ -164,6 +164,8 @@ describe Gori::SessionSlot do
       sent = String.new(Gori::SessionSlot.overlay_wire(wire, slot))
       sent.should end_with("\n\r\n" + body)
       sent.index("Authorization: Bearer T").not_nil!.should be < sent.index("--b").not_nil!
+      # …and the head still ends the way the operator wrote it.
+      sent.should contain("boundary=b\nAuthorization: Bearer T\n\r\n--b")
     end
 
     it "replaces the value of a bare-LF-terminated header instead of appending a duplicate" do

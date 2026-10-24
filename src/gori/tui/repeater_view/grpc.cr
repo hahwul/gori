@@ -95,7 +95,7 @@ class Gori::Tui::RepeaterView
   end
 
   # The replayable request bytes for a gRPC tab: the edited head + the canonical
-  # CRLFCRLF terminator (what H2Engine.split_head_body keys on) + the message body.
+  # CRLFCRLF terminator (what H2Engine.parse_request splits on) + the message body.
   # A reframable (unary) call sends the current payload — hex-edited via @req_hex_edit while
   # in hex mode, else the stored @grpc_payload — behind either a RECOMPUTED length prefix
   # (`␣Pr:FRAME` on, the default) or the CAPTURED one (off, which is how a deliberately-stale

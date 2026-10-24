@@ -2195,7 +2195,7 @@ module Gori::Tui
         return {"COPY AS", [] of CopyMenu::Option} unless d
         d, redacted_count = redacted(d, redactor)
         req = request_wire(d)
-        opts = CopyMenu.request_options(req, copy_target(d))
+        opts = CopyMenu.request_options(req, copy_target(d), code_wire: code_wire(d))
         # …plus the response, on the same 's' key the multi-flow set uses. Without it, marking a
         # SECOND flow would be the only way to reach the raw response, and the guide advertises
         # the format unconditionally. 's' rather than response_options' own keys because those
@@ -2258,7 +2258,7 @@ module Gori::Tui
       # cURL comes from the SAME serialiser the single-flow path uses, via the narrow entry point
       # — request_options would allocate the headers/body/raw variants per flow too, several extra
       # copies of a multi-MiB body, for one line we keep.
-      curls = details.compact_map { |d| CopyMenu.curl_text(request_wire(d), copy_target(d)) }
+      curls = details.compact_map { |d| CopyMenu.curl_text(code_wire(d), copy_target(d)) }
       opts << CopyMenu::Option.new("cURL", 'l', curls.join("\n\n")) unless curls.empty?
       # A raw HTTP message contains blank lines, so joining on one would be ambiguous about
       # where a message ends — each gets a labelled separator line instead. The message bytes
@@ -2298,6 +2298,11 @@ module Gori::Tui
     end
 
     private def request_wire(d : Store::FlowDetail) : String
+      String.new(combine_bytes(d.request_head, d.request_body) || Bytes.empty)
+    end
+
+    # What the cURL / code rows serialize — see `CopyMenu.request_options`'s `code_wire`.
+    private def code_wire(d : Store::FlowDetail) : String
       String.new(combine_bytes(Repeater::FlowRequest.export_head(d), d.request_body) || Bytes.empty)
     end
 
@@ -2320,7 +2325,7 @@ module Gori::Tui
         wire = String.new(combine_bytes(detail.request_head, detail.request_body) || Bytes.empty)
         row = detail.row
         target = Repeater::FlowRequest.build_target(row.scheme, row.host, row.port)
-        opts = CopyMenu.request_options(wire, target)
+        opts = CopyMenu.request_options(wire, target, code_wire: code_wire(detail))
         if pair = pair_option(detail, wire)
           opts << pair
         end

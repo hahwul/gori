@@ -108,7 +108,10 @@ module Gori
           # default port is not part of the authority, or the Host line does not re-parse.
           authority = Proxy::H2::HeadCodec.pseudo(fields, ":authority") ||
                       FlowRequest.authority(plan.scheme, plan.host, plan.port)
-          head = Proxy::H2::HeadCodec.synth_request(fields, authority)
+          # `authority_line` when the fields carry an `:authority`, as `H2Engine.encoded_request` files a
+          # text send: beside a `host` field it was dropped, and a replay sent the host's value.
+          head = Proxy::H2::HeadCodec.synth_request(fields, authority,
+            authority_line: !Proxy::H2::HeadCodec.pseudo(fields, ":authority").nil?)
           method = Proxy::H2::HeadCodec.pseudo(fields, ":method") || ""
           target = Proxy::H2::HeadCodec.pseudo(fields, ":path") || "/"
           {head, plan.h2_body, method, target, "HTTP/2"}

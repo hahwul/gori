@@ -287,3 +287,14 @@ describe Gori::Tui::CopyMenu do
     end
   end
 end
+
+describe "Gori::Tui::CopyMenu.request_options code_wire" do
+  # A capped body: the cURL row serializes the re-framed head, the Raw row stays the capture.
+  it "feeds the code rows code_wire and leaves the Raw row as the capture" do
+    raw = "POST /u HTTP/1.1\r\nHost: h.test\r\nContent-Length: 9000\r\n\r\nshort"
+    framed = "POST /u HTTP/1.1\r\nHost: h.test\r\nContent-Length: 5\r\n\r\nshort"
+    opts = Gori::Tui::CopyMenu.request_options(raw, "http://h.test", code_wire: framed)
+    opts.find! { |o| o.label == "Raw request" }.text.should eq(raw)
+    opts.find! { |o| o.label == "cURL" }.text.should_not contain("9000")
+  end
+end

@@ -1256,6 +1256,18 @@ describe Gori::Repeater::H2Engine do
     String.new(body.not_nil!).should eq(%({"a":1}))
   end
 
+  # …but not in a CRLF head, where an earlier `\n\n` / `\n\r\n` is a payload's bare LF at the
+  # end of a header VALUE: ending the head there sent the real headers and body as DATA.
+  it "keeps a CRLF head whole when a header value carries a bare-LF blank line" do
+    expect_raises(Gori::Error, /not a header field/) do
+      Gori::Repeater::H2Engine.parse_request("GET / HTTP/2\r\nX-F: be\n\naf\r\n\r\n".to_slice, "http", "h", 80)
+    end
+    req = "POST / HTTP/2\r\nX-F: x\n\r\nOther: y\r\n\r\nbody".to_slice
+    headers, body = Gori::Repeater::H2Engine.parse_request(req, "http", "h", 80)
+    headers.should contain({"other", "y"})
+    String.new(body.not_nil!).should eq("body")
+  end
+
   # Only the terminator's CR is removed; a second one is the value's and is refused like a
   # mid-value CR. Under preserve_field_case the name keeps its whitespace (`X-A : v`).
   it "strips one terminator CR and keeps name whitespace under preserve_field_case" do

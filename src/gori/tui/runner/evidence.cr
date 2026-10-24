@@ -519,7 +519,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     ev = selected_evidence || return {"COPY EVIDENCE AS", [] of CopyMenu::Option}
     clean, count = sanitized_evidence(ev)
     request = String.new(join_message(clean.request_head, clean.request_body))
-    options = CopyMenu.request_options(request, clean.meta.url)
+    code = String.new(join_message(Repeater::FlowRequest.export_head(clean.request_head, clean.request_body,
+      clean.meta.request_truncated?), clean.request_body))
+    options = CopyMenu.request_options(request, clean.meta.url, code_wire: code)
     if head = clean.response_head
       response = String.new(join_message(head, clean.response_body))
       options << CopyMenu::Option.new("Raw response", 's', response)
