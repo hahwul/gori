@@ -91,17 +91,23 @@ Spec.after_suite { FileUtils.rm_rf(RESUME_CA_ROOT) }
 
 # A real Session with ONE project-scoped provider and ONE persisted OAST session against it —
 # the state a reopened project is actually in, which is the state resume exists to serve.
-# An endpoint a resume can dial without reaching anything: a loopback port nothing listens on.
-# `resume_session` builds a REAL provider from the row, so the one request it makes has to fail
-# at once and stay off every proxy (loopback is always dialed direct). A public-looking name
-# resolved later, from a fiber that outlived its example, and went out through the upstream
-# proxy the next spec file configured (spec/discover/sender_spec.cr, run in one process).
-private CLOSED_ENDPOINT = begin
-  probe = TCPServer.new("127.0.0.1", 0)
-  port = probe.local_address.port
-  probe.close
-  "https://127.0.0.1:#{port}"
+# An endpoint a resume can dial without reaching anything: a loopback listener that hangs up on
+# every connection. `resume_session` builds a REAL provider from the row, so the one request it
+# makes has to fail at once and stay off every proxy (loopback is always dialed direct). A
+# public-looking name resolved later, from a fiber that outlived its example, and went out
+# through the upstream proxy the next spec file configured (spec/discover/sender_spec.cr, run
+# in one process). The listener is held for the whole run: a probed-and-closed port went back
+# to the kernel, a later spec's server was handed it, and the deregister sat out its 20s TLS
+# read instead of failing. (A bound socket that never listens is refused on Linux but times
+# out on macOS.)
+private CLOSED_SERVER = TCPServer.new("127.0.0.1", 0).tap do |server|
+  spawn(name: "oast-resume-closed-endpoint") do
+    while client = server.accept?
+      client.close
+    end
+  end
 end
+private CLOSED_ENDPOINT = "https://127.0.0.1:#{CLOSED_SERVER.local_address.port}"
 
 # Wait out every register/resume round trip still in flight, so its fiber ends inside the
 # example that started it. Bounded, so a broken future fails the example rather than the suite.
