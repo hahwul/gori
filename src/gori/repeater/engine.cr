@@ -91,7 +91,8 @@ module Gori
       end
 
       # A `StreamBound` ended this event stream: "events" or "time", or "cancelled" when the
-      # send's cancel did. The body holds the events read before the stop, and the result is a
+      # send's cancel did — or "budget" when any h1 body was still arriving at the engine's
+      # whole-read ceiling (`read_response`). The body holds the events read before the stop, and the result is a
       # success; `incomplete?` is also set, because the socket still carries the rest of the
       # stream. Never `timed_out?`: a Fuzz matcher reads that as a time-based hit.
       getter bounded : String?
@@ -507,8 +508,7 @@ module Gori
           # Any other body gets a WHOLE-READ ceiling of DEFAULT_BUDGET_FACTOR idle timeouts (the
           # h2 engine's factor; h2 bounds the whole exchange, this only the body): the idle
           # bound restarts on every byte, so an origin dribbling one byte per tick held a send —
-          # and a stopped fuzz run waiting on it — until 8 MiB came. A body still arriving at
-          # the ceiling keeps what came and is reported cut short.
+          # and a stopped fuzz run waiting on it — until 8 MiB came.
           deadline = unless run
             Proxy::SocketTuning.underlying_socket(upstream).try(&.read_timeout).try do |idle|
               StreamRun.new(nil, idle * H2Engine::DEFAULT_BUDGET_FACTOR, framing.chunked?)
@@ -526,10 +526,12 @@ module Gori
             return Result.new(head, body, resp, elapsed(started), incomplete: true,
               lf_framed: lf_framed, bounded: why, event_times: run.try(&.times))
           end
+          # A stop on gori's own bound, as an event stream's is (`bounded`): the head and what
+          # came of the body are the answer, so a matcher still sees the status and nothing
+          # re-sends a request the origin is answering.
           if deadline.try(&.reason)
-            return Result.new(head, body, resp, elapsed(started),
-              error: "response body still arriving after the whole-read budget; read stopped",
-              incomplete: true, timed_out: true, lf_framed: lf_framed, delivered: true)
+            return Result.new(head, body, resp, elapsed(started), incomplete: true,
+              lf_framed: lf_framed, delivered: true, bounded: "budget")
           end
           Result.new(head, body, resp, elapsed(started), incomplete: !complete, lf_framed: lf_framed,
             event_times: run.try(&.times))

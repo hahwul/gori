@@ -117,7 +117,9 @@ module Gori::Fuzz
       # CL present: a chunked request keeps its (unused) header verbatim (out of scope).
       return {bytes, 0, 0} if chunked?(bytes, sep, eol)
       ls, le = cl
-      return {bytes, 0, 0} if touches?(payloads, ls, le)
+      # `le + 1`: an EMPTY payload in the value is the span `[le, le)`, and an empty
+      # Content-Length is a wordlist staple, not a no-op to overwrite.
+      return {bytes, 0, 0} if touches?(payloads, ls, le + 1)
       # Skip the rebuild when the line is already exactly the canonical form we'd emit —
       # same early-out as the old `lines[idx] == "Content-Length: #{body_len}"` guard.
       canon = "#{CL_CANON}#{body_len}"

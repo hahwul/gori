@@ -37,8 +37,11 @@ describe "the h1 response read under a timeout" do
     t = Time.instant
     r = get(port, 300.milliseconds)
     (Time.instant - t).should be < 2.seconds
-    r.error.should_not be_nil
-    r.timed_out?.should be_true
+    # gori's own bound, not a failure: the 200 is the answer, and nothing re-sends it.
+    r.error.should be_nil
+    r.response.try(&.status).should eq(200)
+    r.bounded.should eq("budget")
+    r.incomplete?.should be_true
     r.delivered?.should be_true
   end
 

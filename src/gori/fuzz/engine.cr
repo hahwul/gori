@@ -1386,7 +1386,9 @@ module Gori::Fuzz
         # Through the request-time macro's gate when the run has one (#1350), and per ATTEMPT: a
         # retry is a request, so a `request` cadence gives it a value of its own.
         raw = candidate_send { @backend.send(job.bytes, job.payload_spans) }
-        return nil unless raw
+        # nil: this attempt was never sent (stopped at a gate). A RETRY's earlier attempt was, so
+        # its failure is still the row.
+        return failed.try { |f| @matcher.build(job, f, resent_count: resent_count - 1) } unless raw
         # A retry the budget refused sent nothing: the row is the failure it was retrying, and
         # that retry was never a superseded attempt. Returning the cap marker read a dead origin
         # as "the budget ran out" (as in Discover/Miner/Sequencer's `send_with_retries`).
@@ -1458,7 +1460,7 @@ module Gori::Fuzz
       failed = nil.as({Repeater::Result, WsOutcome}?)
       loop do
         pair = ws_send(job, frames)
-        return nil unless pair
+        return failed.try { |f| @matcher.build(job, f[0], resent_count: resent_count - 1).with_ws(f[1]) } unless pair
         raw, ws = pair
         # As in `run_one`: a budget-refused retry answers with the failure it was retrying.
         if (prior = failed) && raw.error == CappedBackend::CAP_ERROR

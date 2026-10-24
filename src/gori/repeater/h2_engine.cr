@@ -1146,9 +1146,12 @@ module Gori
             if goaway_covers?(frame, flow.id)
               flow.draining = true
             else
-              # Above last-stream-id only: an ERROR GOAWAY that names this stream may have
-              # processed it, and an unprocessed stream is one the pool re-sends, POST included.
-              flow.unprocessed = true if (last = goaway_last(frame)) && flow.id > last
+              # Graceful, and above last-stream-id: an unprocessed stream is one the pool
+              # re-sends, POST included. An ERROR GOAWAY's last-stream-id is not trusted for that
+              # — an origin failing mid-HPACK answers before it bumps its last accepted id, so the
+              # payload that broke it had gone out and would be sent twice.
+              flow.unprocessed = true if (last = goaway_last(frame)) && flow.id > last &&
+                                         goaway_code(frame) == 0
               done = true
             end
           when Frame::Type::RstStream

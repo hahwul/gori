@@ -214,7 +214,7 @@ private class H2WindowOrigin
   getter connections = 0
   @server : TCPServer
 
-  def initialize
+  def initialize(@code : UInt32 = 0_u32)
     @server = TCPServer.new("127.0.0.1", 0)
     @port = @server.local_address.port
     spawn { accept_loop }
@@ -487,7 +487,7 @@ private class H2RetiringOrigin
   getter connections = 0
   @server : TCPServer
 
-  def initialize
+  def initialize(@code : UInt32 = 0_u32)
     @server = TCPServer.new("127.0.0.1", 0)
     @port = @server.local_address.port
     spawn { accept_loop }
@@ -523,7 +523,7 @@ private class H2RetiringOrigin
       conn.write(Frame::Header.new(Frame::Type::Data.value, Frame::END_STREAM, f.stream_id, "ok".to_slice).to_bytes)
       goaway = IO::Memory.new
       goaway.write_bytes(f.stream_id, IO::ByteFormat::BigEndian)
-      goaway.write_bytes(0_u32, IO::ByteFormat::BigEndian) # NO_ERROR
+      goaway.write_bytes(@code, IO::ByteFormat::BigEndian) # NO_ERROR unless told otherwise
       conn.write(Frame::Header.new(Frame::Type::Goaway.value, 0_u8, 0_u32, goaway.to_slice).to_bytes)
       conn.flush
     end
@@ -547,6 +547,22 @@ describe "H2Pool — GOAWAY last-stream-id and pre-write refusals" do
       r.retried?.should be_false
       pool.dialed.should eq(2_i64)
       pool.unsafe_stale.should eq(0_i64)
+    ensure
+      pool.close_all
+      origin.close
+    end
+  end
+
+  # An ERROR GOAWAY's last-stream-id is not trusted to mean "never processed": an origin that
+  # fails mid-HPACK answers before bumping it, so a redial would send the payload twice.
+  it "does not redial past an error GOAWAY" do
+    origin = H2RetiringOrigin.new(1_u32) # PROTOCOL_ERROR
+    pool = Gori::Repeater::H2Pool.new("http", "127.0.0.1", origin.port, false, nil, 2.seconds, nil, 2)
+    begin
+      pool.send(post("127.0.0.1:#{origin.port}", "one")).error.should be_nil
+      r = pool.send(post("127.0.0.1:#{origin.port}", "two"))
+      r.error.should_not be_nil
+      pool.dialed.should eq(1_i64)
     ensure
       pool.close_all
       origin.close
