@@ -288,13 +288,12 @@ module Gori::Proxy::Codec
     # As `read`, but also returns whether the body completed (false = a
     # Content-Length/chunked body the origin cut short). Lets the Repeater engine
     # flag a half-delivered response instead of presenting it as whole.
-    def self.read_complete(src : IO, framing : BodyFraming, length : Int64, max_bytes : Int64 = Int64::MAX) : {Bytes?, Bool}
+    #
+    # `capture` is the caller's when it wants the bytes that arrived before a read RAISES (a
+    # reset, an idle timeout): the Repeater engine keeps them rather than reporting no body.
+    def self.read_complete(src : IO, framing : BodyFraming, length : Int64, max_bytes : Int64 = Int64::MAX,
+                           capture : IO::Memory = presized_capture(framing, length)) : {Bytes?, Bool}
       return {nil, true} if framing.none?
-      # Presize the capture for a KNOWN Content-Length so it doesn't climb IO::Memory's
-      # 64→128→…→N doubling-realloc chain (each step copies everything captured so far);
-      # bounded by PRESIZE_CAP so a lying Content-Length can't force a huge up-front alloc.
-      # Chunked / close-delimited length is unknown → default growth (as before).
-      capture = presized_capture(framing, length)
       # Bound the body READ, not just the capture buffer: the copy loops read until the
       # framing ends, so a plain IO::Memory would grow with every byte an oversized or
       # endlessly-streaming origin sends. IO::Sized returns EOF once max_bytes are read,
@@ -327,6 +326,9 @@ module Gori::Proxy::Codec
     # A capture buffer presized to a known Length body (bounded by PRESIZE_CAP); default
     # growth for unknown-length (chunked / close-delimited) framings. Public for the h1 paths
     # in `ClientConn` that buffer a whole response body (a body rule, a held response).
+    # Presizing keeps a KNOWN Content-Length off IO::Memory's 64→128→…→N doubling-realloc
+    # chain (each step copies everything captured so far); the cap stops a lying
+    # Content-Length forcing a huge up-front alloc.
     def self.presized_capture(framing : BodyFraming, length : Int64) : IO::Memory
       return IO::Memory.new unless framing.length? && length > 0
       cap = length > CaptureBuffer::PRESIZE_CAP ? CaptureBuffer::PRESIZE_CAP : length.to_i

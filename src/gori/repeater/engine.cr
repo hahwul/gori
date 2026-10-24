@@ -151,9 +151,8 @@ module Gori
                     cancel : Proc(Bool)? = nil,
                     sse : StreamBound? = nil) : Result
         started = Time.instant
-        # `timeout` is a PER-OPERATION bound (connect, and idle between reads/writes),
-        # not a total request deadline — same model as the proxy's `Settings.io_timeout`. A true
-        # whole-request deadline would need a timer fiber racing a socket close.
+        # `timeout` is a PER-OPERATION bound (connect, and idle between reads/writes), with one
+        # whole-read ceiling on the response body (see `read_response`).
         upstream, dial_error = dial_result(scheme, host, port, verify_upstream, sni, timeout,
           overrides, tls_preset, cancel)
         return error(connect_error(scheme, host, port, verify_upstream, dial_error), started) unless upstream
@@ -346,7 +345,10 @@ module Gori
         if w = warmup
           wr = exchange(upstream, w, host, port, Time.instant, origin_scheme: scheme)
           on_warmup.try(&.call)
-          unless ConnPool.reusable_response?(wr, request_method(w))
+          # Residue too, as `ConnPool` checks at checkout: bytes past the warm-up's framing would
+          # be read as the race member's response.
+          unless ConnPool.reusable_response?(wr, request_method(w)) &&
+                 Proxy::SocketResidue.state(upstream).clean?
             upstream.close rescue nil
             return {nil, Result.new(Bytes.new(0), nil, nil, 0_i64,
               "race: warmup failed — #{wr.error || "the connection will not survive to the race request"}")}
@@ -394,6 +396,18 @@ module Gori
         read_response(upstream, request, host, port, started, origin_scheme: origin_scheme,
           sse: sse, cancel: cancel)
       rescue ex
+        # The origin may have answered before taking the whole body — a 413/431 rejection, the
+        # h2 engine's R1-F1 — and then stopped reading or reset. That answer is the result, and
+        # the request was delivered. Read only when bytes are already waiting: a silent socket
+        # is the ordinary pre-delivery case below, and must not cost a second timeout.
+        if Proxy::SocketResidue.state(upstream).residue? &&
+           (early = read_response(upstream, request, host, port, started,
+             origin_scheme: origin_scheme)) && early.response
+          return Result.new(early.head, early.body, early.response, early.duration_us,
+            early.error || "the origin answered before the request was fully sent " \
+                           "(#{exchange_error(ex, host, port, nil)})",
+            early.incomplete?, delivered: true, lf_framed: early.lf_framed?)
+        end
         # A write/flush failure — no response byte was ever attempted, so this is always the
         # pre-delivery case (see `read_response`'s own rescue for the post-head-read one).
         error(exchange_error(ex, host, port, nil), started, delivered: false,
@@ -452,8 +466,10 @@ module Gori
         # socket so the next request won't be misframed against these leftovers.
         if resp.malformed?
           return Result.new(head, nil, resp, elapsed(started),
-            error: "malformed/non-HTTP response from #{host}:#{port} (status line unparseable)")
+            error: "malformed/non-HTTP response from #{host}:#{port} (status line unparseable)",
+            delivered: true)
         end
+        capture = nil.as(IO::Memory?)
         begin
           framing, len = Proxy::Codec::Body.response_framing(resp, request_method(request))
           # Cap the capture read at CAPTURE_READ_MAX (parity with the h2 engine's MAX_BODY):
@@ -464,15 +480,30 @@ module Gori
           run = if sse && Sse.sse?(resp.headers.get?("Content-Type"))
                   sse.start(head, framing.chunked?, cancel)
                 end
-          src = run ? BoundedRead.new(upstream, run) : upstream
+          # Any other body gets a WHOLE-READ ceiling of DEFAULT_BUDGET_FACTOR idle timeouts, the
+          # h2 engine's rule: the idle bound restarts on every byte, so an origin dribbling one
+          # byte per tick held a send — and a stopped fuzz run waiting on it — until 8 MiB came.
+          deadline = unless run
+            Proxy::SocketTuning.underlying_socket(upstream).try(&.read_timeout).try do |idle|
+              StreamRun.new(nil, idle * H2Engine::DEFAULT_BUDGET_FACTOR, framing.chunked?)
+            end
+          end
+          bound = run || deadline
+          src = bound ? BoundedRead.new(upstream, bound) : upstream
           body, complete = begin
-            Proxy::Codec::Body.read_complete(src, framing, len, Proxy::Codec::Body::CAPTURE_READ_MAX)
+            capture = Proxy::Codec::Body.presized_capture(framing, len)
+            Proxy::Codec::Body.read_complete(src, framing, len, Proxy::Codec::Body::CAPTURE_READ_MAX, capture)
           ensure
             src.restore if src.is_a?(BoundedRead)
           end
           if why = run.try(&.reason)
             return Result.new(head, body, resp, elapsed(started), incomplete: true,
               lf_framed: lf_framed, bounded: why, event_times: run.try(&.times))
+          end
+          if deadline.try(&.reason)
+            return Result.new(head, body, resp, elapsed(started),
+              error: "response body still arriving after the whole-read budget; read stopped",
+              incomplete: true, timed_out: true, lf_framed: lf_framed, delivered: true)
           end
           Result.new(head, body, resp, elapsed(started), incomplete: !complete, lf_framed: lf_framed,
             event_times: run.try(&.times))
@@ -487,8 +518,12 @@ module Gori
           # rendering it as "origin closed before the framed body finished" for a socket the
           # origin never closed. It is also the shape a time-based payload produces against an
           # origin that streams its head first, which `Fuzz::Matcher#eligible?` has to see.
-          Result.new(head, nil, resp, elapsed(started), error: ex.message || "response read failed",
-            incomplete: true, timed_out: ex.is_a?(IO::TimeoutError), lf_framed: lf_framed)
+          # `delivered`: the origin answered, so a re-send would repeat whatever it did. The
+          # body bytes that arrived before the failure are kept, as the h2 engine keeps them —
+          # an SSE pane's live events were otherwise erased by the nil body.
+          partial = capture.try { |c| c.to_slice unless c.empty? }
+          Result.new(head, partial, resp, elapsed(started), error: ex.message || "response read failed",
+            incomplete: true, timed_out: ex.is_a?(IO::TimeoutError), lf_framed: lf_framed, delivered: true)
         end
       rescue ex
         # The head reader turns ordinary EOF, reset, timeout, and unfinished-head outcomes into

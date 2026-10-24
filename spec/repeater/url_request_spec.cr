@@ -136,3 +136,10 @@ describe "Gori::Repeater::UrlRequest.structured body text" do
     Gori::Settings.env_vars = [] of {String, String}
   end
 end
+
+describe "UrlRequest.normalize_raw with a mixed \\n\\r\\n blank line" do
+  it "leaves the body's lone LFs alone" do
+    raw = "POST /u HTTP/1.1\nHost: x\nContent-Length: 12\n\r\nbody\nwith\nlf"
+    String.new(Gori::Repeater::UrlRequest.normalize_raw(raw)).should end_with("\r\n\r\nbody\nwith\nlf")
+  end
+end

@@ -258,7 +258,7 @@ module Gori::Repeater
     # line) is left UNTOUCHED — rewriting a bare LF there would grow the payload past the
     # caller's Content-Length and desync the origin (request smuggling), and would corrupt any
     # body whose bytes are not line-oriented text. The header terminator is the first blank line
-    # (`\r\n\r\n` or `\n\n`, whichever comes first).
+    # as `Env.head_body_boundary` finds it (`\r\n\r\n`, `\n\n` or the mixed `\n\r\n`).
     #
     # PUBLIC because `intercept_forward_edit` needs the identical rule: it used to gsub the WHOLE
     # message, silently rewriting 0x0A bytes inside the body it was meant to forward verbatim.
@@ -274,12 +274,7 @@ module Gori::Repeater
     #     bytes and send something other than what was asked for.
     def self.normalize_raw(raw : String) : Bytes
       bytes = raw.to_slice
-      crlf = raw.byte_index("\r\n\r\n")
-      lf = raw.byte_index("\n\n")
-      ends = [] of Int32
-      ends << crlf + 4 if crlf
-      ends << lf + 2 if lf
-      head_len = ends.min? || bytes.size
+      head_len = Gori::Env.head_body_boundary(bytes)
       io = IO::Memory.new(bytes.size + 16)
       i = 0
       while i < head_len
