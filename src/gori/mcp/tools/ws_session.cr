@@ -148,7 +148,7 @@ module Gori
         wait_ms = optional_int_arg(h, "wait_ms").try(&.clamp(0_i64, WS_SESSION_MAX_WAIT_MS)) || 0_i64
         session = job.session
         before = session.transcript.last?.try(&.seq) || 0_i64
-        frames = ws_out_msgs(source, job.verbatim?)
+        frames = ws_out_msgs(source, job.verbatim?, escape: "a session opened with ws_session_open{verbatim:true} sends frames as written")
         return frames if frames.is_a?(Result)
         sent, error, stopped = ws_send_each(session, frames)
         ws_wait_for_reply(session, before, wait_ms) if wait_ms > 0 && error.nil? && !stopped

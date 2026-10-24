@@ -147,8 +147,7 @@ module Gori
         # sentence with the three `gori run` surfaces (`CLI::Run.unbound_overlay_note`).
         unbound_overlay = CLI::Run.unbound_overlay_note(Env.take_unbound_overlay)
         flow_response_saved = recorded_flow_id ? record_outbound_response(recorded_flow_id, result) : false
-        # What made this send's bytes differ from the saved row (the CLI's `per_send_edits`).
-        per_send_edit = applied_rules ? "Match & Replace rewrote this send" : (str_list(h, "grpc_fields").empty? ? nil : "grpc_fields edited this send")
+        per_send_edit = per_send_edit(h, applied_rules)
         write_back_repeater_response(h, result, per_send_edit, sent_row_digest)
         # Audit trail on STDERR — never STDOUT (reserved for JSON-RPC).
         Log.info { "send_request #{built.scheme}://#{built.host}:#{built.port} http2=#{http2} scope=#{sc.decision} flow_id=#{recorded_flow_id || "none"} -> #{result.ok? ? "ok" : result.error}" }
@@ -185,7 +184,7 @@ module Gori
           # report a handshake that did not happen.
           tls_preset: plan.scheme == "https" ? plan.tls_preset : nil,
           body_more: body_more, via: Proxy::Upstream.via(plan.host, plan.scheme, plan.port),
-          kept_repeater: per_send_edit && result.ok? ? int(h, "repeater_id").try { |id| {id, per_send_edit} } : nil,
+          kept_repeater: per_send_edit && result.ok? ? int(h, "repeater_id").try { |rid| {rid, per_send_edit} } : nil,
           freeze_ref: if repeater_id && repeater_response_saved
             %(ref_kind:"repeater" ref_id:#{repeater_id})
           elsif recorded_flow_id && flow_response_saved
@@ -833,6 +832,12 @@ module Gori
         false
       end
 
+      # What made this send's bytes differ from the saved row, or nil (the CLI's `per_send_edits`).
+      private def per_send_edit(h, applied_rules : Bool) : String?
+        return "Match & Replace rewrote this send" if applied_rules
+        "grpc_fields edited this send" unless str_list(h, "grpc_fields").empty?
+      end
+
       # A `repeater_id` send's answer, written back onto the session it ran — what the TUI's
       # send and `gori run repeater send` both do, and what the tab's response pane and the next
       # `repeater send --diff` read as "the last response". Without it an MCP send left the
@@ -1336,8 +1341,11 @@ module Gori
       # The frames to hand the engine: TEXT payloads take `Env.expand` unless `literal`, refusing an
       # `$ENV.X` with no value as `send_request` does (#1666) rather than framing it literally.
       # `evidence` marks captured bytes, which the send seam's binding pass leaves alone.
+      # `escape` is the caller's way to send a frame as written: `send_websocket` takes `verbatim`
+      # per call, a live session only when it is opened.
       private def ws_out_msgs(source : Array(Store::WsOutMessage), literal : Bool,
-                              evidence : Bool = false) : Array(Repeater::WsEngine::OutMsg) | Result
+                              evidence : Bool = false,
+                              escape : String = "verbatim:true sends the frames and handshake as written") : Array(Repeater::WsEngine::OutMsg) | Result
         source.map do |m|
           payload = m.text? && !literal ? Repeater::UrlRequest.expand(String.new(m.payload)).to_slice : m.payload
           Repeater::WsEngine::OutMsg.new(m.opcode, payload, m.shape, evidence)
@@ -1345,7 +1353,7 @@ module Gori
       rescue ex : Repeater::PlanError
         # Which bytes named it: only frames reach here (the handshake is its plan's to refuse) —
         # the call's `messages`, or the session's stored ones when none was given.
-        err("a WebSocket frame: #{send_plan_message(ex)}; verbatim:true sends the frames as written",
+        err("a WebSocket frame: #{send_plan_message(ex)}; #{escape}",
           "INVALID_ARGUMENT", field: "messages")
       end
 
