@@ -2468,11 +2468,14 @@ module Gori
       # active tool's result object so the send's scope evidence is self-contained — and the
       # active `session_slot` it went out as, the line `gori run` prints as `slot: sending as NAME`.
       # (authorize_start does not call this: an Authorize run wears no active slot.)
-      private def emit_scope(j : JSON::Builder, sc : ScopeCheck) : Nil
+      # `slot: false` for a send that never takes the active slot's overlay (`grpc_reflect`'s
+      # client, a field-native `h2_fields` send): naming an identity the request did not carry is
+      # the wrong way for this to be wrong.
+      private def emit_scope(j : JSON::Builder, sc : ScopeCheck, slot : Bool = true) : Nil
         j.field "scope_decision", sc.decision
         j.field "scope_rule_id", sc.rule_id if sc.rule_id
         j.field "effective_host", Serialize.text(sc.host)
-        Env.active_slot_name.try { |slot| j.field "session_slot", Serialize.text(slot) }
+        Env.active_slot_name.try { |name| j.field "session_slot", Serialize.text(name) } if slot
       end
 
       # A string-shaped argument, held to the same "lenient, but never SILENT" contract every

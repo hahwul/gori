@@ -238,6 +238,12 @@ describe "MCP set_active_session_slot" do
         call_json(t, "create_session_slot", %({"name":"admin","set_headers":["X-Who: admin"]}))
         call_json(t, "set_active_session_slot", %({"name":"admin"}))
         call_json(t, "send_request", send)["session_slot"].as_s.should eq("admin")
+        # A field-native send takes no overlay, so it must not claim the identity.
+        fields = %({"url":"http://127.0.0.1:#{server.local_address.port}/","allow_unscoped":true,"record_history":false,) +
+                 %("http2":true,"h2_fields":[[":method","GET"],[":path","/"],[":scheme","http"],[":authority","x"]]})
+        reply = JSON.parse(t.call("send_request", JSON.parse(fields)).text)
+        reply["scope_decision"]?.should_not be_nil # the send reply itself, not an early refusal
+        reply["session_slot"]?.should be_nil
       ensure
         Gori::Env.layer = previous
         server.close

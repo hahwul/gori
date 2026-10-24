@@ -74,7 +74,7 @@ module Gori
             j.field "services" { j.array { outcome.services.each { |s| j.string s } } }
             j.field "notes" { j.array { outcome.notes.each { |n| j.string n } } }
             j.field "schema", Gori::Protobuf::Schemas.status
-            emit_scope(j, sc)
+            emit_scope(j, sc, slot: false)
           end
         end)
       end

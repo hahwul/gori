@@ -61,13 +61,21 @@ describe Gori::Repeater::Diff do
     d.select(&.kind.del?).map(&.text).should eq(["REMOVED"])
   end
 
-  it "drops only the rows the cut leaves unprovable" do
+  it "keeps a tail row whose twin is not past the cut" do
     a = lines(5, "a") + ["ONLY IN A"]
     b = lines(5, "a") + lines(Diff::MAX_LINES, "b")
 
     d = Diff.lines(a, b)
-    d.select(&.kind.del?).map(&.text).should eq([] of String) # b cut: a's tail is unprovable
-    d.count(&.kind.add?).should eq(Diff::MAX_LINES - 5)       # a is whole: b's tail is real
+    d.select(&.kind.del?).map(&.text).should eq(["ONLY IN A"]) # nothing past b's cut holds it
+    d.count(&.kind.add?).should eq(Diff::MAX_LINES - 5)        # a is whole: b's tail is real
+  end
+
+  # Both sides cut and different throughout: every row is a real change, never "no differences".
+  it "keeps the changes of two cut bodies that differ after a shared prefix" do
+    a = lines(2, "head") + lines(Diff::MAX_LINES + 100, "alice")
+    b = lines(2, "head") + lines(Diff::MAX_LINES + 100, "bob")
+
+    Diff.change_count(Diff.lines(a, b)).should be > Diff::MAX_LINES
   end
 
   it "still finds a difference that falls before the cap" do

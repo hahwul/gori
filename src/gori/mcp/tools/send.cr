@@ -1025,7 +1025,7 @@ module Gori
                                    freeze_ref : String? = nil) : String
         JSON.build do |j|
           j.object do
-            emit_scope(j, sc)
+            emit_scope(j, sc, slot: h2_fields.nil?)
             # The egress this send took — upstream proxy, environment proxy or direct, and the
             # setting that chose it (`Proxy::Upstream.via`, `gori run send`'s `via:`, #1625).
             j.field "via", via if via
