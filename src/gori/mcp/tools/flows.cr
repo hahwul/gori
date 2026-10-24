@@ -191,12 +191,15 @@ module Gori
             long_poll(wait_ms) do
               next false if (now = history_mark(filtered)) == mark
               next false if filtered && Time.instant < reread_at
-              reread_at = Time.instant + HISTORY_REREAD_GAP
+              # Each gap counts from the END of the work, so a scan slower than the gap is not
+              # followed by another straight away.
               if filter.uses_fts? && store.fts_dirty?
                 store.drain_fts!(LONG_POLL_SLICE) unless store.read_only?
+                reread_at = Time.instant + HISTORY_REREAD_GAP
                 next false if store.fts_dirty?
               end
               page = history_rows(filter, filtered, scope_unconfigured, fetch, before_id, since_id)
+              reread_at = Time.instant + HISTORY_REREAD_GAP
               mark = now
               !page.empty?
             end
