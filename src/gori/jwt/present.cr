@@ -21,12 +21,14 @@ module Gori
         return jwe_json(jwe).scrub
       end
       parts = token.strip.split('.')
+      header = header_json(token)
+      payload = payload_json(token)
       JSON.build do |j|
         j.object do
           j.field "type", "JWS"
           j.field "alg", (token_alg(token) || "")
-          segment_field(j, "header", header_json(token))
-          segment_field(j, "payload", payload_json(token))
+          segment_field(j, "header", header)
+          segment_field(j, "payload", payload)
           sig = parts[2]?
           j.field "signature", (sig || "")
           j.field "signed", !(sig.nil? || sig.empty?)
@@ -50,6 +52,8 @@ module Gori
             j.field "extra_segments", extra
             j.field "note", "#{parts.size} dot-separated segments — a JWS has 3 and a JWE 5; " \
                             "#{extra.size} segment(s) beyond header.payload.signature shown raw, not decoded"
+          elsif note = undecoded_note(token, header, payload)
+            j.field "note", note
           end
         end
       end.scrub
@@ -115,6 +119,17 @@ module Gori
 
     # header_json/payload_json return PRETTY JSON; compact it so the emitted object is a
     # single clean line (valid either way — this is just tidier).
+    # Why a 2/3-segment token's header or payload came back null, or nil when both decoded: a
+    # null with no reason reads as "this token has no claims". A pasted `Authorization` value
+    # is the common cause, so its `Bearer ` prefix is named.
+    private def undecoded_note(token : String, header : String, payload : String) : String?
+      failed = {"header" => header, "payload" => payload}.select { |_, v| v.empty? }.keys
+      return nil if failed.empty?
+      note = "#{failed.join(" and ")} segment#{failed.size > 1 ? "s are" : " is"} empty or not base64url-encoded JSON"
+      return note unless token.lstrip.downcase.starts_with?("bearer ")
+      note + " — the token starts with a `Bearer ` prefix; pass only the part after it"
+    end
+
     private def segment_field(j : JSON::Builder, name : String, seg_json : String) : Nil
       j.field(name) { seg_json.empty? ? j.null : j.raw(RawJson.reformat(seg_json)) }
     end

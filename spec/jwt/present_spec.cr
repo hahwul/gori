@@ -14,4 +14,16 @@ describe "Gori::Jwt JSON presenters" do
     json.valid_encoding?.should be_true
     JSON.parse(json)["header"]["x"].as_s.should eq("�")
   end
+
+  it "names the segment that did not decode, and a pasted Bearer prefix" do
+    header = seg(%({"alg":"HS256"}).to_slice)
+    JSON.parse(Gori::Jwt.decode_json("#{header}.e30.c2ln"))["note"]?.should be_nil
+    bad = JSON.parse(Gori::Jwt.decode_json("#{header}.!!!.c2ln"))
+    bad["payload"].raw.should be_nil
+    bad["note"].as_s.should start_with("payload segment is empty or not base64url-encoded JSON")
+    bearer = JSON.parse(Gori::Jwt.decode_json("Bearer #{header}.e30.c2ln"))
+    bearer["header"].raw.should be_nil
+    bearer["note"].as_s.should contain("header segment is")
+    bearer["note"].as_s.should contain("`Bearer ` prefix")
+  end
 end
