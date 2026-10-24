@@ -206,6 +206,28 @@ describe Gori::MCP::Server do
       end
     end
 
+    # The tab keeps its old answer when rules rewrote the send; the reply has to say so, or the
+    # next freeze_evidence on the tab freezes an exchange the agent never saw.
+    it "says a rule-rewritten repeater send left the tab's stored response alone" do
+      with_store do |store|
+        port = start_mcp_http_origin("ok")
+        Gori::Rules.load(store).add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+          "X-Rewritten", "gori-rewritten", op: Gori::Store::RuleOp::SetHeader)
+        rid = store.insert_repeater("http://127.0.0.1:#{port}",
+          "GET / HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n".to_slice, false, true, nil, 0)
+        {true, false}.each_with_index do |rules, i|
+          call = %({"jsonrpc":"2.0","id":#{i},"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid},"apply_rules":#{rules},"allow_unscoped":true}}})
+          payload = mcp_tool_payload(mcp_drive(store, call, verify_upstream: false)[0])
+          if rules
+            payload["repeater_response_written"].as_bool.should be_false
+            payload["repeater_response_note"].as_s.should contain("ref_id:#{payload["recorded_flow_id"]}")
+          else
+            payload["repeater_response_written"]?.should be_nil
+          end
+        end
+      end
+    end
+
     # An origin's trailer used to appear NOWHERE in the result while the `Trailer:`
     # announcement was echoed among the headers — which reads as "the origin sent none". A
     # trailer is where a trailer-smuggling / gRPC-over-h1 test's whole answer lives.

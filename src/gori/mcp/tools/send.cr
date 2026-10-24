@@ -182,7 +182,8 @@ module Gori
           # https only: a plaintext leg sends no ClientHello, so naming a preset there would
           # report a handshake that did not happen.
           tls_preset: plan.scheme == "https" ? plan.tls_preset : nil,
-          body_more: body_more, via: Proxy::Upstream.via(plan.host, plan.scheme, plan.port)),
+          body_more: body_more, via: Proxy::Upstream.via(plan.host, plan.scheme, plan.port),
+          rules_kept_repeater: applied_rules && result.ok? ? int(h, "repeater_id") : nil),
           is_error: !result.ok?, event_flow_id: recorded_flow_id, event_note: send_event_note(built, result))
       rescue ex : Gori::Error
         # Bad input (missing/invalid url, illegal header, …) — return a clean
@@ -1013,7 +1014,7 @@ module Gori
                                    unbound_overlay : String? = nil,
                                    head_unterminated : Bool = false,
                                    tls_preset : String? = nil, body_more : String? = nil,
-                                   via : String? = nil) : String
+                                   via : String? = nil, rules_kept_repeater : Int64? = nil) : String
         JSON.build do |j|
           j.object do
             emit_scope(j, sc)
@@ -1032,6 +1033,16 @@ module Gori
             # mentioned it. gori still SENT it — see `CLI::Run.unterminated_head_note`.
             emit_head_unterminated(j, head_unterminated)
             j.field "match_replace_applied", true if applied_rules
+            # `write_back_repeater_response` keeps the tab's old answer when rules rewrote the
+            # send, and said nothing — so the next `freeze_evidence` on the tab froze a response
+            # this send never got, under a request it never sent.
+            if id = rules_kept_repeater
+              j.field "repeater_response_written", false
+              j.field "repeater_response_note",
+                "Match & Replace rewrote this send, so repeater ##{id} keeps its PREVIOUS response; " \
+                "freeze_evidence on the repeater freezes that older exchange, not this one — " +
+                (recorded_flow_id ? "freeze ref_kind:\"flow\" ref_id:#{recorded_flow_id} instead" : "re-send with record_history to freeze this one")
+            end
             # Beside `effective_request`, which is where the literal `$NAME` is visible in the
             # bytes — an agent that reads the response alone cannot tell this send from one
             # that carried the session. Absent when every reference resolved.
