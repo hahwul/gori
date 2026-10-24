@@ -91,6 +91,10 @@ class Gori::Proxy::H2::StreamGate
     when Frame::Type::RstStream
       if @stubs.delete(f.stream_id)
         @assembler.drop_stream(f.stream_id, "stream reset by the client before the short-circuit answer")
+      else
+        # Already answered (a `100-continue` whose body never came, a stub body cut short): the
+        # exchange ends here, as an unstubbed reset ends it, rather than at connection close.
+        @assembler.feed(@direction, f, nil)
       end
     end
   end

@@ -159,6 +159,26 @@ describe "H2::StreamGate short-circuit rules (#1635)" do
     end
   end
 
+  # Answered, then reset with its body never sent: the flow lands at the reset, not at close.
+  it "lands an answered 100-continue stream the client then reset" do
+    with_rules do |rules, ic|
+      stub(rules, "/upload", "200 OK\n\nnot-needed")
+      rig = Rig.new(rules, ic) { |s, p| from_origin(s, p) }
+      begin
+        head = req("/upload", "POST") + [{"content-length", "5"}, {"expect", "100-continue"}]
+        rig.client.send_head(1_u32, head, false)
+        rig.client.wait_done(1_u32, 2.seconds).should be_true
+        rig.sink.responses.should be_empty # the request half is still open
+        rig.client.send_rst(1_u32)
+        50.times { break unless rig.sink.responses.empty?; sleep 10.milliseconds }
+        rig.sink.responses.size.should eq(1)
+        rig.sink.responses[0].status.should eq(200) # the answer it got, whole
+      ensure
+        rig.close
+      end
+    end
+  end
+
   it "answers HEAD with the length and no body" do
     with_rules do |rules, ic|
       stub(rules, "/h", "200 OK\n\nfour")
