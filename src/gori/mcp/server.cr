@@ -90,15 +90,18 @@ module Gori
       # Killed outright instead, a `save_results` run stayed `running` forever. A second signal
       # exits at once, so a stop stuck on in-flight requests never needs SIGKILL.
       def trap_shutdown_signals : Nil
-        signalled = false
         {Signal::INT, Signal::TERM}.each do |sig|
           sig.trap do |s|
-            exit 128 + s.value if signalled
-            signalled = true
+            exit 128 + s.value if @signalled
+            @signalled = s
             @input.close rescue nil
           end
         end
       end
+
+      # The signal that ended the session, for the caller's exit status (128 + signo, which a
+      # supervisor reads), or nil when stdin closed.
+      getter signalled : Signal? = nil
 
       # Reads until EOF on `input` (client closed the pipe). Each line is parsed
       # and dispatched independently; a bad line never stops the loop. A broken

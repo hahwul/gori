@@ -167,6 +167,7 @@ module Gori::CLI
       server.trap_shutdown_signals
       server.run
       server.current_store.try(&.close) # bound later by create/switch_project
+      server.signalled.try { |s| exit 128 + s.value }
       return
     end
 
@@ -216,6 +217,7 @@ module Gori::CLI
         server.trap_shutdown_signals
         server.run
         server.current_store.try(&.close) # bound later by create/switch_project
+        server.signalled.try { |s| exit 128 + s.value }
         return
       end
     Log.warn { "mcp: #{resolved} has no captured flows (empty database)" } if store.count.zero?
@@ -231,6 +233,7 @@ module Gori::CLI
       server.try(&.current_store).try(&.close)
       store.close
     end
+    server.try(&.signalled).try { |s| exit 128 + s.value }
   end
 
   # The `--tools` help. No size in it: this text is compiled in, and every number ever
