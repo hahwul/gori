@@ -413,6 +413,39 @@ describe "a miner stop during a wait for the project budget" do
   end
 end
 
+# Every send went out twice, as a keep-alive pool's stale re-send does below the caller's count
+# (`Fuzz::Backend#extra_requests`).
+private class ResentBackend < F::Backend
+  getter origin : F::Origin
+  getter calls : Int64 = 0_i64
+
+  def initialize(@origin : F::Origin)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @calls += 1
+    body = "BASELINE BODY CONTENT"
+    head = "HTTP/1.1 200 OK\r\nContent-Length: #{body.bytesize}\r\n\r\n".to_slice
+    Gori::Repeater::Result.new(head, body.to_slice, Gori::Proxy::Codec::Http1.parse_response_head(head), 1000_i64)
+  end
+
+  def extra_requests : Int64
+    @calls
+  end
+end
+
+describe "a miner run's reported requests" do
+  it "counts a pool's re-sends, as Fuzz and the Sequencer do" do
+    backend = ResentBackend.new(F::Origin.new("http", "h", 80))
+    engine = M::Engine.new("GET /api HTTP/1.1\r\nHost: h\r\n\r\n".to_slice, http2: false,
+      names: ["a", "b"], backend: backend, config: cfg)
+    done = nil.as(M::DoneEvent?)
+    engine.run { |ev| done = ev if ev.is_a?(M::DoneEvent) }
+    backend.calls.should be > 0
+    done.should_not(be_nil).progress.sent.should eq(backend.calls * 2)
+  end
+end
+
 # Errors the first `fail_first` sends, then answers a stable baseline — a target that was
 # unreachable for the calibration wave and healthy by the time the buckets went out.
 private class DeadThenAliveBackend < F::Backend

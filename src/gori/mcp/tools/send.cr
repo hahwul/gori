@@ -133,6 +133,8 @@ module Gori
         end
         if cancelled?
           ob.refund(1)
+          # The row above was written for a send that is not going to happen.
+          recorded_flow_id.try { |fid| store.delete_flow(fid) }
           return err("request cancelled", "CANCELLED")
         end
         result = plan.send_wire(h1_wire, cancel_signal, admitted: true)

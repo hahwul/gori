@@ -124,3 +124,19 @@ describe "gori run send -d @FILE" do
     end
   end
 end
+
+# A send the project budget refused never left gori, so the TUI and MCP write it no History
+# flow and mint nothing for it. The three `gori run` sends (send, repeater send <id>, repeater
+# flow) did both. Their tail calls `exit`, so this pins the wiring in the source, the way
+# store_budget_spec pins the SQLite budget.
+describe "gori run send — a budget-refused send" do
+  it "records no History flow and runs no wire pass" do
+    {"send.cr" => 1, "repeater.cr" => 2}.each do |file, n|
+      src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", file))
+      src.scan(/= plan\.wire_bytes/).size.should eq(0), "#{file}: wire pass not gated on the budget"
+      src.scan(/= budget_wire\(plan, budget\)/).size.should eq(n), file
+      src.scan(/record_repeater_send_to_history\(plan,/).size.should eq(n), file
+      src.scan(/record_history && !budget/).size.should eq(n), "#{file}: a refused send is recorded"
+    end
+  end
+end

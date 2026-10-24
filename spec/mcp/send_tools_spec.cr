@@ -1111,3 +1111,16 @@ describe "MCP send_websocket scope gate" do
     end
   end
 end
+
+describe "send_request cancelled while its History row is written" do
+  it "leaves no row for the request that never went out" do
+    with_store do |store|
+      # The cancel lands the moment the audit row exists: after the record, before the send.
+      r = tools_for(store).call("send_request",
+        JSON.parse(%({"url":"http://127.0.0.1:1/never","allow_unscoped":true})),
+        cancelled: -> { store.count > 0 })
+      r.error_code.should eq("CANCELLED")
+      store.count.should eq(0)
+    end
+  end
+end

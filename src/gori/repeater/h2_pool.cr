@@ -102,6 +102,7 @@ module Gori::Repeater
             drain
             return unsafe_stale_result(result, method)
           end
+          return result if resend_refused? # see `Pool#resend_gate`
           @stale_retries += 1
           return dial_and_send(bytes, keepable, method, retried: true)
         end

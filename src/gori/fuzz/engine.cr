@@ -157,6 +157,12 @@ module Gori::Fuzz
       0_i64
     end
 
+    # A wrapper's say on a pooled stale re-send (`Repeater::Pool#resend_gate`): `CappedBackend`
+    # charges it to `max_requests` or refuses it at the cap. Only `Sender` holds a pool; for
+    # every other backend this is a no-op, and a wrapper forwards it down.
+    def resend_veto=(veto : Proc(String?)) : Nil
+    end
+
     # Send a GROUP of requests as ONE same-connection sequence, capturing each response in
     # order — the primitive the active request-smuggling / desync rule needs (see
     # `Repeater::Engine.send_pipeline`): a desync induced by member N surfaces only in the
@@ -364,6 +370,15 @@ module Gori::Fuzz
 
     # The active slot's before-send refresh (#1233) — see `send`. Not for a sender that
     # carries its identity itself (`slot_overlay?` false: Authorize asks per identity).
+    #
+    # Its login steps take the PROJECT budget's slots (`SessionRefresh#run_step` admits each)
+    # but not this run's `max_requests`, nor `Progress#requests`, unlike a request macro's
+    # steps (#1350), and that is deliberate: a macro is this run's own configured traffic, while
+    # a refresh belongs to the SLOT. It is single-flight across every sender in the process (a
+    # Fuzzer and a Sequencer crossing the expiry log in once), so charging it to whichever run
+    # happened to ask first would bill one tool for another's login, and refusing it at that
+    # run's cap would leave every later send on the stale credential. It records its own
+    # History rows (source `refresh`), and `COOLDOWN`/`FAILURE_LIMIT` bound how often it fires.
     private def before_send_refresh : Nil
       Gori::SessionRefresh.before_send(Gori::Env.active_slot_name) if @slot_overlay
     end
@@ -397,6 +412,27 @@ module Gori::Fuzz
           ConnPool.new(@origin.scheme, @origin.host, @origin.port, @verify, @sni, @timeout,
             @overrides, idle, @tls_preset, @sse)
         end
+      @pool.try(&.resend_gate = -> { admit_resend })
+    end
+
+    @resend_veto : Proc(String?)? = nil
+
+    def resend_veto=(veto : Proc(String?)) : Nil
+      @resend_veto = veto
+    end
+
+    # The pool's stale re-send is a request like any other: the project budget's slot (#1601),
+    # then the cap of whatever `CappedBackend` wraps this sender, refunding the slot when the
+    # cap says no. Without it an origin that drops every other keep-alive request drew twice
+    # the traffic `outbound_max_requests` was set to allow.
+    private def admit_resend : String?
+      if err = @outbound.admit
+        return err
+      end
+      if err = @resend_veto.try(&.call)
+        @outbound.refund(1)
+      end
+      err
     end
 
     def send(bytes : Bytes) : Repeater::Result
@@ -678,10 +714,13 @@ module Gori::Fuzz
           return requests.map { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err) }
         end
       end
-      Repeater::Engine.send_pipeline(reqs, scheme: @origin.scheme, host: @origin.host,
+      results = Repeater::Engine.send_pipeline(reqs, scheme: @origin.scheme, host: @origin.host,
         port: @origin.port, verify_upstream: @verify, sni: @sni,
         timeout: timeout || @timeout, overrides: @overrides, tls_preset: @tls_preset)
-        .map_with_index { |r, i| reqs[i]?.try { |w| r.with_wire(w) } || r }
+      # A member skipped after the connection died never went out: its slot comes back.
+      skipped = results.count(&.error.== Repeater::Engine::PIPELINE_SKIPPED)
+      @outbound.refund(skipped) if skipped > 0
+      results.map_with_index { |r, i| reqs[i]?.try { |w| r.with_wire(w) } || r }
     end
 
     # The real transport for `Backend#send_race` (see there for the contract). All of
@@ -760,11 +799,21 @@ module Gori::Fuzz
       # Repeater's own multi-endpoint race (#1236). Only the fuzz-specific pre-work stays here:
       # the evidence/`$GEN` expansion and the `sweep_block` gate above, and the `@race_warmups`
       # tally below (each warm-up is a real wire send, reported via `extra_requests`).
-      Repeater::Engine.race_h1(Array.new(jobs.size) { expanded },
+      warmed = 0
+      results = Repeater::Engine.race_h1(Array.new(jobs.size) { expanded },
         scheme: @origin.scheme, host: @origin.host, port: @origin.port,
         verify_upstream: @verify, sni: @sni, timeout: timeout || @timeout,
         overrides: @overrides, tls_preset: @tls_preset,
-        warmup: warmup, on_warmup: -> { @race_warmups += 1; nil })
+        warmup: warmup, on_warmup: -> { @race_warmups += 1; warmed += 1; nil })
+      refund_unraced(results, warmup.nil? ? 0 : jobs.size - warmed)
+      results
+    end
+
+    # Slots for requests a race never put on the wire come back: a member withdrawn for too few
+    # live connections (its last byte never written), and a warm-up whose connection never dialled.
+    private def refund_unraced(results : Array(Repeater::Result), unwarmed : Int32) : Nil
+      unsent = unwarmed + results.count { |r| r.error.try(&.starts_with?(Repeater::Engine::RACE_UNDERFILLED)) }
+      @outbound.refund(unsent) if unsent > 0
     end
   end
 
@@ -785,6 +834,10 @@ module Gori::Fuzz
 
     delegate blocked, blocked_reason, extra_requests, evidence?, http2?, pooled?,
       ws_notes, ws_note_reason, close, to: @inner
+
+    def resend_veto=(veto : Proc(String?)) : Nil
+      @inner.resend_veto = veto
+    end
 
     def send(bytes : Bytes) : Repeater::Result
       send(bytes, nil)
@@ -819,7 +872,7 @@ module Gori::Fuzz
     # candidates are, and `Progress#requests` (which reads it) counts them; refused whole when
     # they would not fit, exactly as `send_race` refuses a group.
     def reserve(n : Int64) : Bool
-      if (c = @cap) && c > 0 && @sent + n > c
+      if (c = @cap) && c > 0 && @sent + @resent + n > c
         @reserve_short = true
         return false
       end
@@ -833,7 +886,19 @@ module Gori::Fuzz
       @sent = Math.max(@sent - n, 0_i64)
     end
 
+    # Pooled stale re-sends this cap admitted (`Repeater::Pool#resend_gate`). Charged to the CAP
+    # and not to `sent`, which counts calls: a run REPORTS the re-sends through
+    # `extra_requests`, so adding them to `sent` too would count each one twice.
+    @resent = 0_i64
+
     def initialize(@inner : Backend, @cap : Int64?)
+      @inner.resend_veto = -> { charge_resend }
+    end
+
+    private def charge_resend : String?
+      return CAP_ERROR if cap_reached?
+      @resent += 1
+      nil
     end
 
     # The project request budget's refusal (#1601), once one came back: that budget is shared
@@ -843,7 +908,7 @@ module Gori::Fuzz
 
     def cap_reached? : Bool
       return true if @reserve_short || @budget_refusal
-      (c = @cap) && c > 0 ? @sent >= c : false
+      (c = @cap) && c > 0 ? @sent + @resent >= c : false
     end
 
     def send(bytes : Bytes, verbatim : Array({Int32, Int32})?) : Repeater::Result
@@ -881,7 +946,7 @@ module Gori::Fuzz
       return [] of Repeater::Result if jobs.empty?
       # No warm-up goes out under h2 — `Sender#send_race` degrades to independent sends there.
       wire = jobs.size.to_i64 * (warmup && !http2? ? 2 : 1)
-      if (c = @cap) && c > 0 && @sent + wire > c
+      if (c = @cap) && c > 0 && @sent + @resent + wire > c
         return jobs.map { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, CAP_ERROR) }
       end
       @sent += jobs.size

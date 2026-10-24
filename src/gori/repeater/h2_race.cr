@@ -460,7 +460,7 @@ module Gori
       private def self.finalize_underfilled(results : Array(Result?), n : Int32, live : Int32) : Array(Result)
         (0...n).map do |i|
           results[i]? || Result.new(Bytes.new(0), nil, nil, 0_i64,
-            "race: could not assemble enough live streams (#{live} of #{n})")
+            "#{Engine::RACE_UNDERFILLED} streams (#{live} of #{n})")
         end
       end
     end

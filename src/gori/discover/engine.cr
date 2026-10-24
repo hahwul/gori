@@ -100,6 +100,11 @@ module Gori::Discover
     # classes, matching `Fuzz::Backend#close`.
     def close : Nil
     end
+
+    # Asked before a keep-alive pool re-sends a stale request (`Repeater::Pool#resend_gate`).
+    # Only `Sender` pools; a no-op for every other backend.
+    def resend_gate=(gate : Proc(String?)) : Nil
+    end
   end
 
   # What a run's transport actually cost, summed over every origin's keep-alive pool.
@@ -302,8 +307,15 @@ module Gori::Discover
                Repeater::ConnPool.new(scheme, host, port, @verify, @sni, @timeout,
                  @overrides, @idle_conns, sse: SSE).as(Repeater::Pool)
              end
+      pool.resend_gate = @resend_gate
       pools[key] = pool
       pool
+    end
+
+    @resend_gate : Proc(String?)? = nil
+
+    def resend_gate=(gate : Proc(String?)) : Nil
+      @resend_gate = gate # pools are made per origin on first use, and take it then
     end
 
     # The header block with session bindings (#501) resolved, or nil when one of them is
@@ -393,6 +405,18 @@ module Gori::Discover
     end
 
     delegate request_head, sni, http2?, close, to: @inner
+
+    def resend_gate=(gate : Proc(String?)) : Nil
+      @inner.resend_gate = gate
+    end
+
+    # A pool's stale re-send is one more real send: charged to `sent` like a fetch (so the
+    # run's progress counts it), or refused at the cap.
+    def charge_resend : Bool
+      return false if cap_reached?
+      @sent += 1
+      true
+    end
   end
 
   # A unit of work owned by the orchestrator frontier.
@@ -767,6 +791,7 @@ module Gori::Discover
       # trailing-slash target already excluded it, proving the leak was prefix- not segment-based.
       @confine_path = @seed_parts.path == "/" ? nil : @seed_parts.path.rchop('/')
       @capped = CappedBackend.new(backend, @config.max_requests)
+      @capped.resend_gate = -> { resend_refusal }
       conc = @config.concurrency.clamp(1, MAX_CONCURRENCY)
       @concurrency = conc
       @state = State::Running
@@ -2159,6 +2184,18 @@ module Gori::Discover
       @scope.refund(1) if @capped.cap_reached?
       # A target the wire seam refuses (`UNSAFE_URL`) never left gori either.
       @capped.fetch(p.scheme, p.host, p.port, target).tap { |r| @scope.refund(1) if r.error == Sender::UNSAFE_URL }
+    end
+
+    # A keep-alive pool's stale re-send, asked as `paced_fetch` asks a fetch: the project
+    # budget's slot, then the run's cap (handing the slot back when the cap says no). Refused,
+    # the fetch ends with the failure its first copy got.
+    private def resend_refusal : String?
+      if err = @scope.admit
+        return err
+      end
+      return nil if @capped.charge_resend
+      @scope.refund(1)
+      CappedBackend::CAP_ERROR
     end
 
     private def distill(raw : Repeater::Result, body : Bytes) : Calibrate::Fetched

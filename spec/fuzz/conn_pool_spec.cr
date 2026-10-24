@@ -865,4 +865,59 @@ describe F::ConnPool do
       F::ConnPool.transport_detail(" (#<IO::FileDescriptor:0xdeadbeef>)").should be_nil
     end
   end
+
+  # A stale re-send is a SECOND request at the origin, so the run's budgets have to admit it.
+  # It used to ride below both: `Sender#send` took one project slot per call and
+  # `CappedBackend` counted calls, while the pool re-sent underneath them.
+  describe "a stale re-send and the run's budgets" do
+    it "asks resend_gate first, and puts nothing on the wire when it refuses" do
+      origin = KeepAliveOrigin.new(drop_every: 2)
+      pool = F::ConnPool.new("http", "127.0.0.1", origin.port, false, nil, 2.seconds, nil, 1)
+      asked = 0
+      pool.resend_gate = -> { asked += 1; "refused".as(String?) }
+      pool.send(req("GET /1 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")).error.should be_nil
+      r = pool.send(req("GET /2 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")) # read, then dropped
+      r.error.should_not be_nil
+      r.retried?.should be_false
+      asked.should eq(1)
+      pool.stale_retries.should eq(0)
+      origin.requests.should eq(2)
+      pool.close_all
+      origin.close
+    end
+
+    it "holds a keep-alive sweep to the project's outbound_max_requests" do
+      with_store do |store|
+        store.set_setting(Gori::Settings::PROJECT_OUTBOUND_MAX_REQUESTS_KEY, "4").should be_true
+        origin = KeepAliveOrigin.new(drop_every: 2)
+        tmpl = F::Template.parse("GET /?q=§a§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+        set = F::PayloadSet.new(F::InlineList.new((1..4).map(&.to_s)))
+        cfg = F::Config.new(mode: F::Mode::Sniper, concurrency: 1)
+        sender = F::Sender.new(F::Origin.new("http", "127.0.0.1", origin.port),
+          Gori::Outbound.interactive(Gori::Scope.load(store)),
+          http2: false, verify: false, keep_alive: true, idle_conns: 1)
+        engine = F::Engine.new(F::Generator.new(tmpl, [set], cfg), F::Matcher.new, sender, cfg)
+        engine.run { |_| }
+        sender.close
+        origin.close
+        origin.requests.should eq(4) # was 7: every dropped GET re-sent without a slot
+      end
+    end
+
+    it "charges a re-send to max_requests" do
+      origin = KeepAliveOrigin.new(drop_every: 2)
+      tmpl = F::Template.parse("GET /?q=§a§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+      set = F::PayloadSet.new(F::InlineList.new((1..10).map(&.to_s)))
+      cfg = F::Config.new(mode: F::Mode::Sniper, concurrency: 1, max_requests: 3_i64)
+      sender = F::Sender.new(F::Origin.new("http", "127.0.0.1", origin.port), ungated_outbound,
+        http2: false, verify: false, keep_alive: true, idle_conns: 1)
+      engine = F::Engine.new(F::Generator.new(tmpl, [set], cfg), F::Matcher.new, sender, cfg)
+      done = nil.as(F::DoneEvent?)
+      engine.run { |ev| done = ev if ev.is_a?(F::DoneEvent) }
+      sender.close
+      origin.close
+      origin.requests.should eq(3) # was 5: the cap counted calls, not wire sends
+      done.should_not(be_nil).progress.requests.should eq(3)
+    end
+  end
 end

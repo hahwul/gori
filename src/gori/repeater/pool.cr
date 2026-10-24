@@ -40,6 +40,13 @@ module Gori::Repeater
     getter? pooling : Bool = true
     @consecutive_stale = 0
 
+    # Asked right before a stale RE-SEND (the `stale_retries` case): nil lets it go, a reason
+    # keeps it off the wire and the request ends with the failure its first copy got. A re-send
+    # is a whole second request at the origin, so the run's budget (the project's
+    # `outbound_max_requests`, a tool's `max_requests`) has to admit it like any other; asked
+    # below the caller's own count, it was the one send neither ever saw. Nil admits everything.
+    property resend_gate : Proc(String?)? = nil
+
     # One request over a pooled connection when this request and the pool's state allow it.
     # Never raises: every failure comes back as an error `Result`, exactly as the unpooled
     # engines do.
@@ -53,6 +60,10 @@ module Gori::Repeater
 
     # Close and forget every parked connection.
     private abstract def drain : Nil
+
+    private def resend_refused? : Bool
+      !@resend_gate.try(&.call).nil?
+    end
 
     # One more parked connection that turned out to be dead, from EITHER discovery point. Give
     # up on pooling for the rest of the run rather than pay a wasted probe-and-redial on every

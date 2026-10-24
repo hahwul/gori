@@ -1941,7 +1941,7 @@ module Gori
         # exact slice, so the recorded flow is the request that went out — session-slot overlay
         # and send-seam `$NAME` values included — rather than the draft the seam started from.
         budget = plan.admit # the budget's slot before the mint, so a rate wait cannot age a `$GEN` value
-        wire = plan.wire_bytes
+        wire = budget_wire(plan, budget)
         # On the WIRE, not on `rec.request`: the notice must describe the bytes that go out,
         # so a session whose terminator arrives with a `$ENV.X` expansion is not accused, and
         # one stored terminated but truncated by an expansion is. BEFORE the send, so it is
@@ -1978,7 +1978,7 @@ module Gori
         # send_request, which records the attempt).
         recorded_flow_id = nil.as(Int64?)
         history_write = nil.as(WriteOutcome?)
-        if record_history
+        if record_history && !budget # a send the budget refused never left gori (see `gori run send`)
           case recorded = record_repeater_send_to_history(plan, wire, result, sent_at, id, project)
           in Int64  then recorded_flow_id = recorded; history_write = WriteOutcome.new(nil)
           in String then history_write = WriteOutcome.new(recorded)
@@ -3478,7 +3478,7 @@ module Gori
         sent_at = Time.utc.to_unix_ms * 1000_i64
         # Taken ONCE and sent as-is, so a `--record-history` flow holds the bytes that went out.
         budget = plan.admit # the budget's slot before the mint, so a rate wait cannot age a `$GEN` value
-        wire_sent = plan.wire_bytes
+        wire_sent = budget_wire(plan, budget)
         result = budget ? Repeater::Engine.error(budget, Time.instant) : plan.send_wire(wire_sent, admitted: true)
         outbound.close
 
@@ -3499,7 +3499,7 @@ module Gori
 
         # A NEW flow, like `gori run send --record-history` (#1384): the replay is its own
         # exchange, and the captured flow it came from stays the evidence it was.
-        recorded = record_history ? record_repeater_send_to_history(plan, wire_sent, result, sent_at, nil, project) : nil
+        recorded = record_history && !budget ? record_repeater_send_to_history(plan, wire_sent, result, sent_at, nil, project) : nil
         history_write = recorded.nil? ? nil : WriteOutcome.new(recorded.as?(String))
         repeater_write = nil.as(WriteOutcome?)
         repeater_response_write = nil.as(WriteOutcome?)

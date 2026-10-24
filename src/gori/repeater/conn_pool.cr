@@ -59,13 +59,13 @@ module Gori::Repeater
     # After `STALE_GIVE_UP` consecutive stale checkouts — of EITHER kind — the pool gives up and
     # runs in dial-per-send mode for the rest of the run.
     #
-    # On `max_requests`: a stale re-send is not charged against the CAP (CappedBackend counts
-    # calls into the Sender, and this retry happens below it), and STALE_GIVE_UP bounds the
-    # slack to a handful. It IS counted in what a run REPORTS as requests, though — see
-    # `Fuzz::Backend#extra_requests`. The old note claimed the re-send was free because the
-    # origin "demonstrably did not process" the first copy; it demonstrably did not ANSWER it,
-    # which is a different fact, so a tester working inside an agreed request budget has to be
-    # told about the extra one.
+    # On budgets: a stale re-send is a second request at the origin, so it asks `resend_gate`
+    # first, which a sweep's sender points at the project budget and the tool's `max_requests`
+    # cap. STALE_GIVE_UP does not bound it: a clean reuse resets the streak, so an origin that
+    # drops every third request draws a re-send per drop for the whole run. It is counted in
+    # what a run REPORTS as requests too — see `Fuzz::Backend#extra_requests`. The old note
+    # claimed the re-send was free because the origin "demonstrably did not process" the first
+    # copy; it demonstrably did not ANSWER it, which is a different fact.
 
     # The methods a closed parked socket may be replayed on.
     #
@@ -184,6 +184,7 @@ module Gori::Repeater
             drain
             return unsafe_stale_result(result, method)
           end
+          return result if resend_refused? # see `Pool#resend_gate`
           return dial_and_send(bytes, keepable, method, retried: true)
         end
         @consecutive_stale = 0

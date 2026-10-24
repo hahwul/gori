@@ -13,7 +13,9 @@ private class KeepAliveOrigin
   getter requests : Int32 = 0
   getter first_head : String = ""
 
-  def initialize
+  # `drop_every` N: every Nth request is read in full and the connection closed unanswered, so
+  # a reused socket's request goes stale and the pool re-sends it.
+  def initialize(@drop_every : Int32? = nil)
     @server = TCPServer.new("127.0.0.1", 0)
     @port = @server.local_address.port
     spawn { accept_loop }
@@ -38,6 +40,7 @@ private class KeepAliveOrigin
       break unless head
       @first_head = String.new(head) if @first_head.empty?
       @requests += 1
+      break if (n = @drop_every) && @requests % n == 0
       body = "pong"
       conn << "HTTP/1.1 200 OK\r\nContent-Length: #{body.bytesize}\r\n\r\n" << body
       conn.flush
@@ -136,6 +139,23 @@ describe "Discover keep-alive" do
     origin.connections.should eq(before + 1)
     s.close
     origin.close
+  end
+
+  # A pool's stale re-send is one more real fetch: the run's cap charges it (so `sent`, the count
+  # every surface reports, includes it) and refuses it past the cap, like any other.
+  it "charges a stale re-send to max_requests and reports it as sent" do
+    origin = KeepAliveOrigin.new(drop_every: 2)
+    s = sender(true, idle: 1)
+    cfg = D::Config.new(concurrency: 1, spider: false, bruteforce: true, max_depth: 0,
+      containment: D::Containment::SameOrigin, retries: 0, keep_alive: true, max_requests: 6_i64)
+    engine = D::Engine.new("http://127.0.0.1:#{origin.port}/", %w[a b c d e f g h], s, cfg)
+    done = nil.as(D::DoneEvent?)
+    engine.run { |ev| done = ev if ev.is_a?(D::DoneEvent) }
+    s.close
+    origin.close
+    s.pool_stats.not_nil!.stale_retries.should be > 0
+    origin.requests.should eq(6)
+    done.should_not(be_nil).progress.sent.should eq(6)
   end
 
   # `Plan.build` is the ONE place a Discover::Sender is constructed on every surface, so a

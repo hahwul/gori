@@ -274,7 +274,7 @@ module Gori
         end
         sent_at = Time.utc.to_unix_ms * 1000_i64
         budget = plan.admit # the budget's slot before the mint, so a rate wait cannot age a `$GEN` value
-        wire = plan.wire_bytes
+        wire = budget_wire(plan, budget)
         # A raw request's head the operator did not terminate — said before the origin answers,
         # like `repeater send`. A built one is always terminated.
         STDERR.puts "gori run send: #{unterminated_head_note}" if raw && !plan.http2? && !Env.head_terminated?(wire)
@@ -283,7 +283,8 @@ module Gori
         outbound.close
 
         new_body, _ = decode_body(result.head, result.body)
-        recorded = record_history ? record_repeater_send_to_history(plan, wire, result, sent_at, nil, project) : nil
+        # Nor does it get a History flow, as on the TUI and MCP: the budget refused it before the socket.
+        recorded = record_history && !budget ? record_repeater_send_to_history(plan, wire, result, sent_at, nil, project) : nil
         recorded_flow_id = recorded.as?(Int64)
         history_write = recorded.nil? ? nil : WriteOutcome.new(recorded.as?(String))
         repeater_write = nil.as(WriteOutcome?)
@@ -305,6 +306,13 @@ module Gori
         end
         report_unbound_slot_overlay("gori run send")
         exit 1 unless result.ok?
+      end
+
+      # The bytes a send puts on the wire, or the draft when the budget refused it: a refused send
+      # dials nothing, so it mints nothing either (`wire_bytes` fires the slot's refresh and the
+      # `$GEN` values). Shared by `repeater send <id>` and `repeater flow`.
+      private def self.budget_wire(plan : Repeater::Plan, budget : String?) : Bytes
+        budget ? plan.bytes : plan.wire_bytes
       end
 
       # Which egress this send takes — upstream proxy, environment proxy or direct (#1625).

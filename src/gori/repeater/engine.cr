@@ -204,6 +204,11 @@ module Gori
       # send→receive (write a request, read its one response, then the next). Once an
       # exchange errors the socket is treated as unusable: the remaining requests return a
       # "skipped" Result rather than dialing again (a group is ONE connection by definition).
+      #
+      # `PIPELINE_SKIPPED` is that Result's error, exact, so a sender can hand back the budget
+      # slots of members that never went out.
+      PIPELINE_SKIPPED = "skipped — the connection closed earlier in the group"
+
       def self.send_pipeline(requests : Array(Bytes), *, scheme : String, host : String, port : Int32,
                              verify_upstream : Bool, sni : String? = nil,
                              timeout : Time::Span? = nil,
@@ -222,7 +227,7 @@ module Gori
           dead = false
           requests.each do |request|
             if dead
-              results << Result.new(Bytes.new(0), nil, nil, 0_i64, "skipped — the connection closed earlier in the group")
+              results << Result.new(Bytes.new(0), nil, nil, 0_i64, PIPELINE_SKIPPED)
               next
             end
             r = exchange(upstream, request, host, port, Time.instant, origin_scheme: scheme)
@@ -261,7 +266,11 @@ module Gori
       # verbatim from the Fuzzer race.
       #
       # Refuses the whole release if fewer than 2 connections survive assembly — racing one
-      # connection proves nothing.
+      # connection proves nothing. A member withdrawn that way (its final byte never written)
+      # carries an error starting `RACE_UNDERFILLED`, as an h2 single-packet race's does, so a
+      # sender can hand back the budget slots of requests that never went out.
+      RACE_UNDERFILLED = "race: could not assemble enough live"
+
       def self.race_h1(wires : Array(Bytes), *, scheme : String, host : String, port : Int32,
                        verify_upstream : Bool, sni : String? = nil,
                        timeout : Time::Span? = nil,
@@ -287,7 +296,7 @@ module Gori
           live.each { |i| sockets[i].try(&.close) rescue nil }
           return (0...n).map do |i|
             results[i] || Result.new(Bytes.new(0), nil, nil, 0_i64,
-              "race: could not assemble enough live connections (#{live.size} of #{n})")
+              "#{RACE_UNDERFILLED} connections (#{live.size} of #{n})")
           end
         end
 

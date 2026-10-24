@@ -186,3 +186,60 @@ describe "a stop during a retry's wait for the project budget" do
     rows[0].error.should eq("read: Connection reset by peer")
   end
 end
+
+# Answers the first request on each connection, then closes it.
+private def answer_once_origin : {TCPServer, Int32}
+  srv = TCPServer.new("127.0.0.1", 0)
+  spawn do
+    while conn = srv.accept?
+      c = conn
+      spawn do
+        if Gori::Proxy::Codec::Http1.read_head(c)
+          c << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+          c.flush
+        end
+      rescue
+      ensure
+        c.close rescue nil
+      end
+    end
+  end
+  {srv, srv.local_address.port}
+end
+
+private def budget_outbound(store : Gori::Store) : Gori::Outbound
+  store.set_settings([{Gori::Settings::PROJECT_OUTBOUND_MAX_REQUESTS_KEY, "10"}] of {String, String?})
+  Gori::Outbound.interactive(Gori::Scope.load(store))
+end
+
+private def spent(store : Gori::Store) : String?
+  Gori::Outbound::Budget.release(store)
+  store.setting(Gori::Store::OUTBOUND_BUDGET_SPENT_KEY)
+end
+
+# A group's slots are taken up front; one for a request that never went out comes back.
+describe "a fuzz group send's project budget slots" do
+  it "refunds the pipeline members skipped after the connection died" do
+    with_store do |store|
+      srv, port = answer_once_origin
+      sender = F::Sender.new(F::Origin.new("http", "127.0.0.1", port), budget_outbound(store),
+        http2: false, verify: false)
+      req = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice
+      results = sender.send_pipeline([req, req, req, req])
+      srv.close
+      results.count(&.error.== Gori::Repeater::Engine::PIPELINE_SKIPPED).should eq(2)
+      spent(store).should eq("2") # was 4
+    end
+  end
+
+  it "refunds the warm-up slots of race connections that never dialled" do
+    with_store do |store|
+      sender = F::Sender.new(F::Origin.new("http", "127.0.0.1", 1), budget_outbound(store),
+        http2: false, verify: false)
+      bytes = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice
+      jobs = Array.new(2) { |i| F::Job.new(i.to_i64, [] of String, nil, bytes) }
+      sender.send_race(jobs, warmup: bytes).each(&.error.to_s.should(start_with("race: dial failed")))
+      spent(store).should eq("2") # was 4: one per member, plus a warm-up that never went out
+    end
+  end
+end

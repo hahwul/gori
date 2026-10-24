@@ -847,7 +847,10 @@ module Gori::Miner
     end
 
     private def snapshot : Progress
-      Progress.new(@names_total, @names_done, @backend.sent, @found, @errors, @request_macro.try(&.tally))
+      # `+ extra_requests`, as Fuzz and the Sequencer report it: a pool's stale re-send left the
+      # machine inside one `sent` call (`Fuzz::Backend#extra_requests`).
+      Progress.new(@names_total, @names_done, @backend.sent + @backend.extra_requests, @found, @errors,
+        @request_macro.try(&.tally))
     end
 
     # ── sending / pacing ────────────────────────────────────────────────────────────

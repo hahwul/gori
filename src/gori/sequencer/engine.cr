@@ -339,8 +339,8 @@ module Gori::Sequencer
     # `keep_alive` buys — so against an origin that reaps idle sockets this number was short
     # by one re-send per reap while claiming to be "the load the run put on the target".
     #
-    # The BUDGET is untouched: `max_requests` is enforced against `CappedBackend#sent` alone,
-    # deliberately, and this is the reported figure only — same split Fuzz makes.
+    # The BUDGET reads the same traffic its own way: `CappedBackend` charges each re-send to the
+    # cap as the pool asks for it (`Repeater::Pool#resend_gate`), and this is the reported figure.
     private def wire_requests : Int64
       @backend.try { |b| b.sent + b.extra_requests } || 0_i64
     end

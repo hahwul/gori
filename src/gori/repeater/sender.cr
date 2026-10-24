@@ -453,6 +453,8 @@ module Gori
         results = Engine.send_pipeline(requests, scheme: @scheme, host: @host, port: @port,
           verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides,
           tls_preset: @tls_preset)
+        # A member skipped after the connection died never went out: its slot comes back.
+        refund_unsent(results, &.== Engine::PIPELINE_SKIPPED)
         # A group is ONE connection carrying a deliberate sequence, so every member is as
         # hand-authored as a lone `send` and every response is an equally legitimate source.
         # Later members win on a name both write, which is the wire order.
@@ -490,10 +492,18 @@ module Gori
               verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides,
               tls_preset: @tls_preset)
           end
+        # A race refused for too few live connections withdrew every member before its last byte.
+        refund_unsent(results, &.starts_with?(Engine::RACE_UNDERFILLED))
         # Every member is as hand-authored as a lone `send`, so each response is a legitimate
         # source for session-binding extraction — later members win on a name both write.
         requests.each_with_index { |b, i| results[i]?.try { |r| extract(b, r) } }
         results
+      end
+
+      # Hand back the budget slots of the group members whose error says they never went out.
+      private def refund_unsent(results : Array(Result), & : String -> Bool) : Nil
+        n = results.count { |r| (e = r.error) && yield e }
+        @outbound.refund(n) if n > 0
       end
 
       def send_ws(upgrade : Bytes, messages : Array(WsEngine::OutMsg),
