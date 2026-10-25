@@ -529,7 +529,7 @@ module Gori::Tui
     # The include boundary binds whether or not the scope lens is on (`Discover::Plan`), so a
     # seed outside it ends the crawl at the seed: say so instead of a bare "done".
     private def scope_note(run : DiscoverRun) : String
-      run.outside_scope? ? " — the seed is outside the scope rules, so no link off it is followed" : ""
+      run.outside_scope? ? " — the seed is outside the scope rules, so links outside them are not followed" : ""
     end
 
     private def push_notification(run : DiscoverRun, level : Symbol, msg : String) : Nil
