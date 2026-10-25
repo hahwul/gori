@@ -65,6 +65,12 @@ module Gori::Tui
       @job_id = 0
     end
 
+    # Reconfigure: the next run uses `config`; findings already shown stay.
+    def set_config(config : Miner::Config) : Nil
+      @config = config
+      @dirty = true
+    end
+
     # Content-only clone for sub-tab Duplicate: request + config. No findings/progress.
     def duplicate_from(src : MinerView) : Nil
       @target = src.@target

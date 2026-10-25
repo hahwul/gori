@@ -48,6 +48,34 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     miner_controller.miner_duplicate
   end
 
+  def mine_reconfigure : Nil
+    reconfigure_mine
+  end
+
+  # Reopen the config popup on the focused session, filled from its own config. Apply writes
+  # the popup's knobs onto a COPY of that config (what the popup has no row for survives) and
+  # persists it; it does not start a run. Refused while the session is mining.
+  def reconfigure_mine : Nil
+    return (@toast = "no miner session to reconfigure") unless v = miner_controller.current_view
+    if why = miner_controller.reconfigure_blocked_reason(v)
+      return (@toast = why)
+    end
+    seed = miner_controller.build_seed_from_session(v)
+    return (@toast = "no mineable locations for this request") if seed.applicable.empty?
+    ov = MineConfigOverlay.new(seed, macro_sessions: macro_session_choices)
+    ov.prefill(v.config)
+    ov.on_commit = -> {
+      if ov.any_checked?
+        miner_controller.reconfigure_session(v, ov.apply_to(v.config.dup))
+        true
+      else
+        @toast = "select at least one location to mine"
+        false
+      end
+    }
+    open_overlay(ov)
+  end
+
   # The strip's raw `e` rename / ^W close, promoted to verbs. `Runner#renameable_subtabs?`
   # and `#subtab_close` have listed :miner all along; only the VERBS were missing, so the
   # `:subtab` space-menu group here held Duplicate alone and neither key was rebindable.

@@ -38,6 +38,12 @@ class FakeHost
   def request_overlay(kind : Symbol) : Nil
   end
 
+  getter mine_reconfigures = 0
+
+  def reconfigure_mine : Nil
+    @mine_reconfigures += 1
+  end
+
   getter focus_requests = [] of Symbol
 
   def request_focus(pane : Symbol) : Nil

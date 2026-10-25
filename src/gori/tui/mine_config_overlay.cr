@@ -60,6 +60,9 @@ module Gori::Tui
     # frame. Start does not wait for it; the Runner says so when it did not finish.
     getter? seeding = false
     @seed_failed = false
+    # Set by `prefill`: this popup edits an existing session's config, so its last row applies
+    # rather than starts (the next ^R runs it).
+    getter? reconfiguring = false
 
     # `macro_sessions` are the project's saved Repeater sessions, `{id, label}` — the choices of
     # the macro step cycler (#1350). The overlay has no text field, so a macro is picked FROM the
@@ -118,6 +121,28 @@ module Gori::Tui
         @notify_idx = NOTIFY_CHOICES.index(mode) || @notify_idx
       end
       @keep_alive = Settings.mine_keep_alive?
+    end
+
+    # Reconfigure (Miner tab): show `c` — the session's current config — instead of the saved
+    # prefs. A value the cyclers cannot show keeps the cycler's current choice.
+    def prefill(c : Miner::Config) : Nil
+      @reconfiguring = true
+      @seed.applicable.each { |l| @checked[l] = c.locations.includes?(l) }
+      @conc_idx = CONC_CHOICES.index(c.concurrency) || @conc_idx
+      @notify_idx = NOTIFY_CHOICES.index(c.notify) || @notify_idx
+      @maxreq_idx = MAX_REQ_CHOICES.index { |n| n.try(&.to_i64) == c.max_requests } || @maxreq_idx
+      @keep_alive = c.keep_alive?
+      prefill_macro(c.request_macro)
+    end
+
+    # One step by session id, as `macro_spec` writes it. A step whose Repeater session is gone
+    # reads as "off": that macro could not run anyway.
+    private def prefill_macro(m : Gori::RequestMacro::Spec?) : Nil
+      @macro_idx = 0
+      return unless m && (step = m.steps.first?)
+      @macro_idx = (@macro_sessions.index { |(id, _)| id.to_s == step } || -1) + 1
+      @macro_every_idx = MACRO_EVERY_CHOICES.index(m.cadence.token) || 0
+      @macro_fail_idx = MACRO_FAIL_CHOICES.index(m.on_failure) || 0
     end
 
     # Rows: one per applicable location, then max-requests + concurrency + notification
@@ -182,7 +207,7 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ field · ←/→ options · ␣ toggle · ↵ start · esc cancel"
+      "↑/↓ field · ←/→ options · ␣ toggle · ↵ #{reconfiguring? ? "apply" : "start"} · esc cancel"
     end
 
     # Own key handling (formerly Runner#handle_mine_config_key): ↑/↓ move, ←/→ adjust
@@ -258,7 +283,13 @@ module Gori::Tui
     end
 
     def build_config : Miner::Config
-      c = Miner::Config.new
+      apply_to(Miner::Config.new)
+    end
+
+    # Write the popup's knobs onto `c` and return it. Reconfigure passes a copy of the
+    # session's config, so what this popup has no row for (buckets, rounds, wordlist, hook…)
+    # survives.
+    def apply_to(c : Miner::Config) : Miner::Config
       c.locations = @seed.applicable.select { |l| @checked[l]? }
       c.concurrency = CONC_CHOICES[@conc_idx]
       c.notify = NOTIFY_CHOICES[@notify_idx]
@@ -355,7 +386,7 @@ module Gori::Tui
       elsif i == keepalive_row
         draw_check(screen, x, py, bg, sel, @keep_alive, "reuse connections (keep-alive)")
       elsif i == start_row
-        label = any_checked? ? "[ Start mining ]" : "[ select a location ]"
+        label = any_checked? ? (reconfiguring? ? "[ Apply to session ]" : "[ Start mining ]") : "[ select a location ]"
         screen.text(x, py, label, any_checked? ? Theme.accent : Theme.muted, bg, Attribute::Bold)
       elsif inert_macro_row?(i)
         screen.text(x, py, inert_macro_text(i), Theme.muted, bg, width: box.right - 2 - x)

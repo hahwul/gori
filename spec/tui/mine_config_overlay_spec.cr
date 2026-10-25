@@ -202,3 +202,55 @@ describe Gori::Tui::MineConfigOverlay do
     ov.row_at(box, box.x + 3, box.y + 3).should eq(0) # first location row
   end
 end
+
+describe "MineConfigOverlay#prefill (Miner Reconfigure)" do
+  q = [Gori::Miner::Location::Query]
+  qh = [Gori::Miner::Location::Query, Gori::Miner::Location::Headers]
+  sessions = [{3_i64, "csrf-fetch"}, {7_i64, "GET /form"}] of {Int64, String}
+
+  it "shows the session's own config instead of the defaults" do
+    c = Gori::Miner::Config.new
+    c.locations = [Gori::Miner::Location::Headers]
+    c.concurrency = 40
+    c.notify = Gori::Miner::NotifyMode::Off
+    c.max_requests = 500_i64
+    c.keep_alive = false
+    c.request_macro = Gori::RequestMacro::Spec.new(["7"], Gori::RequestMacro::Cadence.new(5),
+      Gori::RequestMacro::OnFailure::Stop)
+    ov = MineConfigOverlay.new(seed(qh, q), macro_sessions: sessions)
+    ov.prefill(c)
+    got = ov.build_config
+    got.locations.should eq([Gori::Miner::Location::Headers])
+    got.concurrency.should eq(40)
+    got.notify.should eq(Gori::Miner::NotifyMode::Off)
+    got.max_requests.should eq(500_i64)
+    got.keep_alive?.should be_false
+    m = got.request_macro.not_nil!
+    m.steps.should eq(["7"])
+    m.cadence.every.should eq(5)
+    m.on_failure.should eq(Gori::RequestMacro::OnFailure::Stop)
+  end
+
+  it "writes only its own knobs onto the session's config, and its last row applies" do
+    c = Gori::Miner::Config.new
+    c.locations = q
+    c.stability_rounds = 9
+    c.user_wordlist = "/tmp/words.txt"
+    c.bucket_size[Gori::Miner::Location::Query] = 7
+    ov = MineConfigOverlay.new(seed(qh, q))
+    ov.prefill(c)
+    ov.reconfiguring?.should be_true
+    ov.set_selected(1) # Headers
+    ov.toggle
+    got = ov.apply_to(c.dup)
+    got.locations.should eq(qh)
+    got.stability_rounds.should eq(9)
+    got.user_wordlist.should eq("/tmp/words.txt")
+    got.bucket_size[Gori::Miner::Location::Query].should eq(7)
+    c.locations.should eq(q) # the session's own config is untouched until apply
+    backend = MemoryBackend.new(80, 24)
+    ov.render(Screen.new(backend), Rect.new(0, 0, 80, 24))
+    backend.contains?("Apply to session").should be_true
+    ov.hint.should contain("apply")
+  end
+end

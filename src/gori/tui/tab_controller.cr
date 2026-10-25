@@ -122,6 +122,12 @@ module Gori::Tui
     def toggle_static_assets : Nil
     end
 
+    # Reopen the Miner config popup on the current Miner session (single Duplicate opens it on
+    # the copy). Concrete and a no-op for the spec hosts, like the view picker above; the
+    # Runner's own `reconfigure_mine` (runner/miner.cr) overrides it.
+    def reconfigure_mine : Nil
+    end
+
     # Reconfigure the current Sequencer session's token descriptor/goal (the `c` chord).
     abstract def reconfigure_sequence : Nil
     # Open the Project SCOPE rule popup (nil edit_id = add; else edit that rule id).

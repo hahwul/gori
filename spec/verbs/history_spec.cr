@@ -435,6 +435,8 @@ describe "Gori::Verbs.register_history" do
       verb_intents(r, "mine.run").should eq([:mine_run])
       verb_intents(r, "mine.stop").should eq([:mine_stop])
       verb_intents(r, "mine.duplicate-subtab").should eq([:miner_duplicate_subtab])
+      r["mine.reconfigure"].available?(ctx).should be_true
+      verb_intents(r, "mine.reconfigure").should eq([:mine_reconfigure])
     end
 
     it "runs the active Probe checks against the current Repeater request" do

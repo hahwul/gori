@@ -297,4 +297,81 @@ describe MinerController do
       end
     end
   end
+
+  # Reconfigure: the popup is the Runner's (`reconfigure_mine`); the controller seeds it, gates
+  # it on a running mine, and applies + persists what it returns.
+  describe "Reconfigure" do
+    req = "GET /a?x=1 HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice
+
+    it "seeds the popup from the session's own request" do
+      with_miner_controller do |_, session|
+        session.store.insert_miner_session("https://a.test", req, false, nil, %({"locations":["headers"]}), nil, 0)
+        ctl = MinerController.new(FakeHost.new(session))
+        v = ctl.current_view.not_nil!
+        seed = ctl.build_seed_from_session(v)
+        seed.request.should eq(req)
+        seed.applicable.should contain(Gori::Miner::Location::Query)
+        ov = MineConfigOverlay.new(seed)
+        ov.prefill(v.config)
+        ov.build_config.locations.should eq([Gori::Miner::Location::Headers])
+      end
+    end
+
+    it "applies the new config to that session and persists it, keeping its findings" do
+      with_miner_controller do |_, session|
+        store = session.store
+        id = store.insert_miner_session("https://a.test", req, false, nil, "{}", nil, 0)
+        host = FakeHost.new(session)
+        ctl = MinerController.new(host)
+        v = ctl.current_view.not_nil!
+        v.append_finding(Gori::Miner::Finding.new("p", Gori::Miner::Location::Query,
+          Gori::Miner::Evidence::Status, Gori::Miner::Confidence::Confirmed, nil, nil, 0_i64))
+        cfg = v.config.dup
+        cfg.concurrency = 40
+        cfg.locations = [Gori::Miner::Location::Headers]
+        ctl.reconfigure_session(v, cfg)
+        v.config.concurrency.should eq(40)
+        v.found_count.should eq(1)
+        host.statuses.last.should contain("reconfigured")
+        row = store.miner_sessions.find { |r| r.id == id }.not_nil!
+        row.config.should contain(%("concurrency":40))
+        row.config.should contain(%("headers"))
+      end
+    end
+
+    it "refuses while the session is mining" do
+      with_miner_controller do |_, session|
+        session.store.insert_miner_session("https://a.test", req, false, nil, "{}", nil, 0)
+        host = FakeHost.new(session)
+        ctl = MinerController.new(host)
+        v = ctl.current_view.not_nil!
+        v.begin_run
+        before = v.config.concurrency
+        ctl.reconfigure_blocked_reason(v).should eq("mine running — stop it before reconfiguring")
+        cfg = v.config.dup
+        cfg.concurrency = before == 40 ? 5 : 40
+        ctl.reconfigure_session(v, cfg)
+        v.config.concurrency.should eq(before)
+        host.statuses.last.should eq("mine running — stop it before reconfiguring")
+      end
+    end
+
+    it "opens Reconfigure on a single duplicate, not on a batch duplicate" do
+      with_miner_controller do |_, session|
+        store = session.store
+        store.insert_miner_session("https://a.test", req, false, nil, "{}", nil, 0)
+        store.insert_miner_session("https://b.test", req, false, nil, "{}", nil, 1)
+        host = FakeHost.new(session)
+        ctl = MinerController.new(host)
+        ctl.miner_duplicate
+        host.mine_reconfigures.should eq(1)
+        ctl.subtab_index.should eq(2) # the popup opens on the copy, now current
+        ctl.toggle_subtab_mark(0)
+        ctl.toggle_subtab_mark(1)
+        ctl.miner_duplicate
+        host.mine_reconfigures.should eq(1)
+        store.miner_sessions.size.should eq(5)
+      end
+    end
+  end
 end

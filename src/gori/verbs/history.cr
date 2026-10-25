@@ -1041,6 +1041,14 @@ module Gori
         Verb::Scope::Miner,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :miner && ctx.miner_finding_selected? },
         mnemonic: 'R', intent: :to_repeater, pinned: true) { |ctx| ctx.mine_repeater_selected; nil }
+      # Reopen the config popup on the focused session (refused while it mines). A menu row, not
+      # palette-only: change-and-rerun is the tab's loop, and single Duplicate opens the same
+      # popup. No lexicon intent is "configure", so a one-off letter: 'C', as Sequencer's
+      # "Configure token" is 'c' — but capital, since Miner binds no bare `c` and a level-1 'c'
+      # would reach Global (stop capture) on a dropped space.
+      r.register Verb::Definition.new(
+        "mine.reconfigure", "Reconfigure…", "Change the focused session's mining config (applies to the next run)",
+        Verb::Scope::Miner, available: in_miner, mnemonic: 'C') { |ctx| ctx.mine_reconfigure; nil }
       # Content-only clone of the active miner session (request + config; no findings).
       # 'd' is free in COMMON ∪ :subtab (COMMON: r/s/k/u/p).
       r.register Verb::Definition.new(

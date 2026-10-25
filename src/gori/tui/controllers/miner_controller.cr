@@ -381,6 +381,39 @@ module Gori::Tui
       MineSeed.new(target, bytes, http2, sni, nil, SeededSession.request_summary(bytes), appl.applicable, appl.default)
     end
 
+    # Reconfigure's seed: session `v`'s own request, with its locations re-detected so the
+    # popup offers the same checkboxes a fresh mine of these bytes would.
+    def build_seed_from_session(v : MinerView) : MineSeed
+      bytes = v.request_bytes
+      appl = Miner::Plan.applicable_locations(bytes)
+      flow_id = @sessions.find(&.view.same?(v)).try(&.flow_id)
+      MineSeed.new(v.target, bytes, v.http2?, v.sni_override, flow_id, SeededSession.request_summary(bytes),
+        appl.applicable, appl.default, v.config.seed_names)
+    end
+
+    # Why session `v` cannot be reconfigured, or nil. Asked when the popup opens and again at
+    # apply: a run reads its config when it starts, so a change mid-run would show one config
+    # and report findings from another.
+    def reconfigure_blocked_reason(v : MinerView) : String?
+      "mine running — stop it before reconfiguring" if v.running?
+    end
+
+    # `v` is the session the popup was opened on, not whichever is current at apply: the
+    # per-tick reconcile runs under the popup, and a peer's close moves the selection. Results
+    # stay; the config takes effect on the next run.
+    def reconfigure_session(v : MinerView, config : Miner::Config) : Nil
+      unless idx = @sessions.index(&.view.same?(v))
+        return @host.status("that session was closed — nothing reconfigured")
+      end
+      @current_idx = idx
+      if why = reconfigure_blocked_reason(v)
+        return @host.status(why)
+      end
+      v.set_config(config)
+      @host.status(keys("miner session reconfigured — {mine.run} runs it"))
+      save_current # after the line above, so its "NOT saved" error is the one left showing
+    end
+
     # --- start a session (called by the Runner after the config overlay confirms) ---
     def start_session(seed : MineSeed, config : Miner::Config) : Nil
       view = MinerView.new
@@ -415,6 +448,9 @@ module Gori::Tui
       duplicate_at(@current_idx)
       @host.goto_tab(:miner)
       @host.status("duplicated miner session (#{@sessions.size} open)")
+      # Whoever duplicates one session usually wants to change something: open Reconfigure on
+      # the copy. Cancelling keeps it with the copied config. The batch arm above does not.
+      @host.reconfigure_mine
     end
 
     # Clone sub-tab `idx` into a new session at the end of the strip. Toast-free, so the
