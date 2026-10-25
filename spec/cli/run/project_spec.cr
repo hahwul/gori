@@ -332,3 +332,14 @@ describe "gori run project rename / describe" do
     end
   end
 end
+
+# `scope update <id>` with no field printed "updated" and exited 0. `abort` exits, so the
+# refusal is pinned over the source: it must precede the store write.
+describe "gori run project scope update — nothing to change" do
+  it "refuses a call that sets no field before touching the store" do
+    src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "project.cr"))
+    body = src[src.index!("def self.cmd_scope_update")..]
+    refusal = body.index!("nothing to change — pass --kind, --type and/or --pattern")
+    refusal.should be < body.index!("with_store(project)")
+  end
+end

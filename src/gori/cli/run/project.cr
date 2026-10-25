@@ -1061,6 +1061,11 @@ module Gori
 
         id_s = positional.first? || abort("gori run project scope update: <id> is required (see `gori run project scope list`)")
         id = id_s.to_i64? || abort("gori run project scope update: invalid rule id #{id_s.inspect}")
+        # Printing "updated" for a call that sets no field told a script its edit landed;
+        # `issues update` and MCP `update_scope_rule` refuse it the same way.
+        if kind.nil? && match_type.nil? && pattern.nil?
+          abort "gori run project scope update: nothing to change — pass --kind, --type and/or --pattern"
+        end
         # An ABSENT --pattern keeps the current one; a SUPPLIED blank one is a mistake, not a
         # no-op — keeping the old pattern reported success for an edit that never happened, on
         # the rule that gates outbound traffic. MCP's `update_scope_rule` refuses it the same way.
