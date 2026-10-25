@@ -26,6 +26,12 @@ module Gori
       nil
     end
 
+    # Link, and answer whether the link exists afterwards: `add_link`'s nil is both "already
+    # linked" and "the batch did not commit", so it is looked up. False only for the second.
+    def ensure_link(owner_kind : LinkOwnerKind, owner_id : Int64, ref_kind : LinkRefKind, ref_id : Int64) : Bool
+      !(add_link(owner_kind, owner_id, ref_kind, ref_id) || link_id(owner_kind, owner_id, ref_kind, ref_id)).nil?
+    end
+
     # Attach MANY refs to one owner — History's multi-select link (#442). Returns how many rows
     # were actually inserted (the rest were already linked).
     #

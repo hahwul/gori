@@ -339,3 +339,24 @@ describe "gori run issues delete --yes confirmation" do
     body.should contain("issue_delete_confirmation_error")
   end
 end
+
+# `--repeater` on create/update, at parity with MCP `repeater_id`: checked before the write,
+# then linked through `Store#ensure_link` (an already-present link is success).
+describe "gori run issues --repeater" do
+  it "refuses a repeater id naming no session, and links one that exists" do
+    with_store do |store|
+      Gori::CLI::Run.issue_repeater_error(store, 77_i64).should eq("no repeater with id 77")
+      Gori::CLI::Run.issue_repeater_error(store, nil).should be_nil
+      rid = store.insert_repeater("https://a.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+      Gori::CLI::Run.issue_repeater_error(store, rid).should be_nil
+      iid = store.insert_issue("t", Gori::Store::Severity::Info, nil, nil)
+      2.times { store.ensure_link(Gori::Store::LinkOwnerKind::Issue, iid, Gori::Store::LinkRefKind::Repeater, rid).should be_true }
+    end
+  end
+
+  it "declares --repeater on both parsers and says --cvss sets the severity" do
+    src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "issues.cr"))
+    src.scan(/p\.on\("--repeater=ID"/).size.should eq(2)
+    src.should contain("without --severity it also sets the severity from the score")
+  end
+end

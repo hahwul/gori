@@ -193,6 +193,7 @@ module Gori
         cvss : String? = nil
         host : String? = nil
         flow_id : Int64? = nil
+        repeater_id : Int64? = nil
         notes : String? = nil
         notes_file : String? = nil
         notes_stdin = false
@@ -210,6 +211,7 @@ module Gori
           p.on("--cvss=CVSS", "CVSS vector string or numeric score (e.g. 9.8 or CVSS:3.1/...)") { |v| cvss = v }
           p.on("--host=HOST", "Host concerning the issue") { |v| host = v }
           p.on("--flow=ID", "Associated flow ID") { |v| flow_id = parse_flow_id(v, "gori run issues create") }
+          p.on("--repeater=ID", "Link a saved Repeater session as evidence (MCP's repeater_id)") { |v| repeater_id = parse_id(v, "gori run issues create", "--repeater") }
           p.on("-nNOTES", "--notes=NOTES", "Free-form notes (the issue's body)") { |v| notes = v }
           p.on("--notes-file=FILE", "Read the notes from FILE, byte-for-byte") { |v| notes_file = v }
           p.on("--notes-stdin", "Read the notes from stdin, byte-for-byte, as --notes-file reads a file (`report-generator | gori run issues create -t … --notes-stdin`). Keeps a long write-up out of the argument vector, so it is not in the process listing or the shell history and cannot hit the command-line length limit. Needs a pipe or a redirect (`< notes.md`): a terminal is refused, because it would echo the notes back") { notes_stdin = true }
@@ -251,7 +253,7 @@ module Gori
 
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
-          if err = issue_flow_error(store, flow_id)
+          if err = issue_flow_error(store, flow_id) || issue_repeater_error(store, repeater_id)
             abort "gori run issues create: #{err}"
           end
           masked_title = Env.mask_secrets(t)
@@ -261,6 +263,10 @@ module Gori
           id = store.insert_issue(masked_title, severity, masked_host, flow_id, cvss: cvss,
             notes: body.try { |n| Env.mask_secrets(n) } || "")
           abort "gori run issues create: failed to persist issue (store busy or unwritable)" if id == 0
+          # The issue IS stored, so the refusal names it: a retry of the create would file a duplicate.
+          link_issue_repeater(store, id, repeater_id,
+            "gori run issues create: issue ##{id} created but its repeater link NOT written (store busy " \
+            "or unwritable); retry with `gori run issues update #{id} --repeater #{repeater_id}`")
           puts issue_created_output(store, id, format)
         end
       end
@@ -302,6 +308,22 @@ module Gori
       # argument that was wrong from the moment it was typed is the thing the ordering comment
       # up there promises not to do. Still reached through `issue_flow_error` as well, so the
       # sentence has one spelling and the spec that pins it goes on covering both callers.
+      # `--repeater` (MCP's `repeater_id`): the refusal for an id naming no saved Repeater
+      # session, or nil. Checked before the write, as `--flow` is, so no issue is filed with a
+      # dangling evidence pointer.
+      def self.issue_repeater_error(store : Store, repeater_id : Int64?) : String?
+        return nil unless rid = repeater_id
+        store.get_repeater(rid) ? nil : "no repeater with id #{rid}"
+      end
+
+      # Link the issue to `--repeater`, through `Store#ensure_link` as MCP does; abort with
+      # `failure` when the link did not commit.
+      private def self.link_issue_repeater(store : Store, issue_id : Int64, repeater_id : Int64?, failure : String) : Nil
+        return unless rid = repeater_id
+        return if store.ensure_link(Store::LinkOwnerKind::Issue, issue_id, Store::LinkRefKind::Repeater, rid)
+        abort_closing(store, failure)
+      end
+
       private def self.issue_flow_range_error(flow_id : Int64?) : String?
         return nil unless fid = flow_id
         fid <= 0 ? "invalid --flow #{fid} (expected a positive flow id)" : nil
@@ -354,6 +376,7 @@ module Gori
         clear_host = false
         flow_id : Int64? = nil
         clear_flow = false
+        repeater_id : Int64? = nil
 
         positional = parse_args(args, "gori run issues update") do |p|
           p.banner = "Usage: gori run issues update <issue-id> [options]\n\n" \
@@ -363,7 +386,7 @@ module Gori
           project_options(p, proj, "update")
           p.on("-tTITLE", "--title=TITLE", "New issue title") { |v| title = v }
           p.on("-sSEVERITY", "--severity=SEVERITY", "Severity: info|low|medium|high|critical") { |v| sev_s = v }
-          p.on("--cvss=CVSS", "New CVSS vector or score (empty to clear)") do |v|
+          p.on("--cvss=CVSS", "New CVSS vector or score (empty to clear); without --severity it also sets the severity from the score") do |v|
             if v.strip.empty?
               clear_cvss = true
             else
@@ -380,6 +403,7 @@ module Gori
           p.on("--flow=ID", "The issue's seed flow (empty to clear); the old one stays as a link") do |v|
             v.strip.empty? ? (clear_flow = true) : (flow_id = parse_flow_id(v, "gori run issues update"))
           end
+          p.on("--repeater=ID", "Link a saved Repeater session as evidence (MCP's repeater_id)") { |v| repeater_id = parse_id(v, "gori run issues update", "--repeater") }
         end
 
         id = take_id(positional, "gori run issues update", "<issue-id>", "issue id")
@@ -420,25 +444,27 @@ module Gori
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
           store.get_issue(id) || abort_closing(store, "gori run issues update: no issue with id #{id}")
-          if err = issue_flow_error(store, flow_id)
+          if err = issue_flow_error(store, flow_id) || issue_repeater_error(store, repeater_id)
             abort_closing(store, "gori run issues update: #{err}")
           end
 
-          if title.nil? && severity.nil? && notes.nil? && status.nil? && cvss.nil? && !clear_cvss &&
-             host.nil? && !clear_host && flow_id.nil? && !clear_flow
-            abort_closing(store, "gori run issues update: no fields to update (provide at least one of --title/--severity/--notes[-file|-stdin]/--status/--cvss/--host/--flow)")
+          fields = !(title.nil? && severity.nil? && notes.nil? && status.nil? && cvss.nil? && !clear_cvss &&
+                     host.nil? && !clear_host && flow_id.nil? && !clear_flow)
+          if !fields && repeater_id.nil?
+            abort_closing(store, "gori run issues update: no fields to update (provide at least one of --title/--severity/--notes[-file|-stdin]/--status/--cvss/--host/--flow/--repeater)")
           end
 
           masked_title = title.try { |t| Env.mask_secrets(t) }
           masked_notes = notes.try { |n| Env.mask_secrets(n) }
 
           # update_issue returns false when the write didn't commit (store busy/locked):
-          # don't report success then.
-          unless store.update_issue(id, title: masked_title, severity: severity, notes: masked_notes, status: status,
-                   cvss: cvss, clear_cvss: clear_cvss, host: host.try { |h| Env.mask_secrets(h) }, clear_host: clear_host,
-                   flow_id: flow_id, clear_flow: clear_flow)
+          # don't report success then. `--repeater` alone is a link, not a row write (MCP's rule).
+          if fields && !store.update_issue(id, title: masked_title, severity: severity, notes: masked_notes, status: status,
+               cvss: cvss, clear_cvss: clear_cvss, host: host.try { |h| Env.mask_secrets(h) }, clear_host: clear_host,
+               flow_id: flow_id, clear_flow: clear_flow)
             abort_closing(store, "gori run issues update: project is busy (write did not commit) — try again")
           end
+          link_issue_repeater(store, id, repeater_id, "gori run issues update: repeater link NOT written (store busy or unwritable); try again")
           puts "Issue ##{id} updated successfully."
         end
       end

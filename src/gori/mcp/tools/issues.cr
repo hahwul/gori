@@ -97,13 +97,12 @@ module Gori
         end)
       end
 
-      # Link the issue to the repeater; false only when no such link exists afterwards. nil from
-      # `add_link` is both "already linked" and "the batch did not commit", so it is looked up.
-      # Every MCP issue→repeater link write goes through here (create_repeater, send_request,
+      # Link the issue to the repeater; false only when no such link exists afterwards
+      # (`Store#ensure_link`, which `gori run issues --repeater` uses too). Every MCP
+      # issue→repeater link write goes through here (create_repeater, send_request,
       # send_websocket too), so none reports a link that did not commit.
       private def link_issue_repeater(issue_id : Int64, repeater_id : Int64) : Bool
-        owner, ref = Store::LinkOwnerKind::Issue, Store::LinkRefKind::Repeater
-        !(store.add_link(owner, issue_id, ref, repeater_id) || store.link_id(owner, issue_id, ref, repeater_id)).nil?
+        store.ensure_link(Store::LinkOwnerKind::Issue, issue_id, Store::LinkRefKind::Repeater, repeater_id)
       end
 
       @[Tool("update_issue", gated: true, agent_action: true, permission: "write")]
