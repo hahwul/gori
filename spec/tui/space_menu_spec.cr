@@ -1504,3 +1504,22 @@ describe "the space menu's verb families (#1274 WP9)" do
     SpaceMenu.resume_sticky?(quiet, quiet, was, Gori::Tui::ActionContext.new(Gori::Verb::Scope::Repeater, :request, subtabs: true, banner: "2 MARKED")).should be_true
   end
 end
+
+private def runner_code_for_menu : String
+  File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner.cr"))
+    .lines.reject(&.lstrip.starts_with?('#')).join('\n')
+end
+
+# A resize that hides the Repeater's request column moves focus to TARGET (#1421) under an open
+# card that still lists REQUEST's rows. `Runner.new` owns a terminal, so the wiring is pinned by
+# reading the source (the idiom of spec/tui/modal_paste_guard_spec.cr).
+describe "Runner — a space card whose pane moved under it" do
+  it "closes the card when this frame's section is not the one it opened on" do
+    src = runner_code_for_menu
+    body = src[/private def close_space_menu_moved_under : Nil.*?^    end$/m]?.not_nil!
+    body.should contain("was.section == focused_section")
+    body.should contain("close_space_menu")
+    prompts = src[/private def render_prompts\(.*?^    end$/m]?.not_nil!
+    prompts.index!("close_space_menu_moved_under").should be < prompts.index!("@space_menu.render")
+  end
+end

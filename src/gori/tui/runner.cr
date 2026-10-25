@@ -3142,6 +3142,7 @@ module Gori::Tui
     private def render_prompts(screen : Screen, layout : Layout) : Nil
       @copy_picker.try(&.render(screen, layout.body)) if copy_as_shown?
       @send_picker.try(&.render(screen, layout.body)) if send_to_shown?
+      close_space_menu_moved_under
       @space_menu.render(screen, layout.body) if @space_menu_open
       render_goto_prompt(screen, layout.status) if @goto_open
       render_search_prompt(screen, layout.status) if @search_open
@@ -4435,6 +4436,18 @@ module Gori::Tui
     private def close_space_menu : Nil
       @space_menu_open = false
       @space_menu_here = nil
+    end
+
+    # The card lists the pane it was opened on. A frame can move focus under it — a resize
+    # that hides the Repeater's request column settles focus on TARGET (#1421,
+    # `RepeaterView#settle_focus_on_drawn_pane`) — and a row picked then would run against
+    # the new pane while the card still says the old one. Run after the body drew, so the
+    # focus it compares is this frame's.
+    private def close_space_menu_moved_under : Nil
+      return unless @space_menu_open && (was = @space_menu_here)
+      return if was.section == focused_section
+      close_space_menu
+      @toast = "menu closed — focus moved to another pane"
     end
 
     private def open_goto(target : Symbol) : Nil
