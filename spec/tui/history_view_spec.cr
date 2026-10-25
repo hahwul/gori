@@ -3740,14 +3740,14 @@ end
 
 # The detail body's scroll gauge (┃ on the right border) has to follow the body in every mode
 # the Repeater draws one in: hex (^X), reveal (b), and a body that overflows only by wrapping.
-private def gauge_flow(store, body : String) : Int64
+private def gauge_flow(store, body : String, ctype : String = "text/plain") : Int64
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
     method: "GET", target: "/g", http_version: "HTTP/1.1",
     head: "GET /g HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
   store.update_response(Gori::Store::CapturedResponse.new(
-    flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice,
-    body: body.to_slice, content_type: "text/plain"))
+    flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\nContent-Type: #{ctype}\r\n\r\n".to_slice,
+    body: body.to_slice, content_type: ctype))
   id
 end
 
@@ -3785,6 +3785,31 @@ describe "HistoryView detail scroll gauge" do
       end
     ensure
       Gori::Settings.wrap_lines = prev
+    end
+  end
+end
+
+describe "HistoryView#pretty_missing?" do
+  it "is true only while pretty is on over a body it does not reflow" do
+    with_store do |store|
+      gauge_flow(store, "plain words, nothing to reflow")
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.toggle_pane # request -> response
+      view.pretty = false
+      view.pretty_missing?.should be_false
+      view.pretty = true
+      view.pretty_missing?.should be_true
+    end
+    with_store do |store|
+      gauge_flow(store, %({"a":[1,2]}), "application/json")
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.toggle_pane
+      view.pretty = true
+      view.pretty_missing?.should be_false
     end
   end
 end

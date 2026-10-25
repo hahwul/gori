@@ -2631,6 +2631,13 @@ module Gori::Tui
       @detail_read.reset
     end
 
+    # Pretty is on over a body it cannot reflow: the pane looks the same and its chip still
+    # offers `p:pretty`, while the Display card shows the flag ●. The toggle names it instead.
+    def pretty_missing? : Bool
+      return false unless @pretty && @detail && !hex_view? && !log_pane?
+      !detail_view.pretty
+    end
+
     # The detail's hex dump is showing (the FRAMES pane never draws one).
     def hex_view? : Bool
       @detail_hex && !log_pane?

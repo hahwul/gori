@@ -12,6 +12,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def toggle_pretty : Nil
     @pretty = !@pretty
     @toast = "pretty bodies: #{@pretty ? "on" : "off"}"
+    return unless @overlay.detail?
+    view = history_controller.view
+    view.pretty = @pretty # the per-frame push lands after this toast; the answer needs it now
+    @toast = "pretty bodies: on — no pretty view for this body" if view.pretty_missing?
   end
 
   # --- History / detail ExecContext --- (delegated to HistoryController)
