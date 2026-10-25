@@ -143,11 +143,13 @@ module Gori
       private def lookup_job(h, jobs : Hash(String, T), kind : String, verb : String,
                              missing_field : String? = nil) : T | Result forall T
         id = str(h, "job_id")
+        # This project's jobs only: one from before a switch_project answers PROJECT_CHANGED.
+        held = jobs.compact_map { |k, j| k if j.db_path == @db_path }
         if id.nil? || id.empty?
-          return err("missing required 'job_id'#{held_jobs_hint(kind, jobs.keys)}", "INVALID_ARGUMENT", field: missing_field)
+          return err("missing required 'job_id'#{held_jobs_hint(kind, held)}", "INVALID_ARGUMENT", field: missing_field)
         end
         job = jobs[id]?
-        return job_not_found(id, kind, verb, jobs.keys) unless job
+        return job_not_found(id, kind, verb, held) unless job
         job_project_mismatch(job) || job
       end
 
