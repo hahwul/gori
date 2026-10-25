@@ -136,8 +136,8 @@ module Gori
         # request judged and recorded is the one the rules produced.
         applied_rules = false
         plan, applied_rules = apply_request_rules(plan, project) if apply_rules
-        abort_if_out_of_scope!(outbound, plan, "gori run send")
-        abort_if_blocked!(plan, "gori run send")
+        abort_if_out_of_scope!(outbound, plan, "gori run send", format)
+        abort_if_blocked!(plan, "gori run send", format)
         send_and_report(plan, outbound, project, raw: !raw_content.nil?,
           record_history: record_history, save_as_repeater: save_as_repeater,
           format: format, cap: cap, applied_rules: applied_rules)

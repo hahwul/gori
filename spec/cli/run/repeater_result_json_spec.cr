@@ -297,3 +297,19 @@ describe "gori run repeater --format json — an event stream stopped at its bou
     end
   end
 end
+
+# A scope refusal under `--format json` used to reach stderr only, so a script reading stdout
+# saw nothing where a network failure prints an object. It now prints the same failed-send
+# shape, coded as MCP codes a scope refusal.
+describe "gori run send/repeater --format json — a scope refusal" do
+  it "is the failed-send object with error_code SCOPE_BLOCKED" do
+    j = JSON.parse(Gori::CLI::Run.scope_blocked_json("evil.test is out of the project scope — pass --allow-unscoped"))
+    failure = JSON.parse(Gori::CLI::Run.repeater_json_for_spec(result_of(Bytes.empty, nil, "connect failed")))
+    %w[ok error error_code retryable delivered].each { |k| failure.as_h.has_key?(k).should be_true }
+    j["ok"].as_bool.should be_false
+    j["error_code"].as_s.should eq("SCOPE_BLOCKED")
+    j["error"].as_s.should contain("out of the project scope")
+    j["retryable"].as_bool.should be_false
+    j["delivered"].as_bool.should be_false
+  end
+end

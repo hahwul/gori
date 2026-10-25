@@ -196,8 +196,8 @@ module Gori
         rescue ex : Repeater::PlanError
           repeater_plan_abort("gori run repeater h2", ex)
         end
-        abort_if_out_of_scope!(outbound, plan, "gori run repeater h2")
-        abort_if_blocked!(plan, "gori run repeater h2")
+        abort_if_out_of_scope!(outbound, plan, "gori run repeater h2", format)
+        abort_if_blocked!(plan, "gori run repeater h2", format)
         result = plan.send
         outbound.close
 
@@ -1216,9 +1216,24 @@ module Gori
       # complex) command handlers. `Repeater::Sender#send` re-checks internally, so a
       # missed call here still cannot put bytes on the wire; this exists only so the CLI
       # can refuse with its own message before printing anything.
-      private def self.abort_if_blocked!(plan : Repeater::Plan, prefix : String) : Nil
+      private def self.abort_if_blocked!(plan : Repeater::Plan, prefix : String, format : Symbol = :text) : Nil
         return unless reason = plan.refusal
+        scope_abort(prefix, reason, format)
+      end
+
+      # A scope refusal. Under `--format json` stdout also gets the failed-send object a network
+      # error prints, coded as MCP codes it (`SCOPE_BLOCKED`), so a script reading stdout learns
+      # why nothing was sent instead of reading nothing. Exit 1 either way.
+      def self.scope_abort(prefix : String, reason : String, format : Symbol) : NoReturn
+        if format == :json
+          puts scope_blocked_json(reason)
+        end
         abort "#{prefix}: #{reason}"
+      end
+
+      def self.scope_blocked_json(reason : String) : String
+        {"ok" => false, "error" => reason, "error_code" => "SCOPE_BLOCKED",
+         "retryable" => false, "delivered" => false}.to_json
       end
 
       # The Layer-1 (include-list) gate for the hand-authored repeater send paths. `abort_if_blocked!`
@@ -1226,12 +1241,14 @@ module Gori
       # configured project scope was silently inert for `gori run repeater` and there was no
       # --allow-unscoped waiver, unlike the sibling fuzz/mine/sequence/discover CLIs and MCP's
       # send_gate (#406). DESIGN.md §3 lists repeater as gated on BOTH layers.
-      private def self.abort_if_out_of_scope!(outbound : Gori::Outbound, plan : Repeater::Plan, prefix : String) : Nil
+      private def self.abort_if_out_of_scope!(outbound : Gori::Outbound, plan : Repeater::Plan, prefix : String,
+                                              format : Symbol = :text) : Nil
         verdict = repeater_scope_verdict(outbound, plan)
         return unless verdict.blocked?
+        passes = outbound.send_passes_exclude?
         outbound.close
-        abort "#{prefix}: #{plan.host} is out of the project scope — " \
-              "#{Gori::Outbound.remedy(verdict, "--allow-unscoped", waiver_passes_exclude: outbound.send_passes_exclude?)}"
+        scope_abort(prefix, "#{plan.host} is out of the project scope — " \
+                            "#{Gori::Outbound.remedy(verdict, "--allow-unscoped", waiver_passes_exclude: passes)}", format)
       end
 
       # The Layer-1 verdict `abort_if_out_of_scope!` acts on, split out so it can be asserted
@@ -1437,8 +1454,8 @@ module Gori
         plan, labels = build_cli_race_plan(loaded, mode, outbound, insecure, host_overrides,
           verbatim, timeout, reframe_grpc, tls_preset, seeds)
 
-        abort_if_out_of_scope!(outbound, plan, "gori run repeater race")
-        abort_if_blocked!(plan, "gori run repeater race")
+        abort_if_out_of_scope!(outbound, plan, "gori run repeater race", format)
+        abort_if_blocked!(plan, "gori run repeater race", format)
 
         results = plan.send_race
         outbound.close
@@ -1505,8 +1522,8 @@ module Gori
         plan, labels = build_cli_race_plan(loaded, mode, outbound, insecure, host_overrides,
           verbatim, timeout, reframe_grpc, tls_preset, seeds, cmd_label: "gori run repeater timing")
 
-        abort_if_out_of_scope!(outbound, plan, "gori run repeater timing")
-        abort_if_blocked!(plan, "gori run repeater timing")
+        abort_if_out_of_scope!(outbound, plan, "gori run repeater timing", format)
+        abort_if_blocked!(plan, "gori run repeater timing", format)
 
         run_mode = interleaved ? Repeater::Timing::Mode::Interleaved : Repeater::Timing::Mode::Auto
         rep = Repeater::Timing.run(plan, iterations: count, mode: run_mode, warmup: warmup)
@@ -1881,7 +1898,7 @@ module Gori
         per_send_edits << "--apply-rules" if applied_rules
 
         # Layer 1 (include list) BEFORE Layer 2 — mirrors fuzz/mine/sequence and MCP send_gate.
-        abort_if_out_of_scope!(outbound, plan, "gori run repeater send")
+        abort_if_out_of_scope!(outbound, plan, "gori run repeater send", format)
 
         # The session's stored `ws_http_only` (the TUI's `^V`) is the default, and `--http`
         # overrides it for this send. Both mean the same thing: dial the h1/h2 engine and read
@@ -1935,7 +1952,7 @@ module Gori
           return
         end
 
-        abort_if_blocked!(plan, "gori run repeater send")
+        abort_if_blocked!(plan, "gori run repeater send", format)
         sent_at = Time.utc.to_unix_ms * 1000_i64
         # The bytes the socket gets, taken ONCE and sent as-is: `--record-history` writes this
         # exact slice, so the recorded flow is the request that went out — session-slot overlay
@@ -2060,7 +2077,7 @@ module Gori
                                             evidence : Bool = false,
                                             request_sha256 : String? = nil,
                                             persist : Bool = true) : Nil
-        abort_if_blocked!(plan, "gori run repeater send")
+        abort_if_blocked!(plan, "gori run repeater send", format)
 
         out_messages = begin
           with_store(project, read_only: true) do |store|
@@ -3482,8 +3499,8 @@ module Gori
         applied_rules = false
         plan, applied_rules = apply_request_rules(plan, project) if apply_rules
         # Layer 1 (include list) BEFORE Layer 2 — mirrors fuzz/mine/sequence and MCP send_gate.
-        abort_if_out_of_scope!(outbound, plan, "gori run repeater")
-        abort_if_blocked!(plan, "gori run repeater")
+        abort_if_out_of_scope!(outbound, plan, "gori run repeater", format)
+        abort_if_blocked!(plan, "gori run repeater", format)
         say_request_line_rewrite
         sent_at = Time.utc.to_unix_ms * 1000_i64
         # Taken ONCE and sent as-is, so a `--record-history` flow holds the bytes that went out.
