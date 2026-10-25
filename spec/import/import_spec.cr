@@ -371,6 +371,12 @@ describe Gori::Import do
     end
   end
 
+  it "calls imported TEXT text, not a file, in a parse error" do
+    with_store do |store|
+      expect_raises(Gori::Error, /\AHAR text is not valid JSON/) { Gori::Import.import_text(store, :har, "{nope") }
+    end
+  end
+
   it "imports pending flows from a URL list file" do
     urls = File.tempname("gori", ".txt")
     begin
@@ -747,6 +753,7 @@ describe Gori::Import do
         result = Gori::Import.import_file(store, :har, har)
         result.count.should eq(1)   # the valid entry imported (was: whole import aborted)
         result.skipped.should eq(1) # the bad-base64 entry skipped
+        result.notes.should eq(["skipped entry 1: response content is not valid base64 (Unexpected byte 0x21 at 0)"])
       end
     ensure
       File.delete?(har)

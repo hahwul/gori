@@ -374,8 +374,10 @@ module Gori
       begin
         import_file(store, kind, file.path, surface, ref: "#{kind} text")
       rescue ex : Gori::Error
-        # The parsers name the file they read, which here is a temp path the caller never saw.
-        raise Gori::Error.new((ex.message || "import failed").gsub(file.path, "the #{label(kind)} text"))
+        # The parsers name the file they read, which here is a temp path the caller never saw,
+        # or call it a file ("HAR file is not valid JSON") when the caller passed none.
+        raise Gori::Error.new((ex.message || "import failed").gsub(file.path, "the #{label(kind)} text")
+          .gsub("#{label(kind)} file", "#{label(kind)} text"))
       ensure
         file.delete
       end

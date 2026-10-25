@@ -195,7 +195,7 @@ module Gori
 
         req_headers = headers_list(req["headers"]?)
         req_body, req_frame = post_body(req["postData"]?)
-        raw_request_head = req["_goriRawRequestHead"]?.try(&.as_s?).try { |s| Base64.decode(s) }
+        raw_request_head = req["_goriRawRequestHead"]?.try(&.as_s?).try { |s| base64(s, "_goriRawRequestHead") }
         # HAR's `bodySize` is the size the body had ON THE WIRE, which is not necessarily the
         # size of the text the file carries: `Export::Har` writes the true size beside a body
         # that was capped at capture time. Passing it through keeps that flow truncated
@@ -213,7 +213,7 @@ module Gori
             source_surface: prov.surface, source_ref: prov.ref,
             request_head_override: raw_request_head, userinfo_auth: false)
         end
-        raw_response_head = resp["_goriRawResponseHead"]?.try(&.as_s?).try { |s| Base64.decode(s) }
+        raw_response_head = resp["_goriRawResponseHead"]?.try(&.as_s?).try { |s| base64(s, "_goriRawResponseHead") }
 
         # `number_i64`, not `as_i`: a fractional `"status": 200.5` raises `TypeCastError`
         # out of `as_i`, which the per-entry rescue turned into a dropped request.
@@ -342,7 +342,7 @@ module Gori
           # SKIPPED count, exactly as a malformed `content.text` already does. A corrupt payload
           # is a malformed entry, and a counted skip beats storing bytes that are not the ones
           # the message had. An absent or empty `data` is a legal zero-length frame.
-          payload = encoded_body(h["data"]?.try(&.as_s?) || "", h["encoding"]?.try(&.as_s?)) || Bytes.empty
+          payload = encoded_body(h["data"]?.try(&.as_s?) || "", h["encoding"]?.try(&.as_s?), "a WebSocket message") || Bytes.empty
           # `_origin` is gori's own extension (`Export::Har`, #1630). Only the one value gori
           # writes is kept: any other string is a foreign file's, and the column means "gori".
           injected = h["_origin"]?.try(&.as_s?) == Store::WsMessage::ORIGIN_GORI
@@ -481,7 +481,7 @@ module Gori
       # `[]?` raises on a JSON null, which the per-entry rescue turned into a lost request.
       private def self.post_body(node : JSON::Any?) : {Bytes?, Bool}
         return {nil, false} unless node && node.as_h?
-        if body = encoded_body(node["text"]?.to_s, node["encoding"]?.to_s)
+        if body = encoded_body(node["text"]?.to_s, node["encoding"]?.to_s, "request postData")
           return {body, false}
         end
         params = node["params"]?.try(&.as_a?).try(&.select(&.as_h?)) || return {nil, false}
@@ -523,13 +523,21 @@ module Gori
         content = resp["content"]?
         return {nil, nil, nil} unless content && content.as_h?
         mime = content["mimeType"]?.to_s.presence
-        body = encoded_body(content["text"]?.to_s, content["encoding"]?.to_s)
+        body = encoded_body(content["text"]?.to_s, content["encoding"]?.to_s, "response content")
         {body, mime, declared_size(content["size"]?)}
       end
 
-      private def self.encoded_body(text : String, encoding : String?) : Bytes?
+      private def self.encoded_body(text : String, encoding : String?, field : String) : Bytes?
         return nil if text.empty?
-        encoding.try(&.downcase) == "base64" ? Base64.decode(text) : text.to_slice
+        encoding.try(&.downcase) == "base64" ? base64(text, field) : text.to_slice
+      end
+
+      # `Base64::Error` says only "Unexpected byte 0x21 at 0", which as a skip reason does not
+      # say what was malformed.
+      private def self.base64(text : String, field : String) : Bytes
+        Base64.decode(text)
+      rescue ex : Base64::Error
+        raise Gori::Error.new("#{field} is not valid base64 (#{ex.message})")
       end
 
       # `Export::Har` writes the stored version verbatim and says this maps it back onto
