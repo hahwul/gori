@@ -2641,6 +2641,10 @@ describe Gori::Tui::RepeaterView do
       view.clear_marks.should contain("cleared")
       view.request_text.should eq(smuggle)
       String.new(view.request_bytes).should eq(smuggle)
+      # Not undoable: clearing un-declares the markers, so an undo would bring `§` back as
+      # literal bytes on the wire.
+      view.@editor.undo
+      view.request_text.should eq(smuggle)
     end
 
     it "the marker-strip confirm keeps the terminators" do

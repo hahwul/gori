@@ -86,7 +86,9 @@ class Gori::Tui::RepeaterView
   def clear_marks : String
     return mark_hint unless markable?
     return literal_marker_hint unless markers_live?
-    @editor.remark_keeping_eols(Fuzz::Template.clear_markers(@editor.text))
+    # `set_text_keeping_eols`, not the undoable `remark_keeping_eols`: this un-declares the
+    # markers below, so an undo would bring back `§…§` the send then reads as literal bytes.
+    @editor.set_text_keeping_eols(Fuzz::Template.clear_markers(@editor.text))
     @markers_declared = false # back to a buffer with no markers of its own
     invalidate_marker_caches
     @dirty = true
