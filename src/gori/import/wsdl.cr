@@ -222,8 +222,7 @@ module Gori
           return nil
         end
         unless scheme.downcase.in?("http", "https")
-          # Not "missing scheme": `Builder.normalize_url` would say that, and it reads as a
-          # parse failure when the real answer is that gori does not speak this transport.
+          # Refused here, with the port name, rather than left to `Builder.normalize_url`.
           yield %(port #{port.name.inspect} publishes a #{scheme}: address, which is not a transport gori speaks)
           return nil
         end

@@ -144,7 +144,7 @@ describe Gori::Import do
         result = Gori::Import.import_file(store, :urls, urls)
         {result.count, result.skipped}.should eq({1, 2})
         result.notes.size.should eq(2)
-        result.notes[0].should start_with("skipped line 3: invalid URL (missing scheme)")
+        result.notes[0].should start_with("skipped line 3: invalid URL (ftp: is not a transport gori speaks)")
         result.notes[1].should start_with("skipped line 4: invalid URL (port out of range)")
       end
     ensure

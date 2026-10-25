@@ -158,7 +158,8 @@ module Gori
         return u if u.starts_with?(HTTP_SCHEME)
         raise Gori::Error.new("invalid URL (malformed scheme): #{url}") if u.matches?(HTTP_SCHEME_MANGLED)
         if u.matches?(LEADING_SCHEME) || u.matches?(SCHEME_NO_AUTHORITY)
-          raise Gori::Error.new("invalid URL (missing scheme): #{url}")
+          # The scheme is there, just not one gori sends: say that, as `Wsdl` does.
+          raise Gori::Error.new("invalid URL (#{u[0, u.index!(':')]}: is not a transport gori speaks): #{url}")
         end
         "https://#{u}"
       end
