@@ -289,6 +289,20 @@ describe Gori::Tui::TrafficEmptyState do
     backend.contains?("Discover here").should be_true
   end
 
+  # The menu-only chip is `Hotkeys.menu_chip`'s spelling, never the arrowless ` space > D `.
+  it "spells the discover card's menu chip the shared way" do
+    prev = TrafficEmptyState.registry
+    begin
+      TrafficEmptyState.registry = Gori::Verbs.registry
+      backend = MemoryBackend.new(60, 12)
+      TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 60, 12), variant: :discover)
+      backend.contains?(" #{Gori::Hotkeys.menu_chip(Gori::Verbs.registry, "sitemap.discover")} ").should be_true
+      backend.contains?(" space ").should be_false
+    ensure
+      TrafficEmptyState.registry = prev
+    end
+  end
+
   # The cards' chord chips are literals until the Runner hands the module a registry; with
   # one, a chip names the key the operator actually bound — including the `KEY:WORD` chips,
   # whose WORD half is a state, not a key.

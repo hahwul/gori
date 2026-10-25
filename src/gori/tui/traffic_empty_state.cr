@@ -793,10 +793,10 @@ module Gori::Tui
       Hotkeys.expand_menu_paths(registry, "{space:#{verb}}")
     end
 
-    # …and the same path as a chip: ` space > D `, or a bare ` space ` without a registry.
+    # …and the same path as a chip (`Hotkeys.menu_chip`, the one chip spelling), padded like
+    # every other chip on these cards.
     private def menu_chip(verb : String) : String
-      keys = registry.try(&.menu_keys(verb))
-      keys ? " space #{keys.join(' ')} " : " space "
+      " #{Hotkeys.menu_chip(registry, verb)} "
     end
 
     # A ` KEY ` or ` KEY:WORD ` chip; with `verb`, KEY is resolved through #key and the
