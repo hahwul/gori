@@ -70,7 +70,7 @@ module Gori
         status = nil.as(Int32?)
         schema =
           if send
-            parsed, status = graphql_fetch(prefix, project, detail, legacy, allow_unscoped, !insecure, timeout, overrides)
+            parsed, status = graphql_fetch(prefix, project, detail, legacy, allow_unscoped, !insecure, timeout, overrides, format)
             parsed
           else
             if detail.response_body_truncated?
@@ -83,7 +83,7 @@ module Gori
             parsed
           end
 
-        s = Graphql::Schema.summarize(schema, filter, max_bytes)
+        s = Graphql::Schema.summarize(schema, filter, max_bytes, sent: send)
         if format == :json
           puts graphql_schema_json(flow_id, send, status, s)
         else
@@ -109,7 +109,8 @@ module Gori
       # Aborts on a refusal, a failed send, or an answer that is not a schema.
       private def self.graphql_fetch(prefix : String, project : Project, detail : Store::FlowDetail,
                                      legacy : Bool, allow_unscoped : Bool, verify : Bool,
-                                     timeout : Time::Span?, overrides : Gori::HostOverrides?) : {JSON::Any, Int32?}
+                                     timeout : Time::Span?, overrides : Gori::HostOverrides?,
+                                     format : Symbol = :text) : {JSON::Any, Int32?}
         outbound = project_outbound(project, allow_unscoped)
         plan = begin
           Repeater::Plan.build(Graphql::Schema.plan_options(detail, legacy: legacy, verify: verify,
@@ -121,8 +122,8 @@ module Gori
           outbound.close
           abort "#{prefix}: #{ex.message}"
         end
-        abort_if_out_of_scope!(outbound, plan, prefix)
-        abort_if_blocked!(plan, prefix)
+        abort_if_out_of_scope!(outbound, plan, prefix, format)
+        abort_if_blocked!(plan, prefix, format)
         result = begin
           plan.send
         ensure
