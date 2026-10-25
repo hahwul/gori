@@ -36,6 +36,11 @@ describe Gori::Import::Insomnia do
     result.flows.map(&.request.target).should eq(["/one", "/two"])
     result.flows.map(&.request.method).should eq(["GET", "DELETE"])
     result.flows.map(&.response).should eq([nil, nil])
+    result.skipped.should eq(0)
+    result.notes.should eq([
+      %(not imported: websocket_request "ws_1" — only HTTP requests become flows),
+      %(not imported: grpc_request "grpc_1" — only HTTP requests become flows),
+    ])
   end
 
   it "expands {{ _.var }} from the base environment merged with the first sub-environment" do
@@ -184,6 +189,7 @@ describe Gori::Import::Insomnia do
     bodies[0].should eq("u=a+b")
     bodies[1].not_nil!.should contain(%(Content-Disposition: form-data; name="field"))
     bodies[1].not_nil!.should_not contain("upload")
+    result.notes.should eq([%(request 2: dropped file part "upload" — it names a file on the exporter's disk, which the export does not carry)])
     bodies[2].should eq(%({"a":1}))
     bodies[3].should be_nil # a `fileName`-only body names a path on the exporter's disk
     heads(result)[2].should contain("Content-Type: application/json")

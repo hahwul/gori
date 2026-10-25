@@ -404,6 +404,11 @@ module Gori
         if i = node.as_i64?
           return i
         end
+        # A numeric STRING (`"status": "404"`, some exporters quote every field) read as no
+        # status at all, so the entry imported as Pending and its response body was lost.
+        if s = node.as_s?
+          return s.strip.to_i64?
+        end
         f = node.as_f?
         return nil unless f && f.finite?
         # STRICT at the top: `Int64::MAX.to_f64` rounds UP to 2^63, one more than Int64 holds,

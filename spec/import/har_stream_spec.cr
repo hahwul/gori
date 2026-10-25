@@ -163,6 +163,16 @@ describe "Import::Har.each_flow" do
     end
   end
 
+  it "reads a quoted numeric status, keeping the response and its body" do
+    with_har(%({"log":{"entries":[#{har_entry(1).sub(%("status":200), %("status":"404"))}]}})) do |path|
+      pairs = [] of Gori::Import::Builder::FlowPair
+      Gori::Import::Har.each_flow(path) { |pair| pairs << pair }
+      resp = pairs[0].response.not_nil!
+      resp.status.should eq(404)
+      String.new(resp.body.not_nil!).should eq("ok")
+    end
+  end
+
   it "skips a leading UTF-8 BOM" do
     with_har("\u{FEFF}" + %({"log":{"entries":[#{har_entry(1)}]}})) do |path|
       seen = [] of String

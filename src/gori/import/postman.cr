@@ -74,7 +74,9 @@ module Gori
           # One bad request (unresolved variable, non-http scheme, host-less URL) skips
           # rather than aborting the collection — the contract every import parser shares.
           begin
-            pairs << Vars.per_entry { request_to_flow(now, req, scoped, scoped_auth, missing, prov) }
+            notes = [] of String
+            pairs << Vars.per_entry { request_to_flow(now, req, scoped, scoped_auth, missing, prov, notes) }
+            notes.each { |n| skips.note("request #{h["name"]?.try(&.as_s?).to_s.inspect}: #{n}") }
           rescue ex
             skips.add("request #{h["name"]?.try(&.as_s?).to_s.inspect}", ex)
           end
@@ -89,7 +91,7 @@ module Gori
 
       private def self.request_to_flow(now : Int64, req : JSON::Any, vars : Vars::Table,
                                        auth : JSON::Any?, missing : Set(String),
-                                       prov : Provenance) : Builder::FlowPair
+                                       prov : Provenance, notes : Array(String)) : Builder::FlowPair
         # `"request": "https://example.com/x"` is legal shorthand for a bare GET.
         if s = req.as_s?
           return Builder.pending_request(now, resolve_url(s, vars, missing),
@@ -99,7 +101,7 @@ module Gori
         method = h["method"]?.to_s.presence || "GET"
         url = url_of(h["url"]?, vars, missing)
         headers = header_list(h["header"]?, vars)
-        body, content_type = body_of(h["body"]?, vars)
+        body, content_type = body_of(h["body"]?, vars, notes)
         # An explicit Content-Type header always wins over the one the body mode implies.
         if content_type && !headers.any? { |(k, _)| k.compare("content-type", case_insensitive: true) == 0 }
           headers << {"Content-Type", content_type}
@@ -247,7 +249,7 @@ module Gori
         list
       end
 
-      private def self.body_of(node : JSON::Any?, vars : Vars::Table) : {Bytes?, String?}
+      private def self.body_of(node : JSON::Any?, vars : Vars::Table, notes : Array(String)) : {Bytes?, String?}
         h = node.try(&.as_h?)
         return {nil, nil} unless h
         return {nil, nil} if h["disabled"]?.try(&.as_bool?) == true
@@ -260,7 +262,7 @@ module Gori
           return {nil, nil} if pairs.empty?
           {URI::Params.build { |f| pairs.each { |(k, v)| f.add(k, v) } }.to_slice, "application/x-www-form-urlencoded"}
         when "formdata"
-          Vars.form_data(h["formdata"]?) { |rows| kv_pairs(rows, vars) }
+          Vars.form_data(h["formdata"]?, notes) { |rows| kv_pairs(rows, vars) }
         when "graphql"
           graphql(h["graphql"]?, vars)
         else

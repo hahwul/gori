@@ -302,6 +302,8 @@ describe Gori::Import::Postman do
     bodies[1].should eq("u=a+b&p=q%26z")
     bodies[2].not_nil!.should contain(%(Content-Disposition: form-data; name="field"))
     bodies[2].not_nil!.should_not contain("upload") # a `file` part names a path on the exporter's disk
+    result.notes.should eq([%(request "": dropped file part "upload" — it names a file on the exporter's disk, which the export does not carry)])
+    result.skipped.should eq(0)
     bodies[3].should eq(%({"query":"{ me }","variables":{"n":1}}))
     bodies[4].should be_nil # `file` mode reads nothing off the local filesystem
 

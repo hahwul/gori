@@ -16,7 +16,8 @@ module Gori
     module Insomnia
       # Only HTTP requests. `websocket_request` and `grpc_request` are separate resource
       # types that History has no request-shaped representation for.
-      REQUEST_TYPE = "request"
+      REQUEST_TYPE   = "request"
+      NOT_HTTP_TYPES = {"websocket_request", "grpc_request"}
 
       def self.parse_file(path : String, prov : Provenance = Provenance.none) : ParseResult
         raw = File.read(path).lchop('\u{FEFF}')
@@ -26,15 +27,7 @@ module Gori
         if v5?(raw) || File.extname(path).downcase.in?(".yaml", ".yml")
           raise Gori::Error.new("this looks like an Insomnia v5 (YAML) export — re-export as \"Insomnia v4 (JSON)\"")
         end
-        doc = begin
-          JSON.parse(raw)
-        rescue ex : JSON::ParseException
-          raise Gori::Error.new("Insomnia export is not valid JSON: #{ex.message}")
-        end
-        root = doc.as_h? || raise Gori::Error.new("Insomnia export is not a JSON object")
-        resources = root["resources"]?.try(&.as_a?)
-        raise Gori::Error.new("Insomnia export has no `resources` array — is this an Insomnia v4 export?") unless resources
-
+        resources = resources_of(raw)
         vars = environment_table(resources)
         groups = request_groups(resources)
         # One layered table per folder, not per request: the export decides how many requests a
@@ -48,12 +41,19 @@ module Gori
         resources.each do |res|
           h = res.as_h?
           next unless h
-          next unless h["_type"]?.to_s == REQUEST_TYPE
+          type = h["_type"]?.to_s
+          if type.in?(NOT_HTTP_TYPES)
+            skips.note("not imported: #{type} #{(h["name"]? || h["_id"]?).to_s.inspect} — only HTTP requests become flows")
+            next
+          end
+          next unless type == REQUEST_TYPE
           found += 1
           # One bad request skips; the rest of the export still imports.
           begin
             table = folder_tables.put_if_absent(h["parentId"]?.to_s) { folder_vars(h, groups, vars) }
-            pairs << Vars.per_entry { resource_to_flow(now, h, table, missing, prov) }
+            notes = [] of String
+            pairs << Vars.per_entry { resource_to_flow(now, h, table, missing, prov, notes) }
+            notes.each { |n| skips.note("request #{found}: #{n}") }
           rescue ex
             skips.add("request #{found}", ex)
           end
@@ -63,6 +63,17 @@ module Gori
         # environment that was not exported must not be reported as "malformed".
         raise Gori::Error.new(unresolved_message(skips.count, missing)) if pairs.empty? && !missing.empty?
         skips.result(pairs)
+      end
+
+      private def self.resources_of(raw : String) : Array(JSON::Any)
+        doc = begin
+          JSON.parse(raw)
+        rescue ex : JSON::ParseException
+          raise Gori::Error.new("Insomnia export is not valid JSON: #{ex.message}")
+        end
+        root = doc.as_h? || raise Gori::Error.new("Insomnia export is not a JSON object")
+        root["resources"]?.try(&.as_a?) ||
+          raise Gori::Error.new("Insomnia export has no `resources` array — is this an Insomnia v4 export?")
       end
 
       private def self.v5?(raw : String) : Bool
@@ -145,11 +156,11 @@ module Gori
 
       private def self.resource_to_flow(now : Int64, res : Hash(String, JSON::Any),
                                         vars : Vars::Table, missing : Set(String),
-                                        prov : Provenance) : Builder::FlowPair
+                                        prov : Provenance, notes : Array(String)) : Builder::FlowPair
         method = res["method"]?.to_s.presence || "GET"
         url = resolve_url(res, vars, missing)
         headers = header_list(res["headers"]?, vars)
-        body, content_type = body_of(res["body"]?, vars)
+        body, content_type = body_of(res["body"]?, vars, notes)
         if content_type
           if i = headers.index { |(k, _)| k.compare("content-type", case_insensitive: true) == 0 }
             # Insomnia writes its own `multipart/form-data` header and frames the parts with a
@@ -208,7 +219,7 @@ module Gori
         list
       end
 
-      private def self.body_of(node : JSON::Any?, vars : Vars::Table) : {Bytes?, String?}
+      private def self.body_of(node : JSON::Any?, vars : Vars::Table, notes : Array(String)) : {Bytes?, String?}
         h = node.try(&.as_h?)
         return {nil, nil} unless h
         mime = h["mimeType"]?.to_s
@@ -218,7 +229,7 @@ module Gori
           return {nil, nil} if pairs.empty?
           {URI::Params.build { |f| pairs.each { |(k, v)| f.add(k, v) } }.to_slice, mime}
         when "multipart/form-data"
-          Vars.form_data(h["params"]?) { |rows| named(rows, vars) }
+          Vars.form_data(h["params"]?, notes) { |rows| named(rows, vars) }
         else
           # Everything else is stored as `text` — JSON, XML, GraphQL (already a JSON
           # `{query, variables}` document), plain text. A body with only `fileName` names a

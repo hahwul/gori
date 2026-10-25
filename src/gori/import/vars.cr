@@ -129,13 +129,17 @@ module Gori
       # A multipart body of a form editor's enabled text rows; the block reads each format's
       # own `{name, value}` pairs out of them. A `type: "file"` part references a path on
       # the exporter's machine, so dropping it keeps the other fields rather than discarding
-      # the whole request.
-      def self.form_data(node : JSON::Any?, & : JSON::Any -> Array({String, String})) : {Bytes?, String?}
+      # the whole request — and says so in `notes`, as curl's `-F f=@file` does.
+      def self.form_data(node : JSON::Any?, notes : Array(String), & : JSON::Any -> Array({String, String})) : {Bytes?, String?}
         arr = node.try(&.as_a?)
         return {nil, nil} unless arr
         text_parts = arr.select do |item|
           h = item.as_h?
-          !!h && h["disabled"]?.try(&.as_bool?) != true && h["type"]?.to_s != "file"
+          next false unless h && h["disabled"]?.try(&.as_bool?) != true
+          next true unless h["type"]?.to_s == "file"
+          name = (h["key"]? || h["name"]?).to_s
+          notes << "dropped file part #{name.inspect} — it names a file on the exporter's disk, which the export does not carry"
+          false
         end
         pairs = yield JSON::Any.new(text_parts)
         return {nil, nil} if pairs.empty?
