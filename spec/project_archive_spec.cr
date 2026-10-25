@@ -701,6 +701,18 @@ describe Gori::ProjectArchive do
     end
   end
 
+  it "keeps an unreadable archive's own error instead of calling it not a zip" do
+    posix_only!("chmod 000 does not deny the owner a read on Windows")
+    with_archive_project do |_registry, _project, _store, root|
+      path = File.join(root, "locked.gori")
+      File.write(path, "x")
+      File.chmod(path, 0o000)
+      error = expect_raises(Exception) { Gori::ProjectArchive.prepare_import(path) }
+      File.chmod(path, 0o600)
+      error.message.not_nil!.should_not contain("not a zip file")
+    end
+  end
+
   it "wraps corrupt deflate streams and removes the partial import directory" do
     with_archive_project do |_registry, project, _store, root|
       exported = Gori::ProjectArchive.prepare_export(project)

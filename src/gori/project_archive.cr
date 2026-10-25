@@ -505,7 +505,9 @@ module Gori
             ensure_uncompressed_limit!(total)
           end
         end
-      rescue Compress::Zip::Error | IO::Error
+      rescue ex : Compress::Zip::Error | IO::Error
+        # A file gori cannot read (permissions) keeps its own error; only a bad shape is "not a zip".
+        raise ex if ex.is_a?(File::Error)
         raise Gori::Error.new("'#{source}' is not a gori project archive (not a zip file)")
       end
     end
