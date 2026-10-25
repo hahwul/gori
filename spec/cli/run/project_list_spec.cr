@@ -230,7 +230,7 @@ describe "gori run project list" do
     rewriter.should contain("CLI::Output.term_safe(project.name)")
     colormarker = File.read(File.join(cli_root, "run", "colormarker.cr"))
     colormarker.should contain("CLI::Output.term_safe(project.name)")
-    source.should contain("terminal_project_name(positional.first)")
+    source.should contain(%q(no project matching '#{terminal_project_name(name)}'))
     source.should contain("terminal_project_name(name)}'")
   end
 
