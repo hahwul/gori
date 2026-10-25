@@ -162,8 +162,9 @@ module Gori
       NOTE_FENCE   = /\A {0,3}(`{3,}|~{3,})/
 
       # An issue's notes sit under its `##` heading, so a `## Repro` in them read as the next
-      # issue. Every ATX heading outside a code fence goes two levels down (capped at `######`),
-      # below the issue and its `###` sections. Setext headings are left as typed.
+      # issue. Every ATX heading outside a code fence goes three levels down (capped at `######`),
+      # so even a `#` lands below the issue's `###` sections. Setext headings, and headings inside
+      # a blockquote or list item, are left as typed.
       def self.demote_note_headings(notes : String) : String
         fence = nil.as(String?)
         String.build do |io|
@@ -177,7 +178,7 @@ module Gori
                 fence = nil
               end
             elsif fence.nil? && (m = line.match(NOTE_HEADING))
-              line = "#{m[1]}#{"#" * Math.min(m[2].size + 2, 6)}#{m.post_match}"
+              line = "#{m[1]}#{"#" * Math.min(m[2].size + 3, 6)}#{m.post_match}"
             end
             io << line
           end

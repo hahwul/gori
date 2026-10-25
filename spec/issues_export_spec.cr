@@ -327,13 +327,14 @@ describe Gori::Issues::Export do
     it "demotes a heading in the notes below the issue's own, but not inside a code fence" do
       with_store do |store|
         id = store.insert_issue("clean title", Gori::Store::Severity::Low, "clean.host", nil)
-        store.update_issue(id, notes: "## Repro\n1. send it\n```\n# shell comment\n```\n##### deep\n#nohash")
+        store.update_issue(id, notes: "## Repro\n1. send it\n```\n# shell comment\n```\n##### deep\n# top\n#nohash")
         md = Gori::Issues::Export.markdown(store.issues, store, "proj")
         md.lines.count(&.starts_with?("## ")).should eq(1) # the issue's own heading only
-        md.should contain("\n#### Repro\n")
+        md.should contain("\n##### Repro\n")
         md.should contain("\n# shell comment\n") # fenced: untouched
         md.should contain("\n###### deep\n")
-        md.should contain("\n#nohash") # not a heading
+        md.should contain("\n#### top\n") # below the issue's ### sections
+        md.should contain("\n#nohash")    # not a heading
       end
     end
 
@@ -343,7 +344,7 @@ describe Gori::Issues::Export do
         store.update_issue(id, notes: "```\n```python\n# still code\n```\n## after")
         md = Gori::Issues::Export.markdown(store.issues, store, "proj")
         md.should contain("\n# still code\n")
-        md.should contain("\n#### after")
+        md.should contain("\n##### after")
       end
     end
 
