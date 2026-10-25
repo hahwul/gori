@@ -26,7 +26,7 @@ module Gori
         {"probe dismiss", "Mute a finding by id, or bulk by --code / --host"},
         {"probe promote", "Promote a finding to a human-confirmed Issue"},
         {"probe delete", "Hard-delete a finding (or --all)"},
-        {"probe rules", "List/enable/disable scan rules; add or delete custom ones"},
+        {"probe rules", "List/enable/disable scan rules; add, update or delete custom ones"},
         {"probe mode", "Get/set the scan mode (off, passive, active, aggressive)"},
       ])]
       private def self.cmd_probe(args : Array(String)) : Nil
@@ -427,6 +427,7 @@ module Gori
         when "enable"       then cmd_probe_rule_enabled(args[1..], true)
         when "disable"      then cmd_probe_rule_enabled(args[1..], false)
         when "add"          then cmd_probe_rule_add(args[1..])
+        when "update"       then cmd_probe_rule_update(args[1..])
         when "delete", "rm" then cmd_probe_rule_delete(args[1..])
         when "list"         then cmd_probe_rules_list(args[1..])
         else
@@ -434,7 +435,7 @@ module Gori
           # `probe rules remove my-rule` (or `disble`) listed the rules and exited 0.
           if verb_token?(sub)
             abort "gori run probe rules: unknown subcommand '#{sub}' " \
-                  "(add, enable, disable, delete/rm, list)"
+                  "(add, update, enable, disable, delete/rm, list)"
           end
           cmd_probe_rules_list(args)
         end
@@ -454,7 +455,7 @@ module Gori
           p.on("--kind=KIND", "Only list rules of this kind (passive|active|custom)") { |v| kind = parse_rule_kind(v) }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
-        refuse_list_leftovers(leftover, "probe rules", "add, enable, disable, delete/rm")
+        refuse_list_leftovers(leftover, "probe rules", "add, update, enable, disable, delete/rm")
 
         entries, mode = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           list = Probe::RuleCatalog.load(store)
@@ -544,14 +545,8 @@ module Gori
         abort "gori run probe rules add: --title is required" if t.nil? || t.empty?
         pat = pattern
         abort "gori run probe rules add: --pattern is required" if pat.nil? || pat.empty?
-        abort "gori run probe rules add: invalid --side '#{side}' (#{Probe::CustomRule::SIDES.join("|")})" unless Probe::CustomRule::SIDES.includes?(side)
-        abort "gori run probe rules add: invalid --region '#{region}' (#{Probe::CustomRule::REGIONS.join("|")})" unless Probe::CustomRule::REGIONS.includes?(region)
-        # A regex PCRE rejects would match nothing forever while reporting the rule saved fine.
-        unless Probe::CustomRule.valid_pattern?(pat, match_kind)
-          abort match_kind == "exec" \
-                               ? "gori run probe rules add: --pattern is the command to run for --exec and it does not " \
-                                 "tokenize (it is exec'd directly — there is no shell, so quote arguments, not pipelines)" \
-                                  : "gori run probe rules add: invalid regex --pattern (PCRE rejected it)"
+        if err = probe_rule_shape_error(side, region, match_kind, pat)
+          abort "gori run probe rules add: #{err}"
         end
         severity = Store::Severity.parse?(sev_s.strip) || abort("gori run probe rules add: invalid --severity '#{sev_s}' (info|low|medium|high|critical)")
 
@@ -559,6 +554,99 @@ module Gori
           id = store.insert_probe_custom_rule(t, description, side, region, match_kind, pat, severity)
           abort "gori run probe rules add: failed to persist the rule (store busy or unwritable)" if id == 0
           puts probe_rule_added_output(store, id, format)
+        end
+      end
+
+      # Why a custom rule's side/region/kind/pattern cannot be saved, or nil — `add`'s and
+      # `update`'s checks, against the `Probe::CustomRule` sets and `valid_pattern?` MCP's
+      # `create_probe_rule`/`update_probe_rule` judge with.
+      private def self.probe_rule_shape_error(side : String, region : String, kind : String, pattern : String) : String?
+        return "invalid --side '#{side}' (#{Probe::CustomRule::SIDES.join("|")})" unless Probe::CustomRule::SIDES.includes?(side)
+        return "invalid --region '#{region}' (#{Probe::CustomRule::REGIONS.join("|")})" unless Probe::CustomRule::REGIONS.includes?(region)
+        # A regex PCRE rejects would match nothing forever while reporting the rule saved fine.
+        return nil if Probe::CustomRule.valid_pattern?(pattern, kind)
+        return "invalid regex --pattern (PCRE rejected it)" unless kind == "exec"
+        "--pattern is the command to run for --exec and it does not tokenize " \
+        "(it is exec'd directly — there is no shell, so quote arguments, not pipelines)"
+      end
+
+      # `probe rules update`'s flags. nil = not given, so the rule keeps its value.
+      class ProbeRuleUpdateFlags
+        property title : String? = nil
+        property pattern : String? = nil
+        property description : String? = nil
+        property side : String? = nil
+        property region : String? = nil
+        property match_kind : String? = nil
+        property severity : String? = nil
+
+        # `--string`/`--regex`/`--exec` are one setting: two that disagree are refused.
+        def kind=(v : String) : Nil
+          if (k = @match_kind) && k != v
+            abort "gori run probe rules update: --string, --regex and --exec are mutually exclusive"
+          end
+          @match_kind = v
+        end
+      end
+
+      # The rule `probe rules update` writes — each given flag over `prev`'s field — or the
+      # refusal (without the prefix). Public so a spec can pin it: the command ends in `abort`.
+      def self.probe_rule_update(f : ProbeRuleUpdateFlags, prev : Store::ProbeCustomRule) : Store::ProbeCustomRule | String
+        if [f.title, f.pattern, f.description, f.side, f.region, f.match_kind, f.severity].all?(Nil)
+          return "nothing to change — pass --title, --pattern, --description, --side, --region, " \
+                 "--string/--regex/--exec or --severity"
+        end
+        if blank = Probe::CustomRule.blank_update_field(f.title, f.pattern)
+          return "--#{blank} must not be blank (omit it to keep the current #{blank})"
+        end
+        side = f.side.try(&.strip.downcase) || prev.side
+        region = f.region.try(&.strip.downcase) || prev.region
+        kind = f.match_kind || prev.kind
+        pattern = f.pattern || prev.pattern
+        if err = probe_rule_shape_error(side, region, kind, pattern)
+          return err
+        end
+        severity = prev.severity
+        if s = f.severity
+          severity = Store::Severity.parse?(s.strip) || return "invalid --severity '#{s}' (info|low|medium|high|critical)"
+        end
+        Store::ProbeCustomRule.new(prev.id, f.title || prev.title, f.description || prev.description,
+          side, region, kind, pattern, severity, prev.enabled?)
+      end
+
+      # `gori run probe rules update <custom-rule-id>`: edit a project custom rule in place —
+      # the headless `update_probe_rule`. A flag left out keeps the stored value.
+      private def self.cmd_probe_rule_update(args : Array(String)) : Nil
+        cmd = "gori run probe rules update"
+        proj = ProjectFlags.new
+        f = ProbeRuleUpdateFlags.new
+
+        positional = one_positional_list(args, cmd, "<custom-rule-id>") do |p|
+          p.banner = "Usage: #{cmd} <custom-rule-id> [options]\n\n" \
+                     "Edit a project custom rule in place. A flag left out keeps the stored value."
+          project_options(p, proj, "write")
+          p.on("-tTITLE", "--title=TITLE", "New rule name") { |v| f.title = v }
+          p.on("-pPATTERN", "--pattern=PATTERN", "New string, regex or command") { |v| f.pattern = v }
+          p.on("--description=TEXT", "What the rule is for ('' clears it)") { |v| f.description = v }
+          p.on("--side=SIDE", "request|response") { |v| f.side = v }
+          p.on("--region=REGION", "whole|header|body") { |v| f.region = v }
+          p.on("--string", "Treat --pattern as a literal string") { f.kind = "string" }
+          p.on("--regex", "Treat --pattern as a regex") { f.kind = "regex" }
+          p.on("--exec", "Treat --pattern as a COMMAND (see `probe rules add --help`)") { f.kind = "exec" }
+          p.on("-sSEVERITY", "--severity=SEVERITY", "info|low|medium|high|critical") { |v| f.severity = v }
+        end
+
+        id = positional.first? || abort("#{cmd}: <custom-rule-id> is required (see `gori run probe rules`)")
+        row_id = probe_custom_row_id(id) ||
+                 abort("#{cmd}: '#{id}' is not a project custom rule (only project custom rules are editable)")
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
+          prev = store.probe_custom_rules.find { |r| r.id == row_id } || abort_closing(store, "#{cmd}: no custom rule with id '#{id}'")
+          r = probe_rule_update(f, prev)
+          abort_closing(store, "#{cmd}: #{r}") if r.is_a?(String)
+          unless store.update_probe_custom_rule(row_id, r.title, r.description, r.side, r.region, r.kind, r.pattern, r.severity)
+            abort_closing(store, "#{cmd}: custom rule '#{id}' NOT updated (project busy) — it keeps its previous pattern")
+          end
+          puts "Custom rule '#{id}' updated."
         end
       end
 

@@ -40,6 +40,15 @@ module Gori
       REGIONS = %w[whole header body]
       KINDS   = %w[string regex exec]
 
+      # Which of an update's GIVEN `title`/`pattern` is blank ("title" | "pattern"), or nil. A
+      # blank one is refused rather than read as "keep": create refuses it, and an update that
+      # answered success while keeping the old value told the caller its edit landed. Shared by
+      # MCP `update_probe_rule` and `gori run probe rules update`; nil (omitted) keeps.
+      def self.blank_update_field(title : String?, pattern : String?) : String?
+        return "title" if title.try(&.strip.empty?)
+        "pattern" if pattern.try(&.strip.empty?)
+      end
+
       # Whether a would-be rule's pattern is usable. A regex PCRE rejects would match nothing
       # forever while every surface reported the rule saved fine (#matches? rescues to false),
       # so all three write paths validate through here before persisting. SafeRegexp.compile
