@@ -294,7 +294,8 @@ module Gori
       Settings.take_env_syntax_global_migration.try { |g| Log.info { g.line } }
       if err = session.bind_error
         STDERR.puts "gori: not capturing — #{err}"
-        STDERR.puts "  another gori instance may hold this project or the port; close it or pass --port."
+        # The lock is the project's, so --port cannot help that one.
+        STDERR.puts(session.capturing_lock_held? ? "  another program may hold the port; free it or pass --port." : "  close that instance first.")
         session.close
         exit 1
       end
@@ -627,8 +628,9 @@ module Gori
       upstream = @config.insecure_upstream? ? "insecure-upstream" : "verify-upstream"
       # The bind is what we CALL the listener; `addr` is what the user can actually type
       # into a client. Under a wildcard bind those differ — telling someone to point their
-      # proxy at "0.0.0.0:8070" hands them a string no client can connect to.
-      addr = BindAddress.display(proxy.host, proxy.port)
+      # proxy at "0.0.0.0:8070" hands them a string no client can connect to. Any other bind
+      # prints as bound: "localhost" for a 127.0.0.1 listener names an address (::1) it is not on.
+      addr = BindAddress.wildcard?(proxy.host) ? BindAddress.display(proxy.host, proxy.port) : BindAddress.authority(proxy.host, proxy.port)
       STDERR.puts "gori #{VERSION} listening on #{addr} (#{upstream})"
       STDERR.puts "  root CA: #{@ca.ca_cert_path}"
       STDERR.puts "  trust the CA above, then point your client's HTTP+HTTPS proxy at #{addr}"

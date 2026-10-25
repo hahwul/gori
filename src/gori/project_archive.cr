@@ -493,13 +493,20 @@ module Gori
     # A zip-bomb ratio cannot be inferred safely from the compressed file's size. Read the
     # central directory first and reject a declared expansion above the cap before allocating
     # the extracted database. `copy_entry` enforces the same limit on bytes actually produced.
+    #
+    # The first read of the file, so a file that is no zip at all is refused here as what it
+    # is, not with the zip reader's "Couldn't find directory end signature".
     private def self.validate_uncompressed_size!(source : String) : Nil
       total = 0_i64
-      Compress::Zip::File.open(source) do |zip|
-        zip.entries.each do |entry|
-          total += entry.uncompressed_size.to_i64
-          ensure_uncompressed_limit!(total)
+      begin
+        Compress::Zip::File.open(source) do |zip|
+          zip.entries.each do |entry|
+            total += entry.uncompressed_size.to_i64
+            ensure_uncompressed_limit!(total)
+          end
         end
+      rescue Compress::Zip::Error | IO::Error
+        raise Gori::Error.new("'#{source}' is not a gori project archive (not a zip file)")
       end
     end
 

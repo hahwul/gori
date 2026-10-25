@@ -690,6 +690,17 @@ describe Gori::ProjectArchive do
     end
   end
 
+  it "refuses a file that is not a zip as not a gori project archive" do
+    with_archive_project do |_registry, _project, _store, root|
+      {"tiny", "x" * 70_000}.each do |content|
+        path = File.join(root, "not-an-archive.txt")
+        File.write(path, content)
+        error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(path) }
+        error.message.not_nil!.should contain("is not a gori project archive")
+      end
+    end
+  end
+
   it "wraps corrupt deflate streams and removes the partial import directory" do
     with_archive_project do |_registry, project, _store, root|
       exported = Gori::ProjectArchive.prepare_export(project)
