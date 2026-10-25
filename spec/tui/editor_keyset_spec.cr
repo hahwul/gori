@@ -40,6 +40,15 @@ describe "the editor keyset, from the surfaces" do
     end
   end
 
+  it "reaches Help's select-line rows (Repeater, Project description)" do
+    with_keyset("vim") do
+      rows = Gori::Tui::HelpView.shortcut_rows(r)
+      rows.find(&.b.==("select the current line · extend selection")).not_nil!.a.should eq("⇧V · ⇧arrows")
+      rows.find(&.a.==("Project")).not_nil!.b.should contain("⇧V line · y copy")
+      rows.none? { |row| row.a.starts_with?("x ·") || row.b.includes?(" x line") }.should be_true
+    end
+  end
+
   it "reaches a live Repeater READ pane's footer and a Notes footer" do
     TuiContract.with_session("keyset-strips") do |session|
       host = TuiContract::Host.new(session)

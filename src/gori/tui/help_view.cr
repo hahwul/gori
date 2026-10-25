@@ -129,7 +129,7 @@ module Gori::Tui
         # literal character (and typing it over a selection REPLACES it), so INS gets the
         # ctrl form. The key column resolves `y` from the verb id; `^Y` is its second chord.
         Item.new("y · ^Y", "copy selection/line — `y` in READ, ^Y in INS too", "repeater.copy"),
-        Item.new("x · ⇧arrows", "select the current line · extend selection"),
+        Item.new("{repeater.select-line} · ⇧arrows", "select the current line · extend selection"),
         # The §…§ marker trio, same keys and same order as the FUZZER section below — the
         # Repeater grew `^K`/`^T` to match and Help documented neither.
         Item.new("{repeater.auto-mark} · {repeater.mark-word} · {repeater.toggle-decoded}", "auto-mark params · mark word · mark point (manual §)"),
@@ -323,11 +323,9 @@ module Gori::Tui
         # No pane inventory: the chip strip names all six on screen, no sibling row lists sub-panes,
         # and the parenthetical was what pushed this row past `HelpPopupOverlay::MAX_W` when the
         # sixth pane arrived — it would have broken again at the seventh. Keys only, like the rest.
-        # `x line · y copy` stay LITERAL here, unlike the sibling rows above: the description
-        # pane dispatches both raw (`ProjectController#handle_desc_read`), and the matching
-        # verbs carry no bare chord to read — `project.select-line` has none at all and
-        # `project.copy` is `^Y` only — so a token would resolve to the wrong key or to none.
-        Item.new("Project", "←/→ sub-tab · ↓/↵ enter · desc: i/↵ edit · x line · y copy · space cmds"),
+        # Tokens, like the Notes row: the description pane defers both keys to the keymap
+        # (`ProjectController#handle_desc_read`), and the vim keyset respells select-line.
+        Item.new("Project", "←/→ sub-tab · ↓/↵ enter · desc: i/↵ edit · {project.select-line} line · {project.copy} copy · space cmds"),
         # ACTIVITY is a Project sub-tab, so its keys hang off the row above rather than earning
         # a section — but `⇧X` there deletes the durable audit trail, which is the one key on
         # this tab that must be named somewhere the operator can read before pressing it.
