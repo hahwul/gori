@@ -318,18 +318,22 @@ module Gori
         abort "#{cmd}: --name must not be empty" if name.try(&.empty?)
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
-          existing = store.extract_rules.find(&.id.==(id)) || abort_closing(store, "#{cmd}: no rule ##{id}")
-          a, b = f.range || {existing.pos_start, existing.pos_end}
-          if err = Bindings.new(store, store.extract_rules).update(id, name || existing.name,
-               f.when_s || existing.match_filter, f.kind || existing.kind, f.selector || existing.selector,
-               a, b, f.host || existing.host)
-            abort_closing(store, "#{cmd}: #{err}")
-          end
-          if (en = f.enabled).is_a?(Bool) && !store.set_extract_rule_enabled(id, en)
-            abort_closing(store, "#{cmd}: rule ##{id}'s fields were updated but the enable/disable did not persist (store busy or unwritable); retry")
-          end
-          puts "Extract rule ##{id} updated."
+          write_extract_update(store, id, f, name, cmd)
         end
+      end
+
+      private def self.write_extract_update(store : Store, id : Int64, f : ExtractUpdateFlags, name : String?, cmd : String) : Nil
+        existing = store.extract_rules.find(&.id.==(id)) || abort_closing(store, "#{cmd}: no rule ##{id}")
+        a, b = f.range || {existing.pos_start, existing.pos_end}
+        if err = Bindings.new(store, store.extract_rules).update(id, name || existing.name,
+             f.when_s || existing.match_filter, f.kind || existing.kind, f.selector || existing.selector,
+             a, b, f.host || existing.host)
+          abort_closing(store, "#{cmd}: #{err}")
+        end
+        if (en = f.enabled).is_a?(Bool) && !store.set_extract_rule_enabled(id, en)
+          abort_closing(store, "#{cmd}: rule ##{id}'s fields were updated but the enable/disable did not persist (store busy or unwritable); retry")
+        end
+        puts "Extract rule ##{id} updated."
       end
 
       private def self.cmd_extract_rm(args : Array(String)) : Nil
@@ -923,23 +927,37 @@ module Gori
         return shape if shape.is_a?(String)
         target, part, op, match = shape
         pattern = f.find || existing.pattern
-        return "--find must not be empty" if pattern.empty?
-        return "invalid regex --find (failed to compile)" if match.regex? && !op.header? && !op.json? && !valid_regex?(pattern)
+        if err = update_find_error(op, match, pattern)
+          return err
+        end
         mock = rewriter_update_mock(f, existing, op, f.value || drafted || existing.replacement)
         return mock if mock.is_a?(String)
         respond, respond_args, body_file, replacement = mock
         host = f.host || existing.host
-        error = Gori::Rules.host_error(host) ||
-                (op.short_circuit? ? RuleStub.respond_error(respond, replacement, body_file, respond_args) : nil) ||
-                Gori::Rules.pipe_argv_error(op, replacement).try { |why| "--value is the command to run and #{why}" } ||
-                Gori::Rules.json_rule_error(op, part, pattern, replacement)
-        return error if error
+        if err = update_rule_error(op, part, pattern, replacement, host, respond, respond_args, body_file)
+          return err
+        end
         RewriterEdit.new(target, part, op, match, pattern, replacement, f.name || existing.name, host,
           body_file, respond, respond_args)
       end
 
-      # {target, part, op, match} after the flags, normalized as `update_rule` does.
-      private def self.rewriter_update_shape(f : RewriterUpdateFlags, existing : Store::MatchRule) : {Store::RuleTarget, Store::RulePart, Store::RuleOp, Store::MatchKind} | String
+      private def self.update_find_error(op : Store::RuleOp, match : Store::MatchKind, pattern : String) : String?
+        return "--find must not be empty" if pattern.empty?
+        "invalid regex --find (failed to compile)" if match.regex? && !op.header? && !op.json? && !valid_regex?(pattern)
+      end
+
+      # The shared validators, in `update_rule`'s order.
+      private def self.update_rule_error(op : Store::RuleOp, part : Store::RulePart, pattern : String,
+                                         replacement : String, host : String, respond : Store::RespondKind,
+                                         respond_args : String, body_file : String) : String?
+        Gori::Rules.host_error(host) ||
+          (op.short_circuit? ? RuleStub.respond_error(respond, replacement, body_file, respond_args) : nil) ||
+          Gori::Rules.pipe_argv_error(op, replacement).try { |why| "--value is the command to run and #{why}" } ||
+          Gori::Rules.json_rule_error(op, part, pattern, replacement)
+      end
+
+      # {op, target, match} after the flags.
+      private def self.rewriter_update_kinds(f : RewriterUpdateFlags, existing : Store::MatchRule) : {Store::RuleOp, Store::RuleTarget, Store::MatchKind} | String
         op = existing.op
         if s = f.op
           op = Store::RuleOp.from_label?(s.downcase) || return "invalid --op '#{s}' (#{OP_CHOICES})"
@@ -952,6 +970,14 @@ module Gori
         if s = f.match
           match = Store::MatchKind.parse?(s) || return "invalid --match '#{s}' (literal|regex)"
         end
+        {op, target, match}
+      end
+
+      # {target, part, op, match} after the flags, normalized as `update_rule` does.
+      private def self.rewriter_update_shape(f : RewriterUpdateFlags, existing : Store::MatchRule) : {Store::RuleTarget, Store::RulePart, Store::RuleOp, Store::MatchKind} | String
+        kinds = rewriter_update_kinds(f, existing)
+        return kinds if kinds.is_a?(String)
+        op, target, match = kinds
         part = existing.part
         if s = f.part
           part = Store::RulePart.parse?(s) || return "invalid --part '#{s}'"
@@ -970,29 +996,52 @@ module Gori
       # answer drops what it does not read, and a fault answers with no response.
       private def self.rewriter_update_mock(f : RewriterUpdateFlags, existing : Store::MatchRule, op : Store::RuleOp,
                                             replacement : String) : {Store::RespondKind, String, String, String} | String
-        unless op.short_circuit?
-          return "--respond, --map-dir, --fault, --delay and --from-flow need --op=short_circuit" if f.mock_given?
-          return "--body-file is only meaningful with --op=short_circuit" if (bf = f.body_file) && !bf.empty?
-          return {Store::RespondKind::Inline, "", "", replacement}
+        if err = update_mock_error(f, op)
+          return err
         end
-        return "--map-dir serves a directory; --body-file is for a single-file stub" if f.map_dir && f.body_file
-        return "--map-dir and --fault are two different answers — pick one" if f.map_dir && f.fault
+        return {Store::RespondKind::Inline, "", "", replacement} unless op.short_circuit?
         was = existing.op.short_circuit? ? existing : nil
         body_file = f.map_dir || f.body_file || was.try(&.body_file) || ""
         base = was.try(&.args) || Store::RespondArgs.new
-        fault = base.fault
-        if s = f.fault
-          fault = Store::FaultKind.from_label?(s.downcase) || return "invalid --fault '#{s}' (close|reset|hang)"
-        end
+        fault = update_fault(f, base)
+        return fault if fault.is_a?(String)
         respond = rewriter_update_respond(f, was, body_file)
         return respond if respond.is_a?(String)
-        base = base.for(respond, fault)
+        body_file, replacement = update_dropped(f, respond, body_file, replacement)
+        {respond, update_respond_args(f, base.for(respond, fault), respond, fault), body_file, replacement}
+      end
+
+      # {body_file, replacement} with what the new answer does not read cleared, unless passed.
+      private def self.update_dropped(f : RewriterUpdateFlags, respond : Store::RespondKind,
+                                      body_file : String, replacement : String) : {String, String}
         body_file = "" if (respond.inline? || respond.fault?) && f.body_file.nil?
         replacement = "" if respond.fault? && f.value.nil?
-        args = Store::RespondArgs.new(f.strip_prefix || base.strip_prefix,
-          f.fallthrough.nil? ? base.fallthrough? : f.fallthrough == true, respond.fault? ? fault : nil,
-          f.delay_ms || base.delay_ms, f.hang_ms || base.hang_ms)
-        {respond, args.to_stored, body_file, replacement}
+        {body_file, replacement}
+      end
+
+      # The answer flags that cannot go together, or on a rule that is not a short-circuit.
+      private def self.update_mock_error(f : RewriterUpdateFlags, op : Store::RuleOp) : String?
+        unless op.short_circuit?
+          return "--respond, --map-dir, --fault, --delay and --from-flow need --op=short_circuit" if f.mock_given?
+          return "--body-file is only meaningful with --op=short_circuit" if (bf = f.body_file) && !bf.empty?
+          return nil
+        end
+        return "--map-dir serves a directory; --body-file is for a single-file stub" if f.map_dir && f.body_file
+        "--map-dir and --fault are two different answers — pick one" if f.map_dir && f.fault
+      end
+
+      private def self.update_fault(f : RewriterUpdateFlags, base : Store::RespondArgs) : Store::FaultKind? | String
+        return base.fault unless s = f.fault
+        Store::FaultKind.from_label?(s.downcase) || "invalid --fault '#{s}' (close|reset|hang)"
+      end
+
+      # The stored `respond_args`: each flag given over what the new answer kept.
+      private def self.update_respond_args(f : RewriterUpdateFlags, base : Store::RespondArgs,
+                                           respond : Store::RespondKind, fault : Store::FaultKind?) : String
+        fallthrough = f.fallthrough
+        Store::RespondArgs.new(f.strip_prefix || base.strip_prefix,
+          fallthrough.nil? ? base.fallthrough? : fallthrough, respond.fault? ? fault : nil,
+          f.delay_ms || base.delay_ms, f.hang_ms || base.hang_ms).to_stored
       end
 
       # `--respond` as named, or what the other flags imply; with none of them, the rule's own.
