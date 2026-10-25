@@ -8,7 +8,7 @@ module Gori
   module MCP
     class Tools
       # Entity links — the evidence pointers an Issue or Note carries to a Flow / Repeater tab /
-      # Fuzz run / Miner run. MCP already WROTE these (send_request, create/update_issue,
+      # Fuzz / Miner session (a TUI tab). MCP already WROTE these (send_request, create/update_issue,
       # create_repeater) but had no way to read or remove one, so an agent could attach evidence
       # it could never review or correct. These are the read/unlink halves.
 
@@ -134,7 +134,7 @@ module Gori
         kind = Store::LinkRefKind.parse(kind_s)
         return err("invalid ref_kind '#{kind_s}' (flow|repeater|fuzz|miner)", "INVALID_ARGUMENT", field: "ref_kind") unless kind
         id = required_id(h, "ref_id")
-        return not_found("no #{kind.label} with id #{id}") if must_exist && !store.link_ref_exists?(kind, id)
+        return not_found("no #{kind.label}#{" session" if kind.fuzz? || kind.miner?} with id #{id}") if must_exist && !store.link_ref_exists?(kind, id)
         {kind, id}
       end
 
@@ -145,7 +145,7 @@ module Gori
       private def list_links_tools(j : JSON::Builder) : Nil
         tool j, "list_links",
           "List the evidence pointers an Issue or Note carries (to a Flow, Repeater tab, or " \
-          "Fuzz/Miner run), each resolved to a label and URL. A pointer whose target was pruned " \
+          "Fuzz/Miner session), each resolved to a label and URL. A pointer whose target was pruned " \
           "comes back with stale:true rather than dropped." do |s|
           s.field "owner_kind", enumprop("which kind of record owns the link", LINK_OWNERS), required: true
           s.field "owner_id", intprop("the issue or note id"), required: true
@@ -155,12 +155,12 @@ module Gori
 
         tool j, "add_link",
           "Attach an evidence pointer from an Issue or Note to a Flow / Repeater tab / Fuzz or " \
-          "Miner run. Idempotent: a re-link returns already_linked:true. A pointer only; for a " \
+          "Miner session (the TUI tab; list_fuzz_runs' session_id). Idempotent: a re-link returns already_linked:true. A pointer only; for a " \
           "flow or repeater whose bytes must survive, use freeze_evidence (it links too)." do |s|
           s.field "owner_kind", enumprop("which kind of record owns the link", LINK_OWNERS), required: true
           s.field "owner_id", intprop("the issue or note id"), required: true
           s.field "ref_kind", enumprop("which workbench entity the link points at", LINK_REFS), required: true
-          s.field "ref_id", intprop("id of the linked flow/repeater/fuzz/miner"), required: true
+          s.field "ref_id", intprop("id of the linked flow/repeater/fuzz session/miner session"), required: true
         end
 
         tool j, "remove_link",
@@ -169,7 +169,7 @@ module Gori
           s.field "owner_kind", enumprop("which kind of record owns the link", LINK_OWNERS), required: true
           s.field "owner_id", intprop("the issue or note id"), required: true
           s.field "ref_kind", enumprop("which workbench entity the link points at", LINK_REFS), required: true
-          s.field "ref_id", intprop("id of the linked flow/repeater/fuzz/miner"), required: true
+          s.field "ref_id", intprop("id of the linked flow/repeater/fuzz session/miner session"), required: true
         end
       end
     end

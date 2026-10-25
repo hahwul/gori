@@ -523,6 +523,21 @@ describe "MCP entity links" do
     end
   end
 
+  # `ref_kind:"fuzz"` names a TUI fuzz SESSION (`fuzz_sessions`, list_fuzz_runs' session_id),
+  # not a fuzz run id; the refusal and the schema say so.
+  it "resolves ref_kind fuzz as a fuzz session id" do
+    with_store do |store|
+      iid = store.insert_issue("x", Gori::Store::Severity::Info, nil, nil)
+      sid = store.insert_fuzz_session("https://e.test", "GET / HTTP/1.1\r\n\r\n", false, nil, "", nil, 0)
+      tools = tools_for(store)
+
+      mcp_ok_json(tools, "add_link", %({"owner_kind":"issue","owner_id":#{iid},"ref_kind":"fuzz","ref_id":#{sid}}))
+      r = tools.call("add_link", JSON.parse(%({"owner_kind":"issue","owner_id":#{iid},"ref_kind":"fuzz","ref_id":#{sid + 99}})))
+      r.error_code.should eq "NOT_FOUND"
+      r.text.should contain("no fuzz session with id")
+    end
+  end
+
   it "refuses mutation under --read-only but still lists" do
     with_store do |store|
       fid = mcp_seed_flow(store)
