@@ -690,6 +690,21 @@ describe "Intercept filter bar" do
     end
   end
 
+  it "spells the catch state on the focused chip, not only by colour" do
+    tmp_interceptor do |ic|
+      view = InterceptView.new
+      view.reload(ic)
+      on = MemoryBackend.new(100, 8)
+      view.render(Screen.new(on), Rect.new(0, 0, 100, 8), focused: true)
+      on.row(0).should contain("i:CATCH ON")
+      ic.toggle
+      view.reload(ic)
+      off = MemoryBackend.new(100, 8)
+      view.render(Screen.new(off), Rect.new(0, 0, 100, 8), focused: true)
+      off.row(0).should contain("i:CATCH OFF")
+    end
+  end
+
   it "reflects the interceptor's catch direction after a cycle" do
     tmp_interceptor do |ic|
       ic.cycle_direction # RequestOnly → ResponseOnly

@@ -953,7 +953,7 @@ module Gori::Tui
     end
 
     # Filter-bar click zones, matching render_filter_bar left-to-right:
-    #   " i:CATCH " chip → :catch
+    #   " i:CATCH ON/OFF " chip → :catch
     #   direction label (c:REQ / c:RES / c:ALL) → :direction
     #   rest of the bar → :condition (start query edit)
     # Nil while the bar is an input line (@querying) or off the bar row.
@@ -1187,7 +1187,9 @@ module Gori::Tui
 
     private def catch_chip_label : String
       if @body_focused
-        " #{key_label("intercept.toggle", "i")}:CATCH "
+        # The chord names the key, but ON/OFF stays spelled out: lit-vs-dim alone does not
+        # read on a low-contrast theme.
+        " #{key_label("intercept.toggle", "i")}:CATCH #{@enabled ? "ON" : "OFF"} "
       else
         " CATCH:#{@enabled ? "ON" : "OFF"} "
       end
