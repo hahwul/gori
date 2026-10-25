@@ -19,4 +19,17 @@ describe ProjectController do
       ctl.view.desc_text.should eq("ac")
     end
   end
+
+  # The `s` lens filters Probe's issue list too; there the toast names what it lists.
+  it "names issues, not flows, when the lens turns off on Probe" do
+    TuiContract.with_session("project-lens-noun") do |session|
+      host = FakeHost.new(session, :probe)
+      session.scope.disable
+      ProjectController.new(host).toast_scope_state
+      host.statuses.last.should eq("scope lens OFF — showing all issues")
+      host.active_tab = :history
+      ProjectController.new(host).toast_scope_state
+      host.statuses.last.should eq("scope lens OFF — showing all flows")
+    end
+  end
 end

@@ -1026,7 +1026,8 @@ module Gori::Tui
       n = scope.size
       @host.status(
         if !scope.enabled?
-          "scope lens OFF — showing all flows"
+          # Probe's list is issues, not flows (the lens filters it too — `ProbeView#set_scope`).
+          "scope lens OFF — showing all #{@host.active_tab == :probe ? "issues" : "flows"}"
         elsif n == 0
           # Signpost the add path for where the toggle fired: 'a' on the Project scope
           # pane itself, else point at the Project tab from History/Sitemap.
