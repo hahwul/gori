@@ -139,6 +139,19 @@ describe "MCP job ids of the wrong kind (#1395)" do
       plain.text.should eq("no fuzz job fz_99")
     end
   end
+
+  it "names the ids it does hold for a stale or missing id" do
+    with_store do |store|
+      port = start_origin
+      tools = tools_for(store)
+      job_id = start_fuzz(tools, port)
+      wait_terminal(tools, "fuzz", job_id)
+      tools.call("fuzz_results", JSON.parse(%({"job_id":"fz_99"}))).text
+        .should eq("no fuzz job fz_99 — this server holds fuzz job #{job_id}")
+      tools.call("fuzz_status", JSON.parse("{}")).text
+        .should eq("missing required 'job_id' — this server holds fuzz job #{job_id}")
+    end
+  end
 end
 
 describe "MCP fuzz_results evidence note (#1395)" do

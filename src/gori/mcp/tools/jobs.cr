@@ -111,14 +111,21 @@ module Gori
       # the id names ANOTHER kind — a mine id handed to fuzz_results, the mistake a caller
       # polling several jobs makes — say which tool reads it, instead of "no fuzz job mn_2"
       # about a job that exists one tool over.
-      private def job_not_found(id : String, kind : String, verb : String) : Result
+      private def job_not_found(id : String, kind : String, verb : String, held = [] of String) : Result
         other = job_kind_of(id)
         if other && other != kind
           return err("no #{kind} job #{id} — #{id} is a #{other} job: use #{suggest_job_tool(other, verb)} " \
                      "(or get_job / stop_job, which take any kind)", "NOT_FOUND",
             field: "job_id", details: JSON.parse({"job_kind" => other}.to_json))
         end
-        not_found("no #{kind} job #{id}")
+        not_found("no #{kind} job #{id}#{held_jobs_hint(kind, held)}")
+      end
+
+      # The ids this server holds for `kind`, so a guessed or stale id (a job from an earlier
+      # server process) reads with the ones that would answer; empty when there are none.
+      private def held_jobs_hint(kind : String, held : Array(String)) : String
+        return "" if held.empty?
+        " — this server holds #{kind} job#{held.size == 1 ? "" : "s"} #{held.last(5).join(", ")}"
       end
 
       # The tool that reads `verb` for `kind`. The five async kinds share `_status`/`_results`/
@@ -136,9 +143,11 @@ module Gori
       private def lookup_job(h, jobs : Hash(String, T), kind : String, verb : String,
                              missing_field : String? = nil) : T | Result forall T
         id = str(h, "job_id")
-        return err("missing required 'job_id'", "INVALID_ARGUMENT", field: missing_field) if id.nil? || id.empty?
+        if id.nil? || id.empty?
+          return err("missing required 'job_id'#{held_jobs_hint(kind, jobs.keys)}", "INVALID_ARGUMENT", field: missing_field)
+        end
         job = jobs[id]?
-        return job_not_found(id, kind, verb) unless job
+        return job_not_found(id, kind, verb, jobs.keys) unless job
         job_project_mismatch(job) || job
       end
 

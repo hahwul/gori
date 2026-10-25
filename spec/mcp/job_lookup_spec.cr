@@ -114,11 +114,12 @@ describe "MCP job lookup and stop, across all five kinds" do
           tool = "#{kind}_#{verb}"
           # authorize names the field; the four older kinds leave it to the generic classifier,
           # which codes the refusal but names no field.
-          missing = result("missing required 'job_id'", "INVALID_ARGUMENT", kind == "authorize" ? "job_id" : nil)
+          held = " — this server holds #{kind} job #{own}"
+          missing = result("missing required 'job_id'#{held}", "INVALID_ARGUMENT", kind == "authorize" ? "job_id" : nil)
           invoke(tools, tool, {job_id: ""}).should eq(missing)
           invoke(tools, tool, {} of String => String).should eq(missing)
 
-          invoke(tools, tool, {job_id: "zz_9"}).should eq(result("no #{kind} job zz_9", "NOT_FOUND"))
+          invoke(tools, tool, {job_id: "zz_9"}).should eq(result("no #{kind} job zz_9#{held}", "NOT_FOUND"))
 
           JOB_LOOKUP_KINDS.each do |other|
             next if other == kind
