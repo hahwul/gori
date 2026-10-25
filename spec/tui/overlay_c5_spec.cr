@@ -817,6 +817,16 @@ describe "C5 · PreferencesOverlay on the Overlay seam" do
     OverlayHarness.new(PreferencesOverlay.new).assert_chrome(OverlayKind::Preferences, "PREFERENCES")
   end
 
+  # The status-bar hint is the card footer's: ←/→ switch groups on the strip but edit a field.
+  it "names what ←/→ does where focus is" do
+    strip = PreferencesOverlay.new
+    strip.hint.should contain("←/→ group")
+    OverlayHarness.new(strip).press(DOWN)
+    strip.hint.should contain("←/→ edit")
+    strip.hint.should_not contain("group")
+    PreferencesOverlay.new(:general).hint.should contain("←/→ edit")
+  end
+
   it "closes on esc when clean, and only after the warning when edits are pending" do
     # The view owns this guard; what the overlay adds is the mapping — a warning is :stay,
     # a real close is :cancel. Collapsing both to :cancel would drop typed input silently.

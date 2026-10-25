@@ -467,9 +467,15 @@ module Gori::Tui
       # successful one just because it came through the modal.
       note_fg = @status ? (@status_warn ? Theme.yellow : Theme.green) : Theme.muted
       screen.text(box.x + 2, note_y, note, note_fg, Theme.panel, width: iw)
-      hint = @on_strip ? "←/→ group · ↓/↵ enter · esc close" : "↑/↓ field · ←/→ edit · ↵ save/open · ^R reset · esc close"
+      hint = nav_hint
       hx = {box.right - hint.size - 2, box.x + 2}.max
       screen.text(hx, hint_y, hint, Theme.muted, Theme.panel, width: {box.right - hx - 1, 0}.max)
+    end
+
+    # The keys that work where focus is: the card footer and the status bar both read it, so the
+    # status bar cannot say "←/→ group" while ←/→ edits the selected field.
+    def nav_hint : String
+      @on_strip ? "←/→ group · ↓/↵ enter · esc close" : "↑/↓ field · ←/→ edit · ↵ save/open · ^R reset · esc close"
     end
 
     private def focused_hint : String
@@ -654,7 +660,7 @@ module Gori::Tui
     end
 
     def hint : String
-      "←/→ group · ↑/↓ field · ↵ save/open · ^R reset · esc close"
+      @view.nav_hint
     end
 
     def render(screen : Screen, area : Rect) : Nil
