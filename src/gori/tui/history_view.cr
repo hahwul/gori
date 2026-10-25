@@ -120,6 +120,10 @@ module Gori::Tui
 
     getter rows : Array(Store::FlowRow)
     getter? follow : Bool
+    # The newest flow id on screen the last time the list was drawn while following. Rows
+    # above it arrived with follow off and are the `⌁follow +N` count. An id rather than a
+    # running tally, so a filtered or reloaded list counts only the new rows it actually holds.
+    @seen_id : Int64? = nil
     getter? querying : Bool
     getter query : String
     property reload_handler : Proc(Store, Nil)? = nil
@@ -1129,6 +1133,7 @@ module Gori::Tui
 
     def on_event(event : Store::FlowEvent, store : Store) : Nil
       @host_suggest_dirty = true if event.kind == :inserted
+      sync_seen # before the insert, so a row landing just after follow went off still counts
       # The row's ANSWERS changed, so its colour has to be re-asked. An in-flight row has
       # `status` and `content_type` nil, so `status:>=500` and `proto:sse` genuinely answer
       # differently once the response lands — without this the row would keep the colour it
@@ -2931,6 +2936,7 @@ module Gori::Tui
 
     private def render_list_rows(screen : Screen, rect : Rect, focused : Bool, *,
                                  listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
+      sync_seen
       render_ql_bar(screen, rect)
       hdr_y = rect.y + 1
       if @querying
@@ -4161,7 +4167,12 @@ module Gori::Tui
       # follow is `space → f` now. A chip that still printed `f:` would name a key nothing
       # answers. The chip stays CLICKABLE and stays accent-when-on, which is the discoverability
       # the `s scope` chip beside it is carrying for its own toggle.
-      chips << {:follow, "⌁follow", @follow ? Theme.accent : Theme.muted}
+      unseen = unseen_count
+      chips << if @follow || unseen == 0
+        {:follow, "⌁follow", @follow ? Theme.accent : Theme.muted}
+      else
+        {:follow, "⌁follow +#{unseen}", Theme.yellow}
+      end
       # LEFT of `⌁follow` — the chain draws rightmost-first, so it is pushed after it. Always
       # shown, like the scope chip and for the same reason: a mode nothing advertises is a mode
       # nobody finds. Accent when a view is narrowing, muted `v:all` when none is, so the key is
@@ -4325,6 +4336,25 @@ module Gori::Tui
 
     # Position of `id` in @rows. Sorted id-DESC (newest first) or id-ASC (oldest
     # first) per Settings.history_list_order — O(log n) binary search either way.
+    private def sync_seen : Nil
+      @seen_id = newest_id || @seen_id if @follow || @seen_id.nil?
+    end
+
+    private def newest_id : Int64?
+      return nil if @rows.empty?
+      newest_first? ? @rows.first.id : @rows.last.id
+    end
+
+    # Rows newer than `@seen_id`; the rows are id-sorted, so a bisect rather than a scan.
+    def unseen_count : Int32
+      return 0 unless seen = @seen_id
+      if newest_first?
+        @rows.bsearch_index { |r| r.id <= seen } || @rows.size
+      else
+        @rows.size - (@rows.bsearch_index { |r| r.id > seen } || @rows.size)
+      end
+    end
+
     private def index_of(id : Int64) : Int32?
       lo = 0
       hi = @rows.size - 1

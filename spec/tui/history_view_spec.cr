@@ -2540,6 +2540,47 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "counts flows that arrive while not following on the follow chip" do
+    with_store do |store|
+      add_flow(store, "GET", "/A", 200)
+      add_flow(store, "GET", "/B", 200)
+      view = HistoryView.new
+      view.reload(store)
+      view.render_list(Screen.new(MemoryBackend.new(100, 12)), Rect.new(0, 0, 100, 12))
+      view.select_row(1) # off the newest row → follow off
+      2.times do |i|
+        id = add_flow(store, "GET", "/new#{i}", 200)
+        view.on_event(Gori::Store::FlowEvent.new(id, :inserted), store)
+      end
+      view.unseen_count.should eq(2)
+      backend = MemoryBackend.new(100, 12)
+      view.render_list(Screen.new(backend), Rect.new(0, 0, 100, 12))
+      backend.row(0).should contain("⌁follow +2")
+
+      view.toggle_follow # back on the live tail: the count is spent
+      after = MemoryBackend.new(100, 12)
+      view.render_list(Screen.new(after), Rect.new(0, 0, 100, 12))
+      view.unseen_count.should eq(0)
+      after.row(0).should_not contain("+2")
+    end
+  end
+
+  it "counts only the new flows a filter keeps" do
+    with_store do |store|
+      add_flow(store, "GET", "/a", 200)
+      view = HistoryView.new
+      view.reload(store)
+      view.render_list(Screen.new(MemoryBackend.new(100, 12)), Rect.new(0, 0, 100, 12))
+      view.toggle_follow
+      view.set_query("status:500")
+      view.reload(store)
+      add_flow(store, "GET", "/ok", 200)
+      add_flow(store, "GET", "/boom", 500)
+      view.reload(store)
+      view.unseen_count.should eq(1)
+    end
+  end
+
   it "keeps a requested dropdown across asynchronous host completions" do
     view = HistoryView.new
     requested = [] of String
