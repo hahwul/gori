@@ -153,7 +153,9 @@ module Gori
         fields = !(title.nil? && severity.nil? && notes.nil? && status.nil? && cvss.nil? && !clear_cvss &&
                    host.nil? && !clear_host && flow_id.nil? && !clear_flow)
         if !fields && repeater_id.nil?
-          return Result.new("no fields to update (provide at least one of title/severity/notes/status/cvss/host/flow_id)", is_error: true)
+          if refusal = nothing_to_change_refusal("update_issue")
+            return refusal
+          end
         end
 
         if fields

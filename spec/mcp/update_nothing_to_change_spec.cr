@@ -47,6 +47,18 @@ describe "MCP update_* with nothing to change" do
     end
   end
 
+  it "gives update_issue {id} and {id, title: null} the same refusal, naming repeater_id" do
+    with_store do |store|
+      tools = tools_for(store)
+      issue = mcp_ok_json(tools, "create_issue", %({"title":"t"}))["id"].as_i64
+      bare = tools.call("update_issue", JSON.parse(%({"id":#{issue}})))
+      nulled = tools.call("update_issue", JSON.parse(%({"id":#{issue},"title":null})))
+      nulled.error_code.should eq("INVALID_ARGUMENT")
+      nulled.text.should eq(bare.text)
+      nulled.text.should contain("repeater_id")
+    end
+  end
+
   it "lets a real change through, a null that clears included, and leaves a missing selector to the handler" do
     with_store do |store|
       tools = tools_for(store)
