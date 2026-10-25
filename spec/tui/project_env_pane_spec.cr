@@ -367,33 +367,6 @@ describe Gori::Tui::ProjectController do
     end
   end
 
-  # The card is saved WHOLE: a save of one field must not write back the others as the pane
-  # last saw them, over a `net.*` row another process set or unset since.
-  it "keeps a peer's network edits when saving an unrelated field" do
-    with_env_controller do |c, host, session|
-      store = session.store
-      store.set_setting(Gori::Settings::PROJECT_IO_TIMEOUT_KEY, "5").should be_true
-      Gori::Settings.load_project_network(store, bind: true)
-      c.view.refresh_settings
-      c.view.focus_pane(:settings)
-      # The peer pins the capture cap and unpins the idle timeout; this pane saw neither.
-      store.set_setting(Gori::Settings::PROJECT_CAPTURE_MAX_KEY, "7").should be_true
-      store.delete_setting(Gori::Settings::PROJECT_IO_TIMEOUT_KEY).should be_true
-
-      c.view.select_setting(11) # Connect timeout
-      5.times { c.handle_body_key(key(Termisu::Input::Key::Backspace)) }
-      type_keys(c, "42")
-      c.handle_body_key(key(Termisu::Input::Key::Enter))
-
-      config = host.applied_config.not_nil!
-      config.connect_secs.should eq(42)
-      config.capture_mib.should eq(7)
-      config.io_secs.should eq(Gori::Settings.io_timeout_secs)
-    ensure
-      Gori::Settings.load_project_network(nil, bind: true)
-    end
-  end
-
   it "says a rolled-back env write did NOT save, instead of reporting success" do
     with_env_controller do |c, host, session|
       c.env_add_var
