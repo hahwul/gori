@@ -509,6 +509,7 @@ module Gori::Tui
       msg = close_marked_subtabs(refs)
       refresh_link_preview
       @host.status(msg)
+      save_notes
       @host.resolve_subtab_focus
     end
 
@@ -523,6 +524,9 @@ module Gori::Tui
       close_note_at(idx)
       refresh_link_preview
       @host.status("closed note (#{@notes.count} open)")
+      # The confirm said "discarded": the close is a delete, so it lands now rather than at
+      # the next exit path (a peer listing the notes meanwhile still saw it).
+      save_notes
     end
 
     # Close note `idx`. Notes keeps ≥1 — closing the last one leaves a fresh blank note behind

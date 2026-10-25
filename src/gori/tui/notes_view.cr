@@ -557,13 +557,12 @@ module Gori::Tui
       closed_id
     end
 
-    # Switch to note `idx` (no-op if out of range or already current). Marks dirty
-    # so the active tab is remembered across reloads.
+    # Switch to note `idx` (no-op if out of range or already current). NOT an edit: `@dirty`
+    # blocks `reload`, so marking it here left a peer's creates and deletes unseen until the
+    # tab was left. A reload keeps the active note by id (`soft_merge_from`) anyway.
     def switch_note(idx : Int32) : Nil
       return unless 0 <= idx < @notes.size
-      return if idx == @current
       @current = idx
-      @dirty = true
     end
 
     # Switch to the note with stable id `id` (create-and-link "open" path).

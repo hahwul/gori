@@ -156,7 +156,7 @@ describe "Gori::Tui::NotesController — a closed note's links" do
     end
   end
 
-  it "leaves a PERSISTED note's links to the save, so a refused write cannot destroy them" do
+  it "drops a PERSISTED note's links with the close's own commit" do
     with_notes_controller do |controller|
       controller.notes_new
       id = controller.view.current_note_id
@@ -165,13 +165,20 @@ describe "Gori::Tui::NotesController — a closed note's links" do
       controller.save_notes.should be_true
       controller.view.unpersisted?(id).should be_false # the commit made it persisted
 
+      # The close is a delete and persists itself — a peer listing the notes no longer sees it —
+      # and the links go with that commit, the post-commit cleanup a refused write never reaches.
       controller.notes_close
-
-      # Still there at the close…
-      store.list_links(Gori::Store::LinkOwnerKind::Note, id).size.should eq(1)
-      # …and gone once the document that removes the note has committed.
-      controller.save_notes.should be_true
       store.list_links(Gori::Store::LinkOwnerKind::Note, id).should be_empty
+      Gori::Notes.doc_from(store.setting(Gori::Notes::DOCS_KEY), nil).notes.map(&.id).should_not contain(id)
+    end
+  end
+
+  it "says so when the close's write is refused" do
+    with_notes_controller do |controller|
+      controller.save_notes.should be_true
+      controller.@host.as(NotesFakeHost).session.store.close # every write from here answers false
+      controller.notes_close
+      controller.@host.as(NotesFakeHost).statuses.last.should contain("NOT saved")
     end
   end
 end
