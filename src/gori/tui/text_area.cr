@@ -590,18 +590,24 @@ module Gori::Tui
 
     # `cur` in `before`, mapped into `after` — for a transform that only inserted, or only
     # removed, characters. Greedy: a char equal to its neighbour can shift the caret by one.
+    # Walks both with readers up to `cur` — never `chars`, which built two full arrays of a
+    # multi-MB body on every ^K/^A.
     private def carry_offset(before : String, after : String, cur : Int32) : Int32
-      b = before.chars
-      a = after.chars
-      grew = a.size > b.size
+      grew = after.size > before.size
+      b = Char::Reader.new(before)
+      a = Char::Reader.new(after)
       i = j = 0
-      while i < cur && i < b.size && j < a.size
-        if b[i] == a[j]
+      while i < cur && b.has_next? && a.has_next?
+        if b.current_char == a.current_char
+          b.next_char
+          a.next_char
           i += 1
           j += 1
         elsif grew
+          a.next_char
           j += 1
         else
+          b.next_char
           i += 1
         end
       end
