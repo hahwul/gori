@@ -255,5 +255,7 @@ describe "gori run notes update/delete --id" do
     src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "notes.cr"))
     src.scan(/p\.on\("--id=ID"/).size.should eq(2)
     notes_delete_body.should contain("resolve_note_index(store, persisted, n_arg, note_id")
+    # `update 3 --id 7` must not read the stray "3" as note 7's new text.
+    src.should contain(%(pass <n> or --id ID, not both (with --id, give the text as --text or on STDIN)" if note_id && !positional.empty?))
   end
 end

@@ -130,6 +130,9 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
 
+        # With --id there is no <n>, so a word left over would be read as the text: `update 3
+        # --id 7` would overwrite note 7 with "3". Refused, as `notes delete` refuses the pair.
+        abort "gori run notes update: pass <n> or --id ID, not both (with --id, give the text as --text or on STDIN)" if note_id && !positional.empty?
         n = note_id ? nil : (parse_note_index(positional.first?) || abort "gori run notes update: missing <n> (or --id ID)")
         body = note_update_text(text, n ? positional[1..] : positional)
         store = open_store(resolve_read_project(proj.name, proj.db))
