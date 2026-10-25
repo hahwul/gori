@@ -336,6 +336,14 @@ module Gori
       segment_json(token.strip.split('.')[1]?)
     end
 
+    # Neither the header nor the payload decodes: `gori run jwt` and MCP `jwt_decode` refuse
+    # such a token with `NOT_DECODABLE` rather than print an empty decode.
+    NOT_DECODABLE = "not a decodable JWT (need header.payload)"
+
+    def decodable?(token : String) : Bool
+      !(header_json(token).empty? && payload_json(token).empty?)
+    end
+
     # The header's declared `alg`, for pre-selecting the alg badge when a token is loaded
     # into the Encode editors. nil when unreadable or absent.
     def token_alg(token : String) : String?

@@ -162,6 +162,9 @@ module Gori
       end
 
       private def self.emit_jwt_decode(token : String, format : Symbol) : Nil
+        # MCP `jwt_decode`'s refusal, in either format: an empty decode exiting 0 read as a
+        # token with nothing in it.
+        abort "gori run jwt: #{Jwt::NOT_DECODABLE}" unless Jwt.decodable?(token)
         if format == :json
           puts Jwt.decode_json(token)
           # The JSON keeps its `note` for the dotless blob, but the exit status says what the

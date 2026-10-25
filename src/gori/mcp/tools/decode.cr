@@ -177,9 +177,7 @@ module Gori
         token = str(h, "token")
         return Result.new("missing required 'token'", is_error: true) if token.nil? || token.strip.empty?
         t = token.strip
-        if Jwt.header_json(t).empty? && Jwt.payload_json(t).empty?
-          return Result.new("not a decodable JWT (need header.payload)", is_error: true)
-        end
+        return Result.new(Jwt::NOT_DECODABLE, is_error: true) unless Jwt.decodable?(t)
         Result.new(Jwt.decode_json(t))
       end
 

@@ -26,6 +26,16 @@ describe "gori run jwt" do
     Gori::CLI::Run.jwt_token_input_for_spec(["  #{jwt}\n"]).should eq(jwt)
   end
 
+  it "refuses a token whose header and payload both fail to decode, as MCP jwt_decode does" do
+    # `not.a.jwt` used to print an empty decode and exit 0 here while MCP refused it.
+    Gori::Jwt.decodable?("not.a.jwt").should be_false
+    Gori::Jwt.decodable?("plainstring").should be_false
+    Gori::Jwt.decodable?(jwt).should be_true
+    Gori::Jwt.decodable?("eyJhbGciOiJIUzI1NiJ9").should be_true # a header alone still decodes
+    File.read(File.join(__DIR__, "../../../src/gori/cli/run/jwt.cr"))
+      .should contain(%(abort "gori run jwt: \#{Jwt::NOT_DECODABLE}" unless Jwt.decodable?(token)))
+  end
+
   it "--set-header patches the token's header, and --header mints without a token (#1701)" do
     patched = Gori::CLI::Run.jwt_encode_header_for_spec(jwt, nil, ["kid=../../dev/null", %(jku="https://a.test/j")])
     JSON.parse(patched).as_h.should eq({"alg" => "HS256", "typ" => "JWT", "kid" => "../../dev/null", "jku" => "https://a.test/j"})
