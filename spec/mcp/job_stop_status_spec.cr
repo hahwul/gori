@@ -150,6 +150,9 @@ describe "MCP job ids of the wrong kind (#1395)" do
         .should eq("no fuzz job fz_99 — this server holds fuzz job #{job_id}")
       tools.call("fuzz_status", JSON.parse("{}")).text
         .should eq("missing required 'job_id' — this server holds fuzz job #{job_id}")
+      %w[get_job stop_job].each do |tool|
+        tools.call(tool, JSON.parse(%({"job_id":"zz_9"}))).text.should eq("no job zz_9 — this server holds job #{job_id}")
+      end
     end
   end
 end

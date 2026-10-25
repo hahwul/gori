@@ -136,8 +136,10 @@ describe "MCP job lookup and stop, across all five kinds" do
             "(or get_job / stop_job, which take any kind)", "NOT_FOUND", "job_id", {"job_kind" => named}))
         end
       end
-      invoke(tools, "get_job", {job_id: "zz_9"}).should eq(result("no job zz_9", "NOT_FOUND"))
-      invoke(tools, "stop_job", {job_id: "zz_9"}).should eq(result("no job zz_9", "NOT_FOUND"))
+      # The any-kind tools name every held job, in the server's map order.
+      all = %w[fuzz mine discover sequence authorize].map { |k| ids[k] }.join(", ")
+      invoke(tools, "get_job", {job_id: "zz_9"}).should eq(result("no job zz_9 — this server holds jobs #{all}", "NOT_FOUND"))
+      invoke(tools, "stop_job", {job_id: "zz_9"}).should eq(result("no job zz_9 — this server holds jobs #{all}", "NOT_FOUND"))
 
       # Nothing above stopped anything.
       ids.each_value { |id| ok_json(tools, "get_job", {job_id: id})["status"].as_s.should eq("running") }

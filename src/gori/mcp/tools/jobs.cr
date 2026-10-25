@@ -167,7 +167,7 @@ module Gori
       @[Tool("get_job", gated: true, read_only: true, permission: "send")]
       private def get_job(h) : Result
         id = str(h, "job_id")
-        return err("missing required 'job_id'", "INVALID_ARGUMENT", field: "job_id") if id.nil? || id.empty?
+        return err("missing required 'job_id'#{held_any_hint}", "INVALID_ARGUMENT", field: "job_id") if id.nil? || id.empty?
         if @jobs.has_key?(id)
           fuzz_status(h)
         elsif @mine_jobs.has_key?(id)
@@ -181,8 +181,16 @@ module Gori
         elsif @ws_jobs.has_key?(id)
           ws_session_status(h)
         else
-          not_found("no job #{id}")
+          not_found("no job #{id}#{held_any_hint}")
         end
+      end
+
+      # `held_jobs_hint` across every kind, for the two tools that take any id.
+      private def held_any_hint : String
+        held = {@jobs, @mine_jobs, @discover_jobs, @sequence_jobs, @authorize_jobs, @ws_jobs}.flat_map do |jobs|
+          jobs.compact_map { |k, j| k if j.db_path == @db_path }
+        end
+        held.empty? ? "" : " — this server holds job#{held.size == 1 ? "" : "s"} #{held.last(5).join(", ")}"
       end
 
       # Stop a fuzz, mine, discover, sequence, or authorize job, or close a ws_* session. With wait:true, blocks (yielding to the runner
@@ -191,9 +199,9 @@ module Gori
       @[Tool("stop_job", gated: true, agent_action: true, permission: "send")]
       private def stop_job(h) : Result
         id = str(h, "job_id")
-        return err("missing required 'job_id'", "INVALID_ARGUMENT", field: "job_id") if id.nil? || id.empty?
+        return err("missing required 'job_id'#{held_any_hint}", "INVALID_ARGUMENT", field: "job_id") if id.nil? || id.empty?
         job = @jobs[id]? || @mine_jobs[id]? || @discover_jobs[id]? || @sequence_jobs[id]? || @authorize_jobs[id]? || @ws_jobs[id]?
-        return not_found("no job #{id}") unless job
+        return not_found("no job #{id}#{held_any_hint}") unless job
         if mismatch = job_project_mismatch(job)
           return mismatch
         end
