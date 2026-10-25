@@ -3054,6 +3054,7 @@ module Gori::Tui
       end
 
       layout = Layout.compute(w, h, statusline_active?)
+      @companion.resize(w, h) # before every in_bar? below: a small terminal rides the status row
       if failed = @safe_frame
         render_safe_frame(screen, layout, failed)
         return
@@ -3430,7 +3431,7 @@ module Gori::Tui
     # failure TrafficEmptyState.suppressed exists to prevent. So the gate hides her
     # outright rather than relying on z-order.
     private def render_companion(screen : Screen, body : Rect) : Nil
-      return if Settings.companion_in_bar? # she rides the status row instead
+      return if @companion.in_bar? # she rides the status row instead
       return unless frame = @companion.frame
       return unless companion_visible?
       Companion.draw(screen, body, frame)
@@ -3439,18 +3440,19 @@ module Gori::Tui
     # Where she will be painted over the body this frame — the same gates as
     # #render_companion — or nil when she will not be.
     private def companion_occlusion(body : Rect) : Rect?
-      return nil if Settings.companion_in_bar?
+      return nil if @companion.in_bar?
       return nil unless @companion.frame
       return nil unless companion_visible?
       Companion.hit_rect(body)
     end
 
-    # The status-bar placement. Nil unless she is both enabled and set to `bar`, which is
+    # The status-bar placement. Nil unless she is both enabled and in the bar (set to `bar`,
+    # or a terminal under Companion::AUTO_BAR_W x AUTO_BAR_H), which is
     # what keeps the chip out of the run entirely rather than reserving an empty slot.
     # Unlike the body form this needs no visibility gate: the status row is drawn after the
     # body and nothing but the ^F/^G prompts is ever laid over it.
     private def companion_bar_frame : Mascot::Frame?
-      return nil unless Settings.companion_in_bar?
+      return nil unless @companion.in_bar?
       @companion.frame
     end
 
@@ -3479,7 +3481,7 @@ module Gori::Tui
       # where it is read with the question.
       return nil if @overlay.confirm?
       toast = @toast
-      notice = Settings.companion_in_bar? ? @companion.frame.try(&.bubble) : nil
+      notice = @companion.in_bar? ? @companion.frame.try(&.bubble) : nil
       return format_status_message(toast) unless notice
       return notice unless toast && (at = @toast_at)
       # A HELD reply keeps the slot against a newer toast, as it keeps her bubble against a
@@ -3498,7 +3500,7 @@ module Gori::Tui
     # narrowest body it produces is 36, comfortably over Companion::MIN_W — and @body_h being one
     # frame stale is harmless, since the resize that changed it is itself an event.
     private def companion_on_screen? : Bool
-      return true if Settings.companion_in_bar?
+      return true if @companion.in_bar?
       companion_visible? && @body_h >= Companion::MIN_H
     end
 

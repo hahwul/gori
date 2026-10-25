@@ -177,6 +177,88 @@ describe Gori::Tui::Companion do
     end
   end
 
+  # --- effective placement (small terminal) ---------------------------------
+
+  # On a terminal under AUTO_BAR_W x AUTO_BAR_H the body sprite would stand on real rows, so
+  # a Runner (honors_placement) seats her in the status row for that frame. The saved
+  # placement is never written, and growing the window brings the body sprite back.
+  it "rides the status row on a small terminal, without touching the saved placement" do
+    prev = Gori::Settings.companion_placement
+    Gori::Settings.companion_placement = "body"
+    begin
+      companion = Companion.new(Notifications.new, honors_placement: true)
+      [{99, 40, true}, {100, 29, true}, {80, 24, true}, {60, 20, true}, {100, 30, false}].each do |w, h, bar|
+        companion.resize(w, h)
+        companion.in_bar?.should eq(bar)
+      end
+      Gori::Settings.companion_placement.should eq("body")
+      # A host with no status row paints the body sprite whatever the size.
+      host = Companion.new(Notifications.new)
+      host.resize(60, 20)
+      host.in_bar?.should be_false
+      # Already `bar`: in the bar at every size.
+      Gori::Settings.companion_placement = "bar"
+      companion.resize(200, 60)
+      companion.in_bar?.should be_true
+    ensure
+      Gori::Settings.companion_placement = prev
+    end
+  end
+
+  # The compose fold follows the effective placement too: with `body` saved but a small
+  # terminal she is a chip, so the glint and the shake (mute there) must be folded.
+  it "folds the chip-mute fields when a small terminal puts her in the bar" do
+    prev = Gori::Settings.companion_placement
+    Gori::Settings.companion_placement = "body"
+    begin
+      with_companion(true) do
+        companion = Companion.new(Notifications.new, honors_placement: true)
+        companion.resize(80, 24)
+        t0 = Time.instant
+        (0..200).each do |i|
+          now = t0 + Companion::BEAT * i
+          companion.poke(now)
+          companion.tick(now)
+          f = companion.frame.not_nil!
+          f.glint.should eq(-1)
+          f.shake.should eq(0)
+        end
+      end
+    ensure
+      Gori::Settings.companion_placement = prev
+    end
+  end
+
+  # What the Runner hands the status row when she is in the bar: the chip survives the
+  # narrowest status row a small terminal gives it, and is the click target there.
+  it "keeps her chip on an 80- and 60-column status row" do
+    with_companion(true) do
+      companion = Companion.new(Notifications.new, honors_placement: true)
+      companion.tick(Time.instant)
+      frame = companion.frame.not_nil!
+      {80, 60}.each do |w|
+        rect = Rect.new(0, 0, w, 1)
+        hits = (0...w).select do |x|
+          Chrome.status_bar_chip_at(rect, x, 0, focus: "HISTORY", hints: "q quit  ? help",
+            time: "12:00", companion: frame) == :companion
+        end
+        hits.size.should eq(Mascot::BAR_W)
+      end
+    end
+  end
+
+  # Every Runner branch on the placement goes through Companion#in_bar?, and the render
+  # sizes her before any of them — otherwise the sprite, the occlusion, the chip, the notice
+  # slot and the hit test could disagree about where she is.
+  it "routes every Runner placement branch through the one effective predicate" do
+    runner = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner.cr"))
+    mouse = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner", "mouse.cr"))
+    {runner, mouse}.each(&.includes?("Settings.companion_in_bar?").should(be_false))
+    resize = runner.index!("@companion.resize(w, h)")
+    resize.should be < runner.index!("screen.occlusion = companion_occlusion(layout.body)")
+    resize.should be < runner.index!("companion: companion_bar_frame")
+  end
+
   # --- background work ------------------------------------------------------
 
   # The badge cell is the only thing she owns that can say "still going" — the status

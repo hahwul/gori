@@ -129,6 +129,12 @@ module Gori::Tui
     # reaches. Height is the live constraint (body.h is height - 6, so 6 needs 12 rows).
     MIN_W = 30
     MIN_H =  6
+    # A terminal under this size has no room to spare for the body sprite: at 80x24 she
+    # stands on real rows. A placement-honoring host (#in_bar?) then seats her in the status
+    # row for that frame instead; the saved placement is never touched, so growing the
+    # window brings the body sprite back.
+    AUTO_BAR_W = 100
+    AUTO_BAR_H =  30
     # Columns kept clear at the body's right edge: the same two rules BOTTOM_MARGIN clears
     # (a pane hairline at body.right - 1 and a nested Frame.card's at body.right - 2, which
     # doubles as Frame.scroll_gauge's thumb column), PLUS ONE for the plate strip.
@@ -181,6 +187,7 @@ module Gori::Tui
     # whatever the setting says. #compose folds the fields a chip cannot show, and it may
     # only do that where a chip is actually what gets drawn.
     def initialize(@notes : Notifications, @honors_placement : Bool = false)
+      @cramped = false
       @frame = nil.as(Mascot::Frame?)
       @beat = 0
       @last_beat = nil.as(Time::Instant?)
@@ -393,6 +400,18 @@ module Gori::Tui
     # The frame to draw. A pure function of @beat and the mood/bubble state — never of the
     # wall clock — or the same beat could yield two different frames and the diff would
     # stop being meaningful (or specifiable).
+    # The host's terminal size this frame — see AUTO_BAR_W.
+    def resize(w : Int32, h : Int32) : Nil
+      @cramped = w < AUTO_BAR_W || h < AUTO_BAR_H
+    end
+
+    # THE effective placement: is she drawn as the status-row chip rather than the body
+    # sprite? Every host branch (render, occlusion, chip, notice slot, hit test, the
+    # #compose fold) asks this one predicate, so they cannot disagree.
+    def in_bar? : Bool
+      @honors_placement && (Settings.companion_in_bar? || @cramped)
+    end
+
     private def compose : Mascot::Frame
       # FIELDS THE BAR CANNOT SHOW ARE FOLDED HERE. `placement: bar` paints
       # Mascot.draw_row, which is the middle row plus the badge — so the glint (which
@@ -407,7 +426,7 @@ module Gori::Tui
       # The BADGE is not in that set: Mascot::BAR_W borrows it into the chip precisely so
       # the mood is not left to a hue shift of one gold. A field leaves this fold the
       # moment the chip learns to draw it.
-      bar = @honors_placement && Settings.companion_in_bar?
+      bar = in_bar?
       if @dozing
         return Mascot::Frame.new(pose: :doze, badge: 'z', mood: :doze, bubble: @bubble)
       end

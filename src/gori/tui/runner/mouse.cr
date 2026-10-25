@@ -297,7 +297,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   private def click_companion(layout : Layout, mx : Int32, my : Int32) : Bool
     return false unless Settings.companion?
     return false unless frame = @companion.frame # not drawn yet, or dropped while disabled
-    if Settings.companion_in_bar?
+    if @companion.in_bar?
       return false unless Chrome.status_bar_chip_at(layout.status, mx, my, focus: focus_label,
                             hints: Hotkeys.retag(status_line || key_hints),
                             activity: activity_chip, resource: @resource.label,
