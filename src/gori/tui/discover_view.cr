@@ -39,6 +39,10 @@ module Gori::Tui
     property engine : Discover::Engine? = nil
     property? stop_requested = false
     getter started_at : Time::Instant
+    # Wall-clock base (unix µs) for the flows THIS run records, taken at each `begin_run`;
+    # a flow's timestamp is base + its findings index, the MCP/CLI surfaces' shape. One base
+    # per controller would stamp every later run's flows with the tab's boot time.
+    getter persist_base = 0_i64
 
     def initialize(@target : String, @config : Discover::Config)
       @started_at = Time.instant
@@ -77,6 +81,7 @@ module Gori::Tui
 
     def begin_run : Nil
       @status = :running
+      @persist_base = Time.utc.to_unix * 1_000_000
       @stop_requested = false
       @findings.clear
       @flow_ids.clear

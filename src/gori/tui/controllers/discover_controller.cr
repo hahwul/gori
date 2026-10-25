@@ -31,8 +31,6 @@ module Gori::Tui
       # Which findings row each buffered pair came from, same order as @persist_buf, so the
       # ids the batch returns can be handed back to the rows that will open them.
       @persist_owners = [] of {DiscoverRun, Int32}
-      @persist_base = Time.utc.to_unix * 1_000_000
-      @persist_seq = 0_i64
       @run_seq = 0
     end
 
@@ -542,8 +540,7 @@ module Gori::Tui
     # store). That is what lets a long crawl retain nothing per finding but its row.
     private def queue_persist(run : DiscoverRun, idx : Int32, f : Discover::Finding,
                               exchange : Discover::Exchange?) : Nil
-      @persist_seq += 1
-      pair = Discover::Persist.flow_pair(f, @persist_base + @persist_seq, exchange,
+      pair = Discover::Persist.flow_pair(f, run.persist_base + idx + 1, exchange,
         surface: Gori::FlowSource::Surface::Tui)
       @persist_buf << {pair.request, pair.response}
       @persist_owners << {run, idx}

@@ -72,3 +72,13 @@ describe "Gori::Tui::DiscoverView findings filter" do
     walk(view).should eq(expected(run, ""))
   end
 end
+
+describe "DiscoverRun#persist_base" do
+  it "is taken when a run begins, so a later run's flows are not stamped with an earlier time" do
+    run = DiscoverRun.new("http://t/", Gori::Discover::Config.new)
+    run.persist_base.should eq(0)
+    before = Time.utc.to_unix * 1_000_000
+    run.begin_run
+    run.persist_base.should be >= before
+  end
+end
