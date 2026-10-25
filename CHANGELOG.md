@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- MCP: a missing or unknown `job_id` names the jobs the server holds, and `list_events` refuses a cursor past its feed instead of waiting on it forever (#PR)
+- MCP: `create_note` with no text, `set_env_var` with no `value`, `fuzz_start` with both `verbatim` and `update_content_length`, and `graphql_schema`'s send-only arguments without `send` are refused, and a clamped `list_history`/`list_sitemap` limit is reported as the other lists report it (#PR)
+- GraphQL: a captured introspection whose root type has no fields says so instead of printing an empty `type Query {}`, and the legacy-introspection hint appears only when the server rejected the query (#PR)
+- CLI: under `--format json`, `gori run send` and `repeater send` print a scope refusal as a `SCOPE_BLOCKED` object, `project export`/`import` take `--format json` (and `export --project`), `gori run jwt` refuses a token MCP refuses, and `session add`/`edit` take `-H` for `--set` (#PR)
+- CLI: a target port 0 is named as out of range, a non-zip `project import` says it is not a gori archive, the capture banner prints the address it bound, and `history --count --include-sensitive` is refused (#PR)
+- Issues: the Markdown report demotes headings inside an issue's notes so they nest under the issue (#PR)
 - QL: `port:` filters by the target port with `status:`'s comparisons (`port:8443`, `port:>=8000`), so two services on one host can be told apart in History, the Sitemap, `list_params`, colour rules and intercept conditions (#1767)
 - Authorize: a run whose baseline answered but every other identity failed says so instead of "nothing came back"; a `no_effect` trial carries a note, a `limit` that capped the query is named when nothing is left to send (and as `query_capped` on MCP), and a session slot write that moves the baseline says which slot it is now, on MCP and `gori run session` (#1767)
 - MCP: `send_request` and the fuzz, mine, discover, sequence and WebSocket replies name the active session slot they sent as (`session_slot`), and a send that carries no slot (`grpc_reflect`, `h2_fields`) does not; an `update_*` call that names only its row is refused as changing nothing; deleting a flow or repeater an issue or note links to lists the dropped links (`unlinked`); and a stop that is still winding down says how to wait for it (#1767)

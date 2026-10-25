@@ -1459,7 +1459,7 @@ module Gori
         case ex.reason
         in Repeater::PlanError::Reason::NoRequest         then "the request is empty"
         in Repeater::PlanError::Reason::NoTarget          then "'url' is required"
-        in Repeater::PlanError::Reason::BadTarget         then "could not parse a target host from #{detail.inspect}"
+        in Repeater::PlanError::Reason::BadTarget         then ex.message || "could not parse a target host from #{detail.inspect}"
         in Repeater::PlanError::Reason::UnsupportedScheme then "unsupported scheme: #{detail} (only http/https)"
         in Repeater::PlanError::Reason::UnresolvedEnv
           # The operator is named first: a second-factor secret is better set in gori than

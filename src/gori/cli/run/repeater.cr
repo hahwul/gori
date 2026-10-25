@@ -1345,7 +1345,8 @@ module Gori
           # does), so a shared "pass --target=URL" would point at a flag that command rejects.
           "#{prefix}: no target#{where}"
         in Repeater::PlanError::Reason::BadTarget
-          "#{prefix}: could not determine a target host#{where}#{detail ? " from #{detail.inspect}" : ""}"
+          # The plan's sentence names what is wrong (the host, or a port 0 dial can never reach).
+          "#{prefix}: #{ex.message || "could not determine a target host#{detail ? " from #{detail.inspect}" : ""}"}#{where}"
         in Repeater::PlanError::Reason::UnsupportedScheme
           "#{prefix}: unsupported target scheme #{(detail || "").inspect} (use http:// or https://)"
         in Repeater::PlanError::Reason::UnresolvedEnv
