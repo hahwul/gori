@@ -661,9 +661,10 @@ module Gori::Tui
 
     def intercept_toggle : Nil
       return unless catch_control_allowed?
+      edited = !@intercept.held_edit_id.nil? # read before the reload forgets the released hold
       result = @host.session.interceptor.toggle
       @intercept.reload(@host.session.interceptor)
-      @host.status(toggle_status(result))
+      @host.status(InterceptController.toggle_status(result, edited))
     end
 
     # What turning catch OFF actually did. `forward_all` names its count because "this toast is
@@ -674,13 +675,14 @@ module Gori::Tui
     # It names the EDITOR, not the bytes. "unedited" would be a false claim: `Interceptor#toggle`
     # still applies the active session slot's overlay, as every send seam does. What the flip
     # drops is the one thing ⇧F carries — an open editor's in-progress changes — and that is
-    # the difference the operator has to be able to see between the two keys.
-    private def toggle_status(result : Interceptor::ToggleResult) : String
+    # the difference the operator has to be able to see between the two keys — and only when
+    # there was an edit to drop: with none, the warning read as a loss that never happened.
+    def self.toggle_status(result : Interceptor::ToggleResult, edited : Bool) : String
       return "intercept ON — held traffic waits" if result.enabled?
       return "intercept off" if result.released == 0
       n = result.released
-      "intercept off — auto-forwarded #{n} held message#{n == 1 ? "" : "s"} " \
-      "(an open editor's changes were NOT applied — ⇧F forwards all WITH them)"
+      msg = "intercept off — auto-forwarded #{n} held message#{n == 1 ? "" : "s"}"
+      edited ? "#{msg} (an open editor's changes were NOT applied — ⇧F forwards all WITH them)" : msg
     end
 
     # Forward the effective target set: every marked hold, else the cursor row. The editor

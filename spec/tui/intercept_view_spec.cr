@@ -1403,3 +1403,12 @@ describe "Gori::Interceptor#drain_notices" do
     end
   end
 end
+
+# Turning catch off said an open editor's changes were NOT applied even when nothing was edited.
+describe "Intercept toggle-off toast" do
+  it "warns about dropped editor changes only when there was an edit" do
+    r = Gori::Interceptor::ToggleResult.new(false, 2)
+    InterceptController.toggle_status(r, false).should eq("intercept off — auto-forwarded 2 held messages")
+    InterceptController.toggle_status(r, true).should contain("NOT applied")
+  end
+end
