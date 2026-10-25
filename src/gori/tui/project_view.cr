@@ -970,6 +970,19 @@ module Gori::Tui
       load_network_values
     end
 
+    # Re-seed the NETWORK fields from a freshly reloaded Settings layer, keeping only the fields
+    # the operator edited since the last load. The card is saved WHOLE, so without this a save
+    # of one field wrote back every other field as this pane last saw it — reverting a `net.*`
+    # row another process set or unset in the meantime.
+    def rebase_settings : Nil
+      typed = @set_values.dup
+      base = @set_baseline.to_a
+      now = settings_values.to_a
+      edited = now.each_index.select { |i| now[i] != base[i] }.to_a
+      load_network_values
+      edited.each { |i| @set_values[i] = typed[i] }
+    end
+
     # …and the mirror image, after a proto-schema apply. A network field may be holding a
     # half-typed value that `settings_invalid(on_leave: false)` deliberately LEFT on screen for
     # the operator to correct; resetting the six here would erase it mid-correction, under a

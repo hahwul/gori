@@ -1420,6 +1420,10 @@ module Gori::Tui
     # ↵ keeps it so the user can fix it. Dirty-guarded so an unchanged pane never re-applies.
     private def commit_project_network(on_leave : Bool = false) : String?
       return nil unless @project_view.settings_dirty?
+      # The untouched fields come from DISK, not from what the pane last saw: the save below
+      # writes the whole card, and a peer's `net.*` edit since then must survive it.
+      Settings.load_project_network(@host.session.store, bind: true)
+      @project_view.rebase_settings
       host, port_s, _protocol, _proxy_host, _proxy_port, destination, auth_s, username, password, connect_s, idle_s, cap_s =
         @project_view.settings_values
       if err = bind_host_problem(host)
