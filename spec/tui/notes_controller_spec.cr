@@ -178,7 +178,7 @@ describe "Gori::Tui::NotesController — a closed note's links" do
       controller.save_notes.should be_true
       controller.@host.as(NotesFakeHost).session.store.close # every write from here answers false
       controller.notes_close
-      controller.@host.as(NotesFakeHost).statuses.last.should contain("NOT saved")
+      controller.@host.as(NotesFakeHost).statuses.last.should contain("NOT yet removed from the project")
     end
   end
 end

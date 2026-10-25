@@ -509,6 +509,23 @@ describe Gori::Tui::NotesView do
     end
   end
 
+  it "records the note switched to on the next save, so a reopen lands on it" do
+    with_store do |store|
+      view = NotesView.new
+      view.reload(store)
+      type(view, "one")
+      view.new_note
+      type(view, "two")
+      view.save(store).should be_true
+      view.switch_note(0)
+      view.save(store).should be_true
+
+      reopened = NotesView.new
+      reopened.reload(store)
+      reopened.current_text.should eq("one")
+    end
+  end
+
   it "switch_note_by_id selects the matching note" do
     with_store do |store|
       view = NotesView.new

@@ -407,11 +407,15 @@ module Gori::Tui
     # teardown, where a status line is never rendered (`IssuesController` says the same of its
     # own quit path, and puts that conflict in the leave modal instead). Escalating there
     # needs the quit confirm, which lives in `runner.cr`.
-    def save_notes : Bool
+    def save_notes(refused : String = "notes NOT saved — project busy; your text is still here, esc to retry") : Bool
       return true if @notes.save(@host.session.store)
-      @host.status("notes NOT saved — project busy; your text is still here, esc to retry")
+      @host.status(refused)
       false
     end
+
+    # A close's own save: the note is already gone from the strip, so "your text is still
+    # here" would be false. The close stays pending (`@deleted_ids`) and the next save retries.
+    CLOSE_REFUSED = "closed here, but NOT yet removed from the project — project busy; the next save retries"
 
     # Open a fresh note and drop into it (^N from the tab bar / strip / editor).
     # The Notes tab is always already active when this fires, so only the body focus
@@ -509,7 +513,7 @@ module Gori::Tui
       msg = close_marked_subtabs(refs)
       refresh_link_preview
       @host.status(msg)
-      save_notes
+      save_notes(CLOSE_REFUSED)
       @host.resolve_subtab_focus
     end
 
@@ -526,7 +530,7 @@ module Gori::Tui
       @host.status("closed note (#{@notes.count} open)")
       # The confirm said "discarded": the close is a delete, so it lands now rather than at
       # the next exit path (a peer listing the notes meanwhile still saw it).
-      save_notes
+      save_notes(CLOSE_REFUSED)
     end
 
     # Close note `idx`. Notes keeps ≥1 — closing the last one leaves a fresh blank note behind
