@@ -51,7 +51,10 @@ describe "MCP create_note text" do
         {r.error_code, r.field}.should eq({"INVALID_ARGUMENT", "text"})
       end
       call_json(store, "list_notes", "{}")["notes"].as_a.should be_empty
-      call_json(store, "create_note", %({"text":"x"}))["id"].as_i64.should be > 0
+      id = call_json(store, "create_note", %({"text":"x"}))["id"].as_i64
+      r = tools.call("update_note", JSON.parse(%({"id":#{id},"text":""})))
+      {r.error_code, r.field}.should eq({"INVALID_ARGUMENT", "text"})
+      call_json(store, "get_note", %({"id":#{id}}))["text"].as_s.should eq("x")
     end
   end
 end

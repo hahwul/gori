@@ -85,6 +85,8 @@ module Gori
         id = required_id(h, "id")
         text = str(h, "text")
         return Result.new("missing 'text' parameter", is_error: true) unless text
+        # As create_note and `gori run notes update` refuse it; delete_note removes a note.
+        return err("'text' is empty — a note needs a body (delete_note removes one)", "INVALID_ARGUMENT", field: "text") if text.empty?
 
         # The id is looked up INSIDE the write transaction — see `create_note`. That is also
         # what makes `Missing` trustworthy: it is "not in the set this write is amending",
