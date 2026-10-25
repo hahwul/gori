@@ -35,13 +35,7 @@ module Gori
         unrequested = bool_arg(h, "include_unrequested", false)
         untested = bool_arg(h, "untested", false)
         if bool_arg(h, "collapse_transport", false)
-          # Refused rather than dropped: an answer without the block reads as "no references".
-          return err("include_unrequested is not available with collapse_transport — call without it, or use list_js_endpoints",
-            "INVALID_ARGUMENT", field: "include_unrequested") if unrequested
-          # Coverage is keyed by origin, which a collapsed row no longer carries.
-          return err("untested is not available with collapse_transport — call without it",
-            "INVALID_ARGUMENT", field: "untested") if untested
-          return collapsed_sitemap(filter, pg, dropped, terms)
+          return collapse_clash(unrequested, untested) || collapsed_sitemap(filter, pg, dropped, terms)
         end
         tags = store.sitemap_tags
         coverage = Sitemap::Coverage.load(store)
@@ -79,17 +73,28 @@ module Gori
             # mixing them in would also make `has_more`/`offset` page two different things.
             emit_unrequested(j, parts.sum(&.bytesize)) if unrequested
             emit_query_hint(j, terms.ql) if entries.empty?
-            # Only when coverage is what emptied the page: the same filter without it finds rows.
-            covered = untested && entries.empty? && offset.zero? &&
-                      !sitemap_page(filter, 1, 0, terms, tags, nil)[0].empty?
-            emit_untested_note(j) if covered
+            emit_untested_note(j, untested, entries.empty?, offset, filter, terms, tags)
             j.field("entries") { raw_rows(j, parts) }
           end
         end)
       end
 
       # An empty `untested` first page otherwise reads as "nothing captured".
-      private def emit_untested_note(j : JSON::Builder) : Nil
+      # The `collapse_transport` refusals, or nil.
+      private def collapse_clash(unrequested : Bool, untested : Bool) : Result?
+        # Refused rather than dropped: an answer without the block reads as "no references".
+        return err("include_unrequested is not available with collapse_transport — call without it, or use list_js_endpoints",
+          "INVALID_ARGUMENT", field: "include_unrequested") if unrequested
+        # Coverage is keyed by origin, which a collapsed row no longer carries.
+        err("untested is not available with collapse_transport — call without it",
+          "INVALID_ARGUMENT", field: "untested") if untested
+      end
+
+      # Only when coverage is what emptied the page: the same filter without it finds rows.
+      private def emit_untested_note(j : JSON::Builder, untested : Bool, empty : Bool, offset : Int32, filter : QL::Filter,
+                                     terms : Sitemap::TagTerms, tags : Hash({String, String}, String)) : Nil
+        return unless untested && empty && offset.zero?
+        return if sitemap_page(filter, 1, 0, terms, tags, nil)[0].empty?
         j.field "note", "no untested endpoint left: any endpoint the query matches already has a recorded " \
                         "#{FlowSource::Kind.active.join("/", &.token)} flow or a saved fuzz run; call without untested to list them"
       end
