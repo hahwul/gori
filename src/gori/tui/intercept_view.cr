@@ -437,14 +437,7 @@ module Gori::Tui
       if @editing
         @editing = false
       elsif it = selected_item
-        if (other = held_edit_id.try { |id| @items.find { |o| o.id == id && id != it.id } })
-          if @discard_armed != it.id
-            @discard_armed = it.id
-            @edit_notice = "#{other.label} has an edit not forwarded yet — forward it first, or open this one again to discard that edit"
-            return
-          end
-          @edit_notice = "discarded the unforwarded edit on #{other.label}"
-        end
+        return if keep_other_edit?(it)
         @discard_armed = nil
         it.binary? ? load_hex(it) : load_text(it)
         @loaded_id = it.id
@@ -452,6 +445,19 @@ module Gori::Tui
         @editing = true
         @insert = insert
       end
+    end
+
+    # Whether opening `it` is refused to keep another held item's unforwarded edit; on the
+    # armed second press it is not, and the edit is discarded. Either way `@edit_notice` says so.
+    private def keep_other_edit?(it : Interceptor::Item) : Bool
+      return false unless other = held_edit_id.try { |id| @items.find { |o| o.id == id && id != it.id } }
+      if @discard_armed != it.id
+        @discard_armed = it.id
+        @edit_notice = "#{other.label} has an edit not forwarded yet — forward it first, or open this one again to discard that edit"
+        return true
+      end
+      @edit_notice = "discarded the unforwarded edit on #{other.label}"
+      false
     end
 
     # What the last `toggle_edit` did to another item's unforwarded edit (kept it and refused, or
