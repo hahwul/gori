@@ -49,7 +49,8 @@ module Gori
     SANDBOX_ERROR = "blocked by sandbox (out of scope)"
     # The project-wide request budget's two refusals (`Budget`, #1601). Not Layer 2 (`admit` is
     # asked once per real send, never by a preflight), but just as permanent for a retrier.
-    BUDGET_SPENT_ERROR       = "project request budget spent (outbound_max_requests) — raise it, or unset it to reset the count"
+    BUDGET_SPENT_ERROR = "project request budget spent (outbound_max_requests) — the operator can raise it, or unset it to reset " \
+                         "the count (`gori run project network set|unset outbound_max_requests`)"
     BUDGET_STOPPED_ERROR     = "stopped while waiting for the project request budget"
     BUDGET_UNAVAILABLE_ERROR = "project request budget unavailable — the project database would not take a lease"
 
