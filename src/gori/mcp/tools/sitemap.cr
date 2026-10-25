@@ -17,8 +17,8 @@ module Gori
 
       @[Tool("list_sitemap")]
       private def list_sitemap(h) : Result
-        limit = clamp(optional_int_arg(h, "limit"), SITEMAP_LIMIT)
-        offset = clamp_nonneg(optional_int_arg(h, "offset"))
+        pg = page_args(h, SITEMAP_LIMIT)
+        limit, offset = pg.limit, pg.offset
         # `tag:` is the sitemap's own field, not QL's (`Sitemap.split_tag_terms`, the cut the TUI
         # bar and `gori run sitemap` make): only the QL half is compiled, refused or reported.
         terms = Sitemap.split_tag_terms(str(h, "query") || "")
@@ -41,7 +41,7 @@ module Gori
           # Coverage is keyed by origin, which a collapsed row no longer carries.
           return err("untested is not available with collapse_transport — call without it",
             "INVALID_ARGUMENT", field: "untested") if untested
-          return collapsed_sitemap(filter, limit, offset, dropped, terms)
+          return collapsed_sitemap(filter, pg, dropped, terms)
         end
         tags = store.sitemap_tags
         coverage = Sitemap::Coverage.load(store)
@@ -69,6 +69,7 @@ module Gori
             j.field "scanned", rows.size
             j.field "offset", offset
             j.field "limit", limit
+            emit_clamp(j, pg.req_off, pg.offset, pg.req_lim, pg.limit)
             j.field "has_more", has_more
             emit_cut(j, cut)
             emit_ignored_terms(j, dropped)
@@ -369,8 +370,9 @@ module Gori
       # The legacy collapsed sitemap (distinct host/method/target only), for
       # collapse_transport:true. Its `tag:` terms prune the HOST-level tree, the one these
       # host-keyed rows make.
-      private def collapsed_sitemap(filter : QL::Filter, limit : Int32, offset : Int32,
+      private def collapsed_sitemap(filter : QL::Filter, pg : Page,
                                     dropped : Array(String), terms : Sitemap::TagTerms) : Result
+        limit, offset = pg.limit, pg.offset
         tag_capped = false
         if terms.filtering?
           all = store.sitemap_entries(filter, Store::SITEMAP_MAX)
@@ -391,6 +393,7 @@ module Gori
             j.field "returned", parts.size
             j.field "offset", offset
             j.field "limit", limit
+            emit_clamp(j, pg.req_off, pg.offset, pg.req_lim, pg.limit)
             j.field "has_more", has_more
             emit_cut(j, cut)
             emit_ignored_terms(j, dropped)

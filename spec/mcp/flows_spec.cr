@@ -777,6 +777,24 @@ describe Gori::MCP::Server do
         p["pagination_warning"].as_s.should contain("clamped")
       end
     end
+
+    it "echoes a clamped limit the same way on list_history and list_sitemap" do
+      with_store do |store|
+        mcp_seed_flow(store)
+        tools = tools_for(store)
+        [%({"limit":0}), %({"limit":-1})].each do |args|
+          p = mcp_ok_json(tools, "list_history", args)
+          {p["limit"].as_i, p["pagination_warning"].as_s.includes?("clamped")}.should eq({1, true})
+        end
+        mcp_ok_json(tools, "list_history", %({"limit":0}))["requested_limit"].as_i.should eq(0)
+        [%({"limit":0}), %({"limit":0,"collapse_transport":true})].each do |args|
+          p = mcp_ok_json(tools, "list_sitemap", args)
+          {p["requested_limit"].as_i, p["limit"].as_i}.should eq({0, 1})
+        end
+        mcp_ok_json(tools, "list_history", %({"limit":5}))["requested_limit"]?.should be_nil
+        mcp_ok_json(tools, "list_sitemap", %({"limit":5}))["requested_limit"]?.should be_nil
+      end
+    end
   end
 
   describe "list_sitemap transport" do

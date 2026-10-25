@@ -22,7 +22,8 @@ module Gori
 
       @[Tool("list_history", requires: ["get_flow", "ql_reference"])]
       private def list_history(h) : Result
-        limit = clamp(optional_int_arg(h, "limit"), HISTORY_LIMIT)
+        req_lim = optional_int_arg(h, "limit")
+        limit = clamp(req_lim, HISTORY_LIMIT)
         before_id = optional_int_arg(h, "before_id")
         since_id = optional_int_arg(h, "since")
         # `ids` names an EXACT set — the rows the operator marked in the TUI, handed over by
@@ -232,6 +233,7 @@ module Gori
           j.object do
             j.field "returned", rows.size
             j.field "limit", limit
+            emit_clamp(j, nil, 0, req_lim, limit)
             # Which end of the list the caller is holding. `since` flips the order, which the
             # schema documented and nothing in the payload did — so an agent reading rows[0]
             # as "the newest" was right on one path and wrong on the other.
