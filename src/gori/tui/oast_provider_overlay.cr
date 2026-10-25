@@ -100,7 +100,13 @@ module Gori::Tui
     end
 
     def valid? : Bool
-      !provider_name.empty? && !host.empty?
+      !provider_name.empty? && !host.empty? && host_error.nil?
+    end
+
+    # Why the host can never be one, or nil — the check `gori run oast providers` and MCP make
+    # on the same field, so a host they refuse is not saved here either.
+    def host_error : String?
+      Gori::Oast::Provider.endpoint_error(host) unless host.empty?
     end
 
     # --- Overlay contract (see overlay.cr) ---
@@ -200,7 +206,7 @@ module Gori::Tui
       when ROW_HOST  then draw_field(screen, box, py, bg, fg, sel, "host:", @host)
       when ROW_TOKEN then draw_field(screen, box, py, bg, fg, sel, "token:", @token)
       else
-        label = valid? ? "[ Save provider ]" : "[ name + host required ]"
+        label = valid? ? "[ Save provider ]" : (host_error ? "[ fix the host ]" : "[ name + host required ]")
         screen.text(x, py, label, valid? ? Theme.accent : Theme.muted, bg, Attribute::Bold)
       end
     end

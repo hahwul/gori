@@ -117,6 +117,18 @@ describe "Gori::Tui::OastProviderOverlay — Overlay seam" do
     h.commits.should eq(1) # save_provider DID run — it just returned false
   end
 
+  # `gori run oast providers` and MCP refuse this host (`Oast::Provider.endpoint_error`).
+  it "is not valid with a host the other surfaces refuse" do
+    ov = OastProviderOverlay.editing(config(scope: "project"))
+    ov.valid?.should be_true
+    ov.set_selected(3) # host
+    40.times { ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Backspace)) }
+    "not a url".each_char { |c| ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Unknown, char: c)) }
+    ov.host.should eq("not a url")
+    ov.host_error.should_not be_nil
+    ov.valid?.should be_false
+  end
+
   it "esc cancels and a click-away dismisses — neither persists anything" do
     h = OverlayHarness.new(OastProviderOverlay.adding)
     h.press(Termisu::Input::Key::Escape).should eq(:closed)

@@ -785,6 +785,10 @@ module Gori::Tui
     # old one only once that insert committed: the other order lost the provider outright when
     # the second write was refused.
     def save_provider(ov : OastProviderOverlay) : Bool
+      if err = ov.host_error
+        @host.status("provider: #{err}")
+        return false
+      end
       return false unless ov.valid?
       store = @host.session.store
       if id = ov.edit_id
