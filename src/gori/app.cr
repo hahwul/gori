@@ -295,7 +295,7 @@ module Gori
       if err = session.bind_error
         STDERR.puts "gori: not capturing — #{err}"
         # The lock is the project's, so --port cannot help that one.
-        STDERR.puts(session.capturing_lock_held? ? "  another program may hold the port; free it or pass --port." : "  close that instance first.")
+        STDERR.puts(session.capturing_lock_held? ? "  check --listen, or free the port (another program may hold it) or pass --port." : "  close that instance first.")
         session.close
         exit 1
       end
