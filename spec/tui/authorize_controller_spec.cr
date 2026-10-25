@@ -1,5 +1,6 @@
 require "../spec_helper"
 require "../support/fake_host"
+require "../support/memory_backend"
 require "file_utils"
 require "socket"
 require "../../src/gori/tui/controllers/authorize_controller"
@@ -137,6 +138,18 @@ describe Gori::Tui::AuthorizeController do
       saved[0].baseline?.should be_true
       # Through the LIVE registry, so the send seams see both halves.
       Gori::SessionSlots.load(session.store).slots[0].rules.should eq(["SESSION", "CSRF"])
+    end
+  end
+
+  it "draws the project's session slots as the identities before any run loads them" do
+    with_authorize_controller do |ctrl, _host, session|
+      session.slots.save([Gori::SessionSlot.new("admin", set_headers: [{"Cookie", "session=A"}], baseline: true)]).should be_true
+      backend = MemoryBackend.new(100, 30)
+      ctrl.render_body(Gori::Tui::Screen.new(backend), Gori::Tui::Rect.new(0, 0, 100, 30), :body)
+      ctrl.view.identities.map(&.name).should eq(["admin"])
+      # Drawing does not cache: a slot added before the first run still reaches it.
+      session.slots.save([Gori::SessionSlot.new("admin", baseline: true), Gori::SessionSlot.new("guest")]).should be_true
+      ctrl.identities.map(&.name).should eq(["admin", "guest"])
     end
   end
 

@@ -891,6 +891,12 @@ module Gori::Tui
     # --- render / input ------------------------------------------------------
 
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
+      # Until a run or the card loads (and caches) the set, the header still names the live
+      # one: the view's built-in pair is only right on a project with no session slots.
+      unless @identities_loaded
+        stored = @host.session.slots.slots
+        @view.identities = stored.empty? ? AuthorizeView.default_identities : stored
+      end
       focused = focus == :body
       BodyChrome.framed(screen, rect, focused) do |inner|
         @view.render(screen, inner, focused)
