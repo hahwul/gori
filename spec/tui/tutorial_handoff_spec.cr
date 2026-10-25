@@ -11,6 +11,16 @@ describe "Gori::Tui::Tutorial.first_session_steps" do
     Tour.first_session_steps(Tour::Handoff::Session, 71)[0].should contain("Back in your session")
   end
 
+  # The new-project form is name → description → tags, and ↵ on each advances: three, not two.
+  it "counts one ↵ per field of the new-project form" do
+    Gori::Tui::ProjectPicker::NEW_FIELDS.size.should eq(3)
+    [Tour::Handoff::Picker, Tour::Handoff::Shell].each do |handoff|
+      Tour.first_session_steps(handoff, 71)[0].should contain("↵ ×3")
+      Tour.first_session_steps(handoff, 40)[0].should_not contain("twice")
+    end
+    Tour.first_session_steps(Tour::Handoff::Shell, 40)[0].should contain("↵↵↵")
+  end
+
   it "sends the user through the palette and names the CA verb" do
     Tour::Handoff.values.each do |handoff|
       steps = Tour.first_session_steps(handoff, 71)

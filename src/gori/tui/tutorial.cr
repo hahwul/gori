@@ -292,9 +292,9 @@ module Gori::Tui
       help, tour = reach(registry, "tab.help"), reach(registry, "help.tour")
       if width < 66
         first = case handoff
-                when Handoff::Picker  then "New project → name → ↵ twice"
+                when Handoff::Picker  then "New project → name → ↵ ×3"
                 when Handoff::Direct  then "--db opens · picker if it fails"
-                when Handoff::Shell   then "gori → New project → name → ↵↵"
+                when Handoff::Shell   then "gori → New project → name → ↵↵↵"
                 when Handoff::Session then "Back in session · ^P palette"
                 else                       raise "unknown tutorial handoff"
                 end
@@ -309,11 +309,11 @@ module Gori::Tui
       end
       first = case handoff
               when Handoff::Picker
-                "At the picker: New project → name → ↵ twice (description optional)"
+                "At the picker: New project → name → ↵ ×3 (description, tags optional)"
               when Handoff::Direct
                 "Open your --db project; if picker appears, choose a project"
               when Handoff::Shell
-                "Run gori → New project → name → ↵ twice (description optional)"
+                "Run gori → New project → name → ↵ ×3 (description, tags optional)"
               when Handoff::Session
                 "Back in your session: open the command palette with ^P"
               else
