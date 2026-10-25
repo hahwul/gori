@@ -707,7 +707,9 @@ module Gori::Repeater
         raise PlanError.new(PlanError::Reason::UnresolvedEnv, e.message.to_s, e.detail) if e.unresolved?
         bad_target(e.detail)
       end
-      bad_target(Env.expand(raw)) if port <= 0
+      if port <= 0
+        raise PlanError.new(PlanError::Reason::BadTarget, "target port #{port} is out of range (1-65535)", Env.expand(raw))
+      end
       {normalize_scheme(scheme), host, port}
     end
 

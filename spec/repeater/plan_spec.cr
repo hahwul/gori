@@ -547,6 +547,7 @@ describe "Gori::Repeater::Plan.target_error" do
   it "refuses a port past 65535 and a host no dial could reach" do
     R::Plan.target_error("http://127.0.0.1:99999").not_nil!.should contain("port 99999 is out of range")
     R::Plan.target_error("http://127.0.0.1:65535").should be_nil
+    R::Plan.target_error("http://127.0.0.1:0").not_nil!.should contain("port 0 is out of range")
     R::Plan.target_error("not a url at all").not_nil!.should contain("could not determine a target host")
     R::Plan.target_error("http://").not_nil!.should contain("could not")
     # An 8-bit host (a captured one, via --flow) is answered, never raised on.
