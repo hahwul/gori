@@ -79,9 +79,17 @@ module Gori
             # mixing them in would also make `has_more`/`offset` page two different things.
             emit_unrequested(j, parts.sum(&.bytesize)) if unrequested
             emit_query_hint(j, terms.ql) if entries.empty?
+            emit_untested_note(j, untested, entries.empty?, offset)
             j.field("entries") { raw_rows(j, parts) }
           end
         end)
+      end
+
+      # An empty `untested` first page otherwise reads as "nothing captured".
+      private def emit_untested_note(j : JSON::Builder, untested : Bool, empty : Bool, offset : Int32) : Nil
+        return unless untested && empty && offset.zero?
+        j.field "note", "no untested endpoint left: any endpoint the query matches already has a recorded " \
+                        "#{FlowSource::Kind.active.join("/", &.token)} flow or a saved fuzz run; call without untested to list them"
       end
 
       # One `list_sitemap` entry: the transport key, the fold's variants, counts, seen window
