@@ -153,9 +153,7 @@ module Gori
         fields = !(title.nil? && severity.nil? && notes.nil? && status.nil? && cvss.nil? && !clear_cvss &&
                    host.nil? && !clear_host && flow_id.nil? && !clear_flow)
         if !fields && repeater_id.nil?
-          if refusal = nothing_to_change_refusal("update_issue")
-            return refusal
-          end
+          return nothing_to_change_refusal("update_issue") || err("nothing to change — this call sets no field", "INVALID_ARGUMENT")
         end
 
         if fields
