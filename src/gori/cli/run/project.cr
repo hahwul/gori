@@ -422,7 +422,9 @@ module Gori
           STDERR.puts "gori run project export: #{terminal_project_name(project.name, quoted: true)} — " \
                       "#{ProjectArchive.disclosure(prepared.inventory)}"
           destination = begin
-            prepared.write(output_path, overwrite: force)
+            # The operator's path is theirs (no `archives_only`), but never a project's own
+            # database: `--force` there would leave that project unopenable.
+            prepared.write(output_path, overwrite: force, protected_dir: Paths.projects_dir)
           rescue ex : ProjectArchive::DestinationExists
             prepared.close
             abort "gori run project export: #{ex.message} (use --force to replace it)"
