@@ -368,7 +368,8 @@ module Gori::Tui
         Item.new("{space:colormarker.scope} · {space:colormarker.toggle-default}", "move the rule global ⇄ project · flip a global rule's default everywhere"),
         Item.new("{colormarker.move-down} / {colormarker.move-up}", "reorder — the FIRST enabled match paints the row, the rest are skipped"),
         Item.new("style", "full = tint the whole row · strip = one colour cell ahead of TIME"),
-        Item.new("when:", "host: path: method: scheme: status: proto: — ↹ completes · no header:/size:/dur:"),
+        # Full History QL (`Colormarker`'s two tiers): `header:`/`size:`/`dur:`/`body:` work too.
+        Item.new("when:", "History QL — host: path: status: header: size: dur: … · ↹ completes"),
         Item.new("↹ · ↓ past list", "CUSTOM COLORS pane — a add · ↵/e edit · d delete (name + #hex)"),
         Item.new("custom colour", "a global name the picker offers everywhere; its hex is absolute, not theme-relative"),
         Item.new("off the bar by default", "`0` opens it; settings:tabs gives it a slot, next to Rewriter"),

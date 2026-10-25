@@ -353,6 +353,13 @@ describe Gori::Tui::HelpView do
     row.key.should eq("↹ / ⇧↹")
   end
 
+  # A colour rule speaks full History QL (`Colormarker`'s STORE tier answers header:/size:/dur:).
+  it "does not tell the operator a colour rule refuses header:/size:/dur:" do
+    marker = HelpView::SECTIONS.find! { |(t, _)| t == "COLORMARKER" }[1]
+    row = marker.find! { |i| i.key == "when:" }
+    row.desc.should_not contain("no header")
+  end
+
   it "scrolls — the first section leaves and the last arrives" do
     view = HelpView.new
     short = Rect.new(0, 0, 90, 8)
