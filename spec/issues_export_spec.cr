@@ -324,6 +324,19 @@ describe Gori::Issues::Export do
         md.should contain("l1�\nl2") # newline preserved, invalid byte scrubbed to U+FFFD
       end
     end
+    it "demotes a heading in the notes below the issue's own, but not inside a code fence" do
+      with_store do |store|
+        id = store.insert_issue("clean title", Gori::Store::Severity::Low, "clean.host", nil)
+        store.update_issue(id, notes: "## Repro\n1. send it\n```\n# shell comment\n```\n##### deep\n#nohash")
+        md = Gori::Issues::Export.markdown(store.issues, store, "proj")
+        md.lines.count(&.starts_with?("## ")).should eq(1) # the issue's own heading only
+        md.should contain("\n#### Repro\n")
+        md.should contain("\n# shell comment\n") # fenced: untouched
+        md.should contain("\n###### deep\n")
+        md.should contain("\n#nohash") # not a heading
+      end
+    end
+
     it "neutralizes terminal escape sequences in an issue's notes field (markdown printed to a TTY)" do
       # notes routes through scrub_controls: an OSC "set window title" (ESC ] 0 ; … BEL) embedded
       # in a notes field would otherwise reach the terminal when `gori run issues --format markdown`

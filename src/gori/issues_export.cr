@@ -76,7 +76,7 @@ module Gori
         # AND strips terminal escape sequences (ESC/BEL/OSC/CSI) so a notes value carrying
         # an OSC "set window title" can't drive a TTY when the report is printed/`cat`d,
         # yet keeps its newlines (unlike one_line, which would flatten title/host to a line).
-        io << "\n" << scrub_controls(f.notes) << "\n" unless f.notes.strip.empty?
+        io << "\n" << demote_note_headings(scrub_controls(f.notes)) << "\n" unless f.notes.strip.empty?
         if flow && evidence
           append_evidence(io, "Request", flow.request_head, flow.request_body)
           append_evidence(io, "Response", flow.response_head, flow.response_body)
@@ -156,6 +156,31 @@ module Gori
       # be invalid UTF-8, which would make the following per-char walk operate on U+FFFD safely.)
       def self.scrub_controls(s : String) : String
         s.scrub.gsub { |ch| ch.control? && ch != '\n' && ch != '\t' ? "" : ch }
+      end
+
+      NOTE_HEADING = /\A( {0,3})(\#{1,6})(?=[ \t\r\n]|\z)/
+      NOTE_FENCE   = /\A {0,3}(`{3,}|~{3,})/
+
+      # An issue's notes sit under its `##` heading, so a `## Repro` in them read as the next
+      # issue. Every ATX heading outside a code fence goes two levels down (capped at `######`),
+      # below the issue and its `###` sections. Setext headings are left as typed.
+      def self.demote_note_headings(notes : String) : String
+        fence = nil.as(String?)
+        String.build do |io|
+          notes.each_line(chomp: false) do |line|
+            if m = line.match(NOTE_FENCE)
+              mark = m[1]
+              if fence.nil?
+                fence = mark
+              elsif mark[0] == fence[0] && mark.size >= fence.size
+                fence = nil
+              end
+            elsif fence.nil? && (m = line.match(NOTE_HEADING))
+              line = "#{m[1]}#{"#" * Math.min(m[2].size + 2, 6)}#{m.post_match}"
+            end
+            io << line
+          end
+        end
       end
 
       # Collapse control characters (CR/LF/tab/…) to a single space so a value with
