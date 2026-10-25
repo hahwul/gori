@@ -401,27 +401,15 @@ module Gori
       # Export first makes a WAL-safe snapshot, then shows the sensitive-data inventory before
       # writing the archive. Existing destinations require an explicit --force.
       private def self.cmd_project_export(args : Array(String)) : Nil
-        output = nil.as(String?)
-        force = false
-        positional = parse_args(args, "gori run project export") do |p|
-          p.banner = "Usage: gori run project export <name> -o PATH [--force]\n\n" \
-                     "Snapshot a project database into one portable .gori archive."
-          p.on("-o PATH", "--output=PATH", "Write the archive to PATH") { |v| output = v }
-          p.on("--force", "Replace an existing destination file") { force = true }
-        end
-        abort "gori run project export: missing <name>" if positional.empty?
-        abort "gori run project export: too many arguments (expected one <name>)" if positional.size > 1
-        output_path = output.try(&.strip.presence) || abort "gori run project export: missing -o PATH"
-        # `import` reads `-` as stdin, so `-o -` reads as stdout; it wrote a file named `-`.
-        abort "gori run project export: -o - is not supported (the archive is a file); name a path" if output_path == "-"
+        name, output_path, force, format = project_export_args(args)
 
         registry = ProjectRegistry.new(Paths.projects_dir)
         project = begin
-          registry.find(positional.first)
+          registry.find(name)
         rescue ex : ProjectRegistry::Ambiguous
           abort "gori run project export: #{ex.message}"
         end
-        abort "gori run project export: no project matching '#{terminal_project_name(positional.first)}'" unless project
+        abort "gori run project export: no project matching '#{terminal_project_name(name)}'" unless project
 
         prepared = begin
           ProjectArchive.prepare_export(project)
@@ -445,20 +433,53 @@ module Gori
             prepared.close
             abort "gori run project export: could not write archive: #{ex.message}"
           end
-          puts "Project #{terminal_project_name(project.name, quoted: true)} exported to #{destination}."
+          if format == :json
+            puts archive_json(registry, project, destination)
+          else
+            puts "Project #{terminal_project_name(project.name, quoted: true)} exported to #{destination}."
+          end
         ensure
           prepared.close
         end
+      end
+
+      # `project export`'s argv: {name, -o PATH, --force, format}, or an abort.
+      private def self.project_export_args(args : Array(String)) : {String, String, Bool, Symbol}
+        output = nil.as(String?)
+        force = false
+        format = :text
+        project_flag = nil.as(String?)
+        positional = parse_args(args, "gori run project export") do |p|
+          p.banner = "Usage: gori run project export <name> -o PATH [--force]\n\n" \
+                     "Snapshot a project database into one portable .gori archive."
+          p.on("-o PATH", "--output=PATH", "Write the archive to PATH") { |v| output = v }
+          p.on("--force", "Replace an existing destination file") { force = true }
+          # The flag every other `gori run` command names its project with; same as <name>.
+          p.on("--project=NAME", "Project to export (same as <name>)") { |v| project_flag = v }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
+        end
+        if flag = project_flag
+          abort "gori run project export: name the project once (<name> or --project)" unless positional.empty?
+          positional << flag
+        end
+        abort "gori run project export: missing <name>" if positional.empty?
+        abort "gori run project export: too many arguments (expected one <name>)" if positional.size > 1
+        output_path = output.try(&.strip.presence) || abort "gori run project export: missing -o PATH"
+        # `import` reads `-` as stdin, so `-o -` reads as stdout; it wrote a file named `-`.
+        abort "gori run project export: -o - is not supported (the archive is a file); name a path" if output_path == "-"
+        {positional.first, output_path, force, format}
       end
 
       # An import never reopens or overwrites an existing project. --name gives the imported
       # copy a different display name when the archive came from this same registry.
       private def self.cmd_project_import(args : Array(String)) : Nil
         name = nil.as(String?)
+        format = :text
         positional = parse_args(args, "gori run project import") do |p|
           p.banner = "Usage: gori run project import <archive.gori> [--name NEW]\n\n" \
                      "Validate and register a portable project archive."
           p.on("--name=NAME", "Display name for the imported project (default: archive name)") { |v| name = v }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         abort "gori run project import: missing <archive>" if positional.empty?
         abort "gori run project import: too many arguments (expected one <archive>)" if positional.size > 1
@@ -473,8 +494,9 @@ module Gori
         begin
           STDERR.puts "gori run project import: #{terminal_project_name(prepared.manifest.project_name, quoted: true)} — " \
                       "#{ProjectArchive.disclosure(prepared.inventory)}"
+          registry = ProjectRegistry.new(Paths.projects_dir)
           project = begin
-            prepared.import_into(ProjectRegistry.new(Paths.projects_dir), name)
+            prepared.import_into(registry, name)
           rescue ex : Gori::Error
             prepared.close
             abort "gori run project import: #{import_error_message(ex.message || "", name)}"
@@ -482,9 +504,28 @@ module Gori
             prepared.close
             abort "gori run project import: could not register project: #{ex.message}"
           end
-          puts "Project #{terminal_project_name(project.name, quoted: true)} imported (#{project.db_path})."
+          if format == :json
+            puts archive_json(registry, project, Path[positional.first].expand(home: true).to_s)
+          else
+            puts "Project #{terminal_project_name(project.name, quoted: true)} imported (#{project.db_path})."
+          end
         ensure
           prepared.close
+        end
+      end
+
+      # `project export|import --format json`: the project (as `project create` names it) and
+      # the archive written or read, with its size.
+      def self.archive_json(registry : ProjectRegistry, project : Project, archive : String) : String
+        JSON.build do |j|
+          j.object do
+            j.field "name", project.name
+            j.field "id", registry.id_of(project)
+            j.field "slug", registry.slug_of(project)
+            j.field "db_path", project.db_path
+            j.field "path", archive
+            j.field "bytes", File.size(archive)
+          end
         end
       end
 

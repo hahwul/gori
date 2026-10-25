@@ -25,8 +25,9 @@ describe "gori run project archive commands" do
   it "shows the export inventory before atomically writing a confirmed destination" do
     source = project_archive_cli_source
     export = project_archive_cli_method(source, "cmd_project_export")
-    export.should contain("p.on(\"-o PATH\", \"--output=PATH\"")
-    export.should contain("p.on(\"--force\"")
+    export_args = project_archive_cli_method(source, "project_export_args")
+    export_args.should contain("p.on(\"-o PATH\", \"--output=PATH\"")
+    export_args.should contain("p.on(\"--force\"")
     export.should contain("ProjectArchive.disclosure(prepared.inventory)")
     export.index!("STDERR.puts").should be < export.index!("prepared.write(")
     export.should contain("overwrite: force")
@@ -43,5 +44,34 @@ describe "gori run project archive commands" do
     import.should contain("ProjectArchive.disclosure(prepared.inventory)")
     import.index!("STDERR.puts").should be < import.index!("prepared.import_into(")
     import.should contain("ProjectRegistry.new(Paths.projects_dir)")
+  end
+end
+
+describe "gori run project export/import --format json" do
+  it "takes --json and --project on export, and --json on import" do
+    source = project_archive_cli_source
+    export = project_archive_cli_method(source, "project_export_args")
+    export.should contain("p.on(\"--project=NAME\"")
+    export.should contain("format_flag(p, [:text, :json]")
+    project_archive_cli_method(source, "cmd_project_import").should contain("format_flag(p, [:text, :json]")
+  end
+
+  it "names the project and the archive with its size" do
+    root = File.tempname("gori-archive-json")
+    begin
+      registry = Gori::ProjectRegistry.new(root)
+      project = registry.create("json export")
+      archive = File.join(root, "out.gori")
+      File.write(archive, "12345")
+      j = JSON.parse(Gori::CLI::Run.archive_json(registry, project, archive))
+      j["name"].as_s.should eq("json export")
+      j["slug"].as_s.should eq(registry.slug_of(project))
+      j["id"].as_s.should eq(registry.id_of(project))
+      j["db_path"].as_s.should eq(project.db_path)
+      j["path"].as_s.should eq(archive)
+      j["bytes"].as_i.should eq(5)
+    ensure
+      FileUtils.rm_rf(root)
+    end
   end
 end
