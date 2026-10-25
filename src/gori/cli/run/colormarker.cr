@@ -357,7 +357,7 @@ module Gori
         style_s : String? = nil
         name : String? = nil
         filter : String? = nil
-        scope = Store::RuleScope::Project
+        scope_flag : Store::RuleScope? = nil
 
         positional = parse_args(args, "gori run colormarker update") do |p|
           p.banner = "Usage: gori run colormarker update <id> [options]\n\n" \
@@ -370,9 +370,9 @@ module Gori
           p.on("--color=NAME", "#{marker_color_choices} (default: unchanged)") { |v| color_s = v }
           p.on("--style=STYLE", "full | strip (default: unchanged)") { |v| style_s = v }
           p.on("--name=NAME", "New rule label — pass an empty string to clear it (default: unchanged)") { |v| name = v }
-          p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_rule_scope(v, "gori run colormarker") }
+          p.on("--scope=SCOPE", "Which <id>: project (default) | global; a listed P#/G# id names it itself") { |v| scope_flag = parse_rule_scope(v, "gori run colormarker") }
         end
-        id = take_id(positional, "gori run colormarker update", "<id>", "rule id")
+        id, scope = rule_id_arg(positional, "gori run colormarker update", scope_flag)
         # Copied out of the OptionParser closures before use, so Crystal narrows them below —
         # a block-assigned variable stays nilable at the call site (see `color update`).
         want_filter, want_color, want_style, want_name = filter, color_s, style_s, name
@@ -433,13 +433,13 @@ module Gori
 
       private def self.cmd_colormarker_rm(args : Array(String)) : Nil
         proj = ProjectFlags.new
-        scope = Store::RuleScope::Project
+        scope_flag : Store::RuleScope? = nil
         positional = parse_args(args, "gori run colormarker rm") do |p|
           p.banner = "Usage: gori run colormarker rm <id> [options]"
           project_options(p, proj, "update")
-          p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_rule_scope(v, "gori run colormarker") }
+          p.on("--scope=SCOPE", "Which <id>: project (default) | global; a listed P#/G# id names it itself") { |v| scope_flag = parse_rule_scope(v, "gori run colormarker") }
         end
-        id = take_id(positional, "gori run colormarker rm", "<id>", "rule id")
+        id, scope = rule_id_arg(positional, "gori run colormarker rm", scope_flag)
 
         # A project that had overridden this rule keeps a row pointing at the id, and this
         # surface cannot reach every project's DB to sweep it. It stays inert: global ids come
@@ -469,7 +469,7 @@ module Gori
 
       private def self.cmd_colormarker_set_enabled(enable : Bool, args : Array(String)) : Nil
         proj = ProjectFlags.new
-        scope = Store::RuleScope::Project
+        scope_flag : Store::RuleScope? = nil
         everywhere = false
         action = enable ? "enable" : "disable"
         positional = parse_args(args, "gori run colormarker #{action}") do |p|
@@ -478,10 +478,10 @@ module Gori
                      "way `x` does in the Colormarker tab. --everywhere changes the rule's own\n" \
                      "default instead, which every project without an override follows."
           project_options(p, proj, "update")
-          p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_rule_scope(v, "gori run colormarker") }
+          p.on("--scope=SCOPE", "Which <id>: project (default) | global; a listed P#/G# id names it itself") { |v| scope_flag = parse_rule_scope(v, "gori run colormarker") }
           p.on("--everywhere", "global rules only: change the default for every project") { everywhere = true }
         end
-        id = take_id(positional, "gori run colormarker #{action}", "<id>", "rule id")
+        id, scope = rule_id_arg(positional, "gori run colormarker #{action}", scope_flag)
         if everywhere && !scope.global?
           abort "gori run colormarker #{action}: --everywhere needs --scope=global — a project rule has no default"
         end
@@ -524,7 +524,7 @@ module Gori
       # surface that can create a rule has to be able to reorder one.
       private def self.cmd_colormarker_move(args : Array(String)) : Nil
         proj = ProjectFlags.new
-        scope = Store::RuleScope::Project
+        scope_flag : Store::RuleScope? = nil
         dir = 0
         positional = parse_args(args, "gori run colormarker move") do |p|
           p.banner = "Usage: gori run colormarker move <id> --up|--down [options]\n\n" \
@@ -532,7 +532,7 @@ module Gori
                      "every global rule resolves before every project one, so moving past the end\n" \
                      "of a block is a scope change, not a step."
           project_options(p, proj, "update")
-          p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_rule_scope(v, "gori run colormarker") }
+          p.on("--scope=SCOPE", "Which <id>: project (default) | global; a listed P#/G# id names it itself") { |v| scope_flag = parse_rule_scope(v, "gori run colormarker") }
           # Refused like `repeater move`: last-flag-wins moved the rule the other way.
           p.on("--up", "Give the rule higher precedence") do
             abort "gori run colormarker move: pass one of --up or --down" if dir == 1
@@ -543,7 +543,7 @@ module Gori
             dir = 1
           end
         end
-        id = take_id(positional, "gori run colormarker move", "<id>", "rule id")
+        id, scope = rule_id_arg(positional, "gori run colormarker move", scope_flag)
         abort "gori run colormarker move: pass --up or --down" if dir == 0
 
         if scope.global?

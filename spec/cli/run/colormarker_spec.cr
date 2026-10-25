@@ -177,3 +177,13 @@ describe "gori run colormarker color — dangling rules" do
     %w[add update|edit rm|delete].each { |v| banner.should contain("gori run colormarker color #{v}") }
   end
 end
+
+# The listing (and the dangling-colour warning) print `P#3` / `G#3`; every command taking a rule
+# `<id>` reads that spelling through the rewriter's `rule_id_arg`.
+describe "gori run colormarker rule ids" do
+  it "reads a listed P#/G# id on update, rm, enable/disable and move" do
+    src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "colormarker.cr"))
+    src.scan("rule_id_arg(positional, ").size.should eq(4)
+    src.should_not contain(%("<id>", "rule id"))
+  end
+end

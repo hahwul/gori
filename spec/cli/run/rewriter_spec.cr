@@ -620,3 +620,10 @@ describe "gori run rewriter — a rule <id>" do
     Gori::CLI::Run.parse_rule_id("1x", nil).as(String).should start_with("invalid rule id '1x'")
   end
 end
+
+describe "gori run rewriter extract rule ids" do
+  it "reads the listing's #3 spelling" do
+    src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "rewriter.cr"))
+    src.scan("rest.first?.try(&.lchop('#').to_i64?)").size.should eq(2)
+  end
+end
