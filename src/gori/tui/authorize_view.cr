@@ -64,7 +64,8 @@ module Gori::Tui
       # Built once: `detail` never changes, and the list measures every entry's width each
       # frame to size its HOST / PATH column.
       getter host_path : String do
-        "#{@detail.row.host}#{Url.origin_path(@detail.row.target)}"
+        row = @detail.row
+        "#{Gori::Url.authority(row.scheme, row.host, row.port)}#{Url.origin_path(row.target)}"
       end
 
       getter host_path_width : Int32 do

@@ -2021,7 +2021,7 @@ module Gori::Proxy
       held = build_message(sent_resp_head, body)
       decision = ic.hold_response(held,
         flow_id: flow_id, method: sent_req.method, target: "#{resp.status} #{resp.reason}",
-        host: host, port: port, scheme: scheme)
+        host: host, port: port, scheme: scheme, request_target: sent_req.target)
       # An edit makes the stored body the operator's, so a rule's original keeps the origin's (#1589).
       @resp_orig_body ||= buf.to_slice unless decision.bytes == held
       duration = (Time.instant - started).total_microseconds.to_i64

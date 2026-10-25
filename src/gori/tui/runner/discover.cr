@@ -26,7 +26,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       return
     end
     target = view.selected_endpoint(:container).try(&.[](:target)) || ep[:target]
-    open_discover_config(build_discover_seed(origin, ep[:host], target))
+    open_discover_config(build_discover_seed(origin, target))
   end
 
   # Marks (#442) enrich this WITHIN one host: the config popup's start-target list becomes the
@@ -59,7 +59,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       parsed = parsed.select { |(_, p)| p.host == keep[1].host }
     end
     donor_id, first = parsed.find { |(id, _)| id == history_controller.primary_target_flow_id } || parsed.first
-    open_discover_config(build_discover_seed(Discover::Url.origin(first), first.host,
+    open_discover_config(build_discover_seed(Discover::Url.origin(first),
       parsed.map { |(_, p)| p.path }))
     # One donor for the reused auth/cookie headers — the confirm is nested over the config
     # popup and can't loop, so the first marked flow supplies them. This is the only full

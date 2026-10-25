@@ -30,7 +30,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     if row = fp.selected_row
       if detail = @session.store.get_flow(row.id)
         comparer_controller.view.set_slot(slot, detail)
-        @toast = "comparer: set #{slot.to_s.upcase} — #{row.method} #{row.host}"
+        @toast = "comparer: set #{slot.to_s.upcase} — #{row.method} #{Gori::Url.authority(row.scheme, row.host, row.port)}"
       else
         @toast = "flow no longer available"
       end

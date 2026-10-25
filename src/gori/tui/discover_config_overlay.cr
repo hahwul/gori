@@ -9,7 +9,7 @@ module Gori::Tui
   # A discovery run's seed: one or more candidate start targets so the user can pick the
   # scope from the config popup. When launched on a PATH (a `/notes` flow or node) the choices
   # are `[{"/notes/", url}, {"/", url}]` — the path subtree first (the likely intent), then the
-  # whole host. On a host root there is just the one `/` choice. `base_label` is the host.
+  # whole host. On a host root there is just the one `/` choice. `base_label` is the origin's authority (host[:port]).
   record DiscoverSeed,
     choices : Array({String, String}), # [{display path, full URL}]; index 0 is the default
     base_label : String do
@@ -17,7 +17,7 @@ module Gori::Tui
     # path when the History list has a mark set on ONE host (#442) — so marking five endpoints
     # turns the popup's start-target list into a pick among exactly those five. The host root
     # is always offered last. Duplicates collapse; order follows the paths given.
-    def self.build(origin : String, host : String, paths : Array(String)) : DiscoverSeed
+    def self.build(origin : String, paths : Array(String)) : DiscoverSeed
       choices = [] of {String, String}
       paths.each do |path|
         next unless sub = start_dir(path)
@@ -25,7 +25,7 @@ module Gori::Tui
         choices << {sub, "#{origin}#{sub}"}
       end
       choices << {"/", "#{origin}/"}
-      new(choices, host)
+      new(choices, origin.partition("://")[2]) # the authority, port included when not default
     end
 
     # The directory a path's subtree starts at, nil for the root. `/notes` reads as a

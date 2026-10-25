@@ -1225,7 +1225,7 @@ module Gori::Tui
       method, raw_target = effective_method_target(it) # edited values for the loaded item
       case it.kind
       in .request?, .response? then it.label(method, raw_target)
-      in .ws_out?, .ws_in?     then "#{it.host}#{Url.origin_path(raw_target)}  #{ws_preview(it)}"
+      in .ws_out?, .ws_in?     then "#{it.authority}#{Url.origin_path(raw_target)}  #{ws_preview(it)}"
       end
     end
 

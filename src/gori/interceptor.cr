@@ -135,9 +135,13 @@ module Gori
       # SSE, a gRPC stream), a length over the ceiling, or a padded body. h1 holds head+body
       # always and leaves this false.
       getter? head_only : Bool
+      # A response's own `target` is its status line, so the request target it answers rides
+      # here for the label; nil for every other kind.
+      getter request_target : String?
 
       def initialize(@id, @kind, @method, @host, @target, @port, @scheme, @raw, @held_at,
-                     @flow_id = nil, @binary = false, @edit_refusal = nil, @head_only = false)
+                     @flow_id = nil, @binary = false, @edit_refusal = nil, @head_only = false,
+                     @request_target = nil)
         @reply = Channel(Decision).new(1)
         @held_at_ms = Time.utc.to_unix_ms
       end
@@ -192,11 +196,17 @@ module Gori
       # `Tui::Url`'s.
       def label(m : String = method, t : String = target, size : Int32 = raw.size) : String
         case kind
-        in .request?  then "#{m} #{host}#{Gori::Url.origin_path(t)}"
-        in .response? then "#{m} #{host} -> #{t}"
-        in .ws_out?   then "#{host}#{Gori::Url.origin_path(t)} client->server #{size}B"
-        in .ws_in?    then "#{host}#{Gori::Url.origin_path(t)} server->client #{size}B"
+        in .request?  then "#{m} #{authority}#{Gori::Url.origin_path(t)}"
+        in .response? then "#{m} #{authority}#{request_target.try { |r| Gori::Url.origin_path(r) }} -> #{t}"
+        in .ws_out?   then "#{authority}#{Gori::Url.origin_path(t)} client->server #{size}B"
+        in .ws_in?    then "#{authority}#{Gori::Url.origin_path(t)} server->client #{size}B"
         end
+      end
+
+      # The host as a label names it: with its port unless that is the scheme's default, so
+      # two services on one host do not read as one.
+      def authority : String
+        Gori::Url.authority(scheme, host, port)
       end
 
       # The method + target an EDIT of this message names on its start line, for the label of
@@ -662,9 +672,10 @@ module Gori
     # row yet. `Item#flow_id` was already `Int64?` and the TUI already falls back to the
     # intercept tab when it is nil, so nothing else moves. h1 keeps passing an Int64.
     def hold_response(raw : Bytes, *, flow_id : Int64?, method : String, target : String,
-                      host : String, port : Int32, scheme : String) : Decision
+                      host : String, port : Int32, scheme : String,
+                      request_target : String? = nil) : Decision
       item = enqueue_response(raw, flow_id: flow_id, method: method, target: target,
-        host: host, port: port, scheme: scheme)
+        host: host, port: port, scheme: scheme, request_target: request_target)
       item ? item.reply.receive : Decision.new(Action::Forward, raw)
     end
 
@@ -686,9 +697,10 @@ module Gori
 
     def enqueue_response(raw : Bytes, *, flow_id : Int64?, method : String, target : String,
                          host : String, port : Int32, scheme : String,
-                         edit_refusal : String? = nil, head_only : Bool = false) : Item?
+                         edit_refusal : String? = nil, head_only : Bool = false,
+                         request_target : String? = nil) : Item?
       enqueue(Kind::Response, raw, method, target, host, port, scheme, flow_id,
-        edit_refusal: edit_refusal, head_only: head_only)
+        edit_refusal: edit_refusal, head_only: head_only, request_target: request_target)
     end
 
     # Queue one reassembled WebSocket message (#500 step 2). `raw` is the payload as it would
@@ -708,13 +720,13 @@ module Gori
 
     private def enqueue(kind, raw, method, target, host, port, scheme, flow_id,
                         binary = false, edit_refusal : String? = nil,
-                        head_only : Bool = false) : Item?
+                        head_only : Bool = false, request_target : String? = nil) : Item?
       return nil unless intercepts_host?(host)
       item = @mutex.synchronize do
         return nil if @shutting_down || !@enabled
         id = (@next_id += 1)
         it = Item.new(id, kind, method, host, target, port, scheme, raw, Time.instant, flow_id,
-          binary, edit_refusal, head_only)
+          binary, edit_refusal, head_only, request_target)
         @items[id] = it
         it
       end

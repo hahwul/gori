@@ -252,7 +252,8 @@ module Gori::Proxy::H2
       host : String,
       port : Int32,
       scheme : String,
-      refusal : String?
+      refusal : String?,
+      request_target : String? = nil
 
     property peer : StreamGate?
 
@@ -547,7 +548,8 @@ module Gori::Proxy::H2
       else
         @interceptor.enqueue_response(raw, flow_id: @assembler.flow_id_of(held.stream_id),
           method: held.method, target: held.target, host: held.host, port: held.port,
-          scheme: held.scheme, edit_refusal: held.refusal, head_only: body.nil?)
+          scheme: held.scheme, edit_refusal: held.refusal, head_only: body.nil?,
+          request_target: held.request_target)
       end
     end
 
@@ -875,7 +877,7 @@ module Gori::Proxy::H2
       # h1's response Item carries "<status> <reason>"; h2 has no reason phrase (§8.3.2).
       Held.new(request: false, stream_id: block.stream_id, method: ref.method,
         target: status.to_s, host: host, port: port, scheme: ref.scheme,
-        refusal: edit_refusal(block))
+        refusal: edit_refusal(block), request_target: ref.target)
     end
 
     # Why an edit to this held head cannot be applied, or nil. Asked HERE — at hold time, on

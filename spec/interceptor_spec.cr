@@ -568,7 +568,7 @@ describe "Interceptor scope gates over an ABSOLUTE-FORM target" do
         item = ic.enqueue_request("x".to_slice, method: "POST",
           target: "http://127.0.0.1:19201/held", host: "127.0.0.1", port: 19201,
           scheme: "http").not_nil!
-        item.label.should eq("POST 127.0.0.1/held")
+        item.label.should eq("POST 127.0.0.1:19201/held")
       end
     end
 
@@ -578,7 +578,7 @@ describe "Interceptor scope gates over an ABSOLUTE-FORM target" do
         ic.toggle
         item = ic.enqueue_request("x".to_slice, method: "POST", target: "/held",
           host: "127.0.0.1", port: 19201, scheme: "http").not_nil!
-        item.label.should eq("POST 127.0.0.1/held")
+        item.label.should eq("POST 127.0.0.1:19201/held")
       end
     end
 
@@ -588,12 +588,25 @@ describe "Interceptor scope gates over an ABSOLUTE-FORM target" do
         ic.toggle
         h1 = ic.enqueue_response("x".to_slice, flow_id: 1_i64, method: "POST", target: "200 OK",
           host: "127.0.0.1", port: 19201, scheme: "http").not_nil!
-        h1.label.should eq("POST 127.0.0.1 -> 200 OK")
+        h1.label.should eq("POST 127.0.0.1:19201 -> 200 OK")
         h1.label.should_not contain("127.0.0.1200")
         # h2 has no reason phrase (RFC 9113 §8.3.2), so its response target is the bare code.
         h2 = ic.enqueue_response("x".to_slice, flow_id: 2_i64, method: "GET", target: "200",
           host: "api.test", port: 443, scheme: "https").not_nil!
         h2.label.should eq("GET api.test -> 200")
+      end
+    end
+
+    it "names a non-default port and the request path a response answers, so two services on one host differ" do
+      with_store do |store|
+        ic = Gori::Interceptor.new(Gori::Scope.load(store))
+        ic.toggle
+        a = ic.enqueue_response("x".to_slice, flow_id: 1_i64, method: "GET", target: "200 OK",
+          host: "h.test", port: 8080, scheme: "http", request_target: "http://h.test:8080/a?x=1").not_nil!
+        a.label.should eq("GET h.test:8080/a?x=1 -> 200 OK")
+        b = ic.enqueue_request("x".to_slice, method: "GET", target: "/a", host: "h.test", port: 9090,
+          scheme: "http").not_nil!
+        b.label.should eq("GET h.test:9090/a")
       end
     end
 
@@ -641,7 +654,7 @@ describe "Interceptor scope gates over an ABSOLUTE-FORM target" do
         req = ic.enqueue_request("x".to_slice, method: "GET", target: "/held",
           host: "127.0.0.1", port: 19201, scheme: "http").not_nil!
         req.label(size: 999).should eq(req.label)
-        req.label(size: 999).should eq("GET 127.0.0.1/held")
+        req.label(size: 999).should eq("GET 127.0.0.1:19201/held")
       end
     end
 
@@ -657,14 +670,14 @@ describe "Interceptor scope gates over an ABSOLUTE-FORM target" do
         req = ic.enqueue_request("x".to_slice, method: "GET", target: "/held",
           host: "127.0.0.1", port: 19201, scheme: "http").not_nil!
         # A GET the operator edited into a PUT against another path, absolute-form and all.
-        req.label("PUT", "http://127.0.0.1:19201/edited").should eq("PUT 127.0.0.1/edited")
+        req.label("PUT", "http://127.0.0.1:19201/edited").should eq("PUT 127.0.0.1:19201/edited")
         # An unedited call is the no-argument one.
         req.label(req.method, req.target).should eq(req.label)
 
         resp = ic.enqueue_response("x".to_slice, flow_id: 1_i64, method: "POST", target: "200 OK",
           host: "127.0.0.1", port: 19201, scheme: "http").not_nil!
         # A 200→201 status edit, which is what the editor's first line gives back.
-        resp.label("POST", "201 CREATED").should eq("POST 127.0.0.1 -> 201 CREATED")
+        resp.label("POST", "201 CREATED").should eq("POST 127.0.0.1:19201 -> 201 CREATED")
         resp.label("POST", "201 CREATED").should_not contain("127.0.0.1201")
       end
     end
@@ -918,11 +931,11 @@ describe "Gori::Interceptor::Item#edited_label (#1430)" do
       req = ic.enqueue_request("GET /bf2 HTTP/1.1\r\n\r\n".to_slice, method: "GET", target: "/bf2",
         host: "127.0.0.1", port: 19201, scheme: "http").not_nil!
       edit = "DELETE /changed?x=1 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice
-      req.edited_label(edit).should eq("DELETE 127.0.0.1/changed?x=1")
+      req.edited_label(edit).should eq("DELETE 127.0.0.1:19201/changed?x=1")
       req.edited_method_target(edit).should eq({"DELETE", "/changed?x=1"})
       # LF-joined (the TUI editor's text) and absolute-form (a forward-proxy hold) read alike.
       req.edited_label("PUT http://127.0.0.1:19201/x HTTP/1.1\nHost: h\n\n".to_slice)
-        .should eq("PUT 127.0.0.1/x")
+        .should eq("PUT 127.0.0.1:19201/x")
     end
   end
 
@@ -933,9 +946,9 @@ describe "Gori::Interceptor::Item#edited_label (#1430)" do
       resp = ic.enqueue_response("HTTP/1.1 200 OK\r\n\r\n".to_slice, flow_id: 1_i64, method: "POST",
         target: "200 OK", host: "127.0.0.1", port: 19201, scheme: "http").not_nil!
       resp.edited_label("HTTP/1.1 403 Forbidden\r\nX: y\r\n\r\n".to_slice)
-        .should eq("POST 127.0.0.1 -> 403 Forbidden")
-      resp.edited_label("HTTP/1.1  404 Not Found\r\n\r\n".to_slice).should eq("POST 127.0.0.1 -> 404 Not Found")
-      resp.edited_label("HTTP/1.1\r\n\r\n".to_slice).should eq("POST 127.0.0.1 -> 200 OK")
+        .should eq("POST 127.0.0.1:19201 -> 403 Forbidden")
+      resp.edited_label("HTTP/1.1  404 Not Found\r\n\r\n".to_slice).should eq("POST 127.0.0.1:19201 -> 404 Not Found")
+      resp.edited_label("HTTP/1.1\r\n\r\n".to_slice).should eq("POST 127.0.0.1:19201 -> 200 OK")
     end
   end
 
@@ -956,14 +969,14 @@ describe "Gori::Interceptor::Item#edited_label (#1430)" do
       ic.toggle
       req = ic.enqueue_request("x".to_slice, method: "GET", target: "/held",
         host: "127.0.0.1", port: 19201, scheme: "http").not_nil!
-      req.edited_label("\r\nHost: h\r\n\r\n".to_slice).should eq("GET 127.0.0.1/held")
-      req.edited_label("POST\r\n\r\n".to_slice).should eq("POST 127.0.0.1/held")
-      req.edited_label(Bytes.empty).should eq("GET 127.0.0.1/held")
+      req.edited_label("\r\nHost: h\r\n\r\n".to_slice).should eq("GET 127.0.0.1:19201/held")
+      req.edited_label("POST\r\n\r\n".to_slice).should eq("POST 127.0.0.1:19201/held")
+      req.edited_label(Bytes.empty).should eq("GET 127.0.0.1:19201/held")
       # A doubled space or a tab between tokens is still a target, not an absent one.
-      req.edited_label("DELETE  /changed HTTP/1.1\r\n\r\n".to_slice).should eq("DELETE 127.0.0.1/changed")
-      req.edited_label("DELETE\t/changed\tHTTP/1.1\r\n\r\n".to_slice).should eq("DELETE 127.0.0.1/changed")
+      req.edited_label("DELETE  /changed HTTP/1.1\r\n\r\n".to_slice).should eq("DELETE 127.0.0.1:19201/changed")
+      req.edited_label("DELETE\t/changed\tHTTP/1.1\r\n\r\n".to_slice).should eq("DELETE 127.0.0.1:19201/changed")
       # Only the first line is decoded, and a non-UTF-8 octet in it does not raise.
-      req.edited_label(Bytes[0x50, 0x55, 0x54, 0x20, 0x2f, 0xff, 0x0a]).should start_with("PUT 127.0.0.1/")
+      req.edited_label(Bytes[0x50, 0x55, 0x54, 0x20, 0x2f, 0xff, 0x0a]).should start_with("PUT 127.0.0.1:19201/")
     end
   end
 end

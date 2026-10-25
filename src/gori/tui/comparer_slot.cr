@@ -56,7 +56,7 @@ module Gori::Tui
       row = d.row
       new(
         "#{row.method} #{Url.origin_path(row.target)}",
-        row.method, row.url, row.host, Url.origin_path(row.target),
+        row.method, row.url, Gori::Url.authority(row.scheme, row.host, row.port), Url.origin_path(row.target),
         Repeater::ExchangeMeta.of(row), source: source, flow_id: row.id,
         request_head: d.request_head, request_body: d.request_body,
         response_head: d.response_head, response_body: d.response_body, error: d.error,

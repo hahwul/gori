@@ -5430,13 +5430,13 @@ module Gori::Tui
 
     # Candidate start targets for the Discover popup: the path subtree first (the likely
     # intent), then the whole host — so `/notes` offers both `/notes/` and `/`.
-    private def build_discover_seed(origin : String, host : String, path : String) : DiscoverSeed
-      build_discover_seed(origin, host, [path])
+    private def build_discover_seed(origin : String, path : String) : DiscoverSeed
+      build_discover_seed(origin, [path])
     end
 
     # See `DiscoverSeed.build`.
-    private def build_discover_seed(origin : String, host : String, paths : Array(String)) : DiscoverSeed
-      DiscoverSeed.build(origin, host, paths)
+    private def build_discover_seed(origin : String, paths : Array(String)) : DiscoverSeed
+      DiscoverSeed.build(origin, paths)
     end
 
     # After the config popup opens on a History flow, offer to reuse that flow's own
