@@ -1589,6 +1589,24 @@ describe "FuzzerView TEMPLATE editor parity with the Repeater request editor" do
     view.template_text.should eq(before)
   end
 
+  it "^K and ^A are undoable and leave the caret where it was" do
+    view = FuzzerView.new
+    view.load_request("https://h", "GET /?x=1 HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+    view.focus_pane(:template)
+    view.enter_template_insert!
+    view.template_move(1, 0)
+    view.template_end # after `h`, on the Host line
+    view.mark_word.should eq("marked position")
+    view.template_insert('X') # lands where the caret stayed: inside the new marker, line 2
+    view.template_text.split("\r\n")[1].should eq("Host: §hX§")
+    view.template_undo
+    view.template_undo
+    view.template_text.should eq("GET /?x=1 HTTP/1.1\r\nHost: h\r\n\r\n")
+    view.auto_mark.should contain("auto-marked")
+    view.template_undo
+    view.template_text.should eq("GET /?x=1 HTTP/1.1\r\nHost: h\r\n\r\n")
+  end
+
   it "⇧arrows extend a selection that ⌫ then removes in one step" do
     view = FuzzerView.new
     view.load_request("https://h", "GET /?x=1 HTTP/1.1\r\nHost: h\r\n\r\n", false, "")

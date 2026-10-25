@@ -32,7 +32,7 @@ class Gori::Tui::RepeaterView
   # Each of the three that CREATES a marker also declares the buffer a template — see
   # `markers_live?` for why an evidence tab needs to be told.
   #
-  # They write back through `set_text_keeping_eols`, never plain `set_text`: the Template
+  # They write back through `remark_keeping_eols`, never plain `set_text`: the Template
   # helpers take (and must take) `@editor.text`, the CR-free LF projection every offset here
   # indexes, and a plain `set_text` of that result would store the projection — flattening
   # the capture's body CRLFs before the tab has sent anything, with auto-CL resyncing the
@@ -46,7 +46,7 @@ class Gori::Tui::RepeaterView
     # Name that instead of doing it silently.
     return "the capture's own § would become markers and auto-mark adds none — ^T marks at the cursor" if literal_markers?
     declare_markers
-    @editor.set_text_keeping_eols(Fuzz::Template.auto_mark(@editor.text))
+    @editor.remark_keeping_eols(Fuzz::Template.auto_mark(@editor.text))
     @dirty = true
     n = Fuzz::Template.parse(@editor.text).position_count
     "auto-marked #{Gori.plural(n, "position")}"
@@ -59,7 +59,7 @@ class Gori::Tui::RepeaterView
     return "no word at the cursor — place it on a token (or auto-mark)" if after == before
     note = adopted_literals_note
     declare_markers
-    @editor.set_text_keeping_eols(after)
+    @editor.remark_keeping_eols(after)
     @dirty = true
     msg = Fuzz::Template.parse(after).position_count < Fuzz::Template.parse(before).position_count ? "unmarked position" : "marked position"
     "#{msg}#{note}"
@@ -86,7 +86,7 @@ class Gori::Tui::RepeaterView
   def clear_marks : String
     return mark_hint unless markable?
     return literal_marker_hint unless markers_live?
-    @editor.set_text_keeping_eols(Fuzz::Template.clear_markers(@editor.text))
+    @editor.remark_keeping_eols(Fuzz::Template.clear_markers(@editor.text))
     @markers_declared = false # back to a buffer with no markers of its own
     invalidate_marker_caches
     @dirty = true

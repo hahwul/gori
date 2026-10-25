@@ -580,6 +580,34 @@ module Gori::Tui
       replace_all(with_wire_eols(lf_text), caret)
     end
 
+    # The marking helpers' write-back (^K mark word, ^A auto-mark, Clear markers): the
+    # `replace_all_keeping_eols` above, so the mark is ONE undoable edit, with the caret carried
+    # across the `§`/`¦chain` characters the transform added or removed. `set_text` here reset
+    # the undo stack and sent the caret to line 1.
+    def remark_keeping_eols(lf_text : String) : Nil
+      replace_all_keeping_eols(lf_text, carry_offset(text, lf_text, cursor_offset))
+    end
+
+    # `cur` in `before`, mapped into `after` — for a transform that only inserted, or only
+    # removed, characters. Greedy: a char equal to its neighbour can shift the caret by one.
+    private def carry_offset(before : String, after : String, cur : Int32) : Int32
+      b = before.chars
+      a = after.chars
+      grew = a.size > b.size
+      i = j = 0
+      while i < cur && i < b.size && j < a.size
+        if b[i] == a[j]
+          i += 1
+          j += 1
+        elsif grew
+          j += 1
+        else
+          i += 1
+        end
+      end
+      j
+    end
+
     private def with_wire_eols(lf_text : String) : String
       return lf_text if @eols.all? { |e| e == "\n" || e.empty? } # nothing to restore
       parts = lf_text.split('\n')

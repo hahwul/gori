@@ -395,6 +395,27 @@ describe Gori::Tui::TextArea do
     end
   end
 
+  describe "#remark_keeping_eols (the marking helpers' write-back)" do
+    it "is one undoable edit, carries the caret across added markers, and keeps CRLF" do
+      ta = TextArea.new("GET / HTTP/1.1\r\nX: ab cd\r\n")
+      ta.insert('!') # a prior edit that must survive as undoable
+      ta.move(1, 0)
+      ta.end_of_line
+      ta.move(0, -1) # between c and d
+      ta.remark_keeping_eols("!GET / HTTP/1.1\nX: ab §cd§\n")
+      ta.wire_text.should eq("!GET / HTTP/1.1\r\nX: ab §cd§\r\n")
+      ta.cy.should eq(1)
+      ta.cx.should eq(8)                                    # still between c and d
+      ta.remark_keeping_eols("!GET / HTTP/1.1\nX: ab cd\n") # unmark: the caret comes back
+      ta.cx.should eq(7)
+      ta.undo
+      ta.text.should eq("!GET / HTTP/1.1\nX: ab §cd§\n")
+      ta.undo
+      ta.undo
+      ta.text.should eq("GET / HTTP/1.1\nX: ab cd\n")
+    end
+  end
+
   describe "#replace_line" do
     it "is an undo step of its own by default" do
       ta = TextArea.new("CL: 1\nab")

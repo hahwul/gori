@@ -815,7 +815,7 @@ module Gori::Tui
         return "§ here is literal (escaped §§) — auto-mark won't add positions; ^K marks the token at the cursor" if Fuzz::Template.marker_bytes_in?(before.to_slice)
         return "nothing to auto-mark — no query, cookie or body values found"
       end
-      @editor.set_text_keeping_eols(text)
+      @editor.remark_keeping_eols(text)
       @dirty = true
       n = Fuzz::Template.parse(text).position_count
       "auto-marked #{Gori.plural(n, "position")}"
@@ -865,7 +865,7 @@ module Gori::Tui
       before = @editor.text
       after = Fuzz::Template.mark_word(before, @editor.cursor_offset)
       return "no word at the cursor — place it on a token (or ^A to auto-mark)" if after == before
-      @editor.set_text_keeping_eols(after)
+      @editor.remark_keeping_eols(after)
       @dirty = true
       Fuzz::Template.parse(after).position_count < Fuzz::Template.parse(before).position_count ? "unmarked position" : "marked position"
     end
@@ -891,7 +891,7 @@ module Gori::Tui
     def clear_marks : String
       # clear_markers renders the defaults inline — drops both the § delimiters AND any
       # ¦chain (a naive gsub("§","") would leave a stray value¦chain behind).
-      @editor.set_text_keeping_eols(Fuzz::Template.clear_markers(@editor.text))
+      @editor.remark_keeping_eols(Fuzz::Template.clear_markers(@editor.text))
       @dirty = true
       "cleared all § markers"
     end
@@ -1759,7 +1759,7 @@ module Gori::Tui
     #     has none), the body is copied through byte-for-byte, and no `$` is touched.
     #
     # Provenance is about where the bytes CAME FROM, so an operator edit does not clear it:
-    # ^A/^K only insert §/¦ within a line (`set_text_keeping_eols` keeps every terminator), and
+    # ^A/^K only insert §/¦ within a line (`remark_keeping_eols` keeps every terminator), and
     # dropping evidence on the first keystroke would put the substitution back on the most
     # common workflow there is — seed a capture, tweak a header, mark, run.
     #
