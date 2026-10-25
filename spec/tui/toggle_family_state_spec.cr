@@ -44,7 +44,7 @@ describe "toggle-family row state (#1274 WP9)" do
       ctl.repeater_toggle_auto_content_length
       ctl.menu_state("repeater.toggle-auto-content-length").should_not eq(cl)
 
-      ctl.menu_state("repeater.cycle-tls-preset").should eq("off")
+      ctl.menu_state("repeater.cycle-tls-preset").should eq("default") # what the TARGET chip says
       ctl.repeater_cycle_tls_preset
       ctl.menu_state("repeater.cycle-tls-preset").should eq(v.tls_preset)
       v.tls_preset.should_not be_nil

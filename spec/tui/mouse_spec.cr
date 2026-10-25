@@ -334,6 +334,22 @@ describe "RepeaterView plain-word badges" do
     tls = b.row(rect.y).index!("TLS default")
     view.chrome_hit(rect, tls, rect.y).should eq(:tls_preset)
   end
+
+  # The fingerprint verb is `section: :target`: its menu route is spelled only where TARGET
+  # has focus, and the hit-test follows the same label.
+  it "names the TLS chip's menu route only while TARGET has focus" do
+    view = RepeaterView.new
+    view.load_blank
+    rect = Rect.new(0, 0, 120, 24)
+    {:target, :request}.each do |pane|
+      view.focus_pane(pane)
+      b = MemoryBackend.new(120, 24)
+      view.render(Screen.new(b), rect, focused: true)
+      chip = b.row(rect.y)[%r{ \S*TLS default }]
+      (pane == :target ? chip.should(contain("␣:")) : chip.should(eq(" TLS default ")))
+      view.chrome_hit(rect, b.row(rect.y).index!(chip) + chip.size - 2, rect.y).should eq(:tls_preset)
+    end
+  end
 end
 
 describe "InterceptView#bar_zone_at" do

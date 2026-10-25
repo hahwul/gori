@@ -34,8 +34,13 @@ class Gori::Tui::RepeaterView
   # NOT consult the target's SCHEME — that would put a `URI.parse` on every frame for a
   # question only the chip's COLOUR needs (`tls_preset_live?` asks it, and only when an
   # override is actually set).
+  #
+  # The `␣Pt` route is spelled only while TARGET holds focus: the verb is `section: :target`,
+  # so from REQUEST or RESPONSE the Protocol card has no `t` row and the chip would name a key
+  # that does nothing there. The fingerprint itself stays on the band either way.
   private def tls_chip_label : String
-    " #{menu_chip("repeater.cycle-tls-preset")}:TLS #{@tls_preset || "default"} "
+    route = @focus == :target ? "#{menu_chip("repeater.cycle-tls-preset")}:" : ""
+    " #{route}TLS #{@tls_preset || "default"} "
   end
 
   # The TARGET band's right-to-left chrome after the READ/INS mode chip: the SNI marker, the

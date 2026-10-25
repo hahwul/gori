@@ -204,7 +204,7 @@ module Gori::Tui
       when "repeater.toggle-ws-key"              then SpaceMenu.on_off(v.ws_keep_key?) if v.ws_mode?
       when "repeater.toggle-grpc-reframe"        then SpaceMenu.on_off(v.grpc_reframe?) if v.grpc_mode?
       when "repeater.toggle-grpc-fields"         then SpaceMenu.on_off(v.grpc_fields?) if v.grpc_mode?
-      when "repeater.cycle-tls-preset"           then v.tls_preset || "off"
+      when "repeater.cycle-tls-preset"           then v.tls_preset || "default" # the chip's word: a cycle, not on/off
       else                                            ws_live_protocol_state(v, verb_id)
       end
     end
