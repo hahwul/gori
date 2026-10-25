@@ -831,8 +831,18 @@ module Gori
     # cursor at or below it is still valid after a delete or a clear, because the next capture is
     # issued above it; only one beyond it cannot come from here.
     def flow_id_high_water : Int64?
-      @db.query_one?("SELECT MAX(COALESCE((SELECT CAST(seq AS INTEGER) FROM sqlite_sequence WHERE name = 'flows'), 0), " \
-                     "COALESCE((SELECT MAX(id) FROM flows), 0))", as: Int64)
+      id_high_water("flows")
+    end
+
+    # The same mark for `events` (AUTOINCREMENT since it was created), which `list_events`
+    # judges a forward cursor against.
+    def event_id_high_water : Int64?
+      id_high_water("events")
+    end
+
+    private def id_high_water(table : String) : Int64?
+      @db.query_one?("SELECT MAX(COALESCE((SELECT CAST(seq AS INTEGER) FROM sqlite_sequence WHERE name = '#{table}'), 0), " \
+                     "COALESCE((SELECT MAX(id) FROM #{table}), 0))", as: Int64)
     rescue
       nil
     end

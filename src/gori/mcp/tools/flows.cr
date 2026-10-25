@@ -473,12 +473,20 @@ module Gori
         actor = closed_filter(h, "actor", EVENT_ACTORS)
         return actor if actor.is_a?(Result)
         kind = str(h, "kind")
+        wait_ms = wait_ms_arg(h)
+        # A cursor past every id the feed has issued would echo back on each empty page, and a
+        # tailing agent would wait on it forever; refused as `list_history` refuses one.
+        if since > 0 && (issued = store.event_id_high_water) && since > issued
+          return err("cursor #{since} is ahead of every event id this project has issued (#{issued}), " \
+                     "so it does not come from this project's feed; restart from since=0",
+            "INVALID_ARGUMENT", field: "since")
+        end
         rows, next_cursor, full = events_page(since, limit, source, kind, actor)
         # `wait_ms`: re-read past the cursor each slice — a primary-key range read that finds
         # nothing is the cheap check. Only the feed's END is waited at: a full page the filters
         # emptied answers at once with its advanced cursor, or a stored match deep in a long
         # feed would be reached one page per slice.
-        long_poll(wait_ms_arg(h)) do
+        long_poll(wait_ms) do
           rows, next_cursor, full = events_page(next_cursor, limit, source, kind, actor)
           !rows.empty? || full
         end if rows.empty? && !full

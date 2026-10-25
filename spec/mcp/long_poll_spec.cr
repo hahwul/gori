@@ -268,6 +268,18 @@ describe "MCP wait_ms long polls" do
     end
   end
 
+  it "list_events refuses a cursor past the feed and a bad wait_ms, even on a full page" do
+    with_store do |store|
+      tools = tools_for(store)
+      top = store.insert_event("probe", "a", :info, "x")
+      ahead = tools.call("list_events", JSON.parse(%({"since":#{top + 100},"wait_ms":30000})))
+      ahead.error_code.should eq("INVALID_ARGUMENT")
+      ahead.text.should contain("ahead of every event id this project has issued (#{top})")
+      call_json(tools, "list_events", %({"since":#{top}}))["next_cursor"].as_i64.should eq(top)
+      tools.call("list_events", JSON.parse(%({"wait_ms":"x"}))).error_code.should eq("INVALID_ARGUMENT")
+    end
+  end
+
   it "operator_messages{since, wait_ms} answers a full page of carried rows at once" do
     with_store do |store|
       tools = tools_for(store)
