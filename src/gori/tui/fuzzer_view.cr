@@ -367,6 +367,10 @@ module Gori::Tui
       # change what the saved run records.
       @run_keep = Fuzz::Keep::All
       @run_stop_idx = nil.as(Int64?)
+      # What the running run's TARGET / TEMPLATE / sets / Mode were at `begin_run` — see
+      # `edited_since_run_start?`. `@next_run_noticed` keeps its toast to once per run.
+      @run_edit_mark = nil.as(EditMark?)
+      @next_run_noticed = false
       @saved_run_id = nil.as(Int64?)
       @failed_save_run_id = nil.as(Int64?)
       @result_io_state = ResultIoState::Idle
@@ -1010,11 +1014,34 @@ module Gori::Tui
       @run_keep = @config.keep
       @run_extractors = @matcher.extractors
       @run_stop_idx = nil
+      @run_edit_mark = edit_mark(@sets.dup)
+      @next_run_noticed = false
       @saved_run_id = nil
       @failed_save_run_id = nil
       @loaded_saved_run = false
       @progress = Fuzz::Progress.new(0_i64, total, 0_i64, 0_i64)
       clear_detail_decode # a new run reuses request indices → drop the old decode cache
+    end
+
+    # TARGET, TEMPLATE text, payload sets and Mode stay editable mid-run, but the run snapshotted
+    # them at start, so an edit only reaches the NEXT run. Compared against the start mark rather
+    # than flagged at each edit site: the template alone has a dozen writers (keys, paste, marks,
+    # undo, ^V, replace), and a missed one would silently drop the badge.
+    alias EditMark = {Int32, String, String?, Array(SetSpec), Fuzz::Mode}
+
+    private def edit_mark(sets : Array(SetSpec) = @sets) : EditMark
+      {@editor.edits, @target, sni_override, sets, @config.mode}
+    end
+
+    def edited_since_run_start? : Bool
+      return false unless @running && (mark = @run_edit_mark)
+      mark != edit_mark
+    end
+
+    # True once per run, on the first tick an edit has landed — the controller's toast.
+    def take_next_run_notice : Bool
+      return false if @next_run_noticed || !edited_since_run_start?
+      @next_run_noticed = true
     end
 
     def finish_run(status : String? = nil, archive_ready : Bool = true,
@@ -3116,6 +3143,7 @@ module Gori::Tui
     private def render_config(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
       Frame.card(screen, rect, "CONFIG", bg: Theme.bg, border: Frame.pane_border(focused))
+      Frame.border_meta(screen, rect, "CONFIG", "next run", fg: Theme.yellow) if edited_since_run_start?
       inner = rect.inset(1, 1)
       return if inner.h < 1
       mx = inner.right

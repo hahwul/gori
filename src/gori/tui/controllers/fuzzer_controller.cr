@@ -947,7 +947,15 @@ module Gori::Tui
           break
         end
       end
-      applied
+      applied | note_next_run_edits
+    end
+
+    # Polled per tick, not raised by each edit site: an edit mid-run only reaches the NEXT run
+    # (see `FuzzerView#edited_since_run_start?`), so the first one of a run says so, once.
+    private def note_next_run_edits : Bool
+      return false unless @sessions.any?(&.view.take_next_run_notice)
+      @host.status("edits apply to the next run — this run keeps its start config")
+      true
     end
 
     private def apply_io_event(event : IoEvent) : Nil

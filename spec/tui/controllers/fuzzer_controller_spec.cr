@@ -189,3 +189,26 @@ describe "FuzzerController — a card's commit after a peer closed its session" 
     end
   end
 end
+
+describe "FuzzerController — an edit made while a run is going" do
+  it "toasts once per run that it applies to the next run" do
+    with_fuzzer_controller do |ctl|
+      host = ctl.@host.as(FakeHost)
+      ctl.fuzz_new
+      view = ctl.current_view.not_nil!
+      view.begin_run(nil)
+      ctl.drain_events
+      host.statuses.none?(&.includes?("next run")).should be_true
+      view.cycle_mode_forward
+      ctl.drain_events.should be_true
+      view.target_insert('x')
+      ctl.drain_events
+      host.statuses.count(&.includes?("next run")).should eq(1)
+      view.finish_run("done")
+      view.begin_run(nil)
+      view.cycle_mode_forward
+      ctl.drain_events
+      host.statuses.count(&.includes?("next run")).should eq(2)
+    end
+  end
+end

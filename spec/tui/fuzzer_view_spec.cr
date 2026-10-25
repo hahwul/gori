@@ -2386,3 +2386,60 @@ describe "FuzzerView extractors" do
     grid.should contain("42")
   end
 end
+
+# One edit landed mid-run: flagged while the run goes, gone once it ends and on the next start.
+private def expect_next_run_flag(&edit : FuzzerView ->) : Nil
+  view = loaded_fuzzer
+  view.apply_set(nil, SetSpec.new(:list, "a"))
+  view.begin_run(nil)
+  view.edited_since_run_start?.should be_false
+  edit.call(view)
+  view.edited_since_run_start?.should be_true
+  view.finish_run("done")
+  view.edited_since_run_start?.should be_false # no run going
+  view.begin_run(nil)
+  view.edited_since_run_start?.should be_false
+end
+
+# A mid-run edit to TARGET / TEMPLATE / sets / Mode only reaches the NEXT run (the run
+# snapshotted its config at start), so CONFIG says so with a `next run` border badge.
+describe "FuzzerView edits made while a run is going" do
+  it("flags a target edit") { expect_next_run_flag(&.target_insert('x')) }
+  it("flags a template edit") { expect_next_run_flag(&.template_insert('x')) }
+  it("flags a set add") { expect_next_run_flag(&.apply_set(nil, SetSpec.new(:list, "b"))) }
+  it("flags a set edit") { expect_next_run_flag(&.apply_set(0, SetSpec.new(:list, "c"))) }
+  it("flags a set delete") { expect_next_run_flag { |v| v.focus_config; v.form_delete } }
+  it("flags a mode change") { expect_next_run_flag(&.cycle_mode_forward) }
+
+  it "does not flag an edit made while no run is going" do
+    view = loaded_fuzzer
+    view.cycle_mode_forward
+    view.edited_since_run_start?.should be_false
+  end
+
+  it "draws the badge on CONFIG only while an edited run is going" do
+    view = loaded_fuzzer
+    view.begin_run(nil)
+    b = MemoryBackend.new(120, 30)
+    view.render(Screen.new(b), Rect.new(0, 0, 120, 30))
+    b.contains?("next run").should be_false
+    view.cycle_mode_forward
+    b = MemoryBackend.new(120, 30)
+    view.render(Screen.new(b), Rect.new(0, 0, 120, 30))
+    b.contains?("next run").should be_true
+  end
+
+  it "hands the controller its notice once per run" do
+    view = loaded_fuzzer
+    view.begin_run(nil)
+    view.take_next_run_notice.should be_false
+    view.cycle_mode_forward
+    view.take_next_run_notice.should be_true
+    view.cycle_mode_forward
+    view.take_next_run_notice.should be_false
+    view.finish_run("done")
+    view.begin_run(nil)
+    view.cycle_mode_forward
+    view.take_next_run_notice.should be_true
+  end
+end
