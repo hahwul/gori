@@ -2536,7 +2536,8 @@ store.set_sitemap_tag("api.demo.test", "/v1/import", "ssrf")
 store.set_sitemap_tag("api.demo.test", "/graphql", "introspection")
 store.set_sitemap_tag("shop.demo.test", "/.env", "leak")
 store.set_sitemap_tag("shop.demo.test", "/go", "redirect")
-store.set_sitemap_tag("shop.demo.test", "/uploads/", "listing")
+# Keyed on the node path, as `gori run sitemap tag` keys it: "/uploads/" itself is no node.
+store.set_sitemap_tag("shop.demo.test", Gori::Sitemap.tag_path("/uploads/"), "listing")
 store.set_sitemap_tag("legacy.demo.test", "/admin/dashboard", "cookie")
 store.set_sitemap_tag("auth.demo.test", "/oauth/token", "oauth")
 
