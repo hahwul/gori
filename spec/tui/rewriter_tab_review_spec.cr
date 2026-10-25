@@ -233,6 +233,17 @@ describe "Gori::Tui::RewriterController (tab review)" do
       end
     end
 
+    # Space answers "no commands for this area" on these two sub-tabs (no verb carries their
+    # section), so a footer offering it was a key that does nothing.
+    it "offers no space menu in the footer of the extract and bindings sub-tabs" do
+      with_rewriter_controller do |ctl, _host, _session|
+        2.times do
+          ctl.pane_advance(1)
+          ctl.body_hint(:body).should_not contain("space")
+        end
+      end
+    end
+
     it "edits an extract rule on its sub-tab" do
       with_rewriter_controller do |ctl, host, session|
         session.bindings.add("TOK", "", Gori::ExtractKind::Cookie, "sid").should be_nil

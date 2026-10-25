@@ -1179,9 +1179,9 @@ module Gori::Tui
       return @filter.hint if list_filter_editing?
       case @sub
       when :extract
-        return keys("↹ section · ↑/↓ select · {rewriter.add} add · ↵/e edit · {rewriter.toggle} on/off · {rewriter.delete} delete · space cmds · esc tabs")
+        return keys("↹ section · ↑/↓ select · {rewriter.add} add · ↵/e edit · {rewriter.toggle} on/off · {rewriter.delete} delete · esc tabs")
       when :bindings
-        return "↹ section · ↑/↓ select · d clear · space cmds · esc tabs"
+        return "↹ section · ↑/↓ select · d clear · esc tabs"
       end
       case @focus
       when :preview_in
