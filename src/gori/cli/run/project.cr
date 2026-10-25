@@ -452,7 +452,7 @@ module Gori
         format = :text
         project_flag = nil.as(String?)
         positional = parse_args(args, "gori run project export") do |p|
-          p.banner = "Usage: gori run project export <name> -o PATH [--force]\n\n" \
+          p.banner = "Usage: gori run project export <name> | --project NAME -o PATH [--force] [--format json]\n\n" \
                      "Snapshot a project database into one portable .gori archive."
           p.on("-o PATH", "--output=PATH", "Write the archive to PATH") { |v| output = v }
           p.on("--force", "Replace an existing destination file") { force = true }
@@ -478,7 +478,7 @@ module Gori
         name = nil.as(String?)
         format = :text
         positional = parse_args(args, "gori run project import") do |p|
-          p.banner = "Usage: gori run project import <archive.gori> [--name NEW]\n\n" \
+          p.banner = "Usage: gori run project import <archive.gori> [--name NEW] [--format json]\n\n" \
                      "Validate and register a portable project archive."
           p.on("--name=NAME", "Display name for the imported project (default: archive name)") { |v| name = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
