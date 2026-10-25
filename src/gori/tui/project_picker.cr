@@ -58,6 +58,9 @@ module Gori::Tui
     # Throttle flock + status-file probes so the 50 ms poll loop doesn't hammer
     # the filesystem on every visible project row every frame.
     RUNNING_PROBE_TTL = 400.milliseconds
+    # How often the list re-reads the registry for a project a peer (`gori run project new` /
+    # `rename` / `rm`, MCP `create_project`) changed — see `tick_registry`.
+    REGISTRY_POLL = 1.second
 
     record RunningProbe, at : Time::Instant, held : Bool, status : CaptureStatus::Status?,
       agents : Int32 = 0
@@ -208,6 +211,7 @@ module Gori::Tui
       @theme_card = SettingsView.new # the theme picker opened from the modal's Theme row
       @theme_restore = ""            # active theme name to revert to on esc (live preview)
       @running_cache = {} of String => RunningProbe
+      @registry_polled_at = nil.as(Time::Instant?)
       @art_frame = 0  # entrance-animation clock for the brand art; advances each frame until ART_ANIM_DONE
       @star_frame = 0 # starfield twinkle clock; unlike @art_frame it never freezes (wraps via &+)
       # Startup update check (see start_update_check / reconcile_update_check / the
@@ -246,6 +250,7 @@ module Gori::Tui
       loop do
         reconcile_update_check
         tick_companion
+        tick_registry
         @search.try(&.tick) if @mode == :global_search
         render
         # Drive the entrance animation off the idle poll cadence (~50 ms/frame):
@@ -1151,6 +1156,28 @@ module Gori::Tui
     end
 
     # Re-read the registry after a mutation, dropping marks whose project is gone with it.
+    # A project another process created, renamed or deleted was invisible until a picker action
+    # happened to call `reload_projects`. Only in the plain list (a modal holds a Project it
+    # acts on), and only on a real change of the SET of projects and their names — a capture
+    # elsewhere reorders the mtime-sorted list, and rows shuffling under the cursor is not news.
+    private def tick_registry : Nil
+      return unless @mode == :list
+      now = Time.instant
+      return if (at = @registry_polled_at) && now - at < REGISTRY_POLL
+      @registry_polled_at = now
+      return if ProjectPicker.roster(@registry.list) == ProjectPicker.roster(@projects)
+      keep = selected_project.try(&.dir)
+      reload_projects
+      idx = keep.try { |dir| filtered_projects.index { |p| p.dir == dir } }
+      @selected = idx ? idx + 3 : @selected.clamp(0, {entry_count - 1, 0}.max)
+    rescue IO::Error # an unreadable registry root: keep the list we have
+    end
+
+    # What `tick_registry` compares: which projects exist and what they are called, in no order.
+    def self.roster(projects : Array(Project)) : Set({String, String})
+      projects.map { |p| {p.dir, p.name} }.to_set
+    end
+
     private def reload_projects : Nil
       @entries = @registry.entries
       @projects = @entries.map(&.project)

@@ -690,6 +690,13 @@ module Gori::Tui
               # chip too. Reports dirty only when the rendered chip string actually changed, so an
               # idle project with a steady agent list does not repaint on the timer.
               dirty = true if refresh_agent_presence
+              # A peer's `gori run project rename` writes a sidecar file, not the DB, so it is
+              # polled here beside the other filesystem-side scans: the header, the terminal
+              # title and the Project card's Name row all read `@session.project`.
+              if @session.refresh_project_name
+                project_controller.view.project = @session.project
+                dirty = true
+              end
               # Courier replies to the lines `app.tell-agent` posted (#1090). Beside the presence
               # scan and OUTSIDE the data_version branch for a different reason than it: the
               # cursor is what makes this idempotent, so the DB-version gate buys nothing, and it

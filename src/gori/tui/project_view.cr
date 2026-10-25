@@ -30,6 +30,9 @@ module Gori::Tui
     DESC_KEY = Gori::Project::DESCRIPTION_KEY
 
     @project : Project?
+    # A peer's rename, adopted without a reload (`Session#refresh_project_name`): the card's
+    # Name row reads this, and a reload would re-query the whole tab for one string.
+    setter project : Project?
     @flow_count : Int64
     @issues_count : Int32
     @db_size : Int64

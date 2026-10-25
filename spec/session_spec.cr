@@ -45,3 +45,30 @@ describe Gori::Session, "#close" do
     end
   end
 end
+
+# A peer's `gori run project rename` writes the `.name` sidecar only; the TUI polls this so its
+# header and Project card stop naming the old project.
+describe Gori::Session, "#refresh_project_name" do
+  it "adopts a rename made by another process, once" do
+    root = File.tempname("gori-session-rename")
+    Dir.mkdir_p(root)
+    begin
+      registry = Gori::ProjectRegistry.new(File.join(root, "projects"))
+      project = registry.create("before")
+      ca = Gori::Proxy::Tls::CertAuthority.load_or_create(File.join(root, "ca"))
+      session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0), ca, Gori::Verbs.registry, project)
+      begin
+        session.refresh_project_name.should be_false
+        registry.rename(project, "after") # the peer
+        session.refresh_project_name.should be_true
+        session.project.name.should eq("after")
+        session.project.db_path.should eq(project.db_path)
+        session.refresh_project_name.should be_false
+      ensure
+        session.close
+      end
+    ensure
+      FileUtils.rm_rf(root)
+    end
+  end
+end

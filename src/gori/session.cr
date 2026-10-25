@@ -28,6 +28,17 @@ module Gori
     getter ca : Proxy::Tls::CertAuthority
     getter registry : Verb::Registry
     getter project : Project
+
+    # Re-read the display name a peer may have changed (`gori run project rename` writes the
+    # registry's `.name` sidecar, which no DB poll sees). True when it moved. The name is the
+    # only field that can: a rename leaves the directory, and so `db_path`, where it was.
+    def refresh_project_name : Bool
+      name = (File.read(File.join(@project.dir, ProjectRegistry::NAME_FILE)).strip rescue "")
+      return false if name.empty? || name == @project.name
+      @project = Project.new(name, @project.db_path, @project.ephemeral?)
+      true
+    end
+
     getter store : Store
     getter proxy : Proxy::Server
     getter tunnel : Proxy::Tls::Tunnel
