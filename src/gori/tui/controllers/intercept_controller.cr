@@ -259,11 +259,9 @@ module Gori::Tui
     # After any door into the buffer: the refusal that kept another item's edit, else the
     # opening sentence.
     private def announce_toggle(was : Bool) : Nil
-      if @intercept.take_edit_refusal
-        @host.status("another held message has an edit not forwarded yet — forward it first, or open this one again to discard that edit")
-      elsif !was && @intercept.editing?
-        announce_editor_mode
-      end
+      notice = @intercept.take_edit_notice
+      announce_editor_mode if !was && @intercept.editing?
+      @host.status(notice) if notice # after: a discard outranks the editor's opening sentence
     end
 
     # What the operator has to know the moment the buffer opens, whichever door they came

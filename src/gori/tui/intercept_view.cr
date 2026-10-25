@@ -109,7 +109,7 @@ module Gori::Tui
       @loaded_id = nil.as(Int64?)     # which item the editor currently holds
       @editor_dirty = false           # whether the held bytes were actually edited (vs just viewed)
       @discard_armed = nil.as(Int64?) # the item a refused open will, on a second press, discard the edit for
-      @edit_refused = false
+      @edit_notice = nil.as(String?)
       # Whether the LOADED item is a WebSocket message. Captured when the editor takes the
       # bytes rather than looked up per call: `pending_edit` must know before it touches the
       # buffer, and by then the item can already have left the queue (forwarded cross-process
@@ -277,7 +277,8 @@ module Gori::Tui
     def move(delta : Int32) : Nil
       return if @items.empty? || @editing
       @selected = (@selected + delta).clamp(0, @items.size - 1)
-      @marks.reset_anchor # a plain move re-seeds the range anchor, like a GUI list
+      @marks.reset_anchor  # a plain move re-seeds the range anchor, like a GUI list
+      @discard_armed = nil # a discard is armed for the row the refusal was on, not a later visit
     end
 
     # At the first (top) queue item (and not editing) — lets the Runner pop focus
@@ -430,16 +431,19 @@ module Gori::Tui
     # Tab into the pane lands in READ, where a typed `i` is the way in rather than a byte.
     #
     # Loading a DIFFERENT item replaces the one buffer, so an edit not yet forwarded would go
-    # with no word. The first press is refused (`take_edit_refusal`); a second on the same item
-    # discards that edit and opens this one.
+    # with no word. The first press is refused; a second on the same row, with the cursor not
+    # moved in between, discards that edit and opens this one. Each says so (`take_edit_notice`).
     def toggle_edit(insert : Bool = true) : Nil
       if @editing
         @editing = false
       elsif it = selected_item
-        if held_edit_id.try { |id| id != it.id && @items.any? { |o| o.id == id } } && @discard_armed != it.id
-          @discard_armed = it.id
-          @edit_refused = true
-          return
+        if (other = held_edit_id.try { |id| @items.find { |o| o.id == id && id != it.id } })
+          if @discard_armed != it.id
+            @discard_armed = it.id
+            @edit_notice = "#{other.label} has an edit not forwarded yet — forward it first, or open this one again to discard that edit"
+            return
+          end
+          @edit_notice = "discarded the unforwarded edit on #{other.label}"
         end
         @discard_armed = nil
         it.binary? ? load_hex(it) : load_text(it)
@@ -450,10 +454,11 @@ module Gori::Tui
       end
     end
 
-    # Whether the last `toggle_edit` was refused to keep another item's edit; reading clears it.
-    def take_edit_refusal : Bool
-      refused, @edit_refused = @edit_refused, false
-      refused
+    # What the last `toggle_edit` did to another item's unforwarded edit (kept it and refused, or
+    # discarded it), or nil; reading clears it.
+    def take_edit_notice : String?
+      notice, @edit_notice = @edit_notice, nil
+      notice
     end
 
     def text_insert? : Bool
@@ -994,7 +999,8 @@ module Gori::Tui
     def select_index(idx : Int32) : Nil
       return if @items.empty?
       @selected = idx.clamp(0, @items.size - 1)
-      @marks.reset_anchor # same as the keyboard `move`: a plain click re-seeds the anchor
+      @marks.reset_anchor  # same as the keyboard `move`: a plain click re-seeds the anchor
+      @discard_armed = nil # a discard is armed for the row the refusal was on, not a later visit
     end
 
     # Click the queue list → focus the list (stop editing the detail editor).

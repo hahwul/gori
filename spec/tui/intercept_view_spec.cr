@@ -1094,7 +1094,7 @@ describe "Intercept verbs (P1)" do
         view.stop_edit
         view.move(1) # onto the text hold
         view.toggle_edit
-        view.take_edit_refusal.should be_true # the hex edit is not forwarded: the first open asks
+        view.take_edit_notice.not_nil!.should contain("not forwarded yet") # the hex edit is not forwarded: the first open asks
         view.toggle_edit
         view.hex_editing?.should be_false
         view.text_editing?.should be_true
@@ -1287,12 +1287,18 @@ describe "Intercept operator-edit flag" do
 
       view.move(1)
       view.toggle_edit
-      view.take_edit_refusal.should be_true
+      view.take_edit_notice.not_nil!.should contain("not forwarded yet")
       view.editing?.should be_false
       view.held_edit_id.should eq(first)
 
+      # Moving away disarms it: a later visit asks again rather than discarding unseen.
+      view.move(1)
+      view.move(-1)
       view.toggle_edit
-      view.take_edit_refusal.should be_false
+      view.take_edit_notice.not_nil!.should contain("not forwarded yet")
+
+      view.toggle_edit
+      view.take_edit_notice.not_nil!.should start_with("discarded the unforwarded edit on ")
       view.editing?.should be_true
       view.held_edit_id.should be_nil
     end
