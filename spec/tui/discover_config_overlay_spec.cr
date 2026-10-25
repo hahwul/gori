@@ -192,3 +192,12 @@ describe Gori::Tui::DiscoverConfigOverlay do
     h.commits.should eq(1)
   end
 end
+
+describe "Gori::Tui::DiscoverSeed.build" do
+  it "starts a file path at its directory, not at the file with a slash appended" do
+    o = "http://h.test"
+    DiscoverSeed.build(o, "h.test", ["/app/index.html?x=1"]).choices.should eq([{"/app/", "#{o}/app/"}, {"/", "#{o}/"}])
+    DiscoverSeed.build(o, "h.test", ["/index.html"]).choices.should eq([{"/", "#{o}/"}])
+    DiscoverSeed.build(o, "h.test", ["/notes", "/notes/"]).choices.should eq([{"/notes/", "#{o}/notes/"}, {"/", "#{o}/"}])
+  end
+end

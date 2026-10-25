@@ -5434,21 +5434,9 @@ module Gori::Tui
       build_discover_seed(origin, host, [path])
     end
 
-    # `paths` is one path from the Sitemap/single-flow entry points, or every marked flow's
-    # path when the History list has a mark set on ONE host (#442) — so marking five endpoints
-    # turns the popup's start-target list into a pick among exactly those five. The host root
-    # is always offered last. Duplicates collapse; order follows the paths given.
+    # See `DiscoverSeed.build`.
     private def build_discover_seed(origin : String, host : String, paths : Array(String)) : DiscoverSeed
-      choices = [] of {String, String}
-      paths.each do |path|
-        clean = path.partition('?')[0]
-        next if clean.empty? || clean == "/"
-        sub = clean.ends_with?('/') ? clean : "#{clean}/"
-        next if choices.any? { |(label, _)| label == sub }
-        choices << {sub, "#{origin}#{sub}"}
-      end
-      choices << {"/", "#{origin}/"}
-      DiscoverSeed.new(choices, host)
+      DiscoverSeed.build(origin, host, paths)
     end
 
     # After the config popup opens on a History flow, offer to reuse that flow's own

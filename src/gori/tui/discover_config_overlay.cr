@@ -12,7 +12,34 @@ module Gori::Tui
   # whole host. On a host root there is just the one `/` choice. `base_label` is the host.
   record DiscoverSeed,
     choices : Array({String, String}), # [{display path, full URL}]; index 0 is the default
-    base_label : String
+    base_label : String do
+    # `paths` is one path from the Sitemap/single-flow entry points, or every marked flow's
+    # path when the History list has a mark set on ONE host (#442) — so marking five endpoints
+    # turns the popup's start-target list into a pick among exactly those five. The host root
+    # is always offered last. Duplicates collapse; order follows the paths given.
+    def self.build(origin : String, host : String, paths : Array(String)) : DiscoverSeed
+      choices = [] of {String, String}
+      paths.each do |path|
+        next unless sub = start_dir(path)
+        next if choices.any? { |(label, _)| label == sub }
+        choices << {sub, "#{origin}#{sub}"}
+      end
+      choices << {"/", "#{origin}/"}
+      new(choices, host)
+    end
+
+    # The directory a path's subtree starts at, nil for the root. `/notes` reads as a
+    # directory (`/notes/`), but a last segment with a dot is a file: `/app/index.html`
+    # starts at `/app/`, not at a `/app/index.html/` nothing serves.
+    def self.start_dir(path : String) : String?
+      clean = path.partition('?')[0]
+      return nil if clean.empty? || clean == "/"
+      return clean if clean.ends_with?('/')
+      slash = clean.rindex('/')
+      dir = slash && clean[slash + 1..].includes?('.') ? clean[..slash] : "#{clean}/"
+      dir == "/" ? nil : dir
+    end
+  end
 
   # The config popup shown before a discovery run: a start-target chooser, spider/bruteforce
   # checkboxes, a max-depth cycler, a containment cycler, a concurrency cycler, and a Start row.
