@@ -397,9 +397,6 @@ module Gori::Tui
       @dozing = true
     end
 
-    # The frame to draw. A pure function of @beat and the mood/bubble state — never of the
-    # wall clock — or the same beat could yield two different frames and the diff would
-    # stop being meaningful (or specifiable).
     # The host's terminal size this frame — see AUTO_BAR_W.
     def resize(w : Int32, h : Int32) : Nil
       @cramped = w < AUTO_BAR_W || h < AUTO_BAR_H
@@ -412,6 +409,9 @@ module Gori::Tui
       @honors_placement && (Settings.companion_in_bar? || @cramped)
     end
 
+    # The frame to draw. A pure function of @beat and the mood/bubble state — never of the
+    # wall clock — or the same beat could yield two different frames and the diff would
+    # stop being meaningful (or specifiable).
     private def compose : Mascot::Frame
       # FIELDS THE BAR CANNOT SHOW ARE FOLDED HERE. `placement: bar` paints
       # Mascot.draw_row, which is the middle row plus the badge — so the glint (which
