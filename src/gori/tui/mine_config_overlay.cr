@@ -63,6 +63,7 @@ module Gori::Tui
     # Set by `prefill`: this popup edits an existing session's config, so its last row applies
     # rather than starts (the next ^R runs it).
     getter? reconfiguring = false
+    @prefilled : {Int32, Int32, Int32, {Int32, Int32, Int32}}? = nil
 
     # `macro_sessions` are the project's saved Repeater sessions, `{id, label}` — the choices of
     # the macro step cycler (#1350). The overlay has no text field, so a macro is picked FROM the
@@ -124,7 +125,9 @@ module Gori::Tui
     end
 
     # Reconfigure (Miner tab): show `c` — the session's current config — instead of the saved
-    # prefs. A value the cyclers cannot show keeps the cycler's current choice.
+    # prefs. A value the cyclers cannot show keeps the cycler's current choice, and `apply_to`
+    # leaves that knob alone unless the operator moves it (`@prefilled`), so a cap or macro the
+    # popup cannot draw is never quietly replaced.
     def prefill(c : Miner::Config) : Nil
       @reconfiguring = true
       @seed.applicable.each { |l| @checked[l] = c.locations.includes?(l) }
@@ -133,6 +136,11 @@ module Gori::Tui
       @maxreq_idx = MAX_REQ_CHOICES.index { |n| n.try(&.to_i64) == c.max_requests } || @maxreq_idx
       @keep_alive = c.keep_alive?
       prefill_macro(c.request_macro)
+      @prefilled = cycler_state
+    end
+
+    private def cycler_state : {Int32, Int32, Int32, {Int32, Int32, Int32}}
+      {@conc_idx, @notify_idx, @maxreq_idx, {@macro_idx, @macro_every_idx, @macro_fail_idx}}
     end
 
     # One step by session id, as `macro_spec` writes it. A step whose Repeater session is gone
@@ -291,12 +299,14 @@ module Gori::Tui
     # survives.
     def apply_to(c : Miner::Config) : Miner::Config
       c.locations = @seed.applicable.select { |l| @checked[l]? }
-      c.concurrency = CONC_CHOICES[@conc_idx]
-      c.notify = NOTIFY_CHOICES[@notify_idx]
-      c.max_requests = MAX_REQ_CHOICES[@maxreq_idx].try(&.to_i64)
+      was = @prefilled
+      now = cycler_state
+      c.concurrency = CONC_CHOICES[@conc_idx] unless was && was[0] == now[0]
+      c.notify = NOTIFY_CHOICES[@notify_idx] unless was && was[1] == now[1]
+      c.max_requests = MAX_REQ_CHOICES[@maxreq_idx].try(&.to_i64) unless was && was[2] == now[2]
       c.keep_alive = @keep_alive
       c.seed_names = @seed.names
-      c.request_macro = macro_spec
+      c.request_macro = macro_spec unless was && was[3] == now[3]
       # `user_wordlist` and `hook` (#846) are NOT set here, on purpose and for the same reason:
       # both are free-text (a filesystem path, an argv command line), and this overlay is
       # deliberately field-free — cyclers and checkboxes only, no text input and no IME

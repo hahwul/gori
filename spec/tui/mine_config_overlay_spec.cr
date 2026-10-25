@@ -219,7 +219,10 @@ describe "MineConfigOverlay#prefill (Miner Reconfigure)" do
       Gori::RequestMacro::OnFailure::Stop)
     ov = MineConfigOverlay.new(seed(qh, q), macro_sessions: sessions)
     ov.prefill(c)
-    got = ov.build_config
+    backend = MemoryBackend.new(100, 30)
+    ov.render(Screen.new(backend), Rect.new(0, 0, 100, 30))
+    backend.contains?("500").should be_true # the cycler shows the session's cap
+    got = ov.apply_to(c.dup)
     got.locations.should eq([Gori::Miner::Location::Headers])
     got.concurrency.should eq(40)
     got.notify.should eq(Gori::Miner::NotifyMode::Off)
@@ -229,6 +232,22 @@ describe "MineConfigOverlay#prefill (Miner Reconfigure)" do
     m.steps.should eq(["7"])
     m.cadence.every.should eq(5)
     m.on_failure.should eq(Gori::RequestMacro::OnFailure::Stop)
+  end
+
+  it "keeps a value its cyclers cannot show unless the operator moves that row" do
+    c = Gori::Miner::Config.new
+    c.locations = q
+    c.max_requests = 300_i64 # not a MAX_REQ_CHOICES entry: index 0 would mean "no cap"
+    c.concurrency = 7
+    two = Gori::RequestMacro::Spec.new(["3", "7"], Gori::RequestMacro::Cadence.new(5),
+      Gori::RequestMacro::OnFailure::Stop)
+    c.request_macro = two
+    ov = MineConfigOverlay.new(seed(qh, q), macro_sessions: sessions)
+    ov.prefill(c)
+    got = ov.apply_to(c.dup)
+    got.max_requests.should eq(300_i64)
+    got.concurrency.should eq(7)
+    got.request_macro.not_nil!.steps.should eq(["3", "7"])
   end
 
   it "writes only its own knobs onto the session's config, and its last row applies" do
