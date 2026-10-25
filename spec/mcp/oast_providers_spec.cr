@@ -100,4 +100,15 @@ describe "MCP saved OAST providers" do
       mcp_ok_json(ro, "list_oast_providers", "{}")["total"].as_i.should eq(1)
     end
   end
+
+  it "refuses a host that cannot be one, on create and on update" do
+    with_store do |store|
+      tools = tools_for(store)
+      tools.call("create_oast_provider", JSON.parse(%({"name":"x","host":"ftp://x"}))).error_code.should eq("INVALID_ARGUMENT")
+      store.oast_providers.empty?.should be_true
+      id = mcp_ok_json(tools, "create_oast_provider", %({"name":"x","host":"oast.internal"}))["id"].as_s
+      tools.call("update_oast_provider", JSON.parse(%({"id":"#{id}","host":"not a url"}))).error_code.should eq("INVALID_ARGUMENT")
+      store.oast_providers.first.host.should eq("oast.internal")
+    end
+  end
 end

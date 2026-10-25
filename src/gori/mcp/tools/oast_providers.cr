@@ -84,8 +84,13 @@ module Gori
         name = str(h, "name").try(&.strip).presence || existing.name
         host = str(h, "host").try(&.strip).presence || existing.host
         # Only a host this call names: an operator's saved host stays theirs (see create).
-        if present?(h, "host") && (refusal = oast_endpoint_refusal(host, "host"))
-          return refusal
+        if present?(h, "host")
+          if e = Oast::Provider.endpoint_error(host)
+            return err(e, "INVALID_ARGUMENT", field: "host")
+          end
+          if refusal = oast_endpoint_refusal(host, "host")
+            return refusal
+          end
         end
         # `presence ||` cannot express "clear it": an explicit `"token": ""` folded into the
         # same nil as an OMITTED field, so the old auth credential stayed on the provider and
@@ -148,6 +153,9 @@ module Gori
         host = str(h, "host").try(&.strip).presence ||
                Oast::Presets.all.find { |p| p.kind == kind }.try(&.host)
         return err("'host' is required for #{kind.label} (it has no default preset)", "INVALID_ARGUMENT", field: "host") unless host
+        if e = Oast::Provider.endpoint_error(host)
+          return err(e, "INVALID_ARGUMENT", field: "host")
+        end
         {name, kind.label, host, str(h, "token").try(&.strip).presence, bool_arg(h, "enabled", true)}
       end
 

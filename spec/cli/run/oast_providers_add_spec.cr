@@ -49,3 +49,20 @@ describe "gori run oast providers add --format json" do
     end
   end
 end
+
+# `--enabled --disabled` was last-wins and the host went unchecked; both now go through the
+# shared helpers (`agree`, `Oast::Provider.endpoint_error`). Pinned over the source because
+# the refusals `abort`.
+describe "gori run oast providers add/update — flag checks" do
+  src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "oast.cr"))
+
+  it "refuses --enabled with --disabled and validates --host with the shared check" do
+    src.should contain(%(enabled = agree(enabled, true, "--enabled/--disabled")))
+    src.should contain(%(enabled = agree(enabled, false, "--enabled/--disabled")))
+    src.should contain("Oast::Provider.endpoint_error(h)")
+  end
+
+  it "lists the valid kinds" do
+    Gori::CLI::Run::OAST_PROVIDER_KINDS.should eq("interactsh | custom-http | webhook.site | BOAST | postbin")
+  end
+end

@@ -180,8 +180,18 @@ module Gori::Oast
       uri = URI.parse(url)
       host = uri.host
       {"http", "https"}.includes?(uri.scheme.try(&.downcase)) && !host.nil? && host.matches?(PLAIN_HOST)
-    rescue URI::Error
+    rescue URI::Error | OverflowError # a port past Int32 raises from `URI.parse`
       false
+    end
+
+    # Why a saved provider host cannot be one, or nil when it can: a bare host[:port] (which
+    # `normalize_endpoint` makes https) or an http(s) URL. The one check `oast providers
+    # add/update` and MCP `create/update_oast_provider` share, so `not a url` or `ftp://x` is
+    # refused when it is saved rather than at the listen that could never reach it.
+    def self.endpoint_error(host : String) : String?
+      h = host.strip
+      ok = !(h.includes?("://") && !Gori::Url.absolute_form?(h)) && server_url_ok?(normalize_endpoint(h))
+      ok ? nil : "invalid host #{host.inspect} (expected host[:port] or an http(s) URL)"
     end
 
     # A register answer's id, or a raise naming the provider: the one gate every backend whose

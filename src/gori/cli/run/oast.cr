@@ -230,6 +230,8 @@ module Gori
         end
       end
 
+      OAST_PROVIDER_KINDS = Oast::ProviderKind.values.join(" | ", &.label)
+
       private def self.cmd_oast_provider_write(args : Array(String), *, update : Bool) : Nil
         verb = update ? "update" : "add"
         proj = ProjectFlags.new
@@ -249,11 +251,13 @@ module Gori
                                : "Usage: gori run oast providers add --name=N [options]"
           project_options(p, proj, "update")
           p.on("--name=NAME", "Display name#{update ? "" : " (required)"}") { |v| name = v }
-          p.on("--kind=KIND", "interactsh (default) | custom-http | webhook.site | BOAST | postbin") { |v| kind_s = v }
-          p.on("--host=URL", "Server/base URL (defaults to the kind's public preset)") { |v| host = v }
+          # `update` keeps the stored value of anything not passed, so add's defaults would be
+          # a false promise in its help.
+          p.on("--kind=KIND", update ? "#{OAST_PROVIDER_KINDS} (keeps the current kind)" : OAST_PROVIDER_KINDS.sub("interactsh", "interactsh (default)")) { |v| kind_s = v }
+          p.on("--host=URL", update ? "Server/base URL (keeps the current host)" : "Server/base URL (defaults to the kind's public preset)") { |v| host = v }
           p.on("--token=TOK", "Provider auth token") { |v| token = v }
-          p.on("--enabled", "Turn the provider on") { enabled = true }
-          p.on("--disabled", "Turn the provider off") { enabled = false }
+          p.on("--enabled", "Turn the provider on") { enabled = agree(enabled, true, "--enabled/--disabled") }
+          p.on("--disabled", "Turn the provider off") { enabled = agree(enabled, false, "--enabled/--disabled") }
           # `add` only (#1117): it is the verb that mints an id a script needs back. Not
           # registered on `update`, whose answer is the id the caller already typed — a flag
           # it parsed and ignored would be the silently-dropped argument this parser refuses.
@@ -280,7 +284,10 @@ module Gori
         # An unparseable kind would be stored verbatim and then never match a ProviderKind at
         # listen time — the provider would simply never fire. Refuse it here.
         kind = kind_s.try do |k|
-          Oast::ProviderKind.parse?(k) || abort("gori run oast providers #{verb}: unknown --kind '#{k}'")
+          Oast::ProviderKind.parse?(k) || abort("gori run oast providers #{verb}: unknown --kind '#{k}' (expected #{OAST_PROVIDER_KINDS})")
+        end
+        if (err = host.try(&.strip).presence.try { |h| Oast::Provider.endpoint_error(h) })
+          abort "gori run oast providers #{verb}: #{err}"
         end
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
