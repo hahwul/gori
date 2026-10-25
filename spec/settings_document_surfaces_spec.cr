@@ -193,7 +193,7 @@ describe "TUI Notes tab under a concurrent writer" do
     # SAID — reporting nothing is what made a busy project look like it had saved — and that
     # a caller posting its own line right afterwards keeps quiet when the save was refused.
     src = File.read(File.join(__DIR__, "..", "src", "gori", "tui", "controllers", "notes_controller.cr"))
-    body = src[Regex.new("    def save_notes : Bool.*?\n    end\n", Regex::Options::MULTILINE)]
+    body = src[Regex.new("    def save_notes\\(refused : String = .*?\n    end\n", Regex::Options::MULTILINE)]
     body.should contain("@notes.save(@host.session.store)")
     body.should contain("notes NOT saved")
     dup = src[Regex.new("    def notes_duplicate : Nil.*?\n    end\n", Regex::Options::MULTILINE)]
