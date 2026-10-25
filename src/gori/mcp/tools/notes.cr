@@ -69,7 +69,11 @@ module Gori
       # concurrent creates get two ids and both notes survive.
       @[Tool("create_note", gated: true, agent_action: true, permission: "write")]
       private def create_note(h) : Result
-        text = str(h, "text") || ""
+        # Refused, as `gori run notes create` refuses "no note text": a blank note is a row the
+        # caller has to find and delete, and usually a misspelt argument.
+        text = str(h, "text")
+        return err("missing required 'text'", "INVALID_ARGUMENT", field: "text") unless text
+        return err("'text' is empty — a note needs a body", "INVALID_ARGUMENT", field: "text") if text.empty?
         new_id = Notes.create(store, text)
         return busy("note NOT saved (store busy or unwritable); nothing was persisted") unless new_id
 
@@ -134,7 +138,7 @@ module Gori
         return unless @allow_actions
 
         tool j, "create_note", "Create a note." do |s|
-          s.field "text", strprop("initial text (optional)")
+          s.field "text", strprop("the note's text"), required: true
         end
 
         tool j, "update_note", "Replace a note's text." do |s|

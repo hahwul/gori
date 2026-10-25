@@ -40,3 +40,18 @@ describe "MCP list_notes current note" do
     end
   end
 end
+
+# The CLI's notes create refuses "no note text"; create_note made a blank note instead.
+describe "MCP create_note text" do
+  it "refuses a missing or empty text and writes nothing" do
+    with_store do |store|
+      tools = tools_for(store)
+      [%({}), %({"text":""})].each do |args|
+        r = tools.call("create_note", JSON.parse(args))
+        {r.error_code, r.field}.should eq({"INVALID_ARGUMENT", "text"})
+      end
+      call_json(store, "list_notes", "{}")["notes"].as_a.should be_empty
+      call_json(store, "create_note", %({"text":"x"}))["id"].as_i64.should be > 0
+    end
+  end
+end
