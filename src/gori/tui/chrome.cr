@@ -777,6 +777,13 @@ module Gori::Tui
         break if used <= avail
         start += 1
       end
+      # Room to spare once the strip's tail is on screen (the window widened, a chip closed):
+      # bring back the chips hidden on the left rather than keep an offset nothing needs.
+      # Only then — while the tail is still cut off the offset stays put, so stepping left
+      # through a long strip does not jolt it.
+      while start > 0 && (start - 1...widths.size).sum { |i| widths[i] + (i > start - 1 ? gap : 0) } <= avail
+        start -= 1
+      end
       start
     end
 

@@ -253,6 +253,12 @@ describe "Chrome.scroll_start" do
     widths = [10, 10, 10, 10, 10]
     Chrome.scroll_start(widths, active_idx: 4, avail: 25, prev_start: 1).should eq(3)
   end
+
+  it "drops a scrolled offset once the strip has room for the hidden chips again" do
+    widths = [10, 10, 10, 10, 10]
+    Chrome.scroll_start(widths, active_idx: 3, avail: 60, prev_start: 3).should eq(0) # widened: all fit
+    Chrome.scroll_start(widths, active_idx: 4, avail: 40, prev_start: 3).should eq(2) # room for one more
+  end
 end
 
 # split_tabs folds visible_slots + the hidden list into ONE reconcile pass (the render path needs
