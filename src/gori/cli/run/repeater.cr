@@ -1232,7 +1232,7 @@ module Gori
       end
 
       def self.scope_blocked_json(reason : String) : String
-        {"ok" => false, "error" => reason, "error_code" => "SCOPE_BLOCKED",
+        {"ok" => false, "error" => reason, "error_kind" => "scope", "error_code" => "SCOPE_BLOCKED",
          "retryable" => false, "delivered" => false}.to_json
       end
 
