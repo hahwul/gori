@@ -127,6 +127,21 @@ describe "MCP session slots" do
       text.should contain("already exists")
       # An agent that trusts `retryable` would loop forever on a PROJECT_BUSY here (#414).
       text.should_not contain("PROJECT_BUSY")
+      # An exact duplicate does not get the case-folding sentence ("reads 'admin' and 'admin'").
+      text.should_not contain("case-insensitively")
+      text, _ = call_raw(t, "create_session_slot", %({"name":"Admin"}))
+      text.should contain("'Admin' (new) and 'admin' (existing)")
+    end
+  end
+
+  it "warns when 'rules' names no extract rule in the project" do
+    with_store do |store|
+      store.insert_extract_rule("SESSION", "", Gori::ExtractKind::Cookie, "sid")
+      t = tools_for(store)
+      created = call_json(t, "create_session_slot", %({"name":"admin","rules":["SESSION","SESSOIN"]}))
+      created["warning"].as_s.should contain(%("SESSOIN" is not an extract rule))
+      created["warning"].as_s.should_not contain(%("SESSION"))
+      call_json(t, "create_session_slot", %({"name":"user","rules":["SESSION"]}))["warning"]?.should be_nil
     end
   end
 

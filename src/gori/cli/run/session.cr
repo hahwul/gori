@@ -279,10 +279,13 @@ module Gori
           # Case-INSENSITIVELY (`SessionSlots#name_clash`): `admin` and `Admin` are one identity
           # to Authorize, and creating both left every run in the project refusing to start.
           if taken = slots.name_clash(name)
+            # The case-insensitivity clause only when the spellings differ: for an exact
+            # duplicate it read "reads "tester" and "tester" as one identity".
             abort "gori run session add: a slot called #{taken.inspect} already exists " \
-                  "(change it with `gori run session edit #{taken}`). Names are compared " \
-                  "case-insensitively — Authorize reads #{name.inspect} and #{taken.inspect} " \
-                  "as one identity and refuses a set holding both"
+                  "(change it with `gori run session edit #{taken}`)" +
+                  (taken == name ? "" : ". Names are compared case-insensitively — Authorize reads " \
+                                        "#{name.inspect} (new) and #{taken.inspect} (existing) as one " \
+                                        "identity and refuses a set holding both")
           end
           check_refresh_ids(store, edit.refresh, "gori run session add")
           slot = Gori::SessionSlot.new(name,
@@ -295,7 +298,7 @@ module Gori
           # The row as saved, not as built: `add` may auto-mark the first slot baseline and
           # drops empty entries, and the printed row must not deny either.
           puts session_slot_row(slots.find(name) || slot, false)
-          warn_slot_env(slot, "gori run session add")
+          warn_slot_env(slot, slots, "gori run session add")
           warn_baseline_moved(baseline_before, slots, "gori run session add")
         ensure
           store.close
@@ -505,7 +508,7 @@ module Gori
           abort "gori run session edit: the project could not be written — " \
                 "#{target.inspect} is unchanged" unless slots.update(target, updated)
           puts session_slot_row(updated, false)
-          warn_slot_env(updated, "gori run session edit")
+          warn_slot_env(updated, slots, "gori run session edit")
           warn_baseline_moved(baseline_before, slots, "gori run session edit")
         ensure
           store.close
@@ -517,9 +520,11 @@ module Gori
         Gori::SessionSlots.baseline_moved_note(before, slots.baseline_name).try { |n| STDERR.puts "#{cmd}: #{n}" }
       end
 
-      # Said, not refused (#1689): a slot header's `$ENV.X` is sent as typed (`Env.slot_env_note`).
-      private def self.warn_slot_env(slot : Gori::SessionSlot, cmd : String) : Nil
+      # Said, not refused (#1689): a slot header's `$ENV.X` is sent as typed (`Env.slot_env_note`),
+      # and a `--rule` naming no extract rule claims nothing (`SessionSlots#unknown_rules_note`).
+      private def self.warn_slot_env(slot : Gori::SessionSlot, slots : Gori::SessionSlots, cmd : String) : Nil
         Env.slot_env_warning(slot).try { |w| STDERR.puts "#{cmd}: warning: #{w}" }
+        slots.unknown_rules_note(slot).try { |w| STDERR.puts "#{cmd}: warning: #{w}" }
       end
 
       # `current` with every flag `edit` carries applied — a flag left out keeps its field.

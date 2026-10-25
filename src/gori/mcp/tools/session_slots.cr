@@ -82,8 +82,10 @@ module Gori
         # refusing with DuplicateIdentity until a human renamed one.
         if taken = registry.name_clash(name)
           return err("a session slot called '#{taken}' already exists (change it with " \
-                     "update_session_slot). Names are compared case-insensitively — authorize " \
-                     "reads '#{name}' and '#{taken}' as one identity and refuses a set with both",
+                     "update_session_slot)" +
+                     (taken == name ? "" : ". Names are compared case-insensitively — authorize " \
+                                           "reads '#{name}' (new) and '#{taken}' (existing) as one " \
+                                           "identity and refuses a set with both"),
             "INVALID_ARGUMENT", field: "name")
         end
         built = slot_set_headers_or_flow(h)
@@ -512,11 +514,16 @@ module Gori
           emit_auto_refresh_disarmed(j, [slot.name]) if auto_refresh_disarmed
           emit_refresh_status(j, slot) if refresh_status
           # On a WRITE: a header naming an `$ENV` var is saved, and said (#1689). Names, never values.
-          if env_warning && (w = Env.slot_env_warning(slot))
+          if env_warning && (w = slot_write_warning(slot, registry))
             j.field "warning", w
           end
           emit_baseline_moved(j, baseline_before, registry) if registry
         end
+      end
+
+      # The `$ENV`/`$BIND` note and the unknown-`rules` note for a slot just written, as one line.
+      private def slot_write_warning(slot : Gori::SessionSlot, registry : Gori::SessionSlots?) : String?
+        [Env.slot_env_warning(slot), registry.try(&.unknown_rules_note(slot))].compact.join(". ").presence
       end
 
       # `baseline_slot` + `baseline_note` when a write moved the baseline; nothing when it did not.

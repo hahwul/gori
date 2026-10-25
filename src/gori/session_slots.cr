@@ -102,6 +102,19 @@ module Gori
       "every other slot's response is judged against it"
     end
 
+    # The line a writing surface says when `slot` claims a rule name no extract rule in this
+    # project carries, or nil. Said, not refused, as `Env.slot_env_warning` is: the rule may be
+    # created next. Until then the claim does nothing, and a typo'd name never would.
+    def unknown_rules_note(slot : SessionSlot) : String?
+      return nil if slot.rules.empty?
+      known = @store.extract_rules.map(&.name)
+      missing = slot.rules.reject { |n| known.includes?(n) }
+      return nil if missing.empty?
+      one = missing.size == 1
+      "#{missing.map(&.inspect).join(", ")} #{one ? "is not an extract rule" : "are not extract rules"} in " \
+      "this project, so the slot claims nothing under #{one ? "that name" : "those names"} until one is created"
+    end
+
     # The slot already holding `name` CASE-INSENSITIVELY, ignoring `except` (the row a rename
     # is moving), or nil when the name is free. The WRITE side's question, and a different one
     # from `find`.
