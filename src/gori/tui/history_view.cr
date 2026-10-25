@@ -4334,8 +4334,6 @@ module Gori::Tui
       @scroll = Viewport.scroll_to_show(@selected, @scroll, list_h, @rows.size)
     end
 
-    # Position of `id` in @rows. Sorted id-DESC (newest first) or id-ASC (oldest
-    # first) per Settings.history_list_order — O(log n) binary search either way.
     private def sync_seen : Nil
       @seen_id = newest_id || @seen_id if @follow || @seen_id.nil?
     end
@@ -4355,6 +4353,8 @@ module Gori::Tui
       end
     end
 
+    # Position of `id` in @rows. Sorted id-DESC (newest first) or id-ASC (oldest
+    # first) per Settings.history_list_order — O(log n) binary search either way.
     private def index_of(id : Int64) : Int32?
       lo = 0
       hi = @rows.size - 1
