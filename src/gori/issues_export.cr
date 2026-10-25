@@ -172,7 +172,8 @@ module Gori
               mark = m[1]
               if fence.nil?
                 fence = mark
-              elsif mark[0] == fence[0] && mark.size >= fence.size
+              elsif mark[0] == fence[0] && mark.size >= fence.size && m.post_match.strip.empty?
+                # A closing fence carries no info string; "```python" inside a block is content.
                 fence = nil
               end
             elsif fence.nil? && (m = line.match(NOTE_HEADING))

@@ -337,6 +337,16 @@ describe Gori::Issues::Export do
       end
     end
 
+    it "keeps a fence open past a fence line that carries an info string" do
+      with_store do |store|
+        id = store.insert_issue("t", Gori::Store::Severity::Low, "h", nil)
+        store.update_issue(id, notes: "```\n```python\n# still code\n```\n## after")
+        md = Gori::Issues::Export.markdown(store.issues, store, "proj")
+        md.should contain("\n# still code\n")
+        md.should contain("\n#### after")
+      end
+    end
+
     it "neutralizes terminal escape sequences in an issue's notes field (markdown printed to a TTY)" do
       # notes routes through scrub_controls: an OSC "set window title" (ESC ] 0 ; … BEL) embedded
       # in a notes field would otherwise reach the terminal when `gori run issues --format markdown`
