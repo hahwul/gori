@@ -892,7 +892,7 @@ module Gori::Tui
         # Right-align the host, but width-cap it: a host wider than its slot would otherwise
         # (screen.text with no width) run to the SCREEN edge, painting over the status tag and
         # title already drawn to its right. Cap to the span up to rx so it truncates instead.
-        hx = {rx - issue.host.size, rect.x}.max
+        hx = {rx - Screen.display_width(issue.host), rect.x}.max
         screen.text(hx, y, issue.host, Theme.muted, bg, width: {rx - hx, 0}.max)
         rx = hx - 1
       end

@@ -260,6 +260,19 @@ describe Gori::Tui::ProbeView do
     end
   end
 
+  # The host is right-aligned by its DISPLAY width: counted in chars, a wide-character host got
+  # a slot half its width and was cut.
+  it "draws a wide-character host whole" do
+    view_store do |store|
+      seed(store, "missing_hsts", "例え例え.test")
+      view = Gori::Tui::ProbeView.new
+      view.reload(store)
+      b = MemoryBackend.new(100, 20)
+      view.render(Gori::Tui::Screen.new(b), Gori::Tui::Rect.new(0, 0, 100, 20))
+      b.contains?("例 え 例 え .test").should be_true # a wide glyph owns the cell after it
+    end
+  end
+
   it "re-anchors selection by issue id across reload (not by list index)" do
     view_store do |store|
       seed(store, "missing_hsts", "a.test")
