@@ -354,6 +354,9 @@ module Gori
           "INVALID_ARGUMENT", field: "id") unless row_id
         prev = store.probe_custom_rules.find { |r| r.id == row_id }
         return not_found("no custom rule with id '#{id}'") unless prev
+        if blank = Probe::CustomRule.blank_update_field(str(h, "title"), str(h, "pattern"))
+          return err("'#{blank}' must not be blank (omit it to keep the current #{blank})", "INVALID_ARGUMENT", field: blank)
+        end
 
         # Partial, like every other update_* tool: an omitted field keeps its stored value
         # rather than snapping back to create's default (string / info / response / body).

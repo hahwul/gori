@@ -446,6 +446,22 @@ describe "MCP probe rules + mode tools" do
     end
   end
 
+  # Create refuses a blank title or pattern; an update that kept the old one under `ok` told the
+  # agent its edit landed. `Probe::CustomRule.blank_update_field`, shared with the CLI.
+  it "refuses a blank title or pattern instead of keeping the stored one" do
+    with_store do |store|
+      tools = tools_for(store)
+      id = call_json(tools, "create_probe_rule", %({"title":"a","pattern":"AAA"}))["id"].as_s
+      {"title", "pattern"}.each do |field|
+        r = tools.call("update_probe_rule", JSON.parse(%({"id":"#{id}","#{field}":"  "})))
+        r.is_error.should be_true
+        r.text.should contain("'#{field}' must not be blank (omit it to keep the current #{field})")
+      end
+      row = store.probe_custom_rules.first
+      {row.title, row.pattern}.should eq({"a", "AAA"})
+    end
+  end
+
   # A custom probe rule IS a detection. Reporting the new title over a rolled-back batch tells
   # the agent the rule now carries its widened pattern while every later scan still runs the OLD
   # one — a false negative it was told not to expect. PROJECT_BUSY/retryable, like the
