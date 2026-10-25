@@ -25,7 +25,7 @@ module Gori
             STDERR.puts "gori run rewriter: unknown subcommand '#{sub}'"
             STDERR.puts "Usage: gori run rewriter [list options] | add | rm|delete <id> | enable <id> | disable <id> | preview"
             STDERR.puts "       gori run rewriter preset [list | add <name>]"
-            STDERR.puts "       gori run rewriter extract [list|add|rm|enable|disable] | bindings"
+            STDERR.puts "       gori run rewriter extract [list|add|update|rm|enable|disable] | bindings"
             exit 1
           end
         end
@@ -144,6 +144,7 @@ module Gori
       private def self.cmd_rewriter_extract(args : Array(String)) : Nil
         case sub = args.first?
         when "add"          then cmd_extract_add(args[1..])
+        when "update"       then cmd_extract_update(args[1..])
         when "rm", "delete" then cmd_extract_rm(args[1..])
         when "enable"       then cmd_extract_set_enabled(true, args[1..])
         when "disable"      then cmd_extract_set_enabled(false, args[1..])
@@ -154,7 +155,7 @@ module Gori
             cmd_extract_list(args)
           else
             STDERR.puts "gori run rewriter extract: unknown subcommand '#{sub}'"
-            STDERR.puts "Usage: gori run rewriter extract [list] | add | rm|delete <id> | enable <id> | disable <id>"
+            STDERR.puts "Usage: gori run rewriter extract [list] | add | update <id> | rm|delete <id> | enable <id> | disable <id>"
             exit 1
           end
         end
@@ -177,7 +178,7 @@ module Gori
           project_options(p, proj, "read")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
-        refuse_list_leftovers(leftover, "rewriter extract", "add, rm/delete, enable, disable")
+        refuse_list_leftovers(leftover, "rewriter extract", "add, update, rm/delete, enable, disable")
 
         with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           rules = store.extract_rules
@@ -268,6 +269,66 @@ module Gori
         bi = b.to_i32?
         abort "gori run rewriter extract: invalid --range '#{raw}' (expected A:B)" if ai.nil? || bi.nil? || bi <= ai
         {ai, bi}
+      end
+
+      # `extract update`'s flags. nil = not given, so the rule keeps its value.
+      class ExtractUpdateFlags
+        property name : String? = nil
+        property when_s : String? = nil
+        property host : String? = nil
+        property kind : Gori::ExtractKind? = nil
+        property selector : String? = nil
+        property range : {Int32, Int32}? = nil
+        property enabled : Bool? = nil
+
+        def none? : Bool
+          [name, when_s, host, kind, selector, range, enabled].all?(Nil)
+        end
+      end
+
+      # `gori run rewriter extract update <id>`: edit an extract rule in place — the headless
+      # `update_extract_rule`, through the same `Bindings#update` refusals. A flag left out keeps
+      # the stored value; `--when ''`, `--host ''` and `--range ''` clear theirs.
+      private def self.cmd_extract_update(args : Array(String)) : Nil
+        cmd = "gori run rewriter extract update"
+        proj = ProjectFlags.new
+        f = ExtractUpdateFlags.new
+        rest = one_positional_list(args, cmd, "<id>") do |p|
+          p.banner = "Usage: #{cmd} <id> [options]\n\n" \
+                     "Edit an extract rule in place. A flag left out keeps the stored value;\n" \
+                     "renaming drops the old name's bound value."
+          project_options(p, proj, "update")
+          p.on("--name=NAME", "Binding name, without the sigil or namespace") { |v| f.name = v }
+          p.on("--when=FILTER", "Which messages to read ('' = any)") { |v| f.when_s = v }
+          p.on("--host=GLOB", "Scope to a host glob ('' = all)") { |v| f.host = v }
+          p.on("--kind=KIND", "cookie|header|regex|position|jsonpath") do |v|
+            f.kind = Gori::ExtractKind.parse?(v) || abort("#{cmd}: invalid --kind '#{v}' (cookie|header|regex|position|jsonpath)")
+          end
+          p.on("--selector=SEL", "Cookie/header name, regex, or JSON path") { |v| f.selector = v }
+          p.on("--range=A:B", "position only: a half-open byte range ('' clears it)") { |v| f.range = parse_extract_range(v) }
+          p.on("--enabled", "Enable the rule") { f.enabled = agree(f.enabled, true, "--enabled/--disabled") }
+          p.on("--disabled", "Disable the rule") { f.enabled = agree(f.enabled, false, "--enabled/--disabled") }
+        end
+        id = rest.first?.try(&.to_i64?) || abort("#{cmd}: expected a rule id")
+        if f.none?
+          abort "#{cmd}: nothing to change — pass --name, --when, --host, --kind, --selector, --range or --enabled/--disabled"
+        end
+        name = f.name.try { |n| Env.strip_spelling(n.strip, Env::Namespace::Bind) }
+        abort "#{cmd}: --name must not be empty" if name.try(&.empty?)
+
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
+          existing = store.extract_rules.find(&.id.==(id)) || abort_closing(store, "#{cmd}: no rule ##{id}")
+          a, b = f.range || {existing.pos_start, existing.pos_end}
+          if err = Bindings.new(store, store.extract_rules).update(id, name || existing.name,
+               f.when_s || existing.match_filter, f.kind || existing.kind, f.selector || existing.selector,
+               a, b, f.host || existing.host)
+            abort_closing(store, "#{cmd}: #{err}")
+          end
+          if (en = f.enabled).is_a?(Bool) && !store.set_extract_rule_enabled(id, en)
+            abort_closing(store, "#{cmd}: rule ##{id}'s fields were updated but the enable/disable did not persist (store busy or unwritable); retry")
+          end
+          puts "Extract rule ##{id} updated."
+        end
       end
 
       private def self.cmd_extract_rm(args : Array(String)) : Nil
