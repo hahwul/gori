@@ -116,7 +116,7 @@ module Gori
       # `edit --help` describe the same dialect (they are the same dialect).
       private def self.session_edit_flags(p : OptionParser, e : SlotEdit, cmd : String) : Nil
         p.on("--name=NAME", "The slot's name (on `edit`, renames it)") { |v| e.name = v.strip }
-        p.on("--set=LINE", "Header to UPSERT, as 'Name: value' (repeatable); its value resolves bindings and generators, never env vars") { |v| e.push_set(parse_session_header(v, cmd)) }
+        p.on("-HLINE", "--set=LINE", "Header to UPSERT (-H as in send), as 'Name: value' (repeatable); its value resolves bindings and generators, never env vars") { |v| e.push_set(parse_session_header(v, cmd)) }
         p.on("--remove=NAME", "Header to STRIP before sending (repeatable)") { |v| e.push_remove(v.strip) }
         p.on("--rule=NAME", "Extract rule (binding NAME) whose values belong to THIS slot (repeatable)") { |v| e.push_rule(v.strip) }
         p.on("--baseline", "Make this the Authorize baseline every other slot is judged against") { e.baseline = agree(e.baseline, true, "--baseline/--no-baseline") }
