@@ -1889,21 +1889,6 @@ describe "MCP fuzz_start extractors (#1592)" do
       store.fuzz_runs.should be_empty
     end
   end
-
-  it "refuses verbatim:true beside update_content_length:true" do
-    with_store do |store|
-      r = tools_for(store).call("fuzz_start", JSON.parse({
-        "template"              => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
-        "url"                   => "http://127.0.0.1:1",
-        "payloads"              => %([{"list":["a"]}]),
-        "allow_unscoped"        => true,
-        "verbatim"              => true,
-        "update_content_length" => true,
-      }.to_json))
-      r.error_code.should eq("INVALID_ARGUMENT")
-      r.text.should contain("contradict")
-    end
-  end
 end
 
 # The client going away (EOF on stdin) ends the process. A `save_results` run still in flight

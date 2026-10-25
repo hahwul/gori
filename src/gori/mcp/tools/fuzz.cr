@@ -647,12 +647,6 @@ module Gori
         if spec_err = matcher.spec_error
           raise FuzzArgError.new(spec_err)
         end
-        # `verbatim` implies update_content_length:false (`Fuzz::Plan.build` forces it), so an
-        # explicit true beside it was silently dropped.
-        if bool_arg(h, "verbatim", false) && bool_arg(h, "update_content_length", false)
-          raise FuzzArgError.new("verbatim:true and update_content_length:true contradict each other — " \
-                                 "verbatim sends the template's framing as written. Drop one of the two")
-        end
         if save_results
           config.keep_bodies = :all
           matcher.keep_bodies = :all
