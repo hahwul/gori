@@ -43,6 +43,8 @@ module Gori::Tui
     # a flow's timestamp is base + its findings index, the MCP/CLI surfaces' shape. One base
     # per controller would stamp every later run's flows with the tab's boot time.
     getter persist_base = 0_i64
+    # Set by the controller from `Discover::Plan#seed_outside_scope?` for the run it starts.
+    property? outside_scope = false
 
     def initialize(@target : String, @config : Discover::Config)
       @started_at = Time.instant

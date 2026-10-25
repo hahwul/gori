@@ -314,6 +314,22 @@ describe Gori::Discover::Plan do
       end
     end
 
+    it "names a seed outside the include boundary it keeps, so a surface can say why the crawl ended there" do
+      with_store do |store|
+        scope = Gori::Scope.load(store)
+        D::Plan.build(D::PlanOptions.new(seed), Gori::Outbound.interactive(scope)).seed_outside_scope?.should be_false
+        scope.add("include", "host", "other.test")
+        scope.disable # the lens being off does not lift the boundary (see above)
+        D::Plan.build(D::PlanOptions.new(seed), Gori::Outbound.interactive(scope)).seed_outside_scope?.should be_true
+        # Waived (UnscopedStoreScope) or not scope-aware: nothing bounds the hop, nothing to say.
+        D::Plan.build(D::PlanOptions.new(seed), Gori::Outbound.cli(scope, true)).seed_outside_scope?.should be_false
+        same = D::PlanOptions.new(seed, config: D::Config.new(containment: D::Containment::SameOrigin))
+        D::Plan.build(same, Gori::Outbound.interactive(scope)).seed_outside_scope?.should be_false
+        scope.add("include", "host", "acme.test")
+        D::Plan.build(D::PlanOptions.new(seed), Gori::Outbound.interactive(scope)).seed_outside_scope?.should be_false
+      end
+    end
+
     it "still bounds a sandbox-blocked host under an operator waiver" do
       with_store do |store|
         scope = Gori::Scope.load(store)
