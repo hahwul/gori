@@ -347,9 +347,10 @@ module Gori
       # The explicitly requested locations, or nil to let the builder auto-detect the ones
       # that apply to this request.
       private def mine_locations(h) : Array(Miner::Location)?
-        raw = str(h, "locations")
-        return nil if raw.nil? || raw.strip.empty?
-        raw.split(',').compact_map do |tok|
+        # A comma list or an array, as the sibling list arguments take.
+        toks = str_list(h, "locations").flat_map(&.split(','))
+        return nil if toks.all?(&.strip.empty?)
+        toks.compact_map do |tok|
           next if tok.strip.empty?
           Miner::Location.parse?(tok) || raise FuzzArgError.new("unknown location '#{tok}' (#{MINE_LOCATIONS.join("|")})")
         end
@@ -375,7 +376,7 @@ module Gori
           s.field "flow_id", intprop("seed the request from a captured flow id")
           s.field "url", strprop("absolute URL (scheme+host) setting the origin only; does NOT define the request (unlike send_request)")
           s.requires_one_of "template", "flow_id"
-          s.field "locations", strprop("comma list of where to mine: #{MINE_LOCATIONS.join(",")} (default: auto-detect; multipart only when named)")
+          s.field "locations", strprop("comma list (or array) of where to mine: #{MINE_LOCATIONS.join(",")} (default: auto-detect; multipart only when named)")
           s.field "wordlist", strprop("extra param-name wordlist (server path or saved name, see list_wordlists), merged with the built-in list")
           s.field "names", strarrprop("names to test FIRST (e.g. from list_params)")
           s.field "payload_from", strarrprop("names read from the project's captures, each '<QL> param-names' (e.g. 'host:api.example param-names'); tested after `names`. Sends nothing; the reply's payload_sources says what each read")

@@ -294,6 +294,12 @@ describe "MCP mine_status{skipped}" do
          "locations" => "json", "allow_unscoped" => true}.to_json)
       err.should be_true
       text.should contain("no requested location applies to this request — json: not applicable")
+      # An array names the same locations a comma list does.
+      text, err = call_raw(tools_for(store), "mine_start",
+        {"template" => "GET /x HTTP/1.1\r\nHost: 127.0.0.1:9\r\n\r\n", "url" => "http://127.0.0.1:9",
+         "locations" => ["json"], "allow_unscoped" => true}.to_json)
+      err.should be_true
+      text.should contain("json: not applicable")
     end
   end
 
