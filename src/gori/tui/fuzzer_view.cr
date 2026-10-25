@@ -151,6 +151,12 @@ module Gori::Tui
       @registry.try { |r| Hotkeys.binding_label(r, id, fallback) } || fallback
     end
 
+    # The RESULTS sort chip's key. `fuzz.sort` has no chord by default (bare `o` is unbound,
+    # it is a menu row), so the chip names the menu route unless the operator bound one.
+    private def sort_key_label : String
+      key_label("fuzz.sort", Hotkeys.menu_chip(@registry, "fuzz.sort"))
+    end
+
     PANE_ORDER = [:target, :template, :config, :results]
 
     def initialize(@result_window : FuzzerResultWindow = FuzzerResultWindow.new)
@@ -3365,7 +3371,7 @@ module Gori::Tui
       rx = Frame.toggle_badge(screen, rx, rect.y, min_x,
         key_label("fuzz.matched", "m"), "MATCH", @matched_only)
       Frame.toggle_badge(screen, rx, rect.y, min_x,
-        key_label("fuzz.sort", "o"), sort_chip, false) # sort: a value chip, never lit
+        sort_key_label, sort_chip, false) # sort: a value chip, never lit
       inner = rect.inset(1, 1)
       view = sorted_results
       @sel = @sel.clamp(0, {view.size - 1, 0}.max)
@@ -4242,7 +4248,7 @@ module Gori::Tui
       Frame.right_badge_hit(mx, my, pane.y, pane.right - 1, min_x, [
         {:dist, key_label("fuzz.dist", "v"), "DIST"},
         {:match, key_label("fuzz.matched", "m"), "MATCH"},
-        {:sort, key_label("fuzz.sort", "o"), sort_chip},
+        {:sort, sort_key_label, sort_chip},
       ] of {Symbol, String, String})
     end
 

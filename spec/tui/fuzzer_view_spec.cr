@@ -215,6 +215,20 @@ describe Gori::Tui::FuzzerView do
     end
   end
 
+  # `fuzz.sort` is a menu row with no chord: bare `o` in RESULTS is unbound.
+  it "names the sort chip's menu route when it has no chord" do
+    view = loaded_fuzzer
+    view.set_registry(Gori::Verbs.registry)
+    view.append_result(fuzz_result(0, 200, 10))
+    view.focus_pane(:results)
+    rect = Rect.new(0, 0, 120, 34)
+    backend = MemoryBackend.new(rect.w, rect.h)
+    view.render(Screen.new(backend), rect)
+    chip = Gori::Hotkeys.menu_chip(Gori::Verbs.registry, "fuzz.sort")
+    backend.contains?("#{chip}:index").should be_true
+    backend.contains?(" o:index").should be_false
+  end
+
   describe "decoded response detail" do
     it "shows a gzip response as its decoded entity without changing retained evidence" do
       plain = %({"decoded_response":true})
