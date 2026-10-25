@@ -1797,10 +1797,13 @@ module Gori
         # assume the caller COMPILES with a lens — every one of them does; a surface that parses
         # without one would drop a `scope:` term and this warning would be the thing that named
         # it, so thread a lens there rather than relaxing this.
-        ignored = QL.analyze(q, scope: QL::SCOPE_SHAPE_ONLY).ignored
+        analysis = QL.analyze(q, scope: QL::SCOPE_SHAPE_ONLY)
+        ignored = analysis.ignored
         return if ignored.empty?
+        # With no term left the caller refuses the query, so nothing broader is ever listed.
+        broader = analysis.applied.empty? ? "" : ", so the result is BROADER than the query asks for"
         STDERR.puts "gori run #{cmd}: warning: ignored #{ignored.map(&.inspect).join(", ")} " \
-                    "— unrecognized or invalid, so the result is BROADER than the query asks for"
+                    "— unrecognized or invalid#{broader}"
       end
 
       # QL negation terms ("-field:value" / "-field~rx") begin with '-', so OptionParser
