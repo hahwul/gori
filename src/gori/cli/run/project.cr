@@ -1591,12 +1591,16 @@ module Gori
             abort "gori run project host-override add: give BOTH --host and --ip, or the positional IP HOST form (not a mix)"
           else
             abort "gori run project host-override add: need --host and --ip, or positional IP HOST" if positional.empty?
-            parsed = HostOverrides.parse_line(positional.join(' '))
-            abort "gori run project host-override add: invalid entry (expected IP HOST; IP must be a literal)" unless parsed
-            parsed
+            # Split as `HostOverrides.parse_line` does, but validate below so the refusal names
+            # the half that is wrong instead of blaming the IP for a bad HOST.
+            parts = Utf8.subject(positional.join(' ')).strip.split(/\s+/, 2)
+            abort "gori run project host-override add: invalid entry (expected IP HOST)" if parts.size < 2
+            {parts[1].strip, parts[0]}
           end
         h, i = pair
-        abort "gori run project host-override add: invalid host/ip (host hostname-shaped; ip an IPv4/IPv6 literal, optionally IP:PORT or [v6]:PORT)" unless HostOverrides.valid?(h, i)
+        if err = HostOverrides.validation_error(h, i)
+          abort "gori run project host-override add: #{err}"
+        end
 
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
@@ -1645,7 +1649,9 @@ module Gori
         h = host
         i = ip
         abort "gori run project host-override update: --host and --ip are both required" unless h && i
-        abort "gori run project host-override update: invalid host/ip (host hostname-shaped; ip an IPv4/IPv6 literal, optionally IP:PORT or [v6]:PORT)" unless HostOverrides.valid?(h, i)
+        if err = HostOverrides.validation_error(h, i)
+          abort "gori run project host-override update: #{err}"
+        end
 
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|

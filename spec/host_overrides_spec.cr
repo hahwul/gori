@@ -170,6 +170,17 @@ describe Gori::HostOverrides do
     end
   end
 
+  # Every bad pair used to read "IP must be a literal", even with a fine IP and a bad HOST.
+  describe ".validation_error" do
+    it "names the half that is wrong" do
+      ["a b", "*.wild.test", "x.test:8080"].each do |host|
+        Gori::HostOverrides.validation_error(host, "10.0.0.1").not_nil!.should start_with("invalid host #{host.inspect}")
+      end
+      Gori::HostOverrides.validation_error("ok.test", "nope").not_nil!.should start_with("invalid ip \"nope\"")
+      Gori::HostOverrides.validation_error("ok.test", "10.0.0.1:8443").should be_nil
+    end
+  end
+
   describe ".valid?" do
     it "accepts an IPv4/IPv6 literal with a non-empty host" do
       Gori::HostOverrides.valid?("example.com", "10.0.0.1").should be_true

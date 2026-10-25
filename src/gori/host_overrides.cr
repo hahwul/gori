@@ -195,14 +195,23 @@ module Gori
     # deliberately: /etc/hosts is consulted by a resolver that has no port to change, whereas
     # gori is the thing making the connection.
     def self.valid?(host : String, ip : String) : Bool
+      validation_error(host, ip).nil?
+    end
+
+    # Why `valid?` refuses the pair, naming the half that is wrong, or nil when it is valid.
+    # Every surface prints this, so a fine IP next to a bad HOST is not blamed on the IP.
+    def self.validation_error(host : String, ip : String) : String?
       # Asked of the KEY, not the raw text, so a caller that validates before storing and the
       # store itself judge the same string. It also makes ".", "example.com." and
       # "EXAMPLE.com" answer the way the lookup will treat them rather than the way they were
       # typed — the whole point of HOST_RE being here is to refuse a silent dead override.
-      host = OverrideHost.key(host)
-      return false if host.empty?
-      return false unless Utf8.subject(host).matches?(HOST_RE)
-      DialAddress.valid?(ip)
+      key = OverrideHost.key(host)
+      if key.empty? || !Utf8.subject(key).matches?(HOST_RE)
+        return "invalid host #{host.inspect} (expected a hostname of letters, digits, '.', '-', '_'; " \
+               "no spaces, wildcard, leading dot or :port)"
+      end
+      return nil if DialAddress.valid?(ip)
+      "invalid ip #{ip.inspect} (expected an IPv4/IPv6 literal, optionally IP:PORT or [v6]:PORT)"
     end
 
     # Parse a single-line "ADDRESS host" entry (/etc/hosts order — address first) into

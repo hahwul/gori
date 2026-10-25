@@ -14,7 +14,9 @@ module Gori
       private def add_host_override(h) : Result
         host = required_str(h, "host")
         ip = required_str(h, "ip")
-        return err("invalid host/ip (host hostname-shaped; ip an IPv4/IPv6 literal, optionally IP:PORT or [v6]:PORT)", "INVALID_ARGUMENT") unless HostOverrides.valid?(host, ip)
+        if e = HostOverrides.validation_error(host, ip)
+          return err(e, "INVALID_ARGUMENT")
+        end
         ov = HostOverrides.load(store)
         # `OverrideHost.key`, not `downcase` — it is the form `add` will STORE, so a lookup that
         # spelled it any other way would miss the row it just wrote. A fully-qualified argument
@@ -50,7 +52,9 @@ module Gori
         host = str(h, "host").try(&.strip)
         ip = str(h, "ip").try(&.strip)
         return err("'host' and 'ip' are both required", "INVALID_ARGUMENT") if host.nil? || host.empty? || ip.nil? || ip.empty?
-        return err("invalid host/ip (host hostname-shaped; ip an IPv4/IPv6 literal, optionally IP:PORT or [v6]:PORT)", "INVALID_ARGUMENT") unless HostOverrides.valid?(host, ip)
+        if e = HostOverrides.validation_error(host, ip)
+          return err(e, "INVALID_ARGUMENT")
+        end
         # Split the two causes HostOverrides#update collapses into one `false`: a collision with
         # ANOTHER entry is deterministic (never retry), a rolled-back store write is transient.
         # `OverrideHost.key` for the same reason as `add` above — `update` dedupes on the folded
