@@ -139,7 +139,7 @@ module Gori::Discover
     end
 
     # True when scope-aware containment is bounded by scope rules the seed itself is outside:
-    # every link found off it is refused, so the run ends at the seed. Not a refusal — the
+    # every link outside those rules is refused, which usually ends the run at the seed. Not a refusal — the
     # boundary binds regardless of the scope lens, on purpose (`resolve_policy`) — but the one
     # outcome a surface has to name, or "done, 1 found" reads as "the site has one page".
     def seed_outside_scope? : Bool
