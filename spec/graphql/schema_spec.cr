@@ -168,6 +168,10 @@ describe Gori::Graphql::Schema do
       s.sdl.should eq("type Query {\n}")
       s.note.not_nil!.should contain("carried no fields for root type Query")
       Schema.summarize(demo_schema).note.should be_nil
+      # gori sent the full query itself: asking again would not help.
+      sent = Schema.summarize(schema, sent: true).note.not_nil!
+      sent.should contain("answered the full introspection query with no fields for root type Query")
+      sent.should_not contain("ask again")
     end
   end
 

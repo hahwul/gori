@@ -98,7 +98,7 @@ module Gori
       # and the other types whose name, or one of whose field names, contains it. The cut is by line, so a root type with thousands of fields still
       # answers with as many as fit rather than nothing. A malformed entry (a type with no name,
       # a field that is not an object) is skipped, not raised: the schema is the server's bytes.
-      def summarize(schema : JSON::Any, filter : String? = nil, max_bytes : Int32 = 64 * 1024) : Summary
+      def summarize(schema : JSON::Any, filter : String? = nil, max_bytes : Int32 = 64 * 1024, sent : Bool = false) : Summary
         types = {} of String => JSON::Any
         each_list(schema, "types") do |t|
           name = name_of(t)
@@ -122,15 +122,17 @@ module Gori
         kept = fit(lines, max_bytes)
         # A type counts as shown when the cut left at least its first line.
         Summary.new(lines.first(kept).join('\n'), roots[0], roots[1], roots[2], types.size,
-          starts.count(&.< kept), kept < lines.size, fieldless_note(types, roots.compact))
+          starts.count(&.< kept), kept < lines.size, fieldless_note(types, roots.compact, sent))
       end
 
       # A root the introspection lists with no `fields` renders as `type Query {` + `}`, which
       # reads as "this endpoint has no operations". It is usually a narrower query than the
-      # full introspection one (`types { name kind }`), so say so.
-      private def fieldless_note(types : Hash(String, JSON::Any), roots : Array(String)) : String?
+      # full introspection one (`types { name kind }`), so say so. A `sent` schema answered gori's
+      # own full query, so asking again would not help: say only what the endpoint answered.
+      private def fieldless_note(types : Hash(String, JSON::Any), roots : Array(String), sent : Bool) : String?
         bare = roots.select { |name| at(types[name]?, "fields").try(&.as_a?).try(&.empty?) != false }
         return nil if bare.empty?
+        return "the endpoint answered the full introspection query with no fields for root type #{bare.join(", ")}" if sent
         "the introspection carried no fields for root type #{bare.join(", ")}: the query that produced " \
         "it did not select them, so this is not the endpoint's whole schema; ask again with the full introspection query"
       end

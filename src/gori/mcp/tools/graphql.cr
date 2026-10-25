@@ -53,7 +53,7 @@ module Gori
             parsed
           end
 
-        s = Graphql::Schema.summarize(schema, filter, max_bytes)
+        s = Graphql::Schema.summarize(schema, filter, max_bytes, sent: send)
         Result.new(JSON.build do |j|
           j.object do
             j.field "flow_id", flow_id
