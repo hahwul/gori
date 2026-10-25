@@ -53,11 +53,13 @@ module Gori::Tui
     def body_hint(focus : Symbol) : String
       v = current_view
       return Hotkeys.expand_menu_paths(@host.session.registry, "↹/esc tabs · send a request here (History {space:history.sequence}) or a selection") unless v
+      # `esc sub-tabs`: with a session the strip is shown and `handle_escape` stops there, as
+      # in the Miner and the Fuzzer. Only the empty line above has no strip to land on.
       case v.focus
-      when :samples  then keys("↑/↓ select · → analysis · ↵ detail · {sequence.stop} stop · {sequence.configure} config · space cmds · ↹ pane · esc tabs")
-      when :analysis then keys("↑/↓ scroll · ← samples · {sequence.run} run · {sequence.configure} config · ↹ pane · esc tabs")
+      when :samples  then keys("↑/↓ select · → analysis · ↵ detail · {sequence.stop} stop · {sequence.configure} config · space cmds · ↹ pane · esc sub-tabs")
+      when :analysis then keys("↑/↓ scroll · ← samples · {sequence.run} run · {sequence.configure} config · ↹ pane · esc sub-tabs")
       when :detail   then "↑/↓ scroll · esc back"
-      else                keys("{sequence.run} run · {sequence.configure} config · space cmds · ↹ pane · esc tabs")
+      else                keys("{sequence.run} run · {sequence.configure} config · space cmds · ↹ pane · esc sub-tabs")
       end
     end
 

@@ -218,4 +218,17 @@ describe SequencerController do
       end
     end
   end
+
+  # With a session the strip is shown and escape stops there (`SeededToolTabs#handle_escape`).
+  it "says esc goes to the sub-tabs, where it lands" do
+    with_sequencer_controller do |ctl, _session|
+      view = collected_samples(ctl)
+      {:samples, :analysis, :config}.each do |pane|
+        view.focus_pane(pane)
+        hint = ctl.body_hint(:body)
+        hint.should contain("esc sub-tabs")
+        hint.should_not match(/[^-]esc tabs/)
+      end
+    end
+  end
 end
