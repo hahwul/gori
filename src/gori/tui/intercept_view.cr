@@ -106,8 +106,10 @@ module Gori::Tui
       @host_suggest_values = [] of String
       # The `↓` completion dropdown. Closed until asked for — see `SuggestPopup`.
       @popup = SuggestPopup.new
-      @loaded_id = nil.as(Int64?) # which item the editor currently holds
-      @editor_dirty = false       # whether the held bytes were actually edited (vs just viewed)
+      @loaded_id = nil.as(Int64?)     # which item the editor currently holds
+      @editor_dirty = false           # whether the held bytes were actually edited (vs just viewed)
+      @discard_armed = nil.as(Int64?) # the item a refused open will, on a second press, discard the edit for
+      @edit_refused = false
       # Whether the LOADED item is a WebSocket message. Captured when the editor takes the
       # bytes rather than looked up per call: `pending_edit` must know before it touches the
       # buffer, and by then the item can already have left the queue (forwarded cross-process
@@ -426,16 +428,32 @@ module Gori::Tui
     #
     # `insert` picks the text editor's mode: ↵/`e` on the queue ask to edit and land in INS,
     # Tab into the pane lands in READ, where a typed `i` is the way in rather than a byte.
+    #
+    # Loading a DIFFERENT item replaces the one buffer, so an edit not yet forwarded would go
+    # with no word. The first press is refused (`take_edit_refusal`); a second on the same item
+    # discards that edit and opens this one.
     def toggle_edit(insert : Bool = true) : Nil
       if @editing
         @editing = false
       elsif it = selected_item
+        if held_edit_id.try { |id| id != it.id && @items.any? { |o| o.id == id } } && @discard_armed != it.id
+          @discard_armed = it.id
+          @edit_refused = true
+          return
+        end
+        @discard_armed = nil
         it.binary? ? load_hex(it) : load_text(it)
         @loaded_id = it.id
         @loaded_ws = it.kind.ws?
         @editing = true
         @insert = insert
       end
+    end
+
+    # Whether the last `toggle_edit` was refused to keep another item's edit; reading clears it.
+    def take_edit_refusal : Bool
+      refused, @edit_refused = @edit_refused, false
+      refused
     end
 
     def text_insert? : Bool

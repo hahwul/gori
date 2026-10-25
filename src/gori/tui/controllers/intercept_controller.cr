@@ -251,8 +251,19 @@ module Gori::Tui
     # typing rather than after forwarding (see `InterceptView#edit_caveat`). The border badge
     # stays up for as long as the card does; this is the one keystroke that can say why.
     private def open_editor : Nil
+      was = @intercept.editing?
       @intercept.toggle_edit
-      announce_editor_mode if @intercept.editing?
+      announce_toggle(was)
+    end
+
+    # After any door into the buffer: the refusal that kept another item's edit, else the
+    # opening sentence.
+    private def announce_toggle(was : Bool) : Nil
+      if @intercept.take_edit_refusal
+        @host.status("another held message has an edit not forwarded yet — forward it first, or open this one again to discard that edit")
+      elsif !was && @intercept.editing?
+        announce_editor_mode
+      end
     end
 
     # What the operator has to know the moment the buffer opens, whichever door they came
@@ -607,7 +618,7 @@ module Gori::Tui
     def pane_advance(dir : Int32) : Bool
       was = @intercept.editing?
       moved = @intercept.pane_advance(dir)
-      announce_editor_mode if moved && !was && @intercept.editing?
+      announce_toggle(was) if moved
       moved
     end
 
@@ -618,7 +629,7 @@ module Gori::Tui
     def focus_last : Nil
       was = @intercept.editing?
       @intercept.focus_last
-      announce_editor_mode if !was && @intercept.editing?
+      announce_toggle(was)
     end
 
     # --- verbs (delegated from the Runner's ExecContext; also called inline above) ---
