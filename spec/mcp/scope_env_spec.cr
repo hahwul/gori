@@ -333,6 +333,17 @@ describe "MCP project env vars" do
     end
   end
 
+  it "requires a value, and takes an explicit empty one" do
+    with_store do |store|
+      tools = tools_for(store)
+      r = tools.call("set_env_var", JSON.parse(%({"key":"A"})))
+      {r.error_code, r.field}.should eq({"INVALID_ARGUMENT", "value"})
+      mcp_ok_json(tools, "list_env", "{}")["vars"].as_a.should be_empty
+      mcp_ok_json(tools, "set_env_var", %({"key":"A","value":""}))
+      mcp_ok_json(tools, "list_env", "{}")["vars"].as_a.map(&.["key"].as_s).should eq(["A"])
+    end
+  end
+
   it "does not resurrect a var another process deleted when deleting one" do
     with_store do |store|
       tools = tools_for(store)

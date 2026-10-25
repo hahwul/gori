@@ -90,7 +90,10 @@ module Gori
       private def set_env_var(h) : Result
         key = required_str(h, "key")
         return err("invalid 'key' (use [A-Za-z_][A-Za-z0-9_]*)", "INVALID_ARGUMENT", field: "key") unless Env.valid_key?(key)
-        value = str(h, "value") || ""
+        # Required, as `gori run project env set KEY` refuses a bare KEY: an omitted value set
+        # "" and answered `set:true`. An explicit "" is the way to set it empty.
+        value = str(h, "value")
+        return err(%(missing required 'value' (pass "" to set it empty)), "INVALID_ARGUMENT", field: "value") unless value
         # One transaction, not load-edit-store. This handler owns ONE key; the array it used
         # to persist was built from a copy read before the write, so a peer that set a
         # DIFFERENT key in that window — a second `gori mcp`, the TUI's ENV pane, `gori run
@@ -141,7 +144,7 @@ module Gori
           "Reference it as $ENV.KEY, or $KEY under the legacy bare syntax (see list_env's " \
           "'syntax'/'example')." do |s|
           s.field "key", strprop("variable name ([A-Za-z_][A-Za-z0-9_]*)"), required: true
-          s.field "value", strprop("variable value (default empty)")
+          s.field "value", strprop(%(variable value ("" sets it empty))), required: true
         end
 
         tool j, "delete_env_var", "Delete a project env var by key (see list_env)." do |s|
