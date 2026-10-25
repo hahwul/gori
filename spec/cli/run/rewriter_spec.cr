@@ -597,3 +597,26 @@ describe "gori run rewriter add — mocking (#1237)" do
       .should eq(%({"fault":"reset","throttle":1}))
   end
 end
+
+# The listing prints `P#10` / `G#3` (`G*#3` overridden); rm/enable/disable/update used to refuse
+# that spelling as "invalid rule id".
+describe "gori run rewriter — a rule <id>" do
+  it "reads the listing's spelling, its letter picking the store" do
+    project = Gori::Store::RuleScope::Project
+    global = Gori::Store::RuleScope::Global
+    Gori::CLI::Run.parse_rule_id("10", nil).should eq({10_i64, project})
+    Gori::CLI::Run.parse_rule_id("10", global).should eq({10_i64, global})
+    Gori::CLI::Run.parse_rule_id("#10", nil).should eq({10_i64, project})
+    Gori::CLI::Run.parse_rule_id("P#10", nil).should eq({10_i64, project})
+    Gori::CLI::Run.parse_rule_id("g#3", nil).should eq({3_i64, global})
+    Gori::CLI::Run.parse_rule_id("G*#3", global).should eq({3_i64, global})
+  end
+
+  it "refuses a letter that disagrees with --scope, and anything else" do
+    Gori::CLI::Run.parse_rule_id("G#3", Gori::Store::RuleScope::Project).as(String)
+      .should contain("names a global rule, but --scope=project was given")
+    Gori::CLI::Run.parse_rule_id("X#3", nil).as(String).should contain("P for a project rule or G")
+    Gori::CLI::Run.parse_rule_id("P#", nil).as(String).should start_with("invalid rule id 'P#'")
+    Gori::CLI::Run.parse_rule_id("1x", nil).as(String).should start_with("invalid rule id '1x'")
+  end
+end

@@ -437,6 +437,31 @@ module Gori
         end
       end
 
+      # A rule `<id>` as the listing prints it — `P#10`, `G#3`, `G*#3` (an overridden global
+      # rule) or `#10` — or bare `10`, with the store it names: the letter picks the scope, and
+      # one that disagrees with an explicit `--scope` is refused rather than either winning.
+      # Public so a spec can pin it: the commands end in `abort`.
+      def self.parse_rule_id(raw : String, scope : Store::RuleScope?) : {Int64, Store::RuleScope} | String
+        m = raw.match(/\A(?:([A-Za-z])\*?)?#?(\d+)\z/)
+        id = m.try(&.[2].to_i64?)
+        return "invalid rule id '#{raw}' (expected 10, P#10 or G#3)" unless m && id
+        letter = m[1]?.try(&.upcase)
+        return {id, scope || Store::RuleScope::Project} unless letter
+        named = Store::RuleScope.values.find(&.badge.==(letter)) ||
+                return "invalid rule id '#{raw}' (the letter is P for a project rule or G for a global one)"
+        if scope && scope != named
+          return "rule id '#{raw}' names a #{named.label} rule, but --scope=#{scope.label} was given — pass one"
+        end
+        {id, named}
+      end
+
+      private def self.rule_id_arg(positional : Array(String), cmd : String, scope : Store::RuleScope?) : {Int64, Store::RuleScope}
+        abort "#{cmd}: missing <id>" if positional.empty?
+        abort "#{cmd}: too many arguments (expected one <id>)" if positional.size > 1
+        r = parse_rule_id(positional[0], scope)
+        r.is_a?(String) ? abort("#{cmd}: #{r}") : r
+      end
+
       private def self.rewriter_op_tag(r : Store::MatchRule) : String
         Gori::Rules.op_tag(r)
       end
@@ -812,7 +837,7 @@ module Gori
         cmd = "gori run rewriter update"
         proj = ProjectFlags.new
         f = RewriterUpdateFlags.new
-        scope = Store::RuleScope::Project
+        scope_flag : Store::RuleScope? = nil
         positional = parse_args(args, cmd) do |p|
           p.banner = "Usage: #{cmd} <id> [options]\n\n" \
                      "Edits a rule in place, keeping its id and its place in the apply order.\n" \
@@ -820,7 +845,7 @@ module Gori
                      "`--value ''` clear theirs. See `rewriter add --help` for what each op reads.\n" \
                      "With --scope=global, --enabled/--disabled set THIS project's override."
           project_options(p, proj, "update")
-          p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_rule_scope(v) }
+          p.on("--scope=SCOPE", "Which <id>: project (default) | global; a listed P#/G# id names it itself") { |v| scope_flag = parse_rule_scope(v) }
           p.on("--side=SIDE", "request|response") { |v| f.target = v }
           p.on("--target=SIDE", "Alias for --side") { |v| f.target = v }
           p.on("--op=OP", OP_CHOICES) { |v| f.op = v }
@@ -844,7 +869,7 @@ module Gori
           p.on("--enabled", "Enable the rule") { f.enabled = agree(f.enabled, true, "--enabled/--disabled") }
           p.on("--disabled", "Disable the rule") { f.enabled = agree(f.enabled, false, "--enabled/--disabled") }
         end
-        id = take_id(positional, cmd, "<id>", "rule id")
+        id, scope = rule_id_arg(positional, cmd, scope_flag)
         abort "#{cmd}: nothing to change — pass a field flag (see --help)" if f.none?
         # Read before the store opens, as on `add`: `-` blocks to EOF.
         if path = f.response_file
@@ -1054,13 +1079,13 @@ module Gori
 
       private def self.cmd_rewriter_rm(args : Array(String)) : Nil
         proj = ProjectFlags.new
-        scope = Store::RuleScope::Project
+        scope_flag : Store::RuleScope? = nil
         positional = parse_args(args, "gori run rewriter rm") do |p|
           p.banner = "Usage: gori run rewriter rm|delete <id> [options]"
           project_options(p, proj, "update")
-          p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_rule_scope(v) }
+          p.on("--scope=SCOPE", "Which <id>: project (default) | global; a listed P#/G# id names it itself") { |v| scope_flag = parse_rule_scope(v) }
         end
-        id = take_id(positional, "gori run rewriter rm", "<id>", "rule id")
+        id, scope = rule_id_arg(positional, "gori run rewriter rm", scope_flag)
 
         # Both scopes go through `Gori::Rules` and therefore resolve a project — see
         # `cmd_rewriter_add` for why the model owns the write. For a GLOBAL rule the model also
@@ -1085,7 +1110,7 @@ module Gori
 
       private def self.cmd_rewriter_set_enabled(enable : Bool, args : Array(String)) : Nil
         proj = ProjectFlags.new
-        scope = Store::RuleScope::Project
+        scope_flag : Store::RuleScope? = nil
         everywhere = false
         action = enable ? "enable" : "disable"
         positional = parse_args(args, "gori run rewriter #{action}") do |p|
@@ -1094,10 +1119,10 @@ module Gori
                      "the way `x` does in the Rewriter tab. --everywhere changes the rule's\n" \
                      "own default instead, which every project without an override follows."
           project_options(p, proj, "update")
-          p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_rule_scope(v) }
+          p.on("--scope=SCOPE", "Which <id>: project (default) | global; a listed P#/G# id names it itself") { |v| scope_flag = parse_rule_scope(v) }
           p.on("--everywhere", "global rules only: change the default for every project") { everywhere = true }
         end
-        id = take_id(positional, "gori run rewriter #{action}", "<id>", "rule id")
+        id, scope = rule_id_arg(positional, "gori run rewriter #{action}", scope_flag)
         if everywhere && !scope.global?
           abort "gori run rewriter #{action}: --everywhere needs --scope=global — a project rule has no default"
         end
