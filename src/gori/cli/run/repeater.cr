@@ -1225,6 +1225,10 @@ module Gori
       # error prints, coded as MCP codes it (`SCOPE_BLOCKED`), so a script reading stdout learns
       # why nothing was sent instead of reading nothing. Exit 1 either way.
       def self.scope_abort(prefix : String, reason : String, format : Symbol) : NoReturn
+        # `send_block`'s bare Sandbox sentence, with the way out MCP names.
+        if reason == Gori::Outbound::SANDBOX_ERROR
+          reason = "#{reason} — turn Sandbox off (`gori run project sandbox off`) or add a scope include rule"
+        end
         if format == :json
           puts scope_blocked_json(reason)
         end
