@@ -310,7 +310,7 @@ module Gori
           p.on("--enabled", "Enable the rule") { f.enabled = agree(f.enabled, true, "--enabled/--disabled") }
           p.on("--disabled", "Disable the rule") { f.enabled = agree(f.enabled, false, "--enabled/--disabled") }
         end
-        id = rest.first?.try(&.to_i64?) || abort("#{cmd}: expected a rule id")
+        id = rest.first?.try(&.lchop('#').to_i64?) || abort("#{cmd}: expected a rule id")
         if f.none?
           abort "#{cmd}: nothing to change — pass --name, --when, --host, --kind, --selector, --range or --enabled/--disabled"
         end
@@ -366,7 +366,7 @@ module Gori
           p.banner = "Usage: gori run rewriter extract #{verb} <id> [options]"
           project_options(p, proj, "update")
         end
-        id = rest.first?.try(&.to_i64?) || abort("gori run rewriter extract #{verb}: expected a rule id")
+        id = rest.first?.try(&.lchop('#').to_i64?) || abort("gori run rewriter extract #{verb}: expected a rule id")
         {id, open_store(resolve_read_project(proj.name, proj.db))}
       end
 
@@ -1023,6 +1023,7 @@ module Gori
       private def self.update_mock_error(f : RewriterUpdateFlags, op : Store::RuleOp) : String?
         unless op.short_circuit?
           return "--respond, --map-dir, --fault, --delay and --from-flow need --op=short_circuit" if f.mock_given?
+          return "--response-file is only meaningful with --op=short_circuit" if f.response_file
           return "--body-file is only meaningful with --op=short_circuit" if (bf = f.body_file) && !bf.empty?
           return nil
         end

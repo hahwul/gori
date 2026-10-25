@@ -82,13 +82,17 @@ describe "gori run rewriter update" do
     Gori::CLI::Run.rewriter_update_edit(update_flags { |f| f.match = "regex"; f.find = "(" }, mrule)
       .should eq("invalid regex --find (failed to compile)")
     Gori::CLI::Run.rewriter_update_edit(update_flags(&.find=("")), mrule).should eq("--find must not be empty")
-    Gori::CLI::Run.rewriter_update_edit(update_flags(&.host=("http://x/")), mrule).should be_a(String)
+    Gori::CLI::Run.rewriter_update_edit(update_flags(&.host=("http://x/")), mrule)
+      .as(String).should contain("must not include a scheme")
+    Gori::CLI::Run.rewriter_update_edit(update_flags(&.response_file=("stub.http")), mrule)
+      .should eq("--response-file is only meaningful with --op=short_circuit")
     Gori::CLI::Run.rewriter_update_edit(update_flags { |f| f.op = "add_header"; f.part = "ws" }, mrule)
       .as(String).should contain("cannot use --part=ws")
     Gori::CLI::Run.rewriter_update_edit(update_flags(&.fault=("reset")), mrule)
       .as(String).should contain("need --op=short_circuit")
     # "new" does not parse as a canned response.
-    Gori::CLI::Run.rewriter_update_edit(update_flags(&.op=("short_circuit")), mrule).should be_a(String)
+    Gori::CLI::Run.rewriter_update_edit(update_flags(&.op=("short_circuit")), mrule)
+      .as(String).should contain("the stub response does not parse")
   end
 
   it "switches a stub to a fault, dropping the response it no longer sends, and keeps a fault's args" do
