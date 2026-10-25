@@ -255,7 +255,7 @@ module Gori
                in .io?                                                          then "INTERNAL"
                in .invalid_name?, .exists?, .not_regular?, .bad_value?, .empty? then "INVALID_ARGUMENT"
                end
-        hint = overwrite_arg && ex.reason.exists? ? " Pass overwrite:true to replace it." : ""
+        hint = overwrite_arg && ex.reason.exists? ? " (pass overwrite:true)" : ""
         err("#{ex.message}#{hint}", code, field: field)
       end
 

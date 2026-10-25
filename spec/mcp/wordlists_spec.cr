@@ -126,7 +126,7 @@ describe "MCP wordlist catalog" do
         r.is_error.should be_true
         r.error_code.should eq("INVALID_ARGUMENT")
         r.field.should eq("name")
-        r.text.should contain("overwrite:true")
+        r.text.should end_with("or replace it explicitly (pass overwrite:true)")
         File.read(File.join(dir, "p.txt")).should eq("first\n")
         ok(t, "save_wordlist", %({"name":"p.txt","values":["second"],"overwrite":true}))["replaced"].as_bool.should be_true
         File.read(File.join(dir, "p.txt")).should eq("second\n")
