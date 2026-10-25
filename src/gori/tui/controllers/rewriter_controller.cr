@@ -28,6 +28,12 @@ module Gori::Tui
       @sub = :rules
       @sub_sel = 0
       @sub_scroll = 0
+      # The rows under the two cursors, as `reanchor_selection` restores them: what the last
+      # frame drew (for `on_enter`, after ticks this tab did not see) and what
+      # `before_external_change` noted (for the tick itself).
+      @drawn_rule = nil.as({Store::RuleScope, Int64}?)
+      @drawn_sub = nil.as(String?)
+      @tick_anchor = nil.as({ {Store::RuleScope, Int64}?, String? }?)
       @focus = :list # :list | :preview_in | :preview_out
       # The sample is per PROJECT (the rules it previews already are): an operator pastes a
       # real captured request in here, so it must not follow them into the next project.
@@ -136,7 +142,7 @@ module Gori::Tui
     def on_enter : Nil
       rules_engine.reload
       bindings.reload
-      @sel = @sel.clamp(0, {rule_list.size - 1, 0}.max)
+      reanchor_selection(@drawn_rule, @drawn_sub)
     end
 
     # The `data_version` tick, which since the live-reload work fires while this tab is on
@@ -155,14 +161,31 @@ module Gori::Tui
     # Falls back to CLAMPING when the anchored row is gone — the peer deleted the very rule the
     # cursor was on — which is the one case where staying at the same index is the best answer
     # available: it leaves the operator where they were in the list rather than at the top.
+    #
+    # `Runner#apply_external_change` reloads the shared `Rules` / `Bindings` BEFORE calling this,
+    # so the anchor is the one `before_external_change` took off the lists the cursor was moved
+    # over — read here, it named whichever rule had already slid into the old slot. (Scope too:
+    # a global and a project rule can share an id.)
+    def before_external_change : Nil
+      @tick_anchor = {selected_rule_key, sub_selection_key}
+    end
+
     def on_external_change : Nil
-      prev_rule_id = rule_list[@sel]?.try(&.id)
-      prev_sub_key = sub_selection_key
+      rule_key, sub_key = @tick_anchor || {selected_rule_key, sub_selection_key}
+      @tick_anchor = nil
       rules_engine.reload
       bindings.reload
-      @sel = prev_rule_id.try { |id| rule_list.index { |r| r.id == id } } ||
+      reanchor_selection(rule_key, sub_key)
+    end
+
+    private def selected_rule_key : {Store::RuleScope, Int64}?
+      rule_list[@sel]?.try { |r| {r.scope, r.id} }
+    end
+
+    private def reanchor_selection(rule_key : {Store::RuleScope, Int64}?, sub_key : String?) : Nil
+      @sel = rule_key.try { |k| rule_list.index { |r| {r.scope, r.id} == k } } ||
              @sel.clamp(0, {rule_list.size - 1, 0}.max)
-      @sub_sel = prev_sub_key.try { |k| sub_index_of(k) } ||
+      @sub_sel = sub_key.try { |k| sub_index_of(k) } ||
                  @sub_sel.clamp(0, {sub_count - 1, 0}.max)
     end
 
@@ -241,6 +264,7 @@ module Gori::Tui
       inner = rules_list_rect(inner)
       list = rule_list
       @sel = @sel.clamp(0, {list.size - 1, 0}.max)
+      @drawn_rule = list[@sel]?.try { |r| {r.scope, r.id} }
       ensure_visible(inner, list.size)
       # A preview pane that is no longer DRAWN cannot keep the focus: the pair drops out
       # below `LIST_MIN_H + PREVIEW_MIN_H` rows, and a terminal shrunk past that while the
@@ -260,6 +284,7 @@ module Gori::Tui
       bound = Set(String).new
       binding_rows.each { |r| bound << r.name if r.bound? }
       @sub_sel = @sub_sel.clamp(0, {rules.size - 1, 0}.max)
+      @drawn_sub = sub_selection_key
       ensure_sub_visible(inner, rules.size)
       @view.render_extract(screen, inner, rules, bound, @sub_sel, @sub_scroll, body_focused,
         empty_hint: keys("no extract rules — press {rewriter.add} to add one, then log in from a Repeater tab"))
@@ -268,6 +293,7 @@ module Gori::Tui
     private def render_bindings(screen : Screen, inner : Rect, body_focused : Bool) : Nil
       rows = binding_rows
       @sub_sel = @sub_sel.clamp(0, {rows.size - 1, 0}.max)
+      @drawn_sub = sub_selection_key
       ensure_sub_visible(inner, rows.size)
       @view.render_bindings(screen, inner, rows, @sub_sel, @sub_scroll, body_focused, Time.utc)
     end

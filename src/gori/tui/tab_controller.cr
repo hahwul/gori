@@ -1766,6 +1766,12 @@ module Gori::Tui
     def on_enter : Nil # tab became active — refresh derived data
     end
 
+    # Called on the active tab BEFORE `Runner#apply_external_change` reloads the shared live
+    # objects (`Rules`, `Bindings`, `Colormarker`, …), so a list cursor can note which ROW it is
+    # on while the list it indexes is still the one the operator moved it over.
+    def before_external_change : Nil
+    end
+
     def on_external_change : Nil # another connection committed to the project DB
     end
 

@@ -1265,6 +1265,7 @@ module Gori::Tui
     # store-backed views. Active-tab reloads use id/path soft-anchors; Repeater/Notes
     # soft-merge and skip dirty buffers so session UI is not clobbered.
     private def apply_external_change : Nil
+      @tabs[@active_tab]?.try(&.before_external_change)
       refresh_evidence_availability
       # Scope has no dirty-edit-buffer concept to protect (add/remove/toggle write straight
       # through to the store), so it's always safe to refresh in place here — unlike a

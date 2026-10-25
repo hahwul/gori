@@ -26,6 +26,10 @@ module Gori::Tui
       @view = ColormarkerView.new
       @colors_view = CustomColorsView.new
       @sel = 0
+      # The rule under the cursor as `reload_keeping_selection` restores it: last drawn (for
+      # `on_enter`) or noted by `before_external_change` (for the tick).
+      @drawn_rule = nil.as({Store::RuleScope, Int64}?)
+      @tick_anchor = nil.as({Store::RuleScope, Int64}?)
       @scroll = 0
       @color_sel = 0
       @color_scroll = 0
@@ -142,13 +146,34 @@ module Gori::Tui
 
     # Pull external (MCP / CLI / other-instance) rule edits when the tab becomes active.
     def on_enter : Nil
-      engine.reload
-      @sel = @sel.clamp(0, {rule_list.size - 1, 0}.max)
+      reload_keeping_selection(@drawn_rule)
       @color_sel = @color_sel.clamp(0, {custom_colors.size - 1, 0}.max)
     end
 
+    # Noted BEFORE `Runner#apply_external_change` reloads the shared engine: by
+    # `on_external_change` the list is already the peer's.
+    def before_external_change : Nil
+      @tick_anchor = selected_rule_key
+    end
+
     def on_external_change : Nil
+      prev = @tick_anchor || selected_rule_key
+      @tick_anchor = nil
+      reload_keeping_selection(prev)
+    end
+
+    private def selected_rule_key : {Store::RuleScope, Int64}?
+      selected_rule.try { |r| {r.scope, r.id} }
+    end
+
+    # The highlight follows the RULE, not the index: after a peer's reorder or delete the next
+    # ⇧J / d acted on whichever rule slid into the old slot. (Scope too — a global and a project
+    # rule can share an id.)
+    private def reload_keeping_selection(prev : {Store::RuleScope, Int64}?) : Nil
       engine.reload
+      list = rule_list
+      @sel = (prev ? list.index { |r| {r.scope, r.id} == prev } : nil) || @sel
+      @sel = @sel.clamp(0, {list.size - 1, 0}.max)
     end
 
     # --- render ---
@@ -165,6 +190,7 @@ module Gori::Tui
         rules_r = rules_list_rect(rules_r)
         rlist = rule_list
         @sel = @sel.clamp(0, {rlist.size - 1, 0}.max)
+        @drawn_rule = rlist[@sel]?.try { |r| {r.scope, r.id} }
         ensure_visible(rules_r, rlist.size)
         @view.render(screen, rules_r, rlist, @sel, @scroll, engine.enabled_count,
           body_focused && @focus == :rules)

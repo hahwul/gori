@@ -29,3 +29,35 @@ describe "ColormarkerController double-click" do
     end
   end
 end
+
+# The cursor follows the RULE across a peer's reorder. `Runner#apply_external_change` reloads
+# the shared engine before the tab's `on_external_change`, so the anchor is noted first
+# (`before_external_change`) — read after, it named whichever rule had slid into the slot.
+describe "ColormarkerController under a peer's reorder" do
+  it "keeps the highlight on the same rule, in the order the Runner reloads in" do
+    TuiContract.with_session("colormarker-anchor") do |session|
+      session.colormarker.add("host:a.test", "red", name: "one").should be_true
+      session.colormarker.add("host:b.test", "red", name: "two").should be_true
+      host = ColorEditorRecordingHost.new(session)
+      host.tab = :colormarker
+      ctl = ColormarkerController.new(host)
+      ctl.on_enter
+      TuiContract.render(ctl)
+      ctl.selected_rule.not_nil!.name.should eq("one")
+
+      ctl.before_external_change
+      one = session.colormarker.rules.find! { |r| r.name == "one" }
+      session.store.move_color_rule(one.id, 1).should be_true # the peer's reorder
+      session.colormarker.reload                              # the Runner's, first
+      ctl.on_external_change
+      ctl.selected_rule.not_nil!.name.should eq("one")
+
+      # …and across a tab entry, after ticks this tab did not see.
+      TuiContract.render(ctl)
+      session.store.move_color_rule(one.id, -1).should be_true
+      session.colormarker.reload
+      ctl.on_enter
+      ctl.selected_rule.not_nil!.name.should eq("one")
+    end
+  end
+end

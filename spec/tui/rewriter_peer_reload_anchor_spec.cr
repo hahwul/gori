@@ -69,6 +69,26 @@ describe "the Rewriter rule list under a peer's edit" do
     end
   end
 
+  # The Runner reloads the SHARED `Rules` before the tab's `on_external_change`, so by then
+  # `rule_list[@sel]` is already the peer's list; the anchor is noted in the hook before it.
+  it "keeps it in the order the Runner reloads in" do
+    with_anchor_controller do |ctl, session|
+      add_rule(session, "first")
+      second = add_rule(session, "second")
+      add_rule(session, "third")
+      ctl.on_enter
+      move_to(ctl, 1)
+
+      ctl.before_external_change
+      session.store.delete_rule(session.rules.rules.first.id)
+      session.rules.reload # `Runner#apply_external_change`, ahead of the tab
+      ctl.on_external_change
+
+      # Read after that reload, index 1 already named "third".
+      ctl.selected_rule.not_nil!.id.should eq(second)
+    end
+  end
+
   it "keeps it when a peer INSERTS above the cursor too" do
     with_anchor_controller do |ctl, session|
       first = add_rule(session, "first")
