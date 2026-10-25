@@ -46,7 +46,7 @@ module Gori
         name, kind, host, token, enabled = fields
         # A provider the AGENT saves is not the operator's configuration, so it is judged like
         # an inline `oast_start` server; otherwise saving it first would be the way around that.
-        if refusal = oast_endpoint_refusal(host, "host")
+        if refusal = oast_provider_host_refusal(host)
           return refusal
         end
         position = store.oast_providers.size
@@ -84,13 +84,8 @@ module Gori
         name = str(h, "name").try(&.strip).presence || existing.name
         host = str(h, "host").try(&.strip).presence || existing.host
         # Only a host this call names: an operator's saved host stays theirs (see create).
-        if present?(h, "host")
-          if e = Oast::Provider.endpoint_error(host)
-            return err(e, "INVALID_ARGUMENT", field: "host")
-          end
-          if refusal = oast_endpoint_refusal(host, "host")
-            return refusal
-          end
+        if present?(h, "host") && (refusal = oast_provider_host_refusal(host))
+          return refusal
         end
         # `presence ||` cannot express "clear it": an explicit `"token": ""` folded into the
         # same nil as an OMITTED field, so the old auth credential stayed on the provider and
@@ -126,6 +121,15 @@ module Gori
         Result.new({"deleted" => 1, "id" => "p_#{row}"}.to_json)
       end
 
+      # A host this call names: refused when it cannot be one (`Oast::Provider.endpoint_error`,
+      # the check `gori run oast providers` makes too), or when the Sandbox blocks it.
+      private def oast_provider_host_refusal(host : String) : Result?
+        if e = Oast::Provider.endpoint_error(host)
+          return err(e, "INVALID_ARGUMENT", field: "host")
+        end
+        oast_endpoint_refusal(host, "host")
+      end
+
       # The PROJECT row id behind a "p_<rowid>" key, refusing a global one. A global provider
       # lives in the user's settings.json and is shared across every project, so this server —
       # which is bound to one project DB — must not rewrite it.
@@ -153,9 +157,6 @@ module Gori
         host = str(h, "host").try(&.strip).presence ||
                Oast::Presets.all.find { |p| p.kind == kind }.try(&.host)
         return err("'host' is required for #{kind.label} (it has no default preset)", "INVALID_ARGUMENT", field: "host") unless host
-        if e = Oast::Provider.endpoint_error(host)
-          return err(e, "INVALID_ARGUMENT", field: "host")
-        end
         {name, kind.label, host, str(h, "token").try(&.strip).presence, bool_arg(h, "enabled", true)}
       end
 

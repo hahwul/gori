@@ -253,7 +253,7 @@ module Gori
 
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
-          if err = issue_flow_error(store, flow_id) || issue_repeater_error(store, repeater_id)
+          if err = issue_evidence_error(store, flow_id, repeater_id)
             abort "gori run issues create: #{err}"
           end
           masked_title = Env.mask_secrets(t)
@@ -314,6 +314,11 @@ module Gori
       def self.issue_repeater_error(store : Store, repeater_id : Int64?) : String?
         return nil unless rid = repeater_id
         store.get_repeater(rid) ? nil : "no repeater with id #{rid}"
+      end
+
+      # `--flow` then `--repeater`, the two evidence pointers both commands check before writing.
+      private def self.issue_evidence_error(store : Store, flow_id : Int64?, repeater_id : Int64?) : String?
+        issue_flow_error(store, flow_id) || issue_repeater_error(store, repeater_id)
       end
 
       # Link the issue to `--repeater`, through `Store#ensure_link` as MCP does; abort with
@@ -444,7 +449,7 @@ module Gori
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
           store.get_issue(id) || abort_closing(store, "gori run issues update: no issue with id #{id}")
-          if err = issue_flow_error(store, flow_id) || issue_repeater_error(store, repeater_id)
+          if err = issue_evidence_error(store, flow_id, repeater_id)
             abort_closing(store, "gori run issues update: #{err}")
           end
 

@@ -232,6 +232,22 @@ module Gori
 
       OAST_PROVIDER_KINDS = Oast::ProviderKind.values.join(" | ", &.label)
 
+      # `--kind`/`--host` help: `update` keeps the stored value of anything not passed, so add's
+      # defaults would be a false promise there.
+      private def self.oast_provider_field_help(update : Bool) : {String, String}
+        return {"#{OAST_PROVIDER_KINDS} (keeps the current kind)", "Server/base URL (keeps the current host)"} if update
+        {OAST_PROVIDER_KINDS.sub("interactsh", "interactsh (default)"), "Server/base URL (defaults to the kind's public preset)"}
+      end
+
+      # A `--host` that can never be one is refused when saved (`Oast::Provider.endpoint_error`,
+      # MCP's check too), not at the listen that could never reach it. Blank keeps the current host.
+      private def self.check_oast_provider_host(host : String?, verb : String) : Nil
+        return unless h = host.try(&.strip).presence
+        if err = Oast::Provider.endpoint_error(h)
+          abort "gori run oast providers #{verb}: #{err}"
+        end
+      end
+
       private def self.cmd_oast_provider_write(args : Array(String), *, update : Bool) : Nil
         verb = update ? "update" : "add"
         proj = ProjectFlags.new
@@ -251,10 +267,9 @@ module Gori
                                : "Usage: gori run oast providers add --name=N [options]"
           project_options(p, proj, "update")
           p.on("--name=NAME", "Display name#{update ? "" : " (required)"}") { |v| name = v }
-          # `update` keeps the stored value of anything not passed, so add's defaults would be
-          # a false promise in its help.
-          p.on("--kind=KIND", update ? "#{OAST_PROVIDER_KINDS} (keeps the current kind)" : OAST_PROVIDER_KINDS.sub("interactsh", "interactsh (default)")) { |v| kind_s = v }
-          p.on("--host=URL", update ? "Server/base URL (keeps the current host)" : "Server/base URL (defaults to the kind's public preset)") { |v| host = v }
+          kind_help, host_help = oast_provider_field_help(update)
+          p.on("--kind=KIND", kind_help) { |v| kind_s = v }
+          p.on("--host=URL", host_help) { |v| host = v }
           p.on("--token=TOK", "Provider auth token") { |v| token = v }
           p.on("--enabled", "Turn the provider on") { enabled = agree(enabled, true, "--enabled/--disabled") }
           p.on("--disabled", "Turn the provider off") { enabled = agree(enabled, false, "--enabled/--disabled") }
@@ -286,9 +301,7 @@ module Gori
         kind = kind_s.try do |k|
           Oast::ProviderKind.parse?(k) || abort("gori run oast providers #{verb}: unknown --kind '#{k}' (expected #{OAST_PROVIDER_KINDS})")
         end
-        if (err = host.try(&.strip).presence.try { |h| Oast::Provider.endpoint_error(h) })
-          abort "gori run oast providers #{verb}: #{err}"
-        end
+        check_oast_provider_host(host, verb)
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
           if update
