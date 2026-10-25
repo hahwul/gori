@@ -132,6 +132,23 @@ describe "ProjectView ACTIVITY pane" do
     end
   end
 
+  # …while a cursor on the NEWEST row follows the head, as the live prepend does: anchored by
+  # id, a tab entry after a burst parked it mid-list with the newest rows scrolled off above.
+  it "keeps a cursor on the newest row on the newest row across a reload" do
+    tmp_store do |store, project|
+      seed(store)
+      view = activity_view(store, project)
+      view.reload_activity(store)
+      view.activity_selected_row.not_nil!.message.should eq("Probe: reflected parameter")
+
+      3.times { |i| store.insert_event("agent", "agent_action", "info", "later #{i}") }
+      store.flush
+      view.reload_activity(store)
+
+      view.activity_selected_row.not_nil!.message.should eq("later 2")
+    end
+  end
+
   it "says the feed is empty and says a filter is hiding it, in different words" do
     tmp_store do |store, project|
       view = activity_view(store, project)

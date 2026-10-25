@@ -1272,6 +1272,10 @@ module Gori::Tui
     # applied, and the two readings send the operator opposite ways: one says the log is quiet,
     # the other says the chip is hiding it. Same shape as History's `@no_flows`.
     def reload_activity(store : Store) : Nil
+      # A cursor on the newest row FOLLOWS the head, as `prepend_activity` says: re-anchored by
+      # id instead, a tab entry after events arrived put it N rows down, with the newest ones
+      # scrolled off above it.
+      @act_anchor = nil if @act_sel == 0
       page = store.events_recent(ACT_PAGE, source: @act_source,
         levels: ProjectView.act_level_set(@act_level), actor: @act_actor, query: filter_query)
       @act_rows = page.rows

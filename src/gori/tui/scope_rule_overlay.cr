@@ -130,6 +130,14 @@ module Gori::Tui
       @pattern.set_preedit(text) if on_pattern_row?
     end
 
+    # The Save row says what is wrong, as the Rewriter's does (`fix the regex`): a typed `(abc`
+    # is not a missing pattern.
+    def save_label : String
+      return "[ enter a valid pattern ]" if pattern.empty?
+      return "[ Save rule ]" if Scope.valid?(match_type, pattern)
+      match_type == "regex" ? "[ fix the regex ]" : "[ fix the host pattern ]"
+    end
+
     def card_title : String
       editing? ? "EDIT SCOPE RULE" : "ADD SCOPE RULE"
     end
@@ -161,8 +169,7 @@ module Gori::Tui
         @pattern.render(screen, vx, py, {box.right - 2 - vx, 3}.max, sel, fg, bg)
       else
         ok = !pattern.empty? && Scope.valid?(match_type, pattern)
-        label = ok ? "[ Save rule ]" : "[ enter a valid pattern ]"
-        screen.text(x, py, label, ok ? Theme.accent : Theme.muted, bg, Attribute::Bold, width: {box.right - 2 - x, 0}.max)
+        screen.text(x, py, save_label, ok ? Theme.accent : Theme.muted, bg, Attribute::Bold, width: {box.right - 2 - x, 0}.max)
       end
     end
   end

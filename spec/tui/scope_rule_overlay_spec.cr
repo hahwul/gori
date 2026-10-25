@@ -29,6 +29,13 @@ describe Gori::Tui::ScopeRuleOverlay do
     ov.match_type.should eq("host")
   end
 
+  # A broken regex is not a missing pattern — name it, as the Rewriter's Save row does.
+  it "names the regex problem on the Save row" do
+    ScopeRuleOverlay.new(match_type: "regex", pattern: "(abc").save_label.should eq("[ fix the regex ]")
+    ScopeRuleOverlay.new(match_type: "regex", pattern: "").save_label.should eq("[ enter a valid pattern ]")
+    ScopeRuleOverlay.new(match_type: "regex", pattern: "a.c").save_label.should eq("[ Save rule ]")
+  end
+
   it "seeds edit mode from an existing rule" do
     ov = ScopeRuleOverlay.editing(42_i64, "exclude", "regex", "api\\..*")
     ov.editing?.should be_true
