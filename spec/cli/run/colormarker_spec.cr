@@ -152,3 +152,28 @@ describe "gori run colormarker add --format json" do
     end
   end
 end
+
+# Renaming or deleting a custom colour leaves its rules dangling on purpose; the CLI now says
+# which global rules those are.
+describe "gori run colormarker color — dangling rules" do
+  it "names the global rules that still name the colour, and is silent when none do" do
+    before = Gori::Settings.colormarker_rules
+    begin
+      Gori::Settings.colormarker_rules = [
+        Gori::Settings::ColormarkerRule.new(3_i64, true, "", "host:a", "hotpink", "full"),
+        Gori::Settings::ColormarkerRule.new(5_i64, true, "", "host:b", "blue", "full"),
+        Gori::Settings::ColormarkerRule.new(8_i64, true, "", "host:c", "HotPink", "strip"),
+      ]
+      Gori::CLI::Run.dangling_color_rules_warning("hotpink").not_nil!.should contain("2 global rules still name “hotpink” (G#3, G#8)")
+      Gori::CLI::Run.dangling_color_rules_warning("teal").should be_nil
+    ensure
+      Gori::Settings.colormarker_rules = before
+    end
+  end
+
+  it "lists every colour subcommand in `color --help`" do
+    src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "colormarker.cr"))
+    banner = src[src.index!("def self.cmd_colormarker_color_list")..][0, 1200]
+    %w[add update|edit rm|delete].each { |v| banner.should contain("gori run colormarker color #{v}") }
+  end
+end

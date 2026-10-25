@@ -56,7 +56,11 @@ module Gori
         leftover = parse_args(args, "gori run colormarker color list") do |p|
           p.banner = "Usage: gori run colormarker color list [--format=text|json]\n\n" \
                      "The GLOBAL custom colours, offered in every project's picker alongside the\n" \
-                     "six built-ins. A built-in tracks the active theme; a custom is an absolute hex."
+                     "six built-ins. A built-in tracks the active theme; a custom is an absolute hex.\n\n" \
+                     "Or run with a subcommand (each takes -h):\n" \
+                     "  gori run colormarker color add --name=NAME --hex=#rrggbb\n" \
+                     "  gori run colormarker color update|edit <name> [--name=NEW] [--hex=#rrggbb]\n" \
+                     "  gori run colormarker color rm|delete <name>"
           format_flag(p, [:text, :json], "text (default) | json") { |f| format = f }
         end
         refuse_list_leftovers(leftover, "colormarker color", "add, update/edit, rm/delete, list")
@@ -131,9 +135,21 @@ module Gori
         end
         after = Settings.colormarker_colors.find { |c| c.name == final_name.strip.downcase }
         puts "Custom colour “#{after.try(&.name) || old}” updated (#{after.try(&.hex) || current.hex})."
-        if after && after.name != old
-          puts "note: rules still naming “#{old}” keep that reference and fall back to a default colour."
-        end
+        warn_dangling_color_rules(old) if after && after.name != old
+      end
+
+      # A rename or delete leaves every rule naming the colour on a fallback hue — deliberately
+      # (see `Settings.update_colormarker_color`), but the operator should know which ones. The
+      # global rules are named; project rules live in each project's DB, beyond this command.
+      def self.dangling_color_rules_warning(name : String) : String?
+        ids = Settings.colormarker_rules.select { |r| r.color.downcase == name }.map { |r| "G##{r.id}" }
+        return nil if ids.empty?
+        "warning: #{Gori.plural(ids.size, "global rule")} still name “#{name}” (#{ids.join(", ")}) and now " \
+        "fall back to a default colour; project rules naming it keep it too"
+      end
+
+      private def self.warn_dangling_color_rules(name : String) : Nil
+        dangling_color_rules_warning(name).try { |w| STDERR.puts w }
       end
 
       private def self.cmd_colormarker_color_rm(args : Array(String)) : Nil
@@ -148,6 +164,7 @@ module Gori
         # A rule that still names it is left inert — it falls back to a visible default rather
         # than this surface reaching into every project's DB to rewrite the rules.
         puts "Custom colour “#{name}” deleted."
+        warn_dangling_color_rules(name)
       end
 
       # One text row: `G*#2 [ ] strip  yellow  [name]  status:401 OR status:403`.
