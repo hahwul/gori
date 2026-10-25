@@ -346,6 +346,13 @@ describe Gori::Tui::HelpView do
     end
   end
 
+  # `[` / `]` are the global next/prev TAB; the Rewriter's sub-tabs ride the focus ring.
+  it "names the key that really switches the Rewriter's sub-tabs" do
+    rewriter = HelpView::SECTIONS.find! { |(t, _)| t == "REWRITER" }[1]
+    row = rewriter.find!(&.desc.includes?("switch sub-tab"))
+    row.key.should eq("↹ / ⇧↹")
+  end
+
   it "scrolls — the first section leaves and the last arrives" do
     view = HelpView.new
     short = Rect.new(0, 0, 90, 8)

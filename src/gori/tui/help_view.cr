@@ -352,7 +352,9 @@ module Gori::Tui
         Item.new("{space:rewriter.scope} · {space:rewriter.toggle-default}", "move the rule global ⇄ project · flip a global rule's default everywhere"),
         Item.new("G / P column", "global (every project) or project · G* = this project overrides its default"),
         Item.new("{rewriter.move-down} / {rewriter.move-up}", "reorder within a scope — globals apply first, then project rules"),
-        Item.new("[ / ]", "switch sub-tab: rules · extract · bindings"),
+        # ↹, not `[ / ]`: those are the global next/prev TAB (`nav.next-tab`), and this tab's
+        # sub-tabs ride the focus ring (`RewriterController#pane_advance`).
+        Item.new("↹ / ⇧↹", "switch sub-tab: rules · extract · bindings"),
         Item.new("↓ past the list", "the editable preview sample, and the same message after the rules run"),
         # NOT "y copies the OUTPUT · ^Y copies the INPUT": `rewriter.copy` is ONE verb with two
         # chords, and `rewriter_copy` branches on the FOCUSED PANE, not on which chord fired —
