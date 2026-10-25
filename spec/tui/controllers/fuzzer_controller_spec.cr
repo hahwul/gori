@@ -174,4 +174,18 @@ describe "FuzzerController — a card's commit after a peer closed its session" 
       b.config.follow_redirects?.should eq(before)
     end
   end
+
+  # ← on CONFIG focuses TEMPLATE and ↵ cycles the mode (`edit_config`, `activate_config_row`).
+  it "names the Mode row's real keys" do
+    with_fuzzer_controller do |ctl, _session|
+      ctl.fuzz_new
+      v = ctl.current_view.not_nil!
+      v.focus_pane(:config)
+      4.times { v.form_move(1) unless v.config_row == :mode }
+      v.config_row.should eq(:mode)
+      hint = ctl.body_hint(:body)
+      hint.should contain("→/↵ next mode · ← template")
+      hint.should_not contain("open editor")
+    end
+  end
 end

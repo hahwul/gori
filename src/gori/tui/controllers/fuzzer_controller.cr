@@ -222,7 +222,7 @@ module Gori::Tui
       case v.config_row
       when :set  then "↑/↓ row · ↵ edit set · Del remove · #{run} run · ↹ pane · esc sub-tabs"
       when :add  then keys("↵ add a payload set · {fuzz.list-paste} quick List · ↑/↓ row · #{run} run · ↹ pane · esc sub-tabs")
-      when :mode then "←/→ mode · ↵ open editor · ↑/↓ row · #{run} run · ↹ pane · esc sub-tabs"
+      when :mode then "→/↵ next mode · ← template · ↑/↓ row · #{run} run · ↹ pane · esc sub-tabs"
       else            "↵ open Advanced · ↑/↓ row · #{run} run · ↹ pane · esc sub-tabs"
       end
     end
