@@ -1295,12 +1295,9 @@ module Gori::Tui
       # of the session — every Repeater/Fuzzer/Miner/Intercept send expanded the value this
       # process happened to open with.
       #
-      # The extra reason is that the Project tab's ENV pane read-modify-WRITES the whole array
-      # (`Env.save_project` persists it wholesale, from the copy `ProjectView#reload` took of
-      # this global), so a stale copy did not just READ wrong — the next edit in the pane wrote
-      # the stale set back and silently DELETED every var the other process had added. MCP
-      # states exactly this hazard as the reason it refreshes per call (see
-      # `MCP::Tools::ENV_REFRESH_TOOLS`); this surface is the one that had no refresh at all.
+      # The Project tab's ENV pane also DRAWS from a copy of this global (it writes one key per
+      # edit through `Env.mutate_project`, so the store is safe either way), and a stale copy
+      # is a list showing vars that are gone.
       #
       # Safe in place, like the two above: the pane's inline add/edit row is a separate buffer,
       # and re-seeding the list around it is `ProjectView#reload_env_vars`' business — it

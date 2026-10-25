@@ -442,6 +442,31 @@ describe Gori::Tui::ProjectController do
     end
   end
 
+  # One edit writes one key, as MCP and `gori run project env` do: the pane's copy is stale
+  # between ticks, and writing it back dropped a peer's new var and resurrected a deleted one.
+  it "writes only the edited key over a store a peer changed meanwhile" do
+    with_env_controller do |c, _host, session|
+      Gori::Env.save_project(session.store, [{"A", "1"}, {"GONE", "x"}]).should be_true
+      c.view.reload_env_vars
+      # A peer adds PEER and deletes GONE; no tick has reached this pane yet.
+      Gori::Env.set_project_var(session.store, "PEER", "9").should be_true
+      Gori::Env.delete_project_var(session.store, "GONE").should be_true
+      Gori::Settings.project_env_vars = [{"A", "1"}, {"GONE", "x"}]
+      c.view.reload_env_vars
+
+      c.env_edit_var # A, renamed to B
+      3.times { c.handle_body_key(key(Termisu::Input::Key::Backspace)) }
+      type_keys(c, "B 2")
+      c.handle_body_key(key(Termisu::Input::Key::Enter))
+      stored = -> { Gori::Env.parse_vars_json(session.store.setting(Gori::Env::PROJECT_VARS_KEY)) }
+      stored.call.should eq([{"B", "2"}, {"PEER", "9"}])
+      c.view.env_vars.should eq([{"B", "2"}, {"PEER", "9"}])
+
+      c.env_delete_var # B is still selected
+      stored.call.should eq([{"PEER", "9"}])
+    end
+  end
+
   it "reports the total on a committed save" do
     with_env_controller do |c, host, _session|
       c.env_add_var

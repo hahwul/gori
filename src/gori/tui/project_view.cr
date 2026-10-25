@@ -143,6 +143,9 @@ module Gori::Tui
       # The KEY an open edit row targets, so `reload_env_vars` can re-anchor the index when a
       # peer process reorders or shortens the list under it.
       @env_edit_key = nil.as(String?)
+      # The last `env_commit` as {key the edit row opened on (nil = add), key, value}: the
+      # controller persists that ONE row, not the pane's copy of the table.
+      @env_committed = nil.as({String?, String, String}?)
       # One field for the three sub-modes (add / edit / prefix), which are mutually exclusive —
       # the same shape as `EnvOverlay`. See `@ov_field` for why a TextField and not a triple.
       @env_field = TextField.new
@@ -1085,10 +1088,9 @@ module Gori::Tui
     # `Runner#apply_external_change` has refreshed that global.
     #
     # Unlike SCOPE and HOST OVERRIDES — which this view renders straight out of one live
-    # object — the ENV pane holds its own `@env_items` copy and `Env.save_project` persists it
-    # WHOLESALE. So a stale copy did not merely display wrong: the next commit here wrote the
-    # stale set back over the store, deleting every var the other process had added. Refreshing
-    # only on tab entry left that window open for as long as the operator stayed on the tab.
+    # object — the ENV pane holds its own `@env_items` copy. It once persisted that copy
+    # WHOLESALE, so a stale copy wrote itself back over a peer's vars; the controller now writes
+    # one key per edit (`env_committed`), and this refresh is what keeps the DRAWN list honest.
     #
     # An open EDIT row names its target by INDEX, and the list that index pointed into is gone,
     # so re-anchor by the KEY the row opened on: the commit still updates that var if it
@@ -1857,10 +1859,13 @@ module Gori::Tui
         @env_items << {key, val}
         @env_sel = @env_items.size - 1
       end
+      @env_committed = {@env_edit_key, key, val}
       cancel_env_add
       clamp_env_sel
       :ok
     end
+
+    getter env_committed : {String?, String, String}?
 
     # The selected variable's KEY, for the delete confirm to name it before it is gone. Never
     # the value: a confirm that echoed a secret would print it into a modal the operator may

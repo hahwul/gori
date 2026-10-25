@@ -230,12 +230,13 @@ describe "gori run — the CLI whole-document writers" do
     del.should contain("no env var named")
   end
 
-  it "leaves the ENV pane's whole-array save alone" do
-    # The axis is OWNERSHIP, not "transactions are better": `ProjectView`'s ENV pane edits
-    # the entire table in place and persists what the operator sees, so `save_project` is
-    # the correct call there and swapping it for a per-key mutator would make a deleted row
-    # come back.
+  it "writes the ENV pane's edits one key at a time too" do
+    # The pane's copy of the table is stale between external-change ticks, so writing it back
+    # whole dropped a var a peer had just added and resurrected one it had just deleted. Its
+    # edits go through the same in-transaction read-modify-write as the per-key writers, with
+    # the pane's own deletes deleted explicitly (`project_env_pane_spec` pins both).
     src = src_of("tui", "controllers", "project_controller.cr")
-    src.should contain("Env.save_project(@host.session.store, @project_view.env_vars)")
+    src.should contain("Env.mutate_project(store)")
+    src.should_not contain("Env.save_project(")
   end
 end

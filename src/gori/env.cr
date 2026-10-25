@@ -2499,20 +2499,22 @@ module Gori
       # default. The count and the key list are what an audit needs — "who added $ADMIN_TOKEN",
       # not what it was. Persisted WHOLESALE, so the line describes the resulting set rather
       # than a delta the caller never computed.
-      if committed
-        names = vars.map(&.[0]).sort!
-        summary = names.empty? ? "cleared" : "#{Gori.plural(names.size, "var")} — #{names.join(", ")}"
-        ConfigLog.record(store, "env", "project env vars saved: #{summary}")
-      end
+      log_saved(store, vars) if committed
       committed
+    end
+
+    # The audit line for a committed project env write: the resulting set's NAMES (see above).
+    def self.log_saved(store : Store, vars : Array({String, String})) : Nil
+      names = vars.map(&.[0]).sort!
+      summary = names.empty? ? "cleared" : "#{Gori.plural(names.size, "var")} — #{names.join(", ")}"
+      ConfigLog.record(store, "env", "project env vars saved: #{summary}")
     end
 
     # Read-modify-write the project env table with the READ taken INSIDE the store's write
     # transaction (`Store#mutate_setting`).
     #
-    # `save_project` above persists the WHOLE array, which is right for the surface that owns
-    # the whole array (the TUI's env pane edits it in place) and wrong for every per-KEY
-    # mutator: those load the array, change one entry and save it back, so the loser of a
+    # `save_project` above persists the WHOLE array, which is wrong for every per-KEY mutator
+    # — the TUI's env pane included, whose copy is stale between ticks: those load the array, change one entry and save it back, so the loser of a
     # race commits an array built before the winner's row landed and silently DELETES every
     # var the peer added. MCP's own `ENV_REFRESH_TOOLS` comment already names that hazard and
     # treats a pre-read as the mitigation; measured on the note set (the same shape) the
