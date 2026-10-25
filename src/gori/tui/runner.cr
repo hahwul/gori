@@ -337,7 +337,7 @@ module Gori::Tui
       # Far-right status-bar readout of gori's own CPU/RSS (settings:display → Resource meter).
       # Samples nothing while disabled; see ResourceMeter for the idle-repaint discipline.
       @resource = ResourceMeter.new
-      # Miss Ring (settings:companion). Off by default; while off she is the same zero-cost
+      # Miss Ring (settings:companion). On by default; while off she is the same zero-cost
       # no-op the resource meter is, and she stops ticking entirely once she dozes.
       @companion = Companion.new(@notifications, honors_placement: true)
       @spinner_frame = 0
