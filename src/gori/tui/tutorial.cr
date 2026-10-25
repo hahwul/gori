@@ -400,7 +400,7 @@ module Gori::Tui
     # `registry` is the session's when the tour runs from inside one (Runner#open_tutorial), so
     # the mock menus read the same letters and keys the user just left.
     def initialize(@term : Termisu, @handoff : Handoff = Handoff::Shell,
-                   @registry : Verb::Registry = Verbs.registry)
+                   @registry : Verb::Registry = Verbs.registry, @proxy : {String, Int32}? = nil)
       registry = @registry
       @space_rows = Tutorial.space_rows(registry)
       @send_rows = Tutorial.send_rows(registry)
@@ -2211,14 +2211,14 @@ module Gori::Tui
     end
 
     # Where to point a client, how HTTPS gets trusted, and the capture switch (#1382). The
-    # address is the global default bind; a project can pin its own, which is why the line
-    # sends the reader to the header chip for the live one.
+    # address is the live proxy's when a session opened the tour, else the bind this run would
+    # use; the line still names the header chip, which follows a later rebind.
     private def render_capture(screen : Screen, box : Rect) : Nil
       ix = box.x + 2
       iw = {box.w - 4, 1}.max
       y = box.y + 2
       detail = [
-        "proxy: #{Tutorial.proxy_addr} — the header's ● chip shows the one in use",
+        "proxy: #{@proxy.try { |(h, p)| Tutorial.proxy_addr(h, p) } || Tutorial.proxy_addr} — the header's ● chip shows the one in use",
         "HTTPS: #{reach("browser.open")} opens one proxied and trusting the CA",
         "other clients: gori ca (or #{reach("ca.export")}), then trust it",
         "● green = capturing · grey and \"off\" = gori isn't listening",
@@ -2303,13 +2303,14 @@ module Gori::Tui
       FLOW_ROWS[1, MOCK_HELD][MOCK_HELD - held.clamp(0, MOCK_HELD)..]
     end
 
-    # The address to point a client at: the global default bind, with a wildcard bind read as
-    # the loopback a local browser actually dials.
-    def self.proxy_addr : String
-      host = Settings.bind_host
+    # The address to point a client at: the bind this run uses (a `-l`/`-p` flag or a project
+    # pin over the global, or the live proxy's when a session hands it in), with a wildcard
+    # bind read as the loopback a local browser actually dials.
+    def self.proxy_addr(host : String = Settings.effective_bind_host,
+                        port : Int32 = Settings.effective_bind_port) : String
       host = "127.0.0.1" if host.empty? || host == "0.0.0.0" || host == "::"
       host = "[#{host}]" if host.includes?(':')
-      "#{host}:#{Settings.bind_port}"
+      "#{host}:#{port}"
     end
 
     # "1-N" for the chips this card's mock bar draws — the digits that do something at this

@@ -138,3 +138,12 @@ describe "Runner.port_fallback_stands?" do
     Runner.port_fallback_stands?(fb, "127.0.0.1", 8080, "127.0.0.1", 9000).should be_false
   end
 end
+
+# A Listen IP that does not resolve is allowed by design (`bind_host_error` accepts a
+# hostname), and its bind failure was answered with "set a free port" — the wrong field.
+describe "Runner.bind_fix" do
+  it "names the Listen IP for a lookup failure and the port otherwise" do
+    Runner.bind_fix("Hostname lookup for abc failed: No address found").should contain("Listen IP")
+    Runner.bind_fix("Could not bind to '127.0.0.1:8070': Address already in use").should contain("free port")
+  end
+end

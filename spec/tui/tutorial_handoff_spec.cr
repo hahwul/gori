@@ -21,6 +21,20 @@ describe "Gori::Tui::Tutorial.first_session_steps" do
     Tour.first_session_steps(Tour::Handoff::Shell, 40)[0].should contain("↵↵↵")
   end
 
+  # The capture lesson printed the persisted global bind, so `gori -p 18794` was told 18080.
+  it "prints the bind this run uses, not the persisted global" do
+    saved = {Gori::Settings.bind_host, Gori::Settings.bind_port, Gori::Settings.cli_bind_port}
+    Gori::Settings.bind_host = "127.0.0.1"
+    Gori::Settings.bind_port = 18080
+    Gori::Settings.cli_bind_port = 18794
+    Tour.proxy_addr.should eq("127.0.0.1:18794")
+    Tour.proxy_addr("::", 9000).should eq("127.0.0.1:9000")
+  ensure
+    if s = saved
+      Gori::Settings.bind_host, Gori::Settings.bind_port, Gori::Settings.cli_bind_port = s
+    end
+  end
+
   it "sends the user through the palette and names the CA verb" do
     Tour::Handoff.values.each do |handoff|
       steps = Tour.first_session_steps(handoff, 71)

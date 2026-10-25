@@ -470,6 +470,13 @@ module Gori::Tui
       end
     end
 
+    # What to change after a failed bind. A hostname that does not resolve fails with the
+    # stdlib's `Socket::Addrinfo::Error` ("Hostname lookup for … failed"), and telling that
+    # operator to pick a free port sends them to the wrong field.
+    def self.bind_fix(err : String) : String
+      err.starts_with?("Hostname lookup") ? "set a Listen IP that resolves" : "set a free port"
+    end
+
     def run : Symbol
       # The fiber that runs the event loop: a session slot's before-send refresh asked from it
       # runs in the background instead of blocking the loop on a login (#1233).
@@ -489,8 +496,9 @@ module Gori::Tui
       if err = @session.bind_error
         @toast =
           if @session.capturing_lock_held?
-            # We own this project's capture but the bind failed (port taken).
-            "capture OFF — #{err}. History/Repeater work; set a free port in settings (^P) then press c"
+            # We own this project's capture but the bind failed: the port is taken, or the
+            # Listen IP does not resolve (`bind_host_error` allows a hostname by design).
+            "capture OFF — #{err}. History/Repeater work; #{Runner.bind_fix(err)} in settings (^P) then press c"
           else
             # View-only: another live instance owns this project's capture.
             "view-only — #{err}. History/Repeater work; press c to take over if it closed"
@@ -4138,7 +4146,8 @@ module Gori::Tui
       borrowed = !Settings.mouse
       @term.enable_mouse if borrowed
       begin
-        Tutorial.new(@term, Tutorial::Handoff::Session, @session.registry).run
+        Tutorial.new(@term, Tutorial::Handoff::Session, @session.registry,
+          proxy: {@session.proxy.host, @session.proxy.port}).run
       ensure
         @term.disable_mouse if borrowed
       end
