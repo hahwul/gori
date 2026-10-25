@@ -3737,3 +3737,54 @@ describe "Gori::Tui::HistoryView MESSAGES narrow" do
     end
   end
 end
+
+# The detail body's scroll gauge (┃ on the right border) has to follow the body in every mode
+# the Repeater draws one in: hex (^X), reveal (b), and a body that overflows only by wrapping.
+private def gauge_flow(store, body : String) : Int64
+  id = store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+    method: "GET", target: "/g", http_version: "HTTP/1.1",
+    head: "GET /g HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+  store.update_response(Gori::Store::CapturedResponse.new(
+    flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice,
+    body: body.to_slice, content_type: "text/plain"))
+  id
+end
+
+private def gauge_drawn?(view : HistoryView) : Bool
+  b = MemoryBackend.new(80, 14)
+  view.render_detail(Screen.new(b), Rect.new(0, 0, 80, 14))
+  (0...14).any? { |y| b.row(y).includes?('┃') }
+end
+
+describe "HistoryView detail scroll gauge" do
+  it "is drawn in hex and reveal modes and when only the wrap overflows" do
+    prev = Gori::Settings.wrap_lines?
+    begin
+      Gori::Settings.wrap_lines = true
+      with_store do |store|
+        gauge_flow(store, (1..60).map { |i| "line #{i}" }.join('\n'))
+        view = HistoryView.new
+        view.reload(store)
+        view.open_detail(store).should be_true
+        view.toggle_pane # request -> response
+        gauge_drawn?(view).should be_true
+        view.toggle_detail_hex
+        gauge_drawn?(view).should be_true
+        view.toggle_detail_hex
+        view.reveal = true
+        gauge_drawn?(view).should be_true
+      end
+      with_store do |store|
+        gauge_flow(store, "x" * 2000) # one line, far more rows than the pane once wrapped
+        view = HistoryView.new
+        view.reload(store)
+        view.open_detail(store).should be_true
+        view.toggle_pane
+        gauge_drawn?(view).should be_true
+      end
+    ensure
+      Gori::Settings.wrap_lines = prev
+    end
+  end
+end

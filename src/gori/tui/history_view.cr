@@ -3717,6 +3717,7 @@ module Gori::Tui
       if hex && (bytes = detail_pane_bytes)
         @detail_last_h = body.h # the page step (detail_page_rows) reads it in hex too
         HexView.render(screen, body, bytes, @detail_scroll)
+        Frame.scroll_gauge(screen, body, HexView.rows(bytes.size), @detail_scroll, focused)
         return
       end
       if ws && (rl = reveal_lines)
@@ -3941,12 +3942,25 @@ module Gori::Tui
           Wrap.mark_search(screen, body.x + gw, y, text, vr.a, vr.b, @search_hl, body.x + gw + cw, xoff: xs, memo: @detail_search_memo)
         end
       end
-      # The detail body scrolls (`@detail_scroll`) and had no gauge, while the Repeater's
-      # structurally identical response pane has had one all along. `total` is LINES, and
-      # `detail_rows` windows by wrapped ROWS, so the two disagree on a wrapped line — the
-      # gauge is a proportion, and lines are the number the operator's ↑/↓ and the gutter
-      # both count in, which makes it the honest one to show.
-      Frame.scroll_gauge(screen, body, total, @detail_scroll, focused)
+      draw_detail_gauge(screen, body, total, cw, ->(i : Int32) { detail_line_text(dv, i) }, focused)
+    end
+
+    # The detail body scrolls (`@detail_scroll`) and had no gauge, while the Repeater's
+    # structurally identical response pane has had one all along. `total` is LINES, and
+    # `detail_rows` windows by wrapped ROWS, so the two disagree on a wrapped line — the
+    # gauge is a proportion, and lines are the number the operator's ↑/↓ and the gutter
+    # both count in, which makes it the honest one to show. Except when the lines FIT and
+    # only the wrap overflows: there is no line proportion then, and no gauge would say the
+    # pane does not scroll. That case counts wrapped rows, over at most `body.h` lines.
+    private def draw_detail_gauge(screen : Screen, body : Rect, total : Int32, cw : Int32,
+                                  line_at : Int32 -> String, focused : Bool) : Nil
+      unless total <= body.h && detail_wrap?
+        return Frame.scroll_gauge(screen, body, total, @detail_scroll, focused)
+      end
+      lay = detail_layout_fn(cw, line_at)
+      rows = (0...total).sum { |i| lay.call(i).rows }
+      top = (0...@detail_scroll).sum { |i| lay.call(i).rows } + @detail_scroll_sub
+      Frame.scroll_gauge(screen, body, rows, top, focused)
     end
 
     # Windowed render of revealed (whitespace-visible) lines — mirrors the normal
@@ -3990,6 +4004,7 @@ module Gori::Tui
         Wrap.mark_search(screen, body.x + gw, y, line, vr.a, vr.b, @search_hl, body.x + gw + cw,
           xoff: xs, memo: @detail_search_memo, reveal: true)
       end
+      draw_detail_gauge(screen, body, total, cw, ->(i : Int32) { lines[i] }, focused)
     end
 
     # Detail-pane gutter: the line number rides the FIRST visual row of a logical line only
