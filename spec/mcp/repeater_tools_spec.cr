@@ -381,6 +381,20 @@ describe "MCP repeater tags" do
   end
 end
 
+describe "MCP repeater name" do
+  it "lists an unnamed session's name as create_repeater replied it" do
+    with_store do |store|
+      tools = tools_for(store)
+      created = mcp_ok_json(tools, "create_repeater",
+        %({"target":"https://acme.test","request":"GET / HTTP/1.1\\r\\nHost: acme.test\\r\\n\\r\\n","name":""}))
+      store.get_repeater(created["id"].as_i64).not_nil!.name.should be_nil
+      row = mcp_ok_json(tools, "get_repeater_context", %({"id":#{created["id"]}}))["sessions"].as_a.first
+      row["name"].should eq(created["name"])
+      row["name"].as_s.should eq("")
+    end
+  end
+end
+
 describe "MCP minimize_repeater" do
   it "refuses a WebSocket session, an unknown id, and a bad scheme" do
     with_store do |store|

@@ -379,7 +379,8 @@ module Gori
           j.field "http2", r.http2?
           j.field "auto_content_length", r.auto_content_length?
           j.field "flow_id", r.flow_id if r.flow_id
-          j.field "name", Serialize.text(r.name) if r.name
+          # Always present, "" when unnamed: the spelling create/update_repeater reply with.
+          j.field "name", Serialize.text(r.name) || ""
           r_request_text = String.new(r.request).scrub
           # What tells two unnamed tabs on one origin apart, without include_content (#1561).
           j.field "summary", repeater_summary(r_request_text)
