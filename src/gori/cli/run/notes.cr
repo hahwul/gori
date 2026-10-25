@@ -1,14 +1,14 @@
 # `gori run notes` — read the project's notes (list, show one, or --all),
 # or write them (create, delete). Notes are addressed by their 1-based list
-# position <n> (the same number `notes <n>` and the listing show), not the
-# internal stable id.
+# position <n> (the same number `notes <n>` and the listing show); `update` and `delete`
+# also take `--id ID`, the stable id the listing prints as "(id N)".
 module Gori
   module CLI
     module Run
       @[Subcommand("notes", help: [
         {"notes [<n>]", "Read or write the project's notes (list, <n>, --all, create)"},
-        {"notes update <n>", "Replace (or --append to) the text of the note at list position <n>"},
-        {"notes delete <n>", "Delete the note at 1-based list position <n> (needs --yes)"},
+        {"notes update <n>|--id ID", "Replace (or --append to) the text of the note at list position <n>"},
+        {"notes delete <n>|--id ID", "Delete the note at 1-based list position <n> (needs --yes)"},
       ])]
       private def self.cmd_notes(args : Array(String)) : Nil
         case sub = args.first?
@@ -42,8 +42,8 @@ module Gori
                      "or --all to print them all.\n\n" \
                      "Or run with a subcommand:\n" \
                      "  gori run notes create [--text TEXT] [options]\n" \
-                     "  gori run notes update <n> [--text TEXT] [options]   (append <n>: add to it)\n" \
-                     "  gori run notes delete <n> --yes [options]"
+                     "  gori run notes update <n>|--id ID [--text TEXT] [options]   (append <n>: add to it)\n" \
+                     "  gori run notes delete <n>|--id ID --yes [options]"
           project_options(p, proj, "read")
           p.on("--all", "Print every note in full instead of the one-line list") { all = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
@@ -115,23 +115,25 @@ module Gori
       private def self.cmd_notes_update(args : Array(String), *, append : Bool = false) : Nil
         proj = ProjectFlags.new
         text : String? = nil
+        note_id : Int64? = nil
         format = :text
 
         positional = parse_args(args, "gori run notes update") do |p|
-          p.banner = "Usage: gori run notes update <n> [--append] [--text TEXT | TEXT… ] [options]\n" \
-                     "       gori run notes append <n> [--text TEXT | TEXT…] [options]\n\n" \
-                     "Replace the text of the note at 1-based list position <n>, or add to it with\n" \
-                     "--append. The text comes from --text, else the words after <n>, else STDIN."
+          p.banner = "Usage: gori run notes update <n>|--id ID [--append] [--text TEXT | TEXT… ] [options]\n" \
+                     "       gori run notes append <n>|--id ID [--text TEXT | TEXT…] [options]\n\n" \
+                     "Replace the text of the note at 1-based list position <n> (or stable --id ID), or\n" \
+                     "add to it with --append. The text comes from --text, else the words after <n>, else STDIN."
           p.on("--append", "Add the text on a new line after the note's current text instead of replacing it") { append = true }
+          p.on("--id=ID", "Address the note by its stable id (the listing's \"id N\") instead of <n>") { |v| note_id = parse_id(v, "gori run notes update", "--id") }
           project_options(p, proj, "update")
           p.on("--text=TEXT", "The text (else the words after <n>, else STDIN)") { |v| text = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
 
-        n = parse_note_index(positional.first?) || abort "gori run notes update: missing <n>"
-        body = note_update_text(text, positional[1..])
+        n = note_id ? nil : (parse_note_index(positional.first?) || abort "gori run notes update: missing <n> (or --id ID)")
+        body = note_update_text(text, n ? positional[1..] : positional)
         store = open_store(resolve_read_project(proj.name, proj.db))
-        apply_note_update(store, n, body, append, format)
+        apply_note_update(store, n, note_id, body, append, format)
       end
 
       # The text for `notes update`: --text, else the words after <n>, else a pipe. An empty
@@ -145,26 +147,26 @@ module Gori
         body
       end
 
-      private def self.apply_note_update(store : Store, n : Int32, body : String, append : Bool, format : Symbol) : Nil
+      private def self.apply_note_update(store : Store, n : Int32?, note_id : Int64?, body : String,
+                                         append : Bool, format : Symbol) : Nil
         doc = Notes.load(store)
-        n <= doc.size || abort_closing(store, "gori run notes update: no note ##{n} (this project has #{Gori.plural(doc.size, "note")})")
         # By the note's STABLE id, inside the write transaction — see `Notes.update`.
-        id = doc.notes[n - 1].id
+        id = doc.notes[resolve_note_index(store, doc, n, note_id, "gori run notes update")].id
         case Notes.update(store, id, body, append: append)
         when .busy?
           abort_closing(store, "gori run notes update: project is busy (write did not commit) — try again")
         when .missing?
-          abort_closing(store, "gori run notes update: note ##{n} was deleted before it could be updated")
+          abort_closing(store, "gori run notes update: note (id #{id}) was deleted before it could be updated")
         end
         after = Notes.load(store)
         idx = after.notes.index { |e| e.id == id }
         if format == :json
           # A peer deleted it between the commit and this read: JSON refuses rather than print a
           # sentence where a script expects an object (`note_created_output`'s rule).
-          i = idx || abort_closing(store, "gori run notes update: note ##{n} was updated, but it was gone before it could be read back")
+          i = idx || abort_closing(store, "gori run notes update: note (id #{id}) was updated, but it was gone before it could be read back")
           puts CLI::Output.note_object_json(i, after.notes[i], current: after.cur == i, with_text: true)
         else
-          puts "Note ##{(idx || n - 1) + 1} #{append ? "appended to" : "updated"}."
+          puts "#{note_ref(idx, id)} #{append ? "appended to" : "updated"}."
         end
       ensure
         store.close
@@ -182,10 +184,26 @@ module Gori
         if format == :json
           i = idx || abort_closing(store, "gori run notes create: note (id #{new_id}) was created, but it was gone before it could be read back")
           CLI::Output.note_object_json(i, doc.notes[i], current: doc.cur == i, with_text: false)
-        elsif idx
-          "Note ##{idx + 1} created."
         else
-          "Note created (id #{new_id})."
+          "#{note_ref(idx, new_id)} created."
+        end
+      end
+
+      # How a write names the note it touched: the list position AND the stable id, since
+      # `notes` addresses by the first and `links --note` by the second. A note a peer deleted
+      # in that instant has no position, so the id alone is the honest name.
+      private def self.note_ref(idx : Int32?, id : Int64) : String
+        idx ? "Note #{idx + 1} (id #{id})" : "Note (id #{id})"
+      end
+
+      # The 0-based index of the note `<n>` or `--id ID` names, or abort naming what is missing.
+      private def self.resolve_note_index(store : Store, doc : Notes::Doc, n : Int32?, id : Int64?, cmd : String) : Int32
+        if id
+          doc.notes.index { |e| e.id == id } || abort_closing(store, "#{cmd}: no note with id #{id}")
+        else
+          n = n.not_nil!
+          n <= doc.size || abort_closing(store, "#{cmd}: no note ##{n} (this project has #{Gori.plural(doc.size, "note")})")
+          n - 1
         end
       end
 
@@ -204,22 +222,26 @@ module Gori
       private def self.cmd_notes_delete(args : Array(String)) : Nil
         proj = ProjectFlags.new
         yes = false
+        note_id : Int64? = nil
 
         positional = parse_args(args, "gori run notes delete") do |p|
-          p.banner = "Usage: gori run notes delete <n> --yes [options]\n\n" \
-                     "Delete the note at 1-based list position <n> (as shown by `notes`)."
+          p.banner = "Usage: gori run notes delete <n>|--id ID --yes [options]\n\n" \
+                     "Delete the note at 1-based list position <n> (as shown by `notes`), or by its stable --id ID."
           p.on("-y", "--yes", "Confirm the deletion (required — there is no interactive prompt here)") { yes = true }
+          p.on("--id=ID", "Address the note by its stable id (the listing's \"id N\") instead of <n>") { |v| note_id = parse_id(v, "gori run notes delete", "--id") }
           project_options(p, proj, "update")
         end
 
-        abort "gori run notes delete: missing <n>" if positional.empty?
+        abort "gori run notes delete: pass <n> or --id ID, not both" if note_id && !positional.empty?
+        abort "gori run notes delete: missing <n> (or --id ID)" if positional.empty? && !note_id
         abort "gori run notes delete: too many arguments (expected one note number)" if positional.size > 1
-        n = parse_note_index(positional.first).not_nil!
+        n_arg = parse_note_index(positional.first?)
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
           persisted = Notes.load(store)
-          n <= persisted.size || abort_closing(store, "gori run notes delete: no note ##{n} (this project has #{Gori.plural(persisted.size, "note")})")
-          target = persisted.notes[n - 1]
+          idx = resolve_note_index(store, persisted, n_arg, note_id, "gori run notes delete")
+          n = idx + 1
+          target = persisted.notes[idx]
           # Gated AFTER the note is resolved, so the refusal can name the text that would go —
           # and after the "no note #n" abort, so a typo'd number still gets the specific answer.
           #
@@ -249,7 +271,7 @@ module Gori
           # by POSITION, which is exactly the drift `keep_id` above exists to avoid.)
           merged = Notes.save(store, [] of Notes::NoteEntry, Set{target_id}, keep_id, persisted.next_id)
           merged || abort_closing(store, "gori run notes delete: project is busy (write did not commit) — try again")
-          puts "Note ##{n} deleted."
+          puts "#{note_ref(idx, target_id)} deleted."
         end
       end
 

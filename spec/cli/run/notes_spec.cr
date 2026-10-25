@@ -240,10 +240,20 @@ describe "gori run notes create --format json" do
     end
   end
 
-  it "keeps both text sentences unchanged" do
+  # The position and the stable id both appear, labelled: `Note #1` alone read as an id next to
+  # `links`' `note #5`, which IS one.
+  it "names the note by position and id" do
     doc = Gori::Notes::Doc.new(0, [Gori::Notes::NoteEntry.new(4_i64, "x")], 5_i64)
-    Gori::CLI::Run.note_created_output_for_spec(doc, 4_i64, :text).should eq("Note #1 created.")
-    # A peer deleted it in that instant: text falls back to the id, as it always has.
-    Gori::CLI::Run.note_created_output_for_spec(doc, 9_i64, :text).should eq("Note created (id 9).")
+    Gori::CLI::Run.note_created_output_for_spec(doc, 4_i64, :text).should eq("Note 1 (id 4) created.")
+    # A peer deleted it in that instant: text falls back to the id alone.
+    Gori::CLI::Run.note_created_output_for_spec(doc, 9_i64, :text).should eq("Note (id 9) created.")
+  end
+end
+
+describe "gori run notes update/delete --id" do
+  it "registers --id on both parsers, beside the positional <n>" do
+    src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "notes.cr"))
+    src.scan(/p\.on\("--id=ID"/).size.should eq(2)
+    notes_delete_body.should contain("resolve_note_index(store, persisted, n_arg, note_id")
   end
 end
