@@ -1358,6 +1358,17 @@ describe "MCP get_response_body_chunk find" do
     end
   end
 
+  it "flags an offset past the end as the pager does" do
+    with_store do |store|
+      id = mcp_seed_flow(store, "ex.test", "GET", "/", 200, resp_body: "needle".to_slice)
+      j = JSON.parse(chunk_call(store, %({"flow_id":#{id},"find":"needle","offset":99})).text)
+      j["matches"].as_a.should be_empty
+      j["offset_out_of_range"].as_bool.should be_true
+      j["warning"].as_s.should contain("past the 6-byte body")
+      JSON.parse(chunk_call(store, %({"flow_id":#{id},"find":"needle"})).text)["offset_out_of_range"]?.should be_nil
+    end
+  end
+
   it "refuses a pattern that does not compile, naming the field" do
     with_store do |store|
       id = mcp_seed_flow(store, "ex.test", "GET", "/", 200, resp_body: "x".to_slice)

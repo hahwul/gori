@@ -798,6 +798,11 @@ module Gori
             j.field "origin", options.request? ? "client" : "target" # as the pager labels it (#1586)
             j.field "find", pattern
             j.field "offset", options.offset
+            # Flagged as the pager flags it: an empty `matches` past the end is not "no match".
+            if options.offset > view.bytes.size
+              j.field "offset_out_of_range", true
+              j.field "warning", "requested offset #{options.offset} is past the #{view.bytes.size}-byte body; nothing was searched"
+            end
             j.field "total_bytes", view.bytes.size
             j.field "representation", view.decoded? ? "decoded" : "raw"
             j.field "decode_note", view.decode_note if view.decode_note
