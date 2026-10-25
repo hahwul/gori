@@ -114,8 +114,15 @@ describe Gori::Export::CsrfPoc do
     html = poc("POST /u HTTP/1.1\r\nHost: h.test\r\nContent-Type: multipart/form-data; boundary=#{b}\r\n\r\n#{body}", "https://h.test")
     html.should contain(%(enctype="multipart/form-data"))
     html.should contain(%(<input type="hidden" name="amount" value="100">))
-    html.should contain("file part 'a.txt' (5 bytes)")
+    html.should contain("file part 'a.txt' (5 bytes) — a PoC cannot pre-fill a file input")
     html.should contain(%(<input type="hidden" name="file" value="">))
+  end
+
+  it "escapes a file part's captured filename, not the note's own prose" do
+    body = "--X\r\nContent-Disposition: form-data; name=\"f\"; filename=\"\e[2Jé--x\"\r\n\r\nhi\r\n--X--\r\n"
+    html = poc("POST /u HTTP/1.1\r\nHost: h.test\r\nContent-Type: multipart/form-data; boundary=X\r\n\r\n#{body}", "https://h.test")
+    html.should contain(%(file part '\\x1b[2J\\xc3\\xa9- -x' (2 bytes) — a PoC))
+    html.should_not contain("\e")
   end
 
   it "reads the multipart part name at a param boundary (not the 'name=' inside 'filename=')" do

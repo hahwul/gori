@@ -102,8 +102,10 @@ module Gori
           b << " enctype=\"multipart/form-data\"" if multipart
           b << ">\n"
           fields.each do |(name, value, note)|
+            # A note is gori's prose around a captured part already passed through
+            # `html_comment_safe`, so its own em dash is not byte-escaped to `\xe2\x80\x94`.
             if note
-              b << "    <!-- " << html_comment_safe(note) << " -->\n"
+              b << "    <!-- " << note << " -->\n"
             end
             b << "    <input type=\"hidden\" name=\"" << attr(name) << "\" value=\"" << attr(value) << "\">\n"
           end
@@ -235,7 +237,7 @@ module Gori
           next unless name
           filename = disposition_field(head, "filename")
           if filename
-            pairs << {name, "", "file part '#{filename}' (#{value.bytesize} bytes) — a PoC cannot pre-fill a file input"}
+            pairs << {name, "", "file part '#{html_comment_safe(filename)}' (#{value.bytesize} bytes) — a PoC cannot pre-fill a file input"}
           else
             pairs << {name, value, nil}
           end
