@@ -26,7 +26,10 @@ module Gori
         verify = !bool_arg(h, "insecure", false) && @verify_upstream
         timeout = fuzz_timeout(h)
         filter = str(h, "filter")
-        max_bytes = (optional_int_arg(h, "max_bytes") || REPLY_ROWS_BUDGET).clamp(256_i64, REPLY_ROWS_BUDGET.to_i64).to_i
+        max_bytes = graphql_max_bytes(h)
+        if !send && (orphan = graphql_send_only_arg(h, timeout))
+          return err("'#{orphan}' applies only with send:true", "INVALID_ARGUMENT", field: orphan)
+        end
 
         sc = nil.as(ScopeCheck?)
         status = nil.as(Int32?)
@@ -60,6 +63,20 @@ module Gori
             sc.try { |v| emit_scope(j, v) }
           end
         end)
+      end
+
+      # Honoured down to 1 byte, as the CLI's --max-bytes is; a 0 (a schema-filling client's
+      # placeholder) is the default, not "nothing".
+      private def graphql_max_bytes(h) : Int32
+        n = optional_int_arg(h, "max_bytes")
+        (n && n > 0 ? n : REPLY_ROWS_BUDGET.to_i64).clamp(1_i64, REPLY_ROWS_BUDGET.to_i64).to_i
+      end
+
+      # The first send-only argument given, refused without send:true as the CLI refuses its
+      # flags: ignored, they read like they took effect.
+      private def graphql_send_only_arg(h, timeout : Time::Span?) : String?
+        return "timeout_ms" if timeout
+        {"legacy", "allow_unscoped", "insecure"}.find { |k| bool_arg(h, k, false) }
       end
 
       # The introspection result from the endpoint `detail` captured, with the scope verdict and
@@ -107,7 +124,7 @@ module Gori
         end
         parsed = Graphql::Schema.parse(result.head, result.body)
         return parsed unless parsed.is_a?(String)
-        hint = legacy ? "" : " (an older server may take legacy:true)"
+        hint = legacy || !Graphql::Schema.rejected?(parsed) ? "" : " (an older server may take legacy:true)"
         err("the endpoint did not return a schema (status #{status || "?"}): #{parsed}#{hint}",
           "INTROSPECTION_FAILED", field: "flow_id")
       end

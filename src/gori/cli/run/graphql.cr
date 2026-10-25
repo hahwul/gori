@@ -88,6 +88,7 @@ module Gori
           puts graphql_schema_json(flow_id, send, status, s)
         else
           STDERR.puts "#{s.types_shown} of #{s.types_total} type(s)#{s.truncated ? " — cut at --max-bytes #{max_bytes}" : ""}"
+          s.note.try { |n| STDERR.puts "note: #{CLI::Output.term_line(n)}" }
           puts CLI::Output.term_safe_multiline(s.sdl)
         end
       end
@@ -138,7 +139,7 @@ module Gori
         parsed = Graphql::Schema.parse(result.head, result.body)
         if parsed.is_a?(String)
           abort "#{prefix}: the endpoint did not return a schema (status #{status || "?"}): " \
-                "#{CLI::Output.term_line(parsed)}#{legacy ? "" : " — an older server may take --legacy"}"
+                "#{CLI::Output.term_line(parsed)}#{legacy || !Graphql::Schema.rejected?(parsed) ? "" : " — an older server may take --legacy"}"
         end
         {parsed, status}
       end

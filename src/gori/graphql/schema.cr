@@ -27,8 +27,10 @@ module Gori
 
       # The compact rendering, the counts that say how much of the schema it covers, and the
       # root type names. `truncated` means the budget cut it; `filter` narrows `types_shown`.
+      # `note` says why a schema reads emptier than the endpoint is (`fieldless_note`).
       record Summary, sdl : String, query_type : String?, mutation_type : String?,
-        subscription_type : String?, types_total : Int32, types_shown : Int32, truncated : Bool do
+        subscription_type : String?, types_total : Int32, types_shown : Int32, truncated : Bool,
+        note : String? = nil do
         # The fields both surfaces answer with, after their own `flow_id`/`source`/`status`.
         # Scrubbed: every name in here is the server's bytes, and `JSON::Builder` does not check.
         def emit(j : JSON::Builder) : Nil
@@ -38,6 +40,7 @@ module Gori
           j.field "types_total", types_total
           j.field "types_shown", types_shown
           j.field "truncated", truncated
+          note.try { |n| j.field "note", n.scrub }
           j.field "sdl", sdl.scrub
         end
       end
@@ -57,9 +60,18 @@ module Gori
         end
         # Introspection switched off answers `{"errors":[{"message":…}]}`: say what the server said.
         if msg = at(at(json, "errors").try(&.as_a?).try(&.first?), "message").try(&.as_s?)
-          return "the server answered with an error: #{msg}"
+          return "#{SERVER_ERROR}#{msg}"
         end
         "the response has no data.__schema"
+      end
+
+      private SERVER_ERROR = "the server answered with an error: "
+
+      # Whether `parse`'s refusal is a server that REJECTED the introspection query, the one
+      # answer the legacy query (no subscriptionType/directives) can change. A non-JSON answer
+      # (a 501 HTML page) is not, and suggesting legacy there sends the agent on an errand.
+      def rejected?(reason : String) : Bool
+        reason.starts_with?(SERVER_ERROR)
       end
 
       # The options that re-send `detail`'s request as an introspection query to the same
@@ -110,7 +122,17 @@ module Gori
         kept = fit(lines, max_bytes)
         # A type counts as shown when the cut left at least its first line.
         Summary.new(lines.first(kept).join('\n'), roots[0], roots[1], roots[2], types.size,
-          starts.count(&.< kept), kept < lines.size)
+          starts.count(&.< kept), kept < lines.size, fieldless_note(types, roots.compact))
+      end
+
+      # A root the introspection lists with no `fields` renders as `type Query {` + `}`, which
+      # reads as "this endpoint has no operations". It is usually a narrower query than the
+      # full introspection one (`types { name kind }`), so say so.
+      private def fieldless_note(types : Hash(String, JSON::Any), roots : Array(String)) : String?
+        bare = roots.select { |name| at(types[name]?, "fields").try(&.as_a?).try(&.empty?) != false }
+        return nil if bare.empty?
+        "the introspection carried no fields for root type #{bare.join(", ")}: the query that produced " \
+        "it did not select them, so this is not the endpoint's whole schema; ask again with the full introspection query"
       end
 
       private def builtin?(name : String) : Bool

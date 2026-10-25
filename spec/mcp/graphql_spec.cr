@@ -21,7 +21,7 @@ end
 
 # A one-shot origin that answers the introspection result and hands back the request it read.
 # `declared` overstates Content-Length so the origin closes before the body is whole.
-private def start_graphql_origin(sink : Channel(String), declared : Int32 = SCHEMA_RESULT.bytesize) : Int32
+private def start_graphql_origin(sink : Channel(String), declared : Int32 = SCHEMA_RESULT.bytesize, answer : String? = nil) : Int32
   origin = TCPServer.new("127.0.0.1", 0)
   port = origin.local_address.port
   spawn do
@@ -33,7 +33,7 @@ private def start_graphql_origin(sink : Channel(String), declared : Int32 = SCHE
     body = Bytes.new(len)
     conn.read_fully(body)
     sink.send(text + String.new(body))
-    conn << "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: #{declared}\r\n\r\n#{SCHEMA_RESULT}"
+    conn << (answer || "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: #{declared}\r\n\r\n#{SCHEMA_RESULT}")
     conn.flush
     conn.close
     origin.close
@@ -100,6 +100,45 @@ describe "MCP graphql_schema" do
       r.error_code.should eq("INTROSPECTION_FAILED")
       r.text.should contain("cut short")
       r.text.should_not contain("legacy")
+    end
+  end
+
+  it "suggests legacy only for an answer that rejected the introspection" do
+    with_store do |store|
+      [{"text/html", "<html>no</html>", false},
+       {"application/json", %({"errors":[{"message":"Unknown field directives"}]}), true}].each do |(type, body, hinted)|
+        sink = Channel(String).new(1)
+        answer = "HTTP/1.1 501 Not Implemented\r\nContent-Type: #{type}\r\nContent-Length: #{body.bytesize}\r\n\r\n#{body}"
+        port = start_graphql_origin(sink, answer: answer)
+        id = graphql_flow(store, port, %({"data":{"a":1}}))
+        r = call_tool(tools_for(store), %({"flow_id":#{id},"send":true,"allow_unscoped":true,"timeout_ms":3000}))
+        sink.receive
+        r.error_code.should eq("INTROSPECTION_FAILED")
+        r.text.includes?("legacy:true").should eq(hinted)
+      end
+    end
+  end
+
+  it "refuses a send-only argument without send:true, as the CLI does" do
+    with_store do |store|
+      id = graphql_flow(store, 1, SCHEMA_RESULT)
+      tools = tools_for(store)
+      {"legacy" => "true", "allow_unscoped" => "true", "insecure" => "true", "timeout_ms" => "500"}.each do |key, value|
+        r = call_tool(tools, %({"flow_id":#{id},"#{key}":#{value}}))
+        {r.error_code, r.field}.should eq({"INVALID_ARGUMENT", key})
+      end
+      # Schema-filling placeholders are not arguments.
+      call_tool(tools, %({"flow_id":#{id},"legacy":false,"timeout_ms":0,"max_bytes":0})).is_error.should be_false
+    end
+  end
+
+  it "honours a small max_bytes, as the CLI's --max-bytes does, and carries the engine's note" do
+    with_store do |store|
+      id = graphql_flow(store, 1, SCHEMA_RESULT)
+      out = JSON.parse(call_tool(tools_for(store), %({"flow_id":#{id},"max_bytes":13})).text)
+      {out["sdl"].as_s, out["truncated"].as_bool}.should eq({"type Query {", true})
+      bare = graphql_flow(store, 1, %({"data":{"__schema":{"queryType":{"name":"Query"},"types":[{"name":"Query","kind":"OBJECT"}]}}}))
+      JSON.parse(call_tool(tools_for(store), %({"flow_id":#{bare}})).text)["note"].as_s.should contain("no fields")
     end
   end
 

@@ -160,6 +160,22 @@ describe Gori::Graphql::Schema do
       schema = JSON.parse(%({"queryType":{"name":"Q"},"types":[1,{"kind":"OBJECT","name":"Q","fields":["x",{"name":"ok","type":{"kind":"LIST","ofType":"bad"}}]}]}))
       Schema.summarize(schema).sdl.should eq("type Q {\n  ok: [?]\n}")
     end
+
+    # The demo project's `types { name kind }` introspection: `type Query {` + `}` alone.
+    it "notes a root the introspection lists with no fields" do
+      schema = JSON.parse(%({"queryType":{"name":"Query"},"types":[{"name":"Query","kind":"OBJECT"}]}))
+      s = Schema.summarize(schema)
+      s.sdl.should eq("type Query {\n}")
+      s.note.not_nil!.should contain("carried no fields for root type Query")
+      Schema.summarize(demo_schema).note.should be_nil
+    end
+  end
+
+  describe ".rejected?" do
+    it "is true only for a server's error answer, the one legacy can change" do
+      Schema.rejected?(Schema.parse(nil, %({"errors":[{"message":"no"}]}).to_slice).as(String)).should be_true
+      Schema.rejected?(Schema.parse(nil, "<html>".to_slice).as(String)).should be_false
+    end
   end
 
   describe ".plan_options" do
