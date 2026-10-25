@@ -452,7 +452,10 @@ module Gori::Tui
     # verb-shaped name for the same reason.
     private def render_fuzzer_results_full(screen : Screen, rect : Rect, headline : String, running : Bool) : Nil
       inner_h = full_inner_h(:fuzzer_results, running: running)
-      msg = running ? "Probes are in flight — hits and status codes land here." : "Add payload sets (^O), then press #{key("^R", "fuzz.run")} to start a fuzz run."
+      # True whether or not the tab has sets yet: "Add payload sets, then" read as an
+      # instruction on a tab that already had them. `^O` is the controller's own CONFIG chord
+      # (`FuzzerController#chord_action`), not a verb, so it has no binding to resolve.
+      msg = running ? "Probes are in flight — hits and status codes land here." : "Press #{key("^R", "fuzz.run")} to start a fuzz run · payload sets live on CONFIG (^O)."
       inner, ix, iw = begin_card(screen, rect, :fuzzer_results, headline, "FUZZ RUN", inner_h, Screen.display_width(msg))
       y = inner.y
 
