@@ -397,7 +397,7 @@ module Gori
         # `--count` prints a number (#1648); the flags that shape ROWS contradict it. Before the
         # `--redact` refusal below, which would otherwise send `--count --redact` to `--format har`.
         if count_only
-          if err = history_count_clash(column_specs, no_columns, format, !redaction.mode.nil?)
+          if err = history_count_clash(column_specs, no_columns, format, !redaction.mode.nil?, include_sensitive)
             abort err
           end
           STDERR.puts "gori run history: --limit does not apply to --count" if limit_given
@@ -414,7 +414,7 @@ module Gori
         # value on the text row too, and the configured set is drawn by default. `--format har`
         # is untouched on purpose (an interchange document has to carry the message in full to
         # be replayable), but that is a paragraph for the docs, not a claim to make here.
-        if include_sensitive && (count_only || !format.in?(:json, :jsonl))
+        if include_sensitive && !format.in?(:json, :jsonl)
           STDERR.puts "gori run history: --include-sensitive only changes a --format json/jsonl listing"
         end
         # Refused rather than ignored. A profile redacts BODIES, and `--format har` is the only
@@ -671,7 +671,7 @@ module Gori
       # `cmd_history_list` because `abort` is not spec-able. Every flag here shapes the ROWS a
       # listing prints, which a number does not have.
       def self.history_count_clash(column_specs : Array(String), no_columns : Bool, format : Symbol,
-                                   redact : Bool) : String?
+                                   redact : Bool, include_sensitive = false) : String?
         clash = if !column_specs.empty?
                   "--column"
                 elsif no_columns
@@ -680,6 +680,8 @@ module Gori
                   "--format har"
                 elsif redact
                   "--redact/--no-redact"
+                elsif include_sensitive
+                  "--include-sensitive"
                 end
         clash && "gori run history: --count prints a number, so #{clash} does not apply — drop it"
       end

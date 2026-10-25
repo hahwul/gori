@@ -1729,6 +1729,8 @@ describe "gori run history --count — the clashes" do
       msg = Gori::CLI::Run.history_count_clash(cols, no_cols, fmt, redact).not_nil!
       msg.should contain("--count prints a number, so #{flag} does not apply")
     end
+    Gori::CLI::Run.history_count_clash([] of String, false, :json, false, true).not_nil!
+      .should contain("so --include-sensitive does not apply")
   end
 end
 
