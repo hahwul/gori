@@ -2734,19 +2734,23 @@ module Gori::Tui
       true
     end
 
+    # A pasted ↵ would run the top match, and the rest of the clipboard would then type into
+    # whatever that verb opened: held back the way a modal's is (`Overlay#takes_pasted?`).
+    private def palette_enter(ev : Termisu::Event::Key) : Nil
+      if @paste_newline.pasting?
+        refuse_modal_paste(ev)
+      elsif verb = @palette.selected_verb
+        run_palette_verb(verb)
+      end
+    end
+
     private def handle_palette_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       c = ev.char || key.to_char
-      # A pasted ↵ would run the top match, and the rest of the clipboard would then type into
-      # whatever that verb opened: held back the way a modal's is (`Overlay#takes_pasted?`).
-      if @paste_newline.pasting? && key.enter?
-        refuse_modal_paste(ev)
-      elsif key.escape?
+      if key.escape?
         close_overlay
       elsif key.enter?
-        if verb = @palette.selected_verb
-          run_palette_verb(verb)
-        end
+        palette_enter(ev)
       elsif @palette.edit(ev, self) # ↑/↓, ⌃/⌥←→, Home/End, Delete, ⌥⌫, ←/→ — before ⌫ and the printables
       elsif key.backspace?
         @palette.backspace(self)
