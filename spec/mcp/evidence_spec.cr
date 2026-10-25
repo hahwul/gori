@@ -169,7 +169,10 @@ describe "MCP frozen evidence" do
       id = mcp_ok_json(tools, "freeze_evidence",
         %({"issue_id":#{a},"ref_kind":"repeater","ref_id":#{rid}}))["evidence"]["id"].as_i64
 
-      mcp_ok_json(tools, "link_evidence", %({"id":#{id},"issue_id":#{b}}))["linked"].as_bool.should be_true
+      first = mcp_ok_json(tools, "link_evidence", %({"id":#{id},"issue_id":#{b}}))
+      first["linked"].as_bool.should be_true
+      first["already_linked"].as_bool.should be_false
+      mcp_ok_json(tools, "link_evidence", %({"id":#{id},"issue_id":#{b}}))["already_linked"].as_bool.should be_true
       store.get_evidence_meta(id).not_nil!.issue_ids.should eq([a, b])
       mcp_ok_json(tools, "unlink_evidence", %({"id":#{id},"issue_id":#{a}}))["orphaned"].as_bool.should be_false
       mcp_ok_json(tools, "unlink_evidence", %({"id":#{id},"issue_id":#{b}}))["orphaned"].as_bool.should be_true

@@ -134,10 +134,13 @@ module Gori
       private def link_evidence(h) : Result
         id = required_id(h, "id")
         issue_id = required_id(h, "issue_id")
-        return not_found("no frozen evidence with id #{id}") unless store.get_evidence_meta(id)
+        meta = store.get_evidence_meta(id)
+        return not_found("no frozen evidence with id #{id}") unless meta
         return not_found("no issue with id #{issue_id}") unless store.get_issue(issue_id)
+        # Said, as `gori run evidence link` says it, so a no-op reads apart from a new link.
+        already = meta.issue_ids.includes?(issue_id)
         return busy("evidence link NOT written (store busy or either row disappeared)") unless store.link_evidence(id, issue_id)
-        Result.new({"linked" => true, "id" => id, "issue_id" => issue_id}.to_json)
+        Result.new({"linked" => true, "id" => id, "issue_id" => issue_id, "already_linked" => already}.to_json)
       end
 
       @[Tool("unlink_evidence", gated: true, agent_action: true, permission: "write")]
