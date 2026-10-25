@@ -2016,6 +2016,7 @@ module Gori::Tui
               else
                 persist_new_repeater(view, nil)
               end
+      persist_clone_extras(db_id, view, src) if db_id
       frames_lost = false
       if (id = db_id) && view.ws_content? # the frames come along even on an HTTP-mode duplicate
         if @host.session.store.update_repeater_ws_messages(id, view.ws_out_messages_raw)
@@ -2032,6 +2033,18 @@ module Gori::Tui
       @current_repeater_idx = @repeaters.size - 1
       reveal_active_subtab
       frames_lost
+    end
+
+    # What `insert_repeater` does not take: the clone's "<name> copy" chip and the response it
+    # shows. Without them the row read `Untitled`/`unsent` to `repeater list` and MCP, and a
+    # restart showed neither. The response stays paired with the request its SOURCE sent
+    # (that row's digest), so an edited clone reports drift as its source would.
+    private def persist_clone_extras(id : Int64, view : RepeaterView, src : RepeaterView) : Nil
+      store = @host.session.store
+      view.name.try { |n| store.set_repeater_name(id, n) }
+      return unless (res = view.sent_result) && res.ok?
+      digest = @repeaters.find(&.view.same?(src)).try(&.db_id).try { |sid| store.get_repeater_full(sid).try(&.response_request_sha256) }
+      store.update_repeater_response(id, res.head, res.body, res.error, res.duration_us, request_sha256: digest)
     end
 
     # Insert a freshly-opened repeater tab into the store so it has a stable row id (the
@@ -2075,7 +2088,7 @@ module Gori::Tui
       # `@current_repeater_idx` naming a DIFFERENT tab — the batch arm resolves to views before
       # the dialog for exactly this reason, and the single arm has to as well.
       v = tab.view
-      @host.confirm("CLOSE REPEATER", "Close repeater “#{tab.view.summary}”?\nThe edited request and response are discarded.",
+      @host.confirm("CLOSE REPEATER", "Close repeater “#{tab.view.label(28)}”?\nThe edited request and response are discarded.",
         confirm_label: "close", danger: true) { close_repeater_view(v) }
     end
 

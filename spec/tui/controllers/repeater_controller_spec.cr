@@ -13,13 +13,14 @@ include Gori::Tui
 private REPEATER_CTL_CA = File.tempname("gori-repeater-ctl-ca")
 Spec.after_suite { FileUtils.rm_rf(REPEATER_CTL_CA) }
 
-private def with_repeater_controller(&)
+private def with_repeater_controller(seed : Proc(Gori::Store, Nil)? = nil, &)
   root = File.tempname("gori-repeater-ctl")
   Dir.mkdir_p(root)
   project = Gori::ProjectRegistry.new(root).temp("repeater")
   session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0),
     Gori::Proxy::Tls::CertAuthority.load_or_create(REPEATER_CTL_CA), Gori::Verbs.registry, project)
   begin
+    seed.try &.call(session.store) # rows the controller's constructor reads back, as a reopen does
     host = FakeHost.new(session)
     yield RepeaterController.new(host), host
   ensure
@@ -458,6 +459,29 @@ describe "RepeaterController on an event stream" do
       ctl.repeater_from_request("https://h.test", HTTP_REQ, false, nil)
       ctl.repeater_stop
       host.statuses.last.should contain("nothing to stop")
+    end
+  end
+end
+
+# A duplicate's "<name> copy" chip and copied response lived only on screen: `insert_repeater`
+# takes neither, so `repeater list`/MCP read `Untitled`/`unsent` and a restart lost both.
+describe "RepeaterController duplicate persistence" do
+  it "saves the clone's name and response on its own row" do
+    seed = ->(store : Gori::Store) do
+      id = store.insert_repeater("http://h.test/", HTTP_REQ.to_slice, false, true, nil, 0)
+      store.set_repeater_name(id, "orders")
+      store.update_repeater_response(id, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n".to_slice, "ok".to_slice, nil, 1500_i64,
+        request_sha256: "abc")
+      nil
+    end
+    with_repeater_controller(seed) do |ctl, host|
+      ctl.repeater_duplicate
+      store = host.session.store
+      clone = store.repeaters.max_by(&.id)
+      clone.name.should eq("orders copy")
+      full = store.get_repeater_full(clone.id).not_nil!
+      String.new(full.response_head.not_nil!).should start_with("HTTP/1.1 200 OK")
+      full.response_request_sha256.should eq("abc") # still paired with what the source sent
     end
   end
 end

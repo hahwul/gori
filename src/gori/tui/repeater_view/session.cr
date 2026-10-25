@@ -130,6 +130,11 @@ class Gori::Tui::RepeaterView
     Repeater::SubtabFilter::Subject.status_token(res.error, res.head)
   end
 
+  # The last send's response (nil = unsent), for a duplicate's row to carry — not `shown_result`, which is the live stream's.
+  def sent_result : Repeater::Result?
+    @result
+  end
+
   # Replace the request body (e.g. from the external editor); marks dirty so the
   # tab persists + the cross-session reconcile won't clobber it.
   def replace_request(text : String) : Nil
