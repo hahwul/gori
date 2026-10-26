@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Docs: the landing hero redrawn around the ring knot as a living field of monospace glyphs, with the copy beside it instead of over the wallpaper
+
 ## v0.9.0
 
 ### New features

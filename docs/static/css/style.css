@@ -234,8 +234,8 @@ body.is-doc::before {
   opacity: 0.09;
 }
 
-/* The landing's hero is the wallpaper painting, which carries its own cloud
-   line-work; the contour overlay on top of it only doubled the strokes. */
+/* The landing draws its own atmosphere (the glyph field in the hero); the
+   contour overlay on top of it would only compete with the characters. */
 body:has(.home-main)::before {
   display: none;
 }
@@ -663,36 +663,18 @@ kbd {
   padding: var(--header-h) 1.25rem 0;
 }
 
-/* The hero art: the brand wallpaper (ink, gold leaf, brushed cloud; the plain
-   cut, since the marked one centres the logo right behind the headline),
-   full-bleed across the top of the page. The copy sits centered on top of it,
-   so the seating scrim is a vertical veil, heaviest where the headline is and
-   dissolving before the showcase frame arrives. */
+/* The hero art is the ring knot drawn in glyphs (home-ascii.js); the page
+   behind it stays the plain night so the characters carry the light. One
+   soft gold glow sits under the art column, nothing under the copy. */
 .home-main::before {
   content: "";
   position: absolute;
   top: 0;
   right: 0;
   left: 0;
-  height: min(115vh, 68rem);
-  /* The painting is busier than a photograph, so a third, oval veil sits
-     right under the copy column: the gold leaf keeps the edges and never
-     runs behind the lede or the buttons. */
-  background:
-    radial-gradient(42rem 26rem at 50% 44%, rgb(8 10 17 / 0.72), rgb(8 10 17 / 0) 72%),
-    radial-gradient(64rem 30rem at 50% 78%, rgb(8 10 17 / 0.88), rgb(8 10 17 / 0) 70%),
-    linear-gradient(180deg, rgb(6 8 14 / 0.62) 0%, rgb(6 8 14 / 0.44) 38%, rgb(6 8 14 / 0.3) 62%, rgb(8 10 17 / 0) 80%),
-    url("../images/wallpaper.webp") 50% 40% / cover no-repeat;
-  -webkit-mask: linear-gradient(180deg, #000 48%, transparent 84%);
-  mask: linear-gradient(180deg, #000 48%, transparent 84%);
-}
-
-/* On paper the photograph flips to ink: invert turns the night to cream and
-   the scrims to paper wash, and the half-turn hue rotation brings the rings
-   back from the blue that inversion leaves to their own dark bronze. */
-:root[data-theme="light"] .home-main::before {
-  filter: invert(1) hue-rotate(180deg) saturate(0.82);
-  opacity: 0.9;
+  height: min(100vh, 60rem);
+  pointer-events: none;
+  background: radial-gradient(34rem 30rem at 74% 42%, rgb(var(--accent-rgb) / 0.1), rgb(var(--accent-rgb) / 0) 70%);
 }
 
 .home-hero,
@@ -708,26 +690,63 @@ kbd {
   margin: 0 auto;
 }
 
-/* Centered over the artwork: the headline is the composition now, the ring
-   knot its halo. Height leaves the showcase frame peeking above the fold so
+/* Two columns on one axis: the copy left, the knot right, each taking half
+   the home width. Height leaves the showcase frame peeking above the fold so
    the page says "scroll" without an arrow. */
 .home-hero {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+  gap: 2rem 3rem;
   align-items: center;
-  justify-content: center;
   min-height: calc(88dvh - var(--header-h));
-  padding: var(--space-7) 0 2.6rem;
-  text-align: center;
+  padding: var(--space-6) 0 2.6rem;
 }
 
 .hero-copy {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  /* Explicit width: as a centered column flex item, fit-content sizing would
-     let the nowrap install one-liner push this past narrow viewports. */
-  width: min(100%, 880px);
+  align-items: flex-start;
+  /* Explicit width: as a flex column, fit-content sizing would let the
+     nowrap install one-liner push this past narrow viewports. */
+  width: min(100%, 40rem);
+  text-align: left;
+}
+
+/* The art box is square and owns its pixels: the canvas fills it, the plain
+   mark underneath is what a no-script visit sees. */
+.hero-art {
+  position: relative;
+  width: min(100%, 34rem);
+  aspect-ratio: 1;
+  justify-self: end;
+  order: 1;
+}
+
+.hero-art .hero-mark {
+  position: absolute;
+  inset: 12%;
+  width: 76%;
+  height: 76%;
+  object-fit: contain;
+  opacity: 0.9;
+}
+
+html.js .hero-art .hero-mark {
+  display: none;
+}
+
+.hero-ascii {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  touch-action: pan-y;
+}
+
+html:not(.js) .hero-ascii {
+  display: none;
 }
 
 .home-kicker {
@@ -791,7 +810,7 @@ kbd {
 .home-actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 0.75rem;
   margin-top: 1.8rem;
 }
@@ -864,7 +883,7 @@ kbd {
 .install-tabs {
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 0.3rem;
   padding: 0.5rem 0.6rem;
   border-bottom: 1px solid var(--line-soft);
@@ -3604,16 +3623,22 @@ html.search-lock body {
     padding: 2.2rem 0 2.5rem;
   }
 
-  /* Stacked, the centered copy sits over the photograph's full width: the
-     veil deepens and the frame slides toward the marble left of the ring
-     knot so the bright crossing stays out from under the lede. */
+  /* Stacked: the knot sits above the copy at a hand's width, the glow
+     follows it to the middle. */
+  .home-hero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.2rem;
+  }
+
+  .hero-art {
+    width: min(100%, 17rem);
+    justify-self: start;
+    order: -1;
+  }
+
   .home-main::before {
-    height: min(90vh, 46rem);
-    background:
-      radial-gradient(30rem 24rem at 50% 42%, rgb(8 10 17 / 0.7), rgb(8 10 17 / 0) 72%),
-      radial-gradient(40rem 22rem at 50% 72%, rgb(8 10 17 / 0.9), rgb(8 10 17 / 0) 72%),
-      linear-gradient(180deg, rgb(6 8 14 / 0.72) 0%, rgb(6 8 14 / 0.5) 42%, rgb(6 8 14 / 0) 78%),
-      url("../images/wallpaper.webp") 30% 40% / cover no-repeat;
+    height: min(70vh, 34rem);
+    background: radial-gradient(22rem 20rem at 30% 24%, rgb(var(--accent-rgb) / 0.1), rgb(var(--accent-rgb) / 0) 70%);
   }
 
   .home-hero h1 {

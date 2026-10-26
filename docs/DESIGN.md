@@ -43,6 +43,8 @@ Body copy and code remain the visual priority. Experimental treatments belong in
 
 Motion should be short, low-amplitude, and informative: revealing a section, acknowledging a state change, or orienting the reader. The site must honor `prefers-reduced-motion`, must not hide content without JavaScript, and must not require animation to understand state.
 
+The landing hero is the one ambient exception: the ring knot is drawn as a field of monospace glyphs on a canvas (`static/js/home-ascii.js`), breathing slowly and lighting up under the pointer. It is decoration over a plain `<img>` of the mark, so a no-script visit sees the logo, and under `prefers-reduced-motion` it draws a single still frame and attaches no pointer listeners.
+
 Keyboard and screen-reader behavior is part of the design. Native links, buttons, `details`/`summary`, visible focus, `aria-current`, a skip link, and a logical heading order take precedence over custom interaction.
 
 ## Validation

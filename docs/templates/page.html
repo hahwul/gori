@@ -7,9 +7,17 @@
      only under html.js, so a no-script visit renders everything visible. */
   document.documentElement.classList.add("js");
 </script>
-<link rel="preload" as="image" type="image/webp" href="{{ base_url }}/images/wallpaper.webp" fetchpriority="high">
 <main id="main" class="home-main">
+  {# Two columns: the copy on the left, the ring knot on the right drawn as a
+     field of monospace glyphs (home-ascii.js samples images/gori.svg into a
+     cell grid, breathes it, and lets the pointer leave a wake). The canvas is
+     decoration over a plain <img> of the mark: no script, or reduced motion,
+     and the reader still gets the logo. #}
   <section class="home-hero" aria-labelledby="home-title">
+    <div class="hero-art" id="heroArt" aria-hidden="true">
+      <img class="hero-mark" src="{{ base_url }}/images/gori.svg" alt="" width="512" height="512" decoding="async">
+      <canvas class="hero-ascii" id="heroAscii" data-src="{{ base_url }}/images/gori.svg"></canvas>
+    </div>
     <div class="hero-copy">
       <p class="home-kicker">{{ "home.kicker" | t }}</p>
       {# Three spans so the emphasized word carries the serif-italic gilding;
@@ -220,6 +228,7 @@
   </section>
 </main>
 <script src="{{ base_url }}/js/home.js" defer></script>
+<script src="{{ base_url }}/js/home-ascii.js" defer></script>
 {% else %}
 {% include "partials/document.html" %}
 {% endif %}
