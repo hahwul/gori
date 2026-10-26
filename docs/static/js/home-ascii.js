@@ -27,6 +27,9 @@
 
   var RAMP = " .:-=+*#%@";
   var LAST = RAMP.length - 1;
+  /* Glyphs the light itself is drawn with: a lit cell climbs the ramp, and
+     at the heart of the glint the character turns into a spark. */
+  var SPARK = "*+x";
   var FONT = "ui-monospace, \"SF Mono\", \"Cascadia Code\", Menlo, Consolas, monospace";
   var STEPS = 12;                   /* gold → glint colour ramp resolution */
   var SWEEP_EVERY = 4800;           /* ms between idle glints */
@@ -51,6 +54,7 @@
   var palette = [];                  /* STEPS+1 colours, gold → glint */
   var dust = "#8d90a2";
   var raf = 0, last = 0, visible = true, ready = false, sweepTimer = 0;
+  var time = 0;                      /* seconds the loop has run, for the sparks */
 
   /* The light: where the band is (px, box space), how strong, and where it
      is heading. `want` is the pointer; `lx/ly` ease toward it. */
@@ -231,6 +235,7 @@
            dissolves to its outline before it goes. */
         var lvl = Math.floor(k * (1 - q * 0.7) * LAST + 0.5);
         if (lvl < 1) continue;
+        var lvl0 = lvl;
         var g = 0;
         if (lapOn) {
           /* Ahead of the spot the light cuts off quickly; behind it a tail
@@ -253,12 +258,23 @@
           gx += drift[2 * i] * reach;
           gy += drift[2 * i + 1] * reach;
         }
+        /* The light rewrites the character too: a lit cell climbs the ramp
+           by up to two steps, and the brightest cells turn into sparks, so
+           the glint is visible in the text and not only in the colour. */
+        var glyph;
+        if (g > 0.72) {
+          glyph = SPARK.charAt((c + r + Math.floor(time * 6)) % SPARK.length);
+        } else {
+          lvl = lvl0 + Math.round(g * 2.4);
+          if (lvl > LAST) lvl = LAST;
+          glyph = RAMP.charAt(lvl);
+        }
         ctx.globalAlpha = Math.min(1, 0.42 + 0.58 * k + 0.5 * g) * fade;
         ctx.fillStyle = palette[Math.round(Math.min(1, g) * STEPS)];
-        ctx.fillText(RAMP.charAt(lvl), gx, gy);
+        ctx.fillText(glyph, gx, gy);
         /* A lit cell is struck twice, a hair apart: the glyph reads bolder
            as well as whiter, which is what makes the light carry. */
-        if (g > 0.3) ctx.fillText(RAMP.charAt(lvl), gx + 0.7, gy);
+        if (g > 0.3) ctx.fillText(glyph, gx + 0.7, gy);
       }
     }
     ctx.globalAlpha = 1;
@@ -268,6 +284,7 @@
   function step(dt) {
     /* The lap runs on its own clock; draw() reads it directly. */
     if (sweep && performance.now() - sweep.t0 >= SWEEP_TAKES) sweep = null;
+    time += dt;
     var ease = 1 - Math.exp(-dt * 7);
     lx += (wantX - lx) * ease;
     ly += (wantY - ly) * ease;
