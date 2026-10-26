@@ -3506,6 +3506,9 @@ html.search-lock body {
   html.js .home-stage .showcase-frame {
     transform: rotateX(calc((1 - var(--p2)) * 9deg)) scale(calc(0.94 + 0.06 * var(--p2)));
     transform-origin: 50% 100%;
+    /* Its own layer, so the scale is composited instead of re-rastering
+       the frame, its capture and its wide shadows every frame. */
+    will-change: transform;
   }
 
   html.js .home-opening.is-pre > .home-stage > .home-showcase {
@@ -3719,6 +3722,7 @@ html.search-lock body {
   }
 
   .home-structure .structure-art img {
+    will-change: transform;
     opacity: var(--s2);
     transform: translate(calc((1 - var(--s2)) * 40px), calc((1 - var(--sp, 1)) * 72px)) rotate(calc((1 - var(--s2)) * -1.5deg));
   }
@@ -3756,14 +3760,21 @@ html.search-lock body {
     transform: translateY(calc((1 - var(--s2)) * 24px));
   }
 
-  .flow-shots {
+  /* The figure is the scene and is measured for its own trigger, so it
+     must not move: the rise and tilt go on the frame inside it, through the
+     individual transform properties, which compose with the focus dim's
+     own `transform` there. */
+  .flow-shot {
+    opacity: calc(0.15 + 0.85 * var(--s1));
     perspective: 1400px;
   }
 
-  .flow-shot {
-    opacity: calc(0.15 + 0.85 * var(--s1));
-    transform: translateY(calc((1 - var(--s1)) * 90px)) rotateX(calc((1 - var(--s1)) * 14deg)) scale(calc(0.94 + 0.06 * var(--s1)));
+  .flow-shot .flow-shot-frame {
+    translate: 0 calc((1 - var(--s1)) * 90px);
+    rotate: x calc((1 - var(--s1)) * 14deg);
+    scale: calc(0.94 + 0.06 * var(--s1));
     transform-origin: 50% 100%;
+    will-change: transform;
   }
 
   /* Agent: the title settles, the nodes arrive from both ends, the wire

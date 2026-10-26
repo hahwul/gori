@@ -90,6 +90,7 @@
     var a = hex(cs.getPropertyValue("--hero-knot")) || hex(cs.getPropertyValue("--accent")) || [200, 168, 96];
     var g = hex(cs.getPropertyValue("--hero-glint")) || [255, 243, 207];
     dust = cs.getPropertyValue("--muted").trim() || dust;
+    baseOk = false;
     palette = [];
     for (var i = 0; i <= STEPS; i++) {
       var t = i / STEPS;
@@ -181,11 +182,16 @@
     canvas.height = Math.round(H * dpr);
     canvas.style.width = W + "px";
     canvas.style.height = H + "px";
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    /* Sizing the canvas reset the context state; set the font again. */
-    ctx.font = px + "px " + FONT;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
+    base.width = canvas.width;
+    base.height = canvas.height;
+    baseOk = false;
+    /* Sizing a canvas resets its context state; set it again on both. */
+    [ctx, bctx].forEach(function (c) {
+      c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      c.font = px + "px " + FONT;
+      c.textAlign = "center";
+      c.textBaseline = "middle";
+    });
     if (img.complete && img.naturalWidth) {
       sample();
       ready = true;
@@ -198,68 +204,70 @@
      fixed diagonal: a cell's highlight falls off with its distance across
      the band and, more slowly, along it, so it reads as a spot of glint
      rather than a stripe across the whole box. */
-  function draw() {
-    if (!ready) return;
-    ctx.clearRect(0, 0, W, H);
-    var dx = 0.82, dy = -0.57;             /* band direction, ~35° up-right */
-    var across = Math.max(22, W * 0.045);  /* band half-width in px */
-    var along = Math.max(100, W * 0.26);   /* reach along the band */
-    var s = strength, bx = lx, by = ly;
-    if (scrollLight && scrollLight.s > s) { s = scrollLight.s; bx = scrollLight.x; by = scrollLight.y; }
-    /* The idle lap: a spot at angle theta on the outer ring's track. It
-       runs a little more than a full turn and fades in and out only over
-       the overlap, which is placed where the ring passes under the other,
-       so the whole visible rim is lit at full strength on the way round. */
-    var lapOn = !!sweep, theta = 0, lapS = 0;
-    if (lapOn) {
-      var lt = (performance.now() - sweep.t0) / SWEEP_TAKES;
-      if (lt < 0) lt = 0;
-      if (lt > 1) lt = 1;
-      theta = LAP_START + lt * Math.PI * 2 * LAP_TURNS;
-      lapS = Math.min(1, lt / 0.12, (1 - lt) / 0.12);
-      lapS = lapS * lapS * (3 - 2 * lapS);
-    }
+  /* The unlit knot is the same picture every frame until the size, the
+     theme or the scatter changes, so it is painted once into `base` and
+     each frame of the light copies it and repaints only the cells the light
+     touches. A lap lights a few percent of the cells, so this turns ~1.3k
+     glyph draws a frame into a few dozen. While the knot scatters every
+     cell moves, and the frame is painted in full. */
+  var base = document.createElement("canvas");
+  var bctx = base.getContext("2d");
+  var baseOk = false;
+
+  /* Paint the field into `c`. mode 0: unlit, every cell (the cached base);
+     1: lit cells only, each cleared first, over a copy of the base;
+     2: everything, lit and moving (while scattering). `L` is the light. */
+  function paint(c, mode, L) {
     var q = scatter;
     var fade = Math.pow(1 - q, 1.6);
     var reach = Math.max(W, H) * 0.9 * q * q;
     var ox = padX + cw / 2;
     var oy = padY + ch / 2;
-    for (var r = 0; r < rows; r++) {
-      var y = oy + r * ch;
-      for (var c = 0; c < cols; c++) {
-        var i = r * cols + c;
-        var x = ox + c * cw;
+    var r, cc, i, x, y;
+    /* Off-knot cells: a sparse, still dust, so the dark half of the box
+       reads as the same field the knot sits in. Its own pass, so the fill
+       colour is set once. */
+    if (mode !== 1) {
+      c.fillStyle = dust;
+      for (i = 0; i < cover.length; i++) {
+        if (cover[i] >= 0.03 || seed[i] <= 0.965) continue;
+        c.globalAlpha = (0.07 + 0.07 * seed[i]) * fade;
+        c.fillText(".", ox + (i % cols) * cw, oy + ((i / cols) | 0) * ch);
+      }
+    }
+    var lastStyle = -1, lastAlpha = -1;
+    for (r = 0; r < rows; r++) {
+      y = oy + r * ch;
+      for (cc = 0; cc < cols; cc++) {
+        i = r * cols + cc;
         var k = cover[i];
-        if (k < 0.03) {
-          /* Off-knot cells: a sparse, still dust, so the dark half of the
-             box reads as the same field the knot sits in. */
-          if (seed[i] > 0.965) {
-            ctx.globalAlpha = 0.07 + 0.07 * seed[i];
-            ctx.fillStyle = dust;
-            ctx.fillText(".", x, y);
-          }
-          continue;
-        }
+        if (k < 0.03) continue;
+        x = ox + cc * cw;
         /* Scattering thins the ramp as well as the alpha, so the knot
            dissolves to its outline before it goes. */
         var lvl = Math.floor(k * (1 - q * 0.7) * LAST + 0.5);
         if (lvl < 1) continue;
-        var lvl0 = lvl;
         var g = 0;
-        if (lapOn) {
-          /* Ahead of the spot the light cuts off quickly; behind it a tail
-             trails. Only cells on the outer ring's track take it. */
-          var d = angA[i] - theta;
-          d -= Math.round(d / (Math.PI * 2)) * Math.PI * 2;   /* shortest way round */
-          d /= d > 0 ? LAP_HEAD : LAP_TAIL;
-          g = lapS * ringW[i] * Math.exp(-d * d) * LAP_GLOW;
-        }
-        if (s > 0.004) {
-          var vx = x - bx, vy = y - by;
-          var a = Math.abs(vx * dy - vy * dx) / across;   /* across the band */
-          var b = (vx * dx + vy * dy) / along;            /* along the band */
-          var lit = s * Math.exp(-(a * a) - b * b) * HOVER_GLOW;
-          if (lit > g) g = lit;
+        if (mode !== 0) {
+          if (L.lapOn) {
+            /* Ahead of the spot the light cuts off quickly; behind it a
+               tail trails. Only cells on the outer ring's track take it. */
+            var d = angA[i] - L.theta;
+            d -= Math.round(d / (Math.PI * 2)) * Math.PI * 2;   /* shortest way round */
+            d /= d > 0 ? LAP_HEAD : LAP_TAIL;
+            g = L.lapS * ringW[i] * Math.exp(-d * d) * LAP_GLOW;
+          }
+          if (L.s > 0.004) {
+            var vx = x - L.bx, vy = y - L.by;
+            var a = Math.abs(vx * L.dy - vy * L.dx) / L.across;   /* across the band */
+            var b = (vx * L.dx + vy * L.dy) / L.along;            /* along the band */
+            var lit = L.s * Math.exp(-(a * a) - b * b) * HOVER_GLOW;
+            if (lit > g) g = lit;
+          }
+          if (mode === 1) {
+            if (g < 0.01) continue;
+            c.clearRect(x - cw / 2, y - ch / 2, cw, ch);
+          }
         }
         var gx = x, gy = y;
         if (q > 0) {
@@ -271,21 +279,61 @@
            the glint is visible in the text and not only in the colour. */
         var glyph;
         if (g > 0.55) {
-          glyph = SPARK.charAt((c + r + Math.floor(time * 6)) % SPARK.length);
+          glyph = SPARK.charAt((cc + r + Math.floor(time * 6)) % SPARK.length);
         } else {
-          lvl = lvl0 + Math.round(g * 2.4);
-          if (lvl > LAST) lvl = LAST;
-          glyph = RAMP.charAt(lvl);
+          var up = lvl + Math.round(g * 2.4);
+          glyph = RAMP.charAt(up > LAST ? LAST : up);
         }
-        ctx.globalAlpha = Math.min(1, 0.42 + 0.58 * k + 0.3 * g) * fade;
-        ctx.fillStyle = palette[Math.round(Math.min(1, g) * STEPS)];
-        ctx.fillText(glyph, gx, gy);
+        var alpha = Math.min(1, 0.42 + 0.58 * k + 0.3 * g) * fade;
+        var style = Math.round(Math.min(1, g) * STEPS);
+        if (alpha !== lastAlpha) { c.globalAlpha = alpha; lastAlpha = alpha; }
+        if (style !== lastStyle) { c.fillStyle = palette[style]; lastStyle = style; }
+        c.fillText(glyph, gx, gy);
         /* A lit cell is struck twice, a hair apart: the glyph reads bolder
            as well as whiter, which is what makes the light carry. */
-        if (g > 0.45) ctx.fillText(glyph, gx + 0.5, gy);
+        if (g > 0.45) c.fillText(glyph, gx + 0.5, gy);
       }
     }
-    ctx.globalAlpha = 1;
+    c.globalAlpha = 1;
+  }
+
+  function draw() {
+    if (!ready) return;
+    ctx.clearRect(0, 0, W, H);
+    /* Fully scattered (the end of the opening scene) the knot is invisible
+       under the terminal: nothing to draw. */
+    if (scatter > 0.99) return;
+    var L = {
+      dx: 0.82, dy: -0.57,                  /* band direction, ~35° up-right */
+      across: Math.max(22, W * 0.045),      /* band half-width in px */
+      along: Math.max(100, W * 0.26),       /* reach along the band */
+      s: strength, bx: lx, by: ly,
+      lapOn: !!sweep, theta: 0, lapS: 0
+    };
+    if (scrollLight && scrollLight.s > L.s) { L.s = scrollLight.s; L.bx = scrollLight.x; L.by = scrollLight.y; }
+    /* The idle lap: a spot at angle theta on the outer ring's track. It
+       runs a little more than a full turn and fades in and out only over
+       the overlap, which is placed where the ring passes under the other,
+       so the whole visible rim is lit at full strength on the way round. */
+    if (L.lapOn) {
+      var lt = (performance.now() - sweep.t0) / SWEEP_TAKES;
+      if (lt < 0) lt = 0;
+      if (lt > 1) lt = 1;
+      L.theta = LAP_START + lt * Math.PI * 2 * LAP_TURNS;
+      var e = Math.min(1, lt / 0.12, (1 - lt) / 0.12);
+      L.lapS = e * e * (3 - 2 * e);
+    }
+    if (scatter > 0) {
+      paint(ctx, 2, L);
+      return;
+    }
+    if (!baseOk) {
+      bctx.clearRect(0, 0, W, H);
+      paint(bctx, 0, L);
+      baseOk = true;
+    }
+    ctx.drawImage(base, 0, 0, W, H);
+    if (L.lapOn || L.s > 0.004) paint(ctx, 1, L);
   }
 
   /* Advance the light, then decide whether anything is still moving. */
@@ -325,7 +373,7 @@
     clearTimeout(sweepTimer);
     if (reduced.matches) return;
     sweepTimer = setTimeout(function () {
-      if (visible && !hovering && ready && !document.hidden) {
+      if (visible && !hovering && ready && !document.hidden && scatter < 0.99) {
         sweep = { t0: performance.now() };
         wake();
       }
@@ -380,33 +428,36 @@
     },
     scatter: function (q) {
       q = q < 0 ? 0 : q > 1 ? 1 : q;
-      if (Math.abs(q - scatter) < 0.002) return;
+      /* Land exactly on 0 and 1, so the cached unlit frame comes back. */
+      if (q !== 0 && q !== 1 && Math.abs(q - scatter) < 0.002) return;
       scatter = q;
       if (!raf) draw();
     }
   };
 
-  if (!reduced.matches) {
-    canvas.addEventListener("pointermove", function (ev) {
-      /* The stage scales the box with a transform; map back to canvas px. */
-      var rect = canvas.getBoundingClientRect();
-      var k = rect.width ? W / rect.width : 1;
-      wantX = (ev.clientX - rect.left) * k;
-      wantY = (ev.clientY - rect.top) * k;
-      if (!hovering) {
-        hovering = true;
-        sweep = null;
-        /* Start the band where the pointer is, not where the last sweep
-           left it, so the glint appears under the cursor. */
-        if (strength < 0.01) { lx = wantX; ly = wantY; }
-      }
-      wantStrength = 1;
-      wake();
-    });
-    canvas.addEventListener("pointerleave", function () {
-      hovering = false;
-      wantStrength = 0;
-      wake();
-    });
-  }
+  /* Attached whatever the motion setting is now, and checked when they
+     fire, so turning reduced motion off mid-visit brings the glint back. */
+  canvas.addEventListener("pointermove", function (ev) {
+    if (reduced.matches) return;
+    /* The stage scales the box with a transform; map back to canvas px. */
+    var rect = canvas.getBoundingClientRect();
+    var k = rect.width ? W / rect.width : 1;
+    wantX = (ev.clientX - rect.left) * k;
+    wantY = (ev.clientY - rect.top) * k;
+    if (!hovering) {
+      hovering = true;
+      sweep = null;
+      /* Start the band where the pointer is, not where the last sweep
+         left it, so the glint appears under the cursor. */
+      if (strength < 0.01) { lx = wantX; ly = wantY; }
+    }
+    wantStrength = 1;
+    wake();
+  });
+  canvas.addEventListener("pointerleave", function () {
+    if (!hovering) return;
+    hovering = false;
+    wantStrength = 0;
+    wake();
+  });
 })();
