@@ -45,6 +45,12 @@
   var lx = 0, ly = 0, wantX = 0, wantY = 0, strength = 0, wantStrength = 0;
   var hovering = false;
   var sweep = null;                  /* {t0} while an idle glint crosses */
+  /* Scroll-driven state (home.js, through canvas.goriKnot): the light's
+     place while the opening scene scrubs, and how far the knot has
+     scattered into the terminal's arrival. */
+  var scrollLight = null;            /* {x, y, s} in box px, or null */
+  var scatter = 0;                   /* 0 whole .. 1 gone */
+  var drift = new Float32Array(0);   /* per-cell scatter vector, x then y */
 
   var img = new Image();
   img.decoding = "async";
@@ -99,6 +105,7 @@
     var n = cols * rows;
     cover = new Float32Array(n);
     seed = new Float32Array(n);
+    drift = new Float32Array(2 * n);
     for (var r = 0; r < rows; r++) {
       for (var c = 0; c < cols; c++) {
         var sum = 0;
@@ -111,6 +118,11 @@
         /* Deterministic hash, so a resize does not reshuffle the dust. */
         var h = Math.sin(c * 12.9898 + r * 78.233) * 43758.5453;
         seed[i] = h - Math.floor(h);
+        /* Scatter: away from the centre, each cell at its own pace. */
+        var ang = Math.atan2(r - rows / 2, (c - cols / 2) * cw / ch) + (seed[i] - 0.5) * 1.2;
+        var mag = 0.35 + seed[i] * 0.9;
+        drift[2 * i] = Math.cos(ang) * mag;
+        drift[2 * i + 1] = Math.sin(ang) * mag;
       }
     }
   }
@@ -159,7 +171,11 @@
     var dx = 0.82, dy = -0.57;             /* band direction, ~35° up-right */
     var across = Math.max(34, W * 0.075);  /* band half-width in px */
     var along = Math.max(150, W * 0.42);   /* reach along the band */
-    var s = strength;
+    var s = strength, bx = lx, by = ly;
+    if (scrollLight && scrollLight.s > s) { s = scrollLight.s; bx = scrollLight.x; by = scrollLight.y; }
+    var q = scatter;
+    var fade = Math.pow(1 - q, 1.6);
+    var reach = Math.max(W, H) * 0.9 * q * q;
     var ox = padX + cw / 2;
     var oy = padY + ch / 2;
     for (var r = 0; r < rows; r++) {
@@ -178,18 +194,25 @@
           }
           continue;
         }
-        var lvl = Math.floor(k * LAST + 0.5);
+        /* Scattering thins the ramp as well as the alpha, so the knot
+           dissolves to its outline before it goes. */
+        var lvl = Math.floor(k * (1 - q * 0.7) * LAST + 0.5);
         if (lvl < 1) continue;
         var g = 0;
         if (s > 0.004) {
-          var vx = x - lx, vy = y - ly;
+          var vx = x - bx, vy = y - by;
           var a = Math.abs(vx * dy - vy * dx) / across;   /* across the band */
           var b = (vx * dx + vy * dy) / along;            /* along the band */
           g = s * Math.exp(-(a * a) - b * b);
         }
-        ctx.globalAlpha = Math.min(1, 0.42 + 0.58 * k + 0.5 * g);
+        var gx = x, gy = y;
+        if (q > 0) {
+          gx += drift[2 * i] * reach;
+          gy += drift[2 * i + 1] * reach;
+        }
+        ctx.globalAlpha = Math.min(1, 0.42 + 0.58 * k + 0.5 * g) * fade;
         ctx.fillStyle = palette[Math.round(Math.min(1, g) * STEPS)];
-        ctx.fillText(RAMP.charAt(lvl), x, y);
+        ctx.fillText(RAMP.charAt(lvl), gx, gy);
       }
     }
     ctx.globalAlpha = 1;
@@ -284,11 +307,32 @@
     });
   }
 
+  /* The opening scene's hook (home.js). `light` places the band by box
+     fractions while the copy dismisses (p in (0,1); outside that the pointer
+     and the idle sweep own it again); `scatter` is 0..1. Both redraw at once
+     when the frame loop is idle, since they move with the scroll, not time. */
+  canvas.goriKnot = {
+    light: function (p) {
+      var was = !!scrollLight;
+      if (p <= 0 || p >= 1 || reduced.matches) scrollLight = null;
+      else scrollLight = { x: W * (-0.25 + 1.5 * p), y: H * (-0.05 + 1.1 * p), s: Math.pow(Math.sin(Math.PI * p), 0.6) };
+      if ((was || scrollLight) && !raf) draw();
+    },
+    scatter: function (q) {
+      q = q < 0 ? 0 : q > 1 ? 1 : q;
+      if (Math.abs(q - scatter) < 0.002) return;
+      scatter = q;
+      if (!raf) draw();
+    }
+  };
+
   if (!reduced.matches) {
     canvas.addEventListener("pointermove", function (ev) {
+      /* The stage scales the box with a transform; map back to canvas px. */
       var rect = canvas.getBoundingClientRect();
-      wantX = ev.clientX - rect.left;
-      wantY = ev.clientY - rect.top;
+      var k = rect.width ? W / rect.width : 1;
+      wantX = (ev.clientX - rect.left) * k;
+      wantY = (ev.clientY - rect.top) * k;
       if (!hovering) {
         hovering = true;
         sweep = null;

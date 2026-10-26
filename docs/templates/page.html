@@ -8,11 +8,17 @@
   document.documentElement.classList.add("js");
 </script>
 <main id="main" class="home-main">
-  {# Two columns: the copy on the left, the ring knot on the right drawn as a
-     field of monospace glyphs (home-ascii.js samples images/gori.svg into a
-     cell grid, breathes it, and lets the pointer leave a wake). The canvas is
-     decoration over a plain <img> of the mark: no script, or reduced motion,
-     and the reader still gets the logo. #}
+  {# The opening is one pinned scene on wide screens (home.js drives --p1/--p2
+     from scroll; the stage CSS in style.css reads them): the hero copy and
+     the glyph knot, then the showcase terminal rising into the knot's place.
+     Narrow screens, short viewports and reduced motion get the same two
+     sections in plain flow. Two columns in the hero: the copy on the left,
+     the ring knot on the right drawn as a field of monospace glyphs
+     (home-ascii.js samples images/gori.svg into a cell grid and lights it).
+     The canvas is decoration over a plain <img> of the mark: no script, or
+     reduced motion, and the reader still gets the logo. #}
+  <div class="home-opening" id="opening">
+  <div class="home-stage">
   <section class="home-hero" aria-labelledby="home-title">
     <div class="hero-art" id="heroArt" aria-hidden="true">
       <img class="hero-mark" src="{{ base_url }}/images/gori.svg" alt="" width="512" height="512" decoding="async">
@@ -54,7 +60,7 @@
      with the theme and preloads the neighbours. The rail above names the
      interaction. Tab order follows the TUI's own strip, so the row reads as
      the real thing rather than a curated highlight reel. #}
-  <section class="home-showcase rv" aria-label="{{ "home.showcase_aria" | t }}">
+  <section class="home-showcase" id="workbench" aria-label="{{ "home.showcase_aria" | t }}">
     <div class="showcase-rail home-rail" aria-hidden="true">
       <span><b>01</b>{{ "home.showcase_k_l" | t }}</span>
       <span class="showcase-rail-hint">{{ "home.showcase_k_r" | t }} ↓</span>
@@ -115,6 +121,8 @@
     </figure>
     <p class="showcase-note">{{ "home.showcase_note" | t }}</p>
   </section>
+  </div>
+  </div>
 
   <section class="home-paths rv" aria-label="Documentation paths">
     <div class="path-grid">
@@ -136,7 +144,7 @@
     </div>
   </section>
 
-  <section class="home-structure rv" aria-labelledby="structure-title">
+  <section class="home-structure rv" id="project" aria-labelledby="structure-title">
     <div class="home-rail" aria-hidden="true"><span><b>02</b>{{ "home.rail_structure" | t }}</span></div>
     <figure class="structure-art">
       <img src="{{ base_url }}/images/tui/space-menu.svg" alt="{{ "home.structure_alt" | t }}" width="1206" height="520" loading="lazy" decoding="async">
@@ -166,7 +174,7 @@
      capture crosses the middle of the viewport. The left list is a visual
      index only (aria-hidden): each figure carries its own step as a caption,
      which is also what the stacked narrow layout shows. #}
-  <section class="home-flow" aria-labelledby="flow-title">
+  <section class="home-flow" id="loop" aria-labelledby="flow-title">
     <div class="home-rail" aria-hidden="true"><span><b>03</b>{{ "home.rail_flow" | t }}</span></div>
     <div class="flow-rail rv">
       <h2 id="flow-title">{{ "home.flow_title_pre" | t }}<em class="gild">{{ "home.flow_title_em" | t }}</em>{{ "home.flow_title_post" | t }}</h2>
@@ -192,7 +200,7 @@
     </div>
   </section>
 
-  <section class="home-agent rv" aria-labelledby="agent-title">
+  <section class="home-agent rv" id="agent" aria-labelledby="agent-title">
     <div class="home-rail" aria-hidden="true"><span><b>04</b>{{ "home.rail_agent" | t }}</span></div>
     <h2 id="agent-title">{{ "home.agent_title_pre" | t }}<em class="gild">{{ "home.agent_title_em" | t }}</em>{{ "home.agent_title_post" | t }}</h2>
     <p class="agent-intro">{{ "home.agent_intro" | t }}</p>
@@ -216,7 +224,7 @@
     <a class="agent-link" href="{{ base_url }}{{ lang_prefix }}/guide/mcp/">{{ "home.agent_link" | t }}</a>
   </section>
 
-  <section class="home-meaning rv" aria-labelledby="meaning-title">
+  <section class="home-meaning rv" id="name" aria-labelledby="meaning-title">
     <div class="home-rail" aria-hidden="true"><span><b>05</b>{{ "home.rail_meaning" | t }}</span></div>
     <div class="meaning-entry">
       <h2 class="meaning-word" id="meaning-title" lang="ko">{{ "home.meaning_word" | t }}</h2>
@@ -230,6 +238,15 @@
       <span class="chain-ring chain-ring-side"></span>
     </div>
   </section>
+  {# The fixed section index on the right: five numbered stops, the current
+     one lit by home.js. Hidden under 1100px, where it would sit on content. #}
+  <nav class="home-index" id="homeIndex" aria-label="{{ "home.index_aria" | t }}">
+    <a href="#workbench"><b>01</b><span>{{ "home.rail_showcase" | t }}</span></a>
+    <a href="#project"><b>02</b><span>{{ "home.rail_structure" | t }}</span></a>
+    <a href="#loop"><b>03</b><span>{{ "home.rail_flow" | t }}</span></a>
+    <a href="#agent"><b>04</b><span>{{ "home.rail_agent" | t }}</span></a>
+    <a href="#name"><b>05</b><span>{{ "home.rail_meaning" | t }}</span></a>
+  </nav>
 </main>
 <script src="{{ base_url }}/js/home.js" defer></script>
 <script src="{{ base_url }}/js/home-ascii.js" defer></script>

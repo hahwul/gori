@@ -3399,6 +3399,210 @@ html.search-lock body {
   font-size: 0.68rem;
 }
 
+/* --- The opening scene: hero and showcase pinned, scrubbed by scroll ---- */
+
+/* home.js writes --p1 (the copy dismissing, the knot centring) and --p2 (the
+   knot dissolving, the terminal rising) onto .home-opening as the reader
+   scrolls through its 240vh; everything in here reads those two numbers, so
+   the scene runs backwards as cleanly as forwards. Gated on html.js and a
+   wide, tall, motion-allowing viewport: everywhere else the opening is the
+   two sections in plain flow and none of this applies. */
+.home-opening {
+  --p1: 0;
+  --p2: 0;
+  position: relative;
+}
+
+.home-index {
+  display: none;
+}
+
+@media (min-width: 861px) and (min-height: 640px) and (prefers-reduced-motion: no-preference) {
+  html.js .home-opening {
+    height: 240vh;
+  }
+
+  html.js .home-stage {
+    position: sticky;
+    top: var(--header-h);
+    display: grid;
+    height: calc(100vh - var(--header-h));
+    overflow: clip;
+  }
+
+  /* Both acts share the one cell; the showcase sits on top. */
+  html.js .home-stage > .home-hero,
+  html.js .home-stage > .home-showcase {
+    grid-area: 1 / 1;
+    align-self: center;
+  }
+
+  html.js .home-stage > .home-hero {
+    min-height: 0;
+    height: 100%;
+    padding: 0 0 2rem;
+  }
+
+  /* Act one: the copy lifts away and the knot crosses to the middle, a
+     little larger, with the light running over it (home-ascii.js, from the
+     same --p1). */
+  html.js .home-stage .hero-copy {
+    opacity: calc(1 - var(--p1) * 1.25);
+    transform: translateY(calc(var(--p1) * -56px));
+    will-change: opacity, transform;
+  }
+
+  html.js .home-opening.is-dismissed .hero-copy {
+    visibility: hidden;
+  }
+
+  html.js .home-stage .hero-art {
+    opacity: calc(1 - var(--p2));
+    transform:
+      translate(calc(var(--p1) * var(--art-dx, 0px)), calc(var(--p1) * var(--art-dy, 0px)))
+      scale(calc(1 + 0.18 * var(--p1)));
+    transform-origin: center;
+    will-change: transform, opacity;
+  }
+
+  /* Act two: the terminal rises into the knot's place as it scatters. */
+  html.js .home-stage > .home-showcase {
+    padding: 0;
+    opacity: var(--p2);
+    transform: translateY(calc((1 - var(--p2)) * 34vh));
+    pointer-events: none;
+    will-change: transform, opacity;
+  }
+
+  html.js .home-stage .showcase-frame {
+    transform: rotateX(calc((1 - var(--p2)) * 9deg)) scale(calc(0.94 + 0.06 * var(--p2)));
+    transform-origin: 50% 100%;
+  }
+
+  html.js .home-opening.is-pre > .home-stage > .home-showcase {
+    visibility: hidden;
+  }
+
+  html.js .home-opening.is-live > .home-stage > .home-showcase {
+    pointer-events: auto;
+  }
+
+  /* The index: five stops in the right gutter, the current one lit. The
+     label floats out to the left of the number on hover only, so the column
+     of numbers never shifts and nothing sits on the content at rest. */
+  html.js .home-index {
+    position: fixed;
+    z-index: 5;
+    top: 50%;
+    right: 0.8rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    transform: translateY(-50%);
+  }
+
+  .home-index a {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    color: var(--quiet);
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-decoration: none;
+    text-transform: uppercase;
+    transition: color var(--transition);
+  }
+
+  .home-index span {
+    position: absolute;
+    top: 50%;
+    right: calc(100% + 0.5rem);
+    padding: 0.2rem 0.5rem;
+    border-radius: var(--radius-xs);
+    background: var(--bg-panel);
+    white-space: nowrap;
+    opacity: 0;
+    transform: translate(6px, -50%);
+    pointer-events: none;
+    transition: opacity var(--transition), transform var(--transition);
+  }
+
+  .home-index b {
+    position: relative;
+    font-weight: 600;
+    padding-right: 1.1rem;
+  }
+
+  /* The stop itself: a hairline tick that turns gold and grows when current. */
+  .home-index b::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: 0;
+    width: 0.55rem;
+    height: 1px;
+    background: currentColor;
+    transform: translateY(-50%);
+    transition: width var(--transition), background var(--transition);
+  }
+
+  .home-index a:hover,
+  .home-index a:focus-visible,
+  .home-index a[aria-current] {
+    color: var(--accent-strong);
+  }
+
+  .home-index a:hover span,
+  .home-index a:focus-visible span {
+    opacity: 1;
+    transform: translate(0, -50%);
+  }
+
+  .home-index a[aria-current] b::after {
+    width: 0.95rem;
+    background: var(--accent);
+  }
+}
+
+@media (max-width: 1100px) {
+  html.js .home-index {
+    display: none;
+  }
+}
+
+/* Where the browser can tie an animation to scroll, the reveals below the
+   opening follow the reader's hand instead of firing once: each section
+   fades and rises over the first part of its entry into the viewport, and
+   home.js's .in class becomes moot. */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    html.js .rv,
+    html.js .rv.in {
+      opacity: 1;
+      transform: none;
+      transition: none;
+      animation: rv-scrub linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 55%;
+    }
+  }
+}
+
+@keyframes rv-scrub {
+  from {
+    opacity: 0;
+    transform: translateY(26px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* --- Motion ------------------------------------------------------------ */
 /* Everything that moves sits behind two gates: this reduced-motion query,
    and html.js around the scroll reveals. A no-script visit, or motion off,
@@ -3443,17 +3647,6 @@ html.search-lock body {
 
   html.js .rv.in {
     opacity: 1;
-    transform: none;
-  }
-
-  /* Showcase: the capture tips flat as it arrives, a screen turned to face
-     you. The perspective lives on .home-showcase. */
-  html.js .home-showcase.rv .showcase-frame {
-    transform: rotateX(9deg) scale(0.97);
-    transition: transform 900ms cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  html.js .home-showcase.rv.in .showcase-frame {
     transform: none;
   }
 

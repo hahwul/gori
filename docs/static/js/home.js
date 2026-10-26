@@ -264,3 +264,126 @@
 
   for (var i = 0; i < shots.length; i++) io.observe(shots[i]);
 })();
+
+/* The opening scene. While .home-opening is the pinned stage (the stylesheet
+   decides that: wide, tall, motion allowed), scrolling through it scrubs two
+   numbers onto it: --p1, the copy dismissing and the knot centring, and --p2,
+   the knot scattering and the terminal rising. The knot's canvas takes the
+   same numbers through canvas.goriKnot. Where the stage is not pinned the
+   sticky test fails and nothing here runs, so the plain flow stays plain. */
+(function () {
+  var opening = document.getElementById("opening");
+  var stage = opening && opening.querySelector(".home-stage");
+  var art = opening && opening.querySelector(".hero-art");
+  var canvas = document.getElementById("heroAscii");
+  if (!opening || !stage || !art) return;
+
+  function pinned() {
+    return getComputedStyle(stage).position === "sticky";
+  }
+
+  function smooth(a, b, x) {
+    var t = (x - a) / (b - a);
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    return t * t * (3 - 2 * t);
+  }
+
+  /* Where the knot has to travel to sit in the middle of the stage. Measured
+     with the transform taken off, so the answer does not drift with --p1. */
+  function measure() {
+    var p1 = opening.style.getPropertyValue("--p1");
+    opening.style.setProperty("--p1", "0");
+    var s = stage.getBoundingClientRect(), a = art.getBoundingClientRect();
+    opening.style.setProperty("--art-dx", (s.left + s.width / 2 - (a.left + a.width / 2)) + "px");
+    opening.style.setProperty("--art-dy", (s.top + s.height / 2 - (a.top + a.height / 2)) + "px");
+    if (p1) opening.style.setProperty("--p1", p1);
+  }
+
+  var ticking = false, last = -1;
+  function update() {
+    ticking = false;
+    if (!pinned()) {
+      if (last !== -1) {
+        last = -1;
+        opening.style.removeProperty("--p1");
+        opening.style.removeProperty("--p2");
+        opening.classList.remove("is-pre", "is-live", "is-dismissed");
+        if (canvas && canvas.goriKnot) { canvas.goriKnot.light(0); canvas.goriKnot.scatter(0); }
+      }
+      return;
+    }
+    var top = opening.getBoundingClientRect().top + window.scrollY;
+    var travel = opening.offsetHeight - stage.offsetHeight;
+    var p = travel > 0 ? (window.scrollY - top) / travel : 0;
+    p = p < 0 ? 0 : p > 1 ? 1 : p;
+    if (p === last) return;
+    last = p;
+    var p1 = smooth(0, 0.42, p);
+    var p2 = smooth(0.38, 0.86, p);
+    opening.style.setProperty("--p1", p1.toFixed(4));
+    opening.style.setProperty("--p2", p2.toFixed(4));
+    opening.classList.toggle("is-pre", p2 < 0.02);
+    opening.classList.toggle("is-live", p2 > 0.95);
+    opening.classList.toggle("is-dismissed", p1 > 0.6);
+    if (canvas && canvas.goriKnot) {
+      canvas.goriKnot.light(p1);
+      canvas.goriKnot.scatter(p2);
+    }
+  }
+
+  function schedule() {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(update);
+  }
+
+  window.addEventListener("scroll", schedule, { passive: true });
+  window.addEventListener("resize", function () { measure(); last = -1; schedule(); });
+  measure();
+  update();
+  /* The art box settles after fonts and the first layout; measure again. */
+  window.addEventListener("load", function () { measure(); last = -1; schedule(); });
+})();
+
+/* The section index on the right: light the stop whose section is crossing
+   the middle of the viewport, and land a click on the showcase at the end of
+   the opening's pin, where the terminal is actually standing. */
+(function () {
+  var index = document.getElementById("homeIndex");
+  if (!index || !("IntersectionObserver" in window)) return;
+  var links = index.querySelectorAll("a[href^='#']");
+  var byId = {};
+  var i;
+  for (i = 0; i < links.length; i++) byId[links[i].getAttribute("href").slice(1)] = links[i];
+
+  function current(id) {
+    for (var k in byId) {
+      if (k === id) byId[k].setAttribute("aria-current", "true");
+      else byId[k].removeAttribute("aria-current");
+    }
+  }
+
+  var opening = document.getElementById("opening");
+  var io = new IntersectionObserver(function (entries) {
+    for (var j = 0; j < entries.length; j++) {
+      if (!entries[j].isIntersecting) continue;
+      var el = entries[j].target;
+      current(el === opening ? "workbench" : el.id);
+    }
+  }, { rootMargin: "-40% 0px -55% 0px", threshold: 0 });
+
+  for (var id in byId) {
+    var target = id === "workbench" && opening ? opening : document.getElementById(id);
+    if (target) io.observe(target);
+  }
+
+  if (opening) {
+    byId.workbench.addEventListener("click", function (ev) {
+      var stage = opening.querySelector(".home-stage");
+      if (!stage || getComputedStyle(stage).position !== "sticky") return;
+      ev.preventDefault();
+      var top = opening.getBoundingClientRect().top + window.scrollY;
+      window.scrollTo({ top: top + opening.offsetHeight - stage.offsetHeight, behavior: "smooth" });
+    });
+  }
+})();
