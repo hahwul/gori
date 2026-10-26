@@ -106,21 +106,11 @@
 .nav-overview { margin: 2px 0 4px; }
 .manual-nav a.active { color: var(--accent-strong); background: var(--selection); }
 .nav-group .nav-links a.active::before { content: ""; position: absolute; left: -1px; top: 0; bottom: 0; width: 2px; background: var(--accent); }
-.book-promo {
-  display: block;
-  padding: 16px 14px;
-  margin: 24px 0;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background:
-    linear-gradient(var(--bg-soft), var(--bg-soft)) padding-box,
-    linear-gradient(135deg, rgb(var(--accent-rgb) / 0.75), var(--line) 55%) border-box;
-  text-decoration: none;
-  transition: box-shadow var(--transition);
-}
-.book-promo span { display: block; color: var(--muted); font-size: 11px; margin-bottom: 6px; }
-.book-promo strong { color: var(--accent-strong); font-size: 15px; font-weight: 550; }
-.book-promo:hover { box-shadow: 0 0 36px rgb(var(--accent-rgb) / 0.14); }
+/* The field-guide pointer sits on hairlines like the landing's rails: no box. */
+.book-promo { display: block; padding: 14px 0; margin: 24px 0; border-block: 1px solid var(--line-strong); text-decoration: none; }
+.book-promo span { display: block; margin-bottom: 6px; color: var(--quiet); font: 600 10px/1.6 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; }
+.book-promo strong { color: var(--accent-strong); font-size: 15px; font-weight: 550; transition: color var(--transition); }
+.book-promo:hover strong { color: var(--accent); }
 .docs-main { padding-top: 28px; padding-bottom: 60px; width: 100%; }
 .document-path {
   display: flex;
@@ -173,66 +163,35 @@
 .section-heading h1 { font-size: clamp(48px, 6vw, 78px); font-weight: 550; }
 .title-cursor { color: var(--accent); }
 .docs-main .section-description { margin-top: 20px; margin-bottom: 0; font-size: 17px; line-height: 1.75; max-width: 38em; }
-.tool-catalog { margin-block: 34px; }
-/* Each group is a bento of tiles: two columns, and an odd last tile runs the
-   full width so a group never ends on a hole. Capture tiles show the real TUI
-   screen; type-only tiles carry a gold-and-indigo wash instead, so the rows
-   read as one set rather than pictures beside gaps. */
-.catalog-group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; padding: 28px 0; border-bottom: 1px solid var(--line); }
-.catalog-group:first-child { padding-top: 0; }
-.docs-main .catalog-group h2 { border: 0; margin: 4px 0 0; padding: 0; font: 12px/1.6 var(--font-mono); color: var(--accent-strong); }
-.docs-main .catalog-group h2::before { content: none; }
-.catalog-links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.catalog-card {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
-  text-decoration: none;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background:
-    linear-gradient(var(--bg-panel), var(--bg-panel)) padding-box,
-    linear-gradient(135deg, var(--line-strong), var(--line) 60%) border-box;
-  transition: transform 320ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 320ms ease, background 320ms ease;
-}
-.catalog-card:not(.has-shot) {
-  position: relative;
-  justify-content: flex-end;
-  min-height: 150px;
-  background:
-    radial-gradient(120% 90% at 100% 0%, rgb(var(--accent-rgb) / 0.12), transparent 60%),
-    radial-gradient(90% 90% at 0% 100%, rgb(var(--cloud-rgb) / 0.12), transparent 70%),
-    linear-gradient(var(--bg-panel), var(--bg-panel)) padding-box,
-    linear-gradient(135deg, var(--line-strong), var(--line) 60%) border-box;
-}
-/* Type-only tiles carry the gori mark, gilded and faint, in the corner the
-   wash lights: brand art rather than an empty space where a capture would be. */
-.catalog-card:not(.has-shot)::before { content: ""; position: absolute; top: 18px; right: 18px; width: 64px; height: 64px; background: var(--grad-gild); -webkit-mask: url("../images/gori.png") center / contain no-repeat; mask: url("../images/gori.png") center / contain no-repeat; opacity: 0.22; transition: opacity 320ms ease, transform 420ms cubic-bezier(0.16, 1, 0.3, 1); }
-.catalog-card:not(.has-shot):hover::before { opacity: 0.4; transform: rotate(-8deg) scale(1.06); }
-.catalog-card:not(.has-shot):last-child:nth-child(odd) { min-height: 112px; }
-.catalog-card:not(.has-shot) .catalog-text { padding-right: 96px; }
-.catalog-card:hover, .catalog-card:focus-visible {
-  transform: translateY(-2px);
-  background:
-    linear-gradient(var(--bg-panel-strong), var(--bg-panel-strong)) padding-box,
-    linear-gradient(135deg, rgb(var(--accent-rgb) / 0.9), var(--line-strong) 55%, rgb(var(--accent-rgb) / 0.4)) border-box;
-  box-shadow: 0 18px 40px rgb(0 0 0 / 0.28), 0 0 60px rgb(var(--accent-rgb) / 0.1);
-}
-:root[data-theme="light"] .catalog-card:hover, :root[data-theme="light"] .catalog-card:focus-visible { box-shadow: 0 16px 34px rgb(60 50 30 / 0.14); }
+.tool-catalog { counter-reset: group; margin-block: 34px; }
+/* Each group opens with a numbered mono rail, the landing's section voice,
+   and lays its pages out as flat tiles on hairlines: two columns, an odd
+   last tile on its side across the full width so a group never ends on a
+   hole. Capture tiles show the real TUI screen in a thin frame. */
+.catalog-group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; padding: 14px 0 36px; border-top: 1px solid var(--line); }
+.catalog-group:first-child { padding-top: 0; border-top: 0; }
+.docs-main .catalog-group h2 { border: 0; margin: 0; padding: 0; font: 600 11px/1.6 var(--font-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--quiet); }
+.docs-main .catalog-group h2::before { counter-increment: group; content: "0" counter(group); margin-right: 1em; color: var(--accent-strong); }
+.catalog-links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 24px; }
+.catalog-card { position: relative; display: flex; flex-direction: column; gap: 14px; min-width: 0; padding-top: 16px; border-top: 1px solid var(--line-strong); text-decoration: none; }
+/* The gold segment on the rail grows to full width on hover, and the arrow answers. */
+.catalog-card::before { content: ""; position: absolute; top: -1px; left: 0; width: 2.4rem; height: 1px; background: var(--accent); transition: width 340ms cubic-bezier(0.16, 1, 0.3, 1); }
+.catalog-card:hover::before, .catalog-card:focus-visible::before { width: 100%; }
+.catalog-card:focus-visible { outline-offset: 6px; }
 .catalog-card:last-child:nth-child(odd) { grid-column: 1 / -1; }
-.catalog-shot { display: block; aspect-ratio: 1206 / 520; overflow: hidden; border-bottom: 1px solid var(--line); background: var(--pre-bg); }
+.catalog-shot { display: block; aspect-ratio: 1206 / 520; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--pre-bg); transition: border-color 320ms ease; }
+.catalog-card:hover .catalog-shot { border-color: rgb(var(--accent-rgb) / 0.45); }
 .catalog-shot img { width: 100%; height: 100%; object-fit: cover; object-position: top left; transition: transform 600ms cubic-bezier(0.16, 1, 0.3, 1); }
 .catalog-card:hover .catalog-shot img { transform: scale(1.035); }
 /* A full-width capture tile lies on its side: text left, screen right. */
-.catalog-card.has-shot:last-child:nth-child(odd) { flex-direction: row-reverse; align-items: stretch; }
-.catalog-card.has-shot:last-child:nth-child(odd) .catalog-shot { flex: 0 0 55%; aspect-ratio: auto; border-bottom: 0; border-left: 1px solid var(--line); }
-.catalog-card.has-shot:last-child:nth-child(odd) .catalog-text { align-self: flex-end; }
-.catalog-text { display: block; padding: 14px 16px 16px; }
-.catalog-title { display: flex; gap: 14px; justify-content: space-between; font-size: 16px; font-weight: 620; line-height: 1.4; color: var(--heading); }
+.catalog-card.has-shot:last-child:nth-child(odd) { flex-direction: row-reverse; align-items: flex-start; gap: 28px; }
+.catalog-card.has-shot:last-child:nth-child(odd) .catalog-shot { flex: 0 0 55%; }
+.catalog-text { display: block; }
+.catalog-title { display: flex; gap: 14px; justify-content: space-between; font-size: 17px; font-weight: 620; line-height: 1.35; letter-spacing: -.01em; color: var(--heading); transition: color var(--transition); }
+.catalog-card:hover .catalog-title { color: var(--accent-strong); }
 .catalog-title > span { color: var(--accent); font-weight: 400; transition: transform var(--transition); }
 .catalog-card:hover .catalog-title > span { transform: translate(2px, -2px); }
-.catalog-description { display: block; color: var(--muted); margin-top: 5px; font-size: 13px; line-height: 1.65; }
+.catalog-description { display: block; max-width: 40ch; color: var(--muted); margin-top: 6px; font-size: 13px; line-height: 1.65; }
 .learning-link { display: flex; align-items: center; gap: 24px; justify-content: space-between; border-block: 1px solid var(--line-strong); padding: 22px 0; text-decoration: none; margin: 36px 0; }
 .learning-link > span { color: var(--muted); font-size: 13px; }
 .learning-link strong { color: var(--accent-strong); font-size: 15px; font-weight: 550; }
@@ -265,7 +224,8 @@
 .book-front { display: flex; flex-direction: column; padding: 30px; overflow: hidden; }
 .cover-edition { color: var(--accent-strong); font: 11px/1.5 var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
 .cover-title { display: block; color: var(--heading); font-family: var(--font-serif); font-weight: 400; font-size: clamp(38px, 4.2vw, 58px); line-height: 1.1; letter-spacing: -.04em; margin-top: 25px; }
-.cover-mark { flex: 1; min-height: 130px; display: block; margin: 14px 0; background: var(--grad-logo); mask: var(--logo-src) center / contain no-repeat; -webkit-mask: var(--logo-src) center / contain no-repeat; }
+.cover-mark { flex: 1; min-height: 130px; display: flex; align-items: center; justify-content: center; margin: 14px 0; }
+.cover-mark .glyph-knot { font-size: clamp(7px, 0.9vw, 10px); }
 .cover-foot { display: flex; justify-content: space-between; gap: 10px; border-top: 1px solid var(--line-strong); padding-top: 16px; font: 10px/1.5 var(--font-mono); color: var(--accent-strong); }
 .book-contents { display: grid; grid-template-columns: .75fr 1.5fr; gap: 80px; padding: 52px 0 64px; border-top: 1px solid var(--line-strong); scroll-margin-top: calc(var(--header-h) + 24px); }
 .book-contents-intro { position: sticky; top: calc(var(--header-h) + 40px); align-self: start; }
@@ -341,11 +301,10 @@ html[lang="ko"] .book-reader .docs-main h1 { font-family: var(--font-sans); font
   .is-doc .docs-header { padding-inline: 20px; }
   .docs-main h1 { font-size: 32px; }
   .section-heading h1 { font-size: 52px; }
-  .catalog-group { grid-template-columns: 1fr; gap: 12px; }
-  .catalog-links { grid-template-columns: 1fr; }
-  .catalog-card.has-shot:last-child:nth-child(odd) { flex-direction: column; }
-  .catalog-card.has-shot:last-child:nth-child(odd) .catalog-shot { flex: none; aspect-ratio: 1206 / 520; border-left: 0; border-bottom: 1px solid var(--line); }
-  .catalog-card.has-shot:last-child:nth-child(odd) .catalog-text { align-self: auto; }
+  .catalog-group { gap: 18px; }
+  .catalog-links { grid-template-columns: 1fr; gap: 22px; }
+  .catalog-card.has-shot:last-child:nth-child(odd) { flex-direction: column; gap: 14px; }
+  .catalog-card.has-shot:last-child:nth-child(odd) .catalog-shot { flex: none; }
   .catalog-title { font-size: 16px; }
   .document-body { font-size: 15px; }
   .document-body > p:first-child { font-size: 16px; }

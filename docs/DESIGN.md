@@ -43,7 +43,7 @@ Body copy and code remain the visual priority. Experimental treatments belong in
 
 Motion should be short, low-amplitude, and informative: revealing a section, acknowledging a state change, or orienting the reader. The site must honor `prefers-reduced-motion`, must not hide content without JavaScript, and must not require animation to understand state.
 
-The landing hero is the one ambient exception: the ring knot is drawn as a field of monospace glyphs on a canvas (`static/js/home-ascii.js`), breathing slowly and lighting up under the pointer. It is decoration over a plain `<img>` of the mark, so a no-script visit sees the logo, and under `prefers-reduced-motion` it draws a single still frame and attaches no pointer listeners.
+The landing hero is the one ambient exception: the ring knot is drawn as a field of monospace glyphs on a canvas (`static/js/home-ascii.js`). The glyphs themselves are still; a band of light glides after the pointer and, left alone, sweeps across once every few seconds. It is decoration over a plain `<img>` of the mark, so a no-script visit sees the logo, and under `prefers-reduced-motion` it draws a single still frame and attaches no pointer listeners. Elsewhere the same knot appears as a still `<pre>` (`templates/partials/glyph-knot.html`, generated from `static/images/gori.png` at 22 rows): on the Playbooks cover and the 404 page. Section openers across the site share one voice, a numbered mono-caps rail on a hairline (`.home-rail` on the landing, the catalog group headings on section covers).
 
 Keyboard and screen-reader behavior is part of the design. Native links, buttons, `details`/`summary`, visible focus, `aria-current`, a skip link, and a logical heading order take precedence over custom interaction.
 

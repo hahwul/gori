@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Docs: the landing redrawn around the ring knot as a living field of monospace glyphs, with the copy beside it instead of over the wallpaper, and the sections below it opened by numbered mono rails in the same voice
+- Docs: the site redrawn around the ring knot as a field of monospace glyphs. The landing hero draws it live and lights it with a glint under the pointer, the sections below and the Guide and Reference catalogs open with numbered mono rails and flat tiles, and the field guide's cover and the 404 page carry the knot in glyphs
 
 ## v0.9.0
 
