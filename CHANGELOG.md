@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Docs: the site redrawn around the ring knot as a field of monospace glyphs. The landing opens as one scroll-driven scene: the knot, lit by a passing glint, dissolves into the terminal as you scroll, a fixed index on the right tracks the five sections, and the reveals below follow the scroll. The Guide and Reference catalogs open with numbered mono rails and flat tiles, and the field guide's cover and the 404 page carry the knot in glyphs
+- Docs: the site redrawn around the ring knot as a field of monospace glyphs. The landing opens as one scroll-driven scene: the knot's two rings turn slowly in place, the knot dissolves into the terminal as you scroll, a fixed index on the right tracks the five sections, and every section below arrives with its own eased, scroll-linked choreography. The Guide and Reference catalogs open with numbered mono rails and flat tiles, and the field guide's cover and the 404 page carry the knot in glyphs
 
 ## v0.9.0
 

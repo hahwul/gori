@@ -124,7 +124,7 @@
   </div>
   </div>
 
-  <section class="home-paths rv" aria-label="Documentation paths">
+  <section class="home-paths" data-scene aria-label="Documentation paths">
     <div class="path-grid">
       <a class="path-link" href="{{ base_url }}{{ lang_prefix }}/getting-started/">
         <span>{{ "home.path_start_kicker" | t }}</span>
@@ -144,7 +144,7 @@
     </div>
   </section>
 
-  <section class="home-structure rv" id="project" aria-labelledby="structure-title">
+  <section class="home-structure" data-scene id="project" aria-labelledby="structure-title">
     <div class="home-rail" aria-hidden="true"><span><b>02</b>{{ "home.rail_structure" | t }}</span></div>
     <figure class="structure-art">
       <img src="{{ base_url }}/images/tui/space-menu.svg" alt="{{ "home.structure_alt" | t }}" width="1206" height="520" loading="lazy" decoding="async">
@@ -176,7 +176,7 @@
      which is also what the stacked narrow layout shows. #}
   <section class="home-flow" id="loop" aria-labelledby="flow-title">
     <div class="home-rail" aria-hidden="true"><span><b>03</b>{{ "home.rail_flow" | t }}</span></div>
-    <div class="flow-rail rv">
+    <div class="flow-rail" data-scene>
       <h2 id="flow-title">{{ "home.flow_title_pre" | t }}<em class="gild">{{ "home.flow_title_em" | t }}</em>{{ "home.flow_title_post" | t }}</h2>
       <ol class="flow-steps" aria-hidden="true">
         <li data-step="1" class="is-active"><span>{{ "home.flow_1_label" | t }}</span><p>{{ "home.flow_1_desc" | t }}</p></li>
@@ -185,22 +185,22 @@
       </ol>
     </div>
     <div class="flow-shots">
-      <figure class="flow-shot is-active" data-step="1">
+      <figure class="flow-shot is-active" data-scene data-step="1">
         <figcaption><span>{{ "home.flow_1_label" | t }}</span> {{ "home.flow_1_desc" | t }}</figcaption>
         <div class="flow-shot-frame"><img src="{{ base_url }}/images/tui/response-detail.svg" alt="{{ "home.flow_1_alt" | t }}" loading="lazy"></div>
       </figure>
-      <figure class="flow-shot" data-step="2">
+      <figure class="flow-shot" data-scene data-step="2">
         <figcaption><span>{{ "home.flow_2_label" | t }}</span> {{ "home.flow_2_desc" | t }}</figcaption>
         <div class="flow-shot-frame"><img src="{{ base_url }}/images/tui/fuzzer.svg" alt="{{ "home.flow_2_alt" | t }}" loading="lazy"></div>
       </figure>
-      <figure class="flow-shot" data-step="3">
+      <figure class="flow-shot" data-scene data-step="3">
         <figcaption><span>{{ "home.flow_3_label" | t }}</span> {{ "home.flow_3_desc" | t }}</figcaption>
         <div class="flow-shot-frame"><img src="{{ base_url }}/images/tui/issues.svg" alt="{{ "home.flow_3_alt" | t }}" loading="lazy"></div>
       </figure>
     </div>
   </section>
 
-  <section class="home-agent rv" id="agent" aria-labelledby="agent-title">
+  <section class="home-agent" data-scene id="agent" aria-labelledby="agent-title">
     <div class="home-rail" aria-hidden="true"><span><b>04</b>{{ "home.rail_agent" | t }}</span></div>
     <h2 id="agent-title">{{ "home.agent_title_pre" | t }}<em class="gild">{{ "home.agent_title_em" | t }}</em>{{ "home.agent_title_post" | t }}</h2>
     <p class="agent-intro">{{ "home.agent_intro" | t }}</p>
@@ -224,7 +224,7 @@
     <a class="agent-link" href="{{ base_url }}{{ lang_prefix }}/guide/mcp/">{{ "home.agent_link" | t }}</a>
   </section>
 
-  <section class="home-meaning rv" id="name" aria-labelledby="meaning-title">
+  <section class="home-meaning" data-scene id="name" aria-labelledby="meaning-title">
     <div class="home-rail" aria-hidden="true"><span><b>05</b>{{ "home.rail_meaning" | t }}</span></div>
     <div class="meaning-entry">
       <h2 class="meaning-word" id="meaning-title" lang="ko">{{ "home.meaning_word" | t }}</h2>

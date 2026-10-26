@@ -3573,42 +3573,12 @@ html.search-lock body {
   }
 }
 
-/* Where the browser can tie an animation to scroll, the reveals below the
-   opening follow the reader's hand instead of firing once: each section
-   fades and rises over the first part of its entry into the viewport, and
-   home.js's .in class becomes moot. */
-@supports (animation-timeline: view()) {
-  @media (prefers-reduced-motion: no-preference) {
-    html.js .rv,
-    html.js .rv.in {
-      opacity: 1;
-      transform: none;
-      transition: none;
-      animation: rv-scrub linear both;
-      animation-timeline: view();
-      animation-range: entry 0% entry 55%;
-    }
-  }
-}
-
-@keyframes rv-scrub {
-  from {
-    opacity: 0;
-    transform: translateY(26px);
-  }
-
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
 /* --- Motion ------------------------------------------------------------ */
 /* Everything that moves sits behind two gates: this reduced-motion query,
    and html.js around the scroll reveals. A no-script visit, or motion off,
-   renders the page static and complete. home.js flips .in on each .rv as it
-   scrolls up; only the hero animates on load, because it is the only part
-   guaranteed to be on screen while a load animation runs. */
+   renders the page static and complete. home.js eases a scroll progress onto
+   each [data-scene] section; only the hero animates on load, because it is
+   the only part guaranteed to be on screen while a load animation runs. */
 @media (prefers-reduced-motion: no-preference) {
   /* Load: the hero copy steps in top to bottom. */
   .hero-copy > * {
@@ -3636,168 +3606,147 @@ html.search-lock body {
     animation: seam-run 2.6s ease-in-out infinite alternate;
   }
 
-  /* Scroll reveals. Base: fade and rise as one piece. Sections whose parts
-     carry the movement instead pin their own transform to none below, so
-     the choreography reads from the parts, not the whole. */
-  html.js .rv {
-    opacity: 0;
-    transform: translateY(26px);
-    transition: opacity 700ms cubic-bezier(0.16, 1, 0.3, 1), transform 700ms cubic-bezier(0.16, 1, 0.3, 1);
+  /* Scene progress. home.js eases one number, --sp (0 arriving .. 1 in
+     place), onto every [data-scene] element as it climbs the viewport, and
+     each section spends it on its own choreography below. --s1..--s4 are
+     the same number on a stagger, so parts can follow one another. The
+     fallback of 1 keeps a no-script page, and anything home.js never
+     reaches, drawn complete. */
+  [data-scene] {
+    --s1: clamp(0, calc(var(--sp, 1) / 0.6), 1);
+    --s2: clamp(0, calc((var(--sp, 1) - 0.14) / 0.6), 1);
+    --s3: clamp(0, calc((var(--sp, 1) - 0.28) / 0.6), 1);
+    --s4: clamp(0, calc((var(--sp, 1) - 0.42) / 0.58), 1);
   }
 
-  html.js .rv.in {
-    opacity: 1;
-    transform: none;
+  /* Paths: the three rails rise one after another. */
+  .home-paths .path-link:nth-child(1) {
+    opacity: var(--s1);
+    transform: translateY(calc((1 - var(--s1)) * 30px));
   }
 
-  /* Paths: the three rails step in one after another. */
-  html.js .home-paths.rv {
-    transform: none;
+  .home-paths .path-link:nth-child(2) {
+    opacity: var(--s2);
+    transform: translateY(calc((1 - var(--s2)) * 30px));
   }
 
-  html.js .home-paths.rv .path-link {
-    opacity: 0;
-    transform: translateY(18px);
-    transition: opacity 700ms cubic-bezier(0.16, 1, 0.3, 1), transform 700ms cubic-bezier(0.16, 1, 0.3, 1);
+  .home-paths .path-link:nth-child(3) {
+    opacity: var(--s3);
+    transform: translateY(calc((1 - var(--s3)) * 30px));
   }
 
-  html.js .home-paths.rv .path-link:nth-child(2) {
-    transition-delay: 90ms;
+  /* Structure: the panel and the copy close in from opposite sides while
+     the window inside the panel drifts up a little slower than the page,
+     then the three hairline entries step in. */
+  .home-structure .structure-art {
+    opacity: var(--s1);
+    transform: translateX(calc((1 - var(--s1)) * -44px)) scale(calc(0.97 + 0.03 * var(--s1)));
   }
 
-  html.js .home-paths.rv .path-link:nth-child(3) {
-    transition-delay: 180ms;
+  .home-structure .structure-art img {
+    transform: translateY(calc((1 - var(--sp, 1)) * 56px));
   }
 
-  html.js .home-paths.rv.in .path-link {
-    opacity: 1;
-    transform: none;
+  .home-structure .structure-copy {
+    opacity: var(--s2);
+    transform: translateX(calc((1 - var(--s2)) * 44px));
   }
 
-  /* Structure: art and copy close in from opposite sides, then the three
-     hairline entries step in. */
-  html.js .home-structure.rv {
-    transform: none;
+  .home-structure .structure-grid > div:nth-child(1) {
+    opacity: var(--s2);
+    transform: translateY(calc((1 - var(--s2)) * 18px));
   }
 
-  html.js .home-structure.rv .structure-art,
-  html.js .home-structure.rv .structure-copy,
-  html.js .home-structure.rv .structure-grid > div {
-    opacity: 0;
-    transition: opacity 750ms cubic-bezier(0.16, 1, 0.3, 1), transform 750ms cubic-bezier(0.16, 1, 0.3, 1);
+  .home-structure .structure-grid > div:nth-child(2) {
+    opacity: var(--s3);
+    transform: translateY(calc((1 - var(--s3)) * 18px));
   }
 
-  html.js .home-structure.rv .structure-art {
-    transform: translateX(-26px) scale(0.98);
+  .home-structure .structure-grid > div:nth-child(3) {
+    opacity: var(--s4);
+    transform: translateY(calc((1 - var(--s4)) * 18px));
   }
 
-  html.js .home-structure.rv .structure-copy {
-    transform: translateX(24px);
-    transition-delay: 90ms;
+  /* Flow: the rail's title and steps settle up; each capture rises into its
+     frame as it comes (the focus dimming, once it is there, is the
+     .is-active rule beside the frame). */
+  .flow-rail h2 {
+    opacity: var(--s1);
+    transform: translateY(calc((1 - var(--s1)) * 24px));
   }
 
-  html.js .home-structure.rv .structure-grid > div {
-    transform: translateY(14px);
+  .flow-rail .flow-steps {
+    opacity: var(--s2);
+    transform: translateY(calc((1 - var(--s2)) * 24px));
   }
 
-  html.js .home-structure.rv .structure-grid > div:nth-child(1) {
-    transition-delay: 260ms;
+  .flow-shot {
+    opacity: calc(0.2 + 0.8 * var(--s1));
+    transform: translateY(calc((1 - var(--s1)) * 70px));
   }
 
-  html.js .home-structure.rv .structure-grid > div:nth-child(2) {
-    transition-delay: 350ms;
+  /* Agent: the title settles, the nodes arrive from both ends, the wire
+     closes the seam from its middle and the chip lands on it. */
+  .home-agent h2,
+  .home-agent .agent-intro {
+    opacity: var(--s1);
+    transform: translateY(calc((1 - var(--s1)) * 22px));
   }
 
-  html.js .home-structure.rv .structure-grid > div:nth-child(3) {
-    transition-delay: 440ms;
+  .home-agent .seam-node:first-child {
+    opacity: var(--s2);
+    transform: translateX(calc((1 - var(--s2)) * -48px));
   }
 
-  html.js .home-structure.rv.in .structure-art,
-  html.js .home-structure.rv.in .structure-copy,
-  html.js .home-structure.rv.in .structure-grid > div {
-    opacity: 1;
-    transform: none;
+  .home-agent .seam-node:last-child {
+    opacity: var(--s2);
+    transform: translateX(calc((1 - var(--s2)) * 48px));
   }
 
-  /* Agent: the nodes arrive from both ends and the wire closes the seam,
-     growing outward from the MCP chip at its middle. */
-  html.js .home-agent.rv {
-    transform: none;
+  .home-agent .seam-wire {
+    transform: scaleX(var(--s3));
   }
 
-  html.js .home-agent.rv .seam-node,
-  html.js .home-agent.rv .seam-wire,
-  html.js .home-agent.rv .seam-mcp,
-  html.js .home-agent.rv .agent-link {
-    transition: opacity 700ms cubic-bezier(0.16, 1, 0.3, 1), transform 700ms cubic-bezier(0.16, 1, 0.3, 1);
+  .home-agent .seam-link-label,
+  .home-agent .seam-mcp {
+    opacity: var(--s3);
+    transform: scale(calc(0.8 + 0.2 * var(--s3)));
   }
 
-  html.js .home-agent.rv .seam-node:first-child {
-    transform: translateX(-26px);
+  .home-agent .agent-link {
+    opacity: var(--s4);
+    transform: translateY(calc((1 - var(--s4)) * 12px));
   }
 
-  html.js .home-agent.rv .seam-node:last-child {
-    transform: translateX(26px);
+  /* The name: the entry settles up while the two side rings slide in from
+     apart and weave onto the link, the chain closing as the reader arrives. */
+  .home-meaning .meaning-entry {
+    opacity: var(--s1);
+    transform: translateY(calc((1 - var(--s1)) * 24px));
   }
 
-  html.js .home-agent.rv .seam-wire {
-    transform: scaleX(0);
-    transition-delay: 220ms;
+  .home-meaning .meaning-chain {
+    opacity: var(--s1);
   }
 
-  html.js .home-agent.rv .seam-mcp {
-    transform: scale(0.85);
-    transition-delay: 220ms;
+  .home-meaning .chain-ring-side:first-child {
+    transform: translateX(calc((1 - var(--s2)) * -56px));
   }
 
-  html.js .home-agent.rv .agent-link {
-    opacity: 0;
-    transform: translateY(10px);
-    transition-delay: 420ms;
+  .home-meaning .chain-ring-side:last-child {
+    transform: translateX(calc((1 - var(--s2)) * 56px));
   }
 
-  html.js .home-agent.rv.in .seam-node,
-  html.js .home-agent.rv.in .seam-wire,
-  html.js .home-agent.rv.in .seam-mcp {
-    transform: none;
-  }
-
-  html.js .home-agent.rv.in .agent-link {
-    opacity: 1;
-    transform: none;
-  }
-
-  /* The name: the entry settles up while the mark breathes in from slightly
-     small, one piece each, for the weave. */
-  html.js .home-meaning.rv {
-    transform: none;
-  }
-
-  html.js .home-meaning.rv .meaning-entry,
-  html.js .home-meaning.rv .meaning-chain {
-    transition: transform 800ms cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  html.js .home-meaning.rv .meaning-entry {
-    transform: translateY(20px);
-  }
-
-  html.js .home-meaning.rv .meaning-chain {
-    transform: scale(0.94);
-    transition-delay: 140ms;
-  }
-
-  html.js .home-meaning.rv.in .meaning-entry,
-  html.js .home-meaning.rv.in .meaning-chain {
-    transform: none;
+  .home-meaning .chain-ring-link {
+    transform: scale(calc(0.88 + 0.12 * var(--s2)));
   }
 }
 
 /* The stacked seam (narrow layout) turns the wire on its end: the closing
    scale and the running light swap to the vertical axis. */
 @media (max-width: 860px) and (prefers-reduced-motion: no-preference) {
-  html.js .home-agent.rv .seam-wire {
-    transform: scaleY(0);
+  .home-agent .seam-wire {
+    transform: scaleY(var(--s3));
   }
 
   .seam-pulse::before {
