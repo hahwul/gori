@@ -34,9 +34,11 @@
   var FRAME = 1 / 30;               /* the turn redraws at half rate */
   /* The two rings' centres in logo space (-0.5..0.5 across the mark), their
      band count and angular speed (rad/s): a slow roll, opposite ways. */
-  var RING_A = { x: -0.13, y: 0.11, bands: 4, speed: 0.34 };
-  var RING_B = { x: 0.15, y: -0.11, bands: 4, speed: -0.29 };
-  var TURN = 0.26;                  /* how far the wave moves a glyph, 0..1 */
+  var RING_A = { x: -0.13, y: 0.11, bands: 3, speed: 0.5 };
+  var RING_B = { x: 0.15, y: -0.11, bands: 3, speed: -0.42 };
+  var TURN = 0.34;                  /* how far the wave moves a glyph, 0..1 */
+  var GLOSS = 0.7;                  /* how bright the crest of the wave shines */
+  var SHADE = 0.3;                  /* how dark the trough falls */
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
 
   var cw = 0, ch = 0, cols = 0, rows = 0, px = 13, dpr = 1, padX = 0, padY = 0, W = 0, H = 0;
@@ -214,15 +216,19 @@
           continue;
         }
         /* The turn: a wave around each ring's centre, blended by which ring
-           the cell sits on, moves the glyph along the ramp. Its crest also
-           catches a little light, so the roll reads in colour as well. */
+           the cell sits on, moves the glyph along the ramp. The wave is lit
+           like a polished surface: a narrow, near-white specular on its
+           crest and a shadow in its trough, so the roll reads as light
+           moving over metal and not only as characters changing. */
         var w = ringW[i];
         var wave = w * Math.sin(RING_A.bands * angA[i] - phaseA) +
                    (1 - w) * Math.sin(RING_B.bands * angB[i] - phaseB);
         var lvl = Math.floor(k * (1 + TURN * wave) * (1 - q * 0.7) * LAST + 0.5);
         if (lvl > LAST) lvl = LAST;
         if (lvl < 1) continue;
-        var g = wave > 0 ? 0.22 * wave * k : 0;
+        var crest = wave > 0 ? wave * wave * wave : 0;
+        var g = GLOSS * crest * k;
+        var shade = 1 - SHADE * (wave < 0 ? -wave : 0);
         if (s > 0.004) {
           var vx = x - bx, vy = y - by;
           var a = Math.abs(vx * dy - vy * dx) / across;   /* across the band */
@@ -235,7 +241,7 @@
           gx += drift[2 * i] * reach;
           gy += drift[2 * i + 1] * reach;
         }
-        ctx.globalAlpha = Math.min(1, 0.42 + 0.58 * k + 0.5 * g) * fade;
+        ctx.globalAlpha = Math.min(1, (0.42 + 0.58 * k) * shade + 0.5 * g) * fade;
         ctx.fillStyle = palette[Math.round(Math.min(1, g) * STEPS)];
         ctx.fillText(RAMP.charAt(lvl), gx, gy);
       }
