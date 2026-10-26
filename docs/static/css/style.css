@@ -51,7 +51,7 @@
      (highlight #f1e1b1 → body #d9c28b) so the nav matches downloadable brand assets. */
   --grad-logo: linear-gradient(135deg, #f1e1b1 0%, #eedca5 40%, #d9c28b 100%);
   --hero-knot: #ecd9a0;          /* the glyph knot: brighter than the accent gold */
-  --hero-glint: #fff8e6;         /* the light that runs across the glyph knot */
+  --hero-glint: #ffffff;         /* the light that runs across the glyph knot */
   /* Gilded display words (hero, section titles). On night it is the logo gold. */
   --grad-gild: linear-gradient(120deg, #f4e6b8 0%, #e6cf92 38%, #c8a860 72%, #e9d49c 100%);
   --selection: rgb(var(--accent-rgb) / 0.26);

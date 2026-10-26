@@ -7,8 +7,9 @@
    band of highlight, the way a glint runs across polished metal when it is
    tilted. Under the pointer the band glides after the cursor and the cells
    it crosses turn from gold to a warm white; when the pointer leaves, the
-   band fades. Left alone, the knot catches one sweep of light every few
-   seconds, the first soon after load, and is otherwise still.
+   band fades. Left alone, a spot of light runs once around the large ring
+   every few seconds, the first lap soon after load; otherwise the knot is
+   still.
 
    Gates: the canvas is aria-hidden decoration over an <img> fallback that
    html.js hides, so no-script visits see the plain mark. Reduced motion draws
@@ -29,13 +30,23 @@
   var FONT = "ui-monospace, \"SF Mono\", \"Cascadia Code\", Menlo, Consolas, monospace";
   var STEPS = 12;                   /* gold → glint colour ramp resolution */
   var SWEEP_EVERY = 4800;           /* ms between idle glints */
-  var SWEEP_TAKES = 2400;           /* ms one idle glint takes to cross */
+  var SWEEP_TAKES = 2600;           /* ms one lap of the ring takes */
   var SWEEP_FIRST = 900;            /* ms after load until the first one */
+  /* The two rings' centres in logo space (-0.5..0.5 across the mark). The
+     idle light laps the large ring (A); B only decides which cells are not
+     A's, so the spot stays on one ring where the two cross. */
+  var RING_A = { x: -0.13, y: 0.11 };
+  var RING_B = { x: 0.15, y: -0.11 };
+  var LAP_HEAD = 0.5;               /* the spot's angular width ahead, rad */
+  var LAP_TAIL = 1.3;               /* and the comet tail it trails, rad */
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
 
   var cw = 0, ch = 0, cols = 0, rows = 0, px = 13, dpr = 1, padX = 0, padY = 0, W = 0, H = 0;
   var cover = new Float32Array(0);   /* logo coverage per cell, 0..1 */
   var seed = new Float32Array(0);    /* per-cell hash, for the dust */
+  var ringW = new Float32Array(0);   /* 1 = on ring A, 0 = on ring B */
+  var angA = new Float32Array(0);    /* cell angle around ring A's centre */
+  var side = 1;                      /* the mark's side in px, for logo space */
   var palette = [];                  /* STEPS+1 colours, gold → glint */
   var dust = "#8d90a2";
   var raf = 0, last = 0, visible = true, ready = false, sweepTimer = 0;
@@ -96,6 +107,7 @@
       sideCols = cols * 0.98;
       sideRows = sideCols * cw / ch;
     }
+    side = sideRows * ch;
     o.drawImage(
       img,
       (cols - sideCols) / 2 * ss, (rows - sideRows) / 2 * ss,
@@ -105,6 +117,8 @@
     var n = cols * rows;
     cover = new Float32Array(n);
     seed = new Float32Array(n);
+    ringW = new Float32Array(n);
+    angA = new Float32Array(n);
     drift = new Float32Array(2 * n);
     for (var r = 0; r < rows; r++) {
       for (var c = 0; c < cols; c++) {
@@ -118,6 +132,14 @@
         /* Deterministic hash, so a resize does not reshuffle the dust. */
         var h = Math.sin(c * 12.9898 + r * 78.233) * 43758.5453;
         seed[i] = h - Math.floor(h);
+        /* Logo space: which ring the cell sits on, and where around A. */
+        var ux = ((c - (cols - 1) / 2) * cw) / side;
+        var uy = ((r - (rows - 1) / 2) * ch) / side;
+        var ax = ux - RING_A.x, ay = uy - RING_A.y;
+        var bxx = ux - RING_B.x, byy = uy - RING_B.y;
+        var da = ax * ax + ay * ay, db = bxx * bxx + byy * byy;
+        ringW[i] = db / (da + db + 1e-6);
+        angA[i] = Math.atan2(ay, ax);
         /* Scatter: away from the centre, each cell at its own pace. */
         var ang = Math.atan2(r - rows / 2, (c - cols / 2) * cw / ch) + (seed[i] - 0.5) * 1.2;
         var mag = 0.35 + seed[i] * 0.9;
@@ -173,6 +195,14 @@
     var along = Math.max(150, W * 0.42);   /* reach along the band */
     var s = strength, bx = lx, by = ly;
     if (scrollLight && scrollLight.s > s) { s = scrollLight.s; bx = scrollLight.x; by = scrollLight.y; }
+    /* The idle lap: a spot at angle theta around ring A, fading in over the
+       first part of the lap and out over the last. */
+    var lapOn = !!sweep, theta = 0, lapS = 0;
+    if (lapOn) {
+      var lt = (performance.now() - sweep.t0) / SWEEP_TAKES;
+      theta = -2.2 + lt * Math.PI * 2;
+      lapS = Math.pow(Math.sin(Math.PI * Math.min(1, Math.max(0, lt))), 0.5);
+    }
     var q = scatter;
     var fade = Math.pow(1 - q, 1.6);
     var reach = Math.max(W, H) * 0.9 * q * q;
@@ -199,11 +229,22 @@
         var lvl = Math.floor(k * (1 - q * 0.7) * LAST + 0.5);
         if (lvl < 1) continue;
         var g = 0;
+        if (lapOn) {
+          /* Ahead of the spot the light cuts off quickly; behind it a tail
+             trails. Cells nearer ring A take it in full, the other ring's
+             only a little, so it reads as running along one ring. */
+          var d = angA[i] - theta;
+          d -= Math.round(d / (Math.PI * 2)) * Math.PI * 2;   /* shortest way round */
+          d /= d > 0 ? LAP_HEAD : LAP_TAIL;
+          g = lapS * (0.25 + 0.75 * ringW[i]) * Math.exp(-d * d) * 1.15;
+          if (g > 1) g = 1;
+        }
         if (s > 0.004) {
           var vx = x - bx, vy = y - by;
           var a = Math.abs(vx * dy - vy * dx) / across;   /* across the band */
           var b = (vx * dx + vy * dy) / along;            /* along the band */
-          g = s * Math.exp(-(a * a) - b * b);
+          var lit = s * Math.exp(-(a * a) - b * b);
+          if (lit > g) g = lit;
         }
         var gx = x, gy = y;
         if (q > 0) {
@@ -213,6 +254,9 @@
         ctx.globalAlpha = Math.min(1, 0.42 + 0.58 * k + 0.5 * g) * fade;
         ctx.fillStyle = palette[Math.round(Math.min(1, g) * STEPS)];
         ctx.fillText(RAMP.charAt(lvl), gx, gy);
+        /* A lit cell is struck twice, a hair apart: the glyph reads bolder
+           as well as whiter, which is what makes the light carry. */
+        if (g > 0.3) ctx.fillText(RAMP.charAt(lvl), gx + 0.7, gy);
       }
     }
     ctx.globalAlpha = 1;
@@ -220,19 +264,8 @@
 
   /* Advance the light, then decide whether anything is still moving. */
   function step(dt) {
-    if (sweep) {
-      var t = (performance.now() - sweep.t0) / SWEEP_TAKES;
-      if (t >= 1) {
-        sweep = null;
-        wantStrength = hovering ? 1 : 0;
-      } else {
-        /* Across the box from the top-left corner to the bottom-right, with
-           a soft rise and fall in strength so it arrives and leaves gently. */
-        wantX = lx = W * (-0.15 + 1.3 * t);
-        wantY = ly = H * (0.05 + 0.9 * t);
-        wantStrength = Math.pow(Math.sin(Math.PI * t), 0.7);
-      }
-    }
+    /* The lap runs on its own clock; draw() reads it directly. */
+    if (sweep && performance.now() - sweep.t0 >= SWEEP_TAKES) sweep = null;
     var ease = 1 - Math.exp(-dt * 7);
     lx += (wantX - lx) * ease;
     ly += (wantY - ly) * ease;
