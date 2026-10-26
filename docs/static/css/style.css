@@ -50,6 +50,8 @@
   /* Wordmark/brand-mark gold, sampled from the logo in gori-wallpaper.webp
      (highlight #f1e1b1 → body #d9c28b) so the nav matches downloadable brand assets. */
   --grad-logo: linear-gradient(135deg, #f1e1b1 0%, #eedca5 40%, #d9c28b 100%);
+  --hero-knot: #ecd9a0;          /* the glyph knot: brighter than the accent gold */
+  --hero-glint: #f7ecc9;         /* the light that runs across the glyph knot: cream, not white */
   /* Gilded display words (hero, section titles). On night it is the logo gold. */
   --grad-gild: linear-gradient(120deg, #f4e6b8 0%, #e6cf92 38%, #c8a860 72%, #e9d49c 100%);
   --selection: rgb(var(--accent-rgb) / 0.26);
@@ -121,6 +123,8 @@
      cream (the old #b08d3f sat at 3.0:1). The lightest stop leads the 135deg
      sweep, so 4.9:1 there is the floor for the whole mark. */
   --grad-logo: linear-gradient(135deg, #776d57 0%, #524a3a 55%, #332f26 100%);
+  --hero-knot: #211c15;          /* on paper the knot is near-black, like the mark */
+  --hero-glint: #c8a860;         /* and the light on it is the gold */
   /* Display gold on paper: the bronze logo ramp reads as grey at 6rem, so the
      gilded words keep real gold here. Its lightest stop clears 3:1 on cream,
      the large-text floor. */
@@ -234,8 +238,8 @@ body.is-doc::before {
   opacity: 0.09;
 }
 
-/* The landing's hero is the wallpaper painting, which carries its own cloud
-   line-work; the contour overlay on top of it only doubled the strokes. */
+/* The landing draws its own atmosphere (the glyph field in the hero); the
+   contour overlay on top of it would only compete with the characters. */
 body:has(.home-main)::before {
   display: none;
 }
@@ -663,36 +667,18 @@ kbd {
   padding: var(--header-h) 1.25rem 0;
 }
 
-/* The hero art: the brand wallpaper (ink, gold leaf, brushed cloud; the plain
-   cut, since the marked one centres the logo right behind the headline),
-   full-bleed across the top of the page. The copy sits centered on top of it,
-   so the seating scrim is a vertical veil, heaviest where the headline is and
-   dissolving before the showcase frame arrives. */
+/* The hero art is the ring knot drawn in glyphs (home-ascii.js); the page
+   behind it stays the plain night so the characters carry the light. One
+   soft gold glow sits under the art column, nothing under the copy. */
 .home-main::before {
   content: "";
   position: absolute;
   top: 0;
   right: 0;
   left: 0;
-  height: min(115vh, 68rem);
-  /* The painting is busier than a photograph, so a third, oval veil sits
-     right under the copy column: the gold leaf keeps the edges and never
-     runs behind the lede or the buttons. */
-  background:
-    radial-gradient(42rem 26rem at 50% 44%, rgb(8 10 17 / 0.72), rgb(8 10 17 / 0) 72%),
-    radial-gradient(64rem 30rem at 50% 78%, rgb(8 10 17 / 0.88), rgb(8 10 17 / 0) 70%),
-    linear-gradient(180deg, rgb(6 8 14 / 0.62) 0%, rgb(6 8 14 / 0.44) 38%, rgb(6 8 14 / 0.3) 62%, rgb(8 10 17 / 0) 80%),
-    url("../images/wallpaper.webp") 50% 40% / cover no-repeat;
-  -webkit-mask: linear-gradient(180deg, #000 48%, transparent 84%);
-  mask: linear-gradient(180deg, #000 48%, transparent 84%);
-}
-
-/* On paper the photograph flips to ink: invert turns the night to cream and
-   the scrims to paper wash, and the half-turn hue rotation brings the rings
-   back from the blue that inversion leaves to their own dark bronze. */
-:root[data-theme="light"] .home-main::before {
-  filter: invert(1) hue-rotate(180deg) saturate(0.82);
-  opacity: 0.9;
+  height: min(100vh, 60rem);
+  pointer-events: none;
+  background: radial-gradient(34rem 30rem at 74% 42%, rgb(var(--accent-rgb) / 0.1), rgb(var(--accent-rgb) / 0) 70%);
 }
 
 .home-hero,
@@ -708,26 +694,63 @@ kbd {
   margin: 0 auto;
 }
 
-/* Centered over the artwork: the headline is the composition now, the ring
-   knot its halo. Height leaves the showcase frame peeking above the fold so
+/* Two columns on one axis: the copy left, the knot right, each taking half
+   the home width. Height leaves the showcase frame peeking above the fold so
    the page says "scroll" without an arrow. */
 .home-hero {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+  gap: 2rem 3rem;
   align-items: center;
-  justify-content: center;
   min-height: calc(88dvh - var(--header-h));
-  padding: var(--space-7) 0 2.6rem;
-  text-align: center;
+  padding: var(--space-6) 0 2.6rem;
 }
 
 .hero-copy {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  /* Explicit width: as a centered column flex item, fit-content sizing would
-     let the nowrap install one-liner push this past narrow viewports. */
-  width: min(100%, 880px);
+  align-items: flex-start;
+  /* Explicit width: as a flex column, fit-content sizing would let the
+     nowrap install one-liner push this past narrow viewports. */
+  width: min(100%, 40rem);
+  text-align: left;
+}
+
+/* The art box is square and owns its pixels: the canvas fills it, the plain
+   mark underneath is what a no-script visit sees. */
+.hero-art {
+  position: relative;
+  width: min(100%, 34rem);
+  aspect-ratio: 1;
+  justify-self: end;
+  order: 1;
+}
+
+.hero-art .hero-mark {
+  position: absolute;
+  inset: 12%;
+  width: 76%;
+  height: 76%;
+  object-fit: contain;
+  opacity: 0.9;
+}
+
+html.js .hero-art .hero-mark {
+  display: none;
+}
+
+.hero-ascii {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: default;
+  touch-action: pan-y;
+}
+
+html:not(.js) .hero-ascii {
+  display: none;
 }
 
 .home-kicker {
@@ -791,7 +814,7 @@ kbd {
 .home-actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 0.75rem;
   margin-top: 1.8rem;
 }
@@ -864,7 +887,7 @@ kbd {
 .install-tabs {
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 0.3rem;
   padding: 0.5rem 0.6rem;
   border-bottom: 1px solid var(--line-soft);
@@ -980,20 +1003,62 @@ kbd {
   perspective: 1100px;
 }
 
-/* The rail above the frame names the interaction, in the drafting-table
-   mono-caps voice herdr uses over its session frame. */
-.showcase-rail {
+/* Section rails: one mono-caps line on a hairline, an index number first,
+   in the drafting-table voice the hero kicker set. Every section below the
+   hero opens with one, so the page reads as numbered plates. */
+.home-rail {
+  grid-column: 1 / -1;
   display: flex;
   justify-content: space-between;
   gap: 1rem;
-  width: min(100%, 1180px);
-  margin-bottom: 0.65rem;
+  width: 100%;
+  position: relative;
+  padding-top: 0.8rem;
   color: var(--quiet);
   font-family: var(--font-mono);
   font-size: 0.7rem;
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
+}
+
+/* The hairline is drawn by the scene (motion block): a gold lead the width
+   of the index number, then the grey rule running out from it. */
+.home-rail::before,
+.home-rail::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 1px;
+  transform-origin: left;
+}
+
+.home-rail::before {
+  width: 100%;
+  background: var(--line);
+}
+
+.home-rail::after {
+  width: 2.4rem;
+  background: var(--accent);
+}
+
+.home-rail > span {
+  display: inline-flex;
+  align-items: baseline;
+}
+
+.home-rail b {
+  margin-right: 1em;
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+/* The showcase's rail also names the interaction, on the right. */
+.showcase-rail {
+  width: min(100%, 1180px);
+  margin-bottom: 0.65rem;
 }
 
 .showcase-rail-hint {
@@ -1414,12 +1479,16 @@ kbd {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 3.5rem 4rem;
   align-items: center;
-  padding: 2rem 0 var(--space-8);
+  padding: 1rem 0 var(--space-8);
 }
 
-/* A panel of the ink-and-gold wallpaper with the real Space-menu capture
-   resting on it as a window, offset toward the bottom-right so the art keeps
-   the top-left corner. Rectangular, like every other capture on the page: a
+.home-structure .home-rail {
+  margin-bottom: -0.5rem;
+}
+
+/* A panel of the hero's dust field with the real Space-menu capture resting
+   on it as a window, offset toward the bottom-right so the field keeps the
+   top-left corner. Rectangular, like every other capture on the page: a
    terminal cropped to a circle lost its own edges. */
 .structure-art {
   position: relative;
@@ -1430,8 +1499,10 @@ kbd {
   border: 1px solid rgb(var(--accent-rgb) / 0.3);
   border-radius: var(--radius);
   background:
-    radial-gradient(90% 80% at 70% 70%, rgb(4 5 10 / 0.6), transparent 70%),
-    #0a0a0b url("../images/wallpaper.webp") left / cover;
+    radial-gradient(90% 80% at 70% 70%, var(--bg) 0%, transparent 70%),
+    radial-gradient(circle at 1px 1px, rgb(var(--accent-rgb) / 0.3) 1px, transparent 1.6px) 0 0 / 16px 16px,
+    radial-gradient(70% 60% at 22% 18%, rgb(var(--accent-rgb) / 0.16), transparent 72%),
+    var(--bg-soft);
   box-shadow: var(--shadow-soft);
 }
 
@@ -1519,9 +1590,9 @@ kbd {
 .home-flow {
   display: grid;
   grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr);
-  gap: 4.5rem;
+  gap: 2.8rem 4.5rem;
   align-items: start;
-  padding: 2rem 0 var(--space-8);
+  padding: 1rem 0 var(--space-8);
 }
 
 /* Parked about mid-screen, but never closer to the header than 2rem: on a
@@ -1536,6 +1607,7 @@ kbd {
 }
 
 .flow-steps {
+  counter-reset: step;
   position: relative;
   margin: 2.4rem 0 0;
   padding: 0;
@@ -1570,6 +1642,24 @@ kbd {
   font-weight: 720;
   letter-spacing: -0.01em;
   transition: color var(--transition);
+}
+
+/* Each step is numbered in the rail's mono voice; the live one turns gold. */
+.flow-steps span::before {
+  counter-increment: step;
+  content: "0" counter(step);
+  display: inline-block;
+  min-width: 2.4em;
+  color: var(--quiet);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  vertical-align: 0.2em;
+}
+
+html.js .flow-steps li.is-active span::before {
+  color: var(--accent);
 }
 
 /* Hangul wraps between words, not mid-syllable-run. */
@@ -1668,10 +1758,13 @@ html.js .flow-shot.is-active .flow-shot-frame {
 /* A pool of gold light under the seam: the one place below the hero where
    the page glows, because it is where gori hands its work to something else. */
 .home-agent {
-  padding: 4.5rem 0 5.5rem;
-  border-top: 1px solid var(--line);
+  padding: 1rem 0 5.5rem;
   text-align: center;
   background: radial-gradient(46rem 20rem at 50% 64%, rgb(var(--accent-rgb) / 0.09), transparent 70%);
+}
+
+.home-agent .home-rail {
+  margin-bottom: 3.2rem;
 }
 
 .home-agent h2 {
@@ -1714,7 +1807,6 @@ html.js .flow-shot.is-active .flow-shot-frame {
   background:
     linear-gradient(var(--bg-panel), var(--bg-panel)) padding-box,
     linear-gradient(var(--seam-rim, 90deg), rgb(var(--ink-rgb) / 0.16) 45%, rgb(var(--accent-rgb) / 0.6)) border-box;
-  box-shadow: var(--shadow-soft);
   text-align: left;
 }
 
@@ -2002,8 +2094,7 @@ html.js .flow-shot.is-active .flow-shot-frame {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-7);
   align-items: center;
-  padding: 4.5rem 0 var(--space-8);
-  border-top: 1px solid var(--line);
+  padding: 1rem 0 var(--space-8);
 }
 
 .meaning-word {
@@ -2958,6 +3049,31 @@ nav.pagination a:hover,
   text-align: center;
 }
 
+/* The knot in glyphs (partials/glyph-knot.html): a <pre> that is art, not
+   code, so the code-block chrome comes off and the wordmark's gilding goes
+   on. Used on the field guide's cover and the 404 page. */
+.glyph-knot {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: var(--grad-logo);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: var(--accent);
+  font: 9px/1.04 var(--font-mono);
+  white-space: pre;
+}
+
+.notfound-main .glyph-knot {
+  margin: 0 0 1.4rem;
+  font-size: 8px;
+  opacity: 0.8;
+}
+
 .notfound-code {
   margin: 0;
   color: var(--accent);
@@ -3312,12 +3428,189 @@ html.search-lock body {
   font-size: 0.68rem;
 }
 
+/* --- The opening scene: hero and showcase pinned, scrubbed by scroll ---- */
+
+/* home.js writes --p1 (the copy dismissing, the knot centring) and --p2 (the
+   knot dissolving, the terminal rising) onto .home-opening as the reader
+   scrolls through its 240vh; everything in here reads those two numbers, so
+   the scene runs backwards as cleanly as forwards. Gated on html.js and a
+   wide, tall, motion-allowing viewport: everywhere else the opening is the
+   two sections in plain flow and none of this applies. */
+.home-opening {
+  --p1: 0;
+  --p2: 0;
+  position: relative;
+}
+
+.home-index {
+  display: none;
+}
+
+@media (min-width: 861px) and (min-height: 640px) and (prefers-reduced-motion: no-preference) {
+  html.js .home-opening {
+    height: 240vh;
+  }
+
+  html.js .home-stage {
+    position: sticky;
+    top: var(--header-h);
+    display: grid;
+    height: calc(100vh - var(--header-h));
+    overflow: clip;
+  }
+
+  /* Both acts share the one cell; the showcase sits on top. */
+  html.js .home-stage > .home-hero,
+  html.js .home-stage > .home-showcase {
+    grid-area: 1 / 1;
+    align-self: center;
+  }
+
+  html.js .home-stage > .home-hero {
+    min-height: 0;
+    height: 100%;
+    padding: 0 0 2rem;
+  }
+
+  /* Act one: the copy lifts away and the knot crosses to the middle, a
+     little larger, with the light running over it (home-ascii.js, from the
+     same --p1). */
+  html.js .home-stage .hero-copy {
+    opacity: calc(1 - var(--p1) * 1.25);
+    transform: translateY(calc(var(--p1) * -56px));
+    will-change: opacity, transform;
+  }
+
+  html.js .home-opening.is-dismissed .hero-copy {
+    visibility: hidden;
+  }
+
+  html.js .home-stage .hero-art {
+    opacity: calc(1 - var(--p2));
+    transform:
+      translate(calc(var(--p1) * var(--art-dx, 0px)), calc(var(--p1) * var(--art-dy, 0px)))
+      scale(calc(1 + 0.18 * var(--p1)));
+    transform-origin: center;
+    will-change: transform, opacity;
+  }
+
+  /* Act two: the terminal rises into the knot's place as it scatters. */
+  html.js .home-stage > .home-showcase {
+    padding: 0;
+    opacity: var(--p2);
+    transform: translateY(calc((1 - var(--p2)) * 34vh));
+    pointer-events: none;
+    will-change: transform, opacity;
+  }
+
+  html.js .home-stage .showcase-frame {
+    transform: rotateX(calc((1 - var(--p2)) * 9deg)) scale(calc(0.94 + 0.06 * var(--p2)));
+    transform-origin: 50% 100%;
+    /* Its own layer, so the scale is composited instead of re-rastering
+       the frame, its capture and its wide shadows every frame. */
+    will-change: transform;
+  }
+
+  html.js .home-opening.is-pre > .home-stage > .home-showcase {
+    visibility: hidden;
+  }
+
+  html.js .home-opening.is-live > .home-stage > .home-showcase {
+    pointer-events: auto;
+  }
+
+  /* The index: five stops in the right gutter, the current one lit. The
+     label floats out to the left of the number on hover only, so the column
+     of numbers never shifts and nothing sits on the content at rest. */
+  html.js .home-index {
+    position: fixed;
+    z-index: 5;
+    top: 50%;
+    right: 0.8rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    transform: translateY(-50%);
+  }
+
+  .home-index a {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    color: var(--quiet);
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-decoration: none;
+    text-transform: uppercase;
+    transition: color var(--transition);
+  }
+
+  .home-index span {
+    position: absolute;
+    top: 50%;
+    right: calc(100% + 0.5rem);
+    padding: 0.2rem 0.5rem;
+    border-radius: var(--radius-xs);
+    background: var(--bg-panel);
+    white-space: nowrap;
+    opacity: 0;
+    transform: translate(6px, -50%);
+    pointer-events: none;
+    transition: opacity var(--transition), transform var(--transition);
+  }
+
+  .home-index b {
+    position: relative;
+    font-weight: 600;
+    padding-right: 1.1rem;
+  }
+
+  /* The stop itself: a hairline tick that turns gold and grows when current. */
+  .home-index b::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: 0;
+    width: 0.55rem;
+    height: 1px;
+    background: currentColor;
+    transform: translateY(-50%);
+    transition: width var(--transition), background var(--transition);
+  }
+
+  .home-index a:hover,
+  .home-index a:focus-visible,
+  .home-index a[aria-current] {
+    color: var(--accent-strong);
+  }
+
+  .home-index a:hover span,
+  .home-index a:focus-visible span {
+    opacity: 1;
+    transform: translate(0, -50%);
+  }
+
+  .home-index a[aria-current] b::after {
+    width: 0.95rem;
+    background: var(--accent);
+  }
+}
+
+@media (max-width: 1100px) {
+  html.js .home-index {
+    display: none;
+  }
+}
+
 /* --- Motion ------------------------------------------------------------ */
 /* Everything that moves sits behind two gates: this reduced-motion query,
    and html.js around the scroll reveals. A no-script visit, or motion off,
-   renders the page static and complete. home.js flips .in on each .rv as it
-   scrolls up; only the hero animates on load, because it is the only part
-   guaranteed to be on screen while a load animation runs. */
+   renders the page static and complete. home.js eases a scroll progress onto
+   each [data-scene] section; only the hero animates on load, because it is
+   the only part guaranteed to be on screen while a load animation runs. */
 @media (prefers-reduced-motion: no-preference) {
   /* Load: the hero copy steps in top to bottom. */
   .hero-copy > * {
@@ -3345,179 +3638,236 @@ html.search-lock body {
     animation: seam-run 2.6s ease-in-out infinite alternate;
   }
 
-  /* Scroll reveals. Base: fade and rise as one piece. Sections whose parts
-     carry the movement instead pin their own transform to none below, so
-     the choreography reads from the parts, not the whole. */
-  html.js .rv {
-    opacity: 0;
-    transform: translateY(26px);
-    transition: opacity 700ms cubic-bezier(0.16, 1, 0.3, 1), transform 700ms cubic-bezier(0.16, 1, 0.3, 1);
+  /* Scene progress. home.js eases one number, --sp (0 arriving .. 1 in
+     place), onto every [data-scene] element as it climbs the viewport, and
+     each section spends it on its own choreography below. --s1..--s4 are
+     the same number on a stagger, so parts can follow one another. The
+     fallback of 1 keeps a no-script page, and anything home.js never
+     reaches, drawn complete. */
+  [data-scene] {
+    --s1: clamp(0, calc(var(--sp, 1) / 0.6), 1);
+    --s2: clamp(0, calc((var(--sp, 1) - 0.14) / 0.6), 1);
+    --s3: clamp(0, calc((var(--sp, 1) - 0.28) / 0.6), 1);
+    --s4: clamp(0, calc((var(--sp, 1) - 0.42) / 0.58), 1);
   }
 
-  html.js .rv.in {
-    opacity: 1;
-    transform: none;
+  /* Every section opens the same way: the rule draws out from the index
+     number, the number fades up, the label is uncovered left to right, and
+     the whole rail settles by a few pixels. */
+  [data-scene] .home-rail::before {
+    transform: scaleX(var(--s1));
   }
 
-  /* Showcase: the capture tips flat as it arrives, a screen turned to face
-     you. The perspective lives on .home-showcase. */
-  html.js .home-showcase.rv .showcase-frame {
-    transform: rotateX(9deg) scale(0.97);
-    transition: transform 900ms cubic-bezier(0.16, 1, 0.3, 1);
+  [data-scene] .home-rail::after {
+    transform: scaleX(var(--s2));
   }
 
-  html.js .home-showcase.rv.in .showcase-frame {
-    transform: none;
+  [data-scene] .home-rail b {
+    opacity: var(--s1);
+    transform: translateY(calc((1 - var(--s1)) * 6px));
   }
 
-  /* Paths: the three rails step in one after another. */
-  html.js .home-paths.rv {
-    transform: none;
+  [data-scene] .home-rail > span {
+    clip-path: inset(0 calc((1 - var(--s2)) * 100%) 0 0);
   }
 
-  html.js .home-paths.rv .path-link {
-    opacity: 0;
-    transform: translateY(18px);
-    transition: opacity 700ms cubic-bezier(0.16, 1, 0.3, 1), transform 700ms cubic-bezier(0.16, 1, 0.3, 1);
+  [data-scene] .home-rail .showcase-rail-hint {
+    opacity: var(--s3);
   }
 
-  html.js .home-paths.rv .path-link:nth-child(2) {
-    transition-delay: 90ms;
+  /* Headings rise out of a mask at their own baseline, the way a line of
+     type comes up on a press; the gilded word takes a sweep of light as
+     the sheen crosses it. */
+  .home-structure h2,
+  .home-flow h2,
+  .home-agent h2,
+  .home-meaning .meaning-word {
+    clip-path: inset(-0.2em 0 calc((1 - var(--s1)) * 110%) 0);
+    transform: translateY(calc((1 - var(--s1)) * 0.35em));
   }
 
-  html.js .home-paths.rv .path-link:nth-child(3) {
-    transition-delay: 180ms;
+  [data-scene] .gild {
+    background-size: 260% 100%;
+    background-position: calc((1 - var(--s3)) * 160%) 0;
   }
 
-  html.js .home-paths.rv.in .path-link {
-    opacity: 1;
-    transform: none;
+  /* The name spells itself out: wide-tracked and loose, tightening into
+     the word as it lands. */
+  .home-meaning .meaning-word {
+    letter-spacing: calc(-0.02em + (1 - var(--s1)) * 0.32em);
   }
 
-  /* Structure: art and copy close in from opposite sides, then the three
-     hairline entries step in. */
-  html.js .home-structure.rv {
-    transform: none;
+  /* Paths: the three rails rise one after another. */
+  .home-paths .path-link:nth-child(1) {
+    opacity: var(--s1);
+    transform: translateY(calc((1 - var(--s1)) * 30px));
   }
 
-  html.js .home-structure.rv .structure-art,
-  html.js .home-structure.rv .structure-copy,
-  html.js .home-structure.rv .structure-grid > div {
-    opacity: 0;
-    transition: opacity 750ms cubic-bezier(0.16, 1, 0.3, 1), transform 750ms cubic-bezier(0.16, 1, 0.3, 1);
+  .home-paths .path-link:nth-child(2) {
+    opacity: var(--s2);
+    transform: translateY(calc((1 - var(--s2)) * 30px));
   }
 
-  html.js .home-structure.rv .structure-art {
-    transform: translateX(-26px) scale(0.98);
+  .home-paths .path-link:nth-child(3) {
+    opacity: var(--s3);
+    transform: translateY(calc((1 - var(--s3)) * 30px));
   }
 
-  html.js .home-structure.rv .structure-copy {
-    transform: translateX(24px);
-    transition-delay: 90ms;
+  /* Structure: the panel and the copy close in from opposite sides while
+     the window inside the panel drifts up a little slower than the page,
+     then the three hairline entries step in. */
+  .home-structure .structure-art {
+    clip-path: inset(0 calc((1 - var(--s1)) * 100%) 0 0 round var(--radius));
+    transform: translateX(calc((1 - var(--s1)) * -24px));
   }
 
-  html.js .home-structure.rv .structure-grid > div {
-    transform: translateY(14px);
+  .home-structure .structure-art img {
+    will-change: transform;
+    opacity: var(--s2);
+    transform: translate(calc((1 - var(--s2)) * 40px), calc((1 - var(--sp, 1)) * 72px)) rotate(calc((1 - var(--s2)) * -1.5deg));
   }
 
-  html.js .home-structure.rv .structure-grid > div:nth-child(1) {
-    transition-delay: 260ms;
+  .home-structure .structure-copy > p {
+    opacity: var(--s2);
+    transform: translateY(calc((1 - var(--s2)) * 18px));
   }
 
-  html.js .home-structure.rv .structure-grid > div:nth-child(2) {
-    transition-delay: 350ms;
+  .home-structure .structure-grid > div:nth-child(1) {
+    opacity: var(--s2);
+    transform: translateY(calc((1 - var(--s2)) * 18px));
   }
 
-  html.js .home-structure.rv .structure-grid > div:nth-child(3) {
-    transition-delay: 440ms;
+  .home-structure .structure-grid > div:nth-child(2) {
+    opacity: var(--s3);
+    transform: translateY(calc((1 - var(--s3)) * 18px));
   }
 
-  html.js .home-structure.rv.in .structure-art,
-  html.js .home-structure.rv.in .structure-copy,
-  html.js .home-structure.rv.in .structure-grid > div {
-    opacity: 1;
-    transform: none;
+  .home-structure .structure-grid > div:nth-child(3) {
+    opacity: var(--s4);
+    transform: translateY(calc((1 - var(--s4)) * 18px));
   }
 
-  /* Agent: the nodes arrive from both ends and the wire closes the seam,
-     growing outward from the MCP chip at its middle. */
-  html.js .home-agent.rv {
-    transform: none;
+  /* Flow: the rail's title and steps settle up; each capture rises into its
+     frame as it comes (the focus dimming, once it is there, is the
+     .is-active rule beside the frame). */
+  .flow-rail h2 {
+    opacity: var(--s1);
+    transform: translateY(calc((1 - var(--s1)) * 24px));
   }
 
-  html.js .home-agent.rv .seam-node,
-  html.js .home-agent.rv .seam-wire,
-  html.js .home-agent.rv .seam-mcp,
-  html.js .home-agent.rv .agent-link {
-    transition: opacity 700ms cubic-bezier(0.16, 1, 0.3, 1), transform 700ms cubic-bezier(0.16, 1, 0.3, 1);
+  .flow-rail .flow-steps {
+    opacity: var(--s2);
+    transform: translateY(calc((1 - var(--s2)) * 24px));
   }
 
-  html.js .home-agent.rv .seam-node:first-child {
-    transform: translateX(-26px);
+  /* The figure is the scene and is measured for its own trigger, so it
+     must not move: the rise and tilt go on the frame inside it, through the
+     individual transform properties, which compose with the focus dim's
+     own `transform` there. */
+  .flow-shot {
+    opacity: calc(0.15 + 0.85 * var(--s1));
+    perspective: 1400px;
   }
 
-  html.js .home-agent.rv .seam-node:last-child {
-    transform: translateX(26px);
+  .flow-shot .flow-shot-frame {
+    translate: 0 calc((1 - var(--s1)) * 90px);
+    rotate: x calc((1 - var(--s1)) * 14deg);
+    scale: calc(0.94 + 0.06 * var(--s1));
+    transform-origin: 50% 100%;
+    will-change: transform;
   }
 
-  html.js .home-agent.rv .seam-wire {
-    transform: scaleX(0);
-    transition-delay: 220ms;
+  /* Agent: the title settles, the nodes arrive from both ends, the wire
+     closes the seam from its middle and the chip lands on it. */
+  .home-agent h2,
+  .home-agent .agent-intro {
+    opacity: var(--s1);
+    transform: translateY(calc((1 - var(--s1)) * 22px));
   }
 
-  html.js .home-agent.rv .seam-mcp {
-    transform: scale(0.85);
-    transition-delay: 220ms;
+  .home-agent .agent-seam {
+    perspective: 1200px;
   }
 
-  html.js .home-agent.rv .agent-link {
-    opacity: 0;
-    transform: translateY(10px);
-    transition-delay: 420ms;
+  .home-agent .seam-node:first-child {
+    opacity: var(--s2);
+    transform: translateX(calc((1 - var(--s2)) * -64px)) rotateY(calc((1 - var(--s2)) * 22deg));
+    transform-origin: 100% 50%;
   }
 
-  html.js .home-agent.rv.in .seam-node,
-  html.js .home-agent.rv.in .seam-wire,
-  html.js .home-agent.rv.in .seam-mcp {
-    transform: none;
+  .home-agent .seam-node:last-child {
+    opacity: var(--s2);
+    transform: translateX(calc((1 - var(--s2)) * 64px)) rotateY(calc((1 - var(--s2)) * -22deg));
+    transform-origin: 0 50%;
   }
 
-  html.js .home-agent.rv.in .agent-link {
-    opacity: 1;
-    transform: none;
+  .home-agent .seam-wire {
+    transform: scaleX(var(--s3));
   }
 
-  /* The name: the entry settles up while the mark breathes in from slightly
-     small, one piece each, for the weave. */
-  html.js .home-meaning.rv {
-    transform: none;
+  /* The running light waits for the wire to be drawn. */
+  .home-agent .seam-pulse::before {
+    animation-play-state: paused;
   }
 
-  html.js .home-meaning.rv .meaning-entry,
-  html.js .home-meaning.rv .meaning-chain {
-    transition: transform 800ms cubic-bezier(0.16, 1, 0.3, 1);
+  .home-agent.is-in .seam-pulse::before {
+    animation-play-state: running;
   }
 
-  html.js .home-meaning.rv .meaning-entry {
-    transform: translateY(20px);
+  .home-agent .seam-link-label {
+    opacity: var(--s3);
+    transform: translateY(calc((1 - var(--s3)) * -8px));
   }
 
-  html.js .home-meaning.rv .meaning-chain {
-    transform: scale(0.94);
-    transition-delay: 140ms;
+  .home-agent .seam-mcp {
+    opacity: var(--s4);
+    transform: translateY(calc((1 - var(--s4)) * -14px)) scale(calc(0.7 + 0.3 * var(--s4)));
   }
 
-  html.js .home-meaning.rv.in .meaning-entry,
-  html.js .home-meaning.rv.in .meaning-chain {
-    transform: none;
+  .home-agent .agent-link {
+    opacity: var(--s4);
+    transform: translateY(calc((1 - var(--s4)) * 12px));
+  }
+
+  /* The name: the entry settles up while the two side rings slide in from
+     apart and weave onto the link, the chain closing as the reader arrives. */
+  .home-meaning .meaning-pron {
+    opacity: var(--s2);
+    transform: translateY(calc((1 - var(--s2)) * 12px));
+  }
+
+  .home-meaning .meaning-def:nth-of-type(1) {
+    opacity: var(--s3);
+    transform: translateY(calc((1 - var(--s3)) * 16px));
+  }
+
+  .home-meaning .meaning-def:nth-of-type(2) {
+    opacity: var(--s4);
+    transform: translateY(calc((1 - var(--s4)) * 16px));
+  }
+
+  .home-meaning .meaning-chain {
+    opacity: var(--s1);
+  }
+
+  .home-meaning .chain-ring-side:first-child {
+    transform: translateX(calc((1 - var(--s2)) * -96px)) rotate(calc((1 - var(--s2)) * -40deg));
+  }
+
+  .home-meaning .chain-ring-side:last-child {
+    transform: translateX(calc((1 - var(--s2)) * 96px)) rotate(calc((1 - var(--s2)) * 40deg));
+  }
+
+  .home-meaning .chain-ring-link {
+    transform: scale(calc(0.8 + 0.2 * var(--s3))) rotate(calc((1 - var(--s3)) * 30deg));
   }
 }
 
 /* The stacked seam (narrow layout) turns the wire on its end: the closing
    scale and the running light swap to the vertical axis. */
 @media (max-width: 860px) and (prefers-reduced-motion: no-preference) {
-  html.js .home-agent.rv .seam-wire {
-    transform: scaleY(0);
+  .home-agent .seam-wire {
+    transform: scaleY(var(--s3));
   }
 
   .seam-pulse::before {
@@ -3604,16 +3954,22 @@ html.search-lock body {
     padding: 2.2rem 0 2.5rem;
   }
 
-  /* Stacked, the centered copy sits over the photograph's full width: the
-     veil deepens and the frame slides toward the marble left of the ring
-     knot so the bright crossing stays out from under the lede. */
+  /* Stacked: the knot sits above the copy at a hand's width, the glow
+     follows it to the middle. */
+  .home-hero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.2rem;
+  }
+
+  .hero-art {
+    width: min(100%, 17rem);
+    justify-self: start;
+    order: -1;
+  }
+
   .home-main::before {
-    height: min(90vh, 46rem);
-    background:
-      radial-gradient(30rem 24rem at 50% 42%, rgb(8 10 17 / 0.7), rgb(8 10 17 / 0) 72%),
-      radial-gradient(40rem 22rem at 50% 72%, rgb(8 10 17 / 0.9), rgb(8 10 17 / 0) 72%),
-      linear-gradient(180deg, rgb(6 8 14 / 0.72) 0%, rgb(6 8 14 / 0.5) 42%, rgb(6 8 14 / 0) 78%),
-      url("../images/wallpaper.webp") 30% 40% / cover no-repeat;
+    height: min(70vh, 34rem);
+    background: radial-gradient(22rem 20rem at 30% 24%, rgb(var(--accent-rgb) / 0.1), rgb(var(--accent-rgb) / 0) 70%);
   }
 
   .home-hero h1 {
@@ -3666,6 +4022,11 @@ html.search-lock body {
   .home-flow {
     grid-template-columns: 1fr;
     gap: 0;
+  }
+
+  /* Stacked, the rail and the title are neighbours in the same column. */
+  .home-flow .home-rail {
+    margin-bottom: 1.6rem;
   }
 
   .flow-rail {

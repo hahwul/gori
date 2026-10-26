@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Docs: a redrawn landing built around the ring knot in monospace glyphs, opening as one scroll-driven scene with a glint lapping the knot, and the doc pages in the same glyph voice (#1773)
+
 ## v0.9.0
 
 ### New features

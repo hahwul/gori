@@ -1,38 +1,3 @@
-/* Landing-page scroll reveals: flip .in on each .rv element as it enters the
-   viewport, so the sections below the fold animate when they are actually
-   seen (the hero animates on load from CSS alone). Everything these classes
-   hide sits behind html.js and prefers-reduced-motion in the stylesheet, so
-   without this script, or with motion off, the page renders complete. */
-(function () {
-  var main = document.querySelector(".home-main");
-  if (!main) return;
-  var targets = main.querySelectorAll(".rv");
-  if (!targets.length) return;
-
-  function showAll() {
-    for (var i = 0; i < targets.length; i++) targets[i].classList.add("in");
-  }
-
-  if (!("IntersectionObserver" in window)) {
-    showAll();
-    return;
-  }
-
-  var io = new IntersectionObserver(function (entries) {
-    for (var i = 0; i < entries.length; i++) {
-      if (!entries[i].isIntersecting) continue;
-      entries[i].target.classList.add("in");
-      io.unobserve(entries[i].target);
-    }
-  }, { rootMargin: "0px 0px -10% 0px", threshold: 0.1 });
-
-  for (var i = 0; i < targets.length; i++) io.observe(targets[i]);
-
-  /* Print never scrolls, so the observer would leave everything below the
-     fold hidden; resolve it all before the page is laid out for paper. */
-  window.addEventListener("beforeprint", showAll);
-})();
-
 /* Showcase tabs: each button names a real TUI capture; clicking swaps the
    framed screenshot to that tab's SVG. The theme-swap in footer.html keys off
    img.dataset.darkSrc, so the swap rewrites that too — a tab picked under the
@@ -263,4 +228,185 @@
   }, { rootMargin: "-45% 0px -45% 0px", threshold: 0 });
 
   for (var i = 0; i < shots.length; i++) io.observe(shots[i]);
+})();
+
+/* Scenes. One eased progress per [data-scene] section, written as --sp
+   (0 arriving .. 1 in place) for the stylesheet's choreography, and the
+   opening's two acts, --p1 and --p2, on the pinned stage. The target comes
+   from the scroll position; what is shown chases it with an exponential
+   ease, so a wheel notch glides instead of jumping and the whole page keeps
+   one tempo. The loop runs only while something is still catching up. The
+   knot's canvas takes the opening's numbers through canvas.goriKnot. Under
+   reduced motion the values land at once (the stylesheet ignores them
+   anyway); without JavaScript --sp is never set and every fallback is 1. */
+(function () {
+  var reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+  var scenes = [];
+  var nodes = document.querySelectorAll("[data-scene]");
+  for (var i = 0; i < nodes.length; i++) scenes.push({ el: nodes[i], shown: -1, target: 0 });
+
+  var opening = document.getElementById("opening");
+  var stage = opening && opening.querySelector(".home-stage");
+  var art = opening && opening.querySelector(".hero-art");
+  var canvas = document.getElementById("heroAscii");
+  var open = opening && stage && art ? { shown: -1, target: 0, applied: -1 } : null;
+  if (!scenes.length && !open) return;
+
+  function clamp01(x) { return x < 0 ? 0 : x > 1 ? 1 : x; }
+
+  function smooth(a, b, x) {
+    var t = clamp01((x - a) / (b - a));
+    return t * t * (3 - 2 * t);
+  }
+
+  function pinned() {
+    return getComputedStyle(stage).position === "sticky";
+  }
+
+  /* Where the knot has to travel to sit in the middle of the stage. Measured
+     with the transform taken off, so the answer does not drift with --p1. */
+  function measure() {
+    if (!open) return;
+    var p1 = opening.style.getPropertyValue("--p1");
+    opening.style.setProperty("--p1", "0");
+    var s = stage.getBoundingClientRect(), a = art.getBoundingClientRect();
+    opening.style.setProperty("--art-dx", (s.left + s.width / 2 - (a.left + a.width / 2)) + "px");
+    opening.style.setProperty("--art-dy", (s.top + s.height / 2 - (a.top + a.height / 2)) + "px");
+    if (p1) opening.style.setProperty("--p1", p1);
+  }
+
+  /* A section's target: 0 as its top meets the bottom of the viewport, 1
+     once it has climbed 42% of the way up. */
+  function retarget() {
+    var vh = window.innerHeight;
+    for (var i = 0; i < scenes.length; i++) {
+      var top = scenes[i].el.getBoundingClientRect().top;
+      scenes[i].target = clamp01((vh - top) / (vh * 0.5));
+    }
+    if (open) {
+      if (pinned()) {
+        var t = opening.getBoundingClientRect().top + window.scrollY;
+        var travel = opening.offsetHeight - stage.offsetHeight;
+        open.target = travel > 0 ? clamp01((window.scrollY - t) / travel) : 0;
+      } else {
+        open.target = -1;
+      }
+    }
+  }
+
+  function applyOpening(p) {
+    if (p < 0) {
+      if (open.applied !== -1) {
+        open.applied = -1;
+        opening.style.removeProperty("--p1");
+        opening.style.removeProperty("--p2");
+        opening.classList.remove("is-pre", "is-live", "is-dismissed");
+        if (canvas && canvas.goriKnot) { canvas.goriKnot.light(0); canvas.goriKnot.scatter(0); }
+      }
+      return;
+    }
+    if (p === open.applied) return;
+    open.applied = p;
+    var p1 = smooth(0, 0.42, p);
+    var p2 = smooth(0.38, 0.86, p);
+    opening.style.setProperty("--p1", p1.toFixed(4));
+    opening.style.setProperty("--p2", p2.toFixed(4));
+    opening.classList.toggle("is-pre", p2 < 0.02);
+    opening.classList.toggle("is-live", p2 > 0.95);
+    opening.classList.toggle("is-dismissed", p1 > 0.6);
+    if (canvas && canvas.goriKnot) {
+      canvas.goriKnot.light(p1);
+      canvas.goriKnot.scatter(p2);
+    }
+  }
+
+  var raf = 0, last = 0;
+  function frame(now) {
+    raf = 0;
+    var dt = last ? Math.min(0.05, (now - last) / 1000) : 1 / 60;
+    last = now;
+    var k = reduced.matches ? 1 : 1 - Math.exp(-dt * 9);
+    var busy = false, i, sc;
+    for (i = 0; i < scenes.length; i++) {
+      sc = scenes[i];
+      if (sc.shown < 0) sc.shown = sc.target;
+      else sc.shown += (sc.target - sc.shown) * k;
+      if (Math.abs(sc.target - sc.shown) > 0.001) busy = true;
+      else sc.shown = sc.target;
+      sc.el.style.setProperty("--sp", sc.shown.toFixed(4));
+      sc.el.classList.toggle("is-in", sc.shown > 0.995);
+    }
+    if (open) {
+      if (open.target < 0 || open.shown < 0) open.shown = open.target;
+      else open.shown += (open.target - open.shown) * k;
+      if (open.target >= 0 && Math.abs(open.target - open.shown) > 0.0005) busy = true;
+      else open.shown = open.target;
+      applyOpening(open.shown);
+    }
+    if (busy) raf = requestAnimationFrame(frame);
+    else last = 0;
+  }
+
+  function wake() {
+    if (!raf) raf = requestAnimationFrame(frame);
+  }
+
+  function onScroll() { retarget(); wake(); }
+  function onResize() { measure(); retarget(); wake(); }
+
+  window.addEventListener("scroll", onScroll, { passive: true });
+  window.addEventListener("resize", onResize);
+  /* Fonts and images settle after the first layout; measure again. */
+  window.addEventListener("load", onResize);
+  /* Print never scrolls: land every scene before the page is laid out for paper. */
+  window.addEventListener("beforeprint", function () {
+    for (var i = 0; i < scenes.length; i++) scenes[i].el.style.setProperty("--sp", "1");
+  });
+
+  measure();
+  retarget();
+  wake();
+})();
+
+/* The section index on the right: light the stop whose section is crossing
+   the middle of the viewport, and land a click on the showcase at the end of
+   the opening's pin, where the terminal is actually standing. */
+(function () {
+  var index = document.getElementById("homeIndex");
+  if (!index || !("IntersectionObserver" in window)) return;
+  var links = index.querySelectorAll("a[href^='#']");
+  var byId = {};
+  var i;
+  for (i = 0; i < links.length; i++) byId[links[i].getAttribute("href").slice(1)] = links[i];
+
+  function current(id) {
+    for (var k in byId) {
+      if (k === id) byId[k].setAttribute("aria-current", "true");
+      else byId[k].removeAttribute("aria-current");
+    }
+  }
+
+  var opening = document.getElementById("opening");
+  var io = new IntersectionObserver(function (entries) {
+    for (var j = 0; j < entries.length; j++) {
+      if (!entries[j].isIntersecting) continue;
+      var el = entries[j].target;
+      current(el === opening ? "workbench" : el.id);
+    }
+  }, { rootMargin: "-40% 0px -55% 0px", threshold: 0 });
+
+  for (var id in byId) {
+    var target = id === "workbench" && opening ? opening : document.getElementById(id);
+    if (target) io.observe(target);
+  }
+
+  if (opening) {
+    byId.workbench.addEventListener("click", function (ev) {
+      var stage = opening.querySelector(".home-stage");
+      if (!stage || getComputedStyle(stage).position !== "sticky") return;
+      ev.preventDefault();
+      var top = opening.getBoundingClientRect().top + window.scrollY;
+      window.scrollTo({ top: top + opening.offsetHeight - stage.offsetHeight, behavior: "smooth" });
+    });
+  }
 })();
