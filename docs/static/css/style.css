@@ -1012,14 +1012,41 @@ html:not(.js) .hero-ascii {
   justify-content: space-between;
   gap: 1rem;
   width: 100%;
+  position: relative;
   padding-top: 0.8rem;
-  border-top: 1px solid var(--line);
   color: var(--quiet);
   font-family: var(--font-mono);
   font-size: 0.7rem;
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
+}
+
+/* The hairline is drawn by the scene (motion block): a gold lead the width
+   of the index number, then the grey rule running out from it. */
+.home-rail::before,
+.home-rail::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 1px;
+  transform-origin: left;
+}
+
+.home-rail::before {
+  width: 100%;
+  background: var(--line);
+}
+
+.home-rail::after {
+  width: 2.4rem;
+  background: var(--accent);
+}
+
+.home-rail > span {
+  display: inline-flex;
+  align-items: baseline;
 }
 
 .home-rail b {
@@ -3621,6 +3648,52 @@ html.search-lock body {
     --s4: clamp(0, calc((var(--sp, 1) - 0.42) / 0.58), 1);
   }
 
+  /* Every section opens the same way: the rule draws out from the index
+     number, the number fades up, the label is uncovered left to right, and
+     the whole rail settles by a few pixels. */
+  [data-scene] .home-rail::before {
+    transform: scaleX(var(--s1));
+  }
+
+  [data-scene] .home-rail::after {
+    transform: scaleX(var(--s2));
+  }
+
+  [data-scene] .home-rail b {
+    opacity: var(--s1);
+    transform: translateY(calc((1 - var(--s1)) * 6px));
+  }
+
+  [data-scene] .home-rail > span {
+    clip-path: inset(0 calc((1 - var(--s2)) * 100%) 0 0);
+  }
+
+  [data-scene] .home-rail .showcase-rail-hint {
+    opacity: var(--s3);
+  }
+
+  /* Headings rise out of a mask at their own baseline, the way a line of
+     type comes up on a press; the gilded word takes a sweep of light as
+     the sheen crosses it. */
+  .home-structure h2,
+  .home-flow h2,
+  .home-agent h2,
+  .home-meaning .meaning-word {
+    clip-path: inset(-0.2em 0 calc((1 - var(--s1)) * 110%) 0);
+    transform: translateY(calc((1 - var(--s1)) * 0.35em));
+  }
+
+  [data-scene] .gild {
+    background-size: 260% 100%;
+    background-position: calc((1 - var(--s3)) * 160%) 0;
+  }
+
+  /* The name spells itself out: wide-tracked and loose, tightening into
+     the word as it lands. */
+  .home-meaning .meaning-word {
+    letter-spacing: calc(-0.02em + (1 - var(--s1)) * 0.32em);
+  }
+
   /* Paths: the three rails rise one after another. */
   .home-paths .path-link:nth-child(1) {
     opacity: var(--s1);
@@ -3641,17 +3714,18 @@ html.search-lock body {
      the window inside the panel drifts up a little slower than the page,
      then the three hairline entries step in. */
   .home-structure .structure-art {
-    opacity: var(--s1);
-    transform: translateX(calc((1 - var(--s1)) * -44px)) scale(calc(0.97 + 0.03 * var(--s1)));
+    clip-path: inset(0 calc((1 - var(--s1)) * 100%) 0 0 round var(--radius));
+    transform: translateX(calc((1 - var(--s1)) * -24px));
   }
 
   .home-structure .structure-art img {
-    transform: translateY(calc((1 - var(--sp, 1)) * 56px));
+    opacity: var(--s2);
+    transform: translate(calc((1 - var(--s2)) * 40px), calc((1 - var(--sp, 1)) * 72px)) rotate(calc((1 - var(--s2)) * -1.5deg));
   }
 
-  .home-structure .structure-copy {
+  .home-structure .structure-copy > p {
     opacity: var(--s2);
-    transform: translateX(calc((1 - var(--s2)) * 44px));
+    transform: translateY(calc((1 - var(--s2)) * 18px));
   }
 
   .home-structure .structure-grid > div:nth-child(1) {
@@ -3682,9 +3756,14 @@ html.search-lock body {
     transform: translateY(calc((1 - var(--s2)) * 24px));
   }
 
+  .flow-shots {
+    perspective: 1400px;
+  }
+
   .flow-shot {
-    opacity: calc(0.2 + 0.8 * var(--s1));
-    transform: translateY(calc((1 - var(--s1)) * 70px));
+    opacity: calc(0.15 + 0.85 * var(--s1));
+    transform: translateY(calc((1 - var(--s1)) * 90px)) rotateX(calc((1 - var(--s1)) * 14deg)) scale(calc(0.94 + 0.06 * var(--s1)));
+    transform-origin: 50% 100%;
   }
 
   /* Agent: the title settles, the nodes arrive from both ends, the wire
@@ -3695,24 +3774,43 @@ html.search-lock body {
     transform: translateY(calc((1 - var(--s1)) * 22px));
   }
 
+  .home-agent .agent-seam {
+    perspective: 1200px;
+  }
+
   .home-agent .seam-node:first-child {
     opacity: var(--s2);
-    transform: translateX(calc((1 - var(--s2)) * -48px));
+    transform: translateX(calc((1 - var(--s2)) * -64px)) rotateY(calc((1 - var(--s2)) * 22deg));
+    transform-origin: 100% 50%;
   }
 
   .home-agent .seam-node:last-child {
     opacity: var(--s2);
-    transform: translateX(calc((1 - var(--s2)) * 48px));
+    transform: translateX(calc((1 - var(--s2)) * 64px)) rotateY(calc((1 - var(--s2)) * -22deg));
+    transform-origin: 0 50%;
   }
 
   .home-agent .seam-wire {
     transform: scaleX(var(--s3));
   }
 
-  .home-agent .seam-link-label,
-  .home-agent .seam-mcp {
+  /* The running light waits for the wire to be drawn. */
+  .home-agent .seam-pulse::before {
+    animation-play-state: paused;
+  }
+
+  .home-agent.is-in .seam-pulse::before {
+    animation-play-state: running;
+  }
+
+  .home-agent .seam-link-label {
     opacity: var(--s3);
-    transform: scale(calc(0.8 + 0.2 * var(--s3)));
+    transform: translateY(calc((1 - var(--s3)) * -8px));
+  }
+
+  .home-agent .seam-mcp {
+    opacity: var(--s4);
+    transform: translateY(calc((1 - var(--s4)) * -14px)) scale(calc(0.7 + 0.3 * var(--s4)));
   }
 
   .home-agent .agent-link {
@@ -3722,9 +3820,19 @@ html.search-lock body {
 
   /* The name: the entry settles up while the two side rings slide in from
      apart and weave onto the link, the chain closing as the reader arrives. */
-  .home-meaning .meaning-entry {
-    opacity: var(--s1);
-    transform: translateY(calc((1 - var(--s1)) * 24px));
+  .home-meaning .meaning-pron {
+    opacity: var(--s2);
+    transform: translateY(calc((1 - var(--s2)) * 12px));
+  }
+
+  .home-meaning .meaning-def:nth-of-type(1) {
+    opacity: var(--s3);
+    transform: translateY(calc((1 - var(--s3)) * 16px));
+  }
+
+  .home-meaning .meaning-def:nth-of-type(2) {
+    opacity: var(--s4);
+    transform: translateY(calc((1 - var(--s4)) * 16px));
   }
 
   .home-meaning .meaning-chain {
@@ -3732,15 +3840,15 @@ html.search-lock body {
   }
 
   .home-meaning .chain-ring-side:first-child {
-    transform: translateX(calc((1 - var(--s2)) * -56px));
+    transform: translateX(calc((1 - var(--s2)) * -96px)) rotate(calc((1 - var(--s2)) * -40deg));
   }
 
   .home-meaning .chain-ring-side:last-child {
-    transform: translateX(calc((1 - var(--s2)) * 56px));
+    transform: translateX(calc((1 - var(--s2)) * 96px)) rotate(calc((1 - var(--s2)) * 40deg));
   }
 
   .home-meaning .chain-ring-link {
-    transform: scale(calc(0.88 + 0.12 * var(--s2)));
+    transform: scale(calc(0.8 + 0.2 * var(--s3))) rotate(calc((1 - var(--s3)) * 30deg));
   }
 }
 

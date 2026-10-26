@@ -281,7 +281,7 @@
     var vh = window.innerHeight;
     for (var i = 0; i < scenes.length; i++) {
       var top = scenes[i].el.getBoundingClientRect().top;
-      scenes[i].target = clamp01((vh - top) / (vh * 0.42));
+      scenes[i].target = clamp01((vh - top) / (vh * 0.5));
     }
     if (open) {
       if (pinned()) {
@@ -334,6 +334,7 @@
       if (Math.abs(sc.target - sc.shown) > 0.001) busy = true;
       else sc.shown = sc.target;
       sc.el.style.setProperty("--sp", sc.shown.toFixed(4));
+      sc.el.classList.toggle("is-in", sc.shown > 0.995);
     }
     if (open) {
       if (open.target < 0 || open.shown < 0) open.shown = open.target;
