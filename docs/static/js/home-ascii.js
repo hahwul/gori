@@ -67,7 +67,7 @@
 
   function readTheme() {
     var cs = getComputedStyle(document.documentElement);
-    var a = hex(cs.getPropertyValue("--accent")) || [200, 168, 96];
+    var a = hex(cs.getPropertyValue("--hero-knot")) || hex(cs.getPropertyValue("--accent")) || [200, 168, 96];
     var g = hex(cs.getPropertyValue("--hero-glint")) || [255, 243, 207];
     dust = cs.getPropertyValue("--muted").trim() || dust;
     palette = [];
