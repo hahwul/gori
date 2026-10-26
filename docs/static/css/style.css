@@ -999,20 +999,35 @@ html:not(.js) .hero-ascii {
   perspective: 1100px;
 }
 
-/* The rail above the frame names the interaction, in the drafting-table
-   mono-caps voice herdr uses over its session frame. */
-.showcase-rail {
+/* Section rails: one mono-caps line on a hairline, an index number first,
+   in the drafting-table voice the hero kicker set. Every section below the
+   hero opens with one, so the page reads as numbered plates. */
+.home-rail {
+  grid-column: 1 / -1;
   display: flex;
   justify-content: space-between;
   gap: 1rem;
-  width: min(100%, 1180px);
-  margin-bottom: 0.65rem;
+  width: 100%;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--line);
   color: var(--quiet);
   font-family: var(--font-mono);
   font-size: 0.7rem;
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
+}
+
+.home-rail b {
+  margin-right: 1em;
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+/* The showcase's rail also names the interaction, on the right. */
+.showcase-rail {
+  width: min(100%, 1180px);
+  margin-bottom: 0.65rem;
 }
 
 .showcase-rail-hint {
@@ -1433,12 +1448,16 @@ html:not(.js) .hero-ascii {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 3.5rem 4rem;
   align-items: center;
-  padding: 2rem 0 var(--space-8);
+  padding: 1rem 0 var(--space-8);
 }
 
-/* A panel of the ink-and-gold wallpaper with the real Space-menu capture
-   resting on it as a window, offset toward the bottom-right so the art keeps
-   the top-left corner. Rectangular, like every other capture on the page: a
+.home-structure .home-rail {
+  margin-bottom: -0.5rem;
+}
+
+/* A panel of the hero's dust field with the real Space-menu capture resting
+   on it as a window, offset toward the bottom-right so the field keeps the
+   top-left corner. Rectangular, like every other capture on the page: a
    terminal cropped to a circle lost its own edges. */
 .structure-art {
   position: relative;
@@ -1449,8 +1468,10 @@ html:not(.js) .hero-ascii {
   border: 1px solid rgb(var(--accent-rgb) / 0.3);
   border-radius: var(--radius);
   background:
-    radial-gradient(90% 80% at 70% 70%, rgb(4 5 10 / 0.6), transparent 70%),
-    #0a0a0b url("../images/wallpaper.webp") left / cover;
+    radial-gradient(90% 80% at 70% 70%, var(--bg) 0%, transparent 70%),
+    radial-gradient(circle at 1px 1px, rgb(var(--accent-rgb) / 0.3) 1px, transparent 1.6px) 0 0 / 16px 16px,
+    radial-gradient(70% 60% at 22% 18%, rgb(var(--accent-rgb) / 0.16), transparent 72%),
+    var(--bg-soft);
   box-shadow: var(--shadow-soft);
 }
 
@@ -1538,9 +1559,9 @@ html:not(.js) .hero-ascii {
 .home-flow {
   display: grid;
   grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr);
-  gap: 4.5rem;
+  gap: 2.8rem 4.5rem;
   align-items: start;
-  padding: 2rem 0 var(--space-8);
+  padding: 1rem 0 var(--space-8);
 }
 
 /* Parked about mid-screen, but never closer to the header than 2rem: on a
@@ -1555,6 +1576,7 @@ html:not(.js) .hero-ascii {
 }
 
 .flow-steps {
+  counter-reset: step;
   position: relative;
   margin: 2.4rem 0 0;
   padding: 0;
@@ -1589,6 +1611,24 @@ html:not(.js) .hero-ascii {
   font-weight: 720;
   letter-spacing: -0.01em;
   transition: color var(--transition);
+}
+
+/* Each step is numbered in the rail's mono voice; the live one turns gold. */
+.flow-steps span::before {
+  counter-increment: step;
+  content: "0" counter(step);
+  display: inline-block;
+  min-width: 2.4em;
+  color: var(--quiet);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  vertical-align: 0.2em;
+}
+
+html.js .flow-steps li.is-active span::before {
+  color: var(--accent);
 }
 
 /* Hangul wraps between words, not mid-syllable-run. */
@@ -1687,10 +1727,13 @@ html.js .flow-shot.is-active .flow-shot-frame {
 /* A pool of gold light under the seam: the one place below the hero where
    the page glows, because it is where gori hands its work to something else. */
 .home-agent {
-  padding: 4.5rem 0 5.5rem;
-  border-top: 1px solid var(--line);
+  padding: 1rem 0 5.5rem;
   text-align: center;
   background: radial-gradient(46rem 20rem at 50% 64%, rgb(var(--accent-rgb) / 0.09), transparent 70%);
+}
+
+.home-agent .home-rail {
+  margin-bottom: 3.2rem;
 }
 
 .home-agent h2 {
@@ -1733,7 +1776,6 @@ html.js .flow-shot.is-active .flow-shot-frame {
   background:
     linear-gradient(var(--bg-panel), var(--bg-panel)) padding-box,
     linear-gradient(var(--seam-rim, 90deg), rgb(var(--ink-rgb) / 0.16) 45%, rgb(var(--accent-rgb) / 0.6)) border-box;
-  box-shadow: var(--shadow-soft);
   text-align: left;
 }
 
@@ -2021,8 +2063,7 @@ html.js .flow-shot.is-active .flow-shot-frame {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-7);
   align-items: center;
-  padding: 4.5rem 0 var(--space-8);
-  border-top: 1px solid var(--line);
+  padding: 1rem 0 var(--space-8);
 }
 
 .meaning-word {
@@ -3691,6 +3732,11 @@ html.search-lock body {
   .home-flow {
     grid-template-columns: 1fr;
     gap: 0;
+  }
+
+  /* Stacked, the rail and the title are neighbours in the same column. */
+  .home-flow .home-rail {
+    margin-bottom: 1.6rem;
   }
 
   .flow-rail {

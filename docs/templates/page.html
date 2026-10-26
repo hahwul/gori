@@ -55,8 +55,8 @@
      interaction. Tab order follows the TUI's own strip, so the row reads as
      the real thing rather than a curated highlight reel. #}
   <section class="home-showcase rv" aria-label="{{ "home.showcase_aria" | t }}">
-    <div class="showcase-rail" aria-hidden="true">
-      <span>{{ "home.showcase_k_l" | t }}</span>
+    <div class="showcase-rail home-rail" aria-hidden="true">
+      <span><b>01</b>{{ "home.showcase_k_l" | t }}</span>
       <span class="showcase-rail-hint">{{ "home.showcase_k_r" | t }} ↓</span>
     </div>
     <figure class="showcase-frame">
@@ -137,6 +137,7 @@
   </section>
 
   <section class="home-structure rv" aria-labelledby="structure-title">
+    <div class="home-rail" aria-hidden="true"><span><b>02</b>{{ "home.rail_structure" | t }}</span></div>
     <figure class="structure-art">
       <img src="{{ base_url }}/images/tui/space-menu.svg" alt="{{ "home.structure_alt" | t }}" width="1206" height="520" loading="lazy" decoding="async">
     </figure>
@@ -166,6 +167,7 @@
      index only (aria-hidden): each figure carries its own step as a caption,
      which is also what the stacked narrow layout shows. #}
   <section class="home-flow" aria-labelledby="flow-title">
+    <div class="home-rail" aria-hidden="true"><span><b>03</b>{{ "home.rail_flow" | t }}</span></div>
     <div class="flow-rail rv">
       <h2 id="flow-title">{{ "home.flow_title_pre" | t }}<em class="gild">{{ "home.flow_title_em" | t }}</em>{{ "home.flow_title_post" | t }}</h2>
       <ol class="flow-steps" aria-hidden="true">
@@ -191,6 +193,7 @@
   </section>
 
   <section class="home-agent rv" aria-labelledby="agent-title">
+    <div class="home-rail" aria-hidden="true"><span><b>04</b>{{ "home.rail_agent" | t }}</span></div>
     <h2 id="agent-title">{{ "home.agent_title_pre" | t }}<em class="gild">{{ "home.agent_title_em" | t }}</em>{{ "home.agent_title_post" | t }}</h2>
     <p class="agent-intro">{{ "home.agent_intro" | t }}</p>
     <figure class="agent-seam" aria-label="{{ "home.agent_seam_aria" | t }}">
@@ -214,6 +217,7 @@
   </section>
 
   <section class="home-meaning rv" aria-labelledby="meaning-title">
+    <div class="home-rail" aria-hidden="true"><span><b>05</b>{{ "home.rail_meaning" | t }}</span></div>
     <div class="meaning-entry">
       <h2 class="meaning-word" id="meaning-title" lang="ko">{{ "home.meaning_word" | t }}</h2>
       <p class="meaning-pron">{{ "home.meaning_pron" | t }}</p>

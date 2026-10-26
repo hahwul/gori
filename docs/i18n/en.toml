@@ -72,6 +72,12 @@ hero_art_alt = "The gori mark: two broad translucent rings crossing around a dis
 showcase_aria = "gori running in the terminal. Pick a tab"
 showcase_k_l = "the workbench, up close"
 showcase_k_r = "click a tab"
+# Section rails: the mono-caps line that opens each section below the
+# showcase, after its index number.
+rail_structure = "one project"
+rail_flow = "the loop"
+rail_agent = "the seam"
+rail_meaning = "the name"
 showcase_tabs_aria = "Switch the terminal view"
 showcase_alt = "gori History tab in the terminal, listing captured HTTP flows with time, method, protocol, host, path, status, type, size and duration"
 showcase_alt_project = "gori Project tab: an at-a-glance panel with the project name, database path and size, flow count, and a bar chart of 2xx/3xx/5xx responses"

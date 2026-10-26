@@ -71,6 +71,12 @@ hero_art_alt = "gori 마크: gori 아트워크 원반 주위를 서로 엇갈려
 showcase_aria = "터미널에서 실행 중인 gori. 탭을 골라보세요"
 showcase_k_l = "워크벤치를 가까이서"
 showcase_k_r = "탭을 클릭하세요"
+# Section rails: the mono-caps line that opens each section below the
+# showcase, after its index number.
+rail_structure = "하나의 프로젝트"
+rail_flow = "루프"
+rail_agent = "이음새"
+rail_meaning = "이름"
 showcase_tabs_aria = "터미널 화면 전환"
 showcase_alt = "터미널에서 실행 중인 gori의 History 탭. 캡처된 HTTP 플로우가 시간, 메서드, 프로토콜, 호스트, 경로, 상태, 유형, 크기, 소요 시간과 함께 나열되어 있습니다."
 showcase_alt_project = "gori Project 탭. 프로젝트 이름, 데이터베이스 경로와 크기, 플로우 수와 함께 2xx/3xx/5xx 응답 분포 막대가 한눈에 보입니다."
