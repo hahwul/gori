@@ -106,11 +106,21 @@
 .nav-overview { margin: 2px 0 4px; }
 .manual-nav a.active { color: var(--accent-strong); background: var(--selection); }
 .nav-group .nav-links a.active::before { content: ""; position: absolute; left: -1px; top: 0; bottom: 0; width: 2px; background: var(--accent); }
-/* The field-guide pointer sits on hairlines like the landing's rails: no box. */
-.book-promo { display: block; padding: 14px 0; margin: 24px 0; border-block: 1px solid var(--line-strong); text-decoration: none; }
-.book-promo span { display: block; margin-bottom: 6px; color: var(--quiet); font: 600 10px/1.6 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; }
-.book-promo strong { color: var(--accent-strong); font-size: 15px; font-weight: 550; transition: color var(--transition); }
-.book-promo:hover strong { color: var(--accent); }
+.book-promo {
+  display: block;
+  padding: 16px 14px;
+  margin: 24px 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background:
+    linear-gradient(var(--bg-soft), var(--bg-soft)) padding-box,
+    linear-gradient(135deg, rgb(var(--accent-rgb) / 0.75), var(--line) 55%) border-box;
+  text-decoration: none;
+  transition: box-shadow var(--transition);
+}
+.book-promo span { display: block; color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+.book-promo strong { color: var(--accent-strong); font-size: 15px; font-weight: 550; }
+.book-promo:hover { box-shadow: 0 0 36px rgb(var(--accent-rgb) / 0.14); }
 .docs-main { padding-top: 28px; padding-bottom: 60px; width: 100%; }
 .document-path {
   display: flex;

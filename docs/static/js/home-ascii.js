@@ -7,8 +7,8 @@
    band of highlight, the way a glint runs across polished metal when it is
    tilted. Under the pointer the band glides after the cursor and the cells
    it crosses turn from gold to a warm white; when the pointer leaves, the
-   band fades. Left alone, the knot catches one slow sweep of light every
-   several seconds and is otherwise still.
+   band fades. Left alone, the knot catches one sweep of light every few
+   seconds, the first soon after load, and is otherwise still.
 
    Gates: the canvas is aria-hidden decoration over an <img> fallback that
    html.js hides, so no-script visits see the plain mark. Reduced motion draws
@@ -28,8 +28,9 @@
   var LAST = RAMP.length - 1;
   var FONT = "ui-monospace, \"SF Mono\", \"Cascadia Code\", Menlo, Consolas, monospace";
   var STEPS = 12;                   /* gold → glint colour ramp resolution */
-  var SWEEP_EVERY = 9000;           /* ms between idle glints */
-  var SWEEP_TAKES = 2600;           /* ms one idle glint takes to cross */
+  var SWEEP_EVERY = 4800;           /* ms between idle glints */
+  var SWEEP_TAKES = 2400;           /* ms one idle glint takes to cross */
+  var SWEEP_FIRST = 900;            /* ms after load until the first one */
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
 
   var cw = 0, ch = 0, cols = 0, rows = 0, px = 13, dpr = 1, padX = 0, padY = 0, W = 0, H = 0;
@@ -206,7 +207,7 @@
            a soft rise and fall in strength so it arrives and leaves gently. */
         wantX = lx = W * (-0.15 + 1.3 * t);
         wantY = ly = H * (0.05 + 0.9 * t);
-        wantStrength = 0.75 * Math.sin(Math.PI * t);
+        wantStrength = Math.pow(Math.sin(Math.PI * t), 0.7);
       }
     }
     var ease = 1 - Math.exp(-dt * 7);
@@ -237,7 +238,7 @@
     raf = requestAnimationFrame(frame);
   }
 
-  function scheduleSweep() {
+  function scheduleSweep(delay) {
     clearTimeout(sweepTimer);
     if (reduced.matches) return;
     sweepTimer = setTimeout(function () {
@@ -245,13 +246,13 @@
         sweep = { t0: performance.now() };
         wake();
       }
-      scheduleSweep();
-    }, SWEEP_EVERY);
+      scheduleSweep(SWEEP_EVERY);
+    }, delay);
   }
 
   img.onload = function () {
     resize();
-    scheduleSweep();
+    scheduleSweep(SWEEP_FIRST);
   };
 
   readTheme();
@@ -279,7 +280,7 @@
   if (reduced.addEventListener) {
     reduced.addEventListener("change", function () {
       if (reduced.matches) { sweep = null; strength = wantStrength = 0; draw(); }
-      else scheduleSweep();
+      else scheduleSweep(SWEEP_EVERY);
     });
   }
 
