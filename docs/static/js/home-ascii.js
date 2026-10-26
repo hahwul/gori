@@ -7,7 +7,7 @@
    band of highlight, the way a glint runs across polished metal when it is
    tilted. Under the pointer the band glides after the cursor and the cells
    it crosses turn from gold to a warm white; when the pointer leaves, the
-   band fades. Left alone, a spot of light runs once around the large ring
+   band fades. Left alone, a spot of light runs once around the outer ring
    every few seconds, the first lap soon after load; otherwise the knot is
    still.
 
@@ -32,11 +32,12 @@
   var SWEEP_EVERY = 4800;           /* ms between idle glints */
   var SWEEP_TAKES = 2600;           /* ms one lap of the ring takes */
   var SWEEP_FIRST = 900;            /* ms after load until the first one */
-  /* The two rings' centres in logo space (-0.5..0.5 across the mark). The
-     idle light laps the large ring (A); B only decides which cells are not
-     A's, so the spot stays on one ring where the two cross. */
-  var RING_A = { x: -0.13, y: 0.11 };
-  var RING_B = { x: 0.15, y: -0.11 };
+  /* The outer ring of the mark, fitted as an ellipse in logo space
+     (-0.5..0.5 across the mark; rotation in radians). The idle light laps
+     this track and nothing else: a cell is lit by how close it sits to the
+     ellipse, so the lower ring stays dark except where it passes under. */
+  var OUTER = { x: -0.03, y: -0.055, a: 0.405, b: 0.265, rot: -27 * Math.PI / 180 };
+  var TRACK = 0.11;                 /* how far off the ellipse the light reaches */
   var LAP_HEAD = 0.5;               /* the spot's angular width ahead, rad */
   var LAP_TAIL = 1.3;               /* and the comet tail it trails, rad */
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -44,8 +45,8 @@
   var cw = 0, ch = 0, cols = 0, rows = 0, px = 13, dpr = 1, padX = 0, padY = 0, W = 0, H = 0;
   var cover = new Float32Array(0);   /* logo coverage per cell, 0..1 */
   var seed = new Float32Array(0);    /* per-cell hash, for the dust */
-  var ringW = new Float32Array(0);   /* 1 = on ring A, 0 = on ring B */
-  var angA = new Float32Array(0);    /* cell angle around ring A's centre */
+  var ringW = new Float32Array(0);   /* 1 on the outer ring's track, 0 off it */
+  var angA = new Float32Array(0);    /* cell angle around the outer ring */
   var side = 1;                      /* the mark's side in px, for logo space */
   var palette = [];                  /* STEPS+1 colours, gold → glint */
   var dust = "#8d90a2";
@@ -132,14 +133,16 @@
         /* Deterministic hash, so a resize does not reshuffle the dust. */
         var h = Math.sin(c * 12.9898 + r * 78.233) * 43758.5453;
         seed[i] = h - Math.floor(h);
-        /* Logo space: which ring the cell sits on, and where around A. */
-        var ux = ((c - (cols - 1) / 2) * cw) / side;
-        var uy = ((r - (rows - 1) / 2) * ch) / side;
-        var ax = ux - RING_A.x, ay = uy - RING_A.y;
-        var bxx = ux - RING_B.x, byy = uy - RING_B.y;
-        var da = ax * ax + ay * ay, db = bxx * bxx + byy * byy;
-        ringW[i] = db / (da + db + 1e-6);
-        angA[i] = Math.atan2(ay, ax);
+        /* Logo space, then the outer ring's own frame: how far the cell is
+           from the ellipse (as a fraction of its radius) and its angle on it. */
+        var ux = ((c - (cols - 1) / 2) * cw) / side - OUTER.x;
+        var uy = ((r - (rows - 1) / 2) * ch) / side - OUTER.y;
+        var cr = Math.cos(OUTER.rot), sr = Math.sin(OUTER.rot);
+        var eu = (ux * cr + uy * sr) / OUTER.a;
+        var ev = (-ux * sr + uy * cr) / OUTER.b;
+        var rho = Math.sqrt(eu * eu + ev * ev) - 1;
+        ringW[i] = Math.exp(-(rho * rho) / (TRACK * TRACK));
+        angA[i] = Math.atan2(ev, eu);
         /* Scatter: away from the centre, each cell at its own pace. */
         var ang = Math.atan2(r - rows / 2, (c - cols / 2) * cw / ch) + (seed[i] - 0.5) * 1.2;
         var mag = 0.35 + seed[i] * 0.9;
@@ -191,8 +194,8 @@
     if (!ready) return;
     ctx.clearRect(0, 0, W, H);
     var dx = 0.82, dy = -0.57;             /* band direction, ~35° up-right */
-    var across = Math.max(34, W * 0.075);  /* band half-width in px */
-    var along = Math.max(150, W * 0.42);   /* reach along the band */
+    var across = Math.max(22, W * 0.045);  /* band half-width in px */
+    var along = Math.max(100, W * 0.26);   /* reach along the band */
     var s = strength, bx = lx, by = ly;
     if (scrollLight && scrollLight.s > s) { s = scrollLight.s; bx = scrollLight.x; by = scrollLight.y; }
     /* The idle lap: a spot at angle theta around ring A, fading in over the
@@ -231,12 +234,11 @@
         var g = 0;
         if (lapOn) {
           /* Ahead of the spot the light cuts off quickly; behind it a tail
-             trails. Cells nearer ring A take it in full, the other ring's
-             only a little, so it reads as running along one ring. */
+             trails. Only cells on the outer ring's track take it. */
           var d = angA[i] - theta;
           d -= Math.round(d / (Math.PI * 2)) * Math.PI * 2;   /* shortest way round */
           d /= d > 0 ? LAP_HEAD : LAP_TAIL;
-          g = lapS * (0.25 + 0.75 * ringW[i]) * Math.exp(-d * d) * 1.15;
+          g = lapS * ringW[i] * Math.exp(-d * d) * 1.15;
           if (g > 1) g = 1;
         }
         if (s > 0.004) {
