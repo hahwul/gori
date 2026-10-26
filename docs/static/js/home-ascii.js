@@ -36,6 +36,8 @@
   var SWEEP_TAKES = 3400;           /* ms one lap of the ring takes */
   var LAP_START = 0.4;              /* rad on the track, under the lower ring */
   var LAP_TURNS = 1.3;              /* laps per run: the overlap hides the join */
+  var LAP_GLOW = 0.62;              /* the lap's peak brightness, 0..1 */
+  var HOVER_GLOW = 0.75;            /* the pointer's, 0..1 */
   var SWEEP_FIRST = 900;            /* ms after load until the first one */
   /* The outer ring of the mark, fitted as an ellipse in logo space
      (-0.5..0.5 across the mark; rotation in radians). The idle light laps
@@ -250,14 +252,13 @@
           var d = angA[i] - theta;
           d -= Math.round(d / (Math.PI * 2)) * Math.PI * 2;   /* shortest way round */
           d /= d > 0 ? LAP_HEAD : LAP_TAIL;
-          g = lapS * ringW[i] * Math.exp(-d * d) * 1.15;
-          if (g > 1) g = 1;
+          g = lapS * ringW[i] * Math.exp(-d * d) * LAP_GLOW;
         }
         if (s > 0.004) {
           var vx = x - bx, vy = y - by;
           var a = Math.abs(vx * dy - vy * dx) / across;   /* across the band */
           var b = (vx * dx + vy * dy) / along;            /* along the band */
-          var lit = s * Math.exp(-(a * a) - b * b);
+          var lit = s * Math.exp(-(a * a) - b * b) * HOVER_GLOW;
           if (lit > g) g = lit;
         }
         var gx = x, gy = y;
@@ -269,19 +270,19 @@
            by up to two steps, and the brightest cells turn into sparks, so
            the glint is visible in the text and not only in the colour. */
         var glyph;
-        if (g > 0.72) {
+        if (g > 0.55) {
           glyph = SPARK.charAt((c + r + Math.floor(time * 6)) % SPARK.length);
         } else {
           lvl = lvl0 + Math.round(g * 2.4);
           if (lvl > LAST) lvl = LAST;
           glyph = RAMP.charAt(lvl);
         }
-        ctx.globalAlpha = Math.min(1, 0.42 + 0.58 * k + 0.5 * g) * fade;
+        ctx.globalAlpha = Math.min(1, 0.42 + 0.58 * k + 0.3 * g) * fade;
         ctx.fillStyle = palette[Math.round(Math.min(1, g) * STEPS)];
         ctx.fillText(glyph, gx, gy);
         /* A lit cell is struck twice, a hair apart: the glyph reads bolder
            as well as whiter, which is what makes the light carry. */
-        if (g > 0.3) ctx.fillText(glyph, gx + 0.7, gy);
+        if (g > 0.45) ctx.fillText(glyph, gx + 0.5, gy);
       }
     }
     ctx.globalAlpha = 1;
