@@ -33,14 +33,16 @@
   var FONT = "ui-monospace, \"SF Mono\", \"Cascadia Code\", Menlo, Consolas, monospace";
   var STEPS = 12;                   /* gold → glint colour ramp resolution */
   var SWEEP_EVERY = 4800;           /* ms between idle glints */
-  var SWEEP_TAKES = 2600;           /* ms one lap of the ring takes */
+  var SWEEP_TAKES = 3400;           /* ms one lap of the ring takes */
+  var LAP_START = 0.4;              /* rad on the track, under the lower ring */
+  var LAP_TURNS = 1.3;              /* laps per run: the overlap hides the join */
   var SWEEP_FIRST = 900;            /* ms after load until the first one */
   /* The outer ring of the mark, fitted as an ellipse in logo space
      (-0.5..0.5 across the mark; rotation in radians). The idle light laps
      this track and nothing else: a cell is lit by how close it sits to the
      ellipse, so the lower ring stays dark except where it passes under. */
-  var OUTER = { x: -0.03, y: -0.055, a: 0.405, b: 0.265, rot: -27 * Math.PI / 180 };
-  var TRACK = 0.11;                 /* how far off the ellipse the light reaches */
+  var OUTER = { x: -0.05, y: -0.03, a: 0.43, b: 0.3, rot: -26 * Math.PI / 180 };
+  var TRACK = 0.13;                 /* how far off the ellipse the light reaches */
   var LAP_HEAD = 0.5;               /* the spot's angular width ahead, rad */
   var LAP_TAIL = 1.3;               /* and the comet tail it trails, rad */
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -202,13 +204,18 @@
     var along = Math.max(100, W * 0.26);   /* reach along the band */
     var s = strength, bx = lx, by = ly;
     if (scrollLight && scrollLight.s > s) { s = scrollLight.s; bx = scrollLight.x; by = scrollLight.y; }
-    /* The idle lap: a spot at angle theta around ring A, fading in over the
-       first part of the lap and out over the last. */
+    /* The idle lap: a spot at angle theta on the outer ring's track. It
+       runs a little more than a full turn and fades in and out only over
+       the overlap, which is placed where the ring passes under the other,
+       so the whole visible rim is lit at full strength on the way round. */
     var lapOn = !!sweep, theta = 0, lapS = 0;
     if (lapOn) {
       var lt = (performance.now() - sweep.t0) / SWEEP_TAKES;
-      theta = -2.2 + lt * Math.PI * 2;
-      lapS = Math.pow(Math.sin(Math.PI * Math.min(1, Math.max(0, lt))), 0.5);
+      if (lt < 0) lt = 0;
+      if (lt > 1) lt = 1;
+      theta = LAP_START + lt * Math.PI * 2 * LAP_TURNS;
+      lapS = Math.min(1, lt / 0.12, (1 - lt) / 0.12);
+      lapS = lapS * lapS * (3 - 2 * lapS);
     }
     var q = scatter;
     var fade = Math.pow(1 - q, 1.6);
