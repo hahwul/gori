@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Docs: a redrawn landing built around the ring knot in monospace glyphs, opening as one scroll-driven scene with a glint lapping the knot, and the doc pages in the same glyph voice (#1773)
+- Repeater: a target that names an env var (`http://$ENV.BASE`) is saved whatever the var holds, by create and update alike, and resolves on each send; the guide now documents it (#1774)
 
 ## v0.9.0
 

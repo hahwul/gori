@@ -1219,7 +1219,7 @@ module Gori
           "Create a repeater session from target + request (or curl), flow_id or issue_id. " \
           "Reply: 'id' (the database id every tool takes) and 'tui_index' (the TUI chip number " \
           "the operator says). For many flows use create_repeaters." do |s|
-          s.field "target", strprop("absolute target URL (scheme+host+optional port)")
+          s.field "target", strprop("absolute target URL (scheme+host+optional port); $ENV tokens resolve on each send")
           s.field "curl", strprop("a curl command to build the request (and target/http2) from; ignored transport flags are listed in curl_notes. Exclusive with request/request_base64")
           s.field "request", strprop("raw HTTP request, stored byte-for-byte, never repaired or refused. A head missing its blank-line terminator is kept and flagged head_unterminated:true")
           s.field "request_base64", strprop("the raw request as base64, byte-exact (binary, non-UTF-8). Overrides 'request'")
@@ -1242,7 +1242,7 @@ module Gori
           "Update a repeater session by database id (any field below). Bulk re-label: " \
           "update_repeaters." do |s|
           s.field "id", intprop("repeater DATABASE id ('id'), not the TUI chip number ('tui_index')"), required: true
-          s.field "target", strprop("absolute target URL")
+          s.field "target", strprop("absolute target URL; $ENV tokens resolve on each send")
           s.field "request", strprop("raw HTTP request, stored byte-for-byte, never repaired or refused (see create_repeater)")
           s.field "request_base64", strprop("the raw request as base64, byte-exact. Overrides 'request'")
           s.field "http2", boolprop("use HTTP/2")

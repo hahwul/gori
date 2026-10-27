@@ -540,6 +540,27 @@ describe "MCP update_repeater" do
     end
   end
 
+  # #1774: create stored `http://$BASE/x` with BASE unset, then update refused the same target
+  # once BASE held a placeholder. Both store the template; the send judges the value.
+  it "stores a templated target whatever the var holds now, as create does" do
+    with_store_env do |store|
+      tools = tools_for(store)
+      req = %("request":"GET /x HTTP/1.1\\r\\nHost: h\\r\\n\\r\\n")
+      created = mcp_ok_json(tools, "create_repeater", %({"target":"http://$BASE/x",#{req}}))
+
+      Gori::Env.save_project(store, [{"BASE", "set me to host:port"}])
+      tools = tools_for(store)
+      mcp_ok_json(tools, "update_repeater", %({"id":#{created["id"]},"target":"http://$BASE/y"}))
+      store.get_repeater(created["id"].as_i64).not_nil!.target.should eq("http://$BASE/y")
+      mcp_ok_json(tools, "create_repeater", %({"target":"http://$BASE/x",#{req}}))
+
+      # The value is still checked, at the send.
+      sent = tools.call("send_request", JSON.parse(%({"repeater_id":#{created["id"]}})))
+      sent.is_error.should be_true
+      sent.text.should contain("could not")
+    end
+  end
+
   it "caps a long summary at 80 characters with an ellipsis" do
     with_store do |store|
       created = mcp_ok_json(tools_for(store), "create_repeater",
