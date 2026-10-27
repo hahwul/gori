@@ -86,4 +86,17 @@ describe "gori run repeater update — argv" do
     f.http2 = false
     Gori::CLI::Run.repeater_update_error(f, f.sources).should be_nil
   end
+
+  # #1774: the var's value now is not the target's; the send judges it.
+  it "takes a target naming a var that holds a placeholder" do
+    saved, prefix = Gori::Settings.project_env_vars, Gori::Settings.env_prefix
+    Gori::Settings.project_env_vars = [{"BASE", "set me to host:port"}]
+    Gori::Settings.env_prefix = "$"
+    f = Gori::CLI::Run::RepeaterUpdateFlags.new
+    f.target = "http://$BASE/x"
+    Gori::CLI::Run.repeater_update_error(f, f.sources).should be_nil
+  ensure
+    Gori::Settings.project_env_vars = saved || [] of {String, String}
+    Gori::Settings.env_prefix = prefix || "$"
+  end
 end

@@ -715,11 +715,20 @@ module Gori::Repeater
 
     # Why a session target `raw` can never be sent, or nil — the origin + scheme checks `build`
     # runs, for a surface WRITING a target (MCP create/update_repeater), so `ftp://x` is refused
-    # when stored rather than at its first send. An unresolved `$NAME` is not refused here: it
-    # may be bound by the time the session is sent. A port past 65535 and a host with
+    # when stored rather than at its first send. A port past 65535 and a host with
     # whitespace in it (`not a url at all` parses as one) are write-time refusals only: no
     # dial could ever reach either, and a send keeps failing on them the way it always has.
+    #
+    # A target that names a var is a template, judged by its spelling: only a scheme it spells
+    # literally is checked. The var may be unset, or hold a placeholder, until the send that
+    # reads it (#1774: update refused what create stored), and the send checks the value.
     def self.target_error(raw : String) : String?
+      return literal_target_error(raw) if Env.token_names(raw).empty?
+      scheme, sep, _ = raw.strip.partition("://")
+      literal_target_error("#{scheme}://h") unless sep.empty? || !Env.token_names(scheme).empty?
+    end
+
+    private def self.literal_target_error(raw : String) : String?
       scheme, host, port = origin_of(raw)
       return "unsupported target scheme #{scheme.inspect}" unless scheme.in?("http", "https")
       return "target port #{port} is out of range (1-65535)" if port > 65535
