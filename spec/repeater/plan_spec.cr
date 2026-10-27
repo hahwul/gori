@@ -553,6 +553,11 @@ describe "Gori::Repeater::Plan.target_error" do
       # The scheme it spells is no var's, so no value can make it sendable.
       R::Plan.target_error("ftp://$BASE/x").not_nil!.should contain(%(unsupported target scheme "ftp"))
       R::Plan.target_error("wss://$BASE").should be_nil
+      # A var in the path leaves the literal authority judged, #1683's refusals included…
+      R::Plan.target_error("http://127.0.0.1:99999/$BASE").not_nil!.should contain("port 99999 is out of range")
+      # …and a refusal quotes what was typed, not the stand-in it was judged by.
+      R::Plan.target_error("http://not a host/$BASE").should eq(%(could not determine a target host from "http://not a host/$BASE"))
+      R::Plan.target_error("http://127.0.0.1:8080/$BASE?q=1").should be_nil
     end
     with_env_vars([{"SCHEME", "ftp"}]) do
       R::Plan.target_error("$SCHEME://h").should be_nil

@@ -719,13 +719,18 @@ module Gori::Repeater
     # whitespace in it (`not a url at all` parses as one) are write-time refusals only: no
     # dial could ever reach either, and a send keeps failing on them the way it always has.
     #
-    # A target that names a var is a template, judged by its spelling: only a scheme it spells
-    # literally is checked. The var may be unset, or hold a placeholder, until the send that
-    # reads it (#1774: update refused what create stored), and the send checks the value.
+    # A target that names a var is a template, judged by its spelling: only the scheme and
+    # authority it spells literally are checked (a var in the path leaves `:99999` refused). The
+    # var may be unset, or hold a placeholder, until the send that reads it (#1774: update
+    # refused what create stored), and the send checks the value. The refusal quotes `raw`,
+    # never the stand-in it was judged by.
     def self.target_error(raw : String) : String?
       return literal_target_error(raw) if Env.token_names(raw).empty?
-      scheme, sep, _ = raw.strip.partition("://")
-      literal_target_error("#{scheme}://h") unless sep.empty? || !Env.token_names(scheme).empty?
+      scheme, sep, rest = raw.strip.partition("://")
+      return nil if sep.empty? || !Env.token_names(scheme).empty?
+      authority = rest[0, {'/', '?', '#'}.compact_map { |c| rest.index(c) }.min? || rest.size]
+      probe = "#{scheme}://#{Env.token_names(authority).empty? ? authority : "h"}"
+      literal_target_error(probe).try &.gsub(probe.inspect, raw.inspect)
     end
 
     private def self.literal_target_error(raw : String) : String?
