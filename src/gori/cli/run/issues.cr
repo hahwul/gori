@@ -6,23 +6,36 @@ module Gori
       # `case` can grow without pushing the (already large) list command over the
       # cyclomatic-complexity bar.
       @[Subcommand("issues", help: [
-        {"issues", "List, export, create, update, or delete issues (text, json, markdown)"},
+        {"issues [query]", "List, filter, export, create, update, or delete issues (text, json, markdown, sarif)"},
+        {"issues show <id>", "One issue in full: notes, related links, frozen evidence"},
       ])]
       private def self.cmd_issues(args : Array(String)) : Nil
         case sub = args.first?
         when "create"       then cmd_issues_create(args[1..])
         when "update"       then cmd_issues_update(args[1..])
         when "delete", "rm" then cmd_issues_delete(args[1..])
+        when "show"         then cmd_issues_show(args[1..])
         when "list"         then cmd_issues_list(args[1..])
         else
-          # Why this guard exists at all: see `verb_token?`. Local to issues — the same
-          # fallthrough swallowed a positional query, so `issues severity:high` listed EVERY
-          # issue rather than narrowing, because only the TUI implements Issues::Filter.
-          if verb_token?(sub)
-            abort "gori run issues: unknown subcommand '#{sub}' (create, update, delete/rm, list)"
+          if err = issues_verb_error(sub)
+            abort err
           end
           cmd_issues_list(args)
         end
+      end
+
+      ISSUES_VERBS      = %w[create update delete rm show list]
+      ISSUES_VERBS_HELP = "create, update, delete/rm, show, list"
+
+      # The listing takes a positional query (`issues status:open`), as `history` does, but a
+      # first BARE word is still refused as a verb (see `verb_token?`): `issues remove 1` must
+      # not exit 0 having deleted nothing. A field term or a group opens a query; free text
+      # goes through `-q`, where it cannot be mistaken for a verb.
+      def self.issues_verb_error(sub : String?) : String?
+        return nil unless verb_token?(sub) && sub
+        return nil if sub.includes?(':') || sub.starts_with?('(') || sub == "NOT"
+        "gori run issues: unknown subcommand '#{sub}' (#{ISSUES_VERBS_HELP}) — " \
+        "to search titles and hosts, pass -q '#{sub}'"
       end
 
       # SARIF is the one format that carries header VALUES structurally: text and json have
@@ -38,20 +51,36 @@ module Gori
         format = :text
         export_path : String? = nil
         include_sensitive = false
+        query : String? = nil
+        count_only = false
+        lenient = false
 
-        leftover = parse_args(args, "gori run issues") do |p|
-          p.banner = "Usage: gori run issues [options]\n\n" \
+        # The two pre-passes `history` runs: `-q` with a separate value, and negated terms
+        # (`-status:fp`), which OptionParser would otherwise abort as unknown options.
+        args = normalize_query_flag(args)
+        neg_terms, opt_args = split_ql_negations(args)
+        positional = parse_args(opt_args, "gori run issues") do |p|
+          p.banner = "Usage: gori run issues [query] [options]\n\n" \
+                     "The query is the TUI's / bar: status:open sev:>=high host:api cvss:>=7 -status:fp\n" \
+                     "(status:closed = any non-open state). It narrows every --format and --export.\n\n" \
                      "Or run with a subcommand:\n" \
+                     "  gori run issues show <issue-id> [options]\n" \
                      "  gori run issues create [options]\n" \
-                     "  gori run issues update <issue-id> [options]\n" \
-                     "  gori run issues delete <issue-id> --yes\n\n" \
+                     "  gori run issues update <issue-id>… [options]\n" \
+                     "  gori run issues delete <issue-id>… --yes\n\n" \
                      "#{EVIDENCE_LINK_HELP}\n"
           project_options(p, proj, "read")
+          p.on("-qQUERY", "--query=QUERY", "Filter the issues (the TUI's / bar; a bare word searches title and host)") { |v| query = once(query, v, "-q/--query") }
+          p.on("--count", "Print how many issues match instead of listing them") { count_only = true }
+          p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text, as the TUI bar does") { lenient = true }
           format_flag(p, [:text, :json, :markdown, :sarif], "Output: text (default) | json | markdown | sarif") { |f| format = f }
           p.on("--export=PATH", "Write to PATH instead of STDOUT") { |v| export_path = v }
           p.on("--include-sensitive", "Emit Authorization/Cookie/Set-Cookie/API-key values in --format sarif's webRequest/webResponse headers instead of [REDACTED]") { include_sensitive = true }
         end
-        refuse_list_leftovers(leftover, "issues", "create, update, delete/rm, list")
+        query = issues_list_query(positional, query, neg_terms, lenient)
+        if count_only && (err = issues_count_clash(format, export_path, include_sensitive))
+          abort "gori run issues: #{err}"
+        end
 
         project = resolve_read_project(proj.name, proj.db)
         store = open_store(project, read_only: true)
@@ -61,28 +90,60 @@ module Gori
         # connection — and so the abort below runs after a clean close.
         result = begin
           issues = store.issues
+          if q = query
+            issues = Issues::Filter.parse(q).apply(issues)
+          end
+          if count_only
+            puts format == :json ? {count: issues.size}.to_json : issues.size
+            return
+          end
           # `text` to STDOUT only: every other format has a meaningful empty document (an empty
           # JSON array, a header-only report, a SARIF log with `results: []` — which is how a CI
           # gate learns the scan RAN and found nothing), and an --export always writes a file.
           if issues.empty? && format == :text && export_path.nil?
-            STDERR.puts "no issues"
+            STDERR.puts query.try { |qq| "no issues match #{qq.inspect}" } || "no issues"
             return
           end
-          content =
-            case format
-            when :json     then Issues::Export.json(issues, store)
-            when :markdown then Issues::Export.markdown(issues, store, project.name, Redact::Policy.ambient(store))
-            when :sarif
-              Issues::Export.sarif(issues, store, project.name, include_sensitive,
-                include_sensitive ? nil : Redact::Policy.ambient(store))
-            else issues_text(issues)
-            end
-          {content, issues.size}
+          {issues_report(issues, store, project.name, format, include_sensitive), issues.size}
         ensure
           store.close
         end
         content, count = result
+        write_issues_report(content, count, export_path)
+      end
 
+      # The listing's query: positional terms or `-q` (history's composition), refused before
+      # the store opens when a reserved verb landed among them or the filter cannot match. The
+      # dispatcher's bare-word rule is asked again here, because a flag in front of the word
+      # (`issues --format=json remove 1`) or a leading `list` reaches this without passing it.
+      private def self.issues_list_query(positional : Array(String), query : String?,
+                                         neg_terms : Array(String), lenient : Bool) : String?
+        positional.shift if positional[0]? == "list"
+        if err = reserved_query_verb_error(positional, "issues", ISSUES_VERBS, ISSUES_VERBS_HELP) ||
+                 issues_verb_error(positional[0]?)
+          abort err
+        end
+        query, dropped = Run.compose_history_query(query, positional, neg_terms)
+        Run.warn_dropped_query_terms("issues", dropped)
+        if (q = query) && (why = Issues::Filter.refusal(q, lenient: lenient))
+          abort "gori run issues: #{why}"
+        end
+        query
+      end
+
+      private def self.issues_report(issues : Array(Store::Issue), store : Store, project_name : String,
+                                     format : Symbol, include_sensitive : Bool) : String
+        case format
+        when :json     then Issues::Export.json(issues, store)
+        when :markdown then Issues::Export.markdown(issues, store, project_name, Redact::Policy.ambient(store))
+        when :sarif
+          Issues::Export.sarif(issues, store, project_name, include_sensitive,
+            include_sensitive ? nil : Redact::Policy.ambient(store))
+        else issues_text(issues)
+        end
+      end
+
+      private def self.write_issues_report(content : String, count : Int32, export_path : String?) : Nil
         if path = export_path
           begin
             File.write(path, content.ends_with?('\n') ? content : "#{content}\n")
@@ -99,6 +160,44 @@ module Gori
           # is not a live terminal, and stripping would corrupt captured evidence.
           puts Issues::Export.scrub_controls(content)
         end
+      end
+
+      # `--count` prints a number; a report format, a file or a sensitive-header switch all
+      # shape a document it does not write.
+      def self.issues_count_clash(format : Symbol, export_path : String?, include_sensitive : Bool) : String?
+        return "--count prints a number, so --export does not apply" if export_path
+        return "--count prints a number, so --include-sensitive does not apply" if include_sensitive
+        return "--count prints a number — use --format text or json" unless format.in?(:text, :json)
+        nil
+      end
+
+      # `gori run issues show <id>` — one issue in full, as `history show` / `evidence show`
+      # print one row: the report's Markdown block (notes, related links, frozen evidence and
+      # the filing flow's exchange), or the object `--format json` lists.
+      private def self.cmd_issues_show(args : Array(String)) : Nil
+        proj = ProjectFlags.new
+        format = :text
+        positional = parse_args(args, "gori run issues show") do |p|
+          p.banner = "Usage: gori run issues show <issue-id> [options]"
+          project_options(p, proj, "read")
+          format_flag(p, [:text, :json], "Output: text (default, the report's Markdown block) | json") { |f| format = f }
+        end
+        id = take_id(positional, "gori run issues show", "<issue-id>", "issue id")
+
+        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
+        content = begin
+          issue = store.get_issue(id) || abort_closing(store, "gori run issues show: no issue with id #{id}")
+          if format == :json
+            Issues::Export.issue_json(issue, store)
+          else
+            Issues::Export.issue_markdown(issue, store, Redact::Policy.ambient(store)).lstrip('\n')
+          end
+        ensure
+          store.close
+        end
+        # The block embeds captured bytes and free-text notes: scrubbed for the terminal, as the
+        # listing's STDOUT is.
+        puts Issues::Export.scrub_controls(content)
       end
 
       # `notes_sources` / `notes_source_error` / `notes_content` are PUBLIC for the same reason
@@ -254,15 +353,17 @@ module Gori
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
           if err = issue_evidence_error(store, flow_id, repeater_id)
-            abort "gori run issues create: #{err}"
+            abort_closing(store, "gori run issues create: #{err}")
           end
           masked_title = Env.mask_secrets(t)
-          masked_host = host.try { |h| Env.mask_secrets(h) }
+          # No --host: the filing flow's, as the TUI form pre-fills it, so `host:` filters and the
+          # report do not miss an issue filed with only --flow.
+          masked_host = issue_host(store, host, flow_id).try { |h| Env.mask_secrets(h) }
           # `|| ""` is the column's own default, not a fallback that loses anything: no notes
           # source at all means the issue is created bodiless, exactly as before.
           id = store.insert_issue(masked_title, severity, masked_host, flow_id, cvss: cvss,
             notes: body.try { |n| Env.mask_secrets(n) } || "")
-          abort "gori run issues create: failed to persist issue (store busy or unwritable)" if id == 0
+          abort_closing(store, "gori run issues create: failed to persist issue (store busy or unwritable)") if id == 0
           # The issue IS stored, so the refusal names it: a retry of the create would file a duplicate.
           link_issue_repeater(store, id, repeater_id,
             "gori run issues create: issue ##{id} created but its repeater link NOT written (store busy " \
@@ -284,6 +385,11 @@ module Gori
         issue = store.get_issue(id) ||
                 abort_closing(store, "gori run issues create: issue ##{id} was created, but it was gone before it could be read back")
         Issues::Export.issue_json(issue, store)
+      end
+
+      # `--host`, or the `--flow`'s host when none was given.
+      private def self.issue_host(store : Store, host : String?, flow_id : Int64?) : String?
+        host || flow_id.try { |fid| store.flow_row(fid).try(&.host) }
       end
 
       # The refusal for a `--flow` that names no captured flow, or nil when it names one (or
@@ -340,35 +446,62 @@ module Gori
         proj = ProjectFlags.new
         yes = false
 
-        positional = one_positional_list(args, "gori run issues delete", "<id>") do |p|
-          p.banner = "Usage: gori run issues delete <id> --yes\n\n" \
-                     "Delete an issue and its links. To keep it in the report but mark it closed,\n" \
-                     "use `gori run issues update <id> --status=resolved` instead."
+        positional = parse_args(args, "gori run issues delete") do |p|
+          p.banner = "Usage: gori run issues delete <id>… --yes\n\n" \
+                     "Delete issues and their links (every id must exist, or nothing is deleted).\n" \
+                     "To keep one in the report but mark it closed, use\n" \
+                     "`gori run issues update <id> --status=resolved` instead."
           p.on("-y", "--yes", "Confirm deletion") { yes = true }
           project_options(p, proj, "update")
         end
-
-        id_s = positional.first? || abort("gori run issues delete: <id> is required")
-        id = id_s.to_i64? || abort("gori run issues delete: invalid issue id #{id_s.inspect}")
+        ids = issue_ids(positional, "gori run issues delete")
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
-          abort "gori run issues delete: no issue with id #{id}" unless store.get_issue(id)
-          if err = issue_delete_confirmation_error(id, yes)
-            abort "gori run issues delete: #{err}"
+          refuse_missing_issues(store, ids, "gori run issues delete", "deleted")
+          if err = issue_delete_confirmation_error(ids, yes)
+            abort_closing(store, "gori run issues delete: #{err}")
           end
-          abort "gori run issues delete: issue NOT deleted (store busy or unwritable)" unless store.delete_issue(id)
-          puts "Issue ##{id} deleted."
+          abort_closing(store, "gori run issues delete: #{issue_noun(ids)} NOT deleted (store busy or unwritable)") unless store.delete_issues(ids)
+          puts "#{issue_noun(ids).capitalize} deleted."
         end
       end
 
-      private def self.issue_delete_confirmation_error(id : Int64, yes : Bool) : String?
+      private def self.issue_delete_confirmation_error(ids : Array(Int64), yes : Bool) : String?
         return nil if yes
-        "refusing to delete issue ##{id} without --yes; deleted issues cannot be recovered"
+        "refusing to delete #{issue_noun(ids)} without --yes; deleted issues cannot be recovered"
+      end
+
+      # The `<issue-id>…` positionals of `update` / `delete`, as `history delete` reads its ids.
+      private def self.issue_ids(positional : Array(String), cmd : String) : Array(Int64)
+        abort "#{cmd}: <issue-id> is required" if positional.empty?
+        positional.map { |v| v.to_i64? || abort("#{cmd}: invalid issue id #{v.inspect}") }.uniq!
+      end
+
+      # Every id must name an issue before anything is written — `history delete`'s rule.
+      private def self.refuse_missing_issues(store : Store, ids : Array(Int64), cmd : String, verb : String) : Nil
+        missing = ids.reject { |id| store.get_issue(id) }
+        return if missing.empty?
+        abort_closing(store, "#{cmd}: no issue with id #{missing.join(", ")}#{ids.size > 1 ? " — nothing was #{verb}" : ""}")
+      end
+
+      # `issue #3`, or `3 issues (#1, #2, #5)`.
+      private def self.issue_noun(ids : Array(Int64)) : String
+        return "issue ##{ids[0]}" if ids.size == 1
+        "#{ids.size} issues (#{ids.map { |id| "##{id}" }.join(", ")})"
+      end
+
+      # The fields that name ONE issue's content or evidence. Written across several ids they
+      # would give each issue another's title or body (see `Store#update_issues`).
+      def self.issues_batch_update_error(ids : Int32, *, title : Bool, notes : Bool, flow : Bool, repeater : Bool) : String?
+        return nil if ids <= 1
+        one = {"--title" => title, "--notes" => notes, "--flow" => flow, "--repeater" => repeater}.select { |_, v| v }.keys
+        return nil if one.empty?
+        "#{one.join(", ")} name#{one.size == 1 ? "s" : ""} one issue — pass a single id " \
+        "(several ids take --severity, --status, --cvss and --host)"
       end
 
       private def self.cmd_issues_update(args : Array(String)) : Nil
         proj = ProjectFlags.new
-        id : Int64? = nil
         title : String? = nil
         sev_s : String? = nil
         notes : String? = nil
@@ -384,7 +517,8 @@ module Gori
         repeater_id : Int64? = nil
 
         positional = parse_args(args, "gori run issues update") do |p|
-          p.banner = "Usage: gori run issues update <issue-id> [options]\n\n" \
+          p.banner = "Usage: gori run issues update <issue-id>… [options]\n\n" \
+                     "Several ids set --severity / --status / --cvss / --host on each in one write.\n" \
                      "The notes body comes from one of --notes, --notes-file or --notes-stdin.\n" \
                      "--notes '' clears the notes; a file or pipe that gives no bytes is refused.\n\n" \
                      "#{EVIDENCE_LINK_HELP}\n"
@@ -411,7 +545,11 @@ module Gori
           p.on("--repeater=ID", "Link a saved Repeater session as evidence (MCP's repeater_id)") { |v| repeater_id = parse_id(v, "gori run issues update", "--repeater") }
         end
 
-        id = take_id(positional, "gori run issues update", "<issue-id>", "issue id")
+        ids = issue_ids(positional, "gori run issues update")
+        if err = issues_batch_update_error(ids.size, title: !title.nil?, notes: !notes.nil? || !notes_file.nil? || notes_stdin,
+             flow: !flow_id.nil? || clear_flow, repeater: !repeater_id.nil?)
+          abort "gori run issues update: #{err}"
+        end
         if err = issue_flow_range_error(flow_id)
           abort "gori run issues update: #{err}"
         end
@@ -425,13 +563,7 @@ module Gori
           severity = Gori::Cvss.severity_for(c)
         end
         status = stat_s.try do |s|
-          case s.strip.downcase
-          when "open"                                              then Store::Status::Open
-          when "confirmed"                                         then Store::Status::Confirmed
-          when "false-positive", "false_positive", "falsepositive" then Store::Status::FalsePositive
-          when "resolved"                                          then Store::Status::Resolved
-          else                                                          abort("gori run issues update: invalid status '#{s}' (open|confirmed|false-positive|resolved)")
-          end
+          Store::Status.from_name?(s) || abort("gori run issues update: invalid status '#{s}' (open|confirmed|false-positive|resolved)")
         end
 
         # A blank title is refused as `create` and MCP `update_issue` refuse it (the row would
@@ -448,7 +580,7 @@ module Gori
 
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
-          store.get_issue(id) || abort_closing(store, "gori run issues update: no issue with id #{id}")
+          refuse_missing_issues(store, ids, "gori run issues update", "updated")
           if err = issue_evidence_error(store, flow_id, repeater_id)
             abort_closing(store, "gori run issues update: #{err}")
           end
@@ -464,13 +596,14 @@ module Gori
 
           # update_issue returns false when the write didn't commit (store busy/locked):
           # don't report success then. `--repeater` alone is a link, not a row write (MCP's rule).
-          if fields && !store.update_issue(id, title: masked_title, severity: severity, notes: masked_notes, status: status,
+          if fields && !store.update_issues(ids, title: masked_title, severity: severity, notes: masked_notes, status: status,
                cvss: cvss, clear_cvss: clear_cvss, host: host.try { |h| Env.mask_secrets(h) }, clear_host: clear_host,
                flow_id: flow_id, clear_flow: clear_flow)
             abort_closing(store, "gori run issues update: project is busy (write did not commit) — try again")
           end
-          link_issue_repeater(store, id, repeater_id, "gori run issues update: repeater link NOT written (store busy or unwritable); try again")
-          puts "Issue ##{id} updated successfully."
+          # One id whenever there is a repeater: `issues_batch_update_error` refused the rest.
+          link_issue_repeater(store, ids[0], repeater_id, "gori run issues update: repeater link NOT written (store busy or unwritable); try again")
+          puts ids.size == 1 ? "Issue ##{ids[0]} updated successfully." : "#{issue_noun(ids).capitalize} updated."
         end
       end
 

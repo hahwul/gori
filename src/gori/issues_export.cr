@@ -23,13 +23,20 @@ module Gori
         String.build do |io|
           io << "# Issues — " << project_name << "\n\n"
           io << "_" << issues.size << " issues · exported " << Time.local.to_s("%Y-%m-%d %H:%M") << "_\n"
-          issues.each do |f|
-            flow = f.flow_id.try { |fid| store.get_flow(fid) }
-            flow = Redact::Wire.flow(flow, matcher)[0] if flow && matcher
-            append_issue(io, f, flow, resolve_issue_links(f, store),
-              frozen: store.issue_evidence(f.id))
-          end
+          issues.each { |f| append_stored_issue(io, f, store, matcher) }
         end
+      end
+
+      # ONE issue's block, exactly as `markdown` writes it into the report: `gori run issues show`.
+      def self.issue_markdown(f : Store::Issue, store : Store, matcher : Redact::Matcher? = nil) : String
+        String.build { |io| append_stored_issue(io, f, store, matcher) }
+      end
+
+      private def self.append_stored_issue(io : String::Builder, f : Store::Issue, store : Store,
+                                           matcher : Redact::Matcher?) : Nil
+        flow = f.flow_id.try { |fid| store.get_flow(fid) }
+        flow = Redact::Wire.flow(flow, matcher)[0] if flow && matcher
+        append_issue(io, f, flow, resolve_issue_links(f, store), frozen: store.issue_evidence(f.id))
       end
 
       # The Markdown for ONE issue, heading included — the body of `markdown`'s loop, split out

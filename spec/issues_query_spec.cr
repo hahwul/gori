@@ -301,3 +301,46 @@ describe Gori::Issues::Filter do
     end
   end
 end
+
+describe "Gori::Issues::Filter.refusal" do
+  it "accepts every query the bar can match, aliases and mid-type empties included" do
+    ["status:open sev:>=high", "status:fp", "status:closed", "-status:done", "st:conf",
+     "sev:crit", "cvss:>=7.0", "cvss:3.1", "host:api", "title:\"sql injection\"", "login",
+     "status:", "(sev:high OR sev:critical) -status:resolved"].each do |q|
+      Issues::Filter.refusal(q).should be_nil
+    end
+  end
+
+  it "names a field the bar does not have" do
+    Issues::Filter.refusal("stauts:open").not_nil!.should contain("did you mean `status:`")
+  end
+
+  it "names a status or severity value nothing can match" do
+    Issues::Filter.refusal("status:opne").not_nil!.should contain("unknown status `opne`")
+    Issues::Filter.refusal("-sev:hihg").not_nil!.should contain("unknown severity `hihg`")
+    # Refused as the matcher reads it: a padded value would pass a stripping check and match nothing.
+    Issues::Filter.refusal(%(status:" open")).should_not be_nil
+  end
+
+  it "lets an unknown field through as text when lenient, but never a bad value" do
+    Issues::Filter.refusal("comment:body", lenient: true).should be_nil
+    Issues::Filter.refusal("status:opne", lenient: true).should_not be_nil
+  end
+
+  it "refuses a cvss comparison against a non-score" do
+    Issues::Filter.refusal("cvss:>=high").not_nil!.should contain("cvss comparisons take a score")
+  end
+end
+
+describe "Gori::Store::Status.from_name?" do
+  it "reads every label and the aliases the bars and surfaces accept" do
+    Store::Status.values.each { |st| Store::Status.from_name?(st.label).should eq(st) }
+    {"fp" => Store::Status::FalsePositive, "False_Positive" => Store::Status::FalsePositive,
+     "falsepositive" => Store::Status::FalsePositive, "conf" => Store::Status::Confirmed,
+     " done " => Store::Status::Resolved}.each { |name, st| Store::Status.from_name?(name).should eq(st) }
+  end
+
+  it "has no `closed`: that is a lens, not a state" do
+    Store::Status.from_name?("closed").should be_nil
+  end
+end

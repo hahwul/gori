@@ -159,14 +159,8 @@ module Gori
     end
 
     private def match_status(name : String, status : Store::Status) : Bool
-      case name
-      when "open"                 then status.open?
-      when "confirmed", "conf"    then status.confirmed?
-      when "false-positive", "fp" then status.false_positive?
-      when "resolved", "done"     then status.resolved?
-      when "closed"               then !status.open? # any non-open triage state
-      else                             false
-      end
+      return !status.open? if name == "closed" # any non-open triage state
+      Store::Status.from_lowercase?(name) == status
     end
   end
 end

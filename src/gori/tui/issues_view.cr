@@ -1262,8 +1262,7 @@ module Gori::Tui
     # The first token in the bar that is shaped like a field this backend does not have.
     private def unknown_query_field : FilterAst::UnknownField?
       return nil if @query.blank?
-      FilterAst.unknown_field(@query, FilterAst::SEPS_FIELD, QUERY_KNOWN,
-        FilterAst::EMPTY_NAMESPACES, Issues::Filter::CANDIDATE_FIELDS)
+      Issues::Filter.unknown_field(@query)
     end
 
     private def selected_preview_lines : Array({Color, String})?

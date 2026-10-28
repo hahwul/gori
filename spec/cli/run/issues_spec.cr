@@ -29,8 +29,8 @@ module Gori::CLI::Run
     issue_created_output(store, id, format)
   end
 
-  def self.issue_delete_confirmation_error_for_spec(id : Int64, yes : Bool) : String?
-    issue_delete_confirmation_error(id, yes)
+  def self.issue_delete_confirmation_error_for_spec(ids : Array(Int64), yes : Bool) : String?
+    issue_delete_confirmation_error(ids, yes)
   end
 end
 
@@ -323,13 +323,13 @@ end
 
 describe "gori run issues delete --yes confirmation" do
   it "refuses without --yes" do
-    err = Gori::CLI::Run.issue_delete_confirmation_error_for_spec(12_i64, false).not_nil!
+    err = Gori::CLI::Run.issue_delete_confirmation_error_for_spec([12_i64], false).not_nil!
     err.should contain("refusing to delete issue #12 without --yes")
     err.should contain("deleted issues cannot be recovered")
   end
 
   it "allows deletion with --yes" do
-    Gori::CLI::Run.issue_delete_confirmation_error_for_spec(12_i64, true).should be_nil
+    Gori::CLI::Run.issue_delete_confirmation_error_for_spec([12_i64], true).should be_nil
   end
 
   it "declares --yes and -y in the delete option parser" do
@@ -358,5 +358,39 @@ describe "gori run issues --repeater" do
     src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "issues.cr"))
     src.scan(/p\.on\("--repeater=ID"/).size.should eq(2)
     src.should contain("without --severity it also sets the severity from the score")
+  end
+end
+
+describe "gori run issues — query, count and several ids" do
+  it "opens a query on a field term or a group, and still refuses a bare first word as a verb" do
+    Gori::CLI::Run.issues_verb_error("status:open").should be_nil
+    Gori::CLI::Run.issues_verb_error("(sev:high").should be_nil
+    Gori::CLI::Run.issues_verb_error("NOT").should be_nil # `NOT status:resolved`, the documented grammar
+    Gori::CLI::Run.issues_verb_error("--format=json").should be_nil
+    Gori::CLI::Run.issues_verb_error(nil).should be_nil
+    # `issues remove 1` must not exit 0 having deleted nothing.
+    err = Gori::CLI::Run.issues_verb_error("remove").not_nil!
+    err.should contain("unknown subcommand 'remove'")
+    err.should contain("pass -q 'remove'")
+  end
+
+  it "refuses --count beside what shapes a document" do
+    Gori::CLI::Run.issues_count_clash(:text, nil, false).should be_nil
+    Gori::CLI::Run.issues_count_clash(:json, nil, false).should be_nil
+    Gori::CLI::Run.issues_count_clash(:markdown, nil, false).not_nil!.should contain("--format text or json")
+    Gori::CLI::Run.issues_count_clash(:text, "r.md", false).not_nil!.should contain("--export")
+    Gori::CLI::Run.issues_count_clash(:text, nil, true).not_nil!.should contain("--include-sensitive")
+  end
+
+  it "takes several ids only for the fields every issue can share" do
+    Gori::CLI::Run.issues_batch_update_error(3, title: false, notes: false, flow: false, repeater: false).should be_nil
+    Gori::CLI::Run.issues_batch_update_error(1, title: true, notes: true, flow: true, repeater: true).should be_nil
+    err = Gori::CLI::Run.issues_batch_update_error(2, title: true, notes: true, flow: false, repeater: false).not_nil!
+    err.should contain("--title, --notes name one issue")
+  end
+
+  it "names every id in a batch delete refusal" do
+    Gori::CLI::Run.issue_delete_confirmation_error_for_spec([1_i64, 5_i64], false).not_nil!
+      .should contain("2 issues (#1, #5) without --yes")
   end
 end

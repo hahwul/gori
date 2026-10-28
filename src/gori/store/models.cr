@@ -807,6 +807,25 @@ module Gori
         in .resolved?       then "resolved"
         end
       end
+
+      # Every spelling an operator or an agent may type for a state, or nil. ONE table: the
+      # Issues and Probe filter bars, `gori run issues update --status` and MCP `update_issue`
+      # each kept their own, so `fp` filtered but did not set. `closed` is not here: it is a
+      # filter lens over the three non-open states, never a state an issue can be set to.
+      def self.from_name?(name : String) : self?
+        from_lowercase?(name.strip.downcase)
+      end
+
+      # `from_name?` for a name already stripped and lowercased: the filter bars match per row
+      # on every keystroke, over a term `build_term` normalised once.
+      def self.from_lowercase?(name : String) : self?
+        case name
+        when "open"                                                    then Open
+        when "confirmed", "conf"                                       then Confirmed
+        when "false-positive", "false_positive", "falsepositive", "fp" then FalsePositive
+        when "resolved", "done"                                        then Resolved
+        end
+      end
     end
 
     # Owner of a row in `entity_links`.

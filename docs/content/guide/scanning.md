@@ -127,7 +127,10 @@ Discover sends real, unsolicited traffic to the target. Only run it against syst
 ```bash
 gori run issues --format markdown --export report.md
 gori run issues --format sarif --export issues.sarif   # for GitHub code scanning / a CI dashboard
+gori run issues -status:fp --format markdown --export report.md   # leave false positives out
 ```
+
+Headless, `gori run issues` takes the same query as the tab's `/` bar (`status:open sev:>=high`, `-status:fp`, `host:api`), positionally or with `-q`, and it narrows every format and `--export`; `--count` prints only the number. A field or value the bar does not know is refused rather than matching nothing. `gori run issues show <id>` prints one issue in full, and `update` and `delete` take several ids (`gori run issues update 3 7 --status confirmed`). MCP `list_issues` takes the same `query`.
 
 In the TUI, `⇧E` asks for the format and then the destination path. See [Export the report](/playbooks/triage-and-report/#5-export-the-report) for what a SARIF result carries.
 

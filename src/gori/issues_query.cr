@@ -110,6 +110,48 @@ module Gori
         eval(tree, f)
       end
 
+      # The first token shaped like a field this bar does not have: the TUI names it under an
+      # empty list, `refusal` refuses it.
+      def self.unknown_field(query : String) : FilterAst::UnknownField?
+        FilterAst.unknown_field(query, FilterAst::SEPS_FIELD,
+          ->(f : String, op : Char) { known_field?(f, regex: op == '~') },
+          FilterAst::EMPTY_NAMESPACES, CANDIDATE_FIELDS)
+      end
+
+      # Why a headless query cannot mean what it says, or nil. `gori run issues -q` and MCP
+      # `list_issues(query)` refuse what the interactive bar only notes under its empty list
+      # (see `FilterAst.unknown_field`): `stauts:open` or `status:opne` matches nothing, and an
+      # empty answer to a script reads exactly like "no such issues". `lenient` lets an unknown
+      # field through as the free text the bar searches it as (`comment:body` in a title), as
+      # `history --lenient` does; a bad value of a KNOWN field matches nothing either way.
+      def self.refusal(query : String, *, lenient : Bool = false) : String?
+        if !lenient && (u = unknown_field(query))
+          return FilterAst.unknown_field_note(u)
+        end
+        parse(query).bad_value
+      end
+
+      # The first leaf whose value its field cannot match, as the refusal sentence. An empty
+      # value is the bar's mid-type "matches all" and is never refused.
+      def bad_value : String?
+        return nil unless tree = @tree
+        tree.leaves.each do |t|
+          next if t.text.empty?
+          case t.kind
+          when :status
+            next if t.text == "closed" || Store::Status.from_lowercase?(t.text)
+            return "unknown status `#{t.text}` (#{STATUS_VALUES.join(", ")})"
+          when :severity
+            next if severity_value(t.text)
+            return "unknown severity `#{t.text}` (#{SEVERITY_VALUES.join(", ")})"
+          when :cvss
+            next if t.op == :eq || t.text.to_f?
+            return "cvss comparisons take a score — `#{t.text}` is not one (e.g. cvss:>=7.0)"
+          end
+        end
+        nil
+      end
+
       # --- parsing -------------------------------------------------------------
 
       # Never drops a term: an empty value is kept and resolved in match_term, which

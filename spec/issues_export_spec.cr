@@ -457,3 +457,16 @@ describe Gori::Issues::Export do
     end
   end
 end
+
+describe "Gori::Issues::Export.issue_markdown" do
+  it "is the report's own block for that issue (`gori run issues show`)" do
+    with_store do |store|
+      id = store.insert_issue("SQLi", Gori::Store::Severity::High, "api.test", nil, notes: "the body")
+      issue = store.get_issue(id).not_nil!
+      block = Gori::Issues::Export.issue_markdown(issue, store)
+      block.should contain("## [high] SQLi")
+      block.should contain("the body")
+      Gori::Issues::Export.markdown([issue], store, "p").should contain(block)
+    end
+  end
+end

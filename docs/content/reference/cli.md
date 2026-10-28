@@ -94,7 +94,7 @@ gori run <subcommand> [verb] [options]
 | `decoder <chain> [input]` | Run a Decoder encode / decode / hash chain |
 | `notes [<n>]` · `create` · `update` · `append` · `delete` | Read, write, edit, or delete project notes (`delete` needs `--yes`) |
 | `notify <summary>` | Show the operator one line in the gori TUI (the ring and Miss Ring), from a script |
-| `issues` · `create` · `update` · `delete` | List / export issues, or write and remove issues (`delete` needs `--yes`) |
+| `issues` · `show` · `create` · `update` · `delete` | List / filter / export issues, show one, or write and remove issues (`delete` needs `--yes`) |
 | `links` · `add` · `delete` | Evidence pointers from an issue or note to a flow, Repeater session, or job |
 | `evidence` | Freeze, list, show, link, unlink, or delete frozen request+response copies |
 | `retest` · `add` · `update` · `remove` · `move` · `clear` · `run` · `runs` · `show` · `forget` | An issue's retest steps: list, add, edit, reorder and remove them, run the retest (exit `1` unless it passes), and list its run history |
@@ -1245,6 +1245,10 @@ gori run decoder list                           # every converter (name, categor
 ```bash
 gori run issues --format markdown --export report.md
 gori run issues --format sarif --export issues.sarif    # upload to GitHub code scanning / a CI dashboard
+gori run issues 'sev:>=high' -status:closed               # the Issues tab's / query, positionally or with -q
+gori run issues -status:fp --format markdown --export report.md
+gori run issues --count status:open
+gori run issues show 7
 gori run notes --all
 ```
 
@@ -1264,12 +1268,15 @@ report-generator | gori run issues update 7 --status confirmed --notes-stdin
 
 | Option | Description |
 | -------- | ------------- |
+| `[query]`, `-q`/`--query` | Filter with the Issues tab's `/` query: `status:` (`open`, `confirmed`, `fp`, `resolved`, `closed` = any non-open), `sev:` with `>=`/`<=`, `cvss:>=7`, `host:`, `title:`; a bare word searches title and host, so it goes through `-q` (a bare first word is read as a subcommand). Applies to every `--format` and `--export`. An unknown field or value is refused; `--lenient` searches an unknown `field:` as text instead, as the TUI bar does |
+| `--count` | Print how many issues match (`{"count":N}` under `--format json`) |
 | `--format` | `text` (default) \| `json` \| `markdown` \| `sarif`, the same reports the TUI's Export writes |
 | `--export=PATH` | Write to `PATH` instead of STDOUT (bytes verbatim; STDOUT is escape-scrubbed) |
 | `--include-sensitive` | Emit `Authorization` / `Cookie` / `Set-Cookie` / `Proxy-Authorization` / API-key values in `sarif`'s `webRequest`/`webResponse` headers instead of `[REDACTED]`. Inert in the other formats, which say so on STDERR |
-| `create` | `-t`/`--title` (required), `--cvss` (score or vector; auto-derives severity), `-s`/`--severity` (`info`\|`low`\|`medium`\|`high`\|`critical`), `--host`, `--flow=ID`, `-n`/`--notes`, `--notes-file=FILE`, `--notes-stdin` |
-| `update <id>` | `-t`/`--title`, `--cvss` (new score/vector; empty to clear), `-s`/`--severity`, `-n`/`--notes` (empty to clear), `--notes-file=FILE`, `--notes-stdin`, `--status` (`open`\|`confirmed`\|`false-positive`\|`resolved`), `--host` (empty to clear), `--flow=ID` (the seed flow; empty to clear, and the old seed stays as a removable link) |
-| `delete <id>` (`rm`) | Delete the issue and its evidence links. Requires `-y`/`--yes`. To keep it in the report but mark it closed, use `update <id> --status=resolved` instead |
+| `create` | `-t`/`--title` (required), `--cvss` (score or vector; auto-derives severity), `-s`/`--severity` (`info`\|`low`\|`medium`\|`high`\|`critical`), `--host` (default: the `--flow`'s host), `--flow=ID`, `-n`/`--notes`, `--notes-file=FILE`, `--notes-stdin` |
+| `show <id>` | One issue in full, as its block in the Markdown report (notes, related links, frozen evidence, the filing flow's exchange); `--format json` prints the listing's object |
+| `update <id>…` | Several ids set `--severity` / `--status` / `--cvss` / `--host` on each in one write; the rest need one id. `-t`/`--title`, `--cvss` (new score/vector; empty to clear), `-s`/`--severity`, `-n`/`--notes` (empty to clear), `--notes-file=FILE`, `--notes-stdin`, `--status` (`open`\|`confirmed`\|`false-positive` or `fp`\|`resolved`), `--host` (empty to clear), `--flow=ID` (the seed flow; empty to clear, and the old seed stays as a removable link) |
+| `delete <id>…` (`rm`) | Delete the issues and their evidence links (every id must exist, or nothing is deleted). Requires `-y`/`--yes`. To keep it in the report but mark it closed, use `update <id> --status=resolved` instead |
 
 `--format sarif` writes a [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) log, the format GitHub code scanning, DefectDojo and Azure DevOps ingest. Each issue becomes one result: its severity maps to a SARIF `level` (with `rank` and the rule's `security-severity` preserving the full five-way scale), a `false-positive` or `resolved` triage status becomes a `suppression` so a dismissed finding does not reappear as open, and a linked flow rides along as `webRequest`/`webResponse` with real headers and (decoded, 64 KiB-capped) bodies.
 
