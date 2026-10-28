@@ -3047,13 +3047,9 @@ module Gori
 
       private def status_from(s : String?) : Store::Status?
         return nil unless s
-        # `false_positive` / `falsepositive` stay accepted — they predate the schema's `enum`
-        # and an agent that learned them must not start failing — but the LABEL is what the
-        # enum advertises and what `Status#label` round-trips, so it is matched from the one
-        # list rather than spelled out beside its own aliases.
-        down = s.strip.downcase
-        Store::Status.values.find { |v| v.label == down } ||
-          (down.in?("false_positive", "falsepositive") ? Store::Status::FalsePositive : nil)
+        # The schema's `enum` advertises the labels; the aliases (`fp`, `false_positive`, …)
+        # are the filter bar's and the CLI's too, from the one table.
+        Store::Status.from_name?(s)
       end
 
       # --- tools/list schema builders -----------------------------------------

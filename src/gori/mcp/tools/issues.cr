@@ -12,6 +12,14 @@ module Gori
       private def list_issues(h) : Result
         pg = page_args(h, ISSUES_LIMIT)
         all = store.issues
+        # The TUI `/` bar's own filter, refused where the bar only notes it: an agent reading
+        # an empty page cannot tell a typo'd `stauts:open` from "no open issues".
+        if q = str(h, "query").presence
+          if why = Issues::Filter.refusal(q, lenient: bool_arg(h, "lenient", false))
+            return err(why, "INVALID_ARGUMENT", field: "query")
+          end
+          all = Issues::Filter.parse(q).apply(all)
+        end
         page = all[pg.offset, pg.limit]? || [] of Store::Issue
         parts = fit_rows(page) { |rj, f, _| Serialize.issue(rj, f, store) }
         cut = parts.size < page.size
@@ -70,7 +78,9 @@ module Gori
           return not_found("no repeater with id #{repeater_id}")
         end
 
-        host = str(h, "host").try { |hst| Env.mask_secrets(hst) }
+        # No host given: the filing flow's, as the TUI form pre-fills it, so `host:` filters and
+        # the report do not miss an issue filed with only a `flow_id`.
+        host = (str(h, "host") || flow_id.try { |fid| store.flow_row(fid).try(&.host) }).try { |hst| Env.mask_secrets(hst) }
         # The body, written by the SAME insert as the issue — the atomicity `gori run issues
         # create --notes/--notes-file` already advertises. Without it an agent filing findings
         # in bulk had to follow every create with an `update_issue(notes:)`: two writes, and an
@@ -190,7 +200,10 @@ module Gori
         tool j, "list_issues",
           "List triage issues, newest/most-severe first. Returns {issues, returned, offset, " \
           "total}, not a bare array. Each issue's `links` lists what backs it, the flow it was " \
-          "filed from first (`flow_id`)." do |s|
+          "filed from first (`flow_id`). Probe scanner findings are probe_issues." do |s|
+          s.field "query", strprop("filter, as the TUI's / bar: status:open sev:>=high host:api " \
+                                   "cvss:>=7 -status:fp; a bare word searches title and host")
+          s.field "lenient", boolprop("free-text an unknown `field:` instead of refusing")
           s.field "limit", limitprop("max rows", ISSUES_LIMIT)
           s.field "offset", intprop("start row (default 0)")
         end
@@ -212,7 +225,7 @@ module Gori
           s.field "severity", enumprop("default: derived from cvss, else info", SEVERITIES)
           s.field "cvss", strprop("CVSS vector or score (e.g. 9.8)")
           s.field "notes", strprop("the issue's free-form body")
-          s.field "host", strprop("host the issue concerns")
+          s.field "host", strprop("host the issue concerns (default: the flow's)")
           s.field "flow_id", intprop("flow it is filed from; becomes its first linked flow")
           s.field "repeater_id", intprop("repeater id to link")
         end

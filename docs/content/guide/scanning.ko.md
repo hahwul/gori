@@ -127,7 +127,10 @@ Discover는 대상에 실제 요청을 보냅니다. 테스트 권한이 있는 
 ```bash
 gori run issues --format markdown --export report.md
 gori run issues --format sarif --export issues.sarif   # GitHub code scanning / CI 대시보드용
+gori run issues -status:fp --format markdown --export report.md   # 오탐은 빼고
 ```
+
+헤드리스 `gori run issues`는 탭의 `/` 바와 같은 쿼리(`status:open sev:>=high`, `-status:fp`, `host:api`)를 위치 인자나 `-q`로 받고, 모든 형식과 `--export`에 그대로 적용됩니다. `--count`는 개수만 출력합니다. 바가 모르는 필드나 값은 아무것도 안 맞는 결과 대신 거부됩니다. `gori run issues show <id>`는 이슈 하나를 전부 보여 주고, `update`와 `delete`는 id를 여러 개 받습니다(`gori run issues update 3 7 --status confirmed`). MCP `list_issues`도 같은 `query`를 받습니다.
 
 TUI에서는 `⇧E`가 형식을 먼저, 저장 경로를 그 다음에 묻습니다. SARIF result가 무엇을 담는지는 [리포트 내보내기](/ko/playbooks/triage-and-report/#5-export-the-report)를 참고하세요.
 

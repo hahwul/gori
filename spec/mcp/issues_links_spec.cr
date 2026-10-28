@@ -205,6 +205,50 @@ describe Gori::MCP::Server do
       end
     end
 
+    # The TUI form pre-fills the host from the flow; an agent filing with only `flow_id` got a
+    # host-less issue that `host:` filters and the report then missed.
+    it "takes the host from flow_id when none is given, and keeps an explicit one" do
+      with_store do |store|
+        fid = mcp_seed_flow(store, "api.test", "GET", "/u/1")
+        call = ->(args : String) do
+          mcp_tool_payload(mcp_drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_issue","arguments":{#{args}}}}))[0])["id"].as_i64
+        end
+        store.get_issue(call.call(%("title":"a","flow_id":#{fid}))).not_nil!.host.should eq("api.test")
+        store.get_issue(call.call(%("title":"b","flow_id":#{fid},"host":"other.test"))).not_nil!.host.should eq("other.test")
+      end
+    end
+
+    it "filters list_issues with the Issues bar's query, and refuses one that cannot match" do
+      with_store do |store|
+        store.insert_issue("SQLi", Gori::Store::Severity::High, "api.test", nil)
+        fp = store.insert_issue("HSTS", Gori::Store::Severity::Low, "api.test", nil)
+        store.update_issue(fp, status: Gori::Store::Status::FalsePositive)
+        list = ->(args : String) do
+          mcp_drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_issues","arguments":{#{args}}}}))[0]
+        end
+        got = mcp_tool_payload(list.call(%("query":"-status:fp")))
+        got["issues"].as_a.map(&.["title"].as_s).should eq(["SQLi"])
+        got["total"].as_i.should eq(1)
+        mcp_tool_payload(list.call(%("query":"sev:>=high host:api"))).["issues"].as_a.size.should eq(1)
+        mcp_tool_payload(list.call(%("query":""))).["issues"].as_a.size.should eq(2)
+
+        bad = list.call(%("query":"stauts:open"))["result"]
+        bad["isError"].as_bool.should be_true
+        bad["content"][0]["text"].as_s.should contain("did you mean `status:`")
+        # `lenient` searches it as the text the TUI bar does: a title can hold `comment:body`.
+        store.insert_issue("XSS in comment:body", Gori::Store::Severity::Medium, nil, nil)
+        mcp_tool_payload(list.call(%("query":"comment:body","lenient":true))).["issues"].as_a.size.should eq(1)
+      end
+    end
+
+    it "sets a status by any spelling the filter bar reads, fp included" do
+      with_store do |store|
+        id = store.insert_issue("x", Gori::Store::Severity::Low, nil, nil)
+        mcp_drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"update_issue","arguments":{"id":#{id},"status":"fp"}}}))
+        store.get_issue(id).not_nil!.status.should eq(Gori::Store::Status::FalsePositive)
+      end
+    end
+
     it "rejects a present-but-invalid flow_id instead of silently unlinking" do
       with_store do |store|
         create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_issue","arguments":{"title":"x","flow_id":1.9}}})
