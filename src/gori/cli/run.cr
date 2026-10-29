@@ -2079,23 +2079,23 @@ module Gori
 
       private def self.parse_format(v : String, allowed : Array(Symbol)) : Symbol
         sym = case v.downcase
-              when "text"           then :text
-              when "json"           then :json
-              when "jsonl"          then :jsonl
-              when "raw"            then :raw
-              when "har"            then :har
-              when "curl"           then :curl
-              when "python"         then :python
-              when "fetch"          then :fetch
-              when "go"             then :go
-              when "httpie"         then :httpie
-              when "csrf"           then :csrf
-              when "paths"          then :paths
-              when "markdown", "md" then :markdown
-              when "sarif"          then :sarif
-              when "names"          then :names
-              when "urls"           then :urls
-              else                       abort "gori run: unknown --format '#{v}'"
+              when "text"                         then :text
+              when "json"                         then :json
+              when "jsonl"                        then :jsonl
+              when "raw"                          then :raw
+              when "har"                          then :har
+              when "curl"                         then :curl
+              when "python"                       then :python
+              when "fetch"                        then :fetch
+              when "go"                           then :go
+              when "httpie"                       then :httpie
+              when "csrf", "csrf-poc", "csrf_poc" then :csrf
+              when "paths"                        then :paths
+              when "markdown", "md"               then :markdown
+              when "sarif"                        then :sarif
+              when "names"                        then :names
+              when "urls"                         then :urls
+              else                                     abort "gori run: unknown --format '#{v}'"
               end
         abort "gori run: --format #{v} not valid here (use #{allowed.join("|")})" unless allowed.includes?(sym)
         sym
