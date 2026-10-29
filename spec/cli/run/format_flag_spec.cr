@@ -26,6 +26,9 @@ describe "gori run --format / --json (#1386)" do
     Gori::CLI::Run.format_flag_for_spec(["--json"], [:text, :json]).should eq(:json)
     Gori::CLI::Run.format_flag_for_spec(["--format", "jsonl"], [:text, :json, :jsonl]).should eq(:jsonl)
     Gori::CLI::Run.format_flag_for_spec([] of String, [:text, :json]).should eq(:text)
+    Gori::CLI::Run.format_flag_for_spec(["--format", "csrf-poc"], [:text, :csrf]).should eq(:csrf)
+    Gori::CLI::Run.format_flag_for_spec(["--format", "csrf_poc"], [:text, :csrf]).should eq(:csrf)
+    Gori::CLI::Run.format_flag_for_spec(["--format", "md"], [:text, :markdown]).should eq(:markdown)
   end
 
   it "registers no --json where --format offers no json" do
