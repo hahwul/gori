@@ -1,7 +1,7 @@
 <div align="center">
   <br>
   <img src="docs/static/images/gori-wallpaper.webp">
-  <p>Hack from the terminal.</p>
+  <p>A fast, keyboard-driven HTTP intercepting proxy and pentesting toolkit for the terminal<br>built for humans and AI agents alike.</p>
 </div>
 <p align="center">
 <a href="https://github.com/hahwul/gori/blob/main/.github/CONTRIBUTING.md">
