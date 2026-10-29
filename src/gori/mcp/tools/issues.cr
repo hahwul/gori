@@ -80,7 +80,7 @@ module Gori
 
         # No host given: the filing flow's, as the TUI form pre-fills it, so `host:` filters and
         # the report do not miss an issue filed with only a `flow_id`.
-        host = (str(h, "host") || flow_id.try { |fid| store.flow_row(fid).try(&.host) }).try { |hst| Env.mask_secrets(hst) }
+        host = (str(h, "host").try(&.strip).presence || flow_id.try { |fid| store.flow_row(fid).try(&.host) }).try { |hst| Env.mask_secrets(hst) }
         # The body, written by the SAME insert as the issue — the atomicity `gori run issues
         # create --notes/--notes-file` already advertises. Without it an agent filing findings
         # in bulk had to follow every create with an `update_issue(notes:)`: two writes, and an

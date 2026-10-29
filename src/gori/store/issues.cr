@@ -31,6 +31,7 @@ module Gori
       ts = now_us
       issue_id = 0_i64
       cvss = canonical_cvss(cvss)
+      host = host.try(&.strip).presence
       ok = exec_task_ok ->(c : DB::Connection) {
         c.exec("INSERT INTO issues (created_at, updated_at, title, severity, host, flow_id, notes, cvss) VALUES (?,?,?,?,?,?,?,?)",
           ts, ts, title, severity.value, host, flow_id, notes, cvss)
@@ -110,6 +111,7 @@ module Gori
       elsif cv = canonical_cvss(cvss)
         sets << "cvss = ?"; set_args << cv
       end
+      host, clear_host = resolve_host_update(host, clear_host)
       set_or_clear(sets, set_args, "host", host, clear_host)
       set_or_clear(sets, set_args, "flow_id", flow_id, clear_flow)
       return true if sets.empty?
@@ -135,6 +137,15 @@ module Gori
         sets << "#{col} = NULL"
       elsif !value.nil?
         sets << "#{col} = ?"; args << value
+      end
+    end
+
+    private def resolve_host_update(host : String?, clear_host : Bool) : {String?, Bool}
+      if h = host
+        stripped = h.strip
+        stripped.empty? ? {nil, true} : {stripped, false}
+      else
+        {nil, clear_host}
       end
     end
 

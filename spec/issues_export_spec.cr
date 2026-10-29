@@ -396,6 +396,17 @@ describe Gori::Issues::Export do
       end
     end
 
+    it "emits null in JSON and dash in markdown for an empty or blank host" do
+      with_store do |store|
+        store.insert_issue("t", Gori::Store::Severity::Info, "", nil)
+        parsed = JSON.parse(Gori::Issues::Export.json(store.issues, store))
+        parsed.as_a.first["host"].raw.should be_nil
+
+        md = Gori::Issues::Export.markdown(store.issues, store, "proj")
+        md.should contain("- **Host:** —\n")
+      end
+    end
+
     it "includes CVSS in markdown and json exports" do
       with_store do |store|
         store.insert_issue("SQLi", Gori::Store::Severity::Critical, "app.test", nil,

@@ -215,6 +215,8 @@ describe Gori::MCP::Server do
         end
         store.get_issue(call.call(%("title":"a","flow_id":#{fid}))).not_nil!.host.should eq("api.test")
         store.get_issue(call.call(%("title":"b","flow_id":#{fid},"host":"other.test"))).not_nil!.host.should eq("other.test")
+        store.get_issue(call.call(%("title":"c","flow_id":#{fid},"host":""))).not_nil!.host.should eq("api.test")
+        store.get_issue(call.call(%("title":"d","flow_id":#{fid},"host":"   "))).not_nil!.host.should eq("api.test")
       end
     end
 

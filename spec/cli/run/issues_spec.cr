@@ -29,6 +29,10 @@ module Gori::CLI::Run
     issue_created_output(store, id, format)
   end
 
+  def self.issue_host_for_spec(store : Gori::Store, host : String?, flow_id : Int64?) : String?
+    issue_host(store, host, flow_id)
+  end
+
   def self.issue_delete_confirmation_error_for_spec(ids : Array(Int64), yes : Bool) : String?
     issue_delete_confirmation_error(ids, yes)
   end
@@ -91,6 +95,32 @@ describe "gori run issues create --flow" do
   end
 end
 
+describe "Gori::CLI::Run.issue_host" do
+  it "prefers explicit host when present" do
+    with_store do |store|
+      fid = captured_flow(store)
+      Gori::CLI::Run.issue_host_for_spec(store, "other.test", fid).should eq("other.test")
+    end
+  end
+
+  it "falls back to flow host when host is nil, empty, or whitespace" do
+    with_store do |store|
+      fid = captured_flow(store)
+      Gori::CLI::Run.issue_host_for_spec(store, nil, fid).should eq("acme.test")
+      Gori::CLI::Run.issue_host_for_spec(store, "", fid).should eq("acme.test")
+      Gori::CLI::Run.issue_host_for_spec(store, "   ", fid).should eq("acme.test")
+    end
+  end
+
+  it "returns nil when both host and flow are absent" do
+    with_store do |store|
+      Gori::CLI::Run.issue_host_for_spec(store, nil, nil).should be_nil
+      Gori::CLI::Run.issue_host_for_spec(store, "", nil).should be_nil
+      Gori::CLI::Run.issue_host_for_spec(store, "   ", nil).should be_nil
+    end
+  end
+end
+
 describe "gori run issues — the text listing" do
   it "leads with the id, then the [severity/status] pair, title, host and flow" do
     # Every triage subcommand addresses an issue BY ID, so the id has to be the first
@@ -109,11 +139,13 @@ describe "gori run issues — the text listing" do
     txt.should eq("#1  [critical/open]  [CVSS 9.8]  SQLi  (api.test)")
   end
 
-  it "omits the host and flow clauses when the issue has neither" do
+  it "omits the host and flow clauses when the issue has neither, and suppresses empty parens" do
     txt = Gori::CLI::Run.issues_text_for_spec([
       issue(3_i64, "manual note", Gori::Store::Severity::Info, nil, nil),
+      issue(4_i64, "empty host", Gori::Store::Severity::Info, "", nil),
+      issue(5_i64, "whitespace host", Gori::Store::Severity::Info, "   ", nil),
     ])
-    txt.should eq("#3  [info/open]  manual note")
+    txt.should eq("#3  [info/open]  manual note\n#4  [info/open]  empty host\n#5  [info/open]  whitespace host")
   end
 
   it "flattens a multi-line title so one issue is always one row" do

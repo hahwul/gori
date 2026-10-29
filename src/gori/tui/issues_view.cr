@@ -762,7 +762,7 @@ module Gori::Tui
     # `[severity] title (host)`, one per line.
     def copy_rows_text : String
       rows = @marks.empty? ? [@issues[@selected]?].compact : @all.select { |f| @marks.marked?(f.id) }
-      rows.map { |f| "[#{f.severity.label}] #{f.title}#{f.host ? " (#{f.host})" : ""}" }.join("\n")
+      rows.map { |f| "[#{f.severity.label}] #{f.title}#{(h = f.host.try(&.presence)) ? " (#{h})" : ""}" }.join("\n")
     end
 
     def marked_ids : Array(Int64)
