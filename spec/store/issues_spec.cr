@@ -46,6 +46,22 @@ describe "Store#insert_issue" do
     end
   end
 
+  it "normalises empty and whitespace-only hosts to nil on insert and update" do
+    with_store do |store|
+      id1 = store.insert_issue("Empty host", Gori::Store::Severity::Low, "", nil)
+      store.get_issue(id1).not_nil!.host.should be_nil
+
+      id2 = store.insert_issue("Spaces host", Gori::Store::Severity::Low, "   ", nil)
+      store.get_issue(id2).not_nil!.host.should be_nil
+
+      id3 = store.insert_issue("Trim host", Gori::Store::Severity::Low, "  acme.test  ", nil)
+      store.get_issue(id3).not_nil!.host.should eq("acme.test")
+
+      store.update_issue(id3, host: "   ")
+      store.get_issue(id3).not_nil!.host.should be_nil
+    end
+  end
+
   # Every headless filer routes through this one method — `gori run issues create --flow`,
   # MCP `create_issue(flow_id:)`, the Probe analyzer's automatic filing, the TUI form — so
   # the guarantee holds for all of them without each having to remember the link.

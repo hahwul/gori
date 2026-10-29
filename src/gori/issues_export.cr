@@ -70,7 +70,7 @@ module Gori
           io << "\n"
         end
         io << "- **Status:** " << f.status.label << "\n"
-        io << "- **Host:** " << (f.host.try { |h| one_line(h) } || "—") << "\n"
+        io << "- **Host:** " << (f.host.try { |h| one_line(h).presence } || "—") << "\n"
         # No `- **Flow:**` bullet. The primary flow is the FIRST entry of the Related list
         # below — `resolve_issue_links` puts it there, exactly once, and synthesises it when
         # the link row is missing — because a report reader asking "what backs this finding"
@@ -131,7 +131,7 @@ module Gori
           j.field "status", f.status.label
           j.field "cvss", f.cvss.try { |c| one_line(c) }
           j.field "cvss_score", f.cvss_score
-          j.field "host", f.host.try { |h| one_line(h) }
+          j.field "host", f.host.try { |h| one_line(h).presence }
           # KEPT for compatibility, and it is the same fact as `links[0]`: the flow the
           # issue was filed from is the first entry of `links` below. Readers that only
           # know this field keep working; readers that want everything backing the issue

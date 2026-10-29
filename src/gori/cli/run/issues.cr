@@ -308,7 +308,7 @@ module Gori
           p.on("-tTITLE", "--title=TITLE", "Issue title (required)") { |v| title = v }
           p.on("-sSEVERITY", "--severity=SEVERITY", "Severity: info|low|medium|high|critical (default: auto from cvss, else info)") { |v| sev_s = v }
           p.on("--cvss=CVSS", "CVSS vector string or numeric score (e.g. 9.8 or CVSS:3.1/...)") { |v| cvss = v }
-          p.on("--host=HOST", "Host concerning the issue") { |v| host = v }
+          p.on("--host=HOST", "Host concerning the issue (default: the flow's)") { |v| host = v.strip.presence }
           p.on("--flow=ID", "Associated flow ID") { |v| flow_id = parse_flow_id(v, "gori run issues create") }
           p.on("--repeater=ID", "Link a saved Repeater session as evidence (MCP's repeater_id)") { |v| repeater_id = parse_id(v, "gori run issues create", "--repeater") }
           p.on("-nNOTES", "--notes=NOTES", "Free-form notes (the issue's body)") { |v| notes = v }
@@ -389,7 +389,7 @@ module Gori
 
       # `--host`, or the `--flow`'s host when none was given.
       private def self.issue_host(store : Store, host : String?, flow_id : Int64?) : String?
-        host || flow_id.try { |fid| store.flow_row(fid).try(&.host) }
+        host.try(&.strip).presence || flow_id.try { |fid| store.flow_row(fid).try(&.host) }
       end
 
       # The refusal for a `--flow` that names no captured flow, or nil when it names one (or
@@ -537,7 +537,7 @@ module Gori
           p.on("--notes-stdin", "Read the notes from stdin, byte-for-byte, as --notes-file reads a file (`report-generator | gori run issues update 7 --notes-stdin`). Keeps a long write-up out of the argument vector, so it is not in the process listing or the shell history and cannot hit the command-line length limit. Needs a pipe or a redirect (`< notes.md`): a terminal is refused, because it would echo the notes back") { notes_stdin = true }
           p.on("--status=STATUS", "Status: open|confirmed|false-positive|resolved") { |v| stat_s = v }
           p.on("--host=HOST", "Host concerning the issue (empty to clear)") do |v|
-            v.empty? ? (clear_host = true) : (host = v)
+            v.strip.empty? ? (clear_host = true) : (host = v.strip)
           end
           p.on("--flow=ID", "The issue's seed flow (empty to clear); the old one stays as a link") do |v|
             v.strip.empty? ? (clear_flow = true) : (flow_id = parse_flow_id(v, "gori run issues update"))
@@ -614,7 +614,7 @@ module Gori
             # security-severity and this listing must not print it three different ways.
             cvss_tag = f.cvss_score.try { |sc| "  [CVSS #{sprintf("%.1f", sc)}]" } || ""
             io << '#' << f.id << "  [" << f.severity.label << '/' << f.status.label << ']' << cvss_tag << "  " << Output.term_line(f.title)
-            if h = f.host
+            if h = f.host.try(&.strip).presence
               io << "  (" << Output.term_line(h) << ')'
             end
             # The issue's FIRST related item, in the compact spelling this one-line-per-issue
