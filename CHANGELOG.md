@@ -29,6 +29,7 @@
 ### Changes
 
 - MCP: list replies are held to about 64 KB, probe findings carry each rule's text once and their first five affected URLs, `list_issues` previews notes, and the tool catalogue is ~25% smaller (#1649, #1729, #1730, #1790)
+- Probe: a passive scan of a large capture (`gori run probe`, MCP `probe_scan`) peaks at about a third of the memory, and over MCP it answers `ping` and can be cancelled mid-scan (#1791)
 - An unset `$ENV.KEY` in a request you wrote is refused before it dials (#1666, #1689)
 - `gori run fuzz save --json` prints one `{"results":[…],"run_id":…}` object instead of a bare array (#1682)
 
