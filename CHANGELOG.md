@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Probe: the passive secrets rule detects Hugging Face (`hf_`) and DigitalOcean (`dop_v1_`/`doo_v1_`/`dor_v1_`) tokens (#1779)
 - CLI: `gori run show` accepts `--format csrf-poc` and `csrf_poc` as aliases for `csrf`, matching the command overview (#1777)
 - Docs: a redrawn landing built around the ring knot in monospace glyphs, opening as one scroll-driven scene with a glint lapping the knot, and the doc pages in the same glyph voice (#1773)
 - Issues: `gori run issues` and MCP `list_issues` filter with the Issues tab's query (it narrows exports too), and the CLI adds `issues show <id>`, `--count` and several ids on `update`/`delete`; `fp` sets a status everywhere, and an issue filed from a flow takes that flow's host (an empty host normalises to nil) (#1776)
