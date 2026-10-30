@@ -21,17 +21,17 @@ module Gori
                      "Diff two flows' request or response (default: response)."
           project_options(p, proj, "read")
           p.on("--pane=PANE", "What to diff: request | response (default: response)") do |v|
-            pane = case v.strip.downcase
-                   when "request"  then :request
-                   when "response" then :response
-                   else                 abort "gori run compare: --pane must be request or response"
-                   end
+            case got = compare_pane(v)
+            in Symbol then pane = got
+            in String then abort "gori run compare: #{got}"
+            end
           end
           p.on("--changes-only", "Only print added/removed lines (omit unchanged context)") { changes_only = true }
           p.on("--context=N", "Collapse unchanged runs, keeping N lines around each change (without the flag nothing is folded; --context= alone keeps #{Repeater::Diff::FOLD_CONTEXT})") do |v|
-            n = v.strip.empty? ? Repeater::Diff::FOLD_CONTEXT.to_i64 : (v.to_i64? || abort("gori run compare: --context must be a number"))
-            abort "gori run compare: --context must be >= 0" if n < 0
-            context = n
+            case got = compare_context(v)
+            in Int64  then context = got
+            in String then abort "gori run compare: #{got}"
+            end
           end
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           redact_options(p, redaction)
@@ -95,6 +95,25 @@ module Gori
         clean_a, report_a = Redact::Wire.flow(a, matcher)
         clean_b, report_b = Redact::Wire.flow(b, matcher)
         {clean_a, clean_b, [{a.row.id.as(Int64?), report_a}, {b.row.id.as(Int64?), report_b}]}
+      end
+
+      # `--pane` value → the pane Symbol, or the error text naming what was typed (#1786).
+      private def self.compare_pane(v : String) : Symbol | String
+        case v.strip.downcase
+        when "request"  then :request
+        when "response" then :response
+        else                 "--pane must be request or response (got #{v.inspect})"
+        end
+      end
+
+      # `--context` value → the fold context, or the error text naming what was typed (#1786).
+      # An empty value keeps the default fold context; negatives are refused (#1691).
+      private def self.compare_context(v : String) : Int64 | String
+        return Repeater::Diff::FOLD_CONTEXT.to_i64 if v.strip.empty?
+        n = v.to_i64?
+        return "--context must be a number (got #{v.inspect})" unless n
+        return "--context must be >= 0 (got #{n})" if n < 0
+        n
       end
 
       private def self.compare_lines(d : Store::FlowDetail, pane : Symbol) : Array(String)

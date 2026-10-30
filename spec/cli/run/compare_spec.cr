@@ -24,6 +24,14 @@ module Gori::CLI::Run
                                       matcher : Gori::Redact::Matcher?)
     compare_redaction(a, b, matcher)
   end
+
+  def self.compare_pane_for_spec(v : String) : Symbol | String
+    compare_pane(v)
+  end
+
+  def self.compare_context_for_spec(v : String) : Int64 | String
+    compare_context(v)
+  end
 end
 
 describe "gori run compare" do
@@ -182,6 +190,33 @@ describe Gori::Repeater::ExchangeMeta do
         Gori::CLI::Run.compare_lines_for_spec(shown_b, :response)).join.should_not contain("secret")
     ensure
       Gori::Redact.salt = salt
+    end
+  end
+
+  describe "--pane / --context errors name the value typed (#1786)" do
+    it "accepts request and response, case- and space-insensitively" do
+      Gori::CLI::Run.compare_pane_for_spec("request").should eq(:request)
+      Gori::CLI::Run.compare_pane_for_spec(" Response ").should eq(:response)
+    end
+
+    it "quotes a bad --pane value back" do
+      Gori::CLI::Run.compare_pane_for_spec("reponse")
+        .should eq(%(--pane must be request or response (got "reponse")))
+    end
+
+    it "keeps the default fold context for an empty --context=" do
+      Gori::CLI::Run.compare_context_for_spec("").should eq(Gori::Repeater::Diff::FOLD_CONTEXT.to_i64)
+      Gori::CLI::Run.compare_context_for_spec("5").should eq(5_i64)
+      Gori::CLI::Run.compare_context_for_spec("0").should eq(0_i64)
+    end
+
+    it "quotes a non-numeric --context value back" do
+      Gori::CLI::Run.compare_context_for_spec("five")
+        .should eq(%(--context must be a number (got "five")))
+    end
+
+    it "still refuses a negative --context, naming it (#1691)" do
+      Gori::CLI::Run.compare_context_for_spec("-3").should eq("--context must be >= 0 (got -3)")
     end
   end
 end
