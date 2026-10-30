@@ -99,9 +99,9 @@ gori run <subcommand> [verb] [options]
 | `evidence` | Freeze, list, show, link, unlink, or delete frozen request+response copies |
 | `retest` · `add` · `update` · `remove` · `move` · `clear` · `run` · `runs` · `show` · `forget` | An issue's retest steps: list, add, edit, reorder and remove them, run the retest (exit `1` unless it passes), and list its run history |
 | `redact` | Manage safe-export redaction profiles (`profiles`, `use`, `default`, `set`, `rm`) |
-| `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Manage Match & Replace rules |
+| `rewriter` · `add` · `update` · `rm` · `enable` · `disable` · `preview` | Manage Match & Replace rules |
 | `rewriter preset list` · `add` | List the response-modification presets, and install one as ordinary Match & Replace rules |
-| `rewriter extract` · `bindings` | Manage session-binding extract rules, and list the `$BIND.NAME`s they declare |
+| `rewriter extract` · `update` · `bindings` | Manage session-binding extract rules, and list the `$BIND.NAME`s they declare |
 | `colormarker` · `add` · `update` · `rm` · `enable` · `disable` · `move` · `preview` · `color` | Manage History row-colour rules |
 | `views` · `add` · `set` · `rename` · `scope` · `rm` | Manage saved History views: named QL queries the list is narrowed by, as a lens |
 | `session` · `add` · `from-flow` · `edit` · `rm` · `baseline` · `show` · `refresh` · `from-request` | Session slots: the named identities a send or an Authorize run goes out as, and the Repeater steps that re-authenticate one |
@@ -920,6 +920,7 @@ gori run probe dismiss --code missing_hsts       # mute in bulk by finding code 
 gori run probe delete --all --yes
 gori run probe rules --kind active               # list scan rules and which are armed
 gori run probe rules enable <rule-id>            # ids: `probe rules`, or the Probe rules reference
+gori run probe rules update custom_p_1 --regex -p 'debug_token=\w+'
 gori run probe mode passive                      # off | passive | active | aggressive
 ```
 
@@ -929,7 +930,7 @@ gori run probe mode passive                      # off | passive | active | aggr
 | `dismiss <id>` | With an id, toggles that finding dismissed ⇄ open; `--code=CODE` / `--host=HOST` dismiss every open finding sharing it. The code is the finding's (the `probe issues` column, such as `missing_hsts`), not its rule id, and must match exactly. A dismiss the project could not write exits `1` and leaves the finding unchanged |
 | `promote <id>` | Promote a finding to a human-confirmed Issue |
 | `delete <id>` (`rm`) | Or `--all --yes` |
-| `rules [list\|enable\|disable\|add\|delete]` | `list` takes `--kind=passive\|active\|custom`; `enable`/`disable`/`delete` take a `<rule-id>` from that list (the built-ins are in [Probe rules](/reference/probe-rules/)); `add` takes `-t`/`--title` (required), `-p`/`--pattern` (required), `--description`, `--side` (`request`\|`response`, default `response`), `--region` (`whole`\|`header`\|`body`, default `body`), `--regex`, `--exec` (run `--pattern` as a [process hook](/guide/scripting/#process-hooks): exit 0 raises the finding, stdout is the evidence), `-s`/`--severity` (default `info`) |
+| `rules [list\|enable\|disable\|add\|update\|delete]` | `list` takes `--kind=passive\|active\|custom`; `enable`/`disable`/`delete` take a `<rule-id>` from that list (the built-ins are in [Probe rules](/reference/probe-rules/)); `add` takes `-t`/`--title` (required), `-p`/`--pattern` (required), `--description`, `--side` (`request`\|`response`, default `response`), `--region` (`whole`\|`header`\|`body`, default `body`), `--regex`, `--exec` (run `--pattern` as a [process hook](/guide/scripting/#process-hooks): exit 0 raises the finding, stdout is the evidence), `-s`/`--severity` (default `info`); `update <custom-rule-id>` edits a project custom rule (`custom_p_N`) in place and takes `add`'s flags plus `--string` (match `--pattern` literally, the `add` default). A flag left out keeps the stored value, `--description ''` clears it, and `--string`/`--regex`/`--exec` are mutually exclusive |
 | `mode [off\|passive\|active\|aggressive]` | Print the project's scan mode, or set it |
 
 ### run discover
@@ -1481,6 +1482,14 @@ A request-head rule matches the origin-form request line the proxy forwards (`GE
 
 `preview` takes the same rule flags and reports how many stored flows the rule would have changed, without writing it. Its `--format json` carries `skipped`, the flows a JSON rule left out because their body was too large to preview, and `scan_capped`, true only when older flows than the 500 it read exist. `rm` (`delete`), `enable` and `disable` take a rule id from the list, plus `--scope`, because the two stores number their rules independently, so an id alone names two different rules. The list prints the scope as a `G`/`P` prefix (`G*` = this project overrides that global rule's default) and shows global rules first, the order the proxy applies them in. See [Global and project rules](/guide/proxy/#global-and-project-rules).
 
+**`rewriter update <id>`**: edit a rule in place, keeping its id and its place in the apply order. It takes the rule flags above, plus `--enabled` / `--disabled`. A flag left out keeps the stored value; `--name ''`, `--host ''` and `--value ''` clear theirs. The id may be spelled as the list prints it (`P#1`, `G#2`), which names its store; a `--scope` that disagrees is refused. On a global rule, `--enabled` / `--disabled` set this project's override. For a `short_circuit` rule, `--respond=inline|file|dir|fault` picks how it answers (left out, the kind is kept or follows the flags given), `--body-file ''` returns it to an inline body, and `--no-fallthrough` turns `--fallthrough` off again.
+
+```bash
+gori run rewriter update 1 --value 'secret=[hidden]'     # only the replacement changes
+gori run rewriter update 2 --no-fallthrough              # a missing file is answered 502 again
+gori run rewriter update G#1 --disabled                  # off in THIS project only
+```
+
 Body rules re-sync `Content-Length` and de-chunk as needed, on HTTP/1.1 and HTTP/2 alike. See [Proxy & History](/guide/proxy/) for the interactive editor.
 
 **`rewriter preset`**: install a [response-modification preset](/guide/proxy/#rewriter-presets), a named starting point that writes ordinary Match & Replace rules. Verbs: `list` and `add <name>`.
@@ -1493,7 +1502,7 @@ gori run rewriter preset add remove-csp --scope global --disabled
 
 Names are `unhide-hidden-fields`, `enable-disabled-fields`, `remove-length-limits`, `strip-validation`, `remove-csp`, `remove-security-headers` and `disable-sri`. `add` takes `--scope=project|global`, `--disabled` (install without arming, to review them first) and `--format json`, which prints MCP `create_rule_from_preset`'s object, the new rules' `ids` among it. The rules it writes go through the same path `rewriter add` does, so they are listed, editable and deletable afterwards. Installing the same preset twice duplicates visibly rather than merging.
 
-**`rewriter extract`**: the rules that declare [session bindings](/guide/proxy/#session-bindings): which response a `$BIND.NAME` is read from, and where in it. Verbs: `list` (default), `add`, `rm` (`delete`), `enable`, `disable`.
+**`rewriter extract`**: the rules that declare [session bindings](/guide/proxy/#session-bindings): which response a `$BIND.NAME` is read from, and where in it. Verbs: `list` (default), `add`, `update`, `rm` (`delete`), `enable`, `disable`.
 
 ```bash
 gori run rewriter extract add --name SESS --kind cookie --selector session --host '*.example.com'
@@ -1509,6 +1518,12 @@ gori run rewriter extract add --name CSRF --kind regex --selector 'name="csrf" v
 | `--when=FILTER` | Which messages to read, in intercept-filter syntax (`''` = any) |
 | `--host=GLOB` | Limit to a host glob (`''` = all) |
 | `--disabled` | Create the rule without arming it |
+
+**`rewriter extract update <id>`** takes the same flags, plus `--enabled` / `--disabled`. A flag left out keeps the stored value; `--when ''`, `--host ''` and `--range ''` clear theirs. Renaming a rule drops the value bound to its old name.
+
+```bash
+gori run rewriter extract update 1 --name SID --host ''
+```
 
 **`rewriter bindings`**: list the names those rules declare (`--format text|json`). Values are not shown here and cannot be: a binding's value lives in the memory of the running gori and is never written anywhere, so another process has nothing to read. The Rewriter tab's `bindings` sub-tab shows the live table. For a headless sweep, `--bind-from` fills the values in-process; see [Session bindings from the command line](#session-bindings-from-the-command-line).
 

@@ -99,9 +99,9 @@ gori run <subcommand> [verb] [options]
 | `evidence` | 고정한 요청+응답 사본을 만들고, 나열·조회·연결·연결 해제·삭제 |
 | `retest` · `add` · `update` · `remove` · `move` · `clear` · `run` · `runs` · `show` · `forget` | 이슈의 재테스트 단계: 나열·추가·수정·재정렬·제거, 재테스트 실행(통과하지 않으면 종료 코드 `1`), 실행 이력 나열 |
 | `redact` | 안전한 내보내기용 리댁션 프로필 관리(`profiles`, `use`, `default`, `set`, `rm`) |
-| `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Match & Replace 규칙 관리 |
+| `rewriter` · `add` · `update` · `rm` · `enable` · `disable` · `preview` | Match & Replace 규칙 관리 |
 | `rewriter preset list` · `add` | 응답 수정 프리셋 목록, 그리고 하나를 평범한 Match & Replace 규칙으로 설치 |
-| `rewriter extract` · `bindings` | 세션 바인딩 추출 규칙 관리, 그 규칙이 선언한 `$BIND.NAME` 목록 |
+| `rewriter extract` · `update` · `bindings` | 세션 바인딩 추출 규칙 관리, 그 규칙이 선언한 `$BIND.NAME` 목록 |
 | `colormarker` · `add` · `update` · `rm` · `enable` · `disable` · `move` · `preview` · `color` | History 행 색상 규칙 관리 |
 | `views` · `add` · `set` · `rename` · `scope` · `rm` | 저장된 History 뷰 관리: 목록을 좁히는 이름 붙은 QL 쿼리를 렌즈로 적용 |
 | `session` · `add` · `from-flow` · `edit` · `rm` · `baseline` · `show` · `refresh` · `from-request` | 세션 슬롯: 전송이나 Authorize 실행이 그 이름으로 나가는 신원과, 그 신원을 다시 인증하는 Repeater 단계 |
@@ -911,6 +911,7 @@ gori run probe dismiss --code missing_hsts       # 발견 코드나 --host로 �
 gori run probe delete --all --yes
 gori run probe rules --kind active               # 스캔 룰 목록과 무장 여부
 gori run probe rules enable <rule-id>            # id는 `probe rules`나 Probe 룰 레퍼런스에서
+gori run probe rules update custom_p_1 --regex -p 'debug_token=\w+'
 gori run probe mode passive                      # off | passive | active | aggressive
 ```
 
@@ -920,7 +921,7 @@ gori run probe mode passive                      # off | passive | active | aggr
 | `dismiss <id>` | id를 주면 그 발견 항목을 무시 ⇄ 열림으로 토글하고, `--code=CODE` / `--host=HOST`는 그 값을 공유하는 열린 항목을 모두 무시합니다. 코드는 룰 id가 아니라 발견의 코드(`probe issues`에 나오는 `missing_hsts` 같은 값)이며 정확히 일치해야 합니다. 프로젝트에 쓰지 못한 dismiss는 항목을 바꾸지 않고 `1`로 끝납니다 |
 | `promote <id>` | 발견 항목을 사람이 확인한 Issue로 승격 |
 | `delete <id>` (`rm`) | 또는 `--all --yes` |
-| `rules [list\|enable\|disable\|add\|delete]` | `list`는 `--kind=passive\|active\|custom`. `enable`/`disable`/`delete`는 그 목록의 `<rule-id>`를 받습니다(내장 룰은 [Probe 룰](/ko/reference/probe-rules/)에 있습니다). `add`는 `-t`/`--title`(필수), `-p`/`--pattern`(필수), `--description`, `--side`(`request`\|`response`, 기본 `response`), `--region`(`whole`\|`header`\|`body`, 기본 `body`), `--regex`, `--exec`(`--pattern`을 [프로세스 훅](/ko/guide/scripting/#process-hooks)으로 실행: exit 0이면 발견, stdout이 근거), `-s`/`--severity`(기본 `info`) |
+| `rules [list\|enable\|disable\|add\|update\|delete]` | `list`는 `--kind=passive\|active\|custom`. `enable`/`disable`/`delete`는 그 목록의 `<rule-id>`를 받습니다(내장 룰은 [Probe 룰](/ko/reference/probe-rules/)에 있습니다). `add`는 `-t`/`--title`(필수), `-p`/`--pattern`(필수), `--description`, `--side`(`request`\|`response`, 기본 `response`), `--region`(`whole`\|`header`\|`body`, 기본 `body`), `--regex`, `--exec`(`--pattern`을 [프로세스 훅](/ko/guide/scripting/#process-hooks)으로 실행: exit 0이면 발견, stdout이 근거), `-s`/`--severity`(기본 `info`). `update <custom-rule-id>`는 프로젝트 커스텀 룰(`custom_p_N`)을 제자리에서 고치며, `add`의 플래그에 `--string`(`--pattern`을 리터럴로 매칭, `add`의 기본값)을 더해 받습니다. 생략한 플래그는 저장된 값을 유지하고, `--description ''`은 설명을 지우며, `--string`/`--regex`/`--exec`는 함께 쓸 수 없습니다 |
 | `mode [off\|passive\|active\|aggressive]` | 프로젝트의 스캔 모드를 출력하거나 설정 |
 
 ### run discover {#run-discover}
@@ -1472,6 +1473,14 @@ gori run rewriter rm 3
 
 `preview`는 같은 규칙 플래그를 받아, 규칙을 저장하지 않고 저장된 플로우 중 몇 개가 바뀌었을지 보고합니다. `--format json`에는 `skipped`(본문이 너무 커서 JSON 규칙이 미리보기에서 뺀 플로우 수)와, 읽은 500개보다 오래된 플로우가 있을 때만 참인 `scan_capped`가 담깁니다. `rm`(`delete`), `enable`, `disable`은 목록의 규칙 id와 함께 `--scope`도 받습니다. 두 저장소가 규칙 번호를 각자 매기므로 id 하나가 서로 다른 두 규칙을 가리키기 때문입니다. 목록은 범위를 `G`/`P` 접두어로 출력하고(`G*`는 이 프로젝트가 해당 전역 규칙의 기본값을 오버라이드했다는 뜻), 프록시가 적용하는 순서 그대로 전역 규칙을 먼저 보여 줍니다. [전역 규칙과 프로젝트 규칙](/ko/guide/proxy/#global-and-project-rules)을 참고하세요.
 
+**`rewriter update <id>`**: 규칙을 제자리에서 고칩니다. id와 적용 순서상의 위치는 그대로입니다. 위의 규칙 플래그에 `--enabled` / `--disabled`를 더해 받습니다. 생략한 플래그는 저장된 값을 유지하고, `--name ''`, `--host ''`, `--value ''`는 각 값을 지웁니다. id는 목록에 찍힌 그대로(`P#1`, `G#2`) 써도 되며, 그러면 저장소가 정해집니다. 이와 어긋나는 `--scope`는 거부됩니다. 전역 규칙에서 `--enabled` / `--disabled`는 이 프로젝트의 오버라이드를 설정합니다. `short_circuit` 규칙에서는 `--respond=inline|file|dir|fault`로 응답 방식을 정하고(생략하면 기존 방식을 유지하거나 함께 준 플래그를 따름), `--body-file ''`은 인라인 본문으로 되돌리며, `--no-fallthrough`는 `--fallthrough`를 다시 끕니다.
+
+```bash
+gori run rewriter update 1 --value 'secret=[hidden]'     # 치환 값만 바꿈
+gori run rewriter update 2 --no-fallthrough              # 없는 파일은 다시 502로 응답
+gori run rewriter update G#1 --disabled                  # 이 프로젝트에서만 끔
+```
+
 본문 규칙은 HTTP/1.1과 HTTP/2 모두에서 필요에 따라 `Content-Length`를 다시 맞추고 청크를 해제합니다. 대화형 편집기는 [Proxy & History](/ko/guide/proxy/)를 참고하세요.
 
 **`rewriter preset`**: [응답 수정 프리셋](/ko/guide/proxy/#rewriter-presets) 설치. 평범한 Match & Replace 규칙을 써 주는 이름 붙은 출발점입니다. 동사: `list`, `add <name>`.
@@ -1484,7 +1493,7 @@ gori run rewriter preset add remove-csp --scope global --disabled
 
 이름은 `unhide-hidden-fields`, `enable-disabled-fields`, `remove-length-limits`, `strip-validation`, `remove-csp`, `remove-security-headers`, `disable-sri`입니다. `add`는 `--scope=project|global`, `--disabled`(무장하지 않고 설치해 먼저 검토), `--format json`을 받습니다. `--format json`은 MCP `create_rule_from_preset`의 객체를 출력하며, 새 규칙의 `ids`도 거기 담깁니다. 설치되는 규칙은 `rewriter add`와 같은 경로를 지나므로 이후에도 목록에 나오고 편집·삭제됩니다. 같은 프리셋을 두 번 설치하면 병합되지 않고 눈에 보이게 중복됩니다.
 
-**`rewriter extract`**: [세션 바인딩](/ko/guide/proxy/#session-bindings)을 선언하는 규칙입니다. `$BIND.NAME`을 어느 응답의 어디에서 읽을지 정합니다. 동사: `list`(기본), `add`, `rm`(`delete`), `enable`, `disable`.
+**`rewriter extract`**: [세션 바인딩](/ko/guide/proxy/#session-bindings)을 선언하는 규칙입니다. `$BIND.NAME`을 어느 응답의 어디에서 읽을지 정합니다. 동사: `list`(기본), `add`, `update`, `rm`(`delete`), `enable`, `disable`.
 
 ```bash
 gori run rewriter extract add --name SESS --kind cookie --selector session --host '*.example.com'
@@ -1500,6 +1509,12 @@ gori run rewriter extract add --name CSRF --kind regex --selector 'name="csrf" v
 | `--when=FILTER` | 어떤 메시지를 읽을지, 인터셉트 필터 문법으로(`''`는 전부) |
 | `--host=GLOB` | 호스트 글롭으로 한정(`''`는 전부) |
 | `--disabled` | 규칙을 만들되 활성화하지 않음 |
+
+**`rewriter extract update <id>`**는 같은 플래그에 `--enabled` / `--disabled`를 더해 받습니다. 생략한 플래그는 저장된 값을 유지하고, `--when ''`, `--host ''`, `--range ''`는 각 값을 지웁니다. 규칙 이름을 바꾸면 옛 이름에 묶여 있던 값은 사라집니다.
+
+```bash
+gori run rewriter extract update 1 --name SID --host ''
+```
 
 **`rewriter bindings`**: 그 규칙들이 선언한 이름을 나열합니다(`--format text|json`). 값은 여기에 나오지 않으며, 나올 수도 없습니다. 바인딩 값은 실행 중인 gori의 메모리에만 있고 어디에도 기록되지 않으므로 다른 프로세스가 읽을 것이 없기 때문입니다. 살아 있는 값 테이블은 Rewriter 탭의 `bindings` 하위 탭에서 봅니다. 헤드리스 스윕에서는 `--bind-from`이 같은 프로세스 안에서 값을 채웁니다. [명령줄에서 세션 바인딩 쓰기](#session-bindings-from-the-command-line)를 참고하세요.
 
