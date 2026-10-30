@@ -176,7 +176,7 @@ module Gori
           category.as(String?), str(h, "host").try(&.strip).presence,
           severity_from(str(h, "severity")),
           open_only: !include_closed, limit: pg.limit, offset: pg.offset)
-        parts = fit_rows(page, probe_codes_json(page).bytesize) do |rj, i, _|
+        parts, codes = fit_probe_rows(page) do |rj, i|
           Probe.issue_json(rj, i, affected_limit: affected_limit, rule_text: false)
         end
         cut = parts.size < page.size
@@ -184,7 +184,7 @@ module Gori
         Result.new(JSON.build do |j|
           j.object do
             j.field("issues") { raw_rows(j, parts) }
-            j.field("codes") { j.raw probe_codes_json(page) }
+            j.field("codes") { j.raw codes }
             emit_page(j, pg, page.size, total, cut: cut)
             j.field "include_closed", include_closed
           end
@@ -557,6 +557,20 @@ module Gori
         end
       end
 
+      # `fit_rows` for probe rows: a row is charged its code's `codes` entry too, the first time
+      # that code appears, so the budget holds the rows and the table that rides with them.
+      private def fit_probe_rows(rows : Array(T), & : JSON::Builder, T ->) : {Array(String), String} forall T
+        budget = RowBudget.new
+        seen = Set(String).new
+        rows.each do |r|
+          part = JSON.build { |rj| yield rj, r }
+          extra = seen.includes?(r.code) ? 0 : probe_codes_json([r]).bytesize
+          break unless budget.add(part, extra)
+          seen << r.code
+        end
+        {budget.parts, probe_codes_json(rows.first(budget.parts.size))}
+      end
+
       private def probe_scan_json(groups : Array(Probe::Group), flows_scanned : Int32, repeater_n : Int32,
                                   active : Bool, allow_unscoped : Bool, scope_configured : Bool,
                                   capped : Bool, unsafe : Bool, aggressive : Bool, limit : Int32,
@@ -604,12 +618,11 @@ module Gori
             # Under REPLY_ROWS_BUDGET (#1649) as well as `limit`. A scan has no cursor (a second
             # call would scan, and on active:true send, again), so a cut says `truncated` and
             # `persist:true` + probe_issues is where the rest page.
-            shown = groups.first(limit)
-            parts = fit_rows(shown, probe_codes_json(shown).bytesize) do |rj, g, _|
+            parts, codes = fit_probe_rows(groups.first(limit)) do |rj, g|
               Probe.group_json(rj, g, affected_limit: affected_limit, rule_text: false)
             end
             j.field("issues") { raw_rows(j, parts) }
-            j.field("codes") { j.raw probe_codes_json(shown.first(parts.size)) }
+            j.field("codes") { j.raw codes }
             j.field "truncated", true if groups.size > parts.size
             emit_cut(j, parts.size < {groups.size, limit}.min)
           end
@@ -655,8 +668,8 @@ module Gori
         tool j, "probe_scan",
           "Scan captured History flows + Repeater tabs for issues. #{active_text}Returns " \
           "{flows_scanned, repeaters_scanned, issue_count, issues:[…], codes}, highest severity " \
-          "first; `codes` maps each row's `code` to its remediation and cwe_name. Rows OMIT " \
-          "`cwe` when no CWE applies. Reports only unless " \
+          "first; `codes` maps a row's `code` to its remediation and cwe_name (absent when a code " \
+          "has neither). Rows OMIT `cwe` when no CWE applies. Reports only unless " \
           "persist:true; probe_issues then pages what `truncated:true` left out." do |s|
           s.field "query", strprop("QL filter over History flows only (Repeater tabs are always scanned)")
           s.field "strict", boolprop("refuse a query with an invalid term (else it is dropped, BROADENING the result, and named in `ignored_terms`)")

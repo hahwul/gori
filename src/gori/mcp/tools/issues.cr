@@ -239,7 +239,7 @@ module Gori
           s.field "title", strprop("new title")
           s.field "severity", enumprop("new severity", SEVERITIES)
           s.field "cvss", strprop("CVSS vector or score (empty clears)")
-          s.field "notes", strprop("free-form body (replaces existing)")
+          s.field "notes", strprop("free-form body (replaces existing; list_issues shows a preview, read it whole from get_issue)")
           s.field "status", enumprop("new triage state", ISSUE_STATUSES)
           s.field "host", strprop("host the issue concerns (null/empty clears)")
           s.field "flow_id", intprop("seed flow (null clears); the previous one stays linked")
