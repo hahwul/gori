@@ -1613,7 +1613,7 @@ module Gori
       # `list_retest_steps` for it. Same split `body_mode` makes between a listing and a
       # detail: a per-row read belongs on the call that asked for one row.
       def self.issue(j : JSON::Builder, f : Store::Issue, store : Store? = nil, *,
-                     retest : Bool = false) : Nil
+                     retest : Bool = false, notes_preview : Int32? = nil) : Nil
         j.object do
           j.field "id", f.id
           j.field "created_at", f.created_at
@@ -1636,7 +1636,15 @@ module Gori
           # it never names a flow `links` does not also carry.
           j.field "flow_id", f.flow_id
           # notes is multi-line by design — scrub only, don't collapse (mirrors Export.json).
-          j.field "notes", f.notes.scrub
+          # A list cuts it to `notes_preview` characters: a write-up is often the largest field
+          # of the row, and get_issue serves it whole.
+          notes = f.notes.scrub
+          if (cap = notes_preview) && notes.size > cap
+            j.field "notes", notes[0, cap]
+            j.field "notes_truncated", true
+          else
+            j.field "notes", notes
+          end
           j.field "links" do
             j.array { Issues::Export.append_links_json(j, f, store) if store }
           end

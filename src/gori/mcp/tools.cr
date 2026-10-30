@@ -2981,14 +2981,15 @@ module Gori
         def initialize(@used : Int32 = 0)
         end
 
-        def add(part : String) : Bool
+        # `extra`: bytes the row brings outside itself (a probe row's first use of a `codes` entry).
+        def add(part : String, extra : Int32 = 0) : Bool
           return false if @cut
-          if !@parts.empty? && @used + part.bytesize > REPLY_ROWS_BUDGET
+          if !@parts.empty? && @used + part.bytesize + extra > REPLY_ROWS_BUDGET
             @cut = true
             return false
           end
           @parts << part
-          @used += part.bytesize
+          @used += part.bytesize + extra
           true
         end
       end

@@ -8,6 +8,9 @@ module Gori
     class Tools
       ISSUES_LIMIT = PageLimit.new(100, 500)
 
+      # Characters of an issue's `notes` a list_issues row carries; get_issue has the rest.
+      ISSUE_NOTES_PREVIEW = 200
+
       @[Tool("list_issues")]
       private def list_issues(h) : Result
         pg = page_args(h, ISSUES_LIMIT)
@@ -21,7 +24,7 @@ module Gori
           all = Issues::Filter.parse(q).apply(all)
         end
         page = all[pg.offset, pg.limit]? || [] of Store::Issue
-        parts = fit_rows(page) { |rj, f, _| Serialize.issue(rj, f, store) }
+        parts = fit_rows(page) { |rj, f, _| Serialize.issue(rj, f, store, notes_preview: ISSUE_NOTES_PREVIEW) }
         cut = parts.size < page.size
         page = page.first(parts.size)
         Result.new(JSON.build do |j|
@@ -200,7 +203,8 @@ module Gori
         tool j, "list_issues",
           "List triage issues, newest/most-severe first. Returns {issues, returned, offset, " \
           "total}, not a bare array. Each issue's `links` lists what backs it, the flow it was " \
-          "filed from first (`flow_id`). Probe scanner findings are probe_issues." do |s|
+          "filed from first (`flow_id`). `notes` is cut to #{ISSUE_NOTES_PREVIEW} characters " \
+          "(`notes_truncated`; get_issue has it whole). Probe scanner findings are probe_issues." do |s|
           s.field "query", strprop("filter, as the TUI's / bar: status:open sev:>=high host:api " \
                                    "cvss:>=7 -status:fp; a bare word searches title and host")
           s.field "lenient", boolprop("free-text an unknown `field:` instead of refusing")
@@ -235,7 +239,7 @@ module Gori
           s.field "title", strprop("new title")
           s.field "severity", enumprop("new severity", SEVERITIES)
           s.field "cvss", strprop("CVSS vector or score (empty clears)")
-          s.field "notes", strprop("free-form body (replaces existing)")
+          s.field "notes", strprop("free-form body (replaces existing; list_issues shows a preview, read it whole from get_issue)")
           s.field "status", enumprop("new triage state", ISSUE_STATUSES)
           s.field "host", strprop("host the issue concerns (null/empty clears)")
           s.field "flow_id", intprop("seed flow (null clears); the previous one stays linked")

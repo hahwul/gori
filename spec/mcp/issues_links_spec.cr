@@ -136,6 +136,27 @@ describe Gori::MCP::Server do
       end
     end
 
+    # A list row carries a preview of the body; get_issue still serves all of it.
+    it "cuts a long notes body to a preview in list_issues, not in get_issue" do
+      with_store do |store|
+        body = "é" * 300
+        id = store.insert_issue("Long write-up", Gori::Store::Severity::High, "acme.test", nil, notes: body)
+        store.insert_issue("Short", Gori::Store::Severity::Low, "acme.test", nil, notes: "brief")
+        store.flush
+        list = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_issues","arguments":{}}})
+        rows = mcp_tool_payload(mcp_drive(store, list)[0])["issues"].as_a
+        long = rows.find! { |r| r["id"].as_i64 == id }
+        long["notes"].as_s.should eq("é" * Gori::MCP::Tools::ISSUE_NOTES_PREVIEW)
+        long["notes_truncated"].as_bool.should be_true
+        short = rows.find! { |r| r["title"].as_s == "Short" }
+        short["notes"].as_s.should eq("brief")
+        short.as_h.has_key?("notes_truncated").should be_false
+
+        get = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_issue","arguments":{"id":#{id}}}})
+        mcp_tool_payload(mcp_drive(store, get)[0])["notes"].as_s.should eq(body)
+      end
+    end
+
     # The absent case is the overwhelmingly common call and must be unchanged: `""` is the
     # column's own default, not a value this argument introduced.
     it "still creates a bodiless issue when notes is absent" do

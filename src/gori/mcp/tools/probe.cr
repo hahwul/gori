@@ -18,6 +18,12 @@ module Gori
 
       PROBE_SCAN_LIMIT = PageLimit.new(200, 2000)
 
+      # How many of a finding's affected URLs a probe_scan / probe_issues row lists, beside the
+      # full `affected_count`. The store keeps up to PROBE_AFFECTED_CAP per finding, and on a
+      # wide capture those lists were 86% of a reply that filled REPLY_ROWS_BUDGET at 20 of 50
+      # findings; the agent asks for the rest of one finding's URLs by raising this.
+      PROBE_AFFECTED_LIMIT = PageLimit.new(5, Store::PROBE_AFFECTED_CAP)
+
       # probe_scan — the MCP surface for the Probe scanner (parity with `gori run probe`).
       # PASSIVE by default (zero outbound requests): scans captured History flows (optional
       # QL filter) + Repeater tabs and returns grouped issues. active:true also runs the
@@ -46,6 +52,7 @@ module Gori
         # and then threw every detection away with an argument error. Same rule as
         # `send_request`'s `max_body_bytes` and `minimize_repeater`'s `apply`.
         limit = clamp(optional_int_arg(h, "limit"), PROBE_SCAN_LIMIT)
+        affected_limit = clamp(optional_int_arg(h, "affected_limit"), PROBE_AFFECTED_LIMIT)
         allow_unscoped = bool_arg(h, "allow_unscoped", false)
         # --aggressive implies unsafe (it also raises caps + widens bypass sets).
         aggressive = bool_arg(h, "aggressive", false)
@@ -102,7 +109,7 @@ module Gori
           groups = groups.select { |g| lens.host_in_scope?(g.host) }
         end
         Result.new(probe_scan_json(groups, ids.size, repeater_n, active, allow_unscoped,
-          scope_configured, capped, unsafe, aggressive, limit, scan_errors,
+          scope_configured, capped, unsafe, aggressive, limit, affected_limit, scan_errors,
           oob_inert: oob_inert_rules(store, rules, active), persist: persist, dropped: dropped))
       end
 
@@ -158,6 +165,7 @@ module Gori
 
         include_closed = bool_arg(h, "include_closed", false)
         pg = page_args(h, PROBE_ISSUES_LIMIT)
+        affected_limit = clamp(optional_int_arg(h, "affected_limit"), PROBE_AFFECTED_LIMIT)
         # Page and total in SQL. This used to read EVERY matching row, filter `status.open?`
         # in Crystal (parsing each row's `affected` JSON on the way), and then slice a hundred
         # out of it — so answering a default `probe_issues` call on a wide crawl materialised
@@ -168,12 +176,15 @@ module Gori
           category.as(String?), str(h, "host").try(&.strip).presence,
           severity_from(str(h, "severity")),
           open_only: !include_closed, limit: pg.limit, offset: pg.offset)
-        parts = fit_rows(page) { |rj, i, _| Probe.issue_json(rj, i) }
+        parts, codes = fit_probe_rows(page) do |rj, i|
+          Probe.issue_json(rj, i, affected_limit: affected_limit, rule_text: false)
+        end
         cut = parts.size < page.size
         page = page.first(parts.size)
         Result.new(JSON.build do |j|
           j.object do
             j.field("issues") { raw_rows(j, parts) }
+            j.field("codes") { j.raw codes }
             emit_page(j, pg, page.size, total, cut: cut)
             j.field "include_closed", include_closed
           end
@@ -524,10 +535,46 @@ module Gori
         groups
       end
 
+      # `codes` in a probe_scan / probe_issues reply: each finding code's rule text — its
+      # `remediation` and `cwe_name` — once per reply rather than on every row. It is the same
+      # sentence on every row of a code, and was a third of a small scan's reply. A code with
+      # neither (a custom rule) is left out. Rows keep `cwe`, which is short and filterable.
+      private def probe_codes_json(rows : Array(Probe::Group) | Array(Store::ProbeIssue)) : String
+        JSON.build do |j|
+          j.object do
+            rows.map(&.code).uniq!.each do |code|
+              rem = Probe.remediation(code).presence
+              name = Probe.cwe_name(code)
+              next unless rem || name
+              j.field(code) do
+                j.object do
+                  j.field "remediation", rem if rem
+                  j.field "cwe_name", name if name
+                end
+              end
+            end
+          end
+        end
+      end
+
+      # `fit_rows` for probe rows: a row is charged its code's `codes` entry too, the first time
+      # that code appears, so the budget holds the rows and the table that rides with them.
+      private def fit_probe_rows(rows : Array(T), & : JSON::Builder, T ->) : {Array(String), String} forall T
+        budget = RowBudget.new
+        seen = Set(String).new
+        rows.each do |r|
+          part = JSON.build { |rj| yield rj, r }
+          extra = seen.includes?(r.code) ? 0 : probe_codes_json([r]).bytesize
+          break unless budget.add(part, extra)
+          seen << r.code
+        end
+        {budget.parts, probe_codes_json(rows.first(budget.parts.size))}
+      end
+
       private def probe_scan_json(groups : Array(Probe::Group), flows_scanned : Int32, repeater_n : Int32,
                                   active : Bool, allow_unscoped : Bool, scope_configured : Bool,
                                   capped : Bool, unsafe : Bool, aggressive : Bool, limit : Int32,
-                                  scan_errors : Int32 = 0,
+                                  affected_limit : Int32, scan_errors : Int32 = 0,
                                   oob_inert : Array(String) = [] of String,
                                   persist : Probe::Scan::Persist? = nil,
                                   dropped : Array(String) = [] of String) : String
@@ -571,8 +618,11 @@ module Gori
             # Under REPLY_ROWS_BUDGET (#1649) as well as `limit`. A scan has no cursor (a second
             # call would scan, and on active:true send, again), so a cut says `truncated` and
             # `persist:true` + probe_issues is where the rest page.
-            parts = fit_rows(groups.first(limit)) { |rj, g, _| Probe.group_json(rj, g) }
+            parts, codes = fit_probe_rows(groups.first(limit)) do |rj, g|
+              Probe.group_json(rj, g, affected_limit: affected_limit, rule_text: false)
+            end
             j.field("issues") { raw_rows(j, parts) }
+            j.field("codes") { j.raw codes }
             j.field "truncated", true if groups.size > parts.size
             emit_cut(j, parts.size < {groups.size, limit}.min)
           end
@@ -617,8 +667,9 @@ module Gori
           end
         tool j, "probe_scan",
           "Scan captured History flows + Repeater tabs for issues. #{active_text}Returns " \
-          "{flows_scanned, repeaters_scanned, issue_count, issues:[…]}, highest severity " \
-          "first; `cwe`/`cwe_name` are OMITTED when no CWE applies. Reports only unless " \
+          "{flows_scanned, repeaters_scanned, issue_count, issues:[…], codes}, highest severity " \
+          "first; `codes` maps a row's `code` to its remediation and cwe_name (absent when a code " \
+          "has neither). Rows OMIT `cwe` when no CWE applies. Reports only unless " \
           "persist:true; probe_issues then pages what `truncated:true` left out." do |s|
           s.field "query", strprop("QL filter over History flows only (Repeater tabs are always scanned)")
           s.field "strict", boolprop("refuse a query with an invalid term (else it is dropped, BROADENING the result, and named in `ignored_terms`)")
@@ -632,19 +683,22 @@ module Gori
           s.field "aggressive", boolprop("with active:true, raise caps and widen bypass sets (implies unsafe); authorized targets only")
           s.field "insecure", boolprop("with active:true, skip upstream TLS verification")
           s.field "limit", limitprop("max issue groups to return", PROBE_SCAN_LIMIT)
+          s.field "affected_limit", limitprop("affected URLs listed per row (affected_count has them all)", PROBE_AFFECTED_LIMIT)
           s.field "persist", boolprop("also WRITE findings to the persisted list (probe_issues), merged by (code, host); refused under --read-only. Dismissed stays dismissed; rescans raise hit_count")
         end
 
         tool j, "probe_issues",
           "List PERSISTED probe findings (triage state, unlike probe_scan's stateless rescan), " \
           "each with a stable `id` for probe_dismiss/probe_promote/probe_delete. Open only by " \
-          "default. Returns {issues, returned, offset, total, has_more}, not a bare array." do |s|
+          "default. Returns {issues, codes, returned, offset, total, has_more}, not a bare " \
+          "array; `codes` as probe_scan's." do |s|
           s.field "include_closed", boolprop("also dismissed/confirmed/resolved ones")
           s.field "severity", enumprop("only findings at/above this level", SEVERITIES)
           s.field "category", enumprop("only findings in this category", Probe::FILTER_CATEGORIES)
           s.field "host", strprop("only findings for this exact host")
           s.field "limit", limitprop("max rows", PROBE_ISSUES_LIMIT)
           s.field "offset", intprop("start row (default 0)")
+          s.field "affected_limit", limitprop("affected URLs listed per row (affected_count has them all)", PROBE_AFFECTED_LIMIT)
         end
 
         tool j, "list_probe_rules",

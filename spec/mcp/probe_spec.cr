@@ -83,11 +83,37 @@ describe "MCP probe_scan tool" do
       res["flows_scanned"].as_i.should eq(1)
       res["issue_count"].as_i.should be > 0
       issue = res["issues"].as_a.find { |g| g["code"].as_s == "secret_in_url" }.not_nil!
-      %w(code category host title severity hit_count affected affected_count evidence sample_flow_id remediation).each do |k|
+      %w(code category host title severity hit_count affected affected_count evidence sample_flow_id cwe).each do |k|
         issue.as_h.has_key?(k).should be_true
       end
       issue["host"].as_s.should eq("acme.test")
       issue["category"].as_s.should eq("infoleak")
+      # The rule text rides once per reply, keyed by code, not on the row.
+      issue.as_h.has_key?("remediation").should be_false
+      res["codes"]["secret_in_url"]["remediation"].as_s.should eq(Gori::Probe.remediation("secret_in_url"))
+      res["codes"]["secret_in_url"]["cwe_name"].as_s.should eq(Gori::Probe.cwe_name("secret_in_url"))
+    end
+  end
+
+  # A finding lists its first affected URLs; `affected_count` keeps the whole list's size and
+  # `affected_limit` asks for more of it.
+  it "lists the first affected URLs and serves more on affected_limit" do
+    with_store do |store|
+      8.times do |i|
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64 + i, scheme: "https", host: "acme.test", port: 443, method: "GET",
+          target: "/login/#{i}?token=supersecretvalue123", http_version: "HTTP/1.1",
+          head: "GET /login/#{i}?token=supersecretvalue123 HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
+          source: Gori::FlowSource::Kind::Proxy))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
+      end
+      tools = tools_for(store)
+      find = ->(res : JSON::Any) { res["issues"].as_a.find { |g| g["code"].as_s == "secret_in_url" }.not_nil! }
+      row = find.call(call_json(tools, "probe_scan", "{}"))
+      row["affected"].as_a.size.should eq(Gori::MCP::Tools::PROBE_AFFECTED_LIMIT.default)
+      row["affected_count"].as_i.should eq(8)
+      find.call(call_json(tools, "probe_scan", %({"affected_limit":50})))["affected"].as_a.size.should eq(8)
     end
   end
 
@@ -198,9 +224,10 @@ describe "MCP probe triage tools" do
       row = res["issues"].as_a.first
       row["id"].as_i64.should eq(issue.id)
       row["status"].as_s.should eq("open")
-      %w(id code category host title severity status hit_count sample_flow_id remediation).each do |k|
+      %w(id code category host title severity status hit_count sample_flow_id).each do |k|
         row.as_h.has_key?(k).should be_true
       end
+      res["codes"][row["code"].as_s]["remediation"].as_s.should_not be_empty
 
       call_json(tools, "probe_dismiss", %({"id":#{issue.id}}))["status"].as_s.should eq("false-positive")
       call_json(tools, "probe_issues", "{}")["total"].as_i.should eq(0) # gone from the default lens
