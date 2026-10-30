@@ -171,7 +171,7 @@ module Gori
           # complete one and reads as "clean".
           scan_errors = [] of String
           writer = persist ? Probe::Scan::Persist.new : nil
-          dets, rn = Probe::Scan.scan_all(store, ids, active: active, scope: scope,
+          groups, rn = Probe::Scan.scan_all(store, ids, active: active, scope: scope,
             verify_upstream: !insecure,
             allow_unscoped: allow_unscoped, opts: opts, rules: cfg, progress: probe_progress_meter(meter),
             on_error: ->(where : String, ex : Exception) { scan_errors << "#{where}: #{ex.message}"; nil },
@@ -192,7 +192,7 @@ module Gori
             STDERR.puts "gori run probe: #{Gori.plural(n, "item")} skipped after an error " \
                         "(results are INCOMPLETE) — first: #{scan_errors.first}"
           end
-          {Probe.group(dets), ids.size, rn}
+          {groups, ids.size, rn}
         ensure
           store.close
         end

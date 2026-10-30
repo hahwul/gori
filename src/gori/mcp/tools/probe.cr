@@ -93,13 +93,13 @@ module Gori
         # flow's probes". Nothing is written mid-scan, so a stopped scan leaves no partial
         # state to reconcile — and it is owed no response, so there is no partial report to
         # shape either.
-        dets, repeater_n = Probe::Scan.scan_all(store, ids, active: active, verify_upstream: verify_upstream,
+        found, repeater_n = Probe::Scan.scan_all(store, ids, active: active, verify_upstream: verify_upstream,
           scope: scope, allow_unscoped: allow_unscoped, opts: opts, active_budget: budget, rules: rules,
           stop: cancel_signal, persist: persist,
           on_error: ->(_where : String, _ex : Exception) { scan_errors += 1; nil })
         capped = budget.exhausted?
 
-        groups = probe_filter_groups(Probe.group(dets), severity_from(str(h, "severity")), category.as(String?))
+        groups = probe_filter_groups(found, severity_from(str(h, "severity")), category.as(String?))
         # `in_scope` narrows the REPORT to in-scope hosts — the same host-level lens the TUI
         # Probe tab applies, independent of `active`/`allow_unscoped` which gate what gets SENT.
         # Everything was still scanned. `scope` from the gate is nil on a passive scan, so load

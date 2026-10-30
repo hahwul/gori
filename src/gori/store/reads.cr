@@ -109,6 +109,19 @@ module Gori
       count
     end
 
+    # Every flow id matching `filter` (all of them when nil), oldest first: `search` without the
+    # rows, for a scan that reads each flow itself. Selecting rows to keep only their ids held
+    # 200k FlowRows at once on a whole-capture `probe_scan`. Raises on a failed query, like
+    # `search(raise_on_error: true)`, the call it replaces.
+    def flow_ids(filter : QL::Filter?) : Array(Int64)
+      ids = [] of Int64
+      sql, args = filter ? {"SELECT id FROM flows WHERE #{filter.sql} ORDER BY id ASC", filter.args.dup} : {"SELECT id FROM flows ORDER BY id ASC", [] of DB::Any}
+      @db.query(sql, args: args) do |rs|
+        rs.each { ids << rs.read(Int64) }
+      end
+      ids
+    end
+
     # Which of `ids` satisfy `filter` — the id-scoped form of `search`, for a caller that already
     # HAS its rows and needs an answer the row projection cannot give (Colormarker asking
     # `body:`/`header:`/`size:` of a screenful of History rows). Bounded by the caller's window,
