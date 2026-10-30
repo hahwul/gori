@@ -826,6 +826,26 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "names the compile error for a bad regex on create_rule, update_rule and preview_rule (#1785)" do
+      with_store do |store|
+        id = store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "old", "")
+        bad = {"pattern" => JSON::Any.new("a(b"), "match" => JSON::Any.new("regex")}
+        {
+          {"create_rule", bad},
+          {"update_rule", bad.merge({"id" => JSON::Any.new(id)})},
+          {"preview_rule", bad},
+        }.each do |tool, args|
+          call = {"jsonrpc" => "2.0", "id" => 1, "method" => "tools/call",
+                  "params" => {"name" => tool, "arguments" => args}}.to_json
+          resp = mcp_drive(store, call)[0]["result"]
+          resp["isError"].as_bool.should be_true
+          resp["structuredContent"]["field"].as_s.should eq("pattern")
+          resp["structuredContent"]["message"].as_s.should contain("failed to compile: missing closing parenthesis at 3")
+        end
+        store.match_rules.map(&.pattern).should eq(["old"]) # nothing created, nothing changed
+      end
+    end
+
     it "rejects an uncompilable regex in preview_rule instead of a fake 0-match result" do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"preview_rule","arguments":{"pattern":"[invalid\(regex","match":"regex"}}})
