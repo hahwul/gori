@@ -77,7 +77,12 @@ module Gori
     # A PERSISTED probe issue (the `probe_issues` row the live Analyzer folds into), as opposed
     # to group_json's stateless scan result. Carries the fields only persistence has: the row id
     # triage acts on, the triage status, and the first/last-seen window.
-    def self.issue_json(j : JSON::Builder, i : Store::ProbeIssue) : Nil
+    #
+    # `affected_limit` and `rule_text: false` are the MCP list shape (`Tools#probe_codes_json`):
+    # the first URLs beside the full `affected_count`, and the per-code rule text sent once per
+    # reply instead of on every row. The CLI keeps the whole row.
+    def self.issue_json(j : JSON::Builder, i : Store::ProbeIssue, *,
+                        affected_limit : Int32? = nil, rule_text : Bool = true) : Nil
       j.object do
         j.field "id", i.id
         j.field "code", i.code
@@ -87,32 +92,34 @@ module Gori
         j.field "severity", i.severity.label
         j.field "status", i.status.label
         j.field "hit_count", i.hit_count
-        j.field("affected") { j.array { i.affected.each { |u| j.string(u) } } }
+        j.field("affected") { j.array { i.affected.first(affected_limit || i.affected.size).each { |u| j.string(u) } } }
         j.field "affected_count", i.affected.size
         j.field "evidence", i.evidence
         j.field "sample_flow_id", i.sample_flow_id
         j.field "sample_repeater_id", i.sample_repeater_id
         j.field "first_seen", i.first_seen
         j.field "last_seen", i.last_seen
-        j.field "remediation", Probe.remediation(i.code)
-        cwe_fields(j, i.code)
+        j.field "remediation", Probe.remediation(i.code) if rule_text
+        cwe_fields(j, i.code, rule_text)
       end
     end
 
     # `cwe`/`cwe_name`, emitted only for a code that HAS a mapping. Absent rather than null:
     # tech fingerprints, the informational jwt_in_* notes, and custom rules are unmapped on
     # purpose (see Probe::CWE), and a null would read as "we tried and failed to classify it".
-    private def self.cwe_fields(j : JSON::Builder, code : String) : Nil
+    private def self.cwe_fields(j : JSON::Builder, code : String, name_too : Bool) : Nil
       return unless entry = Probe.cwe(code)
       id, name = entry
       j.field "cwe", "CWE-#{id}"
-      j.field "cwe_name", name
+      j.field "cwe_name", name if name_too
     end
 
     # The canonical JSON object for one grouped issue — the single source of the field shape
     # shared by `gori run probe --format json` (CLI::Output.probe_array_json builds on it)
-    # and the MCP probe_scan tool, so both describe an issue identically.
-    def self.group_json(j : JSON::Builder, g : Group) : Nil
+    # and the MCP probe_scan tool, so both describe an issue with the same fields (MCP trims
+    # with the list options `issue_json` describes).
+    def self.group_json(j : JSON::Builder, g : Group, *,
+                        affected_limit : Int32? = nil, rule_text : Bool = true) : Nil
       j.object do
         j.field "code", g.code
         j.field "category", g.category
@@ -120,13 +127,13 @@ module Gori
         j.field "title", g.title
         j.field "severity", g.severity.label
         j.field "hit_count", g.hit_count
-        j.field("affected") { j.array { g.affected.each { |u| j.string(u) } } }
+        j.field("affected") { j.array { g.affected.first(affected_limit || g.affected.size).each { |u| j.string(u) } } }
         j.field "affected_count", g.affected.size
         j.field "evidence", g.evidence
         j.field "sample_flow_id", g.sample_flow_id
         j.field "sample_repeater_id", g.sample_repeater_id
-        j.field "remediation", Probe.remediation(g.code)
-        cwe_fields(j, g.code)
+        j.field "remediation", Probe.remediation(g.code) if rule_text
+        cwe_fields(j, g.code, rule_text)
       end
     end
   end
