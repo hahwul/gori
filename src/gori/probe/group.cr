@@ -33,44 +33,53 @@ module Gori
     # sample_flow = the first-seen non-nil value (COALESCE/INSERT semantics). Returned sorted by
     # severity (desc), then host, then code for a stable, scannable order.
     def self.group(detections : Array(Detection)) : Array(Group)
-      cap = Store::PROBE_AFFECTED_CAP
-      acc = {} of {String, String} => Group
-      detections.each do |d|
-        key = {d.code, d.host}
-        if g = acc[key]?
-          urls = g.affected
-          # size check first so a full list short-circuits the O(n) includes? scan.
-          urls << d.url if urls.size < cap && !urls.includes?(d.url)
-          sev = g.severity.value >= d.severity.value ? g.severity : d.severity
-          # Title tracks the highest-severity observation (mirrors Store#upsert_probe_issue):
-          # adopt the incoming title only when it RAISES severity, so an escalated group never
-          # shows a lower-severity title (reflected_param: non-HTML Low vs HTML Medium). A
-          # fixed-title code is unaffected.
-          title = d.severity.value > g.severity.value ? d.title : g.title
-          # Type-labeled codes accumulate every distinct label seen (so a host leaking several
-          # secret/error types, or shipping several unflagged cookies, surfaces them all);
-          # others keep the first representative sample. Both the decision and the merge come
-          # from Store so this in-memory fold and the SQL upsert CANNOT drift — they did once,
-          # when missing_sri/jwt_sensitive_claims were added to Store's list and not to a copy
-          # that used to live here, which made a headless scan report one third-party host.
-          evidence = Store.accumulate_evidence?(d.code) ? Store.merge_evidence(g.evidence, d.evidence) : (g.evidence || d.evidence)
-          acc[key] = Group.new(g.code, g.category, g.host, title, sev, g.hit_count + 1,
-            urls, evidence, g.sample_flow_id, g.sample_repeater_id)
-        else
-          acc[key] = Group.new(d.code, d.category, d.host, d.title, d.severity, 1,
-            [d.url], d.evidence, d.flow_id, d.repeater_id)
-        end
-      end
-      finish_group_sort(acc)
+      Grouper.new.tap(&.add(detections)).groups
     end
 
-    private def self.finish_group_sort(acc : Hash({String, String}, Group)) : Array(Group)
-      # Hash#values is insertion order, but the result is fully ordered by the sort below.
-      acc.values.sort! do |a, b|
-        by_sev = b.severity.value <=> a.severity.value
-        next by_sev unless by_sev.zero?
-        by_host = a.host <=> b.host
-        by_host.zero? ? a.code <=> b.code : by_host
+    # `group`'s fold, fed a batch at a time, so a scan can group as it goes instead of holding
+    # every detection until the end (`Scan.scan_all`).
+    class Grouper
+      @acc = {} of {String, String} => Group
+
+      def add(detections : Enumerable(Detection)) : Nil
+        cap = Store::PROBE_AFFECTED_CAP
+        acc = @acc
+        detections.each do |d|
+          key = {d.code, d.host}
+          if g = acc[key]?
+            urls = g.affected
+            # size check first so a full list short-circuits the O(n) includes? scan.
+            urls << d.url if urls.size < cap && !urls.includes?(d.url)
+            sev = g.severity.value >= d.severity.value ? g.severity : d.severity
+            # Title tracks the highest-severity observation (mirrors Store#upsert_probe_issue):
+            # adopt the incoming title only when it RAISES severity, so an escalated group never
+            # shows a lower-severity title (reflected_param: non-HTML Low vs HTML Medium). A
+            # fixed-title code is unaffected.
+            title = d.severity.value > g.severity.value ? d.title : g.title
+            # Type-labeled codes accumulate every distinct label seen (so a host leaking several
+            # secret/error types, or shipping several unflagged cookies, surfaces them all);
+            # others keep the first representative sample. Both the decision and the merge come
+            # from Store so this in-memory fold and the SQL upsert CANNOT drift — they did once,
+            # when missing_sri/jwt_sensitive_claims were added to Store's list and not to a copy
+            # that used to live here, which made a headless scan report one third-party host.
+            evidence = Store.accumulate_evidence?(d.code) ? Store.merge_evidence(g.evidence, d.evidence) : (g.evidence || d.evidence)
+            acc[key] = Group.new(g.code, g.category, g.host, title, sev, g.hit_count + 1,
+              urls, evidence, g.sample_flow_id, g.sample_repeater_id)
+          else
+            acc[key] = Group.new(d.code, d.category, d.host, d.title, d.severity, 1,
+              [d.url], d.evidence, d.flow_id, d.repeater_id)
+          end
+        end
+      end
+
+      def groups : Array(Group)
+        # Hash#values is insertion order, but the result is fully ordered by the sort below.
+        @acc.values.sort! do |a, b|
+          by_sev = b.severity.value <=> a.severity.value
+          next by_sev unless by_sev.zero?
+          by_host = a.host <=> b.host
+          by_host.zero? ? a.code <=> b.code : by_host
+        end
       end
     end
 

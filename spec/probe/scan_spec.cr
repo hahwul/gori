@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/probe_harness"
 
 # --- file-local harness (mirrors spec/probe_spec.cr's private with_store/capture_flow) ---
 
@@ -186,6 +187,42 @@ describe "Probe::Scan active surface dedup" do
       end
     ensure
       rec.close
+    end
+  end
+end
+
+describe "Probe::Scan passive pass" do
+  # A request-free scan never waits on I/O, so it used to hold the fiber for the whole capture:
+  # whoever arms `stop` (an MCP reader taking `notifications/cancelled`) never ran until the
+  # scan was over. The flag below is set by a fiber that only runs if the scan yields.
+  it "yields while it scans, so a stop armed by another fiber lands mid-scan" do
+    with_store do |store|
+      n = Gori::Probe::Scan::YIELD_EVERY * 3
+      ids = Array.new(n) { |i| probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/p#{i}?token=#{AWS_KEY_ID}").row.id }
+      stop_now = false
+      spawn { stop_now = true }
+      scanned = 0
+      Gori::Probe::Scan.scan_flows(store, ids, active: false, stop: -> { stop_now },
+        progress: ->(i : Int32, _total : Int32) { scanned = i + 1; nil })
+      scanned.should eq(Gori::Probe::Scan::YIELD_EVERY)
+    end
+  end
+
+  # `scan_all` folds as it scans instead of grouping one list at the end; the groups must be
+  # the ones that list would have made, repeater tabs included.
+  it "groups as it scans exactly as grouping the collected detections does" do
+    with_store do |store|
+      ids = (0...5).map { |i| probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", host: "h#{i % 2}.test", target: "/p#{i}?token=#{AWS_KEY_ID}").row.id }
+      rid = store.insert_repeater("http://h0.test/r", "GET /r?token=#{AWS_KEY_ID} HTTP/1.1\r\nHost: h0.test\r\n\r\n".to_slice,
+        false, true, nil, 0)
+      store.update_repeater_response(rid, "HTTP/1.1 200 OK\r\n\r\n".to_slice, nil, nil, 1_i64, request_sha256: nil)
+      dets = Gori::Probe::Scan.scan_flows(store, ids, active: false)
+      dets.concat(Gori::Probe::Scan.scan_repeaters(store, active: false)[0])
+      groups, repeaters = Gori::Probe::Scan.scan_all(store, ids, active: false)
+      repeaters.should eq(1)
+      shape = ->(gs : Array(Gori::Probe::Group)) { gs.map { |g| {g.code, g.host, g.hit_count, g.affected, g.sample_repeater_id} } }
+      shape.call(groups).should eq(shape.call(Gori::Probe.group(dets)))
+      groups.should_not be_empty
     end
   end
 end

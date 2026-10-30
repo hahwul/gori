@@ -55,4 +55,17 @@ describe Gori::Store do
       end
     end
   end
+
+  # The scan's id list: what `search` matches, oldest first, without materialising a row.
+  describe "#flow_ids" do
+    it "lists every matching id oldest first, and every flow for nil" do
+      with_store do |store|
+        ids = [seed_count_flow(store, "a.test", 200), seed_count_flow(store, "b.test", 500), seed_count_flow(store, "a.test", 500)]
+        store.flow_ids(nil).should eq(ids)
+        filter = Gori::QL.parse("host:a.test")
+        store.flow_ids(filter).should eq(store.search(filter, 10).map(&.id).reverse!)
+        store.flow_ids(filter).should eq([ids[0], ids[2]])
+      end
+    end
+  end
 end

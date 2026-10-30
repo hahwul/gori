@@ -149,11 +149,15 @@ module Gori
                                   "in a moment.")
           end
         end
-        rows = filter ? store.search(filter, Int32::MAX, raise_on_error: true) : store.recent_flows(Int32::MAX)
-        rows.map(&.id).reverse! # search/recent_flows are newest-first; reverse → ascending id
+        store.flow_ids(filter)
       end
 
-      # Analyze History flows + Repeater tabs. Returns {detections, repeater_count_scanned}.
+      # Analyze History flows + Repeater tabs. Returns {grouped findings, repeater_count_scanned}.
+      #
+      # Findings are folded into their (code, host) groups as each item is scanned rather than
+      # collected first: a passive scan finds a few per flow, and holding every one of them until
+      # the end peaked an MCP server at 340 MB on 200k flows (27 MB idle), which the GC then
+      # kept. The raw list is still kept under `persist`, whose upsert counts every observation.
       # `progress.call(i, total)` is invoked per flow so a CLI can draw a meter; MCP passes nil.
       # `active_budget` caps how many flows receive an ACTIVE probe (network volume) WITHOUT
       # limiting the request-free PASSIVE scan — nil means no active cap (the CLI).
@@ -175,7 +179,7 @@ module Gori
                    active_budget : Budget? = nil,
                    stop : Proc(Bool)? = nil,
                    on_error : Proc(String, Exception, Nil)? = nil,
-                   persist : Persist? = nil) : {Array(Detection), Int32}
+                   persist : Persist? = nil) : {Array(Group), Int32}
         # Read the Rules config ONCE per scan (not per flow) — same as the Analyzer, which
         # loads it at construction and only re-reads on an explicit rules reload.
         cfg = rules || RuleConfig.load(store)
@@ -191,18 +195,22 @@ module Gori
             "not know which ACTIVE checks you switched off — active probing was skipped and " \
             "only passive analysis ran"))
         end
-        detections = scan_flows(store, ids, active: active, verify_upstream: verify_upstream,
+        grouper = Grouper.new
+        kept = persist ? [] of Detection : nil
+        sink = ->(found : Array(Detection)) { grouper.add(found); kept.try(&.concat(found)); nil }
+        scan_flows(store, ids, active: active, verify_upstream: verify_upstream,
           scope: scope, allow_unscoped: allow_unscoped, opts: opts,
           rules: cfg, progress: progress, active_budget: budget, overrides: ov,
-          stop: stop, on_error: on_error)
-        repeater_dets, repeater_n = scan_repeaters(store, active: active, verify_upstream: verify_upstream,
+          stop: stop, on_error: on_error, sink: sink)
+        _, repeater_n = scan_repeaters(store, active: active, verify_upstream: verify_upstream,
           scope: scope, allow_unscoped: allow_unscoped, opts: opts, rules: cfg,
-          active_budget: budget, overrides: ov, stop: stop, on_error: on_error)
-        detections.concat(repeater_dets)
+          active_budget: budget, overrides: ov, stop: stop, on_error: on_error, sink: sink)
         # BEFORE the out-of-band sweep below joins the list: the sweep writes its promotions
         # itself, so persisting them here again would count every one twice. A stopped scan
         # writes nothing, for the reason the sweep is skipped — its caller has walked away.
-        persist.try(&.write(store, detections)) unless stopped?(stop)
+        if (w = persist) && (all = kept) && !stopped?(stop)
+          w.write(store, all)
+        end
         # Promote any OUT-OF-BAND probe whose callback has landed since it was planted. This is
         # a headless surface, so it cannot wait for one: the probes this run plants are picked
         # up by whatever sweeps next (the TUI's timer, or the NEXT `gori run probe`), and what
@@ -216,8 +224,8 @@ module Gori
         # while whatever sweeps next picks up exactly the same evidence, because the sweep
         # holds no watermark. It also keeps a cancelled scan from writing `probe_issues` rows
         # behind a caller that has walked away.
-        detections.concat(sweep_out_of_band(store)) unless stopped?(stop)
-        {detections, repeater_n}
+        grouper.add(sweep_out_of_band(store)) unless stopped?(stop)
+        {grouper.groups, repeater_n}
       end
 
       # --- out-of-band (OAST) --------------------------------------------------------------
@@ -290,7 +298,8 @@ module Gori
                      active_budget : Budget? = nil,
                      overrides : Gori::HostOverrides? = nil,
                      stop : Proc(Bool)? = nil,
-                     on_error : Proc(String, Exception, Nil)? = nil) : Array(Detection)
+                     on_error : Proc(String, Exception, Nil)? = nil,
+                     sink : Proc(Array(Detection), Nil)? = nil) : Array(Detection)
         cfg = rules || RuleConfig.load(store)
         outbound = outbound_for(scope, allow_unscoped)
         ov = overrides_for(store, active, overrides)
@@ -309,20 +318,21 @@ module Gori
           # exactly as `Minimize::Stop` documents — so the guarantee is "at most one more
           # flow's probes", which is the difference between 1 and `PROBE_ACTIVE_MAX_FLOWS`.
           break if stopped?(stop)
+          found = [] of Detection
           begin
             detail = store.get_flow(id)
             if detail && detail.response_head
               # passive is request-free — NEVER capped
-              detections.concat(Passive.analyze(detail, disabled: cfg.disabled, custom: cfg.custom))
+              found.concat(Passive.analyze(detail, disabled: cfg.disabled, custom: cfg.custom))
               # WS frames come from `scan_ws_frames`, a page at a time, rather than as one array
               # handed to `Passive.analyze` above (the only rule that reads them is the WS one).
-              detections.concat(scan_ws_frames(store, detail, id, cfg)) if Probe.ws_transcript_possible?(detail)
+              found.concat(scan_ws_frames(store, detail, id, cfg)) if Probe.ws_transcript_possible?(detail)
               # Gate on the port-less scope URL Layer 2 / History / SQL already share —
               # `FlowRow#url` embeds a non-default port, so a string/regex include of
               # `https://acme.test/` would miss `https://acme.test:8443/…` and silently
               # skip every active probe on that origin while the lens still shows it in-scope.
               if active_now?(active, cfg, outbound, detail.row, budget) { Active.fresh?(detail, opts, cfg.disabled, seen) }
-                detections.concat(Active.analyze(detail, verify_upstream, outbound: outbound,
+                found.concat(Active.analyze(detail, verify_upstream, outbound: outbound,
                   overrides: ov, opts: opts,
                   disabled: cfg.disabled, on_error: on_error,
                   on_oob: oob_sink(store, detail.row, id), seen: seen))
@@ -338,9 +348,29 @@ module Gori
             # already collected) alive. See the per-rule rescue in Active.analyze.
             on_error.try &.call("flow #{id}", ex)
           end
+          emit(found, detections, sink)
           progress.try &.call(i, ids.size)
+          pause(i)
         end
         detections
+      end
+
+      # How many items a scan covers between yields. A request-free scan never waits on I/O, so
+      # without one it held the fiber for the whole capture: an MCP server's reader could not
+      # answer `ping` or read the `notifications/cancelled` that `stop` is waiting for — 1–4 s
+      # on 200k flows. A yield with nothing else runnable costs microseconds.
+      YIELD_EVERY = 32
+
+      private def pause(i : Int32) : Nil
+        Fiber.yield if i % YIELD_EVERY == YIELD_EVERY - 1
+      end
+
+      # One item's findings, to the caller's `sink` when it streams them, else into the list
+      # this half returns.
+      private def emit(found : Array(Detection), into : Array(Detection),
+                       sink : Proc(Array(Detection), Nil)?) : Nil
+        return if found.empty?
+        sink ? sink.call(found) : into.concat(found)
       end
 
       # EVERY captured frame of one socket, a PAGE at a time — the shape `Analyzer#rescan_ws`
@@ -398,7 +428,8 @@ module Gori
                          rules : RuleConfig? = nil, active_budget : Budget? = nil,
                          overrides : Gori::HostOverrides? = nil,
                          stop : Proc(Bool)? = nil,
-                         on_error : Proc(String, Exception, Nil)? = nil) : {Array(Detection), Int32}
+                         on_error : Proc(String, Exception, Nil)? = nil,
+                         sink : Proc(Array(Detection), Nil)? = nil) : {Array(Detection), Int32}
         cfg = rules || RuleConfig.load(store)
         outbound = outbound_for(scope, allow_unscoped)
         ov = overrides_for(store, active, overrides)
@@ -413,21 +444,22 @@ module Gori
           break if stopped?(stop)
           next unless detail = Probe.detail_from_repeater(rec)
           n += 1
+          found = [] of Detection
           # Isolated per repeater tab, exactly like scan_flows isolates per flow.
           begin
             Passive.analyze(detail, disabled: cfg.disabled, custom: cfg.custom).each do |d|
-              detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
+              found << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
             end
             # WS frames come from `scan_repeater_ws_frames`, a page at a time, for the same
             # reason the flow half pages (the only rule that reads them is the WS one).
             scan_repeater_ws_frames(store, detail, rec.id, cfg).each do |d|
-              detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
+              found << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
             end
             if active_now?(active, cfg, outbound, detail.row, budget) { true }
               Active.analyze(detail, verify_upstream, outbound: outbound, overrides: ov, opts: opts,
                 disabled: cfg.disabled, on_error: on_error,
                 on_oob: oob_sink(store, detail.row, rec.flow_id)).each do |d|
-                detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
+                found << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
               end
             end
           rescue ex : DB::Error | SQLite3::Exception
@@ -435,6 +467,8 @@ module Gori
           rescue ex
             on_error.try &.call("repeater #{rec.id}", ex)
           end
+          emit(found, detections, sink)
+          pause(n - 1)
         end
         {detections, n}
       end
@@ -466,9 +500,8 @@ module Gori
       #
       # WHAT IT CANNOT DO: interrupt a fiber. gori runs on the single-threaded cooperative
       # scheduler, so whoever arms the predicate only runs when this loop YIELDS — which an
-      # active scan does on every send and a request-free one may never do. That is the honest
-      # bound, and it is bounded on the right side: passive spends the operator's own CPU,
-      # active spends a third party's server.
+      # active scan does on every send and a request-free one every `YIELD_EVERY` items (see
+      # `pause`), so a stop lands within that many flows either way.
       private def stopped?(stop : Proc(Bool)?) : Bool
         !!stop.try(&.call)
       end
