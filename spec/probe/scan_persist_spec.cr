@@ -15,12 +15,12 @@ describe Gori::Probe::Scan::Persist do
     with_store do |store|
       id = seed(store)
       persist = Gori::Probe::Scan::Persist.new
-      dets, _ = Gori::Probe::Scan.scan_all(store, [id], active: false, persist: persist)
+      groups, _ = Gori::Probe::Scan.scan_all(store, [id], active: false, persist: persist)
       persist.attempted?.should be_true
       persist.committed?.should be_true
-      persist.detections.should eq(dets.size)
+      persist.detections.should eq(groups.sum(&.hit_count))
       store.probe_issues.map { |i| {i.code, i.host} }.to_set
-        .should eq(dets.map { |d| {d.code, d.host} }.to_set)
+        .should eq(groups.map { |g| {g.code, g.host} }.to_set)
       store.probe_issues.all? { |i| i.sample_flow_id == id }.should be_true
     end
   end

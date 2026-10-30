@@ -342,12 +342,12 @@ describe "Gori::Probe::Active (safety + coverage)" do
       ids = Gori::Probe::Scan.flow_ids(store, nil)
       degraded = Gori::Probe::Scan::RuleConfig.new(Set(String).new, [] of Gori::Probe::CustomRule, degraded: true)
       said = [] of String
-      dets = Gori::Probe::Scan.scan_all(store, ids, active: true, scope: scope, rules: degraded,
+      groups = Gori::Probe::Scan.scan_all(store, ids, active: true, scope: scope, rules: degraded,
         on_error: ->(where : String, ex : Exception) { said << "#{where}: #{ex.message}"; nil })[0]
       # It is NAMED, not silent — a scan that quietly stopped probing would read as clean.
       said.first.should contain("active probing was skipped")
       # …and the request-free passive half still ran.
-      dets.count { |d| d.code == "secret_in_url" }.should eq(1)
+      groups.count { |g| g.code == "secret_in_url" }.should eq(1)
     end
   end
 
@@ -805,8 +805,8 @@ describe "Gori::Probe::Scan rules config parity" do
       ids = Gori::Probe::Scan.flow_ids(store, nil)
       store.set_probe_disabled_rules(Set{"secret_in_url"})
 
-      dets, _ = Gori::Probe::Scan.scan_all(store, ids, active: false)
-      dets.count { |d| d.code == "secret_in_url" }.should eq(0)
+      groups, _ = Gori::Probe::Scan.scan_all(store, ids, active: false)
+      groups.count { |g| g.code == "secret_in_url" }.should eq(0)
     end
   end
 end

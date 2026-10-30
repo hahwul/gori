@@ -18,8 +18,8 @@ module Gori
   module Probe
     # Presentation-free scan orchestrator shared by `gori run probe` (CLI) and the MCP
     # probe_scan tool: scan captured History flows + Repeater tabs for Detections, passively
-    # by default and — when `active` — also running the light-touch active checks. Grouping
-    # (Probe.group) and rendering live in the callers; this produces only raw Detections.
+    # by default and — when `active` — also running the light-touch active checks. `scan_all`
+    # returns findings grouped as it scans (`Probe::Grouper`); rendering lives in the callers.
     #
     # Active scope gating goes through the ONE seam every surface shares (Gori::Outbound),
     # in its usual two layers: Layer-1 (`outbound.allows?`) only SENDS to a flow the project
@@ -414,7 +414,7 @@ module Gori
           break if msgs.size < Analyzer::WS_MSG_CAP # a partial page ⇒ the log is drained
         end
         # `WsPayloads` dedups its type labels per Context, which is now per PAGE rather than per
-        # socket, and this array goes to `Probe.group` — which counts every observation into
+        # socket, and this array goes to `Probe::Grouper` — which counts every observation into
         # hit_count. Fold here so paging changed coverage and memory only, not what an operator
         # reads: one finding per (code, label), exactly as the one-shot read gave.
         dets.uniq! { |d| {d.code, d.evidence} }
