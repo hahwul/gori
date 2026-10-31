@@ -244,7 +244,7 @@ class Gori::Tui::RepeaterView
         Repeater::Result.new(response_head || Bytes.empty, response_body, nil,
           response_duration_us || 0_i64, response_error)
       end
-    reflect_content_length_in_editor if @auto_content_length
+    reflect_row_content_length(request)
   end
 
   # Live request-side sync (reconcile poll). Updates target/request/flags from the
@@ -266,7 +266,7 @@ class Gori::Tui::RepeaterView
       tls_preset)
     @req_hex_edit = nil
     # Leave @result / @prev_result / @focus / @scroll / @resp_mode / @original_lines alone.
-    reflect_content_length_in_editor if @auto_content_length
+    reflect_row_content_length(request)
   end
 
   # True when the live view's request-side fields match a store row (reconcile skip).
@@ -292,14 +292,30 @@ class Gori::Tui::RepeaterView
   # `"chrome"`, `reconcile` would see it as changed on EVERY poll, and `apply_peer_request`
   # would slam the caret forever — the exact failure this comparison exists to prevent. `""`
   # and nil fold together for the same reason they do for SNI.
+  #
+  # The one sanctioned inexact match is `@row_reflection`: a pane that still holds exactly
+  # what auto Content-Length made of THIS row on open is that row (see
+  # `reflect_row_content_length`).
   def request_side_matches?(target : String, request : String, http2 : Bool, auto_cl : Bool,
                             sni : String?, ws_keep_key : Bool = false,
                             ws_http_only : Bool = false, tls_preset : String? = nil) : Bool
-    @target == target && request_text == request &&
+    text = request_text
+    @target == target && (text == request || @row_reflection == {request, text}) &&
       @http2 == http2 && @auto_content_length == auto_cl &&
       @ws_keep_key == ws_keep_key && @ws_http_only == ws_http_only &&
       @tls_preset == Settings.tls_preset_normalize(tls_preset) &&
       (sni_override || "") == (sni || "")
+  end
+
+  # Auto Content-Length on a stored row whose header disagrees with its body: the pane shows
+  # the reflected length and the tab stays clean, because the row is the operator's bytes and
+  # opening it must not rewrite them (P7). That left pane != row, so the reconcile poll read
+  # the row as a peer change on EVERY tick and `apply_peer_request` reset the caret, scroll,
+  # undo and selection forever. The pair lets `request_side_matches?` see the pane is still
+  # this row, reflected — and stops matching the moment the operator edits.
+  private def reflect_row_content_length(request : String) : Nil
+    reflect_content_length_in_editor if @auto_content_length
+    @row_reflection = {request, request_text}
   end
 
   # Shared request/target/flag write used by restore (full) and apply_peer_request (soft).

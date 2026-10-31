@@ -367,6 +367,9 @@ module Gori::Tui
       @inflight = false           # a repeater round-trip is outstanding — gates re-send (^R mashing)
       @diffable = false           # true only when loaded from a captured flow (has an original to diff)
       @auto_content_length = true # recompute Content-Length from the edited body on send
+      # {stored row, editor text} right after a restore / peer sync reflected Content-Length
+      # into the pane — see `request_side_matches?`.
+      @row_reflection = nil.as({String, String}?)
       # `§…§` markers carry inline Decoder chains applied on send (mark a value, attach
       # base64-encode → it's encoded on the wire). On a DRAFT they are always active (like the
       # Fuzzer): a request that contains a marker region renders it on send, a marker-free
