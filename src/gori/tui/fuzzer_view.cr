@@ -861,8 +861,9 @@ module Gori::Tui
       return "request body is empty" if body.strip.empty?
 
       if formatted_body = Pretty.format_request(head, body)
-        new_text = "#{head}#{separator}#{formatted_body}"
-        @editor.set_text(new_text)
+        # One ^Z, like the Repeater's pretty-print: `set_text` dropped the undo stack, so a
+        # reformat the operator did not want could not be taken back.
+        @editor.replace_all("#{head}#{separator}#{formatted_body}", 0)
         @dirty = true
         nil # success
       else
