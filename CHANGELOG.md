@@ -9,7 +9,7 @@
 - Probe: a passive scan of a large capture (`gori run probe`, MCP `probe_scan`) peaks at about a third of the memory, and over MCP it answers `ping` and can be cancelled mid-scan (#1791)
 - TUI: in Intercept, Tab and Shift-Tab never discard another hold's unforwarded edit and a second double-click on the row now can; History's `⌁follow +N` counts the first flow that arrives after follow goes off on an empty list (#1797)
 - CLI: `gori run show` accepts `--format csrf-poc` and `csrf_poc` as aliases for `csrf`, matching the command overview (#1777)
-- Docs: a redrawn landing built around the ring knot in monospace glyphs, opening as one scroll-driven scene with a glint lapping the knot, and the doc pages in the same glyph voice (#1773)
+- Docs: the landing is now eight snapped screens drawn as an ordered-dither field on one canvas (the knot, the loop, the figures, the TUI film strip, the seam, the name, the clouds), and the doc pages carry the knot in monospace glyphs (#1773)
 - Issues: `gori run issues` and MCP `list_issues` filter with the Issues tab's query (it narrows exports too), and the CLI adds `issues show <id>`, `--count` and several ids on `update`/`delete`; `fp` sets a status everywhere, and an issue filed from a flow takes that flow's host (an empty host normalises to nil) (#1776)
 - Repeater: a target that names an env var (`http://$ENV.BASE`) is saved whatever the var holds, by create and update alike, and resolves on each send; the guide now documents it (#1774)
 

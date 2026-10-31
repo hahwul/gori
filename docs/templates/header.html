@@ -44,6 +44,7 @@
      stylesheet link is emitted here (sub-path safe). Highlight.js itself
      still loads from the footer. #}
   {% if page.section == "playbooks" %}<link rel="preload" href="{{ base_url }}/fonts/charis-sil-400.woff2" as="font" type="font/woff2" crossorigin>{% endif %}
+  {% if page.section == "" %}<link rel="preload" href="{{ base_url }}/fonts/dotgothic16-latin.woff2" as="font" type="font/woff2" crossorigin>{% endif %}
   {{ math_tags }}
   {{ mermaid_tags }}
   {{ auto_includes_css }}
