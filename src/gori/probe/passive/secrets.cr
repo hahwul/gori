@@ -74,6 +74,11 @@ module Gori
           # Telegram bot token: the `<numeric id>:AA…` shape is the distinctive part.
           {/\b\d{8,10}:AA[A-Za-z0-9_\-]{32,35}\b/, "Telegram bot token"},
           {/\bpypi-AgEIcHlwaS5vcmc[A-Za-z0-9_\-]{50,}/, "PyPI API token"},
+          # Hugging Face user/org access token (`hf_` + 34 alphanumerics) and DigitalOcean
+          # personal / OAuth / refresh tokens (`dop_v1_` / `doo_v1_` / `dor_v1_` + 64 hex). Both
+          # are fixed-length, so the trailing \b keeps a longer or shorter run from matching.
+          {/\bhf_[A-Za-z0-9]{34}\b/, "Hugging Face token"},
+          {/\bdo[opr]_v1_[a-f0-9]{64}\b/, "DigitalOcean token"},
           # Azure Storage connection string — AccountKey is the credential; the surrounding
           # DefaultEndpointsProtocol/AccountName literals make it unmistakable.
           {/AccountKey=[A-Za-z0-9+\/]{86}==/, "Azure Storage account key"},

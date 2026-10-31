@@ -385,6 +385,25 @@ describe "Gori::Probe::Passive::Secrets (provider shapes)" do
     private_hit.call("AccountKey=#{"A" * 86}==").should contain("Azure Storage account key")
   end
 
+  it "matches Hugging Face and DigitalOcean tokens" do
+    private_hit.call("hf_#{"A" * 34}").should eq(["Hugging Face token"])
+    %w[dop doo dor].each do |kind|
+      private_hit.call("#{kind}_v1_#{"0a" * 32}").should eq(["DigitalOcean token"])
+    end
+  end
+
+  it "does not match near-miss Hugging Face and DigitalOcean shapes" do
+    ["tokens start with hf_",
+     "hf_#{"A" * 33}",
+     "hf_#{"A" * 35}",
+     "dop_v1_#{"a" * 63}",
+     "dop_v1_#{"a" * 65}",
+     "dox_v1_#{"a" * 64}",
+     "dop_v1_#{"A" * 64}"].each do |s|
+      private_hit.call(s).should be_empty
+    end
+  end
+
   it "flags a database URI carrying real inline credentials" do
     private_hit.call("mongodb+srv://root:S3cretPassw0rd@cluster0.abcd.mongodb.net")
       .should contain("database URI with inline credentials")
