@@ -67,6 +67,17 @@ describe "Overlay#takes_pasted?" do
     env.prefix_edit_start
     env.takes_pasted?(d).should be_true
   end
+
+  it "keeps a pasted letter off the identities, tab-bar and hotkeys cards outside their search" do
+    d = key(Termisu::Input::Key::LowerD, 'd')
+    AuthorizeIdentitiesOverlay.new([] of Gori::Authorize::Identity).takes_pasted?(d).should be_false
+    TabsOverlay.new.takes_pasted?(key(Termisu::Input::Key::Space, ' ')).should be_false
+    hk = HotkeysOverlay.new(Gori::Verbs.registry)
+    hk.takes_pasted?(key(Termisu::Input::Key::LowerE, 'e')).should be_false
+    hk.handle_key(key(Termisu::Input::Key::Slash, '/'))
+    hk.searching?.should be_true
+    hk.takes_pasted?(d).should be_true
+  end
 end
 
 private def runner_src(file : String) : String

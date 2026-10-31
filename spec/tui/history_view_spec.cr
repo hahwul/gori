@@ -2600,6 +2600,24 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  # Following sees the whole store, not just the rows the query shows: a filter that matched
+  # nothing must not leave the existing flows to read `+N` once it is cleared.
+  it "counts none of the old flows a cleared filter reveals" do
+    with_store do |store|
+      3.times { |i| add_flow(store, "GET", "/old#{i}", 200) }
+      view = HistoryView.new
+      view.set_query("status:500")
+      view.reload(store)
+      view.render_list(Screen.new(MemoryBackend.new(100, 12)), Rect.new(0, 0, 100, 12))
+      view.rows.should be_empty
+      view.toggle_follow
+      view.set_query("")
+      view.reload(store)
+      view.rows.size.should eq(3)
+      view.unseen_count.should eq(0)
+    end
+  end
+
   it "counts only the new flows a filter keeps" do
     with_store do |store|
       add_flow(store, "GET", "/a", 200)

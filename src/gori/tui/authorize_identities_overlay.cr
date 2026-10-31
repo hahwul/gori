@@ -52,6 +52,12 @@ module Gori::Tui
       "↑/↓ pick · a add · e edit · d delete · b baseline · esc close"
     end
 
+    # `d` deletes and `b` moves the baseline at once (through `on_change`), `a`/`e` open the
+    # form: a paste presses none of them (`Overlay#takes_pasted?`).
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      false
+    end
+
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       return :cancel if key.escape?

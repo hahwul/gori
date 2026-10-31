@@ -133,6 +133,13 @@ module Gori::Tui
       capturing?
     end
 
+    # Only the search bar takes text. In browse a pasted `e` or space arms capture (the next
+    # pasted key becomes the binding) and `x`/`r` unbind or reset; capture itself takes one key
+    # as a chord, which a clipboard is not.
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      searching? && super
+    end
+
     def handle_key(ev : Termisu::Event::Key) : Symbol
       return handle_capture_key(ev) if capturing?
       return handle_search_key(ev) if searching?

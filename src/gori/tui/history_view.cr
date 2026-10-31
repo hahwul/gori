@@ -834,6 +834,10 @@ module Gori::Tui
     def reload(store : Store) : Nil
       # The first baseline for `prune_reused_marks`' MAX(id) comparison; later ones are its own.
       @marks_seen_max ||= store.max_flow_id || 0_i64
+      # Following means everything in the store so far is seen, whether or not the query shows
+      # it: a filter that matched nothing must not leave old traffic to count as `+N` once it is
+      # cleared, and an empty list needs a baseline below the first flow to arrive.
+      @seen_id = store.max_flow_id || 0_i64 if @follow || @seen_id.nil?
       if handler = @reload_handler
         handler.call(store)
       elsif request = prepare_search(store)
@@ -1133,7 +1137,8 @@ module Gori::Tui
 
     def on_event(event : Store::FlowEvent, store : Store) : Nil
       @host_suggest_dirty = true if event.kind == :inserted
-      sync_seen # before the insert, so a row landing just after follow went off still counts
+      sync_seen                                                                          # before the insert, so a row landing just after follow went off still counts
+      @seen_id = {@seen_id || 0_i64, event.id}.max if @follow && event.kind == :inserted # see reload
       # The row's ANSWERS changed, so its colour has to be re-asked. An in-flight row has
       # `status` and `content_type` nil, so `status:>=500` and `proto:sse` genuinely answer
       # differently once the response lands — without this the row would keep the colour it
@@ -4334,11 +4339,8 @@ module Gori::Tui
       @scroll = Viewport.scroll_to_show(@selected, @scroll, list_h, @rows.size)
     end
 
-    # An empty list still sets a baseline (0, below every id): otherwise the first rows to
-    # land after follow went off, whether by an in-process event or a peer's reload, would be
-    # taken as already seen.
     private def sync_seen : Nil
-      @seen_id = newest_id || @seen_id || 0_i64 if @follow || @seen_id.nil?
+      @seen_id = newest_id || @seen_id if @follow || @seen_id.nil?
     end
 
     private def newest_id : Int64?

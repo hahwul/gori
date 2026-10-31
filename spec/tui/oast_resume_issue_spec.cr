@@ -396,6 +396,16 @@ describe "Gori::Tui::OastController — resuming a persisted listener" do
     end
   end
 
+  it "refuses up front to resume a session whose provider is disabled" do
+    with_oast_controller do |controller, host, _session, sid, _pid|
+      controller.on_enter
+      controller.toggle_provider
+      controller.resume_session(sid)
+      host.statuses.last.should contain("is disabled")
+      controller.@registering.should be_empty
+    end
+  end
+
   # ^X while "registering…" used to answer "not listening" and let the listener start a
   # moment later; `stop_all` (leaving the project) left the result for a drain that is gone.
   it "cancels a registration still in flight on ^X and on stop_all" do

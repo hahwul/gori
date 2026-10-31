@@ -325,7 +325,20 @@ class Gori::Tui::RepeaterView
   # produces — is still discarded.
   def ws_out_messages_raw : Array(Store::WsOutMessage)
     return @ws_out_seed if ws_out_seeded?
-    lines = @decoded.text.split('\n')
+    # Memoized on the pane text and the seed: the MESSAGES border asks for it every frame
+    # (`ws_unshown_seed`), and the line diff below is not free on a large pasted hunk.
+    text = @decoded.text
+    if (memo = @ws_raw_memo) && memo[1].same?(@ws_out_seed) && memo[0] == text
+      return memo[2]
+    end
+    spliced = ws_splice(text.split('\n'))
+    @ws_raw_memo = {text, @ws_out_seed, spliced}
+    spliced
+  end
+
+  @ws_raw_memo : {String, Array(Store::WsOutMessage), Array(Store::WsOutMessage)}? = nil
+
+  private def ws_splice(lines : Array(String)) : Array(Store::WsOutMessage)
     # The seed positions this pane is showing, in pane order. `ws_line_renderable?` decides
     # both this and what `seed_ws_out` joined into the pane, so seeded line k IS slot slots[k].
     slots = [] of Int32

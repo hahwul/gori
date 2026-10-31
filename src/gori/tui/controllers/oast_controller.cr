@@ -591,16 +591,7 @@ module Gori::Tui
       # payload picker all resolve through `listener_for(picked_provider.key)` — so a resumed
       # session must land under a provider key or it would be a poller the operator could see
       # and never stop.
-      config = Oast::Sessions.resolve(rec, @providers)
-      if config.is_a?(Oast::Sessions::Ambiguous)
-        # Filing it under one of them would poll with that provider's token (#1192). Headless
-        # `gori run oast resume` binds no provider and polls with the session's own token.
-        return @host.status("#{Oast::Sessions.ambiguous_message(config, session_id)} — " \
-                            "resume it with `gori run oast resume #{session_id}`")
-      end
-      unless config
-        return @host.status("session ##{session_id}'s provider is gone — re-add #{rec.kind} #{rec.server_url} in Providers to resume it")
-      end
+      return unless config = resume_config(rec, session_id)
       key = config.key
       return @host.status("already registering with #{config.name}…") if @registering.has_key?(key)
       # ONE listener per provider key, the invariant `listener_for` rests on. Resuming a second
@@ -629,6 +620,25 @@ module Gori::Tui
         reg.send(RegErr.new(ex.message || "resume failed", label, key, cancel: cancel))
       end
       @host.status("resuming #{label} session ##{session_id}…")
+    end
+
+    # The provider a resume files its listener under, or nil with the reason said: ambiguous,
+    # gone, or disabled.
+    private def resume_config(rec : Store::OastSessionRecord, session_id : Int64) : Oast::ProviderConfig?
+      config = Oast::Sessions.resolve(rec, @providers)
+      if config.is_a?(Oast::Sessions::Ambiguous)
+        # Filing it under one of them would poll with that provider's token (#1192). Headless
+        # `gori run oast resume` binds no provider and polls with the session's own token.
+        return @host.status("#{Oast::Sessions.ambiguous_message(config, session_id)} — " \
+                            "resume it with `gori run oast resume #{session_id}`")
+      end
+      unless config
+        return @host.status("session ##{session_id}'s provider is gone — re-add #{rec.kind} #{rec.server_url} in Providers to resume it")
+      end
+      # A disabled provider leaves every picker, so its listener could never be stopped; the
+      # round trip would only land to be discarded (`apply_registration`).
+      return @host.status("#{config.name} is disabled — enable it in Providers to resume ##{session_id}") unless config.enabled
+      config
     end
 
     # Deregister a session's server-side state, stopping its poller first if it is live. The

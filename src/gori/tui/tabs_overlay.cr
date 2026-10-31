@@ -81,6 +81,12 @@ module Gori::Tui
       i < Chrome::MAX_SLOTS ? i + 1 : nil # with the cap off the bar runs past the nine digits
     end
 
+    # Space hides a tab, `J`/`K` reorder and `r` resets: a paste presses none of them
+    # (`Overlay#takes_pasted?`).
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      false
+    end
+
     # ↑/↓ move the selection and ⇧↑/⇧↓ reorder the selected tab; ↵ saves+applies, esc
     # discards; ^P jumps back to the palette.
     def handle_key(ev : Termisu::Event::Key) : Symbol
