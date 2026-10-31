@@ -137,8 +137,8 @@ private def with_oast_controller(&)
     # Nothing an example starts may outlive it: a poller keeps polling on its interval and a
     # resume fiber dials once, both long after the next example has reconfigured the process.
     if c = controller
+      settle_registrations(c) # before stop_all, which cancels (and forgets) what is in flight
       c.stop_all
-      settle_registrations(c)
     end
     session.close
     FileUtils.rm_rf(root) if Dir.exists?(root)
@@ -375,6 +375,72 @@ describe "Gori::Tui::OastController — resuming a persisted listener" do
       controller.@listeners.should be_empty
       # The row survives, so re-adding the provider makes it resumable again.
       session.store.oast_sessions.map(&.id).should contain(sid)
+    end
+  end
+
+  # `@providers` keeps DISABLED rows (only the pickers filter them), so a round trip that
+  # landed after the operator switched its provider off started a listener ^X could not reach.
+  it "drops a registration that lands after its provider was disabled" do
+    with_oast_controller do |controller, host, _session, sid, pid|
+      controller.on_enter
+      controller.toggle_provider
+      controller.@providers.first.enabled.should be_false
+
+      engine_session = Gori::Oast::Session.new(sid, Gori::Oast::ProviderKind::Interactsh,
+        "https://oast.test", "c0rr3lat10n", "s3cret", registered: true)
+      controller.@reg_events.send(resumed_reg(controller, engine_session, "p_#{pid}"))
+      controller.drain_events
+
+      host.statuses.last.should contain("disabled")
+      controller.@listeners.should be_empty
+    end
+  end
+
+  # ^X while "registering…" used to answer "not listening" and let the listener start a
+  # moment later; `stop_all` (leaving the project) left the result for a drain that is gone.
+  it "cancels a registration still in flight on ^X and on stop_all" do
+    with_oast_controller do |controller, host, _session, sid, pid|
+      controller.on_enter
+      key = "p_#{pid}"
+      engine_session = Gori::Oast::Session.new(sid, Gori::Oast::ProviderKind::Interactsh,
+        "https://oast.test", "c0rr3lat10n", "s3cret", registered: true)
+
+      cancel = [false]
+      controller.@registering[key] = cancel
+      controller.stop_listening
+      host.statuses.last.should contain("cancelled registering")
+      cancel[0].should be_true
+      controller.@reg_events.send(OastController::RegOk.new(engine_session, SilentProvider.new, key, nil,
+        "House interactsh", false, resumed: true, cancel: cancel))
+      controller.drain_events
+      controller.@listeners.should be_empty
+
+      queued = [false]
+      controller.@registering[key] = queued
+      controller.@reg_events.send(OastController::RegOk.new(engine_session, SilentProvider.new, key, nil,
+        "House interactsh", false, resumed: true, cancel: queued))
+      controller.stop_all
+      queued[0].should be_true
+      controller.@registering.should be_empty
+      controller.@listeners.should be_empty
+    end
+  end
+
+  # A peer's callbacks (MCP `oast_poll`, another gori) fold in on the reconcile tick, which
+  # only clamped the index: the newest-first list shifted under it and the selection, an
+  # open detail and issue-from-callback all moved onto a neighbour.
+  it "keeps the selected callback across a peer's inserts" do
+    with_oast_controller do |controller, _host, session, sid, _pid|
+      st = session.store
+      3.times { |i| st.insert_oast_callback(sid, "u#{i}", "dns", nil, "10.0.0.#{i}", "f#{i}", "r".to_slice, nil, 1_i64 + i) }
+      controller.on_enter
+      controller.handle_wheel(1) # newest-first: now on u1
+      before = controller.callback_issue_draft.not_nil!.title
+      2.times { |i| st.insert_oast_callback(sid, "p#{i}", "dns", nil, "192.168.9.#{i}", "pf#{i}", "r".to_slice, nil, 100_i64 + i) }
+      controller.reconcile
+      controller.callback_issue_draft.not_nil!.title.should eq(before)
+      controller.reload
+      controller.callback_issue_draft.not_nil!.title.should eq(before)
     end
   end
 
