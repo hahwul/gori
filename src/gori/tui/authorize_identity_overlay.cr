@@ -35,6 +35,9 @@ module Gori::Tui
     getter index : Int32? # nil = adding
     # The focused row, one of the four constants above.
     getter selected : Int32
+    # Whether a bracketed paste is open, injected by the shell that owns the paste state (the
+    # `CurlPasteOverlay#pasting` shape).
+    property pasting : Proc(Bool) = -> { false }
 
     # Names already taken by OTHER identities, lower-cased. A duplicate would put two rows
     # under one label in the results table, and nothing on screen would say which session
@@ -185,7 +188,9 @@ module Gori::Tui
       # are exactly the keys this form's row navigation and its cancel claim. Routed after them
       # the dropdown would have been unreachable: ↹ would jump to the next row and esc would
       # throw the whole identity away rather than close a list.
-      if @selected == EDITOR_ROW && @editor.env_completing? && @editor.handle_env_complete_key(ev)
+      # Not for a pasted key: a clipboard's ↵ is a newline, and accepting on it spliced the
+      # suggestion into the next pasted header (`Runner#pasted_key?`, the tab tier's twin).
+      if @selected == EDITOR_ROW && !pasting.call && @editor.env_completing? && @editor.handle_env_complete_key(ev)
         return :stay
       end
       return :cancel if key.escape?

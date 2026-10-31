@@ -1419,6 +1419,10 @@ module Gori::Tui
     # A bracketed paste being DROPPED because its keystrokes would run as commands — see
     # `paste_runs_as_commands?`. Cleared at the paste's end marker.
     @paste_dropped = false
+    # Keys being REPLAYED from text rather than typed — a refused bulk paste (`replay_paste`)
+    # or a READ-mode edit (`read_edit_key_in`). `pasting?` is already false by then: the
+    # replay runs after the end marker closed the paste.
+    @replaying_keys = false
     # The drop above began MID-paste (a modal held a key back, or a pasted ↵ committed a field):
     # what came before it went in as typed. `@paste_cut_note` is the toast still owed, named on
     # the first key the cut actually drops.
@@ -1769,7 +1773,10 @@ module Gori::Tui
       # The $ENV autocomplete popup in an editor (Repeater request, Fuzzer template) owns
       # Tab/↵/↑/↓/Esc while open — before the focus ring claims Tab, so Tab accepts the
       # suggestion. Non-popup keys fall through (return false) so editing + refilter flow on.
-      if @overlay.none? && @focus == :body && (ac = @tabs[@active_tab]?) && ac.editor_completing?
+      # A PASTED ↵/↹ is a line break or a tab in the clipboard, never a pick: accepted, it
+      # spliced `$TOKEN` into the next pasted line (`Bearer $TOKENHost: h`). It falls through
+      # to the editor, whose newline/tab closes the popup the way typing past it does.
+      if @overlay.none? && @focus == :body && !pasted_key? && (ac = @tabs[@active_tab]?) && ac.editor_completing?
         return if ac.handle_editor_complete_key(ev)
       end
       # Editor-style Tab: while actively typing in a text editor, forward Tab inserts a tab
@@ -6451,7 +6458,7 @@ module Gori::Tui
     # The edit is replayed through the WHOLE key path, the way a refused bulk paste is
     # (`replay_paste`), so every guard the shell applies ahead of a pane's own ladder applies.
     private def read_edit_key_in : ReadEdit::KeyIn
-      ->(ev : Termisu::Event::Key) { handle_key(ev); nil }
+      ->(ev : Termisu::Event::Key) { handle_replayed_key(ev); nil }
     end
 
     # Nil is the engine saying the pane already put its own reason up (`ReadEdit.leave`).

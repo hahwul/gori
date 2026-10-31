@@ -232,3 +232,43 @@ describe "Runner — a paste while the space menu or a picker is up" do
     body.index!("return true if @space_menu_open").should be < body.index!("@goto_open")
   end
 end
+
+describe "Runner — a pasted ↵/↹ under the $ENV popup" do
+  # Accepted, a pasted line break spliced the suggestion into the next pasted line:
+  # `Bearer $TOKEN⏎Host: h` became `Bearer $TOKENHost: h`. A clipboard key, live inside a
+  # bracketed paste or replayed after one, never reaches the popup.
+  it "skips the popup for a pasted key, live or replayed" do
+    tui_src("runner.cr").should contain("@focus == :body && !pasted_key? && (ac = @tabs[@active_tab]?) && ac.editor_completing?")
+    method_body("runner/paste.cr", "private def pasted_key? : Bool")
+      .should contain("@paste_newline.pasting? || @replaying_keys")
+    method_body("runner/paste.cr", "private def replay_paste(text : String) : Nil").should contain("handle_replayed_key")
+    method_body("runner.cr", "private def read_edit_key_in : ReadEdit::KeyIn").should contain("handle_replayed_key")
+    tui_src("runner/authorize.cr").should contain("form.pasting = -> { pasted_key? }")
+  end
+
+  # What the skipped key lands on: the editor's own newline, which closes the popup the way
+  # typing past it does, so the next pasted line starts clean.
+  it "leaves the newline to the editor, which closes the popup" do
+    saved = Gori::Settings.env_vars
+    saved_p = Gori::Settings.project_env_vars
+    saved_prefix = Gori::Settings.env_prefix
+    Gori::Settings.env_vars = [{"TOKEN", "a"}, {"TOKEN2", "b"}]
+    Gori::Settings.project_env_vars = [] of {String, String}
+    Gori::Settings.env_prefix = "$"
+    begin
+      v = FuzzerView.new
+      v.load_request("https://h.test", "", false, "")
+      v.enter_template_insert!
+      "GET / HTTP/1.1\nAuthorization: Bearer $TOKEN".each_char { |c| c == '\n' ? v.template_newline : v.template_insert(c) }
+      v.template_env_completing?.should be_true
+      v.template_newline
+      v.template_env_completing?.should be_false
+      "Host: h".each_char { |c| v.template_insert(c) }
+      v.template_text.should contain("Bearer $TOKEN\nHost: h")
+    ensure
+      Gori::Settings.env_vars = saved
+      Gori::Settings.project_env_vars = saved_p
+      Gori::Settings.env_prefix = saved_prefix
+    end
+  end
+end
