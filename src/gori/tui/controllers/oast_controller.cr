@@ -552,7 +552,7 @@ module Gori::Tui
         next Oast::Sessions.release_detail(provider, session, http) if cancel[0]
         reg.send(RegOk.new(session, provider, key, db_id, label, want_payload, cancel: cancel))
       rescue ex
-        reg.send(RegErr.new(ex.message || "register failed", label, key, cancel: cancel)) unless cancel[0]
+        reg.send(RegErr.new(ex.message || "register failed", label, key, cancel: cancel))
       end
       @host.status("registering with #{label}…")
     end
@@ -623,10 +623,10 @@ module Gori::Tui
       @registering[key] = cancel = [false]
       spawn(name: "gori-oast-resume") do
         provider.resume(http, session)
-        # A cancelled resume just does not listen: the session keeps its row and stays resumable.
-        reg.send(RegOk.new(session, provider, key, db_id, label, false, resumed: true, cancel: cancel)) unless cancel[0]
+        # Cancelled, it lands and is dropped (`settle_in_flight`): the session keeps its row.
+        reg.send(RegOk.new(session, provider, key, db_id, label, false, resumed: true, cancel: cancel))
       rescue ex
-        reg.send(RegErr.new(ex.message || "resume failed", label, key, cancel: cancel)) unless cancel[0]
+        reg.send(RegErr.new(ex.message || "resume failed", label, key, cancel: cancel))
       end
       @host.status("resuming #{label} session ##{session_id}…")
     end
@@ -1662,14 +1662,18 @@ module Gori::Tui
       applied
     end
 
-    private def apply_registration(reg : RegResult) : Nil
-      # Registration resolved (ok or err) — clear the in-flight guard, unless a newer round trip
-      # for the same key took the slot after this one was cancelled.
+    # Registration resolved (ok or err): clear its in-flight guard, unless a newer round trip for
+    # the same key took the slot after this one was cancelled. True when ^X or `stop_all`
+    # cancelled it — dropped, and a fresh registration released (nothing kept it).
+    private def settle_in_flight(reg : RegResult) : Bool
       @registering.delete(reg.provider_key) if @registering[reg.provider_key]?.try(&.same?(reg.cancel))
-      if reg.cancel[0]
-        deregister(reg.provider, reg.session) if reg.is_a?(RegOk) && !reg.resumed
-        return
-      end
+      return false unless reg.cancel[0]
+      deregister(reg.provider, reg.session) if reg.is_a?(RegOk) && !reg.resumed
+      true
+    end
+
+    private def apply_registration(reg : RegResult) : Nil
+      return if settle_in_flight(reg)
       case reg
       when RegErr
         # BOTH, and the notification is the one that matters. The failure message now names the

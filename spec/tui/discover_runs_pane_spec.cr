@@ -199,8 +199,10 @@ private def with_target_discover(&)
     v = t.discover.@view
     2.times do |i|
       run = DiscoverRun.new("http://#{i}.test/", Gori::Discover::Config.new)
-      3.times { |j| run.add_finding(Gori::Discover::Finding.new("http://#{i}.test/#{j}", "GET", 200, 4_i64,
-        "text/html", Gori::Discover::Source::Crawled, 1, 0.95, nil)) }
+      3.times do |j|
+        run.add_finding(Gori::Discover::Finding.new("http://#{i}.test/#{j}", "GET", 200, 4_i64,
+          "text/html", Gori::Discover::Source::Crawled, 1, 0.95, nil))
+      end
       v.add(run)
     end
     yield t

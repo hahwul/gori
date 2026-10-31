@@ -374,7 +374,8 @@ module Gori::Tui
         @host.status("SECRET is empty — enter a wordlist path or a comma-separated candidate list")
         return
       end
-      source = StoppableSource.new(crack_source(spec), stop = [false])
+      stop = [false]
+      source = StoppableSource.new(crack_source(spec), stop)
       fmt, salt, algo = decode_format(s), effective_salt(s), effective_algorithm(s)
       ch = Channel(CrackDone).new(1)
       # Off the render fiber: a rockyou-sized list held the whole TUI for tens of seconds with
