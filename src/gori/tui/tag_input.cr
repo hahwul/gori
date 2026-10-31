@@ -19,6 +19,10 @@ module Gori
       getter buffer = ""
       getter refusal : String? = nil
       @picked = 0
+      # How many suggestion cells the last `render_suggestions` drew (nil before the first
+      # draw). The pick stays inside them: ←/→ over the whole list put it on a cell behind the
+      # `+N`, and ⇥ then committed a tag the operator never saw.
+      @drawn : Int32? = nil
 
       # `known` is `ProjectRegistry.tag_counts` over the host: what to suggest, most-used first.
       def initialize(@tags : Array(String), @known : Array({String, Int32}))
@@ -39,7 +43,7 @@ module Gori
         @refusal = nil
         key = ev.key
         sugg = suggestions
-        @picked = @picked.clamp(0, {sugg.size - 1, 0}.max)
+        @picked = @picked.clamp(0, pickable(sugg) - 1)
         if key.enter?
           @buffer.strip.empty? ? Outcome::Submit : commit(@buffer)
         elsif !sugg.empty? && (key.tab? || key.left? || key.right?)
@@ -52,8 +56,12 @@ module Gori
       # tab takes the picked suggestion; ←/→ move the pick.
       private def pick(key : Termisu::Input::Key, sugg : Array({String, Int32})) : Outcome
         return commit(sugg[@picked][0]) if key.tab?
-        @picked = (@picked + (key.left? ? -1 : 1)) % sugg.size
+        @picked = (@picked + (key.left? ? -1 : 1)) % pickable(sugg)
         Outcome::Handled
+      end
+
+      private def pickable(sugg : Array({String, Int32})) : Int32
+        (@drawn || sugg.size).clamp(1, {sugg.size, 1}.max)
       end
 
       private def edit(ev : Termisu::Event::Key) : Outcome
@@ -118,11 +126,13 @@ module Gori
         return if sugg.empty?
         right = x + width
         px = x
+        @drawn = sugg.size
         sugg.each_with_index do |(t, n), i|
           cell = "#{t} #{n}"
           more = "+#{sugg.size - i}"
           if px + Screen.display_width(cell) + (i < sugg.size - 1 ? Screen.display_width(more) + 3 : 0) > right
             screen.text(px, y, more, Theme.muted, bg) if px + Screen.display_width(more) <= right
+            @drawn = i
             break
           end
           picked = i == @picked

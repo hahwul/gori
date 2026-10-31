@@ -265,6 +265,22 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # the same events the terminal would have produced, so every guard, confirm and escape
   # the editors apply while typing applies here too.
   private def replay_paste(text : String) : Nil
-    text.each_char { |c| handle_key(ReadEdit.key_event(c)) }
+    text.each_char { |c| handle_replayed_key(ReadEdit.key_event(c)) }
+  end
+
+  private def handle_replayed_key(ev : Termisu::Event::Key) : Nil
+    was = @replaying_keys
+    @replaying_keys = true
+    begin
+      handle_key(ev)
+    ensure
+      @replaying_keys = was
+    end
+  end
+
+  # Whether the key in hand came out of a clipboard (live inside a bracketed paste, or
+  # replayed after one) rather than from the operator's fingers.
+  private def pasted_key? : Bool
+    @paste_newline.pasting? || @replaying_keys
   end
 end

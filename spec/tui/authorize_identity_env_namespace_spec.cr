@@ -124,6 +124,20 @@ describe "AuthorizeIdentityOverlay env completion" do
     end
   end
 
+  # A pasted ↵ is the clipboard's line break, not a pick: accepted, it spliced `$BIND.SESSION`
+  # into the header and joined the next pasted line onto it.
+  it "lets a pasted line break through the open list" do
+    with_env_fixture do
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        ov = identity_form("Cookie: $BIND.")
+        ov.pasting = -> { true }
+        ov.handle_key(okey(Termisu::Input::Key::Enter, '\r'))
+        "X-A: 1".each_char { |c| ov.handle_key(okey(Termisu::Input::Key::LowerA, c)) }
+        ov.set_headers.should eq([{"Cookie", "$BIND."}, {"X-A", "1"}])
+      end
+    end
+  end
+
   it "never peeks a value for an ENV token pasted into the buffer" do
     with_env_fixture do
       with_env_syntax(Gori::Env::Syntax::Namespaced) do

@@ -695,6 +695,15 @@ module Gori::Tui
       end
     end
 
+    # Commit-time index for a FIND SUB-TAB row. The per-tick reconcile keeps running under
+    # the modal, so a peer's close or reorder would send ↵ to whatever chip now sits at the
+    # row's old index; a session strip re-finds the chip the row named by identity (nil:
+    # closed since). A fixed strip has no refs and keeps the index.
+    def subtab_search_pick(rows : Array(SubtabPicker::Row)) : Proc(Int32, Int32?)
+      refs = rows.to_h { |r| {r.index, subtab_ref(r.index)} }
+      ->(idx : Int32) { (ref = refs[idx]?) ? subtab_index_of(ref) : idx }
+    end
+
     # Per-session text the picker SEARCHES but never draws — request/template content
     # (Repeater wire text, Fuzzer templates), parallel to subtab_labels by index. Kept out
     # of `detail` because that column is drawn: 200 columns of header soup would bury the

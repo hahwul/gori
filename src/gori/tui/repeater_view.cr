@@ -87,6 +87,10 @@ module Gori::Tui
     end
 
     property name : String? # custom sub-tab chip label (nil = derive from the request); set separately from restore()
+    # The request side as it was SENT — {target, request text, http2, auto-CL, SNI} — for the
+    # passive Probe scan of the answer. Nothing locks the editor while a send is in flight, so
+    # the view's live fields can name another host by the time the result lands.
+    property sent_request : {String, String, Bool, Bool, String?}? = nil
     # How many FROZEN copies exist of this tab's exchange (#1038) — the RESPONSE border's
     # marker. It says a copy exists, never that the tab is locked: the request stays
     # editable and the next send still replaces the response, which is exactly why the
@@ -363,6 +367,9 @@ module Gori::Tui
       @inflight = false           # a repeater round-trip is outstanding — gates re-send (^R mashing)
       @diffable = false           # true only when loaded from a captured flow (has an original to diff)
       @auto_content_length = true # recompute Content-Length from the edited body on send
+      # {stored row, editor text} right after a restore / peer sync reflected Content-Length
+      # into the pane — see `request_side_matches?`.
+      @row_reflection = nil.as({String, String}?)
       # `§…§` markers carry inline Decoder chains applied on send (mark a value, attach
       # base64-encode → it's encoded on the wire). On a DRAFT they are always active (like the
       # Fuzzer): a request that contains a marker region renders it on send, a marker-free

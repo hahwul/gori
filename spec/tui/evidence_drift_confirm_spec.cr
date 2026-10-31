@@ -120,3 +120,22 @@ describe "the freeze drift confirm" do
     gate.should contain("snaps.count(&.request_drifted?)")
   end
 end
+
+describe "the Probe scan of a Repeater answer" do
+  # The passive scan used to build its record from the view's LIVE target and request when the
+  # result landed. Nothing locks the editor in flight, so a Target edited to host B during a
+  # slow send to A filed A's findings under B, with the edited request as evidence.
+  it "files the answer under the request side captured when the send went out" do
+    body = repeater_controller_code
+    send = body[/private def send_repeater_tab\(tab.*?\n    end/m].not_nil!
+    send.should contain("view.sent_request = sent_request_of(view)")
+    ws = body[/private def ws_repeater_send.*?\n    end/m].not_nil!
+    ws.should contain("view.sent_request = sent_request_of(view)")
+    {"probe_scan_repeater", "probe_scan_ws_repeater"}.each do |name|
+      scan = body[/private def #{name}\(.*?\n    end/m].not_nil!
+      scan.should contain("view.sent_request || sent_request_of(view)")
+      scan.should_not contain("view.target")
+      scan.should_not contain("view.request_text")
+    end
+  end
+end

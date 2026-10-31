@@ -67,6 +67,13 @@ module Gori::Tui
       true
     end
 
+    # A pasted `d` deleted the highlighted entry and wrote settings.json, and `a`/`e` opened
+    # the row the rest of the clipboard then typed into: the list's letters are not a
+    # paste's to press. With the inline row open it is a one-line field, so the default.
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      row_open? && super
+    end
+
     # a add · ↵/e edit · d delete · esc close. ^P jumps back to the palette. The add/edit
     # row is a sub-mode of this same overlay (it owns every key while open), not a
     # separate shell state.

@@ -61,6 +61,12 @@ module Gori::Tui
       "↑/↓ pick · ⇧←/⇧→ move · a add · e edit · d delete · esc close"
     end
 
+    # No text field: a pasted `d` deleted the selected column and `a`/`e` closed the card into
+    # the form. A paste presses none of the list's letters (`Overlay#takes_pasted?`).
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      false
+    end
+
     def handle_key(ev : Termisu::Event::Key) : Symbol
       k = ev.key
       return :cancel if k.escape?

@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/memory_backend"
 
 private def key(k : Termisu::Input::Key, char : Char? = nil) : Termisu::Event::Key
   Termisu::Event::Key.new(k, char: char)
@@ -60,5 +61,18 @@ describe Gori::Tui::TagInput do
     input = Gori::Tui::TagInput.new(["web"], known)
     type(input, "api")
     input.final_tags.should eq(["web", "api"])
+  end
+
+  # The row draws what fits, then `+N`. ←/→ cycled the pick over every suggestion, so it sat
+  # on a cell behind the `+N` and ⇥ committed a tag the operator never saw.
+  it "keeps the pick on a drawn suggestion" do
+    many = (1..30).map { |i| {"tag#{i}", 1} }
+    input = Gori::Tui::TagInput.new([] of String, many)
+    b = MemoryBackend.new(40, 1)
+    input.render_suggestions(Gori::Tui::Screen.new(b), 0, 0, 40, Gori::Tui::Theme.panel)
+    row = b.row(0)
+    20.times { input.handle(key(Termisu::Input::Key::Right)) }
+    input.handle(key(Termisu::Input::Key::Tab))
+    row.should contain(input.tags.first)
   end
 end

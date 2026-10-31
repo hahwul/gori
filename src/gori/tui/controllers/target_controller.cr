@@ -175,8 +175,11 @@ module Gori::Tui
       active_child.handle_wheel(step)
     end
 
+    # Discover hit-tests its cards, so it gets the content rect `handle_click` hands it (the
+    # raw rect put the panes two rows off: a notch over the strip changed the selected run).
     def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
-      active_child.handle_wheel_at(step, mx, my, rect)
+      return active_child.handle_wheel_at(step, mx, my, rect) unless @active_sub == 1
+      @discover.handle_wheel_at_content(step, mx, my, BodyChrome.content_rect(rect, strip: true))
     end
 
     def body_scroll(delta : Int32) : Bool

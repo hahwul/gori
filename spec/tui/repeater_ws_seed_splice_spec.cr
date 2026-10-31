@@ -123,6 +123,33 @@ describe "RepeaterView WebSocket seed splice" do
       .should eq([{9, "pi"}, {1, "a"}, {2, "\xFF"}, {1, ""}])
   end
 
+  # Keyed by line index, removing or adding a line slid every later text frame into the
+  # slot before it — past the frames the pane does not show.
+  it "keeps unshown frames in place when a line is deleted or inserted" do
+    seed3 = -> {
+      [
+        Gori::Store::WsOutMessage.text("auth"),
+        Gori::Store::WsOutMessage.new(2, Bytes[0xFF, 0x01]),
+        Gori::Store::WsOutMessage.text("b"),
+      ]
+    }
+    frames = ->(v : RepeaterView) { v.ws_out_messages_raw.map { |m| {m.opcode, m.payload} } }
+
+    view = RepeaterView.new
+    view.restore("https://ws.test", ws_head, false, true, ws_messages: seed3.call)
+    view.focus_pane(:request)
+    5.times { view.edit_delete } # "auth" and its newline
+    frames.call(view).should eq([{2, Bytes[0xFF, 0x01]}, {1, "b".to_slice}])
+
+    view = RepeaterView.new
+    view.restore("https://ws.test", ws_head, false, true, ws_messages: seed3.call)
+    view.focus_pane(:request)
+    view.edit_insert('x')
+    view.edit_newline
+    frames.call(view).should eq(
+      [{1, "x".to_slice}, {1, "auth".to_slice}, {2, Bytes[0xFF, 0x01]}, {1, "b".to_slice}])
+  end
+
   # Was: "reports unresolved env from the spliced list, not from a stale seed". The report
   # is gone with the refusal it fed (owner's round-7 policy). What still matters is that the
   # SPLICED list is what goes out — so the same edit is asserted on the outgoing frames.

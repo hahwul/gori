@@ -1905,6 +1905,17 @@ describe "FuzzerView pretty-printing" do
     view.template_text.should contain("\"b\": §age§")
     view.dirty?.should be_true
   end
+
+  it "is one ⌃Z away, like the Repeater's pretty-print" do
+    view = FuzzerView.new
+    raw = "POST / HTTP/1.1\r\nHost: h\r\nContent-Type: application/json\r\n\r\n{\"a\":1}"
+    view.load_request("https://h", raw, false, "")
+    before = view.template_text
+    view.pretty_print_template.should be_nil
+    view.template_text.should_not eq(before)
+    view.template_undo
+    view.template_text.should eq(before)
+  end
 end
 
 describe "Gori::Tui::FuzzerView matched_count accounting" do

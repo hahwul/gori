@@ -778,6 +778,23 @@ describe Gori::Tui::RepeaterView do
       false, false, nil).should be_true
   end
 
+  # A row whose stored Content-Length is stale opens with the reflected length in the pane and
+  # stays clean (the row is the operator's bytes). The compare used to see pane != row on
+  # every tick, so reconcile re-applied the row forever and slammed the caret to the top.
+  it "request_side_matches? holds for a row auto Content-Length reflected on open" do
+    row = "POST /x HTTP/1.1\r\nHost: h\r\nContent-Length: 99\r\n\r\nhello"
+    view = RepeaterView.new
+    view.restore("http://h", row, false, true)
+    view.request_text.should contain("Content-Length: 5")
+    view.dirty?.should be_false
+    view.request_side_matches?("http://h", row, false, true, nil).should be_true
+
+    view.focus_pane(:request)
+    view.edit_end
+    view.edit_insert('X') # a real edit: the pane is no longer that row
+    view.request_side_matches?("http://h", row, false, true, nil).should be_false
+  end
+
   # The flip side of exactness, and a deliberate behaviour change: a peer that rewrote ONLY
   # the line endings changed the bytes gori will put on the wire, so reconcile must NOT skip.
   # It re-applies once and then matches (the editor now holds the peer's endings), so this

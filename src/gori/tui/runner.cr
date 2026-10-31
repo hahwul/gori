@@ -635,6 +635,7 @@ module Gori::Tui
             dirty = true if sequencer_controller.drain_events
             dirty = true if discover_controller.drain_events
             dirty = true if authorize_controller.drain_events
+            dirty = true if cookie_controller.drain_events
             dirty = true if drain_retest_run
             # A finished gRPC reflection fetch (#827): applied on THIS fiber because
             # `Schemas.adopt` writes to the store, which the send fiber must never wait on.
@@ -1418,6 +1419,10 @@ module Gori::Tui
     # A bracketed paste being DROPPED because its keystrokes would run as commands — see
     # `paste_runs_as_commands?`. Cleared at the paste's end marker.
     @paste_dropped = false
+    # Keys being REPLAYED from text rather than typed — a refused bulk paste (`replay_paste`)
+    # or a READ-mode edit (`read_edit_key_in`). `pasting?` is already false by then: the
+    # replay runs after the end marker closed the paste.
+    @replaying_keys = false
     # The drop above began MID-paste (a modal held a key back, or a pasted ↵ committed a field):
     # what came before it went in as typed. `@paste_cut_note` is the toast still owed, named on
     # the first key the cut actually drops.
@@ -1768,7 +1773,10 @@ module Gori::Tui
       # The $ENV autocomplete popup in an editor (Repeater request, Fuzzer template) owns
       # Tab/↵/↑/↓/Esc while open — before the focus ring claims Tab, so Tab accepts the
       # suggestion. Non-popup keys fall through (return false) so editing + refilter flow on.
-      if @overlay.none? && @focus == :body && (ac = @tabs[@active_tab]?) && ac.editor_completing?
+      # A PASTED ↵/↹ is a line break or a tab in the clipboard, never a pick: accepted, it
+      # spliced `$TOKEN` into the next pasted line (`Bearer $TOKENHost: h`). It falls through
+      # to the editor, whose newline/tab closes the popup the way typing past it does.
+      if @overlay.none? && @focus == :body && !pasted_key? && (ac = @tabs[@active_tab]?) && ac.editor_completing?
         return if ac.handle_editor_complete_key(ev)
       end
       # Editor-style Tab: while actively typing in a text editor, forward Tab inserts a tab
@@ -1842,7 +1850,7 @@ module Gori::Tui
             status(reason)
             return
           end
-          run_external_editor(iv.editor_text, :intercept) { |t| iv.replace_editor(t) }
+          run_external_editor(iv.editor_text, :intercept) { |t| iv.apply_external_edit(t, @session.interceptor) }
           return
         end
       end
@@ -3625,6 +3633,7 @@ module Gori::Tui
       authorize_controller.stop_all
       sitemap_controller.stop_all
       target_controller.params.stop_all
+      cookie_controller.stop_all # a wordlist crack: no job, but it must not outlive the project
       # A retest run is the Issues tab's one background sender (#1036). Cooperative like the
       # rest: the fiber owns its sockets and checks the flag between steps.
       issues_controller.halt_retest
@@ -5510,7 +5519,8 @@ module Gori::Tui
     # path serves every strip. Gives Fuzzer/Notes/Decoder a search-and-jump that doesn't
     # rely on Ctrl+digit (undeliverable on many terminals).
     def subtab_search_open : Nil
-      rows = @tabs[@active_tab]?.try(&.subtab_search_rows) || [] of SubtabPicker::Row
+      return unless tab = @tabs[@active_tab]?
+      rows = tab.subtab_search_rows
       # Opens from ONE session up, matching the ⌕ affordance's own threshold: the pill is
       # drawn from the first session, and an affordance that is visible has to do something.
       # A one-row list is a poor list, but it is not a dead key.
@@ -5518,17 +5528,21 @@ module Gori::Tui
       sp = SubtabPicker.new("FIND SUB-TAB", rows)
       # Open on the ACTIVE chip, not row 0: ↵ with no query then stays put, and ↑/↓ walk out
       # from where the operator is — the way the other pickers open on their current value.
-      if (active = @tabs[@active_tab]?.try(&.subtab_index)) && (cur = rows.index { |r| r.index == active })
+      if (active = tab.subtab_index) && (cur = rows.index { |r| r.index == active })
         sp.set_selected(cur)
       end
-      # The picker hands back the ABSOLUTE index; jump_subtab clamps + saves the outgoing
-      # tab, so a stale index (the cross-session reconcile reordered behind the modal) is
-      # a safe no-op.
+      # The picker hands back the index the row held at OPEN; `subtab_search_pick` re-finds
+      # its chip, since the reconcile can close or reorder sessions behind the modal.
+      pick = tab.subtab_search_pick(rows)
       sp.on_commit = -> {
         if idx = sp.selected_index
-          @tabs[@active_tab]?.try(&.jump_subtab(idx)) # active tab owns the strip (Repeater/Fuzzer/Notes/Decoder)
-          @focus = :body                              # land on the chosen session's content
-          @subtab_find_focus = false                  # raw @focus write — focus_pane's clear never runs
+          if now = pick.call(idx)
+            tab.jump_subtab(now)       # the tab that opened the picker owns the strip
+            @focus = :body             # land on the chosen session's content
+            @subtab_find_focus = false # raw @focus write — focus_pane's clear never runs
+          else
+            @toast = "that sub-tab was closed"
+          end
         end
         true
       }
@@ -6444,7 +6458,7 @@ module Gori::Tui
     # The edit is replayed through the WHOLE key path, the way a refused bulk paste is
     # (`replay_paste`), so every guard the shell applies ahead of a pane's own ladder applies.
     private def read_edit_key_in : ReadEdit::KeyIn
-      ->(ev : Termisu::Event::Key) { handle_key(ev); nil }
+      ->(ev : Termisu::Event::Key) { handle_replayed_key(ev); nil }
     end
 
     # Nil is the engine saying the pane already put its own reason up (`ReadEdit.leave`).

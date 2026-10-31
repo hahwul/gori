@@ -29,14 +29,18 @@ module Gori::Tui
     end
 
     # The directory a path's subtree starts at, nil for the root. `/notes` reads as a
-    # directory (`/notes/`), but a last segment with a dot is a file: `/app/index.html`
-    # starts at `/app/`, not at a `/app/index.html/` nothing serves.
+    # directory (`/notes/`), but a last segment with a file extension is a file:
+    # `/app/index.html` starts at `/app/`, not at a `/app/index.html/` nothing serves. An
+    # extension needs a letter and a name before it, so `/api/v1.2` and `/.well-known` stay
+    # directories: reading them as files widened the crawl to their parent.
     def self.start_dir(path : String) : String?
       clean = path.partition('?')[0]
       return nil if clean.empty? || clean == "/"
       return clean if clean.ends_with?('/')
       slash = clean.rindex('/')
-      dir = slash && clean[slash + 1..].includes?('.') ? clean[..slash] : "#{clean}/"
+      seg = slash ? clean[slash + 1..] : clean
+      file = slash && seg.index('.').try(&.> 0) && seg.rpartition('.')[2].matches?(/\A[a-z0-9]*[a-z][a-z0-9]*\z/i)
+      dir = file && slash ? clean[..slash] : "#{clean}/"
       dir == "/" ? nil : dir
     end
   end

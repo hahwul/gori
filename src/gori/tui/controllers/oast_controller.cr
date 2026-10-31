@@ -112,8 +112,10 @@ module Gori::Tui
     # second session id, and the first row — the one holding the payloads the operator planted
     # — would sit at its old hit count forever.
     record RegOk, session : Oast::Session, provider : Oast::Provider, provider_key : String,
-      db_provider_id : Int64?, provider_label : String, want_payload : Bool, resumed : Bool = false
-    record RegErr, message : String, provider_label : String, provider_key : String
+      db_provider_id : Int64?, provider_label : String, want_payload : Bool, resumed : Bool = false,
+      cancel : Array(Bool) = [false]
+    record RegErr, message : String, provider_label : String, provider_key : String,
+      cancel : Array(Bool) = [false]
     alias RegResult = RegOk | RegErr
 
     # A deregister's outcome, carried back from the detached fiber that ran it. `error` is nil
@@ -159,7 +161,9 @@ module Gori::Tui
       @oast_events = Channel(Oast::Event).new(256)
       @reg_events = Channel(RegResult).new(16)
       @release_events = Channel(ReleaseResult).new(8)
-      @registering = Set(String).new        # provider keys with a register round-trip in flight (dedup g/^R)
+      # Provider key → cancel cell of its register/resume round trip in flight (dedup g/^R). ^X
+      # and `stop_all` set the cell; the fiber and `apply_registration` both honour it.
+      @registering = {} of String => Array(Bool)
       @deaf = Set(Int64).new                # sessions already announced as not reaching their provider
       @poll_error = Hash(Int64, String).new # session_id → the last poll failure's own sentence
       @max_cb_id = 0_i64                    # highest callback row id folded in (watermark for reconcile)
@@ -258,6 +262,7 @@ module Gori::Tui
     # the window is a function of the table, so a revisit must not inflate it.
     def reload : Nil
       store = @host.session.store
+      sel_key = selected_callback.try { |c| {c.session_id, c.uid} } # see drain_events
       @providers = Oast.provider_configs(store)
       @callbacks.clear
       @seen.clear
@@ -270,6 +275,7 @@ module Gori::Tui
       end
       store.oast_callbacks_since(0_i64).each { |cb| fold_callback(cb) }
       @cb_version += 1
+      reanchor_callback_selection(sel_key) if sel_key
       clamp_selection
     end
 
@@ -283,9 +289,11 @@ module Gori::Tui
       store.oast_sessions.each do |s|
         @session_label[s.id] = provider_label_for(s)
       end
+      sel_key = selected_callback.try { |c| {c.session_id, c.uid} } # a peer's inserts shift it; see drain_events
       inserted = false
       store.oast_callbacks_since(@max_cb_id).each { |cb| inserted = true if fold_callback(cb) }
       @cb_version += 1 if inserted
+      reanchor_callback_selection(sel_key) if inserted && sel_key
       clamp_selection
     end
 
@@ -494,7 +502,14 @@ module Gori::Tui
       prov = picked_provider
       return @host.status(no_provider_status("stop listening")) unless prov
       listener = listener_for(prov.key)
-      return @host.status("not listening with #{prov.name}") unless listener
+      unless listener
+        # A register still in flight would otherwise start listening a moment after this said no.
+        if cancel = @registering.delete(prov.key)
+          cancel[0] = true
+          return @host.status("cancelled registering with #{prov.name}")
+        end
+        return @host.status("not listening with #{prov.name}")
+      end
       stop_listener(listener)
       @host.status("stopped listening with #{prov.name} — session kept, resume it with ⇧R")
     end
@@ -506,6 +521,12 @@ module Gori::Tui
     # stop_listener, so quitting keeps the sessions resumable exactly as an explicit stop does.
     # Iterates a COPY: stop_listener deletes from @listeners.
     def stop_all : Nil
+      # Cancel the round trips still in flight first: their results land after the drain is
+      # gone, so the fiber releases a fresh registration itself. One already queued is
+      # drained here, and `apply_registration` discards it the same way.
+      @registering.each_value { |c| c[0] = true }
+      @registering.clear
+      drain_registrations
       @listeners.dup.each { |l| stop_listener(l) }
     end
 
@@ -515,7 +536,7 @@ module Gori::Tui
       # in-flight guard a second g/^R spawns a duplicate register → two sessions, two
       # Listeners and two poller fibers for one provider. Dedup on the provider key.
       key = prov.key
-      return @host.status("already registering with #{prov.name}…") if @registering.includes?(key)
+      return @host.status("already registering with #{prov.name}…") if @registering.has_key?(key)
       kind = Oast::ProviderKind.parse?(prov.kind)
       return @host.status("unknown provider type #{prov.kind}") unless kind
       provider = Oast::Provider.build(kind, prov.host, prov.token)
@@ -523,12 +544,15 @@ module Gori::Tui
       reg = @reg_events
       label = prov.name
       db_id = prov.project_id
-      @registering << key
+      @registering[key] = cancel = [false]
       spawn(name: "gori-oast-register") do
         session = provider.register(http)
-        reg.send(RegOk.new(session, provider, key, db_id, label, want_payload))
+        # Cancelled while in flight (^X, or the project closed — no drain is left to hear it):
+        # nothing kept this registration, so release it here rather than leak it on the server.
+        next Oast::Sessions.release_detail(provider, session, http) if cancel[0]
+        reg.send(RegOk.new(session, provider, key, db_id, label, want_payload, cancel: cancel))
       rescue ex
-        reg.send(RegErr.new(ex.message || "register failed", label, key))
+        reg.send(RegErr.new(ex.message || "register failed", label, key, cancel: cancel))
       end
       @host.status("registering with #{label}…")
     end
@@ -567,18 +591,9 @@ module Gori::Tui
       # payload picker all resolve through `listener_for(picked_provider.key)` — so a resumed
       # session must land under a provider key or it would be a poller the operator could see
       # and never stop.
-      config = Oast::Sessions.resolve(rec, @providers)
-      if config.is_a?(Oast::Sessions::Ambiguous)
-        # Filing it under one of them would poll with that provider's token (#1192). Headless
-        # `gori run oast resume` binds no provider and polls with the session's own token.
-        return @host.status("#{Oast::Sessions.ambiguous_message(config, session_id)} — " \
-                            "resume it with `gori run oast resume #{session_id}`")
-      end
-      unless config
-        return @host.status("session ##{session_id}'s provider is gone — re-add #{rec.kind} #{rec.server_url} in Providers to resume it")
-      end
+      return unless config = resume_config(rec, session_id)
       key = config.key
-      return @host.status("already registering with #{config.name}…") if @registering.includes?(key)
+      return @host.status("already registering with #{config.name}…") if @registering.has_key?(key)
       # ONE listener per provider key, the invariant `listener_for` rests on. Resuming a second
       # session of a provider that is already listening would put two Listeners under one key,
       # and every lookup after that — stop, generate, the job note — would silently pick one.
@@ -596,14 +611,34 @@ module Gori::Tui
       http = poll_http
       reg = @reg_events
       db_id = config.project_id
-      @registering << key
+      @registering[key] = cancel = [false]
       spawn(name: "gori-oast-resume") do
         provider.resume(http, session)
-        reg.send(RegOk.new(session, provider, key, db_id, label, false, resumed: true))
+        # Cancelled, it lands and is dropped (`settle_in_flight`): the session keeps its row.
+        reg.send(RegOk.new(session, provider, key, db_id, label, false, resumed: true, cancel: cancel))
       rescue ex
-        reg.send(RegErr.new(ex.message || "resume failed", label, key))
+        reg.send(RegErr.new(ex.message || "resume failed", label, key, cancel: cancel))
       end
       @host.status("resuming #{label} session ##{session_id}…")
+    end
+
+    # The provider a resume files its listener under, or nil with the reason said: ambiguous,
+    # gone, or disabled.
+    private def resume_config(rec : Store::OastSessionRecord, session_id : Int64) : Oast::ProviderConfig?
+      config = Oast::Sessions.resolve(rec, @providers)
+      if config.is_a?(Oast::Sessions::Ambiguous)
+        # Filing it under one of them would poll with that provider's token (#1192). Headless
+        # `gori run oast resume` binds no provider and polls with the session's own token.
+        return @host.status("#{Oast::Sessions.ambiguous_message(config, session_id)} — " \
+                            "resume it with `gori run oast resume #{session_id}`")
+      end
+      unless config
+        return @host.status("session ##{session_id}'s provider is gone — re-add #{rec.kind} #{rec.server_url} in Providers to resume it")
+      end
+      # A disabled provider leaves every picker, so its listener could never be stopped; the
+      # round trip would only land to be discarded (`apply_registration`).
+      return @host.status("#{config.name} is disabled — enable it in Providers to resume ##{session_id}") unless config.enabled
+      config
     end
 
     # Deregister a session's server-side state, stopping its poller first if it is live. The
@@ -1637,8 +1672,18 @@ module Gori::Tui
       applied
     end
 
+    # Registration resolved (ok or err): clear its in-flight guard, unless a newer round trip for
+    # the same key took the slot after this one was cancelled. True when ^X or `stop_all`
+    # cancelled it — dropped, and a fresh registration released (nothing kept it).
+    private def settle_in_flight(reg : RegResult) : Bool
+      @registering.delete(reg.provider_key) if @registering[reg.provider_key]?.try(&.same?(reg.cancel))
+      return false unless reg.cancel[0]
+      deregister(reg.provider, reg.session) if reg.is_a?(RegOk) && !reg.resumed
+      true
+    end
+
     private def apply_registration(reg : RegResult) : Nil
-      @registering.delete(reg.provider_key) # registration resolved (ok or err) — clear the in-flight guard
+      return if settle_in_flight(reg)
       case reg
       when RegErr
         # BOTH, and the notification is the one that matters. The failure message now names the
@@ -1652,10 +1697,11 @@ module Gori::Tui
           "OAST register failed (#{reg.provider_label}): #{reg.message}",
           Jobs::Goto.new(:oast), source: "oast")
       when RegOk
-        unless @providers.any? { |p| p.key == reg.provider_key }
-          # The provider was deleted or scope-migrated while the round trip was in flight — its
-          # key no longer resolves to anything in @providers, so a Listener built from it
-          # could never be found/stopped again. Drop the result rather than leak an
+        unless @providers.any? { |p| p.key == reg.provider_key && p.enabled }
+          # The provider was deleted, disabled or scope-migrated while the round trip was in
+          # flight. Deleted, its key resolves to nothing; disabled, it leaves every picker
+          # (see `toggle_provider`). Either way a Listener built from it could never be
+          # found/stopped again. Drop the result rather than leak an
           # unreachable poller.
           #
           # A FRESH registration is also deregistered here, and only a fresh one: nothing about
@@ -1665,7 +1711,7 @@ module Gori::Tui
           # releasing that server state because a provider row vanished mid-flight would throw
           # away exactly what the operator asked to get back. Re-add the provider and resume.
           deregister(reg.provider, reg.session) unless reg.resumed
-          return @host.status("OAST #{reg.resumed ? "resume" : "register"} for #{reg.provider_label} finished after its provider was removed — discarded")
+          return @host.status("OAST #{reg.resumed ? "resume" : "register"} for #{reg.provider_label} finished after its provider was removed or disabled — discarded")
         end
         # A resume already HAS its row (see RegOk#resumed); only a fresh registration inserts.
         unless reg.resumed

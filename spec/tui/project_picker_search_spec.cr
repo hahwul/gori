@@ -155,3 +155,13 @@ describe "ProjectPicker.new_form_prefill" do
     ProjectPicker.new_form_prefill("#").should eq({"", [] of String})
   end
 end
+
+describe "ProjectPicker.quick_create_name" do
+  it "direct-creates a plain query, and opens the New form for an empty or #tag one" do
+    # ctrl-n and the footer's `ctrl-n new` token both read this; the token used to create a
+    # project literally named `#web`.
+    ProjectPicker.quick_create_name("  acme ").should eq("acme")
+    ProjectPicker.quick_create_name("   ").should be_nil
+    ProjectPicker.quick_create_name("#web").should be_nil
+  end
+end
