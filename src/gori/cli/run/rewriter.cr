@@ -628,8 +628,8 @@ module Gori
         if find.try(&.empty?) || (find.nil? && mock.from_flow.nil?)
           abort "gori run rewriter add: --find is required"
         end
-        if find && match.regex? && !op.header? && !op.json? && !valid_regex?(find)
-          abort "gori run rewriter add: invalid regex --find (failed to compile)"
+        if find && match.regex? && !op.header? && !op.json? && (why = regex_error(find))
+          abort "gori run rewriter add: invalid regex --find (failed to compile: #{why})"
         end
         {find, match}
       end
@@ -943,7 +943,10 @@ module Gori
 
       private def self.update_find_error(op : Store::RuleOp, match : Store::MatchKind, pattern : String) : String?
         return "--find must not be empty" if pattern.empty?
-        "invalid regex --find (failed to compile)" if match.regex? && !op.header? && !op.json? && !valid_regex?(pattern)
+        return unless match.regex? && !op.header? && !op.json?
+        if why = regex_error(pattern)
+          "invalid regex --find (failed to compile: #{why})"
+        end
       end
 
       # The shared validators, in `update_rule`'s order.
@@ -1120,11 +1123,13 @@ module Gori
         end
       end
 
-      private def self.valid_regex?(pattern : String) : Bool
+      # nil when the pattern compiles, else the compiler's reason (e.g. "missing closing
+      # parenthesis at 3"), so the error can say why and not just that it failed (#1785).
+      private def self.regex_error(pattern : String) : String?
         SafeRegexp.compile(pattern)
-        true
-      rescue
-        false
+        nil
+      rescue ex
+        ex.message || ex.class.name
       end
 
       private def self.cmd_rewriter_rm(args : Array(String)) : Nil
@@ -1246,8 +1251,8 @@ module Gori
         # Validate the regex up front (like `add` does) — otherwise a bad pattern is
         # swallowed and reported as "0 flows", indistinguishable from a valid rule
         # that simply matched nothing.
-        if match.regex? && !op.header? && !op.json? && !valid_regex?(f)
-          abort "gori run rewriter preview: invalid regex --find (failed to compile)"
+        if match.regex? && !op.header? && !op.json? && (why = regex_error(f))
+          abort "gori run rewriter preview: invalid regex --find (failed to compile: #{why})"
         end
         check_pipe_value(op, value, "preview")
         check_json_rule(op, part, f, value, "preview")

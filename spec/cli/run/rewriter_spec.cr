@@ -98,8 +98,8 @@ module Gori::CLI::Run
     parse_rule_part(op, part_s, "add")
   end
 
-  def self.valid_regex_for_spec?(pattern : String) : Bool
-    valid_regex?(pattern)
+  def self.regex_error_for_spec(pattern : String) : String?
+    regex_error(pattern)
   end
 
   def self.read_stub_response_for_spec(path : String) : String
@@ -186,10 +186,10 @@ describe "gori run rewriter — flag parsing" do
     Gori::CLI::Run.parse_extract_range_for_spec("0:1").should eq({0, 1})
   end
 
-  it "answers whether --find compiles as a regex without raising out of the parse" do
-    Gori::CLI::Run.valid_regex_for_spec?("^sess_[0-9a-f]{8}$").should be_true
-    Gori::CLI::Run.valid_regex_for_spec?("(unclosed").should be_false
-    Gori::CLI::Run.valid_regex_for_spec?("a{2,1}").should be_false
+  it "answers whether --find compiles as a regex, and why not, without raising out of the parse" do
+    Gori::CLI::Run.regex_error_for_spec("^sess_[0-9a-f]{8}$").should be_nil
+    Gori::CLI::Run.regex_error_for_spec("(unclosed").should eq("missing closing parenthesis at 9")
+    Gori::CLI::Run.regex_error_for_spec("a{2,1}").should eq("numbers out of order in {} quantifier at 5")
   end
 end
 

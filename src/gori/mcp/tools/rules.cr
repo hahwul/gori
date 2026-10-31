@@ -40,16 +40,17 @@ module Gori
         label_arg(h, "scope", Store::RuleScope, Store::RuleScope::Project, strip: false)
       end
 
-      # Whether a rule's pattern is acceptable: only a Replace+Regex rule must compile; a
-      # literal or header-op rule is always fine. Mirrors the CLI's valid_regex? guard so the
-      # MCP surface rejects a bad pattern instead of persisting a rule that silently never fires.
-      private def valid_rule_regex?(op : Store::RuleOp, match_kind : Store::MatchKind, pattern : String) : Bool
-        return true unless match_kind.regex?
-        return true if op.header? || op.json? # matched by header NAME or JSON path; `match` does not apply
-        Regex.new(pattern)
-        true
-      rescue
-        false
+      # Why a rule's pattern is unacceptable, or nil when it is fine: only a Replace+Regex rule
+      # must compile; a literal or header-op rule is always fine. Mirrors the CLI's regex_error
+      # guard — same SafeRegexp compile, same reason (#1785) — so the MCP surface rejects a bad
+      # pattern instead of persisting a rule that silently never fires.
+      private def rule_regex_error(op : Store::RuleOp, match_kind : Store::MatchKind, pattern : String) : String?
+        return unless match_kind.regex?
+        return if op.header? || op.json? # matched by header NAME or JSON path; `match` does not apply
+        SafeRegexp.compile(pattern)
+        nil
+      rescue ex
+        ex.message || ex.class.name
       end
 
       # Guard the short-circuit-only arguments. A stub that cannot be parsed would answer every
@@ -231,8 +232,8 @@ module Gori
         target, part = Gori::Rules.normalize_shape(op, target, part) # header ops head-only; a stub is request/head
         # Reject an uncompilable regex up front (the CLI does; the proxy would otherwise
         # rescue the compile to passthrough and the rule would silently never fire).
-        unless valid_rule_regex?(op, match_kind, pattern)
-          return err("invalid regex pattern (failed to compile)", "INVALID_ARGUMENT", field: "pattern")
+        if why = rule_regex_error(op, match_kind, pattern)
+          return err("invalid regex pattern (failed to compile: #{why})", "INVALID_ARGUMENT", field: "pattern")
         end
         replacement = str(h, "replacement").presence || draft.try(&.replacement) || ""
         name = str(h, "name") || ""
@@ -370,8 +371,8 @@ module Gori
         target, part = Gori::Rules.normalize_shape(op, target, part)
         pattern = present?(h, "pattern") ? str(h, "pattern") : existing.pattern
         return err("pattern must not be empty", "INVALID_ARGUMENT", field: "pattern") if pattern.nil? || pattern.empty?
-        unless valid_rule_regex?(op, match_kind, pattern)
-          return err("invalid regex pattern (failed to compile)", "INVALID_ARGUMENT", field: "pattern")
+        if why = rule_regex_error(op, match_kind, pattern)
+          return err("invalid regex pattern (failed to compile: #{why})", "INVALID_ARGUMENT", field: "pattern")
         end
         draft = mock_flow_draft(h)
         return draft if draft.is_a?(Result)
@@ -455,8 +456,8 @@ module Gori
         # Rules#apply_rule's own rescue (a deliberate passthrough so a bad LIVE rule
         # can't corrupt traffic) silently reports a fake "0 matches" instead of the
         # compile error preview_rule exists to catch before create_rule.
-        unless valid_rule_regex?(op, match_kind, pattern)
-          return err("invalid regex pattern (failed to compile)", "INVALID_ARGUMENT", field: "pattern")
+        if why = rule_regex_error(op, match_kind, pattern)
+          return err("invalid regex pattern (failed to compile: #{why})", "INVALID_ARGUMENT", field: "pattern")
         end
         replacement = str(h, "replacement") || ""
         host = str(h, "host") || ""

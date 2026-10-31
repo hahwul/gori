@@ -80,7 +80,7 @@ describe "gori run rewriter update" do
     edit = Gori::CLI::Run.rewriter_update_edit(update_flags(&.name=("")), mrule).as(Gori::CLI::Run::RewriterEdit)
     {edit.name, edit.pattern, edit.replacement}.should eq({"", "old", "new"})
     Gori::CLI::Run.rewriter_update_edit(update_flags { |f| f.match = "regex"; f.find = "(" }, mrule)
-      .should eq("invalid regex --find (failed to compile)")
+      .should eq("invalid regex --find (failed to compile: missing closing parenthesis at 1)")
     Gori::CLI::Run.rewriter_update_edit(update_flags(&.find=("")), mrule).should eq("--find must not be empty")
     Gori::CLI::Run.rewriter_update_edit(update_flags(&.host=("http://x/")), mrule)
       .as(String).should contain("must not include a scheme")
