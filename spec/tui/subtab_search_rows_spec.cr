@@ -181,3 +181,37 @@ describe "TabController#subtab_search_rows" do
     end
   end
 end
+
+describe "TabController#subtab_search_pick" do
+  # FIND SUB-TAB used to commit the index its row held at OPEN. The reconcile keeps running
+  # under the modal, so a peer's `delete_repeater` before the pick sent ↵ (and the next ^R)
+  # to the session that slid into that index.
+  it "re-finds the picked session after a peer closes the one before it" do
+    with_session do |host|
+      store = host.session.store
+      store.insert_repeater("https://b.example.com/", "GET /b HTTP/1.1\r\nHost: b.example.com\r\n\r\n".to_slice,
+        false, true, nil, 1)
+      rc = RepeaterController.new(host)
+      rc.subtab_count.should eq 2
+      pick = rc.subtab_search_pick(rc.subtab_search_rows)
+      first = rc.db_id_at(0).not_nil!
+      second = rc.db_id_at(1).not_nil!
+
+      store.delete_repeater(first)
+      rc.reconcile
+      rc.subtab_count.should eq 1
+      (now = pick.call(1)).should eq 0
+      rc.db_id_at(now.not_nil!).should eq second
+    end
+  end
+
+  it "answers nil for a session closed behind the picker" do
+    with_session do |host|
+      rc = RepeaterController.new(host)
+      pick = rc.subtab_search_pick(rc.subtab_search_rows)
+      host.session.store.delete_repeater(rc.db_id_at(0).not_nil!)
+      rc.reconcile
+      pick.call(0).should be_nil
+    end
+  end
+end
