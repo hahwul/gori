@@ -646,6 +646,18 @@ describe Gori::MCP::Install do
   end
 
   describe ".install_toml" do
+    it "raises the client's tool timeout past 60 s, and keeps one already set on a re-install" do
+      with_toml(nil) do |path|
+        Gori::MCP::Install.install_toml(path, "/opt/gori", ["mcp"])
+        File.read(path).should contain("tool_timeout_sec = #{Gori::MCP::Install::TOML_TOOL_TIMEOUT_SEC}\n")
+        File.write(path, File.read(path).sub(/tool_timeout_sec = \d+/, "tool_timeout_sec = 1800"))
+        Gori::MCP::Install.install_toml(path, "/opt/gori", ["mcp"])
+        text = File.read(path)
+        text.should contain("tool_timeout_sec = 1800\n")
+        text.scan(/tool_timeout_sec/).size.should eq(1)
+      end
+    end
+
     it "refuses a file it cannot parse instead of splicing into it" do
       with_toml("model = \"gpt-5\n[features]\nx = true\n") do |path|
         before = File.read(path)

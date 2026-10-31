@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- MCP: probe findings carry each rule's text once and their first five affected URLs, `list_issues` previews notes, and `--install-codex`/`--install-grok` raise the client's tool timeout (Codex: 60 s) to 10 minutes so a long `minimize_repeater` or active `probe_scan` is not cancelled (#1790, #1795)
+- Probe: a passive scan of a large capture (`gori run probe`, MCP `probe_scan`) peaks at about a third of the memory, and over MCP it answers `ping` and can be cancelled mid-scan (#1791)
 - CLI: `gori run show` accepts `--format csrf-poc` and `csrf_poc` as aliases for `csrf`, matching the command overview (#1777)
 - Docs: a redrawn landing built around the ring knot in monospace glyphs, opening as one scroll-driven scene with a glint lapping the knot, and the doc pages in the same glyph voice (#1773)
 - Issues: `gori run issues` and MCP `list_issues` filter with the Issues tab's query (it narrows exports too), and the CLI adds `issues show <id>`, `--count` and several ids on `update`/`delete`; `fp` sets a status everywhere, and an issue filed from a flow takes that flow's host (an empty host normalises to nil) (#1776)
@@ -28,8 +30,7 @@
 
 ### Changes
 
-- MCP: list replies are held to about 64 KB, probe findings carry each rule's text once and their first five affected URLs, `list_issues` previews notes, and the tool catalogue is ~25% smaller (#1649, #1729, #1730, #1790)
-- Probe: a passive scan of a large capture (`gori run probe`, MCP `probe_scan`) peaks at about a third of the memory, and over MCP it answers `ping` and can be cancelled mid-scan (#1791)
+- MCP: list replies are held to about 64 KB, and the tool catalogue is ~25% smaller (#1649, #1729, #1730)
 - An unset `$ENV.KEY` in a request you wrote is refused before it dials (#1666, #1689)
 - `gori run fuzz save --json` prints one `{"results":[…],"run_id":…}` object instead of a bare array (#1682)
 
