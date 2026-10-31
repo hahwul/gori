@@ -112,6 +112,9 @@ module Gori::CLI
 
     # Logs to STDERR ONLY — STDOUT is reserved for the JSON-RPC stream.
     Log.setup(:info, StderrLog.new)
+    # A client that pipes stderr and dies would otherwise exit 141 on the next log line, in the
+    # middle of the shutdown `Server#run` is doing; `StderrLog` swallows the IO::Error instead.
+    STDERR.exit_on_broken_pipe = false
     Settings.load # send_request's repeater engines read the upstream-proxy setting from here
     # A fuzz or mine job grows the heap the way capture does; give it back once the agent is idle.
     IdleGc.start

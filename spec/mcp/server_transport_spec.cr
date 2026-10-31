@@ -121,6 +121,31 @@ describe Gori::MCP::Server do
       end
     end
 
+    # Skipping the queued request's answer is not enough: a `create_*` behind the broken
+    # write used to run anyway, a change nobody was left to be told about.
+    it "does not run a request queued behind the broken write" do
+      with_store do |store|
+        note = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"create_note","arguments":{"text":"after-pipe-broke"}}})
+        Gori::MCP::Server.new(store, allow_actions: true, verify_upstream: false,
+          input: IO::Memory.new("#{INIT}\n#{note}\n"), output: BrokenOutput.new).run
+        out = mcp_drive(store, %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_notes","arguments":{}}}))
+        out[0]["result"]["content"][0]["text"].as_s.should_not contain("after-pipe-broke")
+      end
+    end
+
+    # A real pipe, with the `exit_on_broken_pipe` STDOUT is born with: the EPIPE used to exit
+    # the process with 141 before any shutdown ran — here it would kill the spec runner.
+    it "survives EPIPE on a file-descriptor output that exits on a broken pipe" do
+      with_store do |store|
+        reader, writer = IO.pipe
+        reader.close
+        writer.exit_on_broken_pipe = true
+        Gori::MCP::Server.new(store, allow_actions: true, verify_upstream: false,
+          input: IO::Memory.new("#{INIT}\n"), output: writer).run
+        writer.close rescue nil
+      end
+    end
+
     # One line that is not valid UTF-8 used to END the process: the JSON parse failed (as
     # it should), and the id recovery that answers such a line ran a regex over it — PCRE2
     # refuses a non-UTF-8 subject and raises `ArgumentError`, which nothing on the way out
