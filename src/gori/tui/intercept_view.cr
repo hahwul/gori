@@ -433,11 +433,14 @@ module Gori::Tui
     # Loading a DIFFERENT item replaces the one buffer, so an edit not yet forwarded would go
     # with no word. The first press is refused; a second on the same row, with the cursor not
     # moved in between, discards that edit and opens this one. Each says so (`take_edit_notice`).
-    def toggle_edit(insert : Bool = true) : Nil
+    #
+    # `arm: false` is a focus move (Tab, Shift-Tab): it refuses without arming, because walking
+    # the focus ring past the queue is not asking to open this one again.
+    def toggle_edit(insert : Bool = true, *, arm : Bool = true) : Nil
       if @editing
         @editing = false
       elsif it = selected_item
-        return if keep_other_edit?(it)
+        return if keep_other_edit?(it, arm)
         @discard_armed = nil
         it.binary? ? load_hex(it) : load_text(it)
         @loaded_id = it.id
@@ -449,10 +452,10 @@ module Gori::Tui
 
     # Whether opening `it` is refused to keep another held item's unforwarded edit; on the
     # armed second press it is not, and the edit is discarded. Either way `@edit_notice` says so.
-    private def keep_other_edit?(it : Interceptor::Item) : Bool
+    private def keep_other_edit?(it : Interceptor::Item, arm : Bool) : Bool
       return false unless other = held_edit_id.try { |id| @items.find { |o| o.id == id && id != it.id } }
-      if @discard_armed != it.id
-        @discard_armed = it.id
+      if !arm || @discard_armed != it.id
+        @discard_armed = it.id if arm
         @edit_notice = "#{other.label} has an edit not forwarded yet — forward it first, or open this one again to discard that edit"
         return true
       end
@@ -912,15 +915,15 @@ module Gori::Tui
     end
 
     def focus_last : Nil
-      toggle_edit(insert: false) unless @editing
+      toggle_edit(insert: false, arm: false) unless @editing
     end
 
     def pane_advance(dir : Int32) : Bool
       if dir > 0
         return false if @editing # detail → off the end (to the tab bar)
         return false unless selected_item
-        toggle_edit(insert: false) # queue → detail, in READ
-        true
+        toggle_edit(insert: false, arm: false) # queue → detail, in READ
+        @editing                               # refused to keep another edit: off the end, as if there were no detail pane
       else
         return false unless @editing # queue → off the end (to the tab bar)
         @editing = false             # detail → queue
@@ -1004,9 +1007,12 @@ module Gori::Tui
     # Set the selection, clamped to the populated rows (mirrors `move`).
     def select_index(idx : Int32) : Nil
       return if @items.empty?
-      @selected = idx.clamp(0, @items.size - 1)
-      @marks.reset_anchor  # same as the keyboard `move`: a plain click re-seeds the anchor
-      @discard_armed = nil # a discard is armed for the row the refusal was on, not a later visit
+      idx = idx.clamp(0, @items.size - 1)
+      # A discard is armed for the row the refusal was on, not a later visit — but a click on
+      # that same row (the first press of a double-click) is no visit elsewhere.
+      @discard_armed = nil unless idx == @selected
+      @selected = idx
+      @marks.reset_anchor # same as the keyboard `move`: a plain click re-seeds the anchor
     end
 
     # Click the queue list → focus the list (stop editing the detail editor).

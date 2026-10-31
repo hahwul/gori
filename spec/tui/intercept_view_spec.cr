@@ -1319,6 +1319,52 @@ describe "Intercept operator-edit flag" do
     end
   end
 
+  # Tab walks the focus ring; it is not "open this one again". A refused Tab used to report a
+  # move, so the next Tab opened the row a second time and discarded the other hold's edit.
+  it "never discards another hold's edit from the Tab focus ring" do
+    tmp_interceptor do |ic|
+      three_holds(ic)
+      view = InterceptView.new
+      view.reload(ic)
+      first = view.selected_id.not_nil!
+      view.toggle_edit
+      view.edit_insert('X')
+      view.stop_edit
+      view.move(1)
+
+      view.pane_advance(1).should be_false # refused: off the end, to the tab bar
+      view.take_edit_notice.not_nil!.should contain("not forwarded yet")
+      2.times { view.focus_last; view.focus_first; view.pane_advance(1) }
+      view.editing?.should be_false
+      view.held_edit_id.should eq(first)
+
+      # …and leaves an explicit open's two-step as it was.
+      view.toggle_edit
+      view.held_edit_id.should eq(first)
+      view.toggle_edit
+      view.held_edit_id.should be_nil
+    end
+  end
+
+  # A double-click selects its row before it opens, and selecting cleared the arm — so the
+  # second double-click on the same row was refused again, forever.
+  it "lets a second double-click on the same row discard the other edit" do
+    tmp_interceptor do |ic|
+      three_holds(ic)
+      view = InterceptView.new
+      view.reload(ic)
+      view.toggle_edit
+      view.edit_insert('X')
+      view.stop_edit
+      2.times do
+        view.select_index(1)
+        view.toggle_edit
+      end
+      view.take_edit_notice.not_nil!.should start_with("discarded the unforwarded edit on ")
+      view.editing?.should be_true
+    end
+  end
+
   # `@loaded_id`/`@editor_dirty` used to survive behind a CLOSED editor, so a buffer for a
   # message that no longer exists outlived every release and this flag would have named it.
   it "forgets the edit once the hold leaves the queue" do
