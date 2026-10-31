@@ -1742,9 +1742,10 @@ module Gori::Tui
     private def probe_scan_repeater(repeater_id : Int64, head : Bytes, body : Bytes?,
                                     duration_us : Int64, flow_id : Int64?, view : RepeaterView) : Nil
       return if head.empty?
+      target, text, http2, auto_cl, sni = view.sent_request || sent_request_of(view)
       rec = Store::RepeaterRecord.new(
-        repeater_id, view.target, view.request_text.to_slice, view.http2?, view.auto_content_length?,
-        flow_id, 0, head, body, nil, duration_us, view.name, view.sni_override)
+        repeater_id, target, text.to_slice, http2, auto_cl,
+        flow_id, 0, head, body, nil, duration_us, view.name, sni)
       return unless detail = Probe.detail_from_repeater(rec)
       @host.session.probe.scan_detail(detail, repeater_id: repeater_id)
     rescue
@@ -1756,11 +1757,10 @@ module Gori::Tui
                                        flow_id : Int64?, view : RepeaterView) : Nil
       head = result.handshake_head
       return if head.empty?
-      upgrade = view.ws_upgrade_bytes
-      req_text = upgrade.empty? ? view.request_text : String.new(upgrade).scrub
+      target, req_text, _, _, sni = view.sent_request || sent_request_of(view)
       rec = Store::RepeaterRecord.new(
-        repeater_id, view.target, req_text.to_slice, false, false,
-        flow_id, 0, head, Bytes.empty, nil, result.duration_us, view.name, view.sni_override)
+        repeater_id, target, req_text.to_slice, false, false,
+        flow_id, 0, head, Bytes.empty, nil, result.duration_us, view.name, sni)
       return unless detail = Probe.detail_from_repeater(rec)
       # The frames the passive WS rule reads — every non-control frame, with its own opcode.
       # `Probe.ws_messages_from` owns that projection (see the note there on the `opcode == 1`
@@ -1768,6 +1768,16 @@ module Gori::Tui
       msgs = Probe.ws_messages_from(result.messages, flow_id: flow_id, repeater_id: repeater_id)
       @host.session.probe.scan_detail(detail, repeater_id: repeater_id, ws_messages: msgs)
     rescue
+    end
+
+    # The request side a Probe scan files the answer under, read off the view when the send
+    # goes out (`RepeaterView#sent_request`). A WebSocket send is filed under its upgrade.
+    private def sent_request_of(view : RepeaterView) : {String, String, Bool, Bool, String?}
+      text = view.request_text
+      if view.ws_mode? && !(upgrade = view.ws_upgrade_bytes).empty?
+        text = String.new(upgrade).scrub
+      end
+      {view.target, text, view.http2?, view.auto_content_length?, view.sni_override}
     end
 
     # The persisted outbound frames a restored tab seeds, or nil when `text` is no replayable
@@ -2337,6 +2347,7 @@ module Gori::Tui
       # precisely the drift this records. Over the bytes the save above put in the row
       # (`RepeaterView#request_text`), not `plan.wire_bytes`: see `Evidence.request_digest`.
       sent_digest = Evidence.request_digest(view.request_text.to_slice)
+      view.sent_request = sent_request_of(view)
       if reason = plan.refusal
         apply_refusal { view.apply(Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, reason)) }
         @host.status("repeater: #{reason}")
@@ -2834,6 +2845,7 @@ module Gori::Tui
       # save above is what the row now holds, and the drain writes this handshake's response
       # onto it after a round-trip the operator can type through.
       sent_digest = Evidence.request_digest(view.request_text.to_slice)
+      view.sent_request = sent_request_of(view)
       view.inflight = true
       # WebSocket sends are not written to History, and the CLI draws the same line
       # (`--record-history is HTTP-only`): a socket's evidence is its frame transcript, which
