@@ -21,16 +21,17 @@ module Gori
         detail_b = store.get_flow(id_b)
         return not_found("no flow with id #{id_b}") unless detail_b
 
-        pane_s = str(h, "pane").try(&.strip.downcase)
+        pane_raw = str(h, "pane")
+        pane_s = pane_raw.try(&.strip.downcase)
         if pane_s && !MESSAGE_SIDES.includes?(pane_s)
-          return err("invalid 'pane' (expected #{MESSAGE_SIDES.join("|")})", "INVALID_ARGUMENT", field: "pane")
+          return err("invalid 'pane' #{pane_raw.inspect} (expected #{MESSAGE_SIDES.join("|")})", "INVALID_ARGUMENT", field: "pane")
         end
         pane = pane_s == "request" ? :request : :response
         changes_only = bool_arg(h, "changes_only", false)
         include_sensitive = bool_arg(h, "include_sensitive", false)
         context = optional_int_arg(h, "context")
         if context && context < 0
-          return err("invalid 'context' (expected >= 0)", "INVALID_ARGUMENT", field: "context")
+          return err("invalid 'context' #{context} (expected >= 0)", "INVALID_ARGUMENT", field: "context")
         end
         if context && changes_only
           return err("'changes_only' and 'context' are mutually exclusive", "INVALID_ARGUMENT", field: "context")
