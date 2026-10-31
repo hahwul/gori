@@ -31,6 +31,8 @@ module Gori::Tui
   # `WorkbenchController`'s, shared with the JWT tab (^N new · ^W close · ^T lens); `^A`
   # cycles the format.
   class CookieController < WorkbenchController(CookieSession)
+    @cracking : {CookieSession, Array(Bool), Channel(CrackDone)}? = nil
+
     DECODE_PANES = [:input, :decoded, :opts, :secret]
     FORGE_PANES  = [:payload, :opts, :secret, :output]
     # ^A cycles these. DECODE includes `auto` (it can detect from the punctuation); FORGE
@@ -353,6 +355,7 @@ module Gori::Tui
     # lone secret is a one-element list — the same verify, said as a crack). On success the
     # field is replaced with the winning secret and the verify state flips to ✓.
     def crack : Nil
+      return if stop_crack
       s = cur
       # Cracks the DECODE INPUT cookie, so it runs from the DECODE lens only — `c` reaches here
       # from the FORGE OUTPUT pane too (both are read panes), where cracking the hidden input and
@@ -371,9 +374,40 @@ module Gori::Tui
         @host.status("SECRET is empty — enter a wordlist path or a comma-separated candidate list")
         return
       end
-      source = crack_source(spec)
-      found = Cookie.crack(token, source, decode_format(s), salt: effective_salt(s), algorithm: effective_algorithm(s))
-      if found
+      source = StoppableSource.new(crack_source(spec), stop = [false])
+      fmt, salt, algo = decode_format(s), effective_salt(s), effective_algorithm(s)
+      ch = Channel(CrackDone).new(1)
+      # Off the render fiber: a rockyou-sized list held the whole TUI for tens of seconds with
+      # no way out. The answer lands on `drain_events`, against the session captured here.
+      spawn(name: "gori-cookie-crack") do
+        ch.send(CrackDone.new(Cookie.crack(token, source, fmt, salt: salt, algorithm: algo), nil))
+      rescue ex
+        ch.send(CrackDone.new(nil, ex.message || ex.class.name))
+      end
+      @cracking = {s, stop, ch}
+      @host.status(keys("cracking… {cookie.crack} again to stop"))
+    rescue ex : Gori::Error
+      @host.status("crack: #{ex.message}")
+    end
+
+    # A crack still running, the second press stops it.
+    private def stop_crack : Bool
+      return false unless c = @cracking
+      c[1][0] = true
+      @cracking = nil
+      @host.status("crack stopped")
+      true
+    end
+
+    # Apply a finished crack to the session that started it — dropped if that session was closed.
+    def drain_events : Bool
+      return false unless (c = @cracking) && (done = poll(c[2]))
+      @cracking = nil
+      s = c[0]
+      return true unless @sessions.any?(&.same?(s))
+      if err = done.error
+        @host.status("crack: #{err}")
+      elsif found = done.found
         s.secret = found
         s.secret_cx = found.size
         s.crack_note = "cracked: #{found.size > 24 ? found[0, 23] + "…" : found}"
@@ -386,13 +420,34 @@ module Gori::Tui
         s.crack_note = nil
         @host.status("no candidate verified")
       end
-    rescue ex : Gori::Error
-      @host.status("crack: #{ex.message}")
+      true
+    end
+
+    # Project exit: a crack has nothing to save, it just must not keep burning the CPU.
+    def stop_all : Nil
+      @cracking.try { |c| c[1][0] = true }
+      @cracking = nil
     end
 
     # A file path → a lazily-read wordlist; anything else → the comma-split inline list. A path
     # that does not exist is treated as a one/many-element inline candidate list, not an error:
     # a bare secret typed into the field must still crack (as itself).
+    # A crack's answer: the secret that verified, or the error that ended it.
+    record CrackDone, found : String?, error : String?
+
+    # The candidates, cut short once the stop cell is set (`Cookie.crack` takes any `.each`-able).
+    private struct StoppableSource
+      def initialize(@source : Fuzz::PayloadSource, @stop : Array(Bool))
+      end
+
+      def each(& : String ->) : Nil
+        @source.each do |candidate|
+          break if @stop[0]
+          yield candidate
+        end
+      end
+    end
+
     private def crack_source(spec : String) : Fuzz::PayloadSource
       return Fuzz::WordlistFile.new(spec) if File.file?(spec)
       Fuzz::InlineList.new(spec.split(',').map(&.strip).reject(&.empty?))

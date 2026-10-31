@@ -44,6 +44,15 @@ end
 # Type a literal string into whatever pane currently has focus, one printable key at a time.
 # The controller reads `ev.char` first (a non-special key value is only a fallback), so the
 # LowerA carrier here is inert — every printable char is delivered through `char:`.
+# The crack runs on its own fiber and lands on the next drain, as it does in the live loop.
+private def crack_and_wait(ctl : CookieController) : Nil
+  ctl.crack
+  200.times do
+    break if ctl.drain_events
+    sleep 5.milliseconds
+  end
+end
+
 private def type(ctl : CookieController, text : String) : Nil
   text.each_char { |c| ctl.handle_body_key(key(Termisu::Input::Key::LowerA, char: c)) }
 end
@@ -98,7 +107,7 @@ describe "Gori::Tui::CookieController" do
         ctl.session_from_text(FLASK)
         ctl.focus_last # :secret
         type(ctl, "foo,#{SECRET},bar")
-        ctl.crack
+        crack_and_wait(ctl)
         b = render(ctl)
         # On a hit the SECRET card announces the crack and the field holds the winning secret.
         screen_has?(b, "cracked").should be_true
@@ -111,8 +120,31 @@ describe "Gori::Tui::CookieController" do
         ctl.session_from_text(FLASK)
         ctl.focus_last
         type(ctl, "nope1,nope2")
-        ctl.crack
+        crack_and_wait(ctl)
         (host.statuses.last? || "").should contain("no candidate")
+      end
+    end
+
+    # The crack used to run inline on the render fiber: a rockyou-sized wordlist froze the TUI
+    # for tens of seconds with no way out. It runs on a fiber now, and a second press stops it.
+    it "cracks off the render fiber and stops on a second press" do
+      with_cookie_controller do |ctl, host|
+        list = File.tempname("gori-cookie-words")
+        File.write(list, (1..200_000).map { |i| "nope#{i}" }.join('\n'))
+        begin
+          ctl.session_from_text(FLASK)
+          ctl.focus_last
+          type(ctl, list)
+          ctl.crack
+          (host.statuses.last? || "").should contain("cracking")
+          ctl.crack
+          (host.statuses.last? || "").should contain("crack stopped")
+          20.times { Fiber.yield; ctl.drain_events }
+          screen_has?(render(ctl), "cracked").should be_false
+          (host.statuses.last? || "").should contain("crack stopped")
+        ensure
+          File.delete(list) if File.exists?(list)
+        end
       end
     end
 
@@ -134,7 +166,7 @@ describe "Gori::Tui::CookieController" do
         ctl.session_from_text(FLASK)
         ctl.focus_last # :secret
         type(ctl, "x,#{SECRET}")
-        ctl.crack
+        crack_and_wait(ctl)
         screen_has?(render(ctl), "cracked").should be_true
         ctl.focus_first     # :input
         ctl.pane_advance(1) # :decoded

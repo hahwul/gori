@@ -635,6 +635,7 @@ module Gori::Tui
             dirty = true if sequencer_controller.drain_events
             dirty = true if discover_controller.drain_events
             dirty = true if authorize_controller.drain_events
+            dirty = true if cookie_controller.drain_events
             dirty = true if drain_retest_run
             # A finished gRPC reflection fetch (#827): applied on THIS fiber because
             # `Schemas.adopt` writes to the store, which the send fiber must never wait on.
@@ -3625,6 +3626,7 @@ module Gori::Tui
       authorize_controller.stop_all
       sitemap_controller.stop_all
       target_controller.params.stop_all
+      cookie_controller.stop_all # a wordlist crack: no job, but it must not outlive the project
       # A retest run is the Issues tab's one background sender (#1036). Cooperative like the
       # rest: the fiber owns its sockets and checks the flag between steps.
       issues_controller.halt_retest
