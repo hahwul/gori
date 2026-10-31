@@ -996,6 +996,25 @@ describe "Intercept verbs (P1)" do
     end
   end
 
+  # `$EDITOR` holds the screen, not the proxy: a hold forwarded meanwhile (reap, MCP, toggle
+  # off) used to take the edit anyway and toast "applied external edit" over a buffer the
+  # next reload dropped.
+  it "refuses an external edit whose hold was released while the editor was open" do
+    tmp_interceptor do |ic|
+      item = ic.enqueue_request("GET /a HTTP/1.1\r\nHost: h\r\n\r\n".to_slice,
+        method: "GET", target: "/a", host: "h", port: 80, scheme: "http").not_nil!
+      view = InterceptView.new
+      view.reload(ic)
+      view.toggle_edit
+      view.apply_external_edit("GET /b HTTP/1.1\r\nHost: h\r\n\r\n", ic).should be_nil
+      view.editor_text.should contain("/b")
+
+      ic.forward(item.id) # released while $EDITOR had the screen
+      view.apply_external_edit("GET /c HTTP/1.1\r\nHost: h\r\n\r\n", ic).not_nil!.should contain("released")
+      view.held_edit_id.should be_nil
+    end
+  end
+
   # The complement: the same head-only hold with NO refusal recorded. A head edit applies;
   # only an edit that adds a BODY has nowhere to go on h2.
   it "refuses an edit that adds a body to a head-only hold, and allows a head-only edit" do

@@ -1850,7 +1850,7 @@ module Gori::Tui
             status(reason)
             return
           end
-          run_external_editor(iv.editor_text, :intercept) { |t| iv.replace_editor(t) }
+          run_external_editor(iv.editor_text, :intercept) { |t| iv.apply_external_edit(t, @session.interceptor) }
           return
         end
       end

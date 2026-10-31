@@ -906,6 +906,16 @@ module Gori::Tui
       mark_editor_edit
     end
 
+    # `replace_editor` for the text `^E` brings back, or why it was not applied. `$EDITOR` had
+    # the screen, not the proxy: a timeout reap, an MCP forward or a toggle-off could release
+    # the hold meanwhile, and the edit then landed on a buffer the next reload threw away under
+    # an "applied external edit" toast. Reloading first asks the queue as it is now.
+    def apply_external_edit(text : String, interceptor : Interceptor) : String?
+      reload(interceptor)
+      return "the hold was released while the editor was open — edit not applied" unless text_editing?
+      replace_editor(text)
+    end
+
     # --- focus ring (driven by the Runner's Tab/Shift-Tab) ---
     # Two panes: queue (editing off) ▸ detail editor (editing on). Entering the
     # detail pane opens the selected item's editor in READ; pane_advance returns false at
