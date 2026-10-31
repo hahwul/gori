@@ -5,6 +5,7 @@
 - Probe: the passive secrets rule detects Hugging Face (`hf_`) and DigitalOcean (`dop_v1_`/`doo_v1_`/`dor_v1_`) tokens (#1779)
 - Rewriter: a regex that does not compile names the reason (`failed to compile: missing closing parenthesis at 3`) on `gori run rewriter add`/`update`/`preview` and MCP `create_rule`/`update_rule`/`preview_rule`, and MCP now compiles it with the same match-budgeted `SafeRegexp` as the CLI (#1785)
 - MCP: probe findings carry each rule's text once and their first five affected URLs, `list_issues` previews notes, and `--install-codex`/`--install-grok` raise the client's tool timeout (Codex: 60 s) to 10 minutes so a long `minimize_repeater` or active `probe_scan` is not cancelled (#1790, #1795)
+- MCP: a client that dies mid-call no longer ends `gori mcp` before it stops its jobs (a `save_results` fuzz run stayed `running`), a request still queued behind it is dropped rather than run, and a cancelled `send_request` finalizes its History flow instead of leaving it Pending (#1796)
 - Probe: a passive scan of a large capture (`gori run probe`, MCP `probe_scan`) peaks at about a third of the memory, and over MCP it answers `ping` and can be cancelled mid-scan (#1791)
 - CLI: `gori run show` accepts `--format csrf-poc` and `csrf_poc` as aliases for `csrf`, matching the command overview (#1777)
 - Docs: a redrawn landing built around the ring knot in monospace glyphs, opening as one scroll-driven scene with a glint lapping the knot, and the doc pages in the same glyph voice (#1773)

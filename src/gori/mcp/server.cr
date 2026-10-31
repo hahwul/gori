@@ -112,6 +112,10 @@ module Gori
       # would be a response the caller (and every spec that reads `output` afterwards)
       # never sees.
       def run : Nil
+        # Crystal's STDOUT exits the process with status 141 on EPIPE, skipping every `ensure`
+        # below: a client that died mid-call left a `save_results` run `running` forever. Off,
+        # the write raises IO::Error, which `send` turns into `@closed` and a clean shutdown.
+        @output.as?(IO::FileDescriptor).try(&.exit_on_broken_pipe = false)
         work = Channel(Proc(Nil)).new(WORK_QUEUE)
         drained = Channel(Nil).new(1)
         spawn(name: "mcp-worker") { work_loop(work, drained) }
@@ -157,6 +161,9 @@ module Gori
       # costs it every answer after it.
       private def work_loop(work : Channel(Proc(Nil)), drained : Channel(Nil)) : Nil
         while job = work.receive?
+          # Drained, not run, once the client is gone: a queued `create_*` would otherwise
+          # take effect with nobody left to tell.
+          next if @closed
           begin
             job.call
           rescue ex

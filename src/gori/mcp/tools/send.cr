@@ -138,7 +138,6 @@ module Gori
           return err("request cancelled", "CANCELLED")
         end
         result = plan.send_wire(h1_wire, cancel_signal, admitted: true)
-        return err("request cancelled", "CANCELLED") if cancelled?
         # The active session slot's `$NAME` that `plan.wire_bytes` shipped LITERALLY, drained
         # here because this tool IS the run summary for a synchronous send. Without it the only
         # trace was a `Log.warn` line on the server's STDERR, which no agent reads — so a call
@@ -147,6 +146,9 @@ module Gori
         # sentence with the three `gori run` surfaces (`CLI::Run.unbound_overlay_note`).
         unbound_overlay = CLI::Run.unbound_overlay_note(Env.take_unbound_overlay)
         flow_response_saved = recorded_flow_id ? record_outbound_response(recorded_flow_id, result) : false
+        # After both: the request left, so a cancel still finalizes its History row (it stayed
+        # Pending for good) and drains the overlay (the next send reported this one's names).
+        return err("request cancelled", "CANCELLED") if cancelled?
         per_send_edit = per_send_edit(h, applied_rules)
         write_back_repeater_response(h, result, per_send_edit, sent_row_digest)
         # Audit trail on STDERR — never STDOUT (reserved for JSON-RPC).

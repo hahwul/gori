@@ -248,6 +248,9 @@ describe "MCP cancellation stops the work" do
           end
           fail "cancelled send_request held the MCP worker past 2 seconds"
         end
+        # The request did leave, so its History row is finalized, not left Pending for good.
+        store.flush
+        store.recent_flows(10).map(&.state.pending?).should eq([false])
       end
 
       select
