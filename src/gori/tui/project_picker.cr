@@ -649,8 +649,8 @@ module Gori::Tui
         @results_scroll = 0
       elsif ev.ctrl? && key.lower_n?
         # ctrl-n: quick new. If query has text, prefill (or direct-create).
-        name = @query.strip
-        if name.empty? || name.starts_with?('#') # a `#tag` search is a tag, not a name
+        name = ProjectPicker.quick_create_name(@query)
+        if name.nil?
           start_new
         elsif proj = safe_create(name)
           return proj
@@ -881,6 +881,14 @@ module Gori::Tui
       @desc = ""
       @tag_input = TagInput.new(tags, ProjectRegistry.tag_counts(@entries))
       @new_field = :name
+    end
+
+    # The name ctrl-n (and its footer token) direct-creates from the search query, or nil when
+    # it should open the New form instead: an empty query, or a `#tag` search, which names a
+    # tag rather than a project called `#web`. One home, so the click and the chord agree.
+    def self.quick_create_name(query : String) : String?
+      name = query.strip
+      name unless name.empty? || name.starts_with?('#')
     end
 
     # The New form's {name, tags} from the search query. A `#tag` search names a tag, so it
@@ -2444,8 +2452,8 @@ module Gori::Tui
       when :temp           then return open_temp
       when :quit           then return :quit
       when :new
-        name = @query.strip
-        return safe_create(name) unless name.empty?
+        name = ProjectPicker.quick_create_name(@query)
+        return safe_create(name) if name
         start_new
       when :delete     then request_delete
       when :search_all then open_global_search
