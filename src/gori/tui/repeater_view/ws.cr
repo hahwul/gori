@@ -303,37 +303,97 @@ class Gori::Tui::RepeaterView
   # An untouched pane hands back the seed, opcodes and bytes intact; that is what lets a
   # captured BINARY frame survive a save it had nothing to do with.
   #
-  # An EDITED pane is a position-keyed SPLICE over that seed, not a replacement of it. It
-  # used to be a replacement — `@decoded.text.split('\n').reject(&.empty?)`, every line a
-  # fresh default-shape TEXT frame — so one keystroke anywhere in the pane deleted every
-  # frame the pane had never rendered. On a persisted session that is irreversible:
+  # An EDITED pane is a SPLICE over that seed, not a replacement of it. It used to be a
+  # replacement — `@decoded.text.split('\n').reject(&.empty?)`, every line a fresh
+  # default-shape TEXT frame — so one keystroke anywhere in the pane deleted every frame the
+  # pane had never rendered. On a persisted session that is irreversible:
   # `Store#update_repeater_ws_messages` opens with `DELETE FROM ws_messages`, and a PING, a
   # binary payload, an empty frame, an RSV1 frame and an unmasked frame were gone from the
   # database with no confirmation and no undo. The pane is a text VIEW of a list it cannot
   # fully represent; an edit to the view may only touch what the view showed.
   #
-  # `reject(&.empty?)` is off the mapped range for the same reason: a captured TEXT frame
+  # The splice is keyed by line IDENTITY, not line index: the pane is diffed against the
+  # lines it was seeded with (`ws_line_matches`). Keyed by index, deleting or inserting a
+  # line shifted every later line into the slot before it, so text frames slid past the
+  # frames the pane does not show — `[auth, BIN, b]` minus `auth` went out as `[b, BIN]`.
+  # Now an unchanged line keeps its own slot, a changed line takes the slot of the line it
+  # replaced, and a new line lands just before the next unchanged one (or at the end).
+  #
+  # `reject(&.empty?)` is off the spliced range for the same reason: a captured TEXT frame
   # with an empty payload IS renderable (it is a blank line), so dropping blank lines ate
-  # it. Only a SURPLUS blank line — one past the end of the seed's renderable slots, which
-  # is what pressing Enter at the end of the pane produces — is still discarded.
+  # it. Only a SURPLUS blank line at the end — what pressing Enter at the end of the pane
+  # produces — is still discarded.
   def ws_out_messages_raw : Array(Store::WsOutMessage)
     return @ws_out_seed if ws_out_seeded?
     lines = @decoded.text.split('\n')
-    out = @ws_out_seed.map { |m| m.as(Store::WsOutMessage?) }
     # The seed positions this pane is showing, in pane order. `ws_line_renderable?` decides
-    # both this and what `seed_ws_out` joined into the pane, so line k IS slot slots[k].
+    # both this and what `seed_ws_out` joined into the pane, so seeded line k IS slot slots[k].
     slots = [] of Int32
     @ws_out_seed.each_with_index { |m, i| slots << i if RepeaterView.ws_line_renderable?(m) }
-    slots.each_with_index do |idx, k|
-      # A line the operator deleted takes its slot with it; nil marks it for removal so the
-      # indices of the untouched slots stay valid while the rest are being written.
-      out[idx] = (line = lines[k]?) ? Store::WsOutMessage.text(line) : nil
+    shown = slots.map { |i| String.new(@ws_out_seed[i].payload) }
+    # at[i] is what goes out at seed position i, at[-1] the tail. An unshown frame never
+    # moves: it is the whole of its own position.
+    at = Array.new(@ws_out_seed.size + 1) { [] of Store::WsOutMessage }
+    @ws_out_seed.each_with_index { |m, i| at[i] << m unless RepeaterView.ws_line_renderable?(m) }
+    k0 = j0 = 0
+    (RepeaterView.ws_line_matches(shown, lines) << {shown.size, lines.size}).each do |(k1, j1)|
+      # The hunk before a kept line: seeded lines k0...k1 went, pane lines j0...j1 came.
+      added = lines[j0...j1]
+      replaced = Math.min(k1 - k0, added.size)
+      replaced.times { |n| at[slots[k0 + n]] << Store::WsOutMessage.text(added[n]) }
+      dest = replaced > 0 ? slots[k0 + replaced - 1] : slots[k1]?
+      added[replaced..].each do |l|
+        # A blank surplus line at the very end is the newline an editor leaves behind.
+        dest ? at[dest] << Store::WsOutMessage.text(l) : (at[-1] << Store::WsOutMessage.text(l) unless l.empty?)
+      end
+      at[slots[k1]] << @ws_out_seed[slots[k1]] if k1 < shown.size
+      k0, j0 = k1 + 1, j1 + 1
     end
-    messages = out.compact
-    # Lines with no slot are new: append them in order. Blank ones are the trailing newline
-    # an editor leaves behind, not a frame the operator asked for.
-    lines[slots.size..]?.try &.each { |l| messages << Store::WsOutMessage.text(l) unless l.empty? }
-    messages
+    at.flatten
+  end
+
+  # The (seeded line, pane line) index pairs that are the SAME line, in order: the common
+  # prefix and suffix (one edit is one contiguous hunk, so that is usually the whole answer)
+  # plus a longest common subsequence of what is left between them.
+  # ponytail: O(n·m) table over the middle, skipped past 250k cells (a wholesale paste), where
+  # the middle then splices as one hunk by position. Myers diff if that ever matters.
+  def self.ws_line_matches(a : Array(String), b : Array(String)) : Array({Int32, Int32})
+    pre = 0
+    while pre < a.size && pre < b.size && a[pre] == b[pre]
+      pre += 1
+    end
+    suf = 0
+    while suf < a.size - pre && suf < b.size - pre && a[-1 - suf] == b[-1 - suf]
+      suf += 1
+    end
+    pairs = (0...pre).map { |k| {k, k} }
+    ws_lcs(a[pre, a.size - pre - suf], b[pre, b.size - pre - suf]).each { |(i, j)| pairs << {pre + i, pre + j} }
+    suf.times { |s| pairs << {a.size - suf + s, b.size - suf + s} }
+    pairs
+  end
+
+  private def self.ws_lcs(a : Array(String), b : Array(String)) : Array({Int32, Int32})
+    pairs = [] of {Int32, Int32}
+    return pairs if a.empty? || b.empty? || a.size.to_i64 * b.size > 250_000
+    lcs = Array.new(a.size + 1) { Array.new(b.size + 1, 0) }
+    (a.size - 1).downto(0) do |i|
+      (b.size - 1).downto(0) do |j|
+        lcs[i][j] = a[i] == b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1])
+      end
+    end
+    i = j = 0
+    while i < a.size && j < b.size
+      if a[i] == b[j]
+        pairs << {i, j}
+        i += 1
+        j += 1
+      elsif lcs[i + 1][j] >= lcs[i][j + 1]
+        i += 1
+      else
+        j += 1
+      end
+    end
+    pairs
   end
 
   # Persistence just wrote `ws_out_messages_raw` — those bytes ARE the session now, so the
