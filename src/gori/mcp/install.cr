@@ -316,8 +316,8 @@ module Gori
 
       # --- TOML clients (Codex, Grok) ------------------------------------------
 
-      # Both clients give up on a tool call after `tool_timeout_sec` (Codex: 60 s by default),
-      # cancel it, and ignore `notifications/progress`. A few gori tools are synchronous yet
+      # Both clients give up on a tool call after `tool_timeout_sec` (Codex: 60 s by default,
+      # Grok's unverified); Codex cancels it and ignores `notifications/progress`. A few gori tools are synchronous yet
       # long by design — `minimize_repeater` (up to 250 sends), an active `probe_scan`,
       # `timing_requests` with a high `count` — and at 60 s they are cancelled with the work
       # lost. Ten minutes covers them on an ordinary target; anything longer is a job.
