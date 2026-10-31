@@ -115,7 +115,8 @@ module Gori
         # Crystal's STDOUT exits the process with status 141 on EPIPE, skipping every `ensure`
         # below: a client that died mid-call left a `save_results` run `running` forever. Off,
         # the write raises IO::Error, which `send` turns into `@closed` and a clean shutdown.
-        @output.as?(IO::FileDescriptor).try(&.exit_on_broken_pipe = false)
+        # Crystal 1.22+ only: 1.21 has no such exit, and no setter (the Docker build compiles on it).
+        {% if IO::FileDescriptor.has_method?(:exit_on_broken_pipe=) %} @output.as?(IO::FileDescriptor).try(&.exit_on_broken_pipe = false) {% end %}
         work = Channel(Proc(Nil)).new(WORK_QUEUE)
         drained = Channel(Nil).new(1)
         spawn(name: "mcp-worker") { work_loop(work, drained) }

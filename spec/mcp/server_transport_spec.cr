@@ -139,7 +139,7 @@ describe Gori::MCP::Server do
       with_store do |store|
         reader, writer = IO.pipe
         reader.close
-        writer.exit_on_broken_pipe = true
+        {% if IO::FileDescriptor.has_method?(:exit_on_broken_pipe=) %} writer.exit_on_broken_pipe = true {% end %}
         Gori::MCP::Server.new(store, allow_actions: true, verify_upstream: false,
           input: IO::Memory.new("#{INIT}\n"), output: writer).run
         writer.close rescue nil
