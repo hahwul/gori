@@ -316,6 +316,20 @@ module Gori
 
       # --- TOML clients (Codex, Grok) ------------------------------------------
 
+      # Both clients give up on a tool call after `tool_timeout_sec` (Codex: 60 s by default),
+      # cancel it, and ignore `notifications/progress`. A few gori tools are synchronous yet
+      # long by design — `minimize_repeater` (up to 250 sends), an active `probe_scan`,
+      # `timing_requests` with a high `count` — and at 60 s they are cancelled with the work
+      # lost. Ten minutes covers them on an ordinary target; anything longer is a job.
+      TOML_TOOL_TIMEOUT_SEC = 600
+
+      # The timeout an earlier install (or the operator) already set on gori's entry, as its
+      # raw number, so a re-install does not quietly reset it to the default.
+      private def self.kept_tool_timeout(doc : TomlDoc?) : String?
+        v = doc.try(&.dig("mcp_servers", SERVER_NAME)).try(&.table["tool_timeout_sec"]?)
+        v.str if v && v.kind.other? && v.str.matches?(/\A\d+(\.\d+)?\z/)
+      end
+
       def self.install_toml(config_path : String, exe_path : String, args : Array(String)) : Nil
         existing, bom = read_config(config_path)
 
@@ -339,6 +353,7 @@ module Gori
         body = String.build do |io|
           io << "command = #{toml_string(exe_path)}\n"
           io << "args = #{toml_string_array(args)}\n"
+          io << "tool_timeout_sec = #{kept_tool_timeout(doc) || TOML_TOOL_TIMEOUT_SEC}\n"
         end
 
         # An INLINE entry (`gori = { command = … }` under `[mcp_servers]`, or a dotted
