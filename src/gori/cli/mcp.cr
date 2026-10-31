@@ -114,7 +114,8 @@ module Gori::CLI
     Log.setup(:info, StderrLog.new)
     # A client that pipes stderr and dies would otherwise exit 141 on the next log line, in the
     # middle of the shutdown `Server#run` is doing; `StderrLog` swallows the IO::Error instead.
-    STDERR.exit_on_broken_pipe = false
+    # The setter is Crystal 1.22+; 1.21 (shard.yml's floor, the Docker build) raises instead.
+    {% if IO::FileDescriptor.has_method?(:exit_on_broken_pipe=) %} STDERR.exit_on_broken_pipe = false {% end %}
     Settings.load # send_request's repeater engines read the upstream-proxy setting from here
     # A fuzz or mine job grows the heap the way capture does; give it back once the agent is idle.
     IdleGc.start
