@@ -1,5 +1,6 @@
 require "../spec_helper"
 require "../support/memory_backend"
+require "../support/tui_contract"
 
 # The Discover pane's RUNS list. Discovery is a BACKGROUND job and several can be in flight
 # at once, but the pane used to draw one summary card for the selected run: a second
@@ -186,5 +187,47 @@ describe "Discover RUNS list" do
     backend = render_runs(view, 40, 16)
     backend.contains?("narrow.test").should be_true
     (0...16).any? { |y| backend.row(y).includes?("running") }.should be_true
+  end
+end
+
+private def with_target_discover(&)
+  TuiContract.with_session("discover-wheel") do |session|
+    host = TuiContract::Host.new(session)
+    host.tab = :target
+    t = TargetController.new(host)
+    t.jump_subtab(1)
+    v = t.discover.@view
+    2.times do |i|
+      run = DiscoverRun.new("http://#{i}.test/", Gori::Discover::Config.new)
+      3.times { |j| run.add_finding(Gori::Discover::Finding.new("http://#{i}.test/#{j}", "GET", 200, 4_i64,
+        "text/html", Gori::Discover::Source::Crawled, 1, 0.95, nil)) }
+      v.add(run)
+    end
+    yield t
+  end
+end
+
+# Under Target the panes are drawn below the sub-tab strip (`BodyChrome.content_rect`), but the
+# wheel hit-tested the raw rect inset by one: a notch over the strip ran `move_run` and changed
+# the run ^R/^X act on, and one over the RUNS card's last rows moved the FINDINGS cursor.
+describe "Discover wheel under Target" do
+  it "attributes each notch to the pane drawn under the pointer" do
+    with_target_discover do |t|
+      v = t.discover.@view
+      rect = Rect.new(0, 0, 100, 40)
+      content = BodyChrome.content_rect(rect, strip: true)
+      t.render_body(Screen.new(MemoryBackend.new(100, 40)), rect, :body)
+      v.focus_pane(:findings) # off every card, a notch scrolls FINDINGS, never the run list
+      (0...rect.h).each do |y|
+        {-1, 1}.each do |step| # both ways, so a clamp at either end cannot hide a move
+          before_run = v.current
+          before_finding = v.selected_finding.try(&.url)
+          t.handle_wheel_at(step, 5, y, rect)
+          pane = v.pane_at(content, 5, y) || v.focus
+          v.current.same?(before_run).should be_true unless pane == :runs
+          v.selected_finding.try(&.url).should eq(before_finding) unless pane.in?(:findings, :runs)
+        end
+      end
+    end
   end
 end

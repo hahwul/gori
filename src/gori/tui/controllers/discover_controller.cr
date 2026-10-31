@@ -206,11 +206,16 @@ module Gori::Tui
     end
 
     # Pointer-aware: the card under the cursor scrolls, keyboard focus stays put. Same
-    # content inset `handle_click` hit-tests with.
-    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
-      pane = @view.pane_at(rect.inset(1, 1), mx, my)
+    # content rect `handle_click_content` hit-tests with — under Target that is the rect
+    # below the sub-tab strip, which the Target shell derives (`BodyChrome.content_rect`).
+    def handle_wheel_at_content(step : Int32, mx : Int32, my : Int32, content : Rect) : Bool
+      pane = @view.pane_at(content, mx, my)
       wheel_pane(pane || @view.focus, step)
       true
+    end
+
+    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
+      handle_wheel_at_content(step, mx, my, rect.inset(1, 1))
     end
 
     private def wheel_pane(pane : Symbol, step : Int32) : Nil
