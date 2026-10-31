@@ -122,6 +122,12 @@ module Gori::Tui
       @mode == :results ? RESULTS_HINT : STEPS_HINT
     end
 
+    # No text field here, and every letter acts: a pasted `r` launched a live retest and `d`
+    # removed a step. A clipboard is not a command (`Overlay#takes_pasted?`).
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      false
+    end
+
     # ⇥ swaps the halves; every edit key arms a hand-off and drops the card.
     #
     # `r` is armed in BOTH modes on purpose: after reading a failed result table, re-running

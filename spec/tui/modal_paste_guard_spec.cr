@@ -48,6 +48,25 @@ describe "Overlay#takes_pasted?" do
     picker.takes_pasted?(key(Termisu::Input::Key::LowerS, 's')).should be_false
     NotificationsOverlay.new(Notifications.new).takes_pasted?(key(Termisu::Input::Key::LowerC, 'c')).should be_false
   end
+
+  # A list card's bare letters act: Retest `r` runs a live retest and `d` removes a step, Hosts/Env
+  # `d` deletes and writes settings.json, Links `d`/`f` remove and freeze, Columns `d` deletes.
+  # Only an open add/edit row is a field a paste may type into.
+  it "keeps a pasted letter off the list cards whose letters act" do
+    d = key(Termisu::Input::Key::LowerD, 'd')
+    RetestOverlay.new(1_i64, "t").takes_pasted?(key(Termisu::Input::Key::LowerR, 'r')).should be_false
+    LinksOverlay.new(Gori::Store::LinkOwnerKind::Issue, 1_i64).takes_pasted?(key(Termisu::Input::Key::LowerF, 'f')).should be_false
+    ColumnsOverlay.new([] of Gori::Store::DisplayColumn).takes_pasted?(d).should be_false
+    [HostsOverlay.new, EnvOverlay.new].each do |ov|
+      ov.takes_pasted?(d).should be_false
+      ov.add_start
+      ov.takes_pasted?(d).should be_true
+      ov.takes_pasted?(key(Termisu::Input::Key::Enter)).should be_false
+    end
+    env = EnvOverlay.new
+    env.prefix_edit_start
+    env.takes_pasted?(d).should be_true
+  end
 end
 
 private def runner_src(file : String) : String

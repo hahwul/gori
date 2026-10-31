@@ -119,6 +119,12 @@ module Gori::Tui
       @owner_kind.issue?
     end
 
+    # No text field in either mode: browse letters remove (`d`) and freeze (`f`), and the add
+    # mode's f/r/z/m pick a source and close the card. A paste presses none of them.
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      false
+    end
+
     # Browse: ↑/↓ (or k/j) select · ↵/o open · a arms add · f freezes · d removes · esc closes.
     # Adding: f/r/z/m choose the source, which hands off through on_close.
     def handle_key(ev : Termisu::Event::Key) : Symbol
