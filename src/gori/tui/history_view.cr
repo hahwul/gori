@@ -1134,6 +1134,9 @@ module Gori::Tui
     def on_event(event : Store::FlowEvent, store : Store) : Nil
       @host_suggest_dirty = true if event.kind == :inserted
       sync_seen # before the insert, so a row landing just after follow went off still counts
+      # An empty list gave `sync_seen` nothing to see; without a baseline its nil arm would
+      # take this first new row as already seen.
+      @seen_id ||= event.id - 1 if event.kind == :inserted
       # The row's ANSWERS changed, so its colour has to be re-asked. An in-flight row has
       # `status` and `content_type` nil, so `status:>=500` and `proto:sse` genuinely answer
       # differently once the response lands — without this the row would keep the colour it

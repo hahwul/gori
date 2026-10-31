@@ -2565,6 +2565,23 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  # An empty list gave the baseline nothing to take, so the first arrival was itself
+  # taken as seen: two new flows read `+1`.
+  it "counts the first flow that arrives after follow goes off on an empty list" do
+    with_store do |store|
+      view = HistoryView.new
+      view.reload(store)
+      view.render_list(Screen.new(MemoryBackend.new(100, 12)), Rect.new(0, 0, 100, 12))
+      view.toggle_follow
+      2.times do |i|
+        id = add_flow(store, "GET", "/new#{i}", 200)
+        view.on_event(Gori::Store::FlowEvent.new(id, :inserted), store)
+        view.render_list(Screen.new(MemoryBackend.new(100, 12)), Rect.new(0, 0, 100, 12))
+      end
+      view.unseen_count.should eq(2)
+    end
+  end
+
   it "counts only the new flows a filter keeps" do
     with_store do |store|
       add_flow(store, "GET", "/a", 200)

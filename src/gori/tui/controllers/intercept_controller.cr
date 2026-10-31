@@ -616,7 +616,7 @@ module Gori::Tui
     def pane_advance(dir : Int32) : Bool
       was = @intercept.editing?
       moved = @intercept.pane_advance(dir)
-      announce_toggle(was) if moved
+      announce_toggle(was) # a refusal does not move, and is still the sentence to read
       moved
     end
 
