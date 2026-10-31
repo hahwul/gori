@@ -687,12 +687,17 @@ module Gori
     # The one sentence every surface says about it. ONE wording, here rather than at each bar,
     # for the reason `InterceptFilter.unsupported_reason` gives: an operator who reads it on one
     # surface must recognise it on the next.
-    def self.unknown_field_note(u : UnknownField) : String
+    #
+    # `refused`: a headless surface that turned the query down before running it, so "matched
+    # nothing" would be a claim about a search that never happened (`Issues::Filter.refusal`).
+    def self.unknown_field_note(u : UnknownField, *, refused : Bool = false) : String
       bad = "#{u.name}#{u.sep}"
       if near = u.suggestion
         "unknown field `#{bad}` — did you mean `#{near}#{u.sep}`?"
       elsif ID_FIELDS.includes?(u.name.downcase)
         "unknown field `#{bad}` — QL has no `#{u.name}:` field; select flows by row or id"
+      elsif refused
+        "unknown field `#{bad}` — not searched; set lenient to search it as text"
       else
         "unknown field `#{bad}` — it is searched as text, and matched nothing"
       end

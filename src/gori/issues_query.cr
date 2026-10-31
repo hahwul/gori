@@ -126,7 +126,7 @@ module Gori
       # `history --lenient` does; a bad value of a KNOWN field matches nothing either way.
       def self.refusal(query : String, *, lenient : Bool = false) : String?
         if !lenient && (u = unknown_field(query))
-          return FilterAst.unknown_field_note(u)
+          return FilterAst.unknown_field_note(u, refused: true)
         end
         parse(query).bad_value
       end

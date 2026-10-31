@@ -322,6 +322,14 @@ describe "Gori::Issues::Filter.refusal" do
     Issues::Filter.refusal(%(status:" open")).should_not be_nil
   end
 
+  # Refused before anything ran, so it must not say it searched and found nothing — `xss:`
+  # as free text can match a title the bar shows.
+  it "says an unknown field was not searched, and how to search it" do
+    why = Issues::Filter.refusal("xss: reflected").not_nil!
+    why.should contain("not searched; set lenient to search it as text")
+    why.should_not contain("matched nothing")
+  end
+
   it "lets an unknown field through as text when lenient, but never a bad value" do
     Issues::Filter.refusal("comment:body", lenient: true).should be_nil
     Issues::Filter.refusal("status:opne", lenient: true).should_not be_nil
