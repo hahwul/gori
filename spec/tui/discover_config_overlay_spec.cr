@@ -201,4 +201,13 @@ describe "Gori::Tui::DiscoverSeed.build" do
     DiscoverSeed.build("http://h.test:8080", ["/"]).base_label.should eq("h.test:8080") # the port tells two services apart
     DiscoverSeed.build(o, ["/notes", "/notes/"]).choices.should eq([{"/notes/", "#{o}/notes/"}, {"/", "#{o}/"}])
   end
+
+  # Any dot used to read as a file, so a dotted DIRECTORY lost its own subtree and the default
+  # start target became its parent: a wider crawl than the endpoint the operator picked.
+  it "keeps a dotted directory segment as a directory" do
+    DiscoverSeed.start_dir("/api/v1.2").should eq("/api/v1.2/")
+    DiscoverSeed.start_dir("/.well-known").should eq("/.well-known/")
+    DiscoverSeed.start_dir("/static/jquery.min.js").should eq("/static/")
+    DiscoverSeed.start_dir("/media/clip.mp4").should eq("/media/")
+  end
 end
