@@ -206,6 +206,23 @@ describe Gori::MCP::Server do
       end
     end
 
+    # A request-side short_circuit rule is not run by apply_rules (the send still goes upstream);
+    # the reply names it rather than implying the live-proxy rules all applied.
+    it "reports an enabled short_circuit rule apply_rules skipped" do
+      with_store do |store|
+        port = start_mcp_http_origin("ok")
+        rules = Gori::Rules.load(store)
+        rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+          "GET /", "200 OK\n\nstubbed", op: Gori::Store::RuleOp::ShortCircuit).should be_truthy
+        on = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/","apply_rules":true,"allow_unscoped":true}}})
+        payload = mcp_tool_payload(mcp_drive(store, on, verify_upstream: false)[0])
+        skipped = payload["skipped_rules"].as_a
+        skipped.size.should eq(1)
+        skipped[0]["rule_id"].as_i64.should eq(rules.rules.first.id)
+        skipped[0]["reason"].as_s.should start_with("short_circuit:")
+      end
+    end
+
     # The tab keeps its old answer when rules rewrote the send; the reply has to say so, or the
     # next freeze_evidence on the tab freezes an exchange the agent never saw.
     it "keeps the tab's response, and says so, when grpc_fields edited the send" do

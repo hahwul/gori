@@ -362,6 +362,9 @@ module Gori::Repeater
 
     # What `apply_rules` changed (`RequestRules.apply`), for the History row's rule provenance.
     property rewrite : Store::Rewrite? = nil
+    # The short-circuit rule the live proxy would have ANSWERED this request with, which
+    # `apply_rules` does not run (`RequestRules.apply`): the request still went upstream.
+    property skipped_stub_rule : Int64? = nil
 
     def initialize(@sender : Sender, @requests : Array(Bytes), @scheme : String,
                    @host : String, @port : Int32, @http2 : Bool,

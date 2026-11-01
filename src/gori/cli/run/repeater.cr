@@ -3561,9 +3561,14 @@ module Gori
       # because a rule that fails (a hook, a refused binding) records an event row, and the
       # store the plan was read from is already closed by the time a plan exists.
       private def self.apply_request_rules(plan : Repeater::Plan, project : Project) : {Repeater::Plan, Bool}
-        with_store(project) do |store|
+        applied = with_store(project) do |store|
           Repeater::RequestRules.apply(plan, Gori::Rules.load(store))
         end
+        if id = applied[0].skipped_stub_rule
+          STDERR.puts "gori run: note: --apply-rules does not run short_circuit rule ##{id}; the live proxy " \
+                      "would answer this request from it, and this send goes upstream"
+        end
+        applied
       end
 
       # The parsed status line and headers, beside the raw `head` a script would otherwise have

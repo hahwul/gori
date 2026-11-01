@@ -16,6 +16,21 @@ private def body_rule(match : String, replace : String) : Gori::Store::MatchRule
 end
 
 describe Gori::Repeater::RequestRules do
+  # A direct send does not short-circuit, and that stays so; but the proxy would have answered
+  # this request from the rule, so the plan names it instead of the reply implying parity.
+  it "names an enabled short-circuit rule it did not run" do
+    with_store do |store|
+      stub = Gori::Store::MatchRule.new(7_i64, true, Gori::Store::RuleTarget::Request,
+        Gori::Store::RulePart::Head, "GET /mock", "200 OK\n\nhi", Gori::Store::RuleOp::ShortCircuit)
+      rules = Gori::Rules.new(store, [stub, head_rule("X-A: 1", "X-A: 2")])
+      sent, changed = Gori::Repeater::RequestRules.apply(rules_plan("GET /mock HTTP/1.1\r\nHost: t.test\r\nX-A: 1\r\n\r\n"), rules)
+      changed.should be_true
+      sent.skipped_stub_rule.should eq(7_i64)
+      quiet, _ = Gori::Repeater::RequestRules.apply(rules_plan("GET /real HTTP/1.1\r\nHost: t.test\r\n\r\n"), rules)
+      quiet.skipped_stub_rule.should be_nil
+    end
+  end
+
   # `apply_rules` builds with auto-CL OFF on purpose, so a wrong length is the operator's
   # probe. An enabled rule that matched nothing used to re-sync it anyway and report a change.
   it "leaves a deliberately wrong Content-Length alone when no rule matched" do

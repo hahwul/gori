@@ -191,7 +191,7 @@ module Gori
             %(ref_kind:"repeater" ref_id:#{repeater_id})
           elsif recorded_flow_id && flow_response_saved
             %(ref_kind:"flow" ref_id:#{recorded_flow_id})
-          end),
+          end, skipped_stub_rule: plan.skipped_stub_rule),
           is_error: !result.ok?, event_flow_id: recorded_flow_id, event_note: send_event_note(built, result))
       rescue ex : Gori::Error
         # Bad input (missing/invalid url, illegal header, …) — return a clean
@@ -1032,6 +1032,21 @@ module Gori
         "#{origin} → #{outcome}"
       end
 
+      # `apply_rules` runs the rewrite rules, not a short-circuit one: the proxy would have
+      # answered this request from the rule, and this send went upstream instead.
+      private def emit_skipped_stub_rule(j : JSON::Builder, rule_id : Int64?) : Nil
+        return unless rule_id
+        j.field "skipped_rules" do
+          j.array do
+            j.object do
+              j.field "rule_id", rule_id
+              j.field "reason", "short_circuit: the live proxy would answer this request from the rule " \
+                                "without dialing; a direct send does not short-circuit, so it went upstream"
+            end
+          end
+        end
+      end
+
       private def send_result_json(result : Repeater::Result, recorded_flow_id : Int64?,
                                    repeater_id : Int64?, include_sensitive_headers : Bool,
                                    sc : ScopeCheck, built : RequestBuilder::Built, wire : Bytes,
@@ -1044,7 +1059,7 @@ module Gori
                                    head_unterminated : Bool = false,
                                    tls_preset : String? = nil, body_more : String? = nil,
                                    via : String? = nil, kept_repeater : {Int64, String}? = nil,
-                                   freeze_ref : String? = nil) : String
+                                   freeze_ref : String? = nil, skipped_stub_rule : Int64? = nil) : String
         JSON.build do |j|
           j.object do
             emit_scope(j, sc, slot: h2_fields.nil?)
@@ -1063,6 +1078,7 @@ module Gori
             # mentioned it. gori still SENT it — see `CLI::Run.unterminated_head_note`.
             emit_head_unterminated(j, head_unterminated)
             j.field "match_replace_applied", true if applied_rules
+            emit_skipped_stub_rule(j, skipped_stub_rule)
             # `write_back_repeater_response` keeps the tab's old answer when this send's bytes
             # differ from its row, and said nothing — so the next `freeze_evidence` on the tab
             # froze a response this send never got, under a request it never sent.
