@@ -148,6 +148,25 @@ describe "MCP ws_session tools" do
     end
   end
 
+  # A bogus `after` was echoed back as `cursor`, so a client following it skipped later frames.
+  it "clamps a get_job cursor to the rows that exist" do
+    origin = echo_origin
+    begin
+      with_store do |store|
+        store.add_scope_rule("include", "host", "127.0.0.1")
+        tools = tools_for(store)
+        rid = seed_ws_repeater(store, origin.port)
+        job_id = call_json(tools, "ws_session_open", %({"repeater_id":#{rid}}))["job_id"].as_s
+        last = call_json(tools, "ws_session_send", %({"job_id":"#{job_id}","messages":["hi"],"wait_ms":2000}))["cursor"].as_i64
+        call_json(tools, "get_job", %({"job_id":"#{job_id}","after":#{last + 99}}))["cursor"].as_i64.should be <= last + 2
+        call_json(tools, "get_job", %({"job_id":"#{job_id}","after":-1}))["cursor"].as_i64.should be >= 1
+        call_json(tools, "stop_job", %({"job_id":"#{job_id}","wait":true}))
+      end
+    ensure
+      origin.close
+    end
+  end
+
   it "answers an Engine.IO heartbeat on its own" do
     # The origin pings `2`; the session must reply `3` without the agent asking.
     seen = Channel(String).new(4)
