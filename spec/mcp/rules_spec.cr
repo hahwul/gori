@@ -159,6 +159,9 @@ describe Gori::MCP::Server do
           renamed["name"].as_s.should eq("salmon")
           renamed["hex"].as_s.should eq("#123456") # the unnamed half is carried over, not reset
           renamed["renamed_from"].as_s.should eq("coral")
+          # The rule created above still names "coral" and now paints a fallback hue; the CLI
+          # twin warns about that, and so does this reply.
+          renamed["warning"].as_s.should contain("still name 'coral' (project #")
 
           # An unknown colour, a no-op call and a built-in name are all refused rather than
           # silently doing nothing.
@@ -167,7 +170,9 @@ describe Gori::MCP::Server do
           mcp_drive(store, %({"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"update_custom_color","arguments":{"name":"salmon","new_name":"green"}}}))[0]["result"]["isError"].as_bool.should be_true
 
           del = %({"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"delete_custom_color","arguments":{"name":"salmon"}}})
-          mcp_tool_payload(mcp_drive(store, del)[0])["deleted"].as_bool.should be_true
+          deleted = mcp_tool_payload(mcp_drive(store, del)[0])
+          deleted["deleted"].as_bool.should be_true
+          deleted["warning"].raw.should be_nil # no rule names "salmon"
           Gori::Settings.colormarker_colors.should be_empty
         end
       ensure

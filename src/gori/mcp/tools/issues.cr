@@ -11,6 +11,11 @@ module Gori
       # Characters of an issue's `notes` a list_issues row carries; get_issue has the rest.
       ISSUE_NOTES_PREVIEW = 200
 
+      # `links` / `evidence` entries a list_issues row carries, and get_issue's own cap on
+      # them; list_links / list_evidence page the rest.
+      ISSUE_ITEMS_PREVIEW =  5
+      ISSUE_ITEMS_MAX     = 25
+
       @[Tool("list_issues")]
       private def list_issues(h) : Result
         pg = page_args(h, ISSUES_LIMIT)
@@ -24,7 +29,7 @@ module Gori
           all = Issues::Filter.parse(q).apply(all)
         end
         page = all[pg.offset, pg.limit]? || [] of Store::Issue
-        parts = fit_rows(page) { |rj, f, _| Serialize.issue(rj, f, store, notes_preview: ISSUE_NOTES_PREVIEW) }
+        parts = fit_rows(page) { |rj, f, _| Serialize.issue(rj, f, store, notes_preview: ISSUE_NOTES_PREVIEW, items_cap: ISSUE_ITEMS_PREVIEW) }
         cut = parts.size < page.size
         page = page.first(parts.size)
         Result.new(JSON.build do |j|
@@ -40,7 +45,7 @@ module Gori
         id = required_id(h, "id")
         f = store.get_issue(id)
         return not_found("no issue with id #{id}") unless f
-        Result.new(JSON.build { |j| Serialize.issue(j, f, store, retest: true) })
+        Result.new(JSON.build { |j| Serialize.issue(j, f, store, retest: true, items_cap: ISSUE_ITEMS_MAX) })
       end
 
       @[Tool("create_issue", gated: true, agent_action: true, permission: "write")]
@@ -204,7 +209,8 @@ module Gori
           "List triage issues, newest/most-severe first. Returns {issues, returned, offset, " \
           "total}, not a bare array. Each issue's `links` lists what backs it, the flow it was " \
           "filed from first (`flow_id`). `notes` is cut to #{ISSUE_NOTES_PREVIEW} characters " \
-          "(`notes_truncated`; get_issue has it whole). Probe scanner findings are probe_issues." do |s|
+          "(`notes_truncated`; get_issue has it whole), `links`/`evidence` to #{ISSUE_ITEMS_PREVIEW} " \
+          "(`*_total`, `*_truncated`). Probe scanner findings are probe_issues." do |s|
           s.field "query", strprop("filter, as the TUI's / bar: status:open sev:>=high host:api " \
                                    "cvss:>=7 -status:fp; a bare word searches title and host")
           s.field "lenient", boolprop("free-text an unknown `field:` instead of refusing")
@@ -214,7 +220,8 @@ module Gori
 
         tool j, "get_issue",
           "One issue: `links` (what backs it, the filing flow first = `flow_id`) and " \
-          "`evidence` (frozen copies)." do |s|
+          "`evidence` (frozen copies), #{ISSUE_ITEMS_MAX} each; past that `*_truncated` and " \
+          "`*_total`, and list_links / list_evidence page them." do |s|
           s.field "id", intprop("issue id"), required: true
         end
 

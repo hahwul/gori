@@ -141,8 +141,8 @@ describe Gori::SavedViews do
       # The whole reason this is a REFUSAL: `QL.and` folds an EMPTY side away, so a view whose
       # every term drops shows every flow while a `v:` chip claims a filter is on.
       Gori::SavedViews.unusable_query_reason("").should eq("enter a query")
-      Gori::SavedViews.unusable_query_reason("src:nope")
-        .should eq("this query matches every flow — it would narrow nothing")
+      # A lone bad term also folds to match-all; the refusal names the term, not just the fold.
+      Gori::SavedViews.unusable_query_reason("src:nope").not_nil!.should start_with("`src:nope` is not a value that field takes")
       Gori::SavedViews.unusable_query_reason("bogus:x").not_nil!.should contain("unknown field")
       Gori::SavedViews.unusable_query_reason("host~[").not_nil!.should contain("not a valid regex")
       Gori::SavedViews.unusable_query_reason("src:proxy").should be_nil

@@ -504,7 +504,8 @@ describe Gori::Colormarker do
     it "refuses a condition that would paint every row" do
       Gori::Colormarker.unusable_reason("").should eq("enter a condition")
       # a term with an empty value is DROPPED, and an emptied query matches everything
-      Gori::Colormarker.unusable_reason("host:").should eq("this condition matches every flow")
+      Gori::Colormarker.unusable_reason("host:").not_nil!.should start_with("`host:` is not a value that field takes")
+      Gori::Colormarker.unusable_reason("status:abc").not_nil!.should start_with("`status:abc` is not a value")
       Gori::Colormarker.unusable_reason("host:acme").should be_nil
     end
 

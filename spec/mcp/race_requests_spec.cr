@@ -141,12 +141,32 @@ describe Gori::MCP::Server do
           r.is_error.should be_true
           r.error_code.should eq("SCOPE_BLOCKED")
           r.text.should_not contain("/internal/delete-all")
+          r.text.should start_with("repeater ##{b} on 127.0.0.1") # the session to fix, not "member 2"
         end
         select
         when line = seen.receive
           fail "a request went out: #{line}"
         when timeout(100.milliseconds)
         end
+      end
+    end
+
+    # A PATH exclude on an included host said "target host … is outside the project's configured
+    # scope", sending the agent to add an include that changes nothing.
+    it "names the EXCLUDE rule when one refused an included host" do
+      with_store do |store|
+        scope = Gori::Scope.load(store)
+        scope.add("include", "host", "127.0.0.1")
+        scope.add("exclude", "string", "/admin")
+        a = seed_race_repeater(store, 9, "/ok")
+        b = seed_race_repeater(store, 9, "/admin/x")
+        tools = tools_for(store)
+        r = tools.call("race_requests", JSON.parse(%({"repeater_ids":[#{a},#{b}]})))
+        r.error_code.should eq("SCOPE_BLOCKED")
+        r.text.should match(/\Arepeater ##{b} on 127\.0\.0\.1 matches scope EXCLUDE rule #\d+ string "\/admin"/)
+        r.text.should_not contain("outside")
+        sent = tools.call("send_request", JSON.parse(%({"repeater_id":#{b}})))
+        sent.text.should start_with("the target on 127.0.0.1 matches scope EXCLUDE rule #")
       end
     end
 
@@ -212,7 +232,39 @@ describe Gori::MCP::Server do
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"race_requests","arguments":{"repeater_ids":[#{a},#{b}],"allow_unscoped":true}}})
         resp = mcp_drive(store, call, verify_upstream: false)[0]
         resp["result"]["isError"].as_bool.should be_true
-        resp["result"]["content"][0]["text"].as_s.should contain("SNI")
+        text = resp["result"]["content"][0]["text"].as_s
+        text.should contain("differ in SNI —")
+        text.should_not contain("Content-Length policy")
+      end
+    end
+
+    # send_request{repeater_id} refuses a handshake session ("use send_websocket"); a race sent it
+    # as a plain request and reported the 101 as the exchange.
+    it "refuses a WebSocket handshake member as send_request does" do
+      with_store do |store|
+        a = seed_race_repeater(store, 9, "/a")
+        ws = "GET /chat HTTP/1.1\r\nHost: 127.0.0.1:9\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" \
+             "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+        b = store.insert_repeater(target: "http://127.0.0.1:9", request: ws.to_slice,
+          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"race_requests","arguments":{"repeater_ids":[#{a},#{b}],"allow_unscoped":true}}})
+        resp = mcp_drive(store, call, verify_upstream: false)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        resp["result"]["content"][0]["text"].as_s.should contain("repeater #{b} is a WebSocket handshake — use send_websocket")
+      end
+    end
+
+    # A stored `""` SNI dials exactly like an unset one (`Plan` reads `sni.presence`), so it must
+    # not split the group — the refusal used to fire naming every field and none that differed.
+    it "races a member with an empty stored SNI beside one with none" do
+      with_store do |store|
+        a = store.insert_repeater(target: "http://127.0.0.1:9", request: "GET /a HTTP/1.1\r\nHost: 127.0.0.1:9\r\n\r\n".to_slice,
+          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil)
+        b = store.insert_repeater(target: "http://127.0.0.1:9", request: "GET /b HTTP/1.1\r\nHost: 127.0.0.1:9\r\n\r\n".to_slice,
+          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: "")
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"race_requests","arguments":{"repeater_ids":[#{a},#{b}],"allow_unscoped":true}}})
+        resp = mcp_drive(store, call, verify_upstream: false)[0]
+        mcp_tool_payload(resp)["members"]?.should_not be_nil
       end
     end
 

@@ -13,7 +13,10 @@ module Gori::Repeater::Timing
       b_label : String,
       origin : String? = nil,
       transport : String? = nil, # "single-packet h2" / "last-byte-sync h1" / "interleaved"
-      mode : String? = nil
+      mode : String? = nil,
+      # The warm-up pairs actually discarded: both surfaces clamp the asked-for count to
+      # `iterations - 1`, and a reply that did not say so read as the count the caller passed.
+      warmup : Int32? = nil
 
     def self.report_json(rep : Stats::Report, subject : Subject) : String
       JSON.build { |j| report_object(j, rep, subject) }
@@ -28,6 +31,7 @@ module Gori::Repeater::Timing
         subject.transport.try { |t| j.field "transport", t }
         subject.mode.try { |m| j.field "mode", m }
         j.field "iterations", rep.iterations
+        subject.warmup.try { |w| j.field "warmup", w }
         j.field "pairs_valid", rep.pairs_valid
         j.field "error", rep.error
         # A side with no responses has no median: `Stats` fills it with 0.0, so the gap would be

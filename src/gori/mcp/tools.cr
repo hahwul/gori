@@ -358,9 +358,11 @@ module Gori
         "pages the whole #{what}; body_mode:\"full\" inlines up to #{Serialize::MAX_TEXT} bytes"
       end
 
-      # Whether this call left the body size to the default — neither argument given.
+      # Whether this call left the body size to the default — no `body_mode` and no POSITIVE
+      # `max_body_bytes`: a 0/negative one "falls back to the mode default" (`body_return_opts`),
+      # and with no mode that default is this one, not the 64 KB full cap.
       private def body_auto?(h) : Bool
-        !present?(h, "body_mode") && !present?(h, "max_body_bytes")
+        !present?(h, "body_mode") && !int(h, "max_body_bytes").try(&.positive?)
       end
 
       # Ceiling on the `decoder` tool's returned output string. A Decoder step can
@@ -424,6 +426,7 @@ module Gori
         @ws_jobs = {} of String => WsSessionJob
         @oast_mcp = {} of String => OastMcpSession
         @job_seq = 0
+        @shutting_down = false
         # switch_project reopens @store; @owns_store tracks whether WE opened the
         # current one (and must close it on the next switch). The initial store is
         # owned by the caller (the `gori mcp` command), so it starts false.
@@ -1100,6 +1103,29 @@ module Gori
         # `fuzz_results{clusters:true}` counts the whole run rather than the rows it kept.
         getter clusters = Fuzz::Clusters.new
         getter results = [] of Fuzz::Result
+        # How many payload indices from 0 have ALL completed. Results land as they finish, out
+        # of index order, so while the run is live a row can still arrive BELOW one already
+        # paged — an offset over the whole set then skipped and repeated rows. Below this mark
+        # nothing can land any more, so `fuzz_results` pages only that part until the job ends.
+        getter done_prefix = 0_i64
+        # Completed indices past `done_prefix`: about the concurrency window.
+        # ponytail: a result the engine loses (a worker that raised) stalls the mark and this set
+        # grows by every later index until the job ends; track the lost index if that path matters.
+        @done_ahead = Set(Int64).new
+
+        def note_done(index : Int64) : Nil
+          return if index < @done_prefix
+          @done_ahead << index
+          while @done_ahead.delete(@done_prefix)
+            @done_prefix += 1
+          end
+        end
+
+        # Whether `fuzz_results` may page this row now (see `done_prefix`).
+        def pageable?(r : Fuzz::Result) : Bool
+          status != :running || r.index < @done_prefix
+        end
+
         # How many of `results` the matcher REJECTED — the counter `FUZZ_MAX_STORED_UNMATCHED`
         # is enforced against, so a run's failures can never crowd its findings out of the
         # buffer. Kept as a count rather than derived with `results.count(&.matched?)`, which
@@ -1156,7 +1182,9 @@ module Gori
         property sent = 0_i64
         property found = 0
         property errors = 0_i64
-        property? baseline_stable = true
+        # nil until the run has sampled a baseline: a run that never got that far (refused,
+        # stopped first, still calibrating) has no stability to report.
+        property baseline_stable : Bool? = nil
         # The baseline's own sentence about anything that DOWNGRADES this run's findings: the
         # status varied, the endpoint echoes any input, a location had to be muted, or it never
         # answered at all (see `Miner::Baseline::Report#warning`).
@@ -1663,7 +1691,7 @@ module Gori
         h = stripped
         if (bad = unknown_args(name, h)) && !bad.empty?
           return err("unknown argument#{bad.size > 1 ? "s" : ""} for '#{name}': #{bad.join(", ")}. " \
-                     "Accepted: #{declared_args[name].to_a.sort.join(", ")}",
+                     "Accepted: #{declared_args[name].to_a.sort.join(", ").presence || "(none)"}",
             "INVALID_ARGUMENT", field: bad.first)
         end
         # After the unknown-argument check, which is what built `@aliased_required` (it lists
@@ -1729,6 +1757,21 @@ module Gori
         !!@cancelled.try(&.call)
       end
 
+      # Set by `Server#run` once stdin has closed (EOF, or a signal closing it): the client has
+      # asked the session to end. A HOLD the client chose (`wait_ms`, `stop_job{wait}`) is cut
+      # short, so the shutdown that stops live jobs is not parked behind it while they keep
+      # sending — a 30 s `fuzz_status` wait used to keep a fuzz run hitting the target for the
+      # whole wait. Work that IS the request (a send, a retest) still runs: a piped client
+      # closes stdin right after writing its requests and is owed their answers.
+      def shutting_down! : Nil
+        @shutting_down = true
+      end
+
+      # Whether a hold should end now: the call was cancelled, or the session is ending.
+      private def hold_cut? : Bool
+        @shutting_down || cancelled?
+      end
+
       # The longest long-poll `wait_ms` (list_history, list_events, operator_messages, the job
       # status tools): the server runs one call at a time, so a wait holds every other call
       # behind it — the cap `ws_session_send{wait_ms}` takes, for the same reason.
@@ -1744,11 +1787,11 @@ module Gori
       end
 
       # Sleep a slice, then ask the block; stop once it answers true, `wait_ms` has passed, or
-      # the client cancelled the call. Checks only AFTER a sleep, so a caller that just read an
+      # the client cancelled the call (or closed the session: `hold_cut?`). Checks only AFTER a sleep, so a caller that just read an
       # empty page does not read it again at once; `wait_ms` 0 returns without sleeping.
       private def long_poll(wait_ms : Int64, & : -> Bool) : Nil
         deadline = Time.instant + wait_ms.milliseconds
-        until cancelled?
+        until hold_cut?
           left = deadline - Time.instant
           break if left <= Time::Span.zero
           sleep(left < LONG_POLL_SLICE ? left : LONG_POLL_SLICE)
@@ -2083,6 +2126,41 @@ module Gori
         end
         s.provider.deregister(s.http, s.session) rescue nil
         Result.new({stopped: sid}.to_json)
+      end
+
+      # How long shutdown waits on the providers before exiting with a registration left up.
+      OAST_SHUTDOWN_GRACE = 3.seconds
+
+      # At shutdown (`Server#run`): `oast_start` told the agent an ad-hoc registration "dies with
+      # this process", and only `oast_stop` ever deregistered one. Best-effort and in parallel,
+      # bounded by OAST_SHUTDOWN_GRACE so a provider that does not answer cannot hold the exit.
+      # A persisted session is left alone, as `oast_stop` leaves it: `oast_release` ends those.
+      def deregister_oast_for_shutdown : Nil
+        adhoc = @oast_mcp.values.select(&.store_session_id.nil?)
+        @oast_mcp.clear
+        return if adhoc.empty?
+        done = Channel(Nil).new(adhoc.size) # buffered: a late finisher never blocks
+        adhoc.each { |s| spawn_oast_deregister(s, done) }
+        deadline = Time.instant + OAST_SHUTDOWN_GRACE
+        adhoc.size.times do
+          left = deadline - Time.instant
+          break if left <= Time::Span.zero
+          select
+          when done.receive
+          when timeout(left)
+            break
+          end
+        end
+      end
+
+      private def spawn_oast_deregister(s : OastMcpSession, done : Channel(Nil)) : Nil
+        spawn(name: "mcp-oast-deregister") do
+          s.provider.deregister(s.http, s.session)
+        rescue
+          # MUST NOT raise per `Provider#deregister`; a failure leaves it registered, as before.
+        ensure
+          done.send(nil)
+        end
       end
 
       @[Tool("create_project", read_only: false, unbound: true, permission: "projects")]
@@ -3008,15 +3086,23 @@ module Gori
         rows[offset..]? || [] of T
       end
 
-      # The pagination fields of an `offset_slice` page: returned/offset, `cut_by` when the
-      # budget kept fewer than `page_size` rows, and `has_more` against the `total` rows the
-      # offset counts from. Each tool names its own total.
-      private def emit_offset_page(j : JSON::Builder, offset : Int32, returned : Int32,
+      # The `offset` of a list paged by it alone (`offset_slice`): a `Page` with no limit, so
+      # `emit_offset_page` echoes a negative or oversized offset as clamped, as `emit_page` does.
+      private def offset_args(h) : Page
+        req_off = optional_int_arg(h, "offset")
+        Page.new(req_off, nil, clamp_nonneg(req_off), 0)
+      end
+
+      # The pagination fields of an `offset_slice` page: returned/offset, the clamp echo,
+      # `cut_by` when the budget kept fewer than `page_size` rows, and `has_more` against the
+      # `total` rows the offset counts from. Each tool names its own total.
+      private def emit_offset_page(j : JSON::Builder, pg : Page, returned : Int32,
                                    page_size : Int32, total : Int32) : Nil
         j.field "returned", returned
-        j.field "offset", offset
+        j.field "offset", pg.offset
+        emit_clamp(j, pg.req_off, pg.offset, pg.req_lim, pg.limit)
         emit_cut(j, returned < page_size)
-        j.field "has_more", offset + returned < total
+        j.field "has_more", pg.offset + returned < total
       end
 
       private def page_args(h, limit : PageLimit) : Page

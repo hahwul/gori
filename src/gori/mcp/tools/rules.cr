@@ -21,14 +21,14 @@ module Gori
         rules = rules.select { |r| r.scope == want } if want
         # Under REPLY_ROWS_BUDGET (#1649): a short-circuit stub carries its whole response in
         # `replacement`. `offset` pages the rest, in apply order.
-        offset = clamp_nonneg(optional_int_arg(h, "offset"))
-        page = offset_slice(rules, offset)
+        pg = offset_args(h)
+        page = offset_slice(rules, pg.offset)
         parts = fit_rows(page) { |rj, r, _| Serialize.match_rule(rj, r) }
         Result.new(JSON.build do |j|
           j.object do
             j.field "count", rules.size
             j.field("rules") { raw_rows(j, parts) }
-            emit_offset_page(j, offset, parts.size, page.size, rules.size)
+            emit_offset_page(j, pg, parts.size, page.size, rules.size)
           end
         end)
       end
@@ -47,10 +47,7 @@ module Gori
       private def rule_regex_error(op : Store::RuleOp, match_kind : Store::MatchKind, pattern : String) : String?
         return unless match_kind.regex?
         return if op.header? || op.json? # matched by header NAME or JSON path; `match` does not apply
-        SafeRegexp.compile(pattern)
-        nil
-      rescue ex
-        ex.message || ex.class.name
+        SafeRegexp.compile_error(pattern)
       end
 
       # Guard the short-circuit-only arguments. A stub that cannot be parsed would answer every
@@ -828,7 +825,18 @@ module Gori
         unless en.nil?
           return busy("extract rule fields were updated but the enable/disable did not persist (store busy or unwritable); retry") unless store.set_extract_rule_enabled(id, en)
         end
-        Result.new({id: id, updated: true, name: name, kind: kind.label}.to_json)
+        Result.new({id: id, updated: true, name: name, kind: kind.label, warning: slots_claiming_warning(existing.name)}.to_json)
+      end
+
+      # A session slot claims extract rules BY NAME, so a rename or delete leaves its claim
+      # pointing at nothing — `create_session_slot` warns about a missing name, and so must the
+      # write that makes one go missing. Nil while another rule still carries the name.
+      private def slots_claiming_warning(old : String) : String?
+        return nil if store.extract_rules.any? { |r| r.name == old }
+        names = slot_registry.slots.select(&.rules.includes?(old)).map(&.name)
+        return nil if names.empty?
+        "#{Gori.plural(names.size, "session slot")} (#{names.join(", ")}) still claim \"#{old}\" and now claim " \
+        "nothing under it; update_session_slot to point them at the new name"
       end
 
       @[Tool("set_extract_rule_enabled", gated: true, agent_action: true, permission: "write")]
@@ -844,9 +852,10 @@ module Gori
       @[Tool("delete_extract_rule", gated: true, agent_action: true, permission: "write")]
       private def delete_extract_rule(h) : Result
         id = required_id(h, "id")
-        return not_found("no extract rule with id #{id}") unless store.extract_rules.any?(&.id.==(id))
+        existing = store.extract_rules.find(&.id.==(id))
+        return not_found("no extract rule with id #{id}") unless existing
         return busy("extract rule NOT deleted (store busy or unwritable); it is unchanged") unless store.delete_extract_rule(id)
-        Result.new({id: id, deleted: true}.to_json)
+        Result.new({id: id, deleted: true, warning: slots_claiming_warning(existing.name)}.to_json)
       end
 
       # The tools/list schemas for the Match & Replace / extract rule tools, kept beside the handlers that

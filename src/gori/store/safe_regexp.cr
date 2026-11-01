@@ -70,6 +70,15 @@ module Gori
       rx
     end
 
+    # nil when `pattern` compiles, else the compiler's reason ("missing closing parenthesis at
+    # 3"), so a refusal can say why and not just that it failed (#1785).
+    def self.compile_error(pattern : String) : String?
+      compile(pattern)
+      nil
+    rescue ex
+      ex.message || ex.class.name
+    end
+
     # --- the match budget ---------------------------------------------------------
     #
     # PCRE2's `match_limit` resets at every start position, so one operator- or agent-authored

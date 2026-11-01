@@ -690,12 +690,14 @@ module Gori
     #
     # `refused`: a headless surface that turned the query down before running it, so "matched
     # nothing" would be a claim about a search that never happened (`Issues::Filter.refusal`).
-    def self.unknown_field_note(u : UnknownField, *, refused : Bool = false) : String
+    #
+    # `id_note`: what a bar that is not over flows says about `id:` instead of QL's line.
+    def self.unknown_field_note(u : UnknownField, *, refused : Bool = false, id_note : String? = nil) : String
       bad = "#{u.name}#{u.sep}"
       if near = u.suggestion
         "unknown field `#{bad}` — did you mean `#{near}#{u.sep}`?"
       elsif ID_FIELDS.includes?(u.name.downcase)
-        "unknown field `#{bad}` — QL has no `#{u.name}:` field; select flows by row or id"
+        "unknown field `#{bad}` — #{id_note || "QL has no `#{u.name}:` field; select flows by row or id"}"
       elsif refused
         "unknown field `#{bad}` — not searched; set lenient to search it as text"
       else

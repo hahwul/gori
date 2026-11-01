@@ -40,9 +40,20 @@ module Gori
         # `add_if_missing: false`): a capture without one — an h2/gRPC streamed POST — is evidence.
         rewritten = FlowRequest.resync_content_length_if_body_changed(plan.bytes,
           new_body ? new_head + new_body : new_head)
-        return {plan, false} if rewritten == plan.bytes
+        # A short-circuit rule is NOT run here — a direct send always dials — but the proxy
+        # would have answered this request without dialing, so name the rule rather than let
+        # "the rules applied" stand. Asked of the rewritten head, as the proxy asks it.
+        hit = rules.short_circuit(new_head, plan.host)
+        stub = hit.try(&.rule_id)
+        if rewritten == plan.bytes
+          plan.skipped_stub_rule = stub
+          plan.skipped_stub_ref = hit.try(&.ref)
+          return {plan, false}
+        end
         sent = plan.with_requests([rewritten])
         sent.rewrite = Store::Rewrite.new(hits, head, new_body == body ? nil : body)
+        sent.skipped_stub_rule = stub
+        sent.skipped_stub_ref = hit.try(&.ref)
         {sent, true}
       end
 

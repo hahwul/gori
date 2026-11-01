@@ -191,7 +191,7 @@ module Gori
             %(ref_kind:"repeater" ref_id:#{repeater_id})
           elsif recorded_flow_id && flow_response_saved
             %(ref_kind:"flow" ref_id:#{recorded_flow_id})
-          end),
+          end, skipped_stub: {plan.skipped_stub_rule, plan.skipped_stub_ref}),
           is_error: !result.ok?, event_flow_id: recorded_flow_id, event_note: send_event_note(built, result))
       rescue ex : Gori::Error
         # Bad input (missing/invalid url, illegal header, …) — return a clean
@@ -220,7 +220,7 @@ module Gori
         return built if built.is_a?(Result)
         plan, labels = built
 
-        gate = send_gate(ob, plan)
+        gate = send_gate(ob, plan, members)
         return gate if gate.is_a?(Result)
 
         results = plan.send_race
@@ -287,23 +287,20 @@ module Gori
         # policy, SNI or TLS preset differs would be silently sent under the anchor's — refuse
         # instead of flattening it. `verbatim` folds the CL column uniform, so it only fires on a
         # real stored difference.
-        sigs = [] of {String, String, Int32, Bool, String?, String?}
+        sigs = [] of Repeater::RaceSignature
         wires = [] of Bytes
         labels = [] of String
         loaded.each do |(id, rec)|
-          probe = begin
-            Repeater::Plan.build(race_member_options([rec.request], rec, insecure, overrides, verbatim, timeout, rec.http2?,
-              seeds.includes?(id)), ob)
-          rescue ex : Repeater::PlanError
-            return send_plan_error(ex, "repeater_ids")
-          end
-          sigs << {probe.scheme, probe.host, probe.port, !verbatim && rec.auto_content_length?, rec.sni, rec.tls_preset}
+          probe = race_member_probe(id, rec, race_member_options([rec.request], rec, insecure, overrides,
+            verbatim, timeout, rec.http2?, seeds.includes?(id)), ob)
+          return probe if probe.is_a?(Result)
+          sigs << Repeater.race_signature(probe.scheme, probe.host, probe.port,
+            !verbatim && rec.auto_content_length?, rec.sni, rec.tls_preset)
           wires << rec.request
           labels << "##{id} #{race_member_request_line(rec.request)}"
         end
-        first = sigs.first
-        unless sigs.all? { |s| s == first }
-          return err("the sessions differ in origin, Content-Length policy, SNI or TLS preset — a race rides one connection shape (origins: #{sigs.map { |(s, ho, po, _, _, _)| "#{s}://#{ho}:#{po}" }.uniq!.join(", ")})",
+        if differs = Repeater.race_signature_difference(sigs)
+          return err("the sessions differ in #{differs} — a race rides one connection shape (origins: #{sigs.map { |(s, ho, po, _, _, _)| "#{s}://#{ho}:#{po}" }.uniq!.join(", ")})",
             "INVALID_ARGUMENT", field: "repeater_ids")
         end
 
@@ -320,6 +317,21 @@ module Gori
           return send_plan_error(ex, "repeater_ids")
         end
         {plan, labels}
+      end
+
+      # One member's own plan (which validates its target / env), or the refusal to return.
+      private def race_member_probe(id : Int64, rec : Store::RepeaterRecord, options : Repeater::PlanOptions,
+                                    ob : Outbound) : Repeater::Plan | Result
+        probe = Repeater::Plan.build(options, ob)
+        # As `send_request{repeater_id}` refuses it: a handshake session's exchange is framed,
+        # and a race would send it as a plain request and report its 101 as the answer.
+        if probe.websocket? && !rec.ws_http_only?
+          return err("repeater #{id} is a WebSocket handshake — use send_websocket. NOTHING was sent.",
+            "INVALID_ARGUMENT", field: "repeater_ids")
+        end
+        probe
+      rescue ex : Repeater::PlanError
+        send_plan_error(ex, "repeater_ids")
       end
 
       # PlanOptions for one race member (or the whole group, when `requests` carries every
@@ -432,7 +444,7 @@ module Gori
         return built if built.is_a?(Result)
         plan, labels = built
 
-        gate = send_gate(ob, plan)
+        gate = send_gate(ob, plan, members)
         return gate if gate.is_a?(Result)
 
         mode = interleaved ? Repeater::Timing::Mode::Interleaved : Repeater::Timing::Mode::Auto
@@ -442,7 +454,8 @@ module Gori
         Log.info { "timing_requests #{plan.scheme}://#{plan.host}:#{plan.port} x#{rep.iterations} (#{transport}) -> #{rep.verdict}" }
         subject = Repeater::Timing::Present::Subject.new(
           a_label: labels[0]? || "A", b_label: labels[1]? || "B",
-          origin: "#{plan.scheme}://#{plan.host}:#{plan.port}", transport: transport, mode: mode.to_s.underscore)
+          origin: "#{plan.scheme}://#{plan.host}:#{plan.port}", transport: transport, mode: mode.to_s.underscore,
+          warmup: warmup)
         Result.new(JSON.build { |j| Repeater::Timing::Present.report_object(j, rep, subject) })
       end
 
@@ -703,15 +716,17 @@ module Gori
       # group; the first member's verdict is the one reported. Each member is judged as the
       # binding pass will send it (`Plan#scope_requests`), and the refusal names it by number
       # only: the expanded target may carry a live bound value.
-      private def send_gate(ob : Outbound, plan : Repeater::Plan) : ScopeCheck | Result
+      # `members` is a race/timing group's repeater ids, so a refusal names the session to fix.
+      private def send_gate(ob : Outbound, plan : Repeater::Plan, members : Array(Int64)? = nil) : ScopeCheck | Result
         requests = plan.scope_requests
         first = requests.first? || plan.bytes
         sc = ob.check(request_scope_url(plan, first), plan.host, request_exclude_url(plan, first), plan.port)
-        return scope_blocked(sc, passes_exclude: ob.send_passes_exclude?) if sc.blocked?
+        return scope_blocked(sc, members.try { |m| "repeater ##{m[0]}" }, passes_exclude: ob.send_passes_exclude?) if sc.blocked?
         requests.each_with_index do |req, i|
           next if i == 0
           member = ob.check(request_scope_url(plan, req), plan.host, request_exclude_url(plan, req), plan.port)
-          return scope_blocked(member, "member #{i + 1}", passes_exclude: ob.send_passes_exclude?) if member.blocked?
+          what = members.try(&.[i]?).try { |id| "repeater ##{id}" } || "member #{i + 1}"
+          return scope_blocked(member, what, passes_exclude: ob.send_passes_exclude?) if member.blocked?
         end
         if reason = plan.refusal
           return sandbox_blocked(reason, plan.host, "url")
@@ -973,8 +988,11 @@ module Gori
       end
 
       private def write_outbound_response(flow_id : Int64, result : Repeater::Result) : Nil
+        # A client cancel aborts the exchange from OUR side; the transport then reports a closed
+        # stream, which on the History row read as the origin hanging up.
+        failure = cancelled? && result.error ? "cancelled after the request was sent (MCP client cancel or server shutdown)" : result.error
         if response = result.response
-          error = result.error
+          error = failure
           # A bound gori chose to stop at is not a failed response (#1631).
           error ||= "upstream response body was incomplete" if result.incomplete? && !result.bounded
           state = error ? Store::FlowState::Error : Store::FlowState::Complete
@@ -991,7 +1009,7 @@ module Gori
           # `head`: the bytes of a head gori could not frame are the finding (see
           # `Repeater::HistoryRecord#record`).
           store.update_response(FlowMapper.error_response(flow_id,
-            result.error || "request failed before a response was received", result.duration_us,
+            failure || "request failed before a response was received", result.duration_us,
             head: result.head))
         end
       rescue ex
@@ -1017,6 +1035,23 @@ module Gori
         "#{origin} → #{outcome}"
       end
 
+      # `apply_rules` runs the rewrite rules, not a short-circuit one: the proxy would have
+      # answered this request from the rule, and this send went upstream instead.
+      private def emit_skipped_stub_rule(j : JSON::Builder, stub : {Int64?, String?}) : Nil
+        rule_id, ref = stub
+        return unless rule_id
+        j.field "skipped_rules" do
+          j.array do
+            j.object do
+              j.field "rule_id", rule_id
+              j.field "rule", ref if ref
+              j.field "reason", "short_circuit: the live proxy would answer this request from the rule " \
+                                "without dialing; a direct send does not short-circuit, so it went upstream"
+            end
+          end
+        end
+      end
+
       private def send_result_json(result : Repeater::Result, recorded_flow_id : Int64?,
                                    repeater_id : Int64?, include_sensitive_headers : Bool,
                                    sc : ScopeCheck, built : RequestBuilder::Built, wire : Bytes,
@@ -1029,7 +1064,7 @@ module Gori
                                    head_unterminated : Bool = false,
                                    tls_preset : String? = nil, body_more : String? = nil,
                                    via : String? = nil, kept_repeater : {Int64, String}? = nil,
-                                   freeze_ref : String? = nil) : String
+                                   freeze_ref : String? = nil, skipped_stub : {Int64?, String?} = {nil, nil}) : String
         JSON.build do |j|
           j.object do
             emit_scope(j, sc, slot: h2_fields.nil?)
@@ -1048,6 +1083,7 @@ module Gori
             # mentioned it. gori still SENT it — see `CLI::Run.unterminated_head_note`.
             emit_head_unterminated(j, head_unterminated)
             j.field "match_replace_applied", true if applied_rules
+            emit_skipped_stub_rule(j, skipped_stub)
             # `write_back_repeater_response` keeps the tab's old answer when this send's bytes
             # differ from its row, and said nothing — so the next `freeze_evidence` on the tab
             # froze a response this send never got, under a request it never sent.
@@ -1749,6 +1785,10 @@ module Gori
         return host_approval(sc) if sc.pending?
         reason = if sc.unscoped?
                    "no scope is configured for this project, so active requests are refused by default"
+                 elsif rule = sc.exclude_rule
+                   # The host may well be included: "outside the scope" sent the agent to add an
+                   # include that changes nothing. Name the exclude that refused it.
+                   "#{what || "the target"} on #{sc.host} matches scope EXCLUDE rule #{rule}"
                  elsif what
                    "#{what} on #{sc.host} is outside the project's configured scope"
                  else

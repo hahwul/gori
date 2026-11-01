@@ -158,7 +158,7 @@ describe "MCP approvals (ask)" do
   it "asks about exec only when the probe rule being enabled is an exec rule" do
     with_store do |store|
       tools = ask_tools(store, "exec")
-      plain = store.insert_probe_custom_rule("p", "", "response", "body", "contains", "AAA", Gori::Store::Severity::Info)
+      plain = store.insert_probe_custom_rule("p", "", "response", "body", "string", "AAA", Gori::Store::Severity::Info)
       store.set_probe_custom_rule_enabled(plain, false).should be_true
       call(tools, "set_probe_rule_enabled", %({"id":"custom_p_#{plain}","enabled":true})).is_error.should be_false
       store.open_agent_questions(0_i64, Time.utc.to_unix_ms * 1000).should be_empty

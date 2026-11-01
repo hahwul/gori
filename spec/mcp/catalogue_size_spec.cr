@@ -70,6 +70,8 @@ private INCIDENTAL = {
   "send_request -> send_websocket"          => "only for a WebSocket repeater id; @recon replays HTTP",
   "list_params -> mine_start"               => "says where the names can feed; @recon maps a target, it does not mine",
   "list_sitemap -> scan_js_endpoints"       => "says where the optional unrequested block comes from; @minimal only reads",
+  "get_issue -> list_links"                 => "names where a capped issue's full link set pages; the capped preview stands alone",
+  "get_issue -> list_evidence"              => "names where a capped issue's full evidence set pages; the capped preview stands alone",
 }
 
 private def table_cells(line : String) : Array(String)

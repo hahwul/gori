@@ -173,6 +173,9 @@ module Gori
           ensure
             w.close
           end
+          if applied && (fid = rec.flow_id)
+            STDERR.puts "gori run repeater minimize: note: #{Repeater::DraftMarkers.derived_from_flow_note(id, fid)}"
+          end
           unless applied
             # `update_repeater` answers false for a rolled-back write AND for a row that is
             # gone: the search took seconds, and a peer may have closed the tab meanwhile.

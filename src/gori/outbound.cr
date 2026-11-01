@@ -142,8 +142,11 @@ module Gori
     # `pending` is set on a refusal an operator's approval would lift (`Approval`): `WAIVER`
     # when the waiver was asked for and is waiting on one, `SEND` when only the send is. `port`
     # is the dialled port when the caller passed it, for a grant that names one.
+    # `exclude_rule` names the EXCLUDE that matched (`#3 path "/admin"`), so a refusal on a host
+    # the scope includes says which rule to delete rather than calling the host out of scope.
     record Verdict, decision : String, host : String, rule_id : Int64?, blocked : Bool,
-      excluded : Bool = false, pending : String? = nil, port : Int32? = nil do
+      excluded : Bool = false, pending : String? = nil, port : Int32? = nil,
+      exclude_rule : String? = nil do
       def blocked? : Bool
         blocked
       end
@@ -211,7 +214,8 @@ module Gori
                "with send_request to raise the approval card (only an \"Always\" answer covers later calls)"
       end
       if verdict.excluded?
-        fix = "delete or narrow the scope EXCLUDE rule that matches it (an include rule cannot override an exclude)"
+        rule = verdict.exclude_rule.try { |r| "#{r}; " }
+        fix = "delete or narrow the scope EXCLUDE rule that matches it (#{rule}an include rule cannot override an exclude)"
         if waiver && waiver_passes_exclude
           why = "the Sandbox is off, so an exclude does not stop a hand-authored send"
           return edit_exclude ? "#{fix}, or pass #{waiver} (#{why})" : "pass #{waiver} (#{why}), or ask the operator to #{fix}"
@@ -327,7 +331,8 @@ module Gori
     #
     # `port` is the dialled port, read only by an `approval` grant that names one.
     def check(url : String, host : String, port_url : String? = nil, port : Int32? = nil) : Verdict
-      decision, rule_id, excluded = evaluate(url, host, port_url)
+      decision, rule_id, exclude = evaluate(url, host, port_url)
+      excluded = !exclude.nil?
       blocked = case @gate
                 in Gate::Waived     then false
                 in Gate::Allowlist  then decision != IN_SCOPE
@@ -344,7 +349,8 @@ module Gori
           pending = PENDING_SEND
         end
       end
-      Verdict.new(decision, host, rule_id, blocked, excluded, pending, port)
+      Verdict.new(decision, host, rule_id, blocked, excluded, pending, port,
+        exclude.try { |r| %(##{r.id} #{r.match_type} #{r.pattern.inspect}) })
     end
 
     # `check` for callers that only need the yes/no (Probe's per-flow active filter).
@@ -544,17 +550,19 @@ module Gori
     # The scope's own reading of a URL, independent of the Gate: the allowlist test Probe
     # Active and the Sandbox gate share (≥1 INCLUDE matches, no EXCLUDE), plus the matched
     # include's rule id for the audit trail.
-    private def evaluate(url : String, host : String, port_url : String?) : {String, Int64?, Bool}
+    private def evaluate(url : String, host : String, port_url : String?) : {String, Int64?, Scope::Rule?}
       s = @scope
-      return {UNSCOPED, nil, false} unless s && s.configured?
+      return {UNSCOPED, nil, nil} unless s && s.configured?
       # The port-bearing EXCLUDE spelling, asked FIRST and only when there is a distinct one,
       # so a default-port target pays nothing and the common path is the one it always was.
-      return {OUT_OF_SCOPE, nil, true} if port_url && s.excluded?(port_url, host)
+      if port_url && (rule = s.matching_exclude(port_url, host))
+        return {OUT_OF_SCOPE, nil, rule}
+      end
       # `matches_url?` folds "no include matched" and "an EXCLUDE matched" into one false.
       # They need opposite remedies, so ask the exclude question separately rather than
       # letting the caller guess from a single out_of_scope.
-      return {OUT_OF_SCOPE, nil, s.excluded?(url, host)} unless s.matches_url?(url, host)
-      {IN_SCOPE, s.matching_include_id(url, host), false}
+      return {OUT_OF_SCOPE, nil, s.matching_exclude(url, host)} unless s.matches_url?(url, host)
+      {IN_SCOPE, s.matching_include_id(url, host), nil}
     end
 
     # Throttled in-place reload of the scope from its store so a mid-run rule / Sandbox

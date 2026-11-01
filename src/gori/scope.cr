@@ -294,15 +294,20 @@ module Gori
     # scanner (Discover) applies in every containment mode, INDEPENDENT of includes and the
     # display lens. (matches_url? requires includes; this asks only "is it carved out?".)
     def excluded?(url : String, host : String) : Bool
+      !matching_exclude(url, host).nil?
+    end
+
+    # The first EXCLUDE rule that matches, or nil — `excluded?` with the rule a refusal names.
+    def matching_exclude(url : String, host : String) : Rule?
       @mutex.synchronize do
-        return false if @excludes.empty?
+        return nil if @excludes.empty?
         # Both reductions happen ONCE for the whole walk — see Rule#matches?(_, _, _, _).
         # They read @string_rules, which is swapped with @excludes, so they sit inside the
         # lock with it rather than ahead of it; the section still has no yield point, and on
         # the single-threaded scheduler (no -Dpreview_mt) nothing else can run inside it.
         url_down = url_down_unlocked(url)
         bare = HostPattern.normalize(host)
-        @excludes.any? { |r| r.matches?(url, host, url_down, bare) }
+        @excludes.find { |r| r.matches?(url, host, url_down, bare) }
       end
     end
 
@@ -691,7 +696,7 @@ module Gori
       when "string"
         nil
       when "regex"
-        "invalid regex (failed to compile)" unless valid_regex?(pattern)
+        regex_error(pattern).try { |why| "invalid regex (failed to compile: #{why})" }
       else
         "unknown match type #{match_type.inspect} (expected #{TYPES.join(", ")})"
       end
@@ -813,12 +818,12 @@ module Gori
       HostPattern.bare(i ? pattern[0...i] : pattern)
     end
 
-    # Regex compiles? (the historical `valid?` body, now a helper of validation_error.)
-    private def self.valid_regex?(pattern : String) : Bool
+    # Why the regex does not compile, or nil (the historical `valid?` body, now a helper of validation_error).
+    private def self.regex_error(pattern : String) : String?
       Regex.new(pattern)
-      true
-    rescue
-      false
+      nil
+    rescue ex
+      ex.message || ex.class.name
     end
 
     # Re-read the rules from the store after every mutation so in-memory == DB

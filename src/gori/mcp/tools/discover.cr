@@ -199,6 +199,10 @@ module Gori
         when Discover::ProgressEvent
           p = ev.progress
           djob.sent = p.sent; djob.found = p.found; djob.errors = p.errors; djob.queued = p.queued
+          # The time bound is checked on every event, not only on the next finding: in a slow
+          # crawl that next finding may be minutes away, and the one before it stays out of
+          # the store (no flow_id, invisible to list_history / get_flow) until then.
+          flush_discover_if_due(djob)
         when Discover::DoneEvent
           djob.sent = ev.progress.sent; djob.found = ev.progress.found; djob.errors = ev.progress.errors
           # Read the FINAL queue depth off the Done event rather than leaving whatever the
@@ -253,11 +257,17 @@ module Gori
           surface: Gori::FlowSource::Surface::Mcp, source_ref: djob.id)
         djob.persist_buf << {pair.request, pair.response}
         djob.persist_owners << idx
-        if djob.persist_buf.size >= DISCOVER_PERSIST_BATCH ||
-           Time.instant - djob.persist_at >= DISCOVER_PERSIST_INTERVAL
+        if djob.persist_buf.size >= DISCOVER_PERSIST_BATCH
           flush_discover_persist(djob)
+        else
+          flush_discover_if_due(djob)
         end
       rescue
+      end
+
+      private def flush_discover_if_due(djob : DiscoverJob) : Nil
+        return if djob.persist_buf.empty?
+        flush_discover_persist(djob) if Time.instant - djob.persist_at >= DISCOVER_PERSIST_INTERVAL
       end
 
       # One transaction per batch instead of one per finding. Each `insert_import_batch` is a
@@ -292,8 +302,22 @@ module Gori
         # holding the writer slot past the busy budget) or a closing store, and clearing the
         # buffer over it silently lost up to 64 findings' rows per collision. The CLI twin
         # (`flush_discover`) reports the same number on STDERR and exits 1 (#1118).
-        ids = store.insert_import_batch_ids(djob.persist_buf)
-        lost = djob.persist_buf.size - ids.size
+        # Taken out of the buffer BEFORE the blocking insert: the shutdown flush
+        # (`stop_jobs_for_shutdown`) can run while the drain fiber's own flush is parked on the
+        # writer, and both sending the same buffer would write every finding twice.
+        buf = djob.persist_buf.dup
+        owners = djob.persist_owners.dup
+        clear_persist(djob)
+        begin
+          ids = store.insert_import_batch_ids(buf)
+        rescue ex
+          # A store failure must not wedge the crawl or grow the buffer forever — but it is a
+          # loss, and it is counted as one.
+          Log.warn { "discover job #{djob.id}: #{buf.size} finding(s) not saved as flows (#{ex.message})" }
+          djob.unsaved += buf.size
+          return
+        end
+        lost = buf.size - ids.size
         if lost > 0
           djob.unsaved += lost
           Log.warn { "discover job #{djob.id}: #{lost} finding(s) not saved as flows (store busy or closing) — their rows cannot be opened" }
@@ -301,15 +325,9 @@ module Gori
         # Pair by POSITION, and only when the writer answered for the whole batch — the TUI
         # twin's rule (`DiscoverController#flush_persist`): a short reply would slide every id
         # onto the wrong finding. No id just means the row has no `flow_id` to offer.
-        if ids.size == djob.persist_owners.size
-          djob.persist_owners.each_with_index { |idx, i| djob.flow_ids[idx] = ids[i] if idx }
+        if ids.size == owners.size
+          owners.each_with_index { |idx, i| djob.flow_ids[idx] = ids[i] if idx }
         end
-        clear_persist(djob)
-      rescue ex
-        # A store failure must not wedge the crawl or grow the buffer forever — but it is a
-        # loss, and it is counted as one.
-        Log.warn { "discover job #{djob.id}: #{djob.persist_buf.size} finding(s) not saved as flows (#{ex.message})" }
-        drop_unsaved(djob)
       end
 
       private def drop_unsaved(djob : DiscoverJob) : Nil

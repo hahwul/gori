@@ -1800,6 +1800,48 @@ describe "MCP fuzz — a live job's results page in index order (#1432)" do
       members["results"].as_a.map(&.["index"].as_i).should eq([0, 1, 2, 3, 5, 6, 7])
     end
   end
+
+  # Index order over a set still growing out of order: a row landing BELOW an offset already
+  # read shifted every later row, so the next page repeated one and the lowest was never seen.
+  # A live job now pages only the indices that have all completed, and says how many it holds.
+  it "pages a live run only up to the lowest index still in flight" do
+    with_store do |store|
+      tools = tools_for(store)
+      cfg = Gori::Fuzz::Config.new
+      gen = Gori::Fuzz::Generator.new(Gori::Fuzz::Template.parse("GET / HTTP/1.1\r\nHost: h\r\n\r\n"), [] of Gori::Fuzz::PayloadSet, cfg)
+      engine = Gori::Fuzz::Engine.new(gen, Gori::Fuzz::Matcher.new, NullFuzzBackend.new, cfg)
+      audit = Gori::MCP::Tools::JobAudit.new("http://h:80", nil, 1, nil, 0_i64)
+      fjob = Gori::MCP::Tools::FuzzJob.new("fz_live", 6_i64, engine, :none,
+        Gori::Fuzz::Origin.new("http", "h", 80), false, audit, tools.__db_path)
+      tools.__register_fuzz_job(fjob)
+      land = ->(i : Int32) {
+        tools.__store_fuzz_result(fjob, Gori::Fuzz::Result.new(i.to_i64, ["p#{i}"], nil, 200, 1_i64,
+          1, 1, 1_i64, nil, true, false, nil).tap { |r| fjob.clusters.add(r) })
+      }
+      read = ->(args : String) { call_json(tools, "fuzz_results", args) }
+
+      [1, 2].each { |i| land.call(i) }
+      first = read.call(%({"job_id":"fz_live"}))
+      first["results"].as_a.should be_empty # #0 is still in flight
+      first["rows_pending"].as_i.should eq(2)
+      first["has_more"].as_bool.should be_false
+
+      land.call(0)
+      read.call(%({"job_id":"fz_live","limit":2}))["results"].as_a.map(&.["index"].as_i).should eq([0, 1])
+      [5, 3].each { |i| land.call(i) }
+      # #4 is outstanding: offset 2 sees 2 and 3, never a reshuffled 1.
+      read.call(%({"job_id":"fz_live","offset":2}))["results"].as_a.map(&.["index"].as_i).should eq([2, 3])
+      land.call(4)
+      read.call(%({"job_id":"fz_live","offset":4}))["results"].as_a.map(&.["index"].as_i).should eq([4, 5])
+
+      # A finished job pages everything, held rows or not.
+      land.call(7)
+      fjob.status = :done
+      done = read.call(%({"job_id":"fz_live","offset":4}))
+      done["results"].as_a.map(&.["index"].as_i).should eq([4, 5, 7])
+      done.as_h.has_key?("rows_pending").should be_false
+    end
+  end
 end
 
 # Named extractors (#1592): one value per extractor per row, keyed by label, a sensitive one

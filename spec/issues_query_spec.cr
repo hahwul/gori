@@ -338,6 +338,22 @@ describe "Gori::Issues::Filter.refusal" do
   it "refuses a cvss comparison against a non-score" do
     Issues::Filter.refusal("cvss:>=high").not_nil!.should contain("cvss comparisons take a score")
   end
+
+  # The bar free-texts `title~jwt` whole (see `.known_field?`), which matches nothing and read
+  # to a script as "no such issues". Lenient is for an UNKNOWN field; this one is known.
+  it "refuses a known field written with `~`, naming the substring form" do
+    Issues::Filter.refusal("title~jwt").not_nil!.should contain("use `title:jwt`")
+    Issues::Filter.refusal("-sev~high status:open").not_nil!.should contain("`sev~`")
+    Issues::Filter.refusal("host~(abc").not_nil!.should contain("no regex")
+    Issues::Filter.refusal("status~open", lenient: true).should_not be_nil
+    Issues::Filter.refusal("a~b").should be_nil # not a field: free text, as before
+  end
+
+  it "points `id:` at reading an issue, not at History's flow rows" do
+    why = Issues::Filter.refusal("id:3").not_nil!
+    why.should contain("get_issue")
+    why.should_not contain("flows")
+  end
 end
 
 describe "Gori::Store::Status.from_name?" do

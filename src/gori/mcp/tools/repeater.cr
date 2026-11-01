@@ -285,7 +285,8 @@ module Gori
           return err("invalid 'target': #{why}", "INVALID_ARGUMENT", field: "target")
         end
 
-        sni = str(h, "sni") || flow_sni
+        # `""` is unset on create, as in `gori run repeater create --sni ""` (`given.presence`).
+        sni = str(h, "sni").presence || flow_sni
 
         position = int(h, "position")
         if position.nil?
@@ -709,10 +710,7 @@ module Gori
             # write `flow_id` at all); until then the disagreement is stated, not hidden.
             if (fid = existing.flow_id) && String.new(existing.request) != request
               j.field "flow_id", fid
-              j.field "derived_from_flow_note",
-                "repeater #{id} is still linked to flow #{fid}, but its request no longer holds that " \
-                "flow's bytes — the TUI reads that link as \"these bytes are a capture\" and sends " \
-                "#{Env.spell("NAME", Env::Namespace::Bind)} literally there"
+              j.field "derived_from_flow_note", Repeater::DraftMarkers.derived_from_flow_note(id, fid)
             end
           end
         })

@@ -62,7 +62,7 @@ describe ColormarkerRuleOverlay do
     it "refuses a condition that matches every flow" do
       ov = ColormarkerRuleOverlay.new(match_filter: "host:")
       ov.valid?.should be_false
-      ov.invalid_reason.should eq("this condition matches every flow")
+      ov.invalid_reason.not_nil!.should start_with("`host:` is not a value that field takes")
     end
 
     # `size:` used to be refused here as a field "this backend never implements". It is a

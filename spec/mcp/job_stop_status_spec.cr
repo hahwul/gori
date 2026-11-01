@@ -114,6 +114,47 @@ describe "MCP per-kind job stop" do
   end
 end
 
+# An origin that holds every request `hold` before answering, so a stopped job keeps its
+# in-flight requests (and `live?`) that long.
+private def holding_origin(hold : Time::Span) : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  spawn do
+    while accepted = origin.accept?
+      spawn_with(accepted) do |conn|
+        Gori::Proxy::Codec::Http1.read_head(conn)
+        sleep hold
+        conn << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+        conn.flush
+      rescue
+      ensure
+        conn.close rescue nil
+      end
+    end
+  end
+  origin.local_address.port
+end
+
+describe "MCP stop_job{wait}" do
+  # The wait holds the single MCP worker. Its own sleep loop never read the cancel, so a
+  # cancelled stop-and-confirm kept every later call queued for the whole wait_timeout_ms.
+  it "stops waiting when the call is cancelled" do
+    with_store do |store|
+      port = holding_origin(4.seconds)
+      tools = tools_for(store)
+      job_id = start_fuzz(tools, port)
+      sleep 100.milliseconds # let the requests leave, so the stop has in-flight work to wait on
+      cancel = false
+      spawn do
+        sleep 150.milliseconds
+        cancel = true
+      end
+      t = Time.instant
+      tools.call("stop_job", JSON.parse({job_id: job_id, wait: true, wait_timeout_ms: 10_000}.to_json), -> { cancel })
+      (Time.instant - t).should be < 2.seconds
+    end
+  end
+end
+
 describe "MCP job ids of the wrong kind (#1395)" do
   it "names the tool that reads a job another kind's tool was handed" do
     with_store do |store|

@@ -591,6 +591,22 @@ describe Gori::MCP::Server do
         body["truncated"].as_bool.should be_false
       end
     end
+
+    # The mode default with no body_mode is AUTO_BODY_BYTES, not the 64 KB full cap: a body
+    # between the two tells them apart, which the 5-byte one above cannot.
+    it "treats a non-positive max_body_bytes as absent, so the default cut still applies" do
+      with_store do |store|
+        big = "a" * (Gori::MCP::Tools::AUTO_BODY_BYTES * 2)
+        id = mcp_seed_flow(store, "h.test", "GET", "/b", 200,
+          resp_head: "HTTP/1.1 200 OK\r\nContent-Length: #{big.bytesize}\r\n\r\n", resp_body: big.to_slice)
+        {0, -5}.each do |n|
+          body = mcp_ok_json(tools_for(store, allow_actions: false), "get_flow", %({"id":#{id},"max_body_bytes":#{n}}))["response_body"]
+          body["text"].as_s.size.should eq(Gori::MCP::Tools::AUTO_BODY_BYTES)
+          body["truncated"].as_bool.should be_true
+          body["more"]?.should_not be_nil
+        end
+      end
+    end
   end
 
   # One `Tools` keeps the last decoded body between pages instead of inflating it again for
@@ -1392,6 +1408,24 @@ describe "MCP get_response_body_chunk find" do
       id = mcp_seed_flow(store, "ex.test", "GET", "/", 200, resp_body: "x".to_slice)
       r = chunk_call(store, %[{"flow_id":#{id},"find":"("}])
       {r.is_error, r.error_code, r.field}.should eq({true, "INVALID_ARGUMENT", "find"})
+    end
+  end
+end
+
+# A filtered page empty only because the scanned window held no match must not read as the
+# end of the feed: `has_more` says the scan filled `limit`.
+describe "MCP list_events has_more" do
+  it "is true on a full window the filter emptied, false at the feed's end" do
+    with_store do |store|
+      5.times { |i| store.insert_event("probe", "noise", :info, "n#{i}") }
+      store.insert_event("probe", "want", :info, "match")
+      tools = tools_for(store, allow_actions: false)
+      j = mcp_ok_json(tools, "list_events", %({"since":0,"kind":"want","limit":3}))
+      j["events"].as_a.should be_empty
+      j["has_more"].as_bool.should be_true
+      j = mcp_ok_json(tools, "list_events", %({"since":#{j["next_cursor"]},"kind":"want","limit":10}))
+      j["events"].as_a.size.should eq(1)
+      j["has_more"].as_bool.should be_false
     end
   end
 end

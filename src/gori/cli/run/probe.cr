@@ -496,6 +496,9 @@ module Gori
             if entry.kind == "custom"
               abort "gori run probe rules #{verb}: '#{id}' is a GLOBAL custom rule (stored in settings.json, shared across projects) — it cannot be toggled per project" if entry.scope == "global"
               row_id = probe_custom_row_id(id) || abort("gori run probe rules #{verb}: malformed custom rule id '#{id}'")
+              if enabled && (row = store.probe_custom_rules.find { |r| r.id == row_id }) && Probe::CustomRule.inert?(row.side, row.region, row.kind)
+                abort "gori run probe rules #{verb}: '#{id}' uses a side/region/kind this gori does not know (#{row.side}/#{row.region}/#{row.kind}) — it is inert and cannot be enabled"
+              end
               store.set_probe_custom_rule_enabled(row_id, enabled)
             else
               store.set_probe_rule_enabled(id, enabled)
@@ -565,7 +568,7 @@ module Gori
         return "invalid --region '#{region}' (#{Probe::CustomRule::REGIONS.join("|")})" unless Probe::CustomRule::REGIONS.includes?(region)
         # A regex PCRE rejects would match nothing forever while reporting the rule saved fine.
         return nil if Probe::CustomRule.valid_pattern?(pattern, kind)
-        return "invalid regex --pattern (PCRE rejected it)" unless kind == "exec"
+        return "invalid regex --pattern (PCRE rejected it#{SafeRegexp.compile_error(pattern).try { |m| ": #{m}" }})" unless kind == "exec"
         "--pattern is the command to run for --exec and it does not tokenize " \
         "(it is exec'd directly — there is no shell, so quote arguments, not pipelines)"
       end

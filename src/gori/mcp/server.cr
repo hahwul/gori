@@ -94,6 +94,10 @@ module Gori
           sig.trap do |s|
             exit 128 + s.value if @signalled
             @signalled = s
+            # A signal is the supervisor ending us, not a piped client still owed answers:
+            # every request we hold is cancelled, so the one in flight stops at its next poll
+            # (a retest, a probe scan, a send) and the queued ones never start.
+            @cancelled.concat(@pending)
             @input.close rescue nil
           end
         end
@@ -131,6 +135,9 @@ module Gori
         rescue ex : IO::Error
           Log.info { "mcp: input stream closed (#{ex.message})" }
         ensure
+          # Before the drain, which waits out the call in flight: a `wait_ms` hold there would
+          # otherwise keep every live job sending until it expired (`Tools#shutting_down!`).
+          @tools.shutting_down!
           @courier.try(&.stop)
           work.close
           drained.receive
@@ -138,6 +145,7 @@ module Gori
           # behind us. The store is closed by the caller (cli/mcp.cr); the marker is ours (#815).
           @tools.stop_jobs_for_shutdown
           @tools.close_ws_sessions(wait: true) # live WS sessions must not outlive the process (#1630)
+          @tools.deregister_oast_for_shutdown  # nor an ad-hoc OAST registration
           @tools.release_presence
         end
       end

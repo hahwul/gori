@@ -1612,8 +1612,12 @@ module Gori
       # listing does not, and an agent that wants the check for a row calls
       # `list_retest_steps` for it. Same split `body_mode` makes between a listing and a
       # detail: a per-row read belongs on the call that asked for one row.
+      #
+      # `items_cap` bounds `links` and `evidence` alike: an issue can carry hundreds of either,
+      # and one such row was a 567 KB reply. A cut array says `<name>_total` and
+      # `<name>_truncated`; list_links / list_evidence page the whole set.
       def self.issue(j : JSON::Builder, f : Store::Issue, store : Store? = nil, *,
-                     retest : Bool = false, notes_preview : Int32? = nil) : Nil
+                     retest : Bool = false, notes_preview : Int32? = nil, items_cap : Int32? = nil) : Nil
         j.object do
           j.field "id", f.id
           j.field "created_at", f.created_at
@@ -1629,7 +1633,7 @@ module Gori
           j.field "status", f.status.label
           j.field "cvss", f.cvss.try { |c| Issues::Export.one_line(c) }
           j.field "cvss_score", f.cvss_score
-          j.field "host", f.host.try { |h| Issues::Export.one_line(h) }
+          j.field "host", f.host.try { |h| Issues::Export.one_line(h).presence } # blank → null, as Export.json (#1778)
           # The flow the issue was filed from — and the FIRST entry of `links` below, which is
           # where an agent reads everything backing the issue. Kept as its own field for
           # compatibility (`create_issue(flow_id:)` writes it, SARIF's webRequest reads it);
@@ -1645,15 +1649,15 @@ module Gori
           else
             j.field "notes", notes
           end
-          j.field "links" do
-            j.array { Issues::Export.append_links_json(j, f, store) if store }
-          end
+          links = 0
+          j.field("links") { j.array { links = Issues::Export.append_links_json(j, f, store, items_cap) } }
+          emit_items_cut(j, "links", links, items_cap)
           # Frozen copies (#1038): provenance and hashes only, like the export — an agent that
           # wants the bytes reads the flow it names while it still exists; the copy itself is
           # not served over MCP.
-          j.field "evidence" do
-            j.array { Issues::Export.append_evidence_json(j, f, store) if store }
-          end
+          evidence = 0
+          j.field("evidence") { j.array { evidence = Issues::Export.append_evidence_json(j, f, store, items_cap) } }
+          emit_items_cut(j, "evidence", evidence, items_cap)
           # The RETEST (#1036), and only when the issue has one — the state an agent needs to
           # decide what to do next with a finding it just read: is there a reproducible check,
           # and what did it say last time. Without it the only way to learn a check exists is
@@ -1664,6 +1668,12 @@ module Gori
           # indexed reads, beside the two `links`/`evidence` already make here.
           emit_issue_retest(j, f, store) if retest && store
         end
+      end
+
+      private def self.emit_items_cut(j : JSON::Builder, name : String, total : Int32, cap : Int32?) : Nil
+        return unless cap && total > cap
+        j.field "#{name}_total", total
+        j.field "#{name}_truncated", true
       end
 
       private def self.emit_issue_retest(j : JSON::Builder, f : Store::Issue, store : Store) : Nil

@@ -1537,7 +1537,7 @@ module Gori
         subject = Repeater::Timing::Present::Subject.new(
           a_label: labels[0]? || "A", b_label: labels[1]? || "B",
           origin: "#{plan.scheme}://#{plan.host}:#{plan.port}", transport: transport,
-          mode: run_mode.to_s.underscore)
+          mode: run_mode.to_s.underscore, warmup: warmup)
         if format == :json
           STDOUT.puts Repeater::Timing::Present.report_json(rep, subject)
         else
@@ -1632,7 +1632,7 @@ module Gori
         # differs would be silently sent under the anchor's — refuse instead of flattening it.
         # The signature uses the EFFECTIVE values (the flags fold in: `--tls-preset` / `--verbatim`
         # make those columns uniform), so it only fires on a real stored difference.
-        sigs = [] of {String, String, Int32, Bool, String?, String?}
+        sigs = [] of Repeater::RaceSignature
         wires = [] of Bytes
         labels = [] of String
         loaded.each do |(id, rec)|
@@ -1643,16 +1643,14 @@ module Gori
             outbound.close
             repeater_plan_abort(cmd_label, ex, "session ##{id}")
           end
-          sigs << {probe.scheme, probe.host, probe.port, !verbatim && rec.auto_content_length?,
-                   rec.sni, tls_preset || rec.tls_preset}
+          sigs << Repeater.race_signature(probe.scheme, probe.host, probe.port,
+            !verbatim && rec.auto_content_length?, rec.sni, tls_preset || rec.tls_preset)
           wires << rec.request
           labels << "##{id} #{race_request_line(rec.request)}"
         end
-        first = sigs.first
-        unless sigs.all? { |s| s == first }
+        if differs = Repeater.race_signature_difference(sigs)
           outbound.close
-          abort "#{cmd_label}: the sessions differ in origin, Content-Length policy, SNI or " \
-                "TLS preset — a race rides one connection shape (origins: " \
+          abort "#{cmd_label}: the sessions differ in #{differs} — a race rides one connection shape (origins: " \
                 "#{sigs.map { |(s, h, po, _, _, _)| "#{s}://#{h}:#{po}" }.uniq!.join(", ")})"
         end
 
@@ -3563,9 +3561,14 @@ module Gori
       # because a rule that fails (a hook, a refused binding) records an event row, and the
       # store the plan was read from is already closed by the time a plan exists.
       private def self.apply_request_rules(plan : Repeater::Plan, project : Project) : {Repeater::Plan, Bool}
-        with_store(project) do |store|
+        applied = with_store(project) do |store|
           Repeater::RequestRules.apply(plan, Gori::Rules.load(store))
         end
+        if id = applied[0].skipped_stub_rule
+          STDERR.puts "gori run: note: --apply-rules does not run short_circuit #{applied[0].skipped_stub_ref || "rule ##{id}"}; the live proxy " \
+                      "would answer this request from it, and this send goes upstream"
+        end
+        applied
       end
 
       # The parsed status line and headers, beside the raw `head` a script would otherwise have

@@ -166,6 +166,11 @@ module Gori
             end
             j.field "removed_count", report.removed.size
             j.field "applied", applied
+            # As `update_repeater` reports it: the minimized bytes are no longer the seed's.
+            if applied && (fid = rec.flow_id)
+              j.field "flow_id", fid
+              j.field "derived_from_flow_note", Repeater::DraftMarkers.derived_from_flow_note(id, fid)
+            end
             emit_auto_refresh_disarmed(j, disarmed)
             j.field "minimized_request", report.minimized_text
           end

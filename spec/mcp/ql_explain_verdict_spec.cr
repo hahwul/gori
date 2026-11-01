@@ -137,4 +137,20 @@ describe "MCP ql_explain verdict" do
       w.find(&.includes?("no such field")).not_nil!.should contain("list_history's 'ids' argument")
     end
   end
+
+  # `tag:` is list_sitemap's own field (`Sitemap.split_tag_terms`): it runs there, and only the
+  # two QL tools refuse it.
+  it "names list_sitemap apart for a tag: term it applies" do
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: false, verify_upstream: false)
+      tools.call("list_sitemap", JSON.parse(%({"query":"tag:admin"}))).is_error.should be_false
+      list_history_error(store, "tag:admin").should_not be_nil
+      j = explain(store, "tag:admin")
+      j["refused_by"].as_a.map(&.as_s).should eq(["list_history", "probe_scan"])
+      w = j["warnings"].as_a.map(&.as_s).find!(&.includes?("no such field"))
+      w.should contain("list_history / probe_scan REFUSE")
+      explain(store, "tag:admin methd:GET")["refused_by"].as_a.size.should eq(3)
+      explain(store, "host:a")["refused_by"].as_a.should be_empty
+    end
+  end
 end

@@ -558,6 +558,17 @@ describe "Gori::Repeater::Plan.target_error" do
       # …and a refusal quotes what was typed, not the stand-in it was judged by.
       R::Plan.target_error("http://not a host/$BASE").should eq(%(could not determine a target host from "http://not a host/$BASE"))
       R::Plan.target_error("http://127.0.0.1:8080/$BASE?q=1").should be_nil
+      # A var in the authority stands in for its own spot only, so the bytes typed beside it
+      # are judged too — and a refusal still quotes what was typed.
+      R::Plan.target_error("http://$BASE:99999").should eq(%(target port 99999 is out of range (1-65535)))
+      R::Plan.target_error("http://$BASE bad").should eq(%(could not determine a target host from "http://$BASE bad"))
+      # …while every spot a var could fill stays sendable.
+      R::Plan.target_error("http://$BASE:8080/x").should be_nil
+      R::Plan.target_error("http://$BASE:$PORT").should be_nil
+      R::Plan.target_error("http://127.0.0.1:80$PORT").should be_nil
+      R::Plan.target_error("http://[$BASE]:443").should be_nil
+      R::Plan.target_error("http://[::1]:$PORT").should be_nil
+      R::Plan.target_error("http://user:$PORT@$BASE").should be_nil
     end
     with_env_vars([{"SCHEME", "ftp"}]) do
       R::Plan.target_error("$SCHEME://h").should be_nil
@@ -566,6 +577,11 @@ describe "Gori::Repeater::Plan.target_error" do
       with_env_vars([{"BASE", "set me to host:port"}]) do
         R::Plan.target_error("http://$ENV.BASE/x").should be_nil
         R::Plan.target_error("ftp://$ENV.BASE").not_nil!.should contain(%(unsupported target scheme "ftp"))
+        R::Plan.target_error("http://$ENV.BASE:99999").not_nil!.should contain("port 99999 is out of range")
+        R::Plan.target_error("http://$ENV.BASE bad").not_nil!.should contain("could not determine a target host")
+        R::Plan.target_error("http://$ENV.BASE:8080").should be_nil
+        # A GEN/BIND var still stands in for the whole authority.
+        R::Plan.target_error("http://$GEN.UUID:99999").should be_nil
       end
     end
   end

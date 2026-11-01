@@ -185,7 +185,7 @@ module Gori
       # wedge every other call behind it (#1630). One waiter per session (`WsSession#wait`).
       private def ws_wait_for_reply(session : Repeater::WsSession, before : Int64, wait_ms : Int64) : Nil
         deadline = Time.instant + wait_ms.milliseconds
-        until cancelled? || session.closed? || session.transcript(before).any?(&.reply?)
+        until hold_cut? || session.closed? || session.transcript(before).any?(&.reply?)
           left = deadline - Time.instant
           break if left <= Time::Span.zero
           session.wait(left < WS_WAIT_SLICE ? left : WS_WAIT_SLICE)
@@ -196,7 +196,9 @@ module Gori
       private def ws_session_status(h) : Result
         job = lookup_job(h, @ws_jobs, "ws_session", "status")
         return job if job.is_a?(Result)
-        after = optional_int_arg(h, "after") || 0_i64
+        # Clamped to the rows that exist: a bogus `after` (99 past the end, -1) was echoed back
+        # as `cursor`, and a client following it skipped every frame up to it.
+        after = (optional_int_arg(h, "after") || 0_i64).clamp(0_i64, job.session.last_seq)
         # A session is long-lived, so `wait_ms` here waits for a reply past `after`, not for
         # the session to end.
         wait_ms = wait_ms_arg(h)

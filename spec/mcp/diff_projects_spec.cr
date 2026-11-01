@@ -257,4 +257,21 @@ describe "MCP diff_projects" do
       end
     end
   end
+
+  it "echoes an out-of-range offset or limit as clamped" do
+    with_diff_home do |registry|
+      seed_diff_project(registry, "q1") { |s| diff_seed_flow(s, "/a", 200, 10) }
+      newer = seed_diff_project(registry, "q3") { |s| diff_seed_flow(s, "/a", 404, 10) }
+      store = Gori::Store.open(newer.db_path, background_index: false)
+      begin
+        payload = drive_diff(newer, store, %({"from":"q1","offset":-1,"limit":0}))
+        payload["offset"].as_i.should eq(0)
+        payload["requested_offset"].as_i.should eq(-1)
+        payload["requested_limit"].as_i.should eq(0)
+        payload["pagination_warning"].as_s.should contain("clamped")
+      ensure
+        store.close
+      end
+    end
+  end
 end

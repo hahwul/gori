@@ -14,6 +14,29 @@ module Gori::Repeater
   # the TUI gesture that forms a race, since that is where the largest group comes from.
   MAX_RACE_MEMBERS = 20
 
+  # One race member's dial signature: scheme, host, port, effective auto-Content-Length, SNI and
+  # TLS preset. The group rides ONE Sender built from the anchor, so every member must share it.
+  alias RaceSignature = {String, String, Int32, Bool, String?, String?}
+
+  private RACE_SIGNATURE_FIELDS = {"origin", "origin", "origin", "Content-Length policy", "SNI", "TLS preset"}
+
+  # A member's signature with the SNI as `Plan` reads it (`sni.presence`): a stored `""` dials
+  # exactly like an unset SNI, so it must not split a group.
+  def self.race_signature(scheme : String, host : String, port : Int32, auto_cl : Bool,
+                          sni : String?, tls_preset : String?) : RaceSignature
+    {scheme, host, port, auto_cl, sni.presence, tls_preset}
+  end
+
+  # The fields the members disagree on (`"SNI"`, `"origin and TLS preset"`), or nil when they
+  # all share the first member's signature — so the refusal names what actually differs.
+  def self.race_signature_difference(sigs : Array(RaceSignature)) : String?
+    first = sigs.first
+    differing = RACE_SIGNATURE_FIELDS.each_with_index.compact_map do |(name, i)|
+      name if sigs.any? { |s| s[i] != first[i] }
+    end.to_a.uniq!
+    differing.empty? ? nil : differing.join(" and ")
+  end
+
   # Why one option set cannot become a runnable send.
   #
   # The builder never writes the user-facing sentence: every surface phrases these in its
@@ -339,6 +362,11 @@ module Gori::Repeater
 
     # What `apply_rules` changed (`RequestRules.apply`), for the History row's rule provenance.
     property rewrite : Store::Rewrite? = nil
+    # The short-circuit rule the live proxy would have ANSWERED this request with, which
+    # `apply_rules` does not run (`RequestRules.apply`): the request still went upstream.
+    property skipped_stub_rule : Int64? = nil
+    # Its label with the SCOPE ("project rule #3 · inline 200"): the two stores number rules apart.
+    property skipped_stub_ref : String? = nil
 
     def initialize(@sender : Sender, @requests : Array(Bytes), @scheme : String,
                    @host : String, @port : Int32, @http2 : Bool,
@@ -729,8 +757,23 @@ module Gori::Repeater
       scheme, sep, rest = raw.strip.partition("://")
       return nil if sep.empty? || !Env.token_names(scheme).empty?
       authority = rest[0, {'/', '?', '#'}.compact_map { |c| rest.index(c) }.min? || rest.size]
-      probe = "#{scheme}://#{Env.token_names(authority).empty? ? authority : "h"}"
+      probe = "#{scheme}://#{authority_stand_in(authority)}"
       literal_target_error(probe).try &.gsub(probe.inspect, raw.inspect)
+    end
+
+    # `authority` with each var standing in for a value that makes its own spot valid — a port
+    # digit after the port's `:`, a host label elsewhere — so the bytes typed BESIDE a var
+    # (`$ENV.BASE:99999`, `$ENV.BASE bad`) are still judged. A var outside the ENV namespace
+    # (GEN, BIND) stands in for the whole authority, as every var did before.
+    private def self.authority_stand_in(authority : String) : String
+      names = Env.token_names(authority, ns: Env::Namespace::Env)
+      marked = Env.expand(authority, names.to_h { |n| {n, "\0"} })
+      return "h" unless Env.token_names(marked).empty?
+      colon = marked.rindex(':')
+      if colon && colon > (marked.rindex(']') || -1) && marked.index('\0', colon)
+        marked = "#{marked[0..colon]}1"
+      end
+      marked.gsub('\0', 'h')
     end
 
     private def self.literal_target_error(raw : String) : String?

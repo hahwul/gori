@@ -246,6 +246,22 @@ describe Gori::Outbound do
       end
     end
 
+    # A PATH exclude on an included host: the refusal said the host was "outside the scope", so
+    # an agent added an include that changed nothing. The verdict names the rule, and so does
+    # the shared remedy every surface prints.
+    it "names the EXCLUDE rule that refused an included host" do
+      with_scope do |scope, _store|
+        scope.add("include", "host", "acme.test")
+        scope.add("exclude", "string", "/admin")
+        v = Gori::Outbound.agent(scope, false).check_request("https", "acme.test", "/admin/x", 443)
+        v.blocked?.should be_true
+        rule = v.exclude_rule.not_nil!
+        rule.should match(/\A#\d+ string "\/admin"\z/)
+        Gori::Outbound.remedy(v, nil).should contain("matches it (#{rule}; an include rule cannot override an exclude)")
+        Gori::Outbound.agent(scope, false).check_request("https", "acme.test", "/ok", 443).exclude_rule.should be_nil
+      end
+    end
+
     # The other half of the split, and the one that must NOT move: an EXCLUDE reads the port,
     # an INCLUDE never has. Giving the allowlist a port would put every :8443 origin outside a
     # rule that names the host and path — under the sandbox that REFUSES a target the operator

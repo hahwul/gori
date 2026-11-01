@@ -125,7 +125,13 @@ module Gori
       # server process) reads with the ones that would answer; empty when there are none.
       private def held_jobs_hint(kind : String, held : Array(String)) : String
         return "" if held.empty?
-        " — this server holds #{kind} job#{held.size == 1 ? "" : "s"} #{held.last(5).join(", ")}"
+        " — this server holds #{kind} job#{held.size == 1 ? "" : "s"} #{held_ids(held)}"
+      end
+
+      # The newest five ids, and how many more there are: a bare `last(5)` read as the whole list.
+      private def held_ids(held : Array(String)) : String
+        more = held.size - 5
+        "#{held.last(5).join(", ")}#{more > 0 ? " (+#{more} more; list_jobs shows all)" : ""}"
       end
 
       # The tool that reads `verb` for `kind`. The five async kinds share `_status`/`_results`/
@@ -190,7 +196,7 @@ module Gori
         held = {@jobs, @mine_jobs, @discover_jobs, @sequence_jobs, @authorize_jobs, @ws_jobs}.flat_map do |jobs|
           jobs.compact_map { |k, j| k if j.db_path == @db_path }
         end
-        held.empty? ? "" : " — this server holds job#{held.size == 1 ? "" : "s"} #{held.last(5).join(", ")}"
+        held.empty? ? "" : " — this server holds job#{held.size == 1 ? "" : "s"} #{held_ids(held)}"
       end
 
       # Stop a fuzz, mine, discover, sequence, or authorize job, or close a ws_* session. With wait:true, blocks (yielding to the runner
@@ -211,18 +217,10 @@ module Gori
         wait = bool_arg(h, "wait", false)
         budget = optional_int_arg(h, "wait_timeout_ms").try(&.clamp(1_i64, 60_000_i64)) || 10_000_i64
         return emit_stop_result(job, already_finished: true) unless request_stop(job)
-        waited_out = false
-        if wait
-          deadline = Time.utc.to_unix_ms + budget
-          while job.live?
-            if Time.utc.to_unix_ms >= deadline
-              waited_out = true
-              break
-            end
-            sleep 20.milliseconds
-          end
-        end
-        emit_stop_result(job, waited_out)
+        # The shared hold, so a cancel (or the session closing) frees the single worker; a
+        # private sleep loop here held it for the whole budget whatever the client said.
+        long_poll(budget) { !job.live? } if wait
+        emit_stop_result(job, wait && job.live? && !hold_cut?)
       end
 
       # At shutdown (`Server#run`): the process is about to exit, and a job left running left a
@@ -233,6 +231,9 @@ module Gori
         {@jobs, @mine_jobs, @discover_jobs, @sequence_jobs, @authorize_jobs}.each do |jobs|
           jobs.each_value { |job| request_stop(job) }
         end
+        # A live crawl's findings not yet batched into the store: its DoneEvent flush would
+        # come after the store is closed, so they are written now or lost.
+        @discover_jobs.each_value { |djob| flush_discover_persist(djob) if djob.live? }
         @jobs.each_value do |fjob|
           next unless fjob.live?
           finish_fuzz_persistence(fjob, :stopped)

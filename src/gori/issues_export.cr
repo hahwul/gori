@@ -235,9 +235,14 @@ module Gori
       # The JSON twin of `append_frozen_evidence`: one object per copy, provenance and hashes,
       # no bytes. `error` and `url` are captured text and go through `one_line` like every
       # other captured string in this array's parent object.
-      def self.append_evidence_json(j : JSON::Builder, f : Store::Issue, store : Store?) : Nil
-        return unless store
-        store.issue_evidence(f.id).each { |m| j.object { evidence_fields(j, m) } }
+      # `cap`: emit only the first `cap` copies (MCP's reply budget); the export passes none.
+      # Returns how many there are in all, so a capped caller can say what it left out.
+      def self.append_evidence_json(j : JSON::Builder, f : Store::Issue, store : Store?,
+                                    cap : Int32? = nil) : Int32
+        return 0 unless store
+        metas = store.issue_evidence(f.id)
+        (cap ? metas.first(cap) : metas).each { |m| j.object { evidence_fields(j, m) } }
+        metas.size
       end
 
       # ONE copy's provenance fields — the object the JSON export, MCP `get_issue` /
@@ -272,10 +277,12 @@ module Gori
       # PRIMARY flow leads it and appears exactly once (`Links.issue_links`); `flow_id` stays
       # on the object beside it, which is the compat spelling of the same fact — the first
       # entry of this array.
-      def self.append_links_json(j : JSON::Builder, f : Store::Issue, store : Store?) : Nil
-        return unless store
+      # `cap` and the return value as `append_evidence_json`'s; only the emitted links resolve.
+      def self.append_links_json(j : JSON::Builder, f : Store::Issue, store : Store?,
+                                 cap : Int32? = nil) : Int32
+        return 0 unless store
         links = Links.issue_links(store.list_links(Store::LinkOwnerKind::Issue, f.id), f)
-        Links.resolve_all(store, links).each do |res|
+        Links.resolve_all(store, cap ? links.first(cap) : links).each do |res|
           j.object do
             # `id` and `ref_kind` are the names `gori run links` and MCP `list_links` use for
             # the same row; `kind` stays for existing readers (#1685). A synthesised seed flow
@@ -301,6 +308,7 @@ module Gori
             j.field "stale", res.stale?
           end
         end
+        links.size
       end
 
       # The displayable view of ONE captured body, and the single place the evidence rules live:

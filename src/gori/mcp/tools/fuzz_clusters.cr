@@ -77,7 +77,8 @@ module Gori
           pg = page_args(h, FUZZ_RESULTS_LIMIT)
           cluster = fjob.clusters[id]?
           return not_found("no cluster #{Fuzz::Shape.hex(id)} in fuzz job #{fjob.id}") unless cluster
-          picked = (0...rows.size).select { |i| Fuzz::Clusters.key(rows[i])[0] == id }
+          # Only what a live run can no longer reorder (`FuzzJob#done_prefix`), as `fuzz_results`.
+          picked = (0...rows.size).select { |i| fjob.pageable?(rows[i]) && Fuzz::Clusters.key(rows[i])[0] == id }
           picked.select! { |i| rows[i].matched? } if matched_only
           picked.sort_by! { |i| {rows[i].index, i} } # index order, as `fuzz_results` pages (#1432)
           page = picked[pg.offset, pg.limit]? || [] of Int32

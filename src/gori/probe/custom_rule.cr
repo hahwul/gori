@@ -40,6 +40,14 @@ module Gori
       REGIONS = %w[whole header body]
       KINDS   = %w[string regex exec]
 
+      # A row whose side/region/kind is a label this build does not know (a newer gori, a hand
+      # edit) is inert: it never runs and is never enabled. `match_evidence` would otherwise read
+      # any unknown kind as a substring match — the same projection-as-permission AGENTS.md
+      # Invariant 2 forbids for Rewriter rows.
+      def self.inert?(side : String, region : String, kind : String) : Bool
+        !(SIDES.includes?(side) && REGIONS.includes?(region) && KINDS.includes?(kind))
+      end
+
       # Which of an update's GIVEN `title`/`pattern` is blank ("title" | "pattern"), or nil. A
       # blank one is refused rather than read as "keep": create refuses it, and an update that
       # answered success while keeping the old value told the caller its edit landed. Shared by
@@ -80,7 +88,7 @@ module Gori
 
       def check(ctx : Passive::Context, acc : Array(Detection)) : Nil
         return unless enabled
-        return if pattern.empty?
+        return if pattern.empty? || CustomRule.inert?(side, region, kind)
         text = region_text(ctx)
         return if text.nil? || text.empty?
         hit, evidence = kind == "exec" ? exec_evidence(text, ctx) : match_evidence(text)

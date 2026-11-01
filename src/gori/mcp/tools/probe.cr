@@ -322,8 +322,8 @@ module Gori
           end
           row_id = custom_rule_row_id(id)
           return err("malformed custom rule id '#{id}'", "INVALID_ARGUMENT", field: "id") unless row_id
-          if enabled && store.probe_custom_rules.any? { |r| r.id == row_id && r.kind == "exec" } && (denied = exec_refusal)
-            return denied
+          if enabled && (refused = custom_enable_refusal(id, row_id))
+            return refused
           end
           ok = store.set_probe_custom_rule_enabled(row_id, enabled)
         else
@@ -336,6 +336,18 @@ module Gori
         # `retryable: true` the way every other PROJECT_BUSY refusal in this server does.
         return busy("scan rule '#{id}' NOT updated (store busy or unwritable); it is unchanged") unless ok
         Result.new({"id" => id, "enabled" => enabled, "kind" => entry.kind}.to_json)
+      end
+
+      # Why a project custom rule may not be switched ON: an inert row (a side/region/kind this
+      # build does not know) never runs, and an exec rule needs the exec permission.
+      private def custom_enable_refusal(id : String, row_id : Int64) : Result?
+        row = store.probe_custom_rules.find { |r| r.id == row_id }
+        return nil unless row
+        if Probe::CustomRule.inert?(row.side, row.region, row.kind)
+          return err("'#{id}' uses a side/region/kind this gori does not know (#{row.side}/#{row.region}/#{row.kind}) — it is inert and cannot be enabled",
+            "INVALID_ARGUMENT", field: "id")
+        end
+        exec_refusal if row.kind == "exec"
       end
 
       # create_probe_rule — add a PROJECT custom match rule (string/regex over one region of a
@@ -478,7 +490,7 @@ module Gori
           # looking for a regex bug in something that is not a regex.
           return err(kind == "exec" \
                               ? "'pattern' is the command to run for match_kind=exec and it does not tokenize — " \
-                                "it is exec'd directly with no shell, so quote arguments, not pipelines" : "invalid regex pattern (PCRE rejected it)",
+                                "it is exec'd directly with no shell, so quote arguments, not pipelines" : "invalid regex pattern (PCRE rejected it#{SafeRegexp.compile_error(pattern).try { |m| ": #{m}" }})",
             "INVALID_ARGUMENT", field: "pattern")
         end
         {side, region, kind}
@@ -683,7 +695,7 @@ module Gori
           s.field "aggressive", boolprop("with active:true, raise caps and widen bypass sets (implies unsafe); authorized targets only")
           s.field "insecure", boolprop("with active:true, skip upstream TLS verification")
           s.field "limit", limitprop("max issue groups to return", PROBE_SCAN_LIMIT)
-          s.field "affected_limit", limitprop("affected URLs listed per row (affected_count has them all)", PROBE_AFFECTED_LIMIT)
+          s.field "affected_limit", limitprop("affected URLs listed per row; affected_count stops at #{Store::PROBE_AFFECTED_CAP} (affected_capped:true)", PROBE_AFFECTED_LIMIT)
           s.field "persist", boolprop("also WRITE findings to the persisted list (probe_issues), merged by (code, host); refused under --read-only. Dismissed stays dismissed; rescans raise hit_count")
         end
 
@@ -698,7 +710,7 @@ module Gori
           s.field "host", strprop("only findings for this exact host")
           s.field "limit", limitprop("max rows", PROBE_ISSUES_LIMIT)
           s.field "offset", intprop("start row (default 0)")
-          s.field "affected_limit", limitprop("affected URLs listed per row (affected_count has them all)", PROBE_AFFECTED_LIMIT)
+          s.field "affected_limit", limitprop("affected URLs listed per row; affected_count stops at #{Store::PROBE_AFFECTED_CAP} (affected_capped:true)", PROBE_AFFECTED_LIMIT)
         end
 
         tool j, "list_probe_rules",

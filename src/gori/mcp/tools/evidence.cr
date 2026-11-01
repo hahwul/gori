@@ -81,15 +81,15 @@ module Gori
         metas = issue_id ? store.issue_evidence(issue_id) : store.evidence
         # Under REPLY_ROWS_BUDGET (#1649): a row carries two digests and a URL, so an archive
         # of a hundred copies outgrew it. `offset` pages the rest.
-        offset = clamp_nonneg(optional_int_arg(h, "offset"))
-        page = offset_slice(metas, offset)
+        pg = offset_args(h)
+        page = offset_slice(metas, pg.offset)
         parts = fit_rows(page) { |rj, m, _| rj.object { Serialize.evidence_meta(rj, m) } }
         Result.new(JSON.build do |j|
           j.object do
             j.field "issue_id", issue_id
             j.field "scope", issue_id ? "issue" : "project"
             j.field("evidence") { raw_rows(j, parts) }
-            emit_offset_page(j, offset, parts.size, page.size, metas.size)
+            emit_offset_page(j, pg, parts.size, page.size, metas.size)
             j.field "total", metas.size
             j.field "bytes", metas.sum(&.bytes)
           end

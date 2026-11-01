@@ -224,4 +224,15 @@ describe "MCP frozen evidence" do
       store.count_evidence.should eq(0)
     end
   end
+
+  # Clamped, not silent: the echo every `page_args` list makes (`emit_clamp`).
+  it "echoes an out-of-range offset as clamped" do
+    with_store do |store|
+      j = mcp_ok_json(tools_for(store), "list_evidence", %({"offset":-3}))
+      j["offset"].as_i.should eq(0)
+      j["requested_offset"].as_i.should eq(-3)
+      j["pagination_warning"].as_s.should contain("clamped")
+      mcp_ok_json(tools_for(store), "list_evidence", %({"offset":0})).as_h.has_key?("pagination_warning").should be_false
+    end
+  end
 end

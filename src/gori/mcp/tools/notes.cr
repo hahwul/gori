@@ -5,9 +5,25 @@ require "../../issues_export" # Issues::Export.one_line
 module Gori
   module MCP
     class Tools
+      NOTES_LIMIT = PageLimit.new(100, 500)
+
+      # Characters of a note's first line a `title` carries; get_note has the text whole.
+      NOTE_TITLE_MAX = 200
+
       @[Tool("list_notes")]
-      private def list_notes : Result
+      private def list_notes(h) : Result
         doc = Notes.load(store)
+        cur_id = doc.notes[doc.cur]?.try(&.id)
+        pg = page_args(h, NOTES_LIMIT)
+        page = doc.notes[pg.offset, pg.limit]? || [] of Notes::NoteEntry
+        parts = fit_rows(page) do |rj, entry, _|
+          {
+            id:         entry.id,
+            title:      note_title(entry),
+            line_count: Notes.line_count(entry.text),
+            current:    cur_id == entry.id,
+          }.to_json(rj)
+        end
         Result.new(JSON.build do |j|
           j.object do
             # The current note's ID, not `Doc#cur`'s 0-based INDEX, which is what this used to
@@ -18,19 +34,9 @@ module Gori
             # (`gori run notes --format json`) names its `id` and its (1-based) `index` on every
             # row rather than leaving one bare number to be read either way.
             # nil when `cur` addresses no note: `Notes.parse` accepts `{"cur":0,"notes":[]}`.
-            j.field "current_id", doc.notes[doc.cur]?.try(&.id)
-            j.field "notes" do
-              j.array do
-                doc.notes.each_with_index do |entry, idx|
-                  {
-                    id:         entry.id,
-                    title:      note_title(entry),
-                    line_count: Notes.line_count(entry.text),
-                    current:    doc.cur == idx,
-                  }.to_json(j)
-                end
-              end
-            end
+            j.field "current_id", cur_id
+            j.field("notes") { raw_rows(j, parts) }
+            emit_page(j, pg, parts.size, doc.notes.size, cut: parts.size < page.size)
           end
         end)
       end
@@ -121,7 +127,7 @@ module Gori
       # and a lone CR or a stray C0 inside that line would otherwise ride out into a field a
       # client renders inline.
       private def note_title(entry : Notes::NoteEntry) : String
-        Issues::Export.one_line(Notes.title(entry.text) || "").presence || "Untitled"
+        Issues::Export.one_line(Notes.title(entry.text) || "")[0, NOTE_TITLE_MAX].presence || "Untitled"
       end
 
       # The tools/list schemas for the note tools, kept beside the handlers that
@@ -130,8 +136,11 @@ module Gori
       # wrong side of it by landing in the wrong place in a 1,300-line method.
       private def list_notes_tools(j : JSON::Builder) : Nil
         tool j, "list_notes",
-          "List project notes (title, line count, ...). `current_id` is the open note (null if " \
-          "none); each row's `current` says the same." { }
+          "List project notes (title cut to #{NOTE_TITLE_MAX} chars, line count, ...). `current_id` is " \
+          "the open note (null if none); each row's `current` says the same." do |s|
+          s.field "limit", limitprop("max rows", NOTES_LIMIT)
+          s.field "offset", intprop("start row (default 0)")
+        end
 
         tool j, "get_note", "Full text and metadata of a note." do |s|
           s.field "id", intprop("note id"), required: true
