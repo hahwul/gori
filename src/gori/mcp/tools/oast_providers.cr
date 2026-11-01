@@ -228,7 +228,7 @@ module Gori
           s.field "name", strprop("display name")
           s.field "kind", enumprop("provider kind", OAST_KINDS)
           s.field "host", strprop("server/base URL")
-          s.field "token", strprop("provider auth token")
+          s.field "token", strprop("provider auth token; \"\" clears it (omit the field to keep it)")
           s.field "enabled", boolprop("active or not")
         end
 
