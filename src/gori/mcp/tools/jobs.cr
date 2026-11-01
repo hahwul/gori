@@ -211,18 +211,10 @@ module Gori
         wait = bool_arg(h, "wait", false)
         budget = optional_int_arg(h, "wait_timeout_ms").try(&.clamp(1_i64, 60_000_i64)) || 10_000_i64
         return emit_stop_result(job, already_finished: true) unless request_stop(job)
-        waited_out = false
-        if wait
-          deadline = Time.utc.to_unix_ms + budget
-          while job.live?
-            if Time.utc.to_unix_ms >= deadline
-              waited_out = true
-              break
-            end
-            sleep 20.milliseconds
-          end
-        end
-        emit_stop_result(job, waited_out)
+        # The shared hold, so a cancel (or the session closing) frees the single worker; a
+        # private sleep loop here held it for the whole budget whatever the client said.
+        long_poll(budget) { !job.live? } if wait
+        emit_stop_result(job, wait && job.live? && !hold_cut?)
       end
 
       # At shutdown (`Server#run`): the process is about to exit, and a job left running left a
