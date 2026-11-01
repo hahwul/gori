@@ -949,3 +949,34 @@ describe "Gori::Store::Schema V7 (WebSocket frame shape)" do
     end
   end
 end
+
+describe "Gori::Store#index_pending!" do
+  # The drain hands off to the writer fiber batch after batch without ever emptying the run
+  # queue, so a fiber parked on the event loop (an MCP reader waiting on stdin, a `sleep 0`)
+  # never ran until the whole backlog was indexed.
+  it "lets a fiber parked on the event loop run between batches" do
+    path = File.tempname("gori-test", ".db")
+    store = Gori::Store.open(path, background_index: false)
+    begin
+      (Gori::Store::FTS_BATCH * 20).times { |i| store.insert_flow(sample_request(target: "/#{i}")) }
+      ticks = 0
+      done = false
+      spawn do
+        until done
+          Fiber.yield
+          ticks += 1
+        end
+      rescue
+      end
+      Fiber.yield
+      store.index_pending!.should eq(Gori::Store::FTS_BATCH * 20)
+      done = true
+      ticks.should be >= 10
+    ensure
+      store.close
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+end

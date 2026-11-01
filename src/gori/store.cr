@@ -1081,6 +1081,11 @@ module Gori
           n = reply.receive
           break if n == 0
           total += n
+          # This fiber and the writer hand off to each other without ever leaving the run
+          # queue empty, and the scheduler polls I/O only when it is: an MCP server's reader
+          # could not answer `ping` or read `notifications/cancelled` for the ~2 s a 20k-flow
+          # backlog takes. Same shape as the scan loop's yield (#1791).
+          Fiber.yield
         end
       rescue Channel::ClosedError
         # store closing — stop draining; the rows stay dirty and durable for the next open
