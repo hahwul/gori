@@ -988,8 +988,11 @@ module Gori
       end
 
       private def write_outbound_response(flow_id : Int64, result : Repeater::Result) : Nil
+        # A client cancel aborts the exchange from OUR side; the transport then reports a closed
+        # stream, which on the History row read as the origin hanging up.
+        failure = cancelled? && result.error ? "cancelled by the MCP client after the request was sent" : result.error
         if response = result.response
-          error = result.error
+          error = failure
           # A bound gori chose to stop at is not a failed response (#1631).
           error ||= "upstream response body was incomplete" if result.incomplete? && !result.bounded
           state = error ? Store::FlowState::Error : Store::FlowState::Complete
@@ -1006,7 +1009,7 @@ module Gori
           # `head`: the bytes of a head gori could not frame are the finding (see
           # `Repeater::HistoryRecord#record`).
           store.update_response(FlowMapper.error_response(flow_id,
-            result.error || "request failed before a response was received", result.duration_us,
+            failure || "request failed before a response was received", result.duration_us,
             head: result.head))
         end
       rescue ex
