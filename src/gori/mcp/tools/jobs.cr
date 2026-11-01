@@ -225,6 +225,9 @@ module Gori
         {@jobs, @mine_jobs, @discover_jobs, @sequence_jobs, @authorize_jobs}.each do |jobs|
           jobs.each_value { |job| request_stop(job) }
         end
+        # A live crawl's findings not yet batched into the store: its DoneEvent flush would
+        # come after the store is closed, so they are written now or lost.
+        @discover_jobs.each_value { |djob| flush_discover_persist(djob) if djob.live? }
         @jobs.each_value do |fjob|
           next unless fjob.live?
           finish_fuzz_persistence(fjob, :stopped)

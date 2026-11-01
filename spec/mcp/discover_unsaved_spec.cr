@@ -19,6 +19,10 @@ module Gori::MCP
       @discover_jobs[djob.id] = djob
       store_discover_finding(djob, f, 0_i64)
     end
+
+    def drain_discover_event_for_spec(djob : DiscoverJob, ev : Gori::Discover::Event) : Nil
+      drain_discover_event(djob, ev, 0_i64)
+    end
   end
 end
 
@@ -115,6 +119,40 @@ describe "MCP discover — findings whose rows could not be written" do
       tools.flush_discover_persist_for_spec(djob)
       djob.unsaved.should eq(0)
       JSON.parse(tools.call("discover_status", JSON.parse(%({"job_id":"d-clean"}))).text)["unsaved_flows"].as_i.should eq(0)
+    end
+  end
+end
+
+# The 250 ms flush bound was read only when the NEXT finding arrived, so in a slow crawl a
+# finding sat unwritten (no flow_id, invisible to list_history / get_flow) until another one
+# came — and a session that ended first lost it: the DoneEvent flush lands after the store
+# is closed.
+describe "MCP discover — a finding left in the buffer" do
+  it "is written on the next progress event once the flush interval has passed" do
+    with_store do |store|
+      tools = tools_for(store)
+      djob = idle_job("d-slow")
+      tools.store_discover_finding_for_spec(djob, Gori::Discover::Finding.new("http://t/slow", "GET", 200, 2_i64,
+        "text/plain", Gori::Discover::Source::Bruteforced, 1, 0.9, nil))
+      djob.persist_buf.size.should eq(1) # inside the interval: still buffered
+      djob.persist_at = Time.instant - 1.second
+      progress = Gori::Discover::Progress.new(5_i64, nil, 1, 0_i64, 3, Gori::Discover::Phase::Crawling)
+      tools.drain_discover_event_for_spec(djob, Gori::Discover::ProgressEvent.new(progress))
+      djob.persist_buf.should be_empty
+      store.count.should eq(1_i64)
+    end
+  end
+
+  it "is written when the session shuts down with the crawl still running" do
+    with_store do |store|
+      tools = tools_for(store)
+      djob = idle_job("d-shutdown")
+      tools.store_discover_finding_for_spec(djob, Gori::Discover::Finding.new("http://t/late", "GET", 200, 2_i64,
+        "text/plain", Gori::Discover::Source::Bruteforced, 1, 0.9, nil))
+      djob.live?.should be_true
+      tools.stop_jobs_for_shutdown
+      djob.persist_buf.should be_empty
+      store.count.should eq(1_i64)
     end
   end
 end
