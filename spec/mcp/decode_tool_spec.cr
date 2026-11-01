@@ -33,10 +33,10 @@ describe "MCP decode" do
   end
 
   # A bare encoder name can only decode when the tool can name the converter that undoes it,
-  # and it derives that inverse from a name SUFFIX — which is right for seventeen of the
-  # catalog's nineteen encoders and reaches neither of the two named for what they DO
-  # (`raw-deflate`, `url-encode-all`). That is what `INVERSE_NAME` is for, and this is the
-  # sweep that makes the pair of them a closed set: an encoder added later with a real inverse
+  # and it derives that inverse from a name SUFFIX — which is right for most of the
+  # catalog's encoders and reaches none of those named for what they DO
+  # (`raw-deflate`, `url-encode-all`, `html-encode-all`). That is what `INVERSE_NAME` is for,
+  # and this is the sweep that makes them a closed set: an encoder added later with a real inverse
   # and no rule for it fails HERE, rather than quietly encoding under the `decode` name.
   it "can name the inverse of every ENCODE converter the catalog has one for" do
     # The genuinely one-way transforms: nothing in the catalog undoes them, so a bare one runs

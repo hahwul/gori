@@ -64,7 +64,7 @@ myenc > url-encode
 | **Serialization** | `msgpack-decode`, `cbor-decode`(바이너리 문서를 JSON 텍스트로), 그리고 네이티브 직렬화 리더 `java-deserialize`, `dotnet-viewstate`, `php-unserialize`, `pickle-disasm` |
 | **Token** | `jwt-decode` (헤더 + 페이로드; 서명은 표시되지만 검증하지 않음), 그리고 서명된 세션 쿠키 리더 `cookie-decode`(프레임워크 자동 판별), `flask-decode`(itsdangerous), `django-decode`(`django.core.signing`), `rack-decode`(Ruby) |
 | **Hash** | `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `sha3-256`, `sha3-512`, `crc32` |
-| **Escape** | `html-escape` / `html-unescape`, `json-escape` / `json-unescape`, `unicode-escape` / `unicode-unescape`, `xml-escape` / `xml-unescape`, `c-string-escape` / `c-string-unescape`, `shell-escape`, `powershell-escape` |
+| **Escape** | `html-escape` / `html-unescape`, `html-encode-all`, `json-escape` / `json-unescape`, `unicode-escape` / `unicode-unescape`, `xml-escape` / `xml-unescape`, `c-string-escape` / `c-string-unescape`, `shell-escape`, `powershell-escape` |
 | **Text** | `rot13`, `rot47`, `upper`, `lower`, `reverse`, `homoglyph`, `typo` |
 
 `brotli-decompress`와 `zstd-decompress`는 압축 해제 전용이며, 이는 빠뜨린 것이 아니라 의존성의 모양 그대로입니다. gori는 brotli의 *디코더* 라이브러리를 링크하고 libzstd의 압축 해제기만 감쌉니다. 프록시에게 필요한 것은 원 서버가 보낸 것을 읽는 일이기 때문입니다. 둘 다 `Content-Encoding`이 쓰는 `br`, `zstd` 별칭을 받고, 잘린 스트림도 견딥니다(캡처 상한에 걸린 플로우에서 본문을 복사해 오면 흔한 경우입니다). `-Dwithout_native_codecs`로 빌드한 gori도 이름은 그대로 알고 있으며, 오타라고 답하는 대신 그런 빌드라는 사실을 알려 줍니다.
