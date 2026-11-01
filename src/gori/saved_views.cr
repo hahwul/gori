@@ -260,10 +260,10 @@ module Gori
         return "`#{bad}` is not a valid regex — it would match nothing"
       end
       shape = QL.parse(query, fts: false, scope: QL::SCOPE_SHAPE_ONLY)
-      return "this query matches every flow — it would narrow nothing" if QL.reject_empty?(query, shape)
       if bad = QL.analyze(query, scope: QL::SCOPE_SHAPE_ONLY).ignored.first?
         return "`#{bad}` is not a value that field takes — it would be dropped, and the view would show more"
       end
+      return "this query matches every flow — it would narrow nothing" if QL.reject_empty?(query, shape)
       nil
     end
 

@@ -600,10 +600,10 @@ module Gori
       # nothing instead would report `scope:in` as a DROPPED term and refuse, at every surface,
       # the one field `compile` goes out of its way to answer.
       shape = QL.parse(match_filter, fts: false, scope: QL::SCOPE_SHAPE_ONLY)
-      return "this condition matches every flow" if QL.reject_empty?(match_filter, shape)
       if bad = QL.analyze(match_filter, scope: QL::SCOPE_SHAPE_ONLY).ignored.first?
         return "`#{bad}` is not a value that field takes — it would be dropped, and the rule would paint more"
       end
+      return "this condition matches every flow" if QL.reject_empty?(match_filter, shape)
       nil
     end
 
