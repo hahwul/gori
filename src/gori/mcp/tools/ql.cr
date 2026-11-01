@@ -156,6 +156,12 @@ module Gori
         # refusal, which is the one prediction this tool exists to make and never stated: a
         # caller that explained first was told the query would run.
         refused = matches_all || !a.invalid_regex.empty? || !unknown.empty?
+        # Per tool: list_sitemap compiles only what its own `tag:` terms leave
+        # (`Sitemap.split_tag_terms`), so `tag:admin` runs there and is refused by the other two.
+        sitemap_refused = Sitemap.split_tag_terms(query).ql.try { |q| ql_refused?(q, lens) } || false
+        refused_by = {"list_history", "list_sitemap", "probe_scan"}.select do |t|
+          t == "list_sitemap" ? sitemap_refused : refused
+        end
         Result.new(JSON.build do |j|
           j.object do
             j.field "query", query
@@ -170,7 +176,8 @@ module Gori
               end
             end
             j.field "matches_everything", matches_all
-            j.field "refused_by_query_tools", refused
+            j.field "refused_by_query_tools", !refused_by.empty?
+            j.field "refused_by", refused_by
             j.field "sql", filter.sql
             # Named, not inferred from an empty result: a `scope:` term on a project with no
             # scope rules compiles to a never-match clause, so the query runs clean and returns
@@ -190,21 +197,7 @@ module Gori
                            "than return the whole capture — fix or drop the term(s), or pass an " \
                            "empty query to get the most recent rows"
                 end
-                unless unknown.empty?
-                  named = unknown.map do |n|
-                    if near = QL.suggest_field(n)
-                      "`#{n}:` (did you mean `#{near}:`?)"
-                    elsif FilterAst::ID_FIELDS.includes?(n.downcase)
-                      "`#{n}:` (list_history's 'ids' argument selects flows by id)"
-                    else
-                      "`#{n}:`"
-                    end
-                  end
-                  j.string "QL has no such field: #{named.join(", ")} — the whole token is " \
-                           "searched as literal TEXT, which is why it matches nothing; " \
-                           "list_history / list_sitemap / probe_scan REFUSE it (QUERY_SYNTAX) " \
-                           "unless you pass lenient:true"
-                end
+                j.string unknown_fields_warning(unknown, refused_by) unless unknown.empty?
                 if hint = QL.missing_colon_hint(query)
                   j.string hint
                 end
@@ -228,6 +221,31 @@ module Gori
             end
           end
         end)
+      end
+
+      # Whether `ql_filter_or_error` answers `query` with QUERY_SYNTAX: every term dropped, an
+      # uncompilable regex, or a field QL lacks. `ql_explain`'s verdict, for a query it did not
+      # analyze itself (list_sitemap's residual).
+      private def ql_refused?(query : String, lens) : Bool
+        QL.reject_empty?(query, QL.parse(query, scope: lens)) || !QL.invalid_regex_terms(query).empty? ||
+          QL.fields_used(query).any? { |u| !QL.known_field?(u.name) }
+      end
+
+      private def unknown_fields_warning(unknown : Array(String), refused_by : Array(String)) : String
+        named = unknown.map do |n|
+          if n.downcase == "tag"
+            "`tag:` (list_sitemap's own sitemap-tag filter, which only it applies)"
+          elsif near = QL.suggest_field(n)
+            "`#{n}:` (did you mean `#{near}:`?)"
+          elsif FilterAst::ID_FIELDS.includes?(n.downcase)
+            "`#{n}:` (list_history's 'ids' argument selects flows by id)"
+          else
+            "`#{n}:`"
+          end
+        end
+        "QL has no such field: #{named.join(", ")} — the whole token is searched as literal " \
+        "TEXT, which is why it matches nothing; #{refused_by.join(" / ")} REFUSE it " \
+        "(QUERY_SYNTAX) unless you pass lenient:true"
       end
 
       @[Tool("ql_reference", unbound: true)]
@@ -259,8 +277,8 @@ module Gori
           "Diagnose a gori QL query WITHOUT running it: applied, dropped (broadening) and " \
           "invalid-regex (match-nothing) terms, compiled SQL, warnings. `matches_everything` = " \
           "nothing narrowed; `unknown_fields` = `field:`s QL lacks (they match nothing); " \
-          "`refused_by_query_tools` = list_history / list_sitemap / probe_scan would answer " \
-          "QUERY_SYNTAX." do |s|
+          "`refused_by` = which of list_history / list_sitemap / probe_scan would answer " \
+          "QUERY_SYNTAX (list_sitemap takes its own `tag:`)." do |s|
           s.field "query", strprop("the gori QL query to analyze"), required: true
         end
       end
