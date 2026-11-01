@@ -366,15 +366,6 @@ module Gori::Repeater
     # `apply_rules` does not run (`RequestRules.apply`): the request still went upstream.
     property skipped_stub_rule : Int64? = nil
 
-    # The token namespaces a Repeater row saved from this send must escape (`Env.escape_tokens`)
-    # so that replaying it as a draft re-sends `bytes` rather than expanding them a second time.
-    # `bytes` is past the env-var pass on a draft, so only ENV; a verbatim, evidence or
-    # field-native send expanded nothing, so everything.
-    def persist_escape : Env::Owns
-      return Env::Owns::All if @h2_fields || !@sender.expand_bindings? || @sender.evidence?
-      Env::Owns::Env
-    end
-
     def initialize(@sender : Sender, @requests : Array(Bytes), @scheme : String,
                    @host : String, @port : Int32, @http2 : Bool,
                    @websocket : Bool, @sni : String?, @preserve_field_case : Bool = false,
