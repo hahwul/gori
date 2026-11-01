@@ -145,6 +145,18 @@ describe "MCP session slots" do
     end
   end
 
+  it "warns when renaming or deleting an extract rule strands a slot's claim on its name" do
+    with_store do |store|
+      id = store.insert_extract_rule("SESSION", "", Gori::ExtractKind::Cookie, "sid")
+      t = tools_for(store)
+      call_json(t, "create_session_slot", %({"name":"admin","rules":["SESSION"]}))
+      call_json(t, "update_extract_rule", %({"id":#{id},"selector":"sid2"}))["warning"].raw.should be_nil
+      renamed = call_json(t, "update_extract_rule", %({"id":#{id},"name":"SID"}))
+      renamed["warning"].as_s.should contain(%(session slot (admin) still claim "SESSION"))
+      call_json(t, "delete_extract_rule", %({"id":#{id}}))["warning"].raw.should be_nil # no slot claims "SID"
+    end
+  end
+
   it "refuses a set_headers entry that would forge a header boundary" do
     with_store do |store|
       t = tools_for(store)

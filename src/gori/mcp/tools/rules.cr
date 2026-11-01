@@ -828,7 +828,19 @@ module Gori
         unless en.nil?
           return busy("extract rule fields were updated but the enable/disable did not persist (store busy or unwritable); retry") unless store.set_extract_rule_enabled(id, en)
         end
-        Result.new({id: id, updated: true, name: name, kind: kind.label}.to_json)
+        stranded = name == existing.name ? nil : slots_claiming_warning(existing.name)
+        Result.new({id: id, updated: true, name: name, kind: kind.label, warning: stranded}.to_json)
+      end
+
+      # A session slot claims extract rules BY NAME, so a rename or delete leaves its claim
+      # pointing at nothing — `create_session_slot` warns about a missing name, and so must the
+      # write that makes one go missing. Nil while another rule still carries the name.
+      private def slots_claiming_warning(old : String) : String?
+        return nil if store.extract_rules.any? { |r| r.name == old }
+        names = slot_registry.slots.select(&.rules.includes?(old)).map(&.name)
+        return nil if names.empty?
+        "#{Gori.plural(names.size, "session slot")} (#{names.join(", ")}) still claim \"#{old}\" and now claim " \
+        "nothing under it; update_session_slot to point them at the new name"
       end
 
       @[Tool("set_extract_rule_enabled", gated: true, agent_action: true, permission: "write")]
@@ -844,9 +856,10 @@ module Gori
       @[Tool("delete_extract_rule", gated: true, agent_action: true, permission: "write")]
       private def delete_extract_rule(h) : Result
         id = required_id(h, "id")
-        return not_found("no extract rule with id #{id}") unless store.extract_rules.any?(&.id.==(id))
+        existing = store.extract_rules.find(&.id.==(id))
+        return not_found("no extract rule with id #{id}") unless existing
         return busy("extract rule NOT deleted (store busy or unwritable); it is unchanged") unless store.delete_extract_rule(id)
-        Result.new({id: id, deleted: true}.to_json)
+        Result.new({id: id, deleted: true, warning: slots_claiming_warning(existing.name)}.to_json)
       end
 
       # The tools/list schemas for the Match & Replace / extract rule tools, kept beside the handlers that
