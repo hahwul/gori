@@ -501,6 +501,9 @@ module Gori
             j.field("events") { raw_rows(j, parts) }
             j.field "next_cursor", next_cursor
             emit_cut(j, cut)
+            # The scan filled `limit` (or the budget cut it): more of the feed lies past the
+            # cursor, so a page the filters emptied is not the end of it.
+            j.field "has_more", full || cut
           end
         end)
       end
@@ -967,7 +970,8 @@ module Gori
           "Tail the event feed: job lifecycle, agent actions, denied MCP permissions. Pass " \
           "`since` = the last `next_cursor`, which never moves backward (an empty page echoes " \
           "it). Filters do NOT affect `next_cursor` (max SCANNED id, or the last event returned " \
-          "when `cut_by` says the page was cut). `actor` (tui | cli | mcp) tells your writes " \
+          "when `cut_by` says the page was cut); `has_more` = events past it, even on a page the " \
+          "filters emptied. `actor` (tui | cli | mcp) tells your writes " \
           "from the operator's; `actor_label` names an agent's client." do |s|
           s.field "since", intprop("cursor: only events with id > this (default 0 = from oldest)")
           s.field "limit", limitprop("max events scanned", EVENTS_LIMIT)

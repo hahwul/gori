@@ -1411,3 +1411,21 @@ describe "MCP get_response_body_chunk find" do
     end
   end
 end
+
+# A filtered page empty only because the scanned window held no match must not read as the
+# end of the feed: `has_more` says the scan filled `limit`.
+describe "MCP list_events has_more" do
+  it "is true on a full window the filter emptied, false at the feed's end" do
+    with_store do |store|
+      5.times { |i| store.insert_event("probe", "noise", :info, "n#{i}") }
+      store.insert_event("probe", "want", :info, "match")
+      tools = tools_for(store, allow_actions: false)
+      j = mcp_ok_json(tools, "list_events", %({"since":0,"kind":"want","limit":3}))
+      j["events"].as_a.should be_empty
+      j["has_more"].as_bool.should be_true
+      j = mcp_ok_json(tools, "list_events", %({"since":#{j["next_cursor"]},"kind":"want","limit":10}))
+      j["events"].as_a.size.should eq(1)
+      j["has_more"].as_bool.should be_false
+    end
+  end
+end
