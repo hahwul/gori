@@ -21,14 +21,14 @@ module Gori
         rules = rules.select { |r| r.scope == want } if want
         # Under REPLY_ROWS_BUDGET (#1649): a short-circuit stub carries its whole response in
         # `replacement`. `offset` pages the rest, in apply order.
-        offset = clamp_nonneg(optional_int_arg(h, "offset"))
-        page = offset_slice(rules, offset)
+        pg = offset_args(h)
+        page = offset_slice(rules, pg.offset)
         parts = fit_rows(page) { |rj, r, _| Serialize.match_rule(rj, r) }
         Result.new(JSON.build do |j|
           j.object do
             j.field "count", rules.size
             j.field("rules") { raw_rows(j, parts) }
-            emit_offset_page(j, offset, parts.size, page.size, rules.size)
+            emit_offset_page(j, pg, parts.size, page.size, rules.size)
           end
         end)
       end

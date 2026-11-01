@@ -3010,15 +3010,23 @@ module Gori
         rows[offset..]? || [] of T
       end
 
-      # The pagination fields of an `offset_slice` page: returned/offset, `cut_by` when the
-      # budget kept fewer than `page_size` rows, and `has_more` against the `total` rows the
-      # offset counts from. Each tool names its own total.
-      private def emit_offset_page(j : JSON::Builder, offset : Int32, returned : Int32,
+      # The `offset` of a list paged by it alone (`offset_slice`): a `Page` with no limit, so
+      # `emit_offset_page` echoes a negative or oversized offset as clamped, as `emit_page` does.
+      private def offset_args(h) : Page
+        req_off = optional_int_arg(h, "offset")
+        Page.new(req_off, nil, clamp_nonneg(req_off), 0)
+      end
+
+      # The pagination fields of an `offset_slice` page: returned/offset, the clamp echo,
+      # `cut_by` when the budget kept fewer than `page_size` rows, and `has_more` against the
+      # `total` rows the offset counts from. Each tool names its own total.
+      private def emit_offset_page(j : JSON::Builder, pg : Page, returned : Int32,
                                    page_size : Int32, total : Int32) : Nil
         j.field "returned", returned
-        j.field "offset", offset
+        j.field "offset", pg.offset
+        emit_clamp(j, pg.req_off, pg.offset, pg.req_lim, pg.limit)
         emit_cut(j, returned < page_size)
-        j.field "has_more", offset + returned < total
+        j.field "has_more", pg.offset + returned < total
       end
 
       private def page_args(h, limit : PageLimit) : Page

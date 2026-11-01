@@ -54,7 +54,7 @@ module Gori
           report = Gori::Diff.run(base_store, newer_store,
             label_a: base.name, label_b: diff_label(newer),
             path_a: base.db_path, path_b: newer.db_path,
-            filter: opts.filter, limit: opts.limit, in_scope: opts.in_scope,
+            filter: opts.filter, limit: opts.page.limit, in_scope: opts.in_scope,
             issue_limit: opts.issues ? Gori::Diff::ISSUE_RETEST_MAX : 0,
             raise_on_error: true)
           diff_page(report, opts)
@@ -72,7 +72,7 @@ module Gori
       private def diff_page(report : Gori::Diff::Report, opts : DiffOptions) : Result
         rendered = JSON.parse(Gori::Diff::Render.json(report, verdicts: opts.verdicts, issues: opts.issues)).as_h
         listed = rendered["endpoints"].as_a
-        page = offset_slice(listed, opts.offset)
+        page = offset_slice(listed, opts.page.offset)
         rows = fit_rows(page) { |rj, e, _| e.to_json(rj) }
         all = rendered["issues"]?.try(&.as_a)
         issues = all.try { |a| fit_rows(a, rows.sum(&.bytesize)) { |rj, e, _| e.to_json(rj) } }
@@ -85,7 +85,7 @@ module Gori
               else                  j.field(k) { v.to_json(j) }
               end
             end
-            emit_offset_page(j, opts.offset, rows.size, page.size, listed.size)
+            emit_offset_page(j, opts.page, rows.size, page.size, listed.size)
             j.field "total", listed.size
             if all && issues && issues.size < all.size
               j.field "issues_unshown_ids", all[issues.size..].map(&.["id"])
@@ -99,11 +99,10 @@ module Gori
       private record DiffOptions,
         filter : QL::Filter,
         verdicts : Array(Gori::Diff::Verdict),
-        limit : Int32,
+        page : Page,
         issues : Bool,
         in_scope : Bool,
-        dropped : Array(String),
-        offset : Int32
+        dropped : Array(String)
 
       private def diff_options(h) : DiffOptions | Result
         dropped = [] of String
@@ -111,10 +110,8 @@ module Gori
         return filter if filter.is_a?(Result)
         verdicts = diff_verdicts(h)
         return verdicts if verdicts.is_a?(Result)
-        DiffOptions.new(filter, verdicts,
-          clamp(optional_int_arg(h, "limit"), DIFF_LIMIT),
-          bool_arg(h, "issues", true), bool_arg(h, "in_scope", false), dropped,
-          clamp_nonneg(optional_int_arg(h, "offset")))
+        DiffOptions.new(filter, verdicts, page_args(h, DIFF_LIMIT),
+          bool_arg(h, "issues", true), bool_arg(h, "in_scope", false), dropped)
       end
 
       # NOT `ql_filter_or_error`, for two reasons that are really one: that helper reads the
