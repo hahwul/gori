@@ -147,6 +147,22 @@ describe "MCP job lookup and stop, across all five kinds" do
     end
   end
 
+  # The hint names the newest five; past that it says how many it left out instead of reading
+  # as the whole list.
+  it "says how many held jobs a not-found hint left out" do
+    with_store do |store|
+      port = start_slow_origin
+      tools = tools_for(store)
+      ids = start_all(tools, store, port)
+      extra = ok_json(tools, "fuzz_start", {template: "GET /t?q=§FUZZ§ HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n",
+                                            url: "http://127.0.0.1:#{port}", concurrency: 1,
+                                            payloads: [{list: (1..50).map(&.to_s)}], allow_unscoped: true})["job_id"].as_s
+      invoke(tools, "get_job", {job_id: "zz_9"}).text.should end_with(" (+1 more; list_jobs shows all)")
+      invoke(tools, "fuzz_status", {job_id: "zz_9"}).text.should_not contain("more")
+      (ids.values + [extra]).each { |id| wait_stopped(tools, id) }
+    end
+  end
+
   it "lists every kind's row with its own fields" do
     with_store do |store|
       port = start_slow_origin

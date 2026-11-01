@@ -125,7 +125,13 @@ module Gori
       # server process) reads with the ones that would answer; empty when there are none.
       private def held_jobs_hint(kind : String, held : Array(String)) : String
         return "" if held.empty?
-        " — this server holds #{kind} job#{held.size == 1 ? "" : "s"} #{held.last(5).join(", ")}"
+        " — this server holds #{kind} job#{held.size == 1 ? "" : "s"} #{held_ids(held)}"
+      end
+
+      # The newest five ids, and how many more there are: a bare `last(5)` read as the whole list.
+      private def held_ids(held : Array(String)) : String
+        more = held.size - 5
+        "#{held.last(5).join(", ")}#{more > 0 ? " (+#{more} more; list_jobs shows all)" : ""}"
       end
 
       # The tool that reads `verb` for `kind`. The five async kinds share `_status`/`_results`/
@@ -190,7 +196,7 @@ module Gori
         held = {@jobs, @mine_jobs, @discover_jobs, @sequence_jobs, @authorize_jobs, @ws_jobs}.flat_map do |jobs|
           jobs.compact_map { |k, j| k if j.db_path == @db_path }
         end
-        held.empty? ? "" : " — this server holds job#{held.size == 1 ? "" : "s"} #{held.last(5).join(", ")}"
+        held.empty? ? "" : " — this server holds job#{held.size == 1 ? "" : "s"} #{held_ids(held)}"
       end
 
       # Stop a fuzz, mine, discover, sequence, or authorize job, or close a ws_* session. With wait:true, blocks (yielding to the runner
