@@ -1225,6 +1225,24 @@ describe "Gori::Probe::Passive::Tech (framework fingerprints)" do
       hit.evidence.should eq("3.4.1")
     end
   end
+
+  it "fingerprints WordPress and captures its version when present" do
+    with_store do |store|
+      dets_content = probe_analyze_html(store, %(<html><head><link rel="stylesheet" href="/wp-content/themes/x/style.css"></head></html>))
+      dets_content.find(&.code.==("tech_wordpress")).should_not be_nil
+
+      dets_ver = probe_analyze_html(store, %(<html><head><meta name="generator" content="WordPress 6.4.2"></head></html>))
+      hit = dets_ver.find(&.code.==("tech_wordpress")).not_nil!
+      hit.evidence.should eq("6.4.2")
+
+      # A real WordPress head links its stylesheets before the generator meta.
+      dets_real = probe_analyze_html(store, %(<html><head><link rel="stylesheet" href="/wp-includes/css/x.css"><meta name="generator" content="WordPress 6.4.2" /></head></html>))
+      dets_real.find(&.code.==("tech_wordpress")).not_nil!.evidence.should eq("6.4.2")
+
+      dets_mention = probe_analyze_html(store, %(<html><body>This article discusses wordpress without assets.</body></html>))
+      dets_mention.find(&.code.==("tech_wordpress")).should be_nil
+    end
+  end
 end
 
 describe "Gori::Probe::Passive::SecretInUrl (JWT tightening)" do

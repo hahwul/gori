@@ -226,6 +226,7 @@ module Gori
           {/\bdata-v-[0-9a-f]{6,10}\b|\b__VUE__\b|\bVue\.createApp\b/, "tech_vue", "Vue", false},
           {/\bng-version\s*=\s*"([^"]+)"|\bng-app\b|\[ng-version\]/, "tech_angular", "Angular", true},
           {/\bjquery[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js\b|\bjQuery\.fn\.jquery\b|\/jquery(?:\.min)?\.js\b/, "tech_jquery", "jQuery", true},
+          {/<meta\s+name="generator"\s+content="WordPress\s+(\d+\.\d+(?:\.\d+)?)"|\/wp-(?:content|includes)\//, "tech_wordpress", "WordPress", true},
         ] of {Regex, String, String, Bool}).map { |(re, code, label, has_version)| {Utf8.tolerant(re), code, label, has_version} }
 
         private def check_frameworks(ctx : Context, acc : Array(Detection)) : Nil
@@ -235,6 +236,9 @@ module Gori
           FRAMEWORK_MARKERS.each do |(re, code, label, has_version)|
             next unless m = re.match(text)
             ver = has_version ? m[1]? : nil
+            # The first hit may be a version-less alternative (WordPress prints its
+            # `/wp-content/` stylesheets before the generator meta), so look further for one.
+            text.scan(re) { |mm| break ver = mm[1] if mm[1]? } if has_version && ver.nil?
             title = ver ? "#{label} #{ver}" : label
             acc << tech(ctx, code, title, ver)
           end

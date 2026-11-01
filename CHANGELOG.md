@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Decoder: SHA3-256 and SHA3-512 hashes, and `html-encode-all`, which encodes every code point as a numeric entity (#1781, #1782)
+- Probe: fingerprint WordPress from the response body, with its version from the generator meta tag (#1780)
 
 ## v0.9.1
 

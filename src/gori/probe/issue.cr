@@ -381,6 +381,7 @@ module Gori
       "tech_nuxt"      => "Nuxt",
       "tech_angular"   => "Angular",
       "tech_jquery"    => "jQuery",
+      "tech_wordpress" => "WordPress",
     }
 
     # Codes whose product name is the header VALUE's first token (Server/X-Powered-By/X-Generator).
