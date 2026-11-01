@@ -1235,6 +1235,10 @@ describe "Gori::Probe::Passive::Tech (framework fingerprints)" do
       hit = dets_ver.find(&.code.==("tech_wordpress")).not_nil!
       hit.evidence.should eq("6.4.2")
 
+      # A real WordPress head links its stylesheets before the generator meta.
+      dets_real = probe_analyze_html(store, %(<html><head><link rel="stylesheet" href="/wp-includes/css/x.css"><meta name="generator" content="WordPress 6.4.2" /></head></html>))
+      dets_real.find(&.code.==("tech_wordpress")).not_nil!.evidence.should eq("6.4.2")
+
       dets_mention = probe_analyze_html(store, %(<html><body>This article discusses wordpress without assets.</body></html>))
       dets_mention.find(&.code.==("tech_wordpress")).should be_nil
     end

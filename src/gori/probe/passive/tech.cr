@@ -236,6 +236,9 @@ module Gori
           FRAMEWORK_MARKERS.each do |(re, code, label, has_version)|
             next unless m = re.match(text)
             ver = has_version ? m[1]? : nil
+            # The first hit may be a version-less alternative (WordPress prints its
+            # `/wp-content/` stylesheets before the generator meta), so look further for one.
+            text.scan(re) { |mm| break ver = mm[1] if mm[1]? } if has_version && ver.nil?
             title = ver ? "#{label} #{ver}" : label
             acc << tech(ctx, code, title, ver)
           end
