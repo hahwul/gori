@@ -461,3 +461,41 @@ describe "MCP oast_start persist" do
     end
   end
 end
+
+# `oast_start` without persist promises "dies with this process", and only `oast_stop` ever
+# deregistered one: a session left running at shutdown stayed registered on the provider.
+describe "MCP OAST at shutdown" do
+  it "deregisters an ad-hoc registration and leaves a persisted one alone" do
+    deregistered = [] of String
+    server = HTTP::Server.new do |ctx|
+      case ctx.request.path
+      when "/register" then ctx.response.print "{}"
+      when "/deregister"
+        deregistered << JSON.parse(ctx.request.body.try(&.gets_to_end) || "{}")["correlation-id"].as_s
+        ctx.response.print "{}"
+      else ctx.response.status = HTTP::Status::NOT_FOUND
+      end
+    end
+    port = server.bind_unused_port("127.0.0.1").port
+    spawn { server.listen }
+    sleep 10.milliseconds
+    begin
+      with_store do |store|
+        tools = tools_for(store)
+        url = "http://127.0.0.1:#{port}"
+        adhoc = ok_json(tools, "oast_start", %({"provider":"interactsh","server":#{url.to_json}}))
+        kept = ok_json(tools, "oast_start", %({"provider":"interactsh","server":#{url.to_json},"persist":true}))
+        adhoc["registration"].as_s.should eq("dies with this process")
+        kept["registration"].as_s.should contain("kept")
+
+        tools.deregister_oast_for_shutdown
+        deregistered.size.should eq(1)
+        # The payload host carries the correlation id: the ad-hoc one went, the kept one did not.
+        adhoc["payload_url"].as_s.should contain(deregistered.first)
+        kept["payload_url"].as_s.should_not contain(deregistered.first)
+      end
+    ensure
+      server.close rescue nil
+    end
+  end
+end

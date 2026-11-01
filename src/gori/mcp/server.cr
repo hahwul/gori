@@ -145,6 +145,7 @@ module Gori
           # behind us. The store is closed by the caller (cli/mcp.cr); the marker is ours (#815).
           @tools.stop_jobs_for_shutdown
           @tools.close_ws_sessions(wait: true) # live WS sessions must not outlive the process (#1630)
+          @tools.deregister_oast_for_shutdown  # nor an ad-hoc OAST registration
           @tools.release_presence
         end
       end

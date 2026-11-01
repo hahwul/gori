@@ -2128,6 +2128,41 @@ module Gori
         Result.new({stopped: sid}.to_json)
       end
 
+      # How long shutdown waits on the providers before exiting with a registration left up.
+      OAST_SHUTDOWN_GRACE = 3.seconds
+
+      # At shutdown (`Server#run`): `oast_start` told the agent an ad-hoc registration "dies with
+      # this process", and only `oast_stop` ever deregistered one. Best-effort and in parallel,
+      # bounded by OAST_SHUTDOWN_GRACE so a provider that does not answer cannot hold the exit.
+      # A persisted session is left alone, as `oast_stop` leaves it: `oast_release` ends those.
+      def deregister_oast_for_shutdown : Nil
+        adhoc = @oast_mcp.values.select(&.store_session_id.nil?)
+        @oast_mcp.clear
+        return if adhoc.empty?
+        done = Channel(Nil).new(adhoc.size) # buffered: a late finisher never blocks
+        adhoc.each { |s| spawn_oast_deregister(s, done) }
+        deadline = Time.instant + OAST_SHUTDOWN_GRACE
+        adhoc.size.times do
+          left = deadline - Time.instant
+          break if left <= Time::Span.zero
+          select
+          when done.receive
+          when timeout(left)
+            break
+          end
+        end
+      end
+
+      private def spawn_oast_deregister(s : OastMcpSession, done : Channel(Nil)) : Nil
+        spawn(name: "mcp-oast-deregister") do
+          s.provider.deregister(s.http, s.session)
+        rescue
+          # MUST NOT raise per `Provider#deregister`; a failure leaves it registered, as before.
+        ensure
+          done.send(nil)
+        end
+      end
+
       @[Tool("create_project", read_only: false, unbound: true, permission: "projects")]
       private def create_project_entry(h) : Result
         return create_project(h) if unbound? || @allow_actions
