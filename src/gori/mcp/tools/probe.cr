@@ -490,7 +490,7 @@ module Gori
           # looking for a regex bug in something that is not a regex.
           return err(kind == "exec" \
                               ? "'pattern' is the command to run for match_kind=exec and it does not tokenize — " \
-                                "it is exec'd directly with no shell, so quote arguments, not pipelines" : "invalid regex pattern (PCRE rejected it)",
+                                "it is exec'd directly with no shell, so quote arguments, not pipelines" : "invalid regex pattern (PCRE rejected it#{SafeRegexp.compile_error(pattern).try { |m| ": #{m}" }})",
             "INVALID_ARGUMENT", field: "pattern")
         end
         {side, region, kind}

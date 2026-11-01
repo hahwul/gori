@@ -286,6 +286,11 @@ describe Gori::Scope do
     Gori::Scope.valid?("regex", "^/api/").should be_true
   end
 
+  it "says why a regex rule does not compile" do
+    Gori::Scope.validation_error("regex", "(abc").not_nil!
+      .should match(/\Ainvalid regex \(failed to compile: .*missing closing parenthesis/)
+  end
+
   it "keeps a dead-on-arrival exclude rule out of the store" do
     with_store do |store|
       scope = Gori::Scope.load(store)

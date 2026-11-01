@@ -466,6 +466,7 @@ describe "MCP probe rules + mode tools" do
       tools = tools_for(store)
       r = tools.call("create_probe_rule", JSON.parse(%({"title":"x","pattern":"[unclosed","match_kind":"regex"})))
       r.is_error.should be_true
+      r.text.should contain("missing terminating ]") # the compiler's reason, as create_rule says it (#1793)
       store.probe_custom_rules.empty?.should be_true
     end
   end

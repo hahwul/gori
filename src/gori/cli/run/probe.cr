@@ -568,7 +568,7 @@ module Gori
         return "invalid --region '#{region}' (#{Probe::CustomRule::REGIONS.join("|")})" unless Probe::CustomRule::REGIONS.includes?(region)
         # A regex PCRE rejects would match nothing forever while reporting the rule saved fine.
         return nil if Probe::CustomRule.valid_pattern?(pattern, kind)
-        return "invalid regex --pattern (PCRE rejected it)" unless kind == "exec"
+        return "invalid regex --pattern (PCRE rejected it#{SafeRegexp.compile_error(pattern).try { |m| ": #{m}" }})" unless kind == "exec"
         "--pattern is the command to run for --exec and it does not tokenize " \
         "(it is exec'd directly — there is no shell, so quote arguments, not pipelines)"
       end

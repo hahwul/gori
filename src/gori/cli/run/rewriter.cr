@@ -1123,13 +1123,8 @@ module Gori
         end
       end
 
-      # nil when the pattern compiles, else the compiler's reason (e.g. "missing closing
-      # parenthesis at 3"), so the error can say why and not just that it failed (#1785).
       private def self.regex_error(pattern : String) : String?
-        SafeRegexp.compile(pattern)
-        nil
-      rescue ex
-        ex.message || ex.class.name
+        SafeRegexp.compile_error(pattern)
       end
 
       private def self.cmd_rewriter_rm(args : Array(String)) : Nil

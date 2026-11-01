@@ -691,7 +691,7 @@ module Gori
       when "string"
         nil
       when "regex"
-        "invalid regex (failed to compile)" unless valid_regex?(pattern)
+        regex_error(pattern).try { |why| "invalid regex (failed to compile: #{why})" }
       else
         "unknown match type #{match_type.inspect} (expected #{TYPES.join(", ")})"
       end
@@ -813,12 +813,12 @@ module Gori
       HostPattern.bare(i ? pattern[0...i] : pattern)
     end
 
-    # Regex compiles? (the historical `valid?` body, now a helper of validation_error.)
-    private def self.valid_regex?(pattern : String) : Bool
+    # Why the regex does not compile, or nil (the historical `valid?` body, now a helper of validation_error).
+    private def self.regex_error(pattern : String) : String?
       Regex.new(pattern)
-      true
-    rescue
-      false
+      nil
+    rescue ex
+      ex.message || ex.class.name
     end
 
     # Re-read the rules from the store after every mutation so in-memory == DB

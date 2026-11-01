@@ -47,10 +47,7 @@ module Gori
       private def rule_regex_error(op : Store::RuleOp, match_kind : Store::MatchKind, pattern : String) : String?
         return unless match_kind.regex?
         return if op.header? || op.json? # matched by header NAME or JSON path; `match` does not apply
-        SafeRegexp.compile(pattern)
-        nil
-      rescue ex
-        ex.message || ex.class.name
+        SafeRegexp.compile_error(pattern)
       end
 
       # Guard the short-circuit-only arguments. A stub that cannot be parsed would answer every

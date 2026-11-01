@@ -52,7 +52,7 @@ describe "gori run probe rules update" do
       Gori::CLI::Run.probe_rule_update(f, prev).should eq("--pattern must not be blank (omit it to keep the current pattern)")
       f = Gori::CLI::Run::ProbeRuleUpdateFlags.new
       f.pattern = "(" # the stored kind is regex, so the new pattern is judged as one
-      Gori::CLI::Run.probe_rule_update(f, prev).should eq("invalid regex --pattern (PCRE rejected it)")
+      Gori::CLI::Run.probe_rule_update(f, prev).as(String).should match(/\Ainvalid regex --pattern \(PCRE rejected it: .*missing closing parenthesis/)
       f.kind = "string"
       Gori::CLI::Run.probe_rule_update(f, prev).as(Gori::Store::ProbeCustomRule).kind.should eq("string")
       f.side = "sideways"
