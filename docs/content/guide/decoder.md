@@ -63,8 +63,8 @@ Saved chains can call each other. A recursive definition fails that step with a 
 | **Compression** | `gzip-compress` / `gzip-decompress`, `zlib-compress` / `zlib-decompress`, `raw-deflate` / `raw-inflate` (headerless, RFC 1951), `brotli-decompress`, `zstd-decompress` |
 | **Serialization** | `msgpack-decode`, `cbor-decode` (a binary document as JSON text), and the native-serialization readers `java-deserialize`, `dotnet-viewstate`, `php-unserialize`, `pickle-disasm` |
 | **Token** | `jwt-decode` (header + payload; signature shown, not verified), and the signed-session-cookie readers `cookie-decode` (auto-detects the framework), `flask-decode` (itsdangerous), `django-decode` (`django.core.signing`), `rack-decode` (Ruby) |
-| **Hash** | `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `crc32` |
-| **Escape** | `html-escape` / `html-unescape`, `json-escape` / `json-unescape`, `unicode-escape` / `unicode-unescape`, `xml-escape` / `xml-unescape`, `c-string-escape` / `c-string-unescape`, `shell-escape`, `powershell-escape` |
+| **Hash** | `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `sha3-256`, `sha3-512`, `crc32` |
+| **Escape** | `html-escape` / `html-unescape`, `html-encode-all`, `json-escape` / `json-unescape`, `unicode-escape` / `unicode-unescape`, `xml-escape` / `xml-unescape`, `c-string-escape` / `c-string-unescape`, `shell-escape`, `powershell-escape` |
 | **Text** | `rot13`, `rot47`, `upper`, `lower`, `reverse`, `homoglyph`, `typo` |
 
 `brotli-decompress` and `zstd-decompress` are decompress-only, and that is the shape of the dependency rather than an omission: gori links the brotli *decoder* library and wraps libzstd's decompressor, because what a proxy needs is to read what an origin sent. Both accept the `br` and `zstd` aliases a `Content-Encoding` spells them with, and both tolerate a truncated stream, the ordinary case for a body copied out of a capture-capped flow. A gori built with `-Dwithout_native_codecs` still knows the names, and says that is the build it is rather than reporting a typo.

@@ -108,13 +108,13 @@ module Gori
       # COMPRESS and `decode{spec:"html"}` ESCAPE — the same trap three families wide.
       INVERSE_SUFFIX = {"-encode" => "-decode", "-compress" => "-decompress", "-escape" => "-unescape"}
 
-      # The two encoders in the catalog named for what they DO rather than for which half of
+      # The encoders in the catalog named for what they DO rather than for which half of
       # a pair they are, so no suffix rule can reach them. Named here rather than given a
-      # field on `Converter` that the other seventeen pairs would leave nil — and swept by a
+      # field on `Converter` that the other pairs would leave nil — and swept by a
       # spec (`spec/mcp/decode_tool_spec.cr`) that walks every Encode converter in the
       # registry, so an encoder added later with an inverse and no rule for it fails there
       # instead of going on encoding.
-      INVERSE_NAME = {"raw-deflate" => "raw-inflate", "url-encode-all" => "url-decode"}
+      INVERSE_NAME = {"raw-deflate" => "raw-inflate", "url-encode-all" => "url-decode", "html-encode-all" => "html-unescape"}
 
       # A token that spells one of these named a DIRECTION, whatever else it says, so it runs
       # as typed. Substring and not a suffix: `url-encode-all` and `gzip-compress`
