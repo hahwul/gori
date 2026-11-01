@@ -496,6 +496,9 @@ module Gori
             if entry.kind == "custom"
               abort "gori run probe rules #{verb}: '#{id}' is a GLOBAL custom rule (stored in settings.json, shared across projects) — it cannot be toggled per project" if entry.scope == "global"
               row_id = probe_custom_row_id(id) || abort("gori run probe rules #{verb}: malformed custom rule id '#{id}'")
+              if enabled && (row = store.probe_custom_rules.find { |r| r.id == row_id }) && Probe::CustomRule.inert?(row.side, row.region, row.kind)
+                abort "gori run probe rules #{verb}: '#{id}' uses a side/region/kind this gori does not know (#{row.side}/#{row.region}/#{row.kind}) — it is inert and cannot be enabled"
+              end
               store.set_probe_custom_rule_enabled(row_id, enabled)
             else
               store.set_probe_rule_enabled(id, enabled)

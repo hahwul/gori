@@ -322,7 +322,12 @@ module Gori
           end
           row_id = custom_rule_row_id(id)
           return err("malformed custom rule id '#{id}'", "INVALID_ARGUMENT", field: "id") unless row_id
-          if enabled && store.probe_custom_rules.any? { |r| r.id == row_id && r.kind == "exec" } && (denied = exec_refusal)
+          row = store.probe_custom_rules.find { |r| r.id == row_id }
+          if enabled && row && Probe::CustomRule.inert?(row.side, row.region, row.kind)
+            return err("'#{id}' uses a side/region/kind this gori does not know (#{row.side}/#{row.region}/#{row.kind}) — it is inert and cannot be enabled",
+              "INVALID_ARGUMENT", field: "id")
+          end
+          if enabled && row.try(&.kind) == "exec" && (denied = exec_refusal)
             return denied
           end
           ok = store.set_probe_custom_rule_enabled(row_id, enabled)

@@ -422,6 +422,23 @@ describe "MCP probe rules + mode tools" do
     end
   end
 
+  it "refuses to enable a custom rule whose kind this build does not know, and never runs it" do
+    with_store do |store|
+      seed_secret_flow(store)
+      tools = tools_for(store)
+      row = store.insert_probe_custom_rule("future", "", "request", "whole", "wasm", "supersecretvalue123",
+        Gori::Store::Severity::High, enabled: false)
+      r = tools.call("set_probe_rule_enabled", JSON.parse(%({"id":"custom_p_#{row}","enabled":true})))
+      r.is_error.should be_true
+      r.text.should contain("inert")
+      store.probe_custom_rules.find! { |c| c.id == row }.enabled?.should be_false
+      # Even enabled behind the tool's back, the engine does not read 'wasm' as a substring match.
+      store.set_probe_custom_rule_enabled(row, true)
+      call_json(tools, "probe_scan", "{}")["issues"].as_a
+        .none? { |g| g["code"].as_s == "custom_p_#{row}" }.should be_true
+    end
+  end
+
   it "refuses a regex PCRE rejects instead of saving a rule that can never match" do
     with_store do |store|
       tools = tools_for(store)

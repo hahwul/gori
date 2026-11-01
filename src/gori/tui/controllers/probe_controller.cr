@@ -703,6 +703,10 @@ module Gori::Tui
       when :custom
         c = row.custom.not_nil!
         on = !c.enabled
+        if on && Probe::CustomRule.inert?(c.side, c.region, c.kind)
+          @host.status("rule \"#{c.title}\" uses a side/region/kind this gori does not know — it stays off")
+          return
+        end
         # BOTH writers answer. `Settings.set_scan_rule_enabled` returns whether the section
         # reached disk — `Settings.save` refuses outright after a half-read load, and it puts
         # the array back when the write did not commit — and this branch used to throw that

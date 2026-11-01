@@ -322,3 +322,14 @@ describe "Gori::Probe::Passive::Context whole-region memo" do
     end
   end
 end
+
+describe "Gori::Probe::CustomRule.inert?" do
+  it "never runs a row whose side/region/kind this build does not know" do
+    with_store do |store|
+      matches?(store, rule(kind: "wasm", pattern: "SECRET"), body: "a SECRET").should be_empty
+      matches?(store, rule(side: "both", pattern: "SECRET"), body: "a SECRET").should be_empty
+      matches?(store, rule(region: "trailer", pattern: "SECRET"), body: "a SECRET").should be_empty
+      matches?(store, rule(pattern: "SECRET"), body: "a SECRET").size.should eq(1)
+    end
+  end
+end
