@@ -240,6 +240,22 @@ describe Gori::MCP::Server do
       end
     end
 
+    # stdin closing is the client ending the session. A `wait_ms` hold in flight used to run
+    # its whole wait before the shutdown that stops live jobs, so a fuzz run went on hitting the
+    # target for up to 30 s after the client had gone. The hold still answers, just at once.
+    it "cuts a held wait_ms short once stdin closes, and still answers it" do
+      with_store do |store|
+        top = mcp_seed_flow(store, "acme.test", "GET", "/a")
+        wait = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_history",) +
+               %("arguments":{"since":#{top},"wait_ms":30000}}})
+        started = Time.instant
+        out = mcp_drive(store, INIT, wait)
+        (Time.instant - started).should be < 5.seconds
+        out.map(&.["id"].as_i).should eq([1, 2])
+        out[1]["result"]["isError"]?.should_not eq(JSON::Any.new(true))
+      end
+    end
+
     it "ends the session cleanly when the input stream raises mid-read" do
       with_store do |store|
         sink = IO::Memory.new

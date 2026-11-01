@@ -426,6 +426,7 @@ module Gori
         @ws_jobs = {} of String => WsSessionJob
         @oast_mcp = {} of String => OastMcpSession
         @job_seq = 0
+        @shutting_down = false
         # switch_project reopens @store; @owns_store tracks whether WE opened the
         # current one (and must close it on the next switch). The initial store is
         # owned by the caller (the `gori mcp` command), so it starts false.
@@ -1731,6 +1732,21 @@ module Gori
         !!@cancelled.try(&.call)
       end
 
+      # Set by `Server#run` once stdin has closed (EOF, or a signal closing it): the client has
+      # asked the session to end. A HOLD the client chose (`wait_ms`, `stop_job{wait}`) is cut
+      # short, so the shutdown that stops live jobs is not parked behind it while they keep
+      # sending — a 30 s `fuzz_status` wait used to keep a fuzz run hitting the target for the
+      # whole wait. Work that IS the request (a send, a retest) still runs: a piped client
+      # closes stdin right after writing its requests and is owed their answers.
+      def shutting_down! : Nil
+        @shutting_down = true
+      end
+
+      # Whether a hold should end now: the call was cancelled, or the session is ending.
+      private def hold_cut? : Bool
+        @shutting_down || cancelled?
+      end
+
       # The longest long-poll `wait_ms` (list_history, list_events, operator_messages, the job
       # status tools): the server runs one call at a time, so a wait holds every other call
       # behind it — the cap `ws_session_send{wait_ms}` takes, for the same reason.
@@ -1746,11 +1762,11 @@ module Gori
       end
 
       # Sleep a slice, then ask the block; stop once it answers true, `wait_ms` has passed, or
-      # the client cancelled the call. Checks only AFTER a sleep, so a caller that just read an
+      # the client cancelled the call (or closed the session: `hold_cut?`). Checks only AFTER a sleep, so a caller that just read an
       # empty page does not read it again at once; `wait_ms` 0 returns without sleeping.
       private def long_poll(wait_ms : Int64, & : -> Bool) : Nil
         deadline = Time.instant + wait_ms.milliseconds
-        until cancelled?
+        until hold_cut?
           left = deadline - Time.instant
           break if left <= Time::Span.zero
           sleep(left < LONG_POLL_SLICE ? left : LONG_POLL_SLICE)

@@ -185,7 +185,7 @@ module Gori
       # wedge every other call behind it (#1630). One waiter per session (`WsSession#wait`).
       private def ws_wait_for_reply(session : Repeater::WsSession, before : Int64, wait_ms : Int64) : Nil
         deadline = Time.instant + wait_ms.milliseconds
-        until cancelled? || session.closed? || session.transcript(before).any?(&.reply?)
+        until hold_cut? || session.closed? || session.transcript(before).any?(&.reply?)
           left = deadline - Time.instant
           break if left <= Time::Span.zero
           session.wait(left < WS_WAIT_SLICE ? left : WS_WAIT_SLICE)
