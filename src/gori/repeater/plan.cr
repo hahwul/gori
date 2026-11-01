@@ -729,8 +729,23 @@ module Gori::Repeater
       scheme, sep, rest = raw.strip.partition("://")
       return nil if sep.empty? || !Env.token_names(scheme).empty?
       authority = rest[0, {'/', '?', '#'}.compact_map { |c| rest.index(c) }.min? || rest.size]
-      probe = "#{scheme}://#{Env.token_names(authority).empty? ? authority : "h"}"
+      probe = "#{scheme}://#{authority_stand_in(authority)}"
       literal_target_error(probe).try &.gsub(probe.inspect, raw.inspect)
+    end
+
+    # `authority` with each var standing in for a value that makes its own spot valid — a port
+    # digit after the port's `:`, a host label elsewhere — so the bytes typed BESIDE a var
+    # (`$ENV.BASE:99999`, `$ENV.BASE bad`) are still judged. A var outside the ENV namespace
+    # (GEN, BIND) stands in for the whole authority, as every var did before.
+    private def self.authority_stand_in(authority : String) : String
+      names = Env.token_names(authority, ns: Env::Namespace::Env)
+      marked = Env.expand(authority, names.to_h { |n| {n, "\0"} })
+      return "h" unless Env.token_names(marked).empty?
+      colon = marked.rindex(':')
+      if colon && colon > (marked.rindex(']') || -1) && marked.index('\0', colon)
+        marked = "#{marked[0..colon]}1"
+      end
+      marked.gsub('\0', 'h')
     end
 
     private def self.literal_target_error(raw : String) : String?
