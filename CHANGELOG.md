@@ -1,22 +1,16 @@
 # Changelog
 
-## Unreleased
+## v0.9.1
 
-- Probe: the passive secrets rule detects Hugging Face (`hf_`) and DigitalOcean (`dop_v1_`/`doo_v1_`/`dor_v1_`) tokens (#1779)
-- Rewriter: a regex that does not compile names the reason (`failed to compile: missing closing parenthesis at 3`) on `gori run rewriter add`/`update`/`preview` and MCP `create_rule`/`update_rule`/`preview_rule`, and MCP now compiles it with the same match-budgeted `SafeRegexp` as the CLI; probe and scope rules name the reason too (#1785, #1802)
-- MCP: probe findings carry each rule's text once and their first five affected URLs (`affected_capped` marks a list stopped at 50), `list_issues` previews notes, and `--install-codex`/`--install-grok` raise the client's tool timeout (Codex: 60 s) to 10 minutes so a long `minimize_repeater` or active `probe_scan` is not cancelled (#1790, #1795, #1802)
-- MCP: a client that dies mid-call no longer ends `gori mcp` before it stops its jobs (a `save_results` fuzz run stayed `running`), a request still queued behind it is dropped rather than run, and a cancelled `send_request` finalizes its History flow as cancelled instead of leaving it Pending (#1796, #1802)
-- Probe: a passive scan of a large capture (`gori run probe`, MCP `probe_scan`) peaks at about a third of the memory, and over MCP it answers `ping` and can be cancelled mid-scan (#1791)
-- MCP: `race_requests`/`timing_requests` refuse a WebSocket session and name the field or scope exclude that blocks them, and `apply_rules` reports a `short_circuit` rule it did not run (#1802)
-- MCP: closing stdin cuts a held `wait_ms` short so jobs stop at once, `stop_job` honours a cancel, ad-hoc OAST sessions are deregistered at exit, a slow crawl's findings reach History, and `fuzz_results` on a live run pages only rows that cannot be overtaken (#1802)
-- MCP: `list_notes`, `list_links` and an issue's links and evidence are held to the reply budget, `list_events` says `has_more`, and `ql_explain` no longer says `list_sitemap` refuses `tag:` (#1802)
-- Rules: renaming or deleting a custom colour or an extract rule names the rules and session slots left pointing at the old name, a view or colour rule refusal names the term it drops, and a custom probe rule with a kind this build does not know stays off (#1802)
-- TUI: in Intercept, Tab and Shift-Tab never discard another hold's unforwarded edit and a second double-click on the row now can; History's `⌁follow +N` counts the first flows that arrive after follow goes off on an empty list, from this process or another (#1797, #1801)
-- TUI: a paste no longer presses a card's letters or accepts an `$ENV` completion, a sub-tab or OAST callback pick survives another process reordering the list, a Cookie crack runs in the background and stops on a second press, and Repeater WebSocket frames keep their order when a line is edited (#1801)
-- CLI: `gori run show` accepts `--format csrf-poc` and `csrf_poc` as aliases for `csrf`, matching the command overview (#1777)
-- Docs: the landing is now eight snapped screens drawn as an ordered-dither field on one canvas (the knot, the loop, the figures, the TUI film strip, the seam, the name, the clouds), and the doc pages carry the knot in monospace glyphs (#1773)
-- Issues: `gori run issues` and MCP `list_issues` filter with the Issues tab's query (it narrows exports too), and the CLI adds `issues show <id>`, `--count` and several ids on `update`/`delete`; `fp` sets a status everywhere, and an issue filed from a flow takes that flow's host (an empty host normalises to nil); a field written with `~` is refused rather than matching nothing (#1776, #1802)
-- Repeater: a target that names an env var (`http://$ENV.BASE`) is saved whatever the var holds, by create and update alike, and resolves on each send, while a literal port or space beside the var is still refused; the guide now documents it (#1774, #1802)
+- MCP: leaner probe findings and list rows, a passive scan in about a third of the memory that stays cancellable, and `--install-codex`/`--install-grok` raise the tool timeout to 10 minutes (#1790, #1791, #1795)
+- MCP: a client that dies mid-call stops its jobs cleanly, a cancelled `send_request` is finalized, and fixes to job lifecycle, paging, reply budgets and rule warnings (#1796, #1802)
+- Issues: `gori run issues` and MCP `list_issues` filter with the Issues tab's query, and the CLI adds `issues show`, `--count` and several ids on `update`/`delete` (#1776, #1778, #1799)
+- Rewriter: a regex that does not compile names the reason on the CLI and MCP (#1785, #1793)
+- Repeater: a target that names an env var (`http://$ENV.BASE`) is saved as written and resolves on each send (#1774, #1775)
+- Probe: the secrets rule detects Hugging Face and DigitalOcean tokens (#1779, #1794)
+- TUI: fixes from a defect audit: paste guards, Intercept Tab edits, stale picks and a background Cookie crack (#1797, #1801)
+- CLI: `gori run show --format csrf-poc` is accepted as an alias for `csrf` (#1777)
+- Docs: a redrawn landing page (#1773, #1800)
 
 ## v0.9.0
 
