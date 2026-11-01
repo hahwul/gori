@@ -454,7 +454,8 @@ module Gori
         Log.info { "timing_requests #{plan.scheme}://#{plan.host}:#{plan.port} x#{rep.iterations} (#{transport}) -> #{rep.verdict}" }
         subject = Repeater::Timing::Present::Subject.new(
           a_label: labels[0]? || "A", b_label: labels[1]? || "B",
-          origin: "#{plan.scheme}://#{plan.host}:#{plan.port}", transport: transport, mode: mode.to_s.underscore)
+          origin: "#{plan.scheme}://#{plan.host}:#{plan.port}", transport: transport, mode: mode.to_s.underscore,
+          warmup: warmup)
         Result.new(JSON.build { |j| Repeater::Timing::Present.report_object(j, rep, subject) })
       end
 

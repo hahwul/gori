@@ -117,4 +117,18 @@ describe Gori::MCP::Server do
       huge.error_code.should_not eq("INTERNAL")
     end
   end
+
+  # `warmup` is clamped to `count - 1`; the reply says what was used rather than leave the
+  # caller assuming its own value.
+  it "echoes the warm-up actually used" do
+    with_store do |store|
+      a = store.insert_repeater(target: "http://127.0.0.1:9", request: "GET /a HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+        http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil)
+      b = store.insert_repeater(target: "http://127.0.0.1:9", request: "GET /b HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+        http2: false, auto_cl: true, flow_id: nil, position: 1, sni: nil)
+      tools = tools_for(store)
+      r = tools.call("timing_requests", JSON.parse(%({"repeater_ids":[#{a},#{b}],"count":3,"warmup":50,"allow_unscoped":true})))
+      JSON.parse(r.text)["warmup"].as_i.should eq(2)
+    end
+  end
 end

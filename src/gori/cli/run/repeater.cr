@@ -1537,7 +1537,7 @@ module Gori
         subject = Repeater::Timing::Present::Subject.new(
           a_label: labels[0]? || "A", b_label: labels[1]? || "B",
           origin: "#{plan.scheme}://#{plan.host}:#{plan.port}", transport: transport,
-          mode: run_mode.to_s.underscore)
+          mode: run_mode.to_s.underscore, warmup: warmup)
         if format == :json
           STDOUT.puts Repeater::Timing::Present.report_json(rep, subject)
         else
