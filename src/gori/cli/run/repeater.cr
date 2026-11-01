@@ -3565,7 +3565,7 @@ module Gori
           Repeater::RequestRules.apply(plan, Gori::Rules.load(store))
         end
         if id = applied[0].skipped_stub_rule
-          STDERR.puts "gori run: note: --apply-rules does not run short_circuit rule ##{id}; the live proxy " \
+          STDERR.puts "gori run: note: --apply-rules does not run short_circuit #{applied[0].skipped_stub_ref || "rule ##{id}"}; the live proxy " \
                       "would answer this request from it, and this send goes upstream"
         end
         applied

@@ -219,6 +219,7 @@ describe Gori::MCP::Server do
         skipped = payload["skipped_rules"].as_a
         skipped.size.should eq(1)
         skipped[0]["rule_id"].as_i64.should eq(rules.rules.first.id)
+        skipped[0]["rule"].as_s.should start_with("project rule ##{rules.rules.first.id}")
         skipped[0]["reason"].as_s.should start_with("short_circuit:")
       end
     end

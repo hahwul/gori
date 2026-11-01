@@ -365,6 +365,8 @@ module Gori::Repeater
     # The short-circuit rule the live proxy would have ANSWERED this request with, which
     # `apply_rules` does not run (`RequestRules.apply`): the request still went upstream.
     property skipped_stub_rule : Int64? = nil
+    # Its label with the SCOPE ("project rule #3 · inline 200"): the two stores number rules apart.
+    property skipped_stub_ref : String? = nil
 
     def initialize(@sender : Sender, @requests : Array(Bytes), @scheme : String,
                    @host : String, @port : Int32, @http2 : Bool,

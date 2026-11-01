@@ -26,6 +26,7 @@ describe Gori::Repeater::RequestRules do
       sent, changed = Gori::Repeater::RequestRules.apply(rules_plan("GET /mock HTTP/1.1\r\nHost: t.test\r\nX-A: 1\r\n\r\n"), rules)
       changed.should be_true
       sent.skipped_stub_rule.should eq(7_i64)
+      sent.skipped_stub_ref.not_nil!.should start_with("project rule #7")
       quiet, _ = Gori::Repeater::RequestRules.apply(rules_plan("GET /real HTTP/1.1\r\nHost: t.test\r\n\r\n"), rules)
       quiet.skipped_stub_rule.should be_nil
     end
