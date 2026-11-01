@@ -552,9 +552,10 @@ module Gori
       # so an offset names the same rows on the next call; the rest are `rows_pending`.
       private def fuzz_result_positions(fjob : FuzzJob, matched_only : Bool) : {Array(Int32), Int32}
         rows = fjob.results
-        picked = (0...rows.size).select { |i| fjob.pageable?(rows[i]) }
-        pending = rows.size - picked.size
-        picked.select! { |i| rows[i].matched? } if matched_only
+        listed = matched_only ? (0...rows.size).select { |i| rows[i].matched? } : (0...rows.size).to_a
+        picked = listed.select { |i| fjob.pageable?(rows[i]) }
+        # Counted over THIS listing: a held-back row matched_only would hide is not pending here.
+        pending = listed.size - picked.size
         # `results` holds a concurrent run's rows as they COMPLETED; page them in index order,
         # as the TUI lists them and a saved run is read back (`ORDER BY idx, id`), so an offset
         # names the same rows every surface does (#1432). Arrival breaks a resend's tie.

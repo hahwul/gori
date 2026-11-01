@@ -252,7 +252,7 @@ describe "MCP cancellation stops the work" do
         store.flush
         store.recent_flows(10).map(&.state.pending?).should eq([false])
         # ...and blames the cancel, not the origin (whose socket gori itself closed).
-        store.get_flow(store.recent_flows(1).first.id).not_nil!.error.to_s.should contain("cancelled by the MCP client")
+        store.get_flow(store.recent_flows(1).first.id).not_nil!.error.to_s.should contain("cancelled after the request was sent")
       end
 
       select
