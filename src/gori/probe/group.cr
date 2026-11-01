@@ -101,8 +101,7 @@ module Gori
         j.field "severity", i.severity.label
         j.field "status", i.status.label
         j.field "hit_count", i.hit_count
-        j.field("affected") { j.array { i.affected.first(affected_limit || i.affected.size).each { |u| j.string(u) } } }
-        j.field "affected_count", i.affected.size
+        affected_fields(j, i.affected, affected_limit)
         j.field "evidence", i.evidence
         j.field "sample_flow_id", i.sample_flow_id
         j.field "sample_repeater_id", i.sample_repeater_id
@@ -111,6 +110,16 @@ module Gori
         j.field "remediation", Probe.remediation(i.code) if rule_text
         cwe_fields(j, i.code, rule_text)
       end
+    end
+
+    # `affected` (the first `limit` URLs) and `affected_count`. On the MCP shape (a `limit`) also
+    # `affected_capped: true` once the list is full: the fold stops collecting at
+    # PROBE_AFFECTED_CAP, so `affected_count` is then a floor, and a `hit_count` of 70 beside
+    # `affected_count` 50 read as "50 is all of them". The CLI row keeps its bytes.
+    private def self.affected_fields(j : JSON::Builder, urls : Array(String), limit : Int32?) : Nil
+      j.field("affected") { j.array { urls.first(limit || urls.size).each { |u| j.string(u) } } }
+      j.field "affected_count", urls.size
+      j.field "affected_capped", true if limit && urls.size >= Store::PROBE_AFFECTED_CAP
     end
 
     # `cwe`/`cwe_name`, emitted only for a code that HAS a mapping. Absent rather than null:
@@ -136,8 +145,7 @@ module Gori
         j.field "title", g.title
         j.field "severity", g.severity.label
         j.field "hit_count", g.hit_count
-        j.field("affected") { j.array { g.affected.first(affected_limit || g.affected.size).each { |u| j.string(u) } } }
-        j.field "affected_count", g.affected.size
+        affected_fields(j, g.affected, affected_limit)
         j.field "evidence", g.evidence
         j.field "sample_flow_id", g.sample_flow_id
         j.field "sample_repeater_id", g.sample_repeater_id

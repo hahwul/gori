@@ -695,7 +695,7 @@ module Gori
           s.field "aggressive", boolprop("with active:true, raise caps and widen bypass sets (implies unsafe); authorized targets only")
           s.field "insecure", boolprop("with active:true, skip upstream TLS verification")
           s.field "limit", limitprop("max issue groups to return", PROBE_SCAN_LIMIT)
-          s.field "affected_limit", limitprop("affected URLs listed per row (affected_count has them all)", PROBE_AFFECTED_LIMIT)
+          s.field "affected_limit", limitprop("affected URLs listed per row; affected_count stops at #{Store::PROBE_AFFECTED_CAP} (affected_capped:true)", PROBE_AFFECTED_LIMIT)
           s.field "persist", boolprop("also WRITE findings to the persisted list (probe_issues), merged by (code, host); refused under --read-only. Dismissed stays dismissed; rescans raise hit_count")
         end
 
@@ -710,7 +710,7 @@ module Gori
           s.field "host", strprop("only findings for this exact host")
           s.field "limit", limitprop("max rows", PROBE_ISSUES_LIMIT)
           s.field "offset", intprop("start row (default 0)")
-          s.field "affected_limit", limitprop("affected URLs listed per row (affected_count has them all)", PROBE_AFFECTED_LIMIT)
+          s.field "affected_limit", limitprop("affected URLs listed per row; affected_count stops at #{Store::PROBE_AFFECTED_CAP} (affected_capped:true)", PROBE_AFFECTED_LIMIT)
         end
 
         tool j, "list_probe_rules",

@@ -114,6 +114,28 @@ describe "MCP probe_scan tool" do
       row["affected"].as_a.size.should eq(Gori::MCP::Tools::PROBE_AFFECTED_LIMIT.default)
       row["affected_count"].as_i.should eq(8)
       find.call(call_json(tools, "probe_scan", %({"affected_limit":50})))["affected"].as_a.size.should eq(8)
+      row["affected_capped"]?.should be_nil
+    end
+  end
+
+  # The fold stops collecting at PROBE_AFFECTED_CAP, so past it `affected_count` is a floor and
+  # the row has to say so rather than read as "these are all of them".
+  it "marks a row whose affected list hit the cap" do
+    cap = Gori::Store::PROBE_AFFECTED_CAP
+    with_store do |store|
+      (cap + 5).times do |i|
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64 + i, scheme: "https", host: "acme.test", port: 443, method: "GET",
+          target: "/login/#{i}?token=supersecretvalue123", http_version: "HTTP/1.1",
+          head: "GET /login/#{i}?token=supersecretvalue123 HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
+          source: Gori::FlowSource::Kind::Proxy))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
+      end
+      row = call_json(tools_for(store), "probe_scan", "{}")["issues"].as_a.find { |g| g["code"].as_s == "secret_in_url" }.not_nil!
+      row["hit_count"].as_i.should eq(cap + 5)
+      row["affected_count"].as_i.should eq(cap)
+      row["affected_capped"].as_bool.should be_true
     end
   end
 
