@@ -292,7 +292,7 @@ describe "MCP tool permissions" do
       t = tools_for(store)
       sent = t.call("send_request", JSON.parse(%({"url":"http://ex.in.test/"})))
       sent.error_code.should eq("SCOPE_BLOCKED")
-      sent.text.should contain("EXCLUDE rule that matches it (an include rule cannot override an exclude), or pass allow_unscoped:true")
+      sent.text.should match(/EXCLUDE rule that matches it \(#\d+ host "ex\.in\.test"; an include rule cannot override an exclude\), or pass allow_unscoped:true/)
       mined = t.call("mine_start", JSON.parse({"url"      => "http://ex.in.test/",
                                                "template" => "GET / HTTP/1.1\r\nHost: ex.in.test\r\n\r\n"}.to_json))
       mined.error_code.should eq("SCOPE_BLOCKED")

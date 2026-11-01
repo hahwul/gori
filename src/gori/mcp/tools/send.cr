@@ -220,7 +220,7 @@ module Gori
         return built if built.is_a?(Result)
         plan, labels = built
 
-        gate = send_gate(ob, plan)
+        gate = send_gate(ob, plan, members)
         return gate if gate.is_a?(Result)
 
         results = plan.send_race
@@ -444,7 +444,7 @@ module Gori
         return built if built.is_a?(Result)
         plan, labels = built
 
-        gate = send_gate(ob, plan)
+        gate = send_gate(ob, plan, members)
         return gate if gate.is_a?(Result)
 
         mode = interleaved ? Repeater::Timing::Mode::Interleaved : Repeater::Timing::Mode::Auto
@@ -716,15 +716,17 @@ module Gori
       # group; the first member's verdict is the one reported. Each member is judged as the
       # binding pass will send it (`Plan#scope_requests`), and the refusal names it by number
       # only: the expanded target may carry a live bound value.
-      private def send_gate(ob : Outbound, plan : Repeater::Plan) : ScopeCheck | Result
+      # `members` is a race/timing group's repeater ids, so a refusal names the session to fix.
+      private def send_gate(ob : Outbound, plan : Repeater::Plan, members : Array(Int64)? = nil) : ScopeCheck | Result
         requests = plan.scope_requests
         first = requests.first? || plan.bytes
         sc = ob.check(request_scope_url(plan, first), plan.host, request_exclude_url(plan, first), plan.port)
-        return scope_blocked(sc, passes_exclude: ob.send_passes_exclude?) if sc.blocked?
+        return scope_blocked(sc, members.try { |m| "repeater ##{m[0]}" }, passes_exclude: ob.send_passes_exclude?) if sc.blocked?
         requests.each_with_index do |req, i|
           next if i == 0
           member = ob.check(request_scope_url(plan, req), plan.host, request_exclude_url(plan, req), plan.port)
-          return scope_blocked(member, "member #{i + 1}", passes_exclude: ob.send_passes_exclude?) if member.blocked?
+          what = members.try(&.[i]?).try { |id| "repeater ##{id}" } || "member #{i + 1}"
+          return scope_blocked(member, what, passes_exclude: ob.send_passes_exclude?) if member.blocked?
         end
         if reason = plan.refusal
           return sandbox_blocked(reason, plan.host, "url")
@@ -1762,6 +1764,10 @@ module Gori
         return host_approval(sc) if sc.pending?
         reason = if sc.unscoped?
                    "no scope is configured for this project, so active requests are refused by default"
+                 elsif rule = sc.exclude_rule
+                   # The host may well be included: "outside the scope" sent the agent to add an
+                   # include that changes nothing. Name the exclude that refused it.
+                   "#{what || "the target"} on #{sc.host} matches scope EXCLUDE rule #{rule}"
                  elsif what
                    "#{what} on #{sc.host} is outside the project's configured scope"
                  else

@@ -141,12 +141,32 @@ describe Gori::MCP::Server do
           r.is_error.should be_true
           r.error_code.should eq("SCOPE_BLOCKED")
           r.text.should_not contain("/internal/delete-all")
+          r.text.should start_with("repeater ##{b} on 127.0.0.1") # the session to fix, not "member 2"
         end
         select
         when line = seen.receive
           fail "a request went out: #{line}"
         when timeout(100.milliseconds)
         end
+      end
+    end
+
+    # A PATH exclude on an included host said "target host … is outside the project's configured
+    # scope", sending the agent to add an include that changes nothing.
+    it "names the EXCLUDE rule when one refused an included host" do
+      with_store do |store|
+        scope = Gori::Scope.load(store)
+        scope.add("include", "host", "127.0.0.1")
+        scope.add("exclude", "string", "/admin")
+        a = seed_race_repeater(store, 9, "/ok")
+        b = seed_race_repeater(store, 9, "/admin/x")
+        tools = tools_for(store)
+        r = tools.call("race_requests", JSON.parse(%({"repeater_ids":[#{a},#{b}]})))
+        r.error_code.should eq("SCOPE_BLOCKED")
+        r.text.should match(/\Arepeater ##{b} on 127\.0\.0\.1 matches scope EXCLUDE rule #\d+ string "\/admin"/)
+        r.text.should_not contain("outside")
+        sent = tools.call("send_request", JSON.parse(%({"repeater_id":#{b}})))
+        sent.text.should start_with("the target on 127.0.0.1 matches scope EXCLUDE rule #")
       end
     end
 
