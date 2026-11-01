@@ -358,9 +358,11 @@ module Gori
         "pages the whole #{what}; body_mode:\"full\" inlines up to #{Serialize::MAX_TEXT} bytes"
       end
 
-      # Whether this call left the body size to the default — neither argument given.
+      # Whether this call left the body size to the default — no `body_mode` and no POSITIVE
+      # `max_body_bytes`: a 0/negative one "falls back to the mode default" (`body_return_opts`),
+      # and with no mode that default is this one, not the 64 KB full cap.
       private def body_auto?(h) : Bool
-        !present?(h, "body_mode") && !present?(h, "max_body_bytes")
+        !present?(h, "body_mode") && !int(h, "max_body_bytes").try(&.positive?)
       end
 
       # Ceiling on the `decoder` tool's returned output string. A Decoder step can
