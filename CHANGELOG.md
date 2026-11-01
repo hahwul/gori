@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Probe: fingerprint WordPress from the response body and generator meta tag (#1780)
+
 ## v0.9.1
 
 - MCP: leaner probe findings and list rows, a passive scan in about a third of the memory that stays cancellable, and `--install-codex`/`--install-grok` raise the tool timeout to 10 minutes (#1790, #1791, #1795)
