@@ -746,6 +746,17 @@ module Gori::Decoder
       end
     end
 
+    # Numeric entity-encode EVERY code point (&#xNN;, lowercase hex) — WAF-bypass style.
+    def html_encode_all(s : String) : String
+      String.build(s.bytesize * 6) do |io|
+        s.each_char do |ch|
+          io << "&#x"
+          ch.ord.to_s(io, 16)
+          io << ";"
+        end
+      end
+    end
+
     # ROT47: rotate printable ASCII 33..126 by 47 (mod 94); all else passes through.
     # Self-inverse — applying it twice restores the original.
     ROT47_FROM = String.new(Bytes.new(94) { |i| (33 + i).to_u8 })

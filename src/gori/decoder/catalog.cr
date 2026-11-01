@@ -261,6 +261,9 @@ module Gori::Decoder
     r.register text("html-escape", "html-encode", "htmlentities", "html",
       category: Category::Escape, direction: Direction::Encode,
       description: "HTML-escape & < > \" ' (only)") { |s| HTML.escape(s) }
+    r.register text("html-encode-all", "html-entity-encode-all",
+      category: Category::Escape, direction: Direction::Encode,
+      description: "HTML numeric-encode every code point (&#xNN;)") { |s| Codecs.html_encode_all(s) }
     r.register text("html-unescape", "html-decode", "unhtml",
       category: Category::Escape, direction: Direction::Decode,
       description: "HTML-unescape named + numeric entities") { |s| Codecs.html_unescape(s) }

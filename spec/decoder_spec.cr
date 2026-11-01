@@ -694,6 +694,16 @@ describe Gori::Decoder do
       conv("html-unescape", "&lt;a&gt;&#65;").should eq "<a>A"
     end
 
+    it "html-encode-all encodes every code point as lowercase hex numeric entity" do
+      conv("html-encode-all", "A<").should eq "&#x41;&#x3c;"
+      conv("html-encode-all", "é").should eq "&#xe9;"
+      conv("html-encode-all", "😀").should eq "&#x1f600;"
+      conv("html-entity-encode-all", "A<").should eq "&#x41;&#x3c;"
+      conv("html-unescape", conv("html-encode-all", "A<")).should eq "A<"
+      conv("html-unescape", conv("html-encode-all", "é")).should eq "é"
+      conv("html-unescape", conv("html-encode-all", "hello 😀 world")).should eq "hello 😀 world"
+    end
+
     # #1698: only the HTML5 legacy names may drop their ';' (matches Python's html.unescape).
     it "html unescape decodes a ';'-less name only when it is a legacy entity" do
       conv("html-unescape", "/p?a=1&lang=en&image=x&order=asc").should eq "/p?a=1&lang=en&image=x&order=asc"
