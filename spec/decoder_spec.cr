@@ -683,6 +683,10 @@ describe Gori::Decoder do
       conv("sha256", "abc").should eq "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
       conv("sha384", "abc").should eq "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7"
       conv("sha512", "abc").should start_with "ddaf35a193617aba"
+      conv("sha3-256", "abc").should eq "3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532"
+      conv("sha3-256", "").should eq "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"
+      conv("sha3-512", "abc").should eq "b751850b1a57168a5693cd924b6b096e08f621827444f70d884f5d0240d2712e10e116e9192af3c91a7ec57647e3934057340b4cf408d5a56592f8274eec53f0"
+      conv("sha3-512", "").should eq "a69f73cca23a9ac5c8b567dc185a756e97c982164fe25859e0d1dcc1475c80a615b2123af1f5f94c11e3e9402c3ac558f500199d95b6d3e301758586281dcd26"
       conv("crc32", "hello world").should eq "0d4a1185"
       conv("crc32", "").should eq "00000000" # empty input → zero, left-padded to 8 hex
     end

@@ -255,6 +255,8 @@ module Gori::Decoder
     r.register encode("sha256", category: Category::Hash, direction: Direction::Hash, description: "SHA-256 digest (hex)") { |b| Digest::SHA256.hexdigest(b) }
     r.register encode("sha384", category: Category::Hash, direction: Direction::Hash, description: "SHA-384 digest (hex)") { |b| OpenSSL::Digest.new("SHA384").update(b).final.hexstring }
     r.register encode("sha512", category: Category::Hash, direction: Direction::Hash, description: "SHA-512 digest (hex)") { |b| Digest::SHA512.hexdigest(b) }
+    r.register encode("sha3-256", category: Category::Hash, direction: Direction::Hash, description: "SHA3-256 digest (hex)") { |b| OpenSSL::Digest.new("SHA3-256").update(b).final.hexstring }
+    r.register encode("sha3-512", category: Category::Hash, direction: Direction::Hash, description: "SHA3-512 digest (hex)") { |b| OpenSSL::Digest.new("SHA3-512").update(b).final.hexstring }
     r.register encode("crc32", category: Category::Hash, direction: Direction::Hash, description: "CRC-32 checksum (hex)") { |b| Digest::CRC32.checksum(b).to_s(16).rjust(8, '0') }
 
     # ---------------- ESCAPE ----------------

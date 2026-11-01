@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Decoder: add html-encode-all operation to encode every code point as a numeric entity (#1782)
+- Decoder: SHA3-256 and SHA3-512 hashes, and `html-encode-all`, which encodes every code point as a numeric entity (#1781, #1782)
 
 ## v0.9.1
 

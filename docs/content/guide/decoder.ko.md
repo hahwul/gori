@@ -63,7 +63,7 @@ myenc > url-encode
 | **Compression** | `gzip-compress` / `gzip-decompress`, `zlib-compress` / `zlib-decompress`, `raw-deflate` / `raw-inflate` (헤더 없는 RFC 1951), `brotli-decompress`, `zstd-decompress` |
 | **Serialization** | `msgpack-decode`, `cbor-decode`(바이너리 문서를 JSON 텍스트로), 그리고 네이티브 직렬화 리더 `java-deserialize`, `dotnet-viewstate`, `php-unserialize`, `pickle-disasm` |
 | **Token** | `jwt-decode` (헤더 + 페이로드; 서명은 표시되지만 검증하지 않음), 그리고 서명된 세션 쿠키 리더 `cookie-decode`(프레임워크 자동 판별), `flask-decode`(itsdangerous), `django-decode`(`django.core.signing`), `rack-decode`(Ruby) |
-| **Hash** | `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `crc32` |
+| **Hash** | `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `sha3-256`, `sha3-512`, `crc32` |
 | **Escape** | `html-escape` / `html-unescape`, `html-encode-all`, `json-escape` / `json-unescape`, `unicode-escape` / `unicode-unescape`, `xml-escape` / `xml-unescape`, `c-string-escape` / `c-string-unescape`, `shell-escape`, `powershell-escape` |
 | **Text** | `rot13`, `rot47`, `upper`, `lower`, `reverse`, `homoglyph`, `typo` |
 
