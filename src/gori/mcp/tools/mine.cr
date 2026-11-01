@@ -123,7 +123,7 @@ module Gori
             j.field "found", mjob.found
             j.field "errors", mjob.errors
             emit_request_macro_status(j, mjob.engine.request_macro)
-            j.field "baseline_stable", mjob.baseline_stable?
+            j.field "baseline_stable", mjob.baseline_stable
             # How this run had to be calibrated: the status varied, the endpoint echoes any
             # input (reflection detection is then OFF at those locations), it never answered at
             # all — or a location reacts to unknown parameters and is mined against a
@@ -405,7 +405,7 @@ module Gori
                                "budget_exhausted: max_requests hit early (see incomplete_reason). `skipped` lists " \
                                "names NOT tested per location, with a reason; names_total omits them, so read `skipped` " \
                                "before calling a sweep clean. `baseline_warning` makes findings tentative: READ IT even " \
-                               "when baseline_stable is true." do |s|
+                               "when baseline_stable is true (null until the baseline was sampled)." do |s|
           s.field "job_id", strprop("id from mine_start"), required: true
           s.field "wait_ms", job_wait_prop
         end

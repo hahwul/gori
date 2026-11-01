@@ -1159,7 +1159,9 @@ module Gori
         property sent = 0_i64
         property found = 0
         property errors = 0_i64
-        property? baseline_stable = true
+        # nil until the run has sampled a baseline: a run that never got that far (refused,
+        # stopped first, still calibrating) has no stability to report.
+        property baseline_stable : Bool? = nil
         # The baseline's own sentence about anything that DOWNGRADES this run's findings: the
         # status varied, the endpoint echoes any input, a location had to be muted, or it never
         # answered at all (see `Miner::Baseline::Report#warning`).
