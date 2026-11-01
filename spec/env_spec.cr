@@ -1,6 +1,28 @@
 require "./spec_helper"
 
 describe Gori::Env do
+  # A saved row already past the expansion passes replays as a draft; escaped, a draft pass hands
+  # back exactly what was saved instead of expanding it a second time.
+  it "escapes tokens so a draft pass reproduces the bytes" do
+    Gori::Settings.env_vars = [{"TOK", "secret123"}]
+    with_env_syntax(Gori::Env::Syntax::Namespaced) do
+      sent = "a=$ENV.TOK b=$$ENV.TOK c=$$$ENV.TOK g=$GEN.UUID d=$5 $"
+      env_only = String.new(Gori::Env.escape_tokens(sent.to_slice, Gori::Env::Owns::Env))
+      env_only.should contain("g=$GEN.UUID") # left for the send pass to mint
+      Gori::Env.expand(env_only).should eq(sent)
+      all = String.new(Gori::Env.escape_tokens(sent.to_slice, Gori::Env::Owns::All))
+      Gori::Env.expand_bindings(Gori::Env.expand(all), resolve: Gori::Env::Owns::Gen).should eq(sent)
+    end
+    with_env_syntax(Gori::Env::Syntax::Bare) do
+      sent = "a=$TOK b=$$ d=$5"
+      Gori::Env.escape_tokens(sent.to_slice, Gori::Env::Owns::Env).should eq(sent.to_slice) # bare env pass keeps `$$`
+      all = String.new(Gori::Env.escape_tokens(sent.to_slice, Gori::Env::Owns::All))
+      Gori::Env.expand(all, escape: Gori::Env::Escape::Consume).should eq(sent)
+    end
+  ensure
+    Gori::Settings.env_vars = [] of {String, String}
+  end
+
   it "expands registered keys and leaves unknown keys literal" do
     Gori::Settings.env_prefix = "$"
     Gori::Settings.env_vars = [{"HOST", "api.test"}, {"TOKEN", "secret"}]

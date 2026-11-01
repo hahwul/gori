@@ -1712,6 +1712,39 @@ module Gori
       buf.to_slice
     end
 
+    # The spelling of `bytes` that a DRAFT send turns back into `bytes`: every token and escape
+    # of the `owns` namespaces gets one more sigil, so the passes that resolve and unescape them
+    # hand back what is here. For a saved row whose bytes ALREADY went through those passes (or
+    # were exempt from them), which a draft replay would otherwise expand a second time — a
+    # `$$ENV.TOK` the operator escaped came back `$ENV.TOK` and then went out as its value.
+    #
+    # Namespaced: `$ENV.X` → `$$ENV.X`, `$$ENV.X` → `$$$ENV.X` (a literal `$` before the escape).
+    # Bare: its env pass consumes no escape, so only an `All` request (nothing ran) is escaped,
+    # by doubling each sigil of a token or a `$$`.
+    def self.escape_tokens(bytes : Bytes, owns : Owns, prefix : String = Settings.env_prefix,
+                           syntax : Syntax = Settings.env_syntax) : Bytes
+      return bytes if owns.none? || prefix.empty? || (syntax.bare? && owns != Owns::All)
+      return bytes unless contains_prefix?(bytes, prefix)
+      buf = IO::Memory.new(bytes.size + 8)
+      i = 0
+      while i < bytes.size
+        found = read_token_at(bytes, i, bytes.size, syntax: syntax, prefix: prefix, escapes: owns)
+        unless found
+          buf.write_byte(bytes[i])
+          i += 1
+          next
+        end
+        span = bytes[i, found.width]
+        if found.kind.token? ? found.owned_by?(owns) : found.kind.escape?
+          # A bare `$$` → `$$$$`; anything else takes one more sigil in front.
+          syntax.bare? && found.kind.escape? ? buf.write(span) : (buf << prefix)
+        end
+        buf.write(span)
+        i += found.width
+      end
+      buf.to_slice
+    end
+
     # Substitute registered `prefix+KEY` tokens; unknown keys stay literal.
     #
     # Operates on raw bytes, not `String#chars`. `prefix` and KEY names are always

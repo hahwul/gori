@@ -156,7 +156,7 @@ module Gori
 
         repeater_id, repeater_response_saved = persist_send_repeater(h, save, built, http2, result,
           issue_id, recorded_flow_id, plan.h2_fields,
-          sni: plan.sni, auto_cl: send_persist_auto_cl(h), tls_preset: plan.tls_preset)
+          sni: plan.sni, auto_cl: send_persist_auto_cl(h), tls_preset: plan.tls_preset, escape: plan.persist_escape)
         # Issue links come from MCP-only arguments, so that relation stays in this adapter; the
         # shared seam persists the Repeater row and its response evidence. The request already
         # went out, so the refusal names where its response is.
@@ -884,7 +884,7 @@ module Gori
                                         issue_id : Int64?, recorded_flow_id : Int64?,
                                         h2_fields : Array({String, String})? = nil,
                                         *, sni : String? = nil, auto_cl : Bool = false,
-                                        tls_preset : String? = nil) : {Int64?, Bool}
+                                        tls_preset : String? = nil, escape : Env::Owns = Env::Owns::None) : {Int64?, Bool}
         return {nil, false} unless save
         # Preserve the original source flow for a flow repeater; otherwise link
         # the Repeater tab to the newly recorded History evidence.
@@ -896,7 +896,7 @@ module Gori
         # stored SNI because it passed no stored value.
         persisted = Repeater::SendPersistence.persist(store, built.scheme, built.host, built.port,
           built.bytes, http2, auto_cl, flow_id, result, h2_fields,
-          sni: sni.presence || send_sni(h), tls_preset: tls_preset)
+          sni: sni.presence || send_sni(h), tls_preset: tls_preset, escape: escape)
         repeater_id = persisted.id
         return {nil, false} unless repeater_id
 

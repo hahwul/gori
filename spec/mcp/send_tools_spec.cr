@@ -777,6 +777,31 @@ describe Gori::MCP::Server do
       end
     end
 
+    # The saved row (no flow beside it, so a DRAFT) used to hold the bytes after expansion: the
+    # operator's `$$ENV.TOK` came back as `$ENV.TOK`, and replaying the row sent the secret.
+    it "saves a send as a repeater that replays the bytes it sent, not a second expansion" do
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        with_store_env do |store|
+          port = start_mcp_http_origin("ok")
+          set = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"set_env_var","arguments":{"key":"TOK","value":"secret123"}}})
+          {false, true}.each do |verbatim|
+            raw = "GET /e?a=#{verbatim ? "" : "$"}$ENV.TOK&g=$GEN.UUID HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n"
+            send = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"send_request","arguments":) +
+                   %({"url":"http://127.0.0.1:#{port}/","raw":#{raw.to_json},"verbatim":#{verbatim},"save_as_repeater":true,"record_history":false,"allow_unscoped":true}}})
+            first = mcp_tool_payload(mcp_drive(store, set, send, verify_upstream: false)[1])
+            first["effective_request"]["target"].as_s.should start_with("/e?a=$ENV.TOK&g=")
+            rid = first["saved_repeater_id"].as_i64
+            replay = %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid},"record_history":false,"allow_unscoped":true}}})
+            target = mcp_tool_payload(mcp_drive(store, replay, verify_upstream: false)[0])["effective_request"]["target"].as_s
+            target.should start_with("/e?a=$ENV.TOK&g=")
+            target.should_not contain("secret123")
+            # A draft's `$GEN.UUID` stays a draft token; a verbatim send's literal stays literal.
+            target.ends_with?("g=$GEN.UUID").should eq(verbatim)
+          end
+        end
+      end
+    end
+
     it "executes a saved HTTP repeater by repeater_id" do
       with_store do |store|
         port = start_mcp_http_origin("repeater-ok")

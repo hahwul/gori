@@ -710,7 +710,7 @@ module Gori
         begin
           saved = Repeater::SendPersistence.persist(store, plan.scheme, plan.host, plan.port,
             request, plan.http2?, false, flow_id, result, plan.h2_fields,
-            sni: plan.sni, tls_preset: plan.tls_preset)
+            sni: plan.sni, tls_preset: plan.tls_preset, escape: plan.persist_escape)
           id = saved.id
           unless id
             message = project_write_failure("#{prefix}: Repeater session was NOT saved", project)

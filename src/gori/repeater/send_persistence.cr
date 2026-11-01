@@ -88,11 +88,19 @@ module Gori::Repeater
     def self.persist(store : Store, scheme : String, host : String, port : Int32,
                      request : Bytes, http2 : Bool, auto_cl : Bool, flow_id : Int64?,
                      response : Result, h2_fields : Array({String, String})? = nil,
-                     *, sni : String? = nil, tls_preset : String? = nil) : SendPersistenceResult
+                     *, sni : String? = nil, tls_preset : String? = nil,
+                     escape : Env::Owns = Env::Owns::None) : SendPersistenceResult
       # `host` is the bare dial host (IPv6 unbracketed); `build_target` brackets it back so
       # the row re-parses on the next send.
       target = FlowRequest.build_target(scheme, host, port)
+      # `escape` is `Plan#persist_escape`: `request` already went through (or was exempt from)
+      # the expansion passes, and a row with no matching flow replays as a DRAFT, which runs
+      # them again — a `$$ENV.TOK` the operator escaped was saved as `$ENV.TOK` and the replay
+      # sent the secret. Escaped, the replay re-sends what this send did. Only for a row with no
+      # flow: a flow-linked one is evidence in the TUI (`RepeaterView#evidence?`), which reads
+      # its tokens against the capture, and an escape there would itself go out.
       saved_request = replayable_request(h2_fields, scheme, host, port, request)
+      saved_request = Env.escape_tokens(saved_request, escape) unless flow_id
       # These are for probe scanning or safe presentation only. Never write them to the row.
       masked_target = Env.mask_secrets(target)
       masked_request = Env.mask_secrets(String.new(saved_request))
