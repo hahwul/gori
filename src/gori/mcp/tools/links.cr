@@ -30,6 +30,8 @@ module Gori
         end
       end
 
+      LINKS_LIMIT = PageLimit.new(100, 500)
+
       @[Tool("list_links")]
       private def list_links(h) : Result
         owner = link_owner(h)
@@ -37,33 +39,32 @@ module Gori
         owner_kind, owner_id = owner
 
         links = Links.owner_links(store, owner_kind, owner_id)
+        pg = page_args(h, LINKS_LIMIT)
+        page = Links.resolve_all(store, links[pg.offset, pg.limit]? || [] of Store::EntityLink)
+        parts = fit_rows(page) do |j, r, _|
+          j.object do
+            j.field "id", r.link.id
+            j.field "ref_kind", r.link.ref_kind.label
+            j.field "ref_id", r.link.ref_id
+            # `one_line`, like every other captured value MCP emits (see
+            # `Serialize.text`'s contract). Both are built from wire bytes —
+            # `Links.resolve_flow` composes them from the flow's method/host/target,
+            # which `Codec::Http1.parse_request_head` builds with a plain `String.new`
+            # — so an h2 `:path` carrying a raw 0x80 made this whole JSON-RPC response
+            # line invalid UTF-8. Same pair, same fix as `Issues::Export.append_links_json`.
+            j.field "label", Issues::Export.one_line(r.label)
+            j.field "url", Issues::Export.one_line(r.url)
+            # A link whose target was pruned/deleted. Kept (not hidden) so the caller
+            # can tell "no evidence" from "evidence that no longer exists".
+            j.field "stale", true if r.stale?
+          end
+        end
         Result.new(JSON.build do |j|
           j.object do
             j.field "owner_kind", owner_kind.label
             j.field "owner_id", owner_id
-            j.field("links") do
-              j.array do
-                Links.resolve_all(store, links).each do |r|
-                  j.object do
-                    j.field "id", r.link.id
-                    j.field "ref_kind", r.link.ref_kind.label
-                    j.field "ref_id", r.link.ref_id
-                    # `one_line`, like every other captured value MCP emits (see
-                    # `Serialize.text`'s contract). Both are built from wire bytes —
-                    # `Links.resolve_flow` composes them from the flow's method/host/target,
-                    # which `Codec::Http1.parse_request_head` builds with a plain `String.new`
-                    # — so an h2 `:path` carrying a raw 0x80 made this whole JSON-RPC response
-                    # line invalid UTF-8. Same pair, same fix as `Issues::Export.append_links_json`.
-                    j.field "label", Issues::Export.one_line(r.label)
-                    j.field "url", Issues::Export.one_line(r.url)
-                    # A link whose target was pruned/deleted. Kept (not hidden) so the caller
-                    # can tell "no evidence" from "evidence that no longer exists".
-                    j.field "stale", true if r.stale?
-                  end
-                end
-              end
-            end
-            j.field "total", links.size
+            j.field("links") { raw_rows(j, parts) }
+            emit_page(j, pg, parts.size, links.size, cut: parts.size < page.size)
           end
         end)
       end
@@ -149,6 +150,8 @@ module Gori
           "comes back with stale:true rather than dropped." do |s|
           s.field "owner_kind", enumprop("which kind of record owns the link", LINK_OWNERS), required: true
           s.field "owner_id", intprop("the issue or note id"), required: true
+          s.field "limit", limitprop("max rows", LINKS_LIMIT)
+          s.field "offset", intprop("start row (default 0)")
         end
 
         return unless @allow_actions

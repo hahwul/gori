@@ -772,3 +772,42 @@ describe "MCP delete of a linked flow or repeater" do
     end
   end
 end
+
+# One issue with hundreds of links or frozen copies was a single half-megabyte row: list_issues
+# and get_issue carry a capped preview with the totals, and list_links pages the whole set.
+describe "MCP issue links and evidence caps" do
+  it "caps links and evidence per row, says the totals, and list_links pages the rest" do
+    with_store do |store|
+      fid = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
+        method: "GET", target: "/x", http_version: "HTTP/1.1",
+        head: "GET /x HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice,
+        source: Gori::FlowSource::Kind::Proxy))
+      iid = store.insert_issue("t", Gori::Store::Severity::Low, "h.test", nil)
+      links = Gori::MCP::Tools::ISSUE_ITEMS_MAX + 10
+      links.times { |i| store.ensure_link(Gori::Store::LinkOwnerKind::Issue, iid, Gori::Store::LinkRefKind::Flow, 10_000_i64 + i) }
+      snap = Gori::Evidence.from_flow(store.get_flow(fid).not_nil!)
+      7.times { store.freeze_evidence(iid, snap) }
+      tools = tools_for(store, allow_actions: false)
+
+      row = mcp_ok_json(tools, "list_issues", "{}")["issues"][0]
+      row["links"].as_a.size.should eq(Gori::MCP::Tools::ISSUE_ITEMS_PREVIEW)
+      row["links_total"].as_i.should eq(links)
+      row["links_truncated"].as_bool.should be_true
+      row["evidence"].as_a.size.should eq(Gori::MCP::Tools::ISSUE_ITEMS_PREVIEW)
+      row["evidence_total"].as_i.should eq(7)
+
+      one = mcp_ok_json(tools, "get_issue", %({"id":#{iid}}))
+      one["links"].as_a.size.should eq(Gori::MCP::Tools::ISSUE_ITEMS_MAX)
+      one["links_truncated"].as_bool.should be_true
+      one["evidence"].as_a.size.should eq(7)
+      one.as_h.has_key?("evidence_truncated").should be_false
+
+      page = mcp_ok_json(tools, "list_links", %({"owner_kind":"issue","owner_id":#{iid},"limit":20,"offset":#{links - 10}}))
+      page["links"].as_a.size.should eq(10)
+      page["total"].as_i.should eq(links)
+      page["has_more"].as_bool.should be_false
+      mcp_ok_json(tools, "list_links", %({"owner_kind":"issue","owner_id":#{iid},"limit":20}))["has_more"].as_bool.should be_true
+    end
+  end
+end
