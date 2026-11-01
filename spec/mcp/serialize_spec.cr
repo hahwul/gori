@@ -173,4 +173,14 @@ describe "Gori::MCP::Serialize.emit_grpc_messages (compressed)" do
     m["note"].as_s.should contain("snappy")
     Base64.decode(m["bytes"].as_s).should eq(Bytes[0xab, 0xcd])
   end
+
+  # #1778 made a host that scrubs to nothing null in Issues::Export.json; list_issues/get_issue
+  # said "" for the same row while `gori run issues --format json` said null.
+  it "emits null, not an empty string, for an issue host that scrubs to nothing" do
+    with_store do |store|
+      store.insert_issue("t", Gori::Store::Severity::Info, "\u0001", nil)
+      out = JSON.parse(JSON.build { |j| Gori::MCP::Serialize.issue(j, store.issues.first, store) })
+      out["host"].raw.should be_nil
+    end
+  end
 end

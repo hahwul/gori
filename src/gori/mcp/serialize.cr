@@ -1633,7 +1633,7 @@ module Gori
           j.field "status", f.status.label
           j.field "cvss", f.cvss.try { |c| Issues::Export.one_line(c) }
           j.field "cvss_score", f.cvss_score
-          j.field "host", f.host.try { |h| Issues::Export.one_line(h) }
+          j.field "host", f.host.try { |h| Issues::Export.one_line(h).presence } # blank → null, as Export.json (#1778)
           # The flow the issue was filed from — and the FIRST entry of `links` below, which is
           # where an agent reads everything backing the issue. Kept as its own field for
           # compatibility (`create_issue(flow_id:)` writes it, SARIF's webRequest reads it);
