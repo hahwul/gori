@@ -128,7 +128,20 @@ module Gori
         if !lenient && (u = unknown_field(query))
           return FilterAst.unknown_field_note(u, refused: true)
         end
-        parse(query).bad_value
+        regex_term(query) || parse(query).bad_value
+      end
+
+      # A known field written with QL's `~`. This bar has no regex, so `title~jwt` free-texts the
+      # whole token and matches nothing — refused whatever `lenient` says, because the field is
+      # not unknown and the substring form is what the operator meant.
+      private def self.regex_term(query : String) : String?
+        FilterAst.terms(FilterAst.parse(query)).each do |t|
+          next unless (i = t.text.index('~')) && i > 0
+          field = t.text[0...i]
+          next unless known_field?(field)
+          return "`#{field}~` — the issues filter has no regex; use `#{field}:#{t.text[(i + 1)..]}` for a substring"
+        end
+        nil
       end
 
       # The first leaf whose value its field cannot match, as the refusal sentence. An empty
