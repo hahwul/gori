@@ -218,6 +218,22 @@ describe Gori::MCP::Server do
       end
     end
 
+    # send_request{repeater_id} refuses a handshake session ("use send_websocket"); a race sent it
+    # as a plain request and reported the 101 as the exchange.
+    it "refuses a WebSocket handshake member as send_request does" do
+      with_store do |store|
+        a = seed_race_repeater(store, 9, "/a")
+        ws = "GET /chat HTTP/1.1\r\nHost: 127.0.0.1:9\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" \
+             "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+        b = store.insert_repeater(target: "http://127.0.0.1:9", request: ws.to_slice,
+          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"race_requests","arguments":{"repeater_ids":[#{a},#{b}],"allow_unscoped":true}}})
+        resp = mcp_drive(store, call, verify_upstream: false)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        resp["result"]["content"][0]["text"].as_s.should contain("repeater #{b} is a WebSocket handshake — use send_websocket")
+      end
+    end
+
     # A stored `""` SNI dials exactly like an unset one (`Plan` reads `sni.presence`), so it must
     # not split the group — the refusal used to fire naming every field and none that differed.
     it "races a member with an empty stored SNI beside one with none" do

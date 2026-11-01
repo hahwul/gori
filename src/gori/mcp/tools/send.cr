@@ -291,12 +291,9 @@ module Gori
         wires = [] of Bytes
         labels = [] of String
         loaded.each do |(id, rec)|
-          probe = begin
-            Repeater::Plan.build(race_member_options([rec.request], rec, insecure, overrides, verbatim, timeout, rec.http2?,
-              seeds.includes?(id)), ob)
-          rescue ex : Repeater::PlanError
-            return send_plan_error(ex, "repeater_ids")
-          end
+          probe = race_member_probe(id, rec, race_member_options([rec.request], rec, insecure, overrides,
+            verbatim, timeout, rec.http2?, seeds.includes?(id)), ob)
+          return probe if probe.is_a?(Result)
           sigs << Repeater.race_signature(probe.scheme, probe.host, probe.port,
             !verbatim && rec.auto_content_length?, rec.sni, rec.tls_preset)
           wires << rec.request
@@ -320,6 +317,21 @@ module Gori
           return send_plan_error(ex, "repeater_ids")
         end
         {plan, labels}
+      end
+
+      # One member's own plan (which validates its target / env), or the refusal to return.
+      private def race_member_probe(id : Int64, rec : Store::RepeaterRecord, options : Repeater::PlanOptions,
+                                    ob : Outbound) : Repeater::Plan | Result
+        probe = Repeater::Plan.build(options, ob)
+        # As `send_request{repeater_id}` refuses it: a handshake session's exchange is framed,
+        # and a race would send it as a plain request and report its 101 as the answer.
+        if probe.websocket? && !rec.ws_http_only?
+          return err("repeater #{id} is a WebSocket handshake — use send_websocket. NOTHING was sent.",
+            "INVALID_ARGUMENT", field: "repeater_ids")
+        end
+        probe
+      rescue ex : Repeater::PlanError
+        send_plan_error(ex, "repeater_ids")
       end
 
       # PlanOptions for one race member (or the whole group, when `requests` carries every
