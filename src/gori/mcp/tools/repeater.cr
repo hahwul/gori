@@ -285,7 +285,8 @@ module Gori
           return err("invalid 'target': #{why}", "INVALID_ARGUMENT", field: "target")
         end
 
-        sni = str(h, "sni") || flow_sni
+        # `""` is unset on create, as in `gori run repeater create --sni ""` (`given.presence`).
+        sni = str(h, "sni").presence || flow_sni
 
         position = int(h, "position")
         if position.nil?

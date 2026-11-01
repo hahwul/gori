@@ -1632,7 +1632,7 @@ module Gori
         # differs would be silently sent under the anchor's — refuse instead of flattening it.
         # The signature uses the EFFECTIVE values (the flags fold in: `--tls-preset` / `--verbatim`
         # make those columns uniform), so it only fires on a real stored difference.
-        sigs = [] of {String, String, Int32, Bool, String?, String?}
+        sigs = [] of Repeater::RaceSignature
         wires = [] of Bytes
         labels = [] of String
         loaded.each do |(id, rec)|
@@ -1643,16 +1643,14 @@ module Gori
             outbound.close
             repeater_plan_abort(cmd_label, ex, "session ##{id}")
           end
-          sigs << {probe.scheme, probe.host, probe.port, !verbatim && rec.auto_content_length?,
-                   rec.sni, tls_preset || rec.tls_preset}
+          sigs << Repeater.race_signature(probe.scheme, probe.host, probe.port,
+            !verbatim && rec.auto_content_length?, rec.sni, tls_preset || rec.tls_preset)
           wires << rec.request
           labels << "##{id} #{race_request_line(rec.request)}"
         end
-        first = sigs.first
-        unless sigs.all? { |s| s == first }
+        if differs = Repeater.race_signature_difference(sigs)
           outbound.close
-          abort "#{cmd_label}: the sessions differ in origin, Content-Length policy, SNI or " \
-                "TLS preset — a race rides one connection shape (origins: " \
+          abort "#{cmd_label}: the sessions differ in #{differs} — a race rides one connection shape (origins: " \
                 "#{sigs.map { |(s, h, po, _, _, _)| "#{s}://#{h}:#{po}" }.uniq!.join(", ")})"
         end
 

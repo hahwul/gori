@@ -287,7 +287,7 @@ module Gori
         # policy, SNI or TLS preset differs would be silently sent under the anchor's — refuse
         # instead of flattening it. `verbatim` folds the CL column uniform, so it only fires on a
         # real stored difference.
-        sigs = [] of {String, String, Int32, Bool, String?, String?}
+        sigs = [] of Repeater::RaceSignature
         wires = [] of Bytes
         labels = [] of String
         loaded.each do |(id, rec)|
@@ -297,13 +297,13 @@ module Gori
           rescue ex : Repeater::PlanError
             return send_plan_error(ex, "repeater_ids")
           end
-          sigs << {probe.scheme, probe.host, probe.port, !verbatim && rec.auto_content_length?, rec.sni, rec.tls_preset}
+          sigs << Repeater.race_signature(probe.scheme, probe.host, probe.port,
+            !verbatim && rec.auto_content_length?, rec.sni, rec.tls_preset)
           wires << rec.request
           labels << "##{id} #{race_member_request_line(rec.request)}"
         end
-        first = sigs.first
-        unless sigs.all? { |s| s == first }
-          return err("the sessions differ in origin, Content-Length policy, SNI or TLS preset — a race rides one connection shape (origins: #{sigs.map { |(s, ho, po, _, _, _)| "#{s}://#{ho}:#{po}" }.uniq!.join(", ")})",
+        if differs = Repeater.race_signature_difference(sigs)
+          return err("the sessions differ in #{differs} — a race rides one connection shape (origins: #{sigs.map { |(s, ho, po, _, _, _)| "#{s}://#{ho}:#{po}" }.uniq!.join(", ")})",
             "INVALID_ARGUMENT", field: "repeater_ids")
         end
 

@@ -14,6 +14,29 @@ module Gori::Repeater
   # the TUI gesture that forms a race, since that is where the largest group comes from.
   MAX_RACE_MEMBERS = 20
 
+  # One race member's dial signature: scheme, host, port, effective auto-Content-Length, SNI and
+  # TLS preset. The group rides ONE Sender built from the anchor, so every member must share it.
+  alias RaceSignature = {String, String, Int32, Bool, String?, String?}
+
+  private RACE_SIGNATURE_FIELDS = {"origin", "origin", "origin", "Content-Length policy", "SNI", "TLS preset"}
+
+  # A member's signature with the SNI as `Plan` reads it (`sni.presence`): a stored `""` dials
+  # exactly like an unset SNI, so it must not split a group.
+  def self.race_signature(scheme : String, host : String, port : Int32, auto_cl : Bool,
+                          sni : String?, tls_preset : String?) : RaceSignature
+    {scheme, host, port, auto_cl, sni.presence, tls_preset}
+  end
+
+  # The fields the members disagree on (`"SNI"`, `"origin and TLS preset"`), or nil when they
+  # all share the first member's signature — so the refusal names what actually differs.
+  def self.race_signature_difference(sigs : Array(RaceSignature)) : String?
+    first = sigs.first
+    differing = RACE_SIGNATURE_FIELDS.each_with_index.compact_map do |(name, i)|
+      name if sigs.any? { |s| s[i] != first[i] }
+    end.to_a.uniq!
+    differing.empty? ? nil : differing.join(" and ")
+  end
+
   # Why one option set cannot become a runnable send.
   #
   # The builder never writes the user-facing sentence: every surface phrases these in its

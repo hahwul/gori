@@ -94,6 +94,16 @@ describe Gori::MCP::Server do
       end
     end
 
+    # `sni:""` names nothing — a client filling every declared property sends it. Stored as ""
+    # it split race/timing groups from identically-dialling sessions.
+    it "reads an empty sni as unset on create" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_repeater","arguments":{"target":"http://127.0.0.1:9","request":"GET / HTTP/1.1\\r\\nHost: 127.0.0.1:9\\r\\n\\r\\n","sni":""}}})
+        id = mcp_tool_payload(mcp_drive(store, call)[0])["id"].as_i64
+        store.get_repeater(id).not_nil!.sni.should be_nil
+      end
+    end
+
     it "creates a new repeater from a issue_id" do
       with_store do |store|
         flow_id = mcp_seed_flow(store, "ex.test", "POST", "/submit", 200)
