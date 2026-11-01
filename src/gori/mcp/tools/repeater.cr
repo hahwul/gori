@@ -710,10 +710,7 @@ module Gori
             # write `flow_id` at all); until then the disagreement is stated, not hidden.
             if (fid = existing.flow_id) && String.new(existing.request) != request
               j.field "flow_id", fid
-              j.field "derived_from_flow_note",
-                "repeater #{id} is still linked to flow #{fid}, but its request no longer holds that " \
-                "flow's bytes — the TUI reads that link as \"these bytes are a capture\" and sends " \
-                "#{Env.spell("NAME", Env::Namespace::Bind)} literally there"
+              j.field "derived_from_flow_note", Repeater::DraftMarkers.derived_from_flow_note(id, fid)
             end
           end
         })

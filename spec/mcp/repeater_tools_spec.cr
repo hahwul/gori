@@ -480,6 +480,44 @@ describe "MCP minimize_repeater" do
     end
   end
 
+  # apply:true on a capture-seeded session writes bytes that no longer equal the flow, so the
+  # session became a draft without a word; update_repeater says so, and so must this.
+  it "notes that an applied minimize left the session's flow link without its bytes" do
+    origin = TCPServer.new("127.0.0.1", 0)
+    port = origin.local_address.port
+    spawn do
+      while conn = origin.accept?
+        spawn_with(conn) do |c|
+          while Gori::Proxy::Codec::Http1.read_head(c)
+            c << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+            c.flush
+          end
+        rescue
+        ensure
+          c.close rescue nil
+        end
+      end
+    rescue
+    end
+    begin
+      with_store do |store|
+        head = "GET /m?a=1 HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nX-Noise: 1\r\n\r\n"
+        fid = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: port,
+          method: "GET", target: "/m?a=1", http_version: "HTTP/1.1",
+          head: head.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+        id = store.insert_repeater("http://127.0.0.1:#{port}", head.to_slice, false, false, fid, 0)
+        Gori::Scope.load(store).add("include", "host", "127.0.0.1")
+        payload = mcp_ok_json(tools_for(store), "minimize_repeater", %({"repeater_id":#{id},"apply":true}))
+        payload["applied"].as_bool.should be_true
+        payload["flow_id"].as_i64.should eq(fid)
+        payload["derived_from_flow_note"].as_s.should contain("no longer holds that flow's bytes")
+      end
+    ensure
+      origin.close
+    end
+  end
+
   it "is refused under --read-only (it sends real requests)" do
     with_store do |store|
       id = store.insert_repeater("https://acme.test/", "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,

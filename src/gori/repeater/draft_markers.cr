@@ -74,6 +74,16 @@ module Gori::Repeater
       false
     end
 
+    # What a write that replaced a flow-seeded session's bytes did to its provenance (an
+    # `update_repeater`, a `minimize --apply`): `flow_id` stays, so the TUI still reads the row as
+    # a capture, while `evidence?` above now answers draft and the headless sends expand it.
+    def self.derived_from_flow_note(id : Int64, flow_id : Int64) : String
+      "repeater #{id} is still linked to flow #{flow_id}, but its request no longer holds that " \
+      "flow's bytes — `gori run repeater send` and MCP send_request now replay it as a draft " \
+      "(a captured #{Env.spell("NAME", Env::Namespace::Env)} expands), while the TUI reads the link as " \
+      "\"these bytes are a capture\" and sends #{Env.spell("NAME", Env::Namespace::Bind)} literally there"
+    end
+
     # Why a race/timing group whose members' `evidence?` answers are `captured` cannot ride one
     # plan, or nil. The group is one Sender, so an untouched seed beside a draft would have its
     # captured tokens expanded as the draft's (#1670); the TUI race refuses the same group. A
