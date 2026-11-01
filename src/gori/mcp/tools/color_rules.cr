@@ -346,7 +346,10 @@ module Gori
           j.object do
             j.field "name", after.try(&.name) || key
             j.field "hex", after.try(&.hex) || current.hex
-            j.field "renamed_from", key if after && after.name != key
+            if after && after.name != key
+              j.field "renamed_from", key
+              color_warning(key).try { |w| j.field "warning", w }
+            end
           end
         end)
       end
@@ -357,7 +360,18 @@ module Gori
         key = name.strip.downcase
         return not_found("no custom colour named '#{key}'") unless Settings.colormarker_colors.any? { |c| c.name == key }
         return busy("custom colour NOT deleted (settings not writable)") unless Settings.delete_colormarker_color(key)
-        Result.new({name: key, deleted: true}.to_json)
+        Result.new({name: key, deleted: true, warning: color_warning(key)}.to_json)
+      end
+
+      # A rename or delete leaves every rule naming the colour on a fallback hue (by design, see
+      # `Settings.update_colormarker_color`); the CLI twin warns, so say which rules here too.
+      # Other projects' rules are beyond this server's store and are named only as a class.
+      private def color_warning(name : String) : String?
+        ids = Settings.colormarker_rules.select { |r| r.color.downcase == name }.map { |r| "global ##{r.id}" } +
+              store.color_rules.select { |r| r.color.downcase == name }.map { |r| "project ##{r.id}" }
+        return nil if ids.empty?
+        "#{Gori.plural(ids.size, "colour rule")} still name '#{name}' (#{ids.join(", ")}) and now fall back to " \
+        "a default colour; rules in other projects naming it do too"
       end
 
       # Whether a colour rule id exists IN THAT SCOPE. A full read (neither store has a
