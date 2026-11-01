@@ -322,13 +322,8 @@ module Gori
           end
           row_id = custom_rule_row_id(id)
           return err("malformed custom rule id '#{id}'", "INVALID_ARGUMENT", field: "id") unless row_id
-          row = store.probe_custom_rules.find { |r| r.id == row_id }
-          if enabled && row && Probe::CustomRule.inert?(row.side, row.region, row.kind)
-            return err("'#{id}' uses a side/region/kind this gori does not know (#{row.side}/#{row.region}/#{row.kind}) — it is inert and cannot be enabled",
-              "INVALID_ARGUMENT", field: "id")
-          end
-          if enabled && row.try(&.kind) == "exec" && (denied = exec_refusal)
-            return denied
+          if enabled && (refused = custom_enable_refusal(id, row_id))
+            return refused
           end
           ok = store.set_probe_custom_rule_enabled(row_id, enabled)
         else
@@ -341,6 +336,18 @@ module Gori
         # `retryable: true` the way every other PROJECT_BUSY refusal in this server does.
         return busy("scan rule '#{id}' NOT updated (store busy or unwritable); it is unchanged") unless ok
         Result.new({"id" => id, "enabled" => enabled, "kind" => entry.kind}.to_json)
+      end
+
+      # Why a project custom rule may not be switched ON: an inert row (a side/region/kind this
+      # build does not know) never runs, and an exec rule needs the exec permission.
+      private def custom_enable_refusal(id : String, row_id : Int64) : Result?
+        row = store.probe_custom_rules.find { |r| r.id == row_id }
+        return nil unless row
+        if Probe::CustomRule.inert?(row.side, row.region, row.kind)
+          return err("'#{id}' uses a side/region/kind this gori does not know (#{row.side}/#{row.region}/#{row.kind}) — it is inert and cannot be enabled",
+            "INVALID_ARGUMENT", field: "id")
+        end
+        exec_refusal if row.kind == "exec"
       end
 
       # create_probe_rule — add a PROJECT custom match rule (string/regex over one region of a

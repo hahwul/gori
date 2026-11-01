@@ -828,8 +828,7 @@ module Gori
         unless en.nil?
           return busy("extract rule fields were updated but the enable/disable did not persist (store busy or unwritable); retry") unless store.set_extract_rule_enabled(id, en)
         end
-        stranded = name == existing.name ? nil : slots_claiming_warning(existing.name)
-        Result.new({id: id, updated: true, name: name, kind: kind.label, warning: stranded}.to_json)
+        Result.new({id: id, updated: true, name: name, kind: kind.label, warning: slots_claiming_warning(existing.name)}.to_json)
       end
 
       # A session slot claims extract rules BY NAME, so a rename or delete leaves its claim
