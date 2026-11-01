@@ -1665,7 +1665,7 @@ module Gori
         h = stripped
         if (bad = unknown_args(name, h)) && !bad.empty?
           return err("unknown argument#{bad.size > 1 ? "s" : ""} for '#{name}': #{bad.join(", ")}. " \
-                     "Accepted: #{declared_args[name].to_a.sort.join(", ")}",
+                     "Accepted: #{declared_args[name].to_a.sort.join(", ").presence || "(none)"}",
             "INVALID_ARGUMENT", field: bad.first)
         end
         # After the unknown-argument check, which is what built `@aliased_required` (it lists
