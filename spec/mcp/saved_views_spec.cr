@@ -142,7 +142,7 @@ describe "MCP saved views" do
 
         text, err = call_raw(t, "create_view", %({"name":"bad","query":"src:nope"}))
         err.should be_true
-        text.should contain("narrow nothing")
+        text.should contain("`src:nope` is not a value that field takes")
 
         text, err = call_raw(t, "create_view", %({"name":"All","query":"src:proxy"}))
         err.should be_true
