@@ -348,6 +348,12 @@ describe "Gori::Issues::Filter.refusal" do
     Issues::Filter.refusal("status~open", lenient: true).should_not be_nil
     Issues::Filter.refusal("a~b").should be_nil # not a field: free text, as before
   end
+
+  it "points `id:` at reading an issue, not at History's flow rows" do
+    why = Issues::Filter.refusal("id:3").not_nil!
+    why.should contain("get_issue")
+    why.should_not contain("flows")
+  end
 end
 
 describe "Gori::Store::Status.from_name?" do

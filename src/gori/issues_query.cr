@@ -126,10 +126,14 @@ module Gori
       # `history --lenient` does; a bad value of a KNOWN field matches nothing either way.
       def self.refusal(query : String, *, lenient : Bool = false) : String?
         if !lenient && (u = unknown_field(query))
-          return FilterAst.unknown_field_note(u, refused: true)
+          return FilterAst.unknown_field_note(u, refused: true, id_note: ID_NOTE)
         end
         regex_term(query) || parse(query).bad_value
       end
+
+      # Issues are not filtered by id: one is read by it. The default note sends the operator
+      # to History's flow rows, which is the wrong table here.
+      ID_NOTE = "the issues filter has no `id:` field; read one issue by id (get_issue, `gori run issues show <id>`)"
 
       # A known field written with QL's `~`. This bar has no regex, so `title~jwt` free-texts the
       # whole token and matches nothing — refused whatever `lenient` says, because the field is
