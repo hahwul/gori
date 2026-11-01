@@ -352,6 +352,7 @@ module Gori
         # names no PAYLOAD, so an agent could see `errors: 40` and have no way to ask which
         # forty. The CLI prints both (`emit_fuzz_result`) and the TUI renders every row; this
         # was the one surface where they vanished.
+        fjob.note_done(r.index) # every completed row, kept or not
         return unless r.interesting?
         # TWO budgets, because one FIFO over `FUZZ_MAX_STORED` lets the exceptions EVICT the
         # findings. Rows arrive in send order and the cap is a hard stop, so a sweep against a
@@ -497,12 +498,7 @@ module Gori
         # History flow that IS its evidence.
         rows = fjob.results
         matched_only = bool_arg(h, "matched_only", false)
-        picked = (0...rows.size).to_a
-        picked.select! { |i| rows[i].matched? } if matched_only
-        # `results` holds a concurrent run's rows as they COMPLETED; page them in index order,
-        # as the TUI lists them and a saved run is read back (`ORDER BY idx, id`), so an offset
-        # names the same rows every surface does (#1432). Arrival breaks a resend's tie.
-        picked.sort_by! { |i| {rows[i].index, i} }
+        picked, pending = fuzz_result_positions(fjob, matched_only)
         pg = page_args(h, FUZZ_RESULTS_LIMIT)
         last = pg.offset < picked.size ? Math.min(pg.offset + pg.limit, picked.size) : pg.offset
         returned = last - pg.offset
@@ -530,6 +526,9 @@ module Gori
             j.field "job_complete", fjob.status != :running
             j.field "page_complete", last >= picked.size
             j.field "has_more", last < picked.size
+            # Completed rows held back behind a lower index still in flight; they join the
+            # end of this ordering as it lands, so page on from offset + returned.
+            j.field "rows_pending", pending if pending > 0
             j.field "incomplete_reason", incomplete_reason(fjob.status)
             j.field "results_truncated", fjob.truncated?
             j.field "history_truncated", fjob.history_truncated?
@@ -546,6 +545,21 @@ module Gori
             end
           end
         end)
+      end
+
+      # The positions in `fjob.results` that `fuzz_results` pages, and how many it holds back.
+      # A live run pages only the rows no later result can land below (`FuzzJob#done_prefix`),
+      # so an offset names the same rows on the next call; the rest are `rows_pending`.
+      private def fuzz_result_positions(fjob : FuzzJob, matched_only : Bool) : {Array(Int32), Int32}
+        rows = fjob.results
+        picked = (0...rows.size).select { |i| fjob.pageable?(rows[i]) }
+        pending = rows.size - picked.size
+        picked.select! { |i| rows[i].matched? } if matched_only
+        # `results` holds a concurrent run's rows as they COMPLETED; page them in index order,
+        # as the TUI lists them and a saved run is read back (`ORDER BY idx, id`), so an offset
+        # names the same rows every surface does (#1432). Arrival breaks a resend's tie.
+        picked.sort_by! { |i| {rows[i].index, i} }
+        {picked, pending}
       end
 
       # The History flow id of each cached result at `positions` (indices into `fjob.results`),

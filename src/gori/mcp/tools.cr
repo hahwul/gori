@@ -1103,6 +1103,29 @@ module Gori
         # `fuzz_results{clusters:true}` counts the whole run rather than the rows it kept.
         getter clusters = Fuzz::Clusters.new
         getter results = [] of Fuzz::Result
+        # How many payload indices from 0 have ALL completed. Results land as they finish, out
+        # of index order, so while the run is live a row can still arrive BELOW one already
+        # paged — an offset over the whole set then skipped and repeated rows. Below this mark
+        # nothing can land any more, so `fuzz_results` pages only that part until the job ends.
+        getter done_prefix = 0_i64
+        # Completed indices past `done_prefix`: about the concurrency window.
+        # ponytail: a result the engine loses (a worker that raised) stalls the mark and this set
+        # grows by every later index until the job ends; track the lost index if that path matters.
+        @done_ahead = Set(Int64).new
+
+        def note_done(index : Int64) : Nil
+          return if index < @done_prefix
+          @done_ahead << index
+          while @done_ahead.delete(@done_prefix)
+            @done_prefix += 1
+          end
+        end
+
+        # Whether `fuzz_results` may page this row now (see `done_prefix`).
+        def pageable?(r : Fuzz::Result) : Bool
+          status != :running || r.index < @done_prefix
+        end
+
         # How many of `results` the matcher REJECTED — the counter `FUZZ_MAX_STORED_UNMATCHED`
         # is enforced against, so a run's failures can never crowd its findings out of the
         # buffer. Kept as a count rather than derived with `results.count(&.matched?)`, which
