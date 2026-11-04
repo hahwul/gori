@@ -511,3 +511,25 @@ describe "RepeaterController#reconcile chip labels (#1807)" do
     end
   end
 end
+
+describe "RepeaterController#restore_send (#1808)" do
+  it "saves the restored request and its response on the row" do
+    seed = ->(store : Gori::Store) do
+      store.insert_repeater("http://h.test/", HTTP_REQ.to_slice, false, true, nil, 0)
+      nil
+    end
+    with_repeater_controller(seed) do |ctl, host|
+      view = ctl.current_view.not_nil!
+      {"/old", "/new"}.each_with_index do |path, i|
+        view.replace_request("GET #{path} HTTP/1.1\r\nHost: h.test\r\n\r\n")
+        view.sent_request = {view.target, view.request_text, false, true, nil}
+        view.apply(Gori::Repeater::Result.new("HTTP/1.1 #{200 + i} X\r\n\r\n".to_slice, nil, nil, 1_i64))
+      end
+      ctl.restore_send(view, view.send_history[0])
+      row = host.session.store.repeaters.first
+      String.new(row.request).should start_with("GET /old ")
+      String.new(row.response_head.not_nil!).should start_with("HTTP/1.1 200")
+      view.dirty?.should be_false
+    end
+  end
+end

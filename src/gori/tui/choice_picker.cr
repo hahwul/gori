@@ -90,7 +90,8 @@ module Gori::Tui
       # severity, a status, the scan mode) and wrong for the fourth: EXPORT ISSUES AS stores
       # nothing — it asks a question once and the next ↵ writes a file. "↵ set" there read as
       # "store a preference", which is a different act from the one about to happen.
-      "↑/↓ select · ↵ #{hint_action} · key picks · esc cancel"
+      # "key picks" only when a row HAS a key: SEND HISTORY's rows are all keyless.
+      "↑/↓ select · ↵ #{hint_action}#{@choices.any?(&.key) ? " · key picks" : ""} · esc cancel"
     end
 
     # What ↵ does, for the pickers where "set" would be wrong: OPEN SHELL stores nothing
@@ -99,6 +100,7 @@ module Gori::Tui
       case @kind
       when :export_format   then "export"
       when :shell, :android then "go"
+      when :send_history    then "restore"
       else                       "set"
       end
     end
