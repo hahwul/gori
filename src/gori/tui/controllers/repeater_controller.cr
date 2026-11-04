@@ -1504,7 +1504,7 @@ module Gori::Tui
       view.name = name.strip.presence
       if id = tab.db_id
         unless @host.session.store.set_repeater_name(id, view.name)
-          @host.status("rename NOT saved (project busy) — the chip reads the new name until the tab reloads")
+          @host.status("rename NOT saved (project busy) — the chip reverts on the next sync")
         end
       end
     end
@@ -1520,7 +1520,7 @@ module Gori::Tui
       view.tags = Repeater::Tags.parse(raw)
       if id = tab.db_id
         unless @host.session.store.set_repeater_tags(id, Repeater::Tags.serialize(view.tags))
-          @host.status("tags NOT saved (project busy) — the chip reads the new tags until the tab reloads")
+          @host.status("tags NOT saved (project busy) — the chip reverts on the next sync")
         end
       end
       true
@@ -1795,8 +1795,8 @@ module Gori::Tui
     # holds a dedicated pool connection, so own commits ARE visible to the poll).
     # Keyed by db_id: update changed tabs in place (keeping the RepeaterView object so
     # an inflight result still matches by identity), append peer-created tabs, drop
-    # peer-deleted ones — but NEVER touch a locked tab (actively edited / inflight /
-    # locally dirty).
+    # peer-deleted ones — but NEVER touch a locked tab's request side (actively edited /
+    # inflight / locally dirty). Its chip label (name, tags) still converges.
     def reconcile : Nil
       refresh_evidence_marker
       # Metadata only (no response BLOBs): converge the request side. Responses are
@@ -1809,8 +1809,12 @@ module Gori::Tui
 
       @repeaters.each do |tab|
         next unless (id = tab.db_id) && (row = by_id[id]?)
-        next if repeater_tab_locked?(tab)
         v = tab.view
+        # The chip label is not request side, so a lock (an edit, a send) never holds it: a
+        # rename lands in the row before the next poll, and a CLI/MCP rename must show (#1807).
+        v.name = row.name
+        v.tags = Repeater::Tags.parse(row.tags)
+        next if repeater_tab_locked?(tab)
         # Only re-apply when the PERSISTED request side actually changed (data_version
         # also bumps on capture/response writes, so most polls touch an identical row).
         next if v.request_side_matches?(row.target, String.new(row.request), row.http2?,
@@ -1836,6 +1840,8 @@ module Gori::Tui
         view.restore(row.target, row_request_text, row.http2?, row.auto_content_length?,
           sni: row.sni || "", ws_messages: ws_msgs, ws_keep_key: row.ws_keep_key?,
           ws_http_only: row.ws_http_only?, tls_preset: row.tls_preset, evidence: !row.flow_id.nil?)
+        view.name = row.name
+        view.tags = Repeater::Tags.parse(row.tags)
         seed_repeater_original(view, row.flow_id)
         @repeaters << RepeaterTab.new(view, row.flow_id, row.id)
       end

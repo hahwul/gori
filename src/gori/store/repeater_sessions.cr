@@ -68,11 +68,11 @@ module Gori
 
     def repeaters_meta : Array(RepeaterRecord)
       list = [] of RepeaterRecord
-      @db.query("SELECT #{HEAD_COLS}, sni, ws_keep_key, ws_http_only, tls_preset FROM repeaters ORDER BY position, id") do |rs|
+      @db.query("SELECT #{HEAD_COLS}, sni, ws_keep_key, ws_http_only, tls_preset, name, tags FROM repeaters ORDER BY position, id") do |rs|
         rs.each do
           list << RepeaterRecord.new(*read_head(rs),
             sni: rs.read(String?), ws_keep_key: rs.read(Int32) != 0, ws_http_only: rs.read(Int32) != 0,
-            tls_preset: rs.read(String?))
+            tls_preset: rs.read(String?), name: rs.read(String?), tags: rs.read(String?))
         end
       end
       list
