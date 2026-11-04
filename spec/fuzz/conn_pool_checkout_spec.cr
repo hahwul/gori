@@ -129,6 +129,16 @@ describe "ConnPool checkout (Proxy::SocketResidue.state)" do
   end
 
   describe "TLS (the DRAIN_PROBE path)" do
+    # The probe reads the userspace record layer, so every context must keep kernel TLS off
+    # even when the system openssl.cnf turns it on (it did on ubuntu-26.04; see userspace_tls.cr).
+    it "is running on contexts with kernel TLS off" do
+      ktls = OpenSSL::SSL::Options::ENABLE_KTLS
+      OpenSSL::SSL::Context::Client.new.options.includes?(ktls).should be_false
+      OpenSSL::SSL::Context::Client.insecure.options.includes?(ktls).should be_false
+      OpenSSL::SSL::Context::Server.new.options.includes?(ktls).should be_false
+      with_ca { |ca| ca.context_for("127.0.0.1", advertise_h2: false).options.includes?(ktls).should be_false }
+    end
+
     it "answers Clean on an idle socket with nothing waiting" do
       with_ca { |ca| tls_socket(ca) { |io| Gori::Proxy::SocketResidue.state(io).should eq(P::Checkout::Clean) } }
     end
