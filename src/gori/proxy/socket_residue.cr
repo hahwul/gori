@@ -1,5 +1,6 @@
 require "socket"
 require "openssl"
+require "./tls/userspace_tls"
 
 # Non-blocking "is there residue in the read buffer?" — the piece Crystal's public IO has no
 # way to ask. `ConnPool` checkout needs it because `read_head` reads byte-by-byte through the
