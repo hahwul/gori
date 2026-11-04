@@ -153,6 +153,63 @@ class Gori::Tui::RepeaterView
     @decoded_dirty = false
   end
 
+  # One past send of this tab (#1808): the request side as the editor held it (`$KEY` tokens
+  # unexpanded, which is why it is not read back from the History flow) and what came back.
+  # Session-only, oldest first; a restore-then-send appends, it never truncates.
+  record SendEntry, target : String, request : String, http2 : Bool, auto_cl : Bool, sni : String?,
+    tls_preset : String?, result : Repeater::Result, at : Time
+
+  SEND_HISTORY_CAP = 50
+  getter send_history = [] of SendEntry
+
+  # The tab kinds whose request side `restore_send` can put back: a WebSocket tab (even one
+  # sent as plain HTTP with `^V`, which still holds its frames), a gRPC or a decoded tab keeps
+  # state the request text does not carry.
+  def send_history_kind? : Bool
+    !ws_content? && !@grpc_mode && !decode_mode?
+  end
+
+  private def remember_send(result : Repeater::Result) : Nil
+    return unless send_history_kind? && (sent = @sent_request)
+    target, text, http2, auto_cl, sni = sent
+    @send_history << SendEntry.new(target, text, http2, auto_cl, sni, @tls_preset, result, Time.local)
+    @send_history.shift if @send_history.size > SEND_HISTORY_CAP
+  end
+
+  # Put past send `entry` back: its request side in the editor and its response in the pane, the
+  # one shown until now becoming the diff baseline as a fresh send's would. The tab goes dirty
+  # so the restored request is what it saves. Returns why it could not, or nil.
+  #
+  # The request goes in through `replace_all` (one undoable edit, wire-exact like `set_text`)
+  # rather than `apply_request_fields`, which would reset the undo stack and re-seed the draft
+  # baselines from this text — on a captured tab that adopts an operator-typed `$ENV.X` or
+  # `%%%` as the capture's own, and the next send puts it on the wire literally.
+  def restore_send(entry : SendEntry) : String?
+    return "a send is in flight" if inflight?
+    return "hex mode active — leave it first" if request_hex?
+    return "not on a WebSocket, gRPC or decoded tab" unless send_history_kind?
+    @target = entry.target
+    @tcx = @target.size
+    @sni = entry.sni || ""
+    @scx = @sni.size
+    @target_field = :url
+    @http2 = entry.http2
+    @auto_content_length = entry.auto_cl
+    @tls_preset = Settings.tls_preset_normalize(entry.tls_preset)
+    @editor.replace_all(entry.request, 0)
+    @dirty = true
+    @sent_request = {entry.target, entry.request, entry.http2, entry.auto_cl, entry.sni}
+    @prev_result = @result
+    @result = entry.result
+    @result_times = nil
+    @group_results = nil
+    reset_result_caches
+    @resp_mode = :response unless @resp_mode == :diff && entry.result.ok? && diff_baseline_lines
+    @scroll = 0
+    resp_wrap_reset
+    nil
+  end
+
   # The starting scaffold for a hand-authored request (Repeater `^N`): a minimal
   # but immediately sendable HTTP/1.1 message the user edits in place.
   BLANK_TARGET    = "https://example.com"
