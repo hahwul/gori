@@ -332,8 +332,8 @@ module Gori
       # so chasing an earlier attempt no longer means a trip to History (whose rows hold the
       # expanded wire bytes, not the `$KEY` text the editor sent). Menu-only, no chord.
       r.register Verb::Definition.new(
-        "repeater.send-history", "Send history…", "Pick one of this tab's past sends and restore its request and response",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'H') { |ctx| ctx.repeater_send_history; nil }
+        "repeater.past-sends", "Past sends…", "Pick one of this tab's past sends and restore its request and response",
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'H') { |ctx| ctx.repeater_past_sends; nil }
 
       # Sub-tab rename/close — today's raw key-dispatch on the strip (`e` rename, ^W
       # close) promoted to verbs so the :subtab space-menu group (reachable from the

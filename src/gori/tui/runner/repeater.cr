@@ -101,11 +101,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   # This tab's past sends, newest first (#1808); ↵ puts the tab back to the picked one. The
   # picker holds the VIEW it opened on, so a tab switch under it cannot restore another tab.
-  def repeater_send_history : Nil
+  def repeater_past_sends : Nil
     return unless view = repeater_controller.current_view
-    return @toast = "send history: not on a WebSocket, gRPC or decoded tab" unless view.send_history_kind?
+    return @toast = "past sends: not on a WebSocket, gRPC or decoded tab" unless view.send_history_kind?
     sends = view.send_history
-    return @toast = "send history: nothing sent from this tab yet" if sends.empty?
+    return @toast = "past sends: nothing sent from this tab yet" if sends.empty?
     choices = sends.each_with_index.map do |(e, i)|
       line = e.request.each_line.first?.to_s.split(' ')
       label = "##{i + 1}  #{e.at.to_s("%H:%M:%S")}  " \
@@ -113,7 +113,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
               "#{Fmt.size(e.result.body.try(&.size.to_i64)).rjust(6)}  #{line[0]?} #{line[1]?}"
       ChoicePicker::Choice.new(label, nil, e.result.ok? ? Theme.text : Theme.muted, i)
     end.to_a.reverse!
-    picker = ChoicePicker.new("SEND HISTORY · #{sends.size}", choices, -1, :send_history)
+    picker = ChoicePicker.new("PAST SENDS · #{sends.size}", choices, -1, :past_sends)
     # A snapshot, read by the picked row's value: a send landing while the picker is up shifts
     # the live list once it is at its cap, and an index into it would restore a neighbour.
     snapshot = sends.dup
