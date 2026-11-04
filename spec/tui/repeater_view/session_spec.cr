@@ -8,7 +8,7 @@ private def send(view : RepeaterView, request : String, status : Int32) : Nil
   view.apply(Gori::Repeater::Result.new("HTTP/1.1 #{status} X\r\n\r\n".to_slice, "b#{status}".to_slice, nil, 1_i64))
 end
 
-# #1808: a tab keeps its past sends, and the SEND HISTORY picker puts one back.
+# #1808: a tab keeps its past sends, and the PAST SENDS picker puts one back.
 describe "Gori::Tui::RepeaterView send history" do
   it "restores an earlier send's request and response, and a resend appends" do
     view = RepeaterView.new

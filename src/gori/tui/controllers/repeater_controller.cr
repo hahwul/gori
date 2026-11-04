@@ -1534,7 +1534,7 @@ module Gori::Tui
     def restore_send(view : RepeaterView, entry : RepeaterView::SendEntry) : Nil
       return unless tab = @repeaters.find(&.view.same?(view))
       if reason = view.restore_send(entry)
-        return @host.status("send history: #{reason}")
+        return @host.status("past sends: #{reason}")
       end
       return unless save_repeater_tab(tab) # says "NOT saved" itself; the tab stays dirty
       res = entry.result
