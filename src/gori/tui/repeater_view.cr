@@ -86,7 +86,7 @@ module Gori::Tui
       @dirty || (@ws_mode && @decoded_dirty)
     end
 
-    property name : String? # custom sub-tab chip label (nil = derive from the request); set separately from restore()
+    property name : String? # custom sub-tab chip label (nil = derive from the request); set beside restore() and on every reconcile
     # The request side as it was SENT — {target, request text, http2, auto-CL, SNI} — for the
     # passive Probe scan of the answer. Nothing locks the editor while a send is in flight, so
     # the view's live fields can name another host by the time the result lands.
@@ -96,8 +96,8 @@ module Gori::Tui
     # editable and the next send still replaces the response, which is exactly why the
     # copy was taken. Set by the controller (open, tab switch, reconcile, after a freeze).
     property frozen_count : Int32 = 0
-    # Flat multi-label tags (V31) for organizing/filtering the sub-tab strip. Set
-    # separately from restore() — like @name, the reconcile clobber never touches it.
+    # Flat multi-label tags (V31) for organizing/filtering the sub-tab strip. Like @name, set
+    # beside restore() and re-read from the row on every reconcile (#1807).
     property tags : Array(String) = [] of String
 
     # PROVENANCE: this tab's request came from a CAPTURED flow (^R off History, the Sitemap,

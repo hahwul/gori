@@ -485,3 +485,29 @@ describe "RepeaterController duplicate persistence" do
     end
   end
 end
+
+describe "RepeaterController#reconcile chip labels (#1807)" do
+  it "picks up a name and tags another process wrote, on new and already-open tabs" do
+    seed = ->(store : Gori::Store) do
+      id = store.insert_repeater("http://h.test/", HTTP_REQ.to_slice, false, true, nil, 0)
+      store.set_repeater_name(id, "NAME-A")
+      store.set_repeater_tags(id, "TAG-A")
+      nil
+    end
+    with_repeater_controller(seed) do |ctl, host|
+      store = host.session.store
+      first = store.repeaters_meta.first.id
+      store.set_repeater_name(first, "RENAMED-B")
+      store.set_repeater_tags(first, "TAG-B")
+      later = store.insert_repeater("http://h.test/", HTTP_REQ.to_slice, false, true, nil, 1)
+      store.set_repeater_name(later, "LATER")
+      ctl.current_view.not_nil!.replace_request(HTTP_REQ) # dirty = locked; the label still lands
+      ctl.reconcile
+
+      ctl.current_view.not_nil!.label.should eq("RENAMED-B")
+      ctl.current_view.not_nil!.tags.should eq(["TAG-B"])
+      ctl.jump_subtab(1)
+      ctl.current_view.not_nil!.label.should eq("LATER")
+    end
+  end
+end
