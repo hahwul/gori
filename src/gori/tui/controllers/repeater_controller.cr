@@ -1526,6 +1526,25 @@ module Gori::Tui
       true
     end
 
+    # Put `view` back to its past send `entry` (#1808) and save it, so the row — `repeater
+    # list`, MCP, a peer — holds the restored request beside the response it got. Re-found by
+    # VIEW identity like the rename prompt: a peer may have closed the tab while the picker was
+    # up. The response is written only once the request is: a rolled-back save would pair the
+    # row's OLD request with this response and a digest of the new one.
+    def restore_send(view : RepeaterView, entry : RepeaterView::SendEntry) : Nil
+      return unless tab = @repeaters.find(&.view.same?(view))
+      if reason = view.restore_send(entry)
+        return @host.status("send history: #{reason}")
+      end
+      return unless save_repeater_tab(tab) # says "NOT saved" itself; the tab stays dirty
+      res = entry.result
+      if (id = tab.db_id) && res.ok?
+        @host.session.store.update_repeater_response(id, res.head, res.body, res.error, res.duration_us,
+          request_sha256: Evidence.request_digest(view.request_text.to_slice))
+      end
+      @host.status("restored the #{entry.at.to_s("%H:%M:%S")} send — undo in the request brings back the text it replaced (not the target)")
+    end
+
     # --- async (run loop) ---
     # Apply any repeater results that finished since the last tick (the round-trip ran on
     # a background fiber; view state is mutated HERE, on the UI fiber that owns it).
@@ -2355,7 +2374,7 @@ module Gori::Tui
       sent_digest = Evidence.request_digest(view.request_text.to_slice)
       view.sent_request = sent_request_of(view)
       if reason = plan.refusal
-        apply_refusal { view.apply(Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, reason)) }
+        apply_refusal { view.apply(Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, reason), remember: false) }
         @host.status("repeater: #{reason}")
         return false
       end

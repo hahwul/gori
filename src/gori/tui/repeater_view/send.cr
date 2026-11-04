@@ -474,12 +474,15 @@ class Gori::Tui::RepeaterView
     nil
   end
 
-  def apply(result : Repeater::Result) : Nil
+  # `remember: false` for a send gori refused before dialling: it never reached the wire, so it
+  # is no attempt to go back to (#1808), and a run of scope refusals would push real sends out.
+  def apply(result : Repeater::Result, remember : Bool = true) : Nil
     # The prior send becomes the diff baseline (diff vs the *previous* request,
     # not always the original captured flow). For the first send we still fall
     # back to the captured original (when loaded from History).
     @prev_result = @result
     @result = result
+    remember_send(result) if remember
     @result_times = @live.try(&.times) # the stream this result ends keeps its arrival times
     live_end
     @group_results = nil # a single ^R send takes the pane back from a group transcript
