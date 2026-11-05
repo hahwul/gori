@@ -488,7 +488,7 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 
 **`repeater list`**: 저장된 Repeater 세션 목록 (`--format text|json`). 각 행에 마지막 전송 결과가 붙습니다. 텍스트 줄은 상태(코드, `error`, `unsent`)와 저장된 본문 크기를 보여 주고, JSON은 `last_error`, `last_duration_us` 옆에 `summary`(`GET /`), `last_status`, `last_size`(응답이 없으면 null, 디코딩 전 저장된 본문의 바이트 수)를 더합니다.
 
-**`repeater show <repeater-id>`**: 저장된 세션의 요청과 마지막으로 저장된 응답을 전송 없이 찍습니다. HTTP 세션에서 MCP `get_repeater_context{include_content}`의 읽기 쪽입니다(WebSocket 세션의 저장된 프레임은 찍지 않습니다). `--format json`은 `repeater list` 필드에 `request`와 `response`(응답이 없으면 null)를 `repeater send --format json`과 같은 모양으로 더합니다. `--headers-only`와 `--max-body`는 위처럼 본문을 줄이고, `--redact` / `--no-redact` / `--redact-preview`는 [`show`](#run-show)와 같이 동작합니다. 그 응답 이후 요청이 수정됐으면 STDERR로 알립니다(JSON은 `request_drifted: true`).
+**`repeater show <repeater-id>`**: 저장된 세션의 요청과 마지막으로 저장된 응답을 전송 없이 찍습니다. HTTP 세션에서 MCP `get_repeater_context{include_content}`의 읽기 쪽입니다(WebSocket 세션의 저장된 프레임은 찍지 않습니다). `--format json`은 `repeater list` 필드에 `request`와 `response`(응답이 없으면 null)를 `repeater send --format json`과 같은 모양으로 더합니다. `--headers-only`와 `--max-body`는 위처럼 본문을 줄이고, `--redact` / `--no-redact` / `--redact-preview`는 [`show`](#run-show)와 같이 동작합니다. `Authorization`, `Cookie`, `Set-Cookie`, API 키 헤더 값과 chunked trailer 값은 `--include-sensitive`를 주지 않으면 양쪽 모두 `[REDACTED]`로 찍힙니다. `get_repeater_context`와 같은 규칙입니다(JSON은 `sensitive_headers_redacted: true`). 그 응답 이후 요청이 수정됐으면 STDERR로 알립니다(JSON은 `request_drifted: true`).
 
 **`repeater create`**: Repeater 세션 생성:
 

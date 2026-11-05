@@ -5,8 +5,9 @@ module Gori::CLI::Run
     JSON.parse(JSON.build { |j| j.object { repeater_row_fields(j, r, 1) } })
   end
 
-  def self.repeater_show_sides_for_spec(rec : Store::RepeaterRecord, matcher : Redact::Matcher?)
-    repeater_show_sides(rec, matcher)
+  def self.repeater_show_sides_for_spec(rec : Store::RepeaterRecord, matcher : Redact::Matcher?,
+                                        include_sensitive : Bool = false)
+    repeater_show_sides(rec, matcher, include_sensitive)
   end
 end
 
@@ -87,11 +88,12 @@ describe "gori run repeater list/show" do
       id = store.insert_repeater(target: "http://127.0.0.1:1", request: req,
         http2: false, auto_cl: true, flow_id: nil, position: 0)
       rec = store.get_repeater_full(id).not_nil!
-      req_head, req_body, resp_head, _, report = Gori::CLI::Run.repeater_show_sides_for_spec(rec, nil)
+      req_head, req_body, resp_head, _, report, withheld = Gori::CLI::Run.repeater_show_sides_for_spec(rec, nil)
       String.new(req_head).should end_with("\r\n\r\n")
       String.new(req_body.not_nil!).should contain("hunter2")
       resp_head.should be_nil
       report.should be_nil
+      withheld.should be_false
 
       matcher = Gori::Redact::Policy.resolve(store, nil, true).matcher.not_nil!
       _, req_body, resp_head, _, report = Gori::CLI::Run.repeater_show_sides_for_spec(rec, matcher)
@@ -99,6 +101,54 @@ describe "gori run repeater list/show" do
       String.new(req_body.not_nil!).should contain("[REDACTED")
       resp_head.should be_nil
       report.not_nil!.count.should be > 0
+    end
+  end
+
+  # #1809: the read half of MCP get_repeater_context withholds credential heads by default,
+  # and so does this one.
+  it "withholds credential header values on both sides unless include_sensitive" do
+    with_store do |store|
+      req = "GET /a HTTP/1.1\r\nHost: h\r\nCookie: sid=SECRET123\r\nAuthorization: Bearer TOKEN456\r\n\r\n".to_slice
+      id = store.insert_repeater(target: "http://127.0.0.1:1", request: req,
+        http2: false, auto_cl: true, flow_id: nil, position: 0)
+      answer(store, id, req, head: "HTTP/1.1 200 OK\r\nSet-Cookie: sid=NEW789\r\nContent-Length: 6\r\n\r\n")
+      rec = store.get_repeater_full(id).not_nil!
+
+      req_head, _, resp_head, _, _, withheld = Gori::CLI::Run.repeater_show_sides_for_spec(rec, nil)
+      withheld.should be_true
+      shown = String.new(req_head) + String.new(resp_head.not_nil!)
+      {"SECRET123", "TOKEN456", "NEW789"}.each { |v| shown.should_not contain(v) }
+      String.new(req_head).should contain("Cookie: [REDACTED]\r\n")
+      String.new(req_head).should contain("Host: h\r\n")
+      doc = JSON.parse(Gori::CLI::Run.repeater_show_json(listed(store, id), 1, req_head, nil, resp_head, nil, false,
+        withheld: withheld))
+      doc["sensitive_headers_redacted"].as_bool.should be_true
+      doc["request"]["head"].as_s.should_not contain("TOKEN456")
+
+      req_head, _, resp_head, _, _, withheld = Gori::CLI::Run.repeater_show_sides_for_spec(rec, nil, true)
+      withheld.should be_false
+      String.new(req_head).should contain("Bearer TOKEN456")
+      String.new(resp_head.not_nil!).should contain("sid=NEW789")
+      doc = JSON.parse(Gori::CLI::Run.repeater_show_json(listed(store, id), 1, req_head, nil, resp_head, nil, false,
+        include_sensitive: true))
+      doc["sensitive_headers_redacted"]?.should be_nil
+    end
+  end
+
+  it "withholds a chunked response's credential trailers too" do
+    with_store do |store|
+      id = seed_session(store)
+      answer(store, id, head: "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n",
+        body: "2\r\nok\r\n0\r\nSet-Cookie: sid=TRAILER1\r\nX-Note: fine\r\n\r\n".to_slice)
+      rec = store.get_repeater_full(id).not_nil!
+      req_head, req_body, resp_head, resp_body, _, withheld = Gori::CLI::Run.repeater_show_sides_for_spec(rec, nil)
+      withheld.should be_true
+      json = Gori::CLI::Run.repeater_show_json(listed(store, id), 1, req_head, req_body, resp_head, resp_body, false)
+      json.should_not contain("TRAILER1")
+      json.should contain("fine")
+      json = Gori::CLI::Run.repeater_show_json(listed(store, id), 1, req_head, req_body, resp_head, resp_body, false,
+        include_sensitive: true)
+      json.should contain("TRAILER1")
     end
   end
 end

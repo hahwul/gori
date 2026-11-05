@@ -355,11 +355,15 @@ module Gori
         redaction = RedactFlags.new
         headers_only = false
         max_body : Int32? = nil
+        include_sensitive = false
 
         positional = parse_args(args, "gori run repeater show") do |p|
           p.banner = "Usage: gori run repeater show <repeater-id> [options]\n\n" \
-                     "Print a saved session's request and its last stored response, without sending."
+                     "Print a saved session's request and its last stored response, without sending.\n" \
+                     "Authorization/Cookie/Set-Cookie/API-key header values read [REDACTED] unless\n" \
+                     "--include-sensitive (heads and chunked trailers; bodies follow --redact)."
           project_options(p, proj, "read")
+          p.on("--include-sensitive", "Print credential header values verbatim instead of [REDACTED]") { include_sensitive = true }
           p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
           p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
           redact_options(p, redaction)
@@ -380,7 +384,8 @@ module Gori
         abort "gori run repeater show: #{choice.error}" if choice.error
         preview_format_error(redaction, format).try { |err| abort "gori run repeater show: #{err}" }
 
-        req_head, req_body, resp_head, resp_body, report = repeater_show_sides(rec, choice.matcher)
+        req_head, req_body, resp_head, resp_body, report, withheld =
+          repeater_show_sides(rec, choice.matcher, include_sensitive)
         if report && redaction.preview?
           print_redact_preview(redact_one(report), choice, "repeater show")
           return
@@ -388,9 +393,9 @@ module Gori
 
         if format == :json
           puts repeater_show_json(row, tui_index, req_head, req_body, resp_head, resp_body,
-            Evidence.drifted?(rec), cap)
+            Evidence.drifted?(rec), cap, include_sensitive, withheld)
         else
-          print_repeater_show_text(rec, req_head, req_body, resp_head, resp_body, cap)
+          print_repeater_show_text(rec, req_head, req_body, resp_head, resp_body, cap, include_sensitive)
         end
         # After the document, on STDERR: the pair no longer describes one exchange.
         if Evidence.drifted?(rec)
@@ -398,26 +403,44 @@ module Gori
                       "received, so the two are not one exchange — `gori run repeater send #{id}` to refresh it"
         end
         redact_notes(redact_one(report), choice, "repeater show")
+        if withheld
+          STDERR.puts "gori run repeater show: credential header values read [REDACTED]; --include-sensitive prints them"
+        end
       end
 
       # The session's request split into head and body, and its last response (nil when never
       # answered: an errored send is saved as an EMPTY head) — sanitized when a redaction
-      # profile is in play, with the report that says what it did.
-      private def self.repeater_show_sides(rec : Store::RepeaterRecord, matcher : Redact::Matcher?) : {Bytes, Bytes?, Bytes?, Bytes?, Redact::Report?}
+      # profile is in play, with the report that says what it did. Credential header values
+      # are withheld unless `include_sensitive` (#1809), and the last element says whether any
+      # was.
+      private def self.repeater_show_sides(rec : Store::RepeaterRecord, matcher : Redact::Matcher?,
+                                           include_sensitive : Bool) : {Bytes, Bytes?, Bytes?, Bytes?, Redact::Report?, Bool}
         req_head, req_body = Env.split_head_body(rec.request)
         resp_head = rec.response_head.try { |h| h.empty? ? nil : h }
         resp_body = resp_head ? rec.response_body : nil
-        return {req_head, req_body, resp_head, resp_body, nil} unless matcher
-        req = Redact::Wire.message(req_head, req_body, matcher)
-        res = Redact::Wire.message(resp_head, resp_body, matcher)
-        report = Redact::Report.new(matcher.profile, req, res, matcher.pattern_errors)
-        {req.head, req.body, resp_head && res.head, res.body, report}
+        report = nil
+        if matcher
+          req = Redact::Wire.message(req_head, req_body, matcher)
+          res = Redact::Wire.message(resp_head, resp_body, matcher)
+          report = Redact::Report.new(matcher.profile, req, res, matcher.pattern_errors)
+          req_head, req_body, resp_head, resp_body = req.head, req.body, resp_head && res.head, res.body
+        end
+        shown_req = MCP::Serialize.redact_head_bytes(req_head, include_sensitive) || req_head
+        shown_resp = MCP::Serialize.redact_head_bytes(resp_head, include_sensitive)
+        withheld = shown_req != req_head || shown_resp != resp_head ||
+                   (!include_sensitive && (sensitive_trailer?(req_head, req_body) || sensitive_trailer?(resp_head, resp_body)))
+        {shown_req, req_body, shown_resp, resp_body, report, withheld}
+      end
+
+      private def self.sensitive_trailer?(head : Bytes?, body : Bytes?) : Bool
+        Proxy::Codec::ContentDecode.trailers(head, body).any? { |(name, _)| Redact.sensitive_header?(name) }
       end
 
       private def self.print_repeater_show_text(rec : Store::RepeaterRecord, req_head : Bytes, req_body : Bytes?,
-                                                resp_head : Bytes?, resp_body : Bytes?, cap : BodyCap) : Nil
+                                                resp_head : Bytes?, resp_body : Bytes?, cap : BodyCap,
+                                                include_sensitive : Bool) : Nil
         puts "=== REQUEST ==="
-        print_message_text(req_head, display_body(req_head, req_body), req_body, cap, SEND_EXACT_BYTES)
+        print_message_text(req_head, display_body(req_head, req_body), req_body, cap, SEND_EXACT_BYTES, include_sensitive)
         puts ""
         took = rec.response_duration_us.try { |d| " (in #{CLI::Output.human_us(d)})" } || ""
         puts "=== LAST RESPONSE#{took} ==="
@@ -426,7 +449,7 @@ module Gori
         elsif resp_head.nil?
           puts "(never sent — `gori run repeater send #{rec.id}`)"
         end
-        print_message_text(resp_head, display_body(resp_head, resp_body), resp_body, cap, SEND_EXACT_BYTES) if resp_head
+        print_message_text(resp_head, display_body(resp_head, resp_body), resp_body, cap, SEND_EXACT_BYTES, include_sensitive) if resp_head
       end
 
       # `repeater show --format json`: the listing row's fields, then the request and the last
@@ -434,16 +457,18 @@ module Gori
       def self.repeater_show_json(row : Store::RepeaterRecord, tui_index : Int32,
                                   req_head : Bytes, req_body : Bytes?,
                                   resp_head : Bytes?, resp_body : Bytes?,
-                                  drifted : Bool, cap : BodyCap = BodyCap.new) : String
+                                  drifted : Bool, cap : BodyCap = BodyCap.new,
+                                  include_sensitive : Bool = false, withheld : Bool = false) : String
         JSON.build do |j|
           j.object do
             repeater_row_fields(j, row, tui_index)
             j.field "request_drifted", true if drifted
+            j.field "sensitive_headers_redacted", true if withheld
             j.field "request" do
               j.object do
                 j.field "head", scrub(req_head)
                 emit_lossy_head_json(j, req_head)
-                emit_body_json(j, "body", req_head, req_body, false, cap)
+                emit_body_json(j, "body", req_head, req_body, false, cap, include_sensitive: include_sensitive)
               end
             end
             j.field "response" do
@@ -460,7 +485,7 @@ module Gori
                   end
                   j.field "head", scrub(head)
                   emit_lossy_head_json(j, head)
-                  emit_body_json(j, "body", head, resp_body, false, cap)
+                  emit_body_json(j, "body", head, resp_body, false, cap, include_sensitive: include_sensitive)
                 end
               else
                 j.null
