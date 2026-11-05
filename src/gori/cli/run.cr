@@ -2199,7 +2199,7 @@ module Gori
       # adds `shown_size` for the prefix; `truncated` is then true, as it is on MCP for any cut.
       private def self.emit_body_json(j : JSON::Builder, field_name : String, head : Bytes?, body : Bytes?,
                                       wire_truncated : Bool, cap : BodyCap = BodyCap.new,
-                                      source_size : Int64? = nil) : Nil
+                                      source_size : Int64? = nil, include_sensitive : Bool = true) : Nil
         if body.nil? || body.empty?
           j.field field_name, nil
           return
@@ -2230,9 +2230,9 @@ module Gori
             # origin meant to send. Silence here read as "decoded: gzip, all of it".
             j.field "decode_truncated", true unless complete
             # The chunked message's TRAILER fields, which neither the de-chunked body nor the
-            # rendered head carries. MCP's shape; `include_sensitive` keeps the CLI's values
-            # unredacted, as they always were here.
-            MCP::Serialize.emit_trailers(j, head, body, include_sensitive: true)
+            # rendered head carries. MCP's shape; the CLI's values stay unredacted unless the
+            # caller withholds credentials (`repeater show`, #1809).
+            MCP::Serialize.emit_trailers(j, head, body, include_sensitive: include_sensitive)
           end
         end
       end
@@ -2260,7 +2260,8 @@ module Gori
       # `--format raw`, a send or repeater run only `--format json` (#1708).
       private def self.print_message_text(head : Bytes?, body : Bytes?, wire_body : Bytes? = nil,
                                           cap : BodyCap = BodyCap.new,
-                                          exact : String = "--format raw for exact bytes, or view hex") : Nil
+                                          exact : String = "--format raw for exact bytes, or view hex",
+                                          include_sensitive : Bool = true) : Nil
         # Neutralize ANSI/OSC/CSI escapes in captured (attacker-controlled) head/body
         # before writing to the live terminal; `binary_body?` only sniffs for NUL, so an
         # escape-only payload would otherwise pass through. `--format raw` stays exact.
@@ -2282,7 +2283,7 @@ module Gori
         # The decode note describes the body text, so it goes with it; trailers are header
         # fields the origin sent after the body, and stay under --headers-only too.
         print_decode_note(head, wire_body) unless cap.omit
-        print_trailers_text(head, wire_body)
+        print_trailers_text(head, wire_body, include_sensitive)
       end
 
       # Name the derivation under a body that IS one. The text view prints a de-gzipped,
@@ -2303,12 +2304,13 @@ module Gori
       # everything past the terminating 0-chunk, so a trailer the origin really sent showed
       # up in neither the head nor the body. Labelled, never merged into the head: whether
       # the far side treats a trailer as a header is the test.
-      private def self.print_trailers_text(head : Bytes?, wire_body : Bytes?) : Nil
+      private def self.print_trailers_text(head : Bytes?, wire_body : Bytes?, include_sensitive : Bool = true) : Nil
         trailers = Proxy::Codec::ContentDecode.trailers(head, wire_body)
         return if trailers.empty?
         STDOUT.puts ""
         STDOUT.puts "--- trailers ---"
         trailers.each do |(name, value)|
+          value = "[REDACTED]" if !include_sensitive && Redact.sensitive_header?(name)
           STDOUT.puts(CLI::Output.term_safe_multiline("#{name}: #{value}".scrub))
         end
       end
