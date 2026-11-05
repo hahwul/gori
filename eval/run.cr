@@ -3,6 +3,8 @@
 #
 #   crystal run eval/run.cr -- [--model sonnet] [--n 3] [--jobs 4]
 #                              [--profiles minimal,recon,full,full-ro] [--tasks t0-*]
+#                              [--baseline eval/out/runs/<stamp>]
+#   crystal run eval/run.cr -- --report eval/out/runs/<stamp> [--baseline <older stamp dir>]
 #
 # Build the fixtures first (`just eval-fixtures`) and gori itself (`just build`). Every run
 # gets its own copy of the fixture db, its own GORI_HOME and an empty cwd, so neither the
@@ -38,6 +40,8 @@ jobs = 4
 budget = "2"
 profiles = PROFILES.keys
 task_glob = "*"
+report_dir = nil
+baseline_dir = nil
 OptionParser.parse do |p|
   p.on("--model=M", "claude model alias or id (default sonnet)") { |v| model = v }
   p.on("--n=N", "repetitions per task × profile (default 3)") { |v| reps = v.to_i }
@@ -45,6 +49,92 @@ OptionParser.parse do |p|
   p.on("--budget=USD", "--max-budget-usd per run (default 2)") { |v| budget = v }
   p.on("--profiles=LIST", "comma-separated: #{PROFILES.keys.join(',')}") { |v| profiles = v.split(',') }
   p.on("--tasks=GLOB", "task id glob (default *)") { |v| task_glob = v }
+  p.on("--report=DIR", "summarize an earlier run's results.jsonl instead of running") { |v| report_dir = v }
+  p.on("--baseline=DIR", "compare the summary against an earlier run") { |v| baseline_dir = v }
+end
+
+def load_results(dir : String) : Array(Hash(String, JSON::Any))
+  path = File.join(dir, "results.jsonl")
+  abort "#{path} missing" unless File.exists?(path)
+  File.read_lines(path).reject(&.blank?).map { |l| JSON.parse(l).as_h }
+end
+
+def median(xs : Array(Float64)) : Float64
+  s = xs.sort
+  s.empty? ? 0.0 : (s[(s.size - 1) // 2] + s[s.size // 2]) / 2
+end
+
+def num(r : Hash(String, JSON::Any), k : String) : Float64
+  r[k].as_f? || r[k].as_i64.to_f
+end
+
+# An errored run (CLI failure, budget cut, rate limit) or one whose isolation leaked says
+# nothing about the agent, so it is counted apart and kept out of pass rates and medians.
+def void?(r : Hash(String, JSON::Any)) : Bool
+  r["error"].as_bool || r["foreign_tools"].as_i64 > 0
+end
+
+def pct(now : Float64, base : Float64) : String
+  base.zero? ? "" : "%+.0f%%" % ((now / base - 1) * 100)
+end
+
+def summarize(results : Array(Hash(String, JSON::Any)), baseline : Array(Hash(String, JSON::Any))?)
+  ok = results.reject { |r| void?(r) }
+  # The baseline delta covers only the tasks both runs have, or the medians weigh different
+  # questions (a run that adds tasks would read as a token change).
+  base_ok = baseline.try(&.reject { |r| void?(r) })
+  shared = base_ok.try { |b| ok.map(&.["task"].as_s).to_set & b.map(&.["task"].as_s).to_set }
+  puts "%-22s %-8s %5s %6s %9s %7s %6s" % %w[task profile pass calls in_tok cost secs]
+  ok.group_by { |r| {r["task"].as_s, r["profile"].as_s} }.to_a.sort_by(&.first).each do |(task, pr), rs|
+    puts "%-22s %-8s %2d/%-2d %6.1f %8.0fk %7.3f %6.1f" % {
+      task, pr, rs.count(&.["pass"].as_bool), rs.size, median(rs.map(&.["calls"].as_a.size.to_f)),
+      median(rs.map { |r| num(r, "input_tokens") }) / 1000, median(rs.map { |r| num(r, "cost_usd") }),
+      median(rs.map { |r| num(r, "seconds") }),
+    }
+  end
+
+  # The numbers the eval exists for: per profile, how often right and at what input-token
+  # cost against @minimal (cost USD is noisy across parallel runs sharing a prompt cache), and
+  # which tool the agent reaches for first — the shift a description edit shows up as.
+  by_profile = ok.group_by(&.["profile"].as_s)
+  floor = by_profile["minimal"]?.try { |rs| median(rs.map { |r| num(r, "input_tokens") }) }
+  puts
+  puts "%-8s %7s %9s %6s %6s  %s" % %w[profile pass in_tok ×min calls first-calls]
+  PROFILES.keys.each do |pr|
+    next unless rs = by_profile[pr]?
+    tok = median(rs.map { |r| num(r, "input_tokens") })
+    firsts = rs.compact_map(&.["calls"].as_a.first?.try(&.as_s)).tally.to_a.sort_by! { |(c, n)| {-n, c} }
+    line = "%-8s %3d/%-3d %8.0fk %6s %6.1f  %s" % {
+      pr, rs.count(&.["pass"].as_bool), rs.size, tok / 1000, floor ? "%.1f×" % (tok / floor) : "-",
+      median(rs.map(&.["calls"].as_a.size.to_f)), firsts.first(3).map { |(c, n)| "#{c} #{n}" }.join(", "),
+    }
+    if shared && (b = base_ok.try(&.select { |r| r["profile"].as_s == pr && shared.includes?(r["task"].as_s) })) && !b.empty?
+      cur = rs.select { |r| shared.includes?(r["task"].as_s) }
+      ctok = median(cur.map { |r| num(r, "input_tokens") })
+      btok = median(b.map { |r| num(r, "input_tokens") })
+      line += "   (#{shared.size} shared tasks: #{cur.count(&.["pass"].as_bool)}/#{cur.size} " \
+              "vs base #{b.count(&.["pass"].as_bool)}/#{b.size}, in_tok #{pct(ctok, btok)})"
+    end
+    puts line
+  end
+
+  fails = ok.reject(&.["pass"].as_bool)
+  unless fails.empty?
+    puts
+    puts "failed:"
+    fails.sort_by { |r| {r["task"].as_s, r["profile"].as_s, r["rep"].as_i64} }.each do |r|
+      puts "  #{r["task"]} #{r["profile"]} ##{r["rep"]}: answered #{r["answer"].to_json}, want #{r["want"]?.try(&.to_json) || "?"}"
+    end
+  end
+  if (bad = results.size - ok.size) > 0
+    puts "#{bad} run(s) errored or saw non-gori tools — not counted above; read their stream.jsonl"
+  end
+end
+
+baseline = baseline_dir.try { |b| load_results(b) } # read now, not after a paid run
+if dir = report_dir
+  summarize(load_results(dir), baseline)
+  exit
 end
 abort "unknown profile in #{profiles}" unless profiles.all? { |pr| PROFILES.has_key?(pr) }
 abort "#{GORI_BIN} missing: run `just build`" unless File.exists?(GORI_BIN)
@@ -65,16 +155,22 @@ stamp = Time.local.to_s("%Y%m%d-%H%M%S")
 run_dir = File.join(EVAL, "out", "runs", stamp)
 FileUtils.mkdir_p(run_dir)
 
+# A set member's canonical spelling, so 58, 58.0 and "58" match, a full URL names its path,
+# and a set of paths works the same as one of ids.
+def set_key(v : JSON::Any) : String
+  f = v.as_f? || v.as_i64?.try(&.to_f) || v.as_s?.try(&.strip.to_f?)
+  return f.to_i64.to_s if f && f == f.round && f.abs < 1e15
+  (v.as_s? || v.to_json).strip.sub(/\Ahttps?:\/\/[^\/]+/, "")
+end
+
 # An answer the agent spelled as "70" grades the same as 70; a set ignores order.
 def grade(task : Task, answer : JSON::Any?, truth : JSON::Any) : Bool
   return false unless answer
   case task.grade
   when "set"
-    # A lone id answers a one-element set: "answer with the id" reads as a scalar.
     items = answer.as_a? || [answer]
-    got = items.map { |v| v.as_i64? || v.as_s?.try(&.to_i64?) }
-    return false if got.any?(Nil)
-    got.compact.sort! == truth.as_a.map(&.as_i64).sort!
+    # A lone id answers a one-element set: "answer with the id" reads as a scalar.
+    items.map { |v| set_key(v) }.to_set == truth.as_a.map { |v| set_key(v) }.to_set
   else
     # A number compares as a number, so 73, 73.0 and "73" are the same answer.
     num = ->(v : JSON::Any) { v.as_f? || v.as_i64?.try(&.to_f) || v.as_s?.try(&.strip.to_f?) }
@@ -149,6 +245,7 @@ def run_one(job : Job, run_dir : String, model : String, budget : String, truth 
     "rep"           => JSON::Any.new(job.rep.to_i64),
     "pass"          => JSON::Any.new(grade(job.task, answer, truth)),
     "answer"        => answer || JSON::Any.new(nil),
+    "want"          => truth,
     "calls"         => JSON::Any.new(calls.map { |c| JSON::Any.new(c) }),
     "input_tokens"  => JSON::Any.new(tokens),
     "output_tokens" => JSON::Any.new(usage.try(&.["output_tokens"]?).try(&.as_i64?) || 0_i64),
@@ -187,21 +284,6 @@ File.open(File.join(run_dir, "results.jsonl"), "w") do |log|
   end
 end
 
-def median(xs : Array(Float64)) : Float64
-  s = xs.sort
-  s.empty? ? 0.0 : (s[(s.size - 1) // 2] + s[s.size // 2]) / 2
-end
-
 puts
 puts "model=#{model} n=#{reps} → #{run_dir}"
-puts "%-22s %-8s %5s %6s %9s %7s %6s" % %w[task profile pass calls in_tok cost secs]
-results.group_by { |r| {r["task"].as_s, r["profile"].as_s} }.to_a.sort_by(&.first).each do |(task, pr), rs|
-  med = ->(k : String) { median(rs.map { |r| r[k].as_f? || r[k].as_i64.to_f }) }
-  puts "%-22s %-8s %2d/%-2d %6.1f %8.0fk %7.3f %6.1f" % {
-    task, pr, rs.count(&.["pass"].as_bool), rs.size, median(rs.map(&.["calls"].as_a.size.to_f)),
-    med.call("input_tokens") / 1000, med.call("cost_usd"), med.call("seconds"),
-  }
-end
-if (bad = results.count { |r| r["error"].as_bool || r["foreign_tools"].as_i64 > 0 }) > 0
-  puts "#{bad} run(s) errored or saw non-gori tools — read their stream.jsonl"
-end
+summarize(results, baseline)

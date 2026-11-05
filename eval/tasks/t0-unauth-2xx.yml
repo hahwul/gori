@@ -1,0 +1,6 @@
+fixture: ops
+tier: 0
+grade: set
+prompt: |
+  Which paths on api.ops.test returned a 2xx response to at least one request
+  that carried no Authorization header? Answer with the paths.

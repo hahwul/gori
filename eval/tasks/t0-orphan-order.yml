@@ -1,0 +1,7 @@
+fixture: ops
+tier: 0
+grade: set
+prompt: |
+  Orders on api.ops.test are created with POST /api/v1/orders and read back
+  with GET /api/v1/orders/<id>. Which created order was never read back?
+  Answer with its order id.

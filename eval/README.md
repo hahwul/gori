@@ -10,6 +10,8 @@ runs are nondeterministic and cost money. CI only format-checks and type-checks 
 just build
 just eval-fixtures          # eval/out/fixtures/<name>.db + <name>.truth.json
 just eval --n=3 --jobs=4    # all tasks × all profiles; --tasks=GLOB --profiles=LIST --model=M
+# re-summarize a run, and compare it with an older one (no build, no claude calls):
+crystal run eval/run.cr -- --report=eval/out/runs/<stamp> --baseline=eval/out/runs/<older>
 ```
 
 Needs the `claude` CLI, logged in. Each run gets a copy of the fixture db, an empty
@@ -18,11 +20,21 @@ Needs the `claude` CLI, logged in. Each run gets a copy of the fixture db, an em
 flags any run whose init listed another tool.
 
 Output lands in `eval/out/runs/<stamp>/`: `results.jsonl` (one row per run: pass, answer,
-tool calls, tokens, cost) and each run's raw `stream.jsonl`.
+expected answer, tool calls, tokens, cost) and each run's raw `stream.jsonl`.
+
+The summary has three parts: a task × profile table; a per-profile rollup (pass rate, median
+input tokens and its multiple of `@minimal`, median calls, the most common first tool call);
+and every failed run's answer beside the expected one. Errored runs and runs whose init
+listed a non-gori tool are counted apart, never as failures. Judge cost by input tokens:
+`cost_usd` is noisy because parallel runs share a prompt cache. `--baseline` adds the older
+run's pass rate and input-token change to each profile's row, which is how to check a
+tool-description edit: a shift in first calls (say, a `ql_reference` call before every
+query) shows up there before it shows up in pass rates.
 
 ## Tasks
 
-`tasks/<id>.yml` names a fixture, a tier, a grading mode (`set` or `exact`) and the prompt.
+`tasks/<id>.yml` names a fixture, a tier, a grading mode (`set`: order-free, ids or strings;
+`exact`: numbers compare as numbers) and the prompt.
 The expected answer is not in the task: `fixtures.cr` writes it to the fixture's answer
 key while inserting the flows, keyed by task id, so it is always the id or value the store
 actually holds.
