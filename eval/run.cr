@@ -155,24 +155,22 @@ stamp = Time.local.to_s("%Y%m%d-%H%M%S")
 run_dir = File.join(EVAL, "out", "runs", stamp)
 FileUtils.mkdir_p(run_dir)
 
+# A set member's canonical spelling, so 58, 58.0 and "58" match, a full URL names its path,
+# and a set of paths works the same as one of ids.
+def set_key(v : JSON::Any) : String
+  f = v.as_f? || v.as_i64?.try(&.to_f) || v.as_s?.try(&.strip.to_f?)
+  return f.to_i64.to_s if f && f == f.round && f.abs < 1e15
+  (v.as_s? || v.to_json).strip.sub(/\Ahttps?:\/\/[^\/]+/, "")
+end
+
 # An answer the agent spelled as "70" grades the same as 70; a set ignores order.
 def grade(task : Task, answer : JSON::Any?, truth : JSON::Any) : Bool
   return false unless answer
   case task.grade
   when "set"
-    # A lone id answers a one-element set: "answer with the id" reads as a scalar. Members
-    # compare as canonical strings, so 58, 58.0 and "58" match, a full URL names its path, and
-    # a set of paths works the same as ids.
-    key = ->(v : JSON::Any) do
-      f = v.as_f? || v.as_i64?.try(&.to_f) || v.as_s?.try(&.strip.to_f?)
-      if f && f == f.round && f.abs < 1e15
-        f.to_i64.to_s
-      else
-        (v.as_s? || v.to_json).strip.sub(/\Ahttps?:\/\/[^\/]+/, "")
-      end
-    end
     items = answer.as_a? || [answer]
-    items.map(&key).to_set == truth.as_a.map(&key).to_set
+    # A lone id answers a one-element set: "answer with the id" reads as a scalar.
+    items.map { |v| set_key(v) }.to_set == truth.as_a.map { |v| set_key(v) }.to_set
   else
     # A number compares as a number, so 73, 73.0 and "73" are the same answer.
     num = ->(v : JSON::Any) { v.as_f? || v.as_i64?.try(&.to_f) || v.as_s?.try(&.strip.to_f?) }
