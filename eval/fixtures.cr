@@ -18,8 +18,13 @@ OUT = File.join(__DIR__, "out", "fixtures")
 
 def add_flow(store : S, at : Int64, *, host : String, target : String, method = "GET",
              status = 200, ctype = "application/json", body = "{}",
-             resp_headers = [] of {String, String}, dur_ms = 20) : Int64
-  req_head = "#{method} #{target} HTTP/1.1\r\nHost: #{host}\r\nUser-Agent: eval/1.0\r\nAccept: */*\r\n\r\n"
+             resp_headers = [] of {String, String}, req_headers = [] of {String, String},
+             dur_ms = 20) : Int64
+  req_head = String.build do |b|
+    b << method << ' ' << target << " HTTP/1.1\r\nHost: " << host << "\r\nUser-Agent: eval/1.0\r\nAccept: */*\r\n"
+    req_headers.each { |(k, v)| b << k << ": " << v << "\r\n" }
+    b << "\r\n"
+  end
   fid = store.insert_flow(S::CapturedRequest.new(
     created_at: at, scheme: "https", host: host, port: 443, method: method, target: target,
     http_version: "HTTP/1.1", head: req_head.to_slice, body: nil, body_size: nil,
@@ -154,15 +159,33 @@ def build_ops(path : String) : Hash(String, JSON::Any)
   }
   # t0-median-duration: the 41 search durations, so the median is one of them.
   search_ms = (0...41).map { |i| (i * 37) % 97 + 20 }
+  # t0-unauth-2xx: every request carries a bearer token except /health and the ones `bare`
+  # names. The traps: a request whose only "authorization" is inside another header's name
+  # (a substring `-req.header:authorization` drops it), a lowercase `authorization:` (has
+  # it), and unauthenticated requests that were refused with 401 (not 2xx).
+  bearer = {"Authorization", "Bearer eyJ.ops.sig"}
+  bare = {
+    {"/api/v1/products", 3}  => [] of {String, String},
+    {"/api/v1/products", 17} => [] of {String, String},
+    {"/api/v1/cart", 5}      => [{"X-Authorization-Debug", "off"}],
+    {"/api/v1/search", 8}    => [{"authorization", "Bearer eyJ.ops.sig"}],
+  }
+  unauth_2xx = Set(String).new
   plan.each do |target, (n, errors)|
     stride = errors.zero? ? 1 : n // errors
     n.times do |i|
       status = errors > 0 && i % stride == 0 && i // stride < errors ? 503 : 200
       r = next_rid.call
       dur = target == "/api/v1/search" ? search_ms[i] : 30
+      auth = target == "/health" ? [] of {String, String} : bare[{target, i}]? || [bearer]
+      unauth_2xx << target if status < 300 && auth.none? { |(k, _)| k.downcase == "authorization" }
       rid_flow[r] = add_flow(store, tick.call, host: api, target: target, status: status,
-        body: %({"ok":#{status == 200}}), resp_headers: [{"X-Request-Id", r}], dur_ms: dur)
+        body: %({"ok":#{status == 200}}), resp_headers: [{"X-Request-Id", r}], req_headers: auth, dur_ms: dur)
     end
+  end
+  5.times do
+    add_flow(store, tick.call, host: api, target: "/api/v1/account", status: 401,
+      body: %({"error":"unauthorized"}), resp_headers: [{"X-Request-Id", next_rid.call}])
   end
 
   # t0-request-ref: one support response cites an earlier request by its X-Request-Id; the
@@ -170,7 +193,23 @@ def build_ops(path : String) : Hash(String, JSON::Any)
   cited = rid_flow.keys[57]
   add_flow(store, tick.call, host: api, target: "/api/v1/support/tickets/88",
     body: %({"ticket":88,"refs":["#{cited}","req-00000"],"note":"customer reported a failed checkout"}),
-    resp_headers: [{"X-Request-Id", next_rid.call}])
+    resp_headers: [{"X-Request-Id", next_rid.call}], req_headers: [bearer])
+
+  # t0-orphan-order: twelve orders created, eleven read back later in another order. The
+  # created id is only in each POST's response body and no POST is followed by its own read,
+  # so the answer needs those bodies joined against the GET paths.
+  order_ids = (0...12).map { |k| 7000 + (k * 37) % 100 }
+  orphan = order_ids[8]
+  order_ids.each do |oid|
+    add_flow(store, tick.call, host: api, target: "/api/v1/orders", method: "POST", status: 201,
+      body: %({"id":#{oid},"status":"pending"}), resp_headers: [{"X-Request-Id", next_rid.call}],
+      req_headers: [bearer])
+  end
+  (order_ids - [orphan]).sort.each do |oid|
+    add_flow(store, tick.call, host: api, target: "/api/v1/orders/#{oid}",
+      body: %({"id":#{oid},"status":"pending"}), resp_headers: [{"X-Request-Id", next_rid.call}],
+      req_headers: [bearer])
+  end
 
   store.close
   errors = plan.compact_map { |k, (n, e)| n >= 10 ? {k, e / n} : nil }
@@ -179,13 +218,15 @@ def build_ops(path : String) : Hash(String, JSON::Any)
     "t0-error-rate"      => JSON::Any.new(errors.max_by(&.[1])[0]),
     "t0-median-duration" => JSON::Any.new(sorted[sorted.size // 2].to_i64),
     "t0-request-ref"     => JSON::Any.new([JSON::Any.new(rid_flow[cited])]),
+    "t0-unauth-2xx"      => JSON::Any.new(unauth_2xx.to_a.sort.map { |p| JSON::Any.new(p) }),
+    "t0-orphan-order"    => JSON::Any.new([JSON::Any.new(orphan.to_i64)]),
   }
 end
 
 FileUtils.mkdir_p(OUT)
 {"shop" => ->build_shop(String), "events" => ->build_events(String), "ops" => ->build_ops(String)}.each do |name, build|
   db = File.join(OUT, "#{name}.db")
-  Dir.glob("#{db}*").each { |f| File.delete(f) }
+  FileUtils.rm_rf(Dir.glob("#{db}*")) # the db, its -wal/-shm, and gori's <db>.agents/ dir
   truth = build.call(db)
   File.write(File.join(OUT, "#{name}.truth.json"), truth.to_pretty_json)
   puts "• #{name}: #{db}"
