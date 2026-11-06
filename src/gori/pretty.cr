@@ -93,23 +93,30 @@ module Gori
     # on HTTP/1.1 a repeated Cookie is the client's own anomaly and stays visible. Exact
     # lowercase `cookie:` only: an uppercase or look-alike name is malformed h2 (RFC 9113
     # §8.2.1) and keeps its own line, as does an empty value, so the fold never hides a name
-    # or invents a separator. Display only, like the rest of this module; nil = nothing folded.
+    # or invents a separator. Values are joined as captured: surrounding whitespace is itself
+    # malformed h2 (§8.2.1) and stays visible. One streaming pass, so a head with thousands of
+    # crumbs folds in linear time on the shared scheduler (P6). Display only, like the rest of
+    # this module; nil = nothing folded.
     def fold_h2_cookies(head : Bytes) : Bytes?
-      out = [] of String
-      run = false # out.last is a cookie line
+      run = false # the last line written is a cookie line
       folded = false
-      String.new(head).split("\r\n").each do |line|
-        value = line.starts_with?("cookie:") ? line[7..].strip : ""
-        cookie = !value.empty?
-        if cookie && run
-          out[-1] = "#{out[-1].rstrip}; #{value}"
-          folded = true
-        else
-          out << line
+      first = true
+      text = String.build(head.size) do |io|
+        String.new(head).split("\r\n").each do |line|
+          value = line.starts_with?("cookie: ") ? line[8..] : ""
+          cookie = !value.strip.empty?
+          if cookie && run
+            io << "; " << value
+            folded = true
+          else
+            io << "\r\n" unless first
+            io << line
+          end
+          first = false
+          run = cookie
         end
-        run = cookie
       end
-      folded ? out.join("\r\n").to_slice : nil
+      folded ? text.to_slice : nil
     end
 
     # Decode escaped Unicode in a JSON body without changing its original whitespace. This is

@@ -571,6 +571,24 @@ describe "Gori::Pretty.fold_h2_cookies" do
     end
   end
 
+  it "joins values as captured: surrounding whitespace is malformed h2 and stays visible" do
+    head = "GET / HTTP/2\r\ncookie: a=1 \r\ncookie:  b=2\r\n\r\n"
+    String.new(Gori::Pretty.fold_h2_cookies(head.to_slice).not_nil!).should eq(
+      "GET / HTTP/2\r\ncookie: a=1 ;  b=2\r\n\r\n")
+  end
+
+  # Copilot on #1818: appending to the accumulated line was quadratic, and this runs on the
+  # shared scheduler (P6). 20k crumbs is ~2.4 GB of copying that way; linear is a few MB.
+  it "folds a long run in linear allocation" do
+    head = "GET / HTTP/2\r\n" + (0...20_000).map { |i| "cookie: c#{i}=1\r\n" }.join + "\r\n"
+    before = GC.stats.total_bytes
+    out = String.new(Gori::Pretty.fold_h2_cookies(head.to_slice).not_nil!)
+    (GC.stats.total_bytes - before).should be < 50_000_000
+    out.count("\n").should eq(3)
+    out.should contain("c0=1; c1=1")
+    out.should contain("c19999=1\r\n\r\n")
+  end
+
   it "never invents a separator for an empty cookie field" do
     head = "GET / HTTP/2\r\ncookie: a=1\r\ncookie: \r\ncookie: b=2\r\n\r\n"
     Gori::Pretty.fold_h2_cookies(head.to_slice).should be_nil
