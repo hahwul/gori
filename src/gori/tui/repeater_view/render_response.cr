@@ -3,10 +3,10 @@
 # diff. Reopens Gori::Tui::RepeaterView (see tui/repeater_view.cr).
 class Gori::Tui::RepeaterView
   # The RESPONSE pane's top-border chrome: keyed toggle chips + the right-aligned
-  # latency·size of the last send. Each chip carries its shortcut (history-style:
-  # d diff · x hex · p pretty) so the toggle is discoverable in place, and lights
-  # when active. Plain response mode needs no chip of its own — it's simply none of
-  # these lit (the pane is already titled RESPONSE).
+  # latency·size of the last send. Each chip carries its shortcut (⇧D DIFF · ^X HEX ·
+  # p PRETTY, upper-case like the REQUEST and TARGET borders' badges beside it) so the
+  # toggle is discoverable in place, and lights when active. Plain response mode needs no
+  # chip of its own — it's simply none of these lit (the pane is already titled RESPONSE).
   private def render_response_chrome(screen : Screen, rect : Rect) : Nil
     # These chips are LEFT-anchored, and `Frame.chip` does not clip (unlike its sibling
     # `Frame.toggle_badge`, which draws nothing when it doesn't fit). RESPONSE is a
@@ -30,12 +30,12 @@ class Gori::Tui::RepeaterView
   private def response_chips : Array({Symbol, String, Bool})
     resp_plain = !@resp_hex && @resp_mode == :response
     chips = [
-      {:diff, " #{key_label("repeater.toggle-diff", "⇧D")}:diff", !@resp_hex && @resp_mode == :diff},
-      {:hex, " #{key_label("repeater.toggle-resp-hex", "^X")}:hex", @resp_hex},
-      {:pretty, " #{key_label("repeater.toggle-pretty", "p")}:pretty", resp_plain && !@reveal && resp_pretty_applied?},
+      {:diff, " #{key_label("repeater.toggle-diff", "⇧D")}:DIFF", !@resp_hex && @resp_mode == :diff},
+      {:hex, " #{key_label("repeater.toggle-resp-hex", "^X")}:HEX", @resp_hex},
+      {:pretty, " #{key_label("repeater.toggle-pretty", "p")}:PRETTY", resp_plain && !@reveal && resp_pretty_applied?},
     ] of {Symbol, String, Bool}
     if resp_plain && !@reveal && resp_unicode_escape_count > 0
-      label = resp_unicode_decoded? ? "wire" : "decode"
+      label = resp_unicode_decoded? ? "WIRE" : "DECODE"
       chips << {:unicode, " #{key_label("repeater.toggle-unicode", "u")}:#{label}", resp_unicode_decoded?}
     end
     chips
@@ -115,7 +115,7 @@ class Gori::Tui::RepeaterView
   # state it is in. A method rather than a literal in each place for the reason `grpc_chip_x`
   # is one: the draw and the hit-test must not be able to disagree about its width.
   private def grpc_chip_label : String
-    @pretty ? " #{key_label("repeater.toggle-pretty", "p")}:bytes " : " #{key_label("repeater.toggle-pretty", "p")}:tree "
+    @pretty ? " #{key_label("repeater.toggle-pretty", "p")}:BYTES " : " #{key_label("repeater.toggle-pretty", "p")}:TREE "
   end
 
   # …and where that chip must STOP. `Frame.chip` does not clip itself and this card is a

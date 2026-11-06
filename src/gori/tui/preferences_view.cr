@@ -493,9 +493,14 @@ module Gori::Tui
 
     # Keep the focused row inside the content viewport (scroll follows focus).
     # `group_height` is the row extent `render_group` lays out (and the number it feeds the
-    # scroll gauge), and `focus_row_offset` is the focused row's index within it.
+    # scroll gauge), and `focus_rows` is the focused row's index within it.
     private def ensure_scroll(content : Rect) : Nil
-      @scroll = Viewport.scroll_to_show(focus_row_offset, @scroll, {content.h, 1}.max, group_height)
+      h = {content.h, 1}.max
+      field, lead = focus_rows
+      # The focused field first, then the row that leads it (its section or subheader), so
+      # stepping down into a subsection never leaves the field itself just below the fold.
+      @scroll = Viewport.scroll_to_show(field, @scroll, h, group_height)
+      @scroll = Viewport.scroll_to_show(lead, @scroll, h, group_height)
     end
 
     # --- catalog / geometry helpers ---
@@ -522,7 +527,7 @@ module Gori::Tui
       out = [] of {SettingsCatalog::Section, Int32}
       group_sections.each do |sec|
         if sec.kind == :form
-          field_count(sec.sym).times { |i| out << {sec, i} }
+          field_count(sec.sym).times { |i| out << {sec, i} unless SettingsView.header?(sec.sym, i) }
         else
           out << {sec, -1}
         end
@@ -551,12 +556,7 @@ module Gori::Tui
 
     # The flat target index of a section's first field/opener within its group.
     private def target_index_of(section : Symbol) : Int32
-      i = 0
-      group_sections.each do |sec|
-        return i if sec.sym == section
-        i += sec.kind == :form ? field_count(sec.sym) : 1
-      end
-      0
+      targets.index(&.[0].sym.==(section)) || 0
     end
 
     private def height_of(gsym : Symbol) : Int32
@@ -567,23 +567,29 @@ module Gori::Tui
       height_of(group_sym)
     end
 
-    private def focus_row_offset : Int32
-      return 0 unless ft = focused_target
+    # {focused field's row, the row that leads it}: a section's first field is led by the
+    # section header, a field under a subheader by that subheader, any other by itself.
+    private def focus_rows : {Int32, Int32}
+      return {0, 0} unless ft = focused_target
       fsec, ffield = ft
       row = 0
       group_sections.each do |sec|
         header = row
         row += 1
         if sec.kind == :form
-          return ffield == 0 ? header : row + ffield if sec.sym == fsec.sym
+          if sec.sym == fsec.sym
+            lead = ffield
+            lead -= 1 if lead > 0 && SettingsView.header?(sec.sym, lead - 1)
+            return {row + ffield, lead == 0 ? header : row + lead}
+          end
           row += field_count(sec.sym)
         else
-          return header if sec.sym == fsec.sym
+          return {header, header} if sec.sym == fsec.sym
           row += 1
         end
         row += 1
       end
-      row
+      {row, row}
     end
 
     private def target_at_row(vrow : Int32) : Int32?
@@ -594,6 +600,7 @@ module Gori::Tui
         if sec.kind == :form
           fc = field_count(sec.sym)
           fc.times do |i|
+            next if SettingsView.header?(sec.sym, i) # a subheader row is not a target
             return ti if row + i == vrow
             ti += 1
           end

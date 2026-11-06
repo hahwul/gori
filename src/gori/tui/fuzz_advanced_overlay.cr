@@ -58,8 +58,13 @@ module Gori::Tui
   # Overlay seam (see overlay.cr) — where "apply" IS :commit, so there is no cancel:
   # esc and click-away both write the snapshot back through the injected closure.
   class FuzzAdvancedOverlay < Overlay
-    # {field key, label, kind(:text|:toggle)} in display order.
+    # {field key, label, kind(:text|:toggle|:header)} in display order. A `:header` row is a
+    # muted section title (` ─ engine ─`): drawn and scrolled like any row, never selected —
+    # ↑/↓/⇥, ↵, the wheel and a click all step over it. Rows are reached by KEY, never by
+    # index (spec/tui/fuzz_advanced_overlay_spec.cr), so a new row goes in the section it
+    # belongs to.
     ROWS = [
+      {:engine, "engine", :header},
       {:conc, "Concurrency", :text},
       {:rate, "Rate (rps)", :text},
       {:timeout, "Timeout (s)", :text},
@@ -68,9 +73,39 @@ module Gori::Tui
       # `Fuzz::CappedBackend`, the same counter `--max-requests` and MCP's `max_requests`
       # are enforced against. Blank = no cap, which is what every TUI run used to be.
       {:max_requests, "Max requests", :text},
+      {:keep_alive, "Keep-alive", :toggle},
       {:follow, "Follow redirects", :toggle},
       {:calibrate, "Auto-calibrate", :toggle},
-      {:keep_alive, "Keep-alive", :toggle},
+      {:match, "match", :header},
+      {:m_status, "Match status", :text},
+      {:m_size, "Match size", :text},
+      {:m_words, "Match words", :text},
+      # The TIME dimension — `gori run fuzz --mt/--ft`, MCP `match:{time:…}`. Milliseconds,
+      # because that is what an operator types for a `SLEEP(5)` sweep (`>=4500`), and because
+      # a time-based blind payload is the one class whose entire signal is this row: status,
+      # size and body come back identical whether the sleep fired or not.
+      {:m_time, "Match time (ms)", :text},
+      {:m_regex, "Match regex", :text},
+      {:filter, "filter", :header},
+      {:f_status, "Filter status", :text},
+      {:f_size, "Filter size", :text},
+      {:f_words, "Filter words", :text},
+      {:f_time, "Filter time (ms)", :text},
+      {:f_regex, "Filter regex", :text},
+      {:stop, "stop", :header},
+      # `stop_on` (issue #1240) — `gori run fuzz --stop-after-matches` / `--stop-on`, MCP
+      # `stop_on`. `Stop after N hits` ends the run once the matchers have hit N times (1 = first
+      # hit); `Stop on` is a SEPARATE condition, one DIM:SPEC term (regex:admin, status:200,
+      # !regex:Invalid password — ! negates to a filter, "stop when the body no longer carries
+      # it"). A run either fires lands `condition_met`, not `stopped`.
+      {:stop_after, "Stop after N hits", :text},
+      {:stop_on, "Stop on (DIM:SPEC)", :text},
+      # The result-capture filter for a saved run (Shift-E) / the private spool: on keeps only
+      # the interesting rows (matched + error/re-send/incomplete/stop), so a huge sweep does not
+      # spool one row per request. The pane, the counters and `idx` are unaffected. A toggle
+      # because the policy is exactly two-valued (all / interesting).
+      {:keep_interesting, "Keep interesting only", :toggle},
+      {:wire, "wire", :header},
       # The Repeater's ^L / `--verbatim` and Intercept's `update_content_length:false` by
       # the same name and for the same reason: a CL / CL-TE desync template IS the payload,
       # and recomputing its Content-Length sweeps a different request than the one written.
@@ -83,9 +118,23 @@ module Gori::Tui
       # `Plan#unframed_body?` is what says so on the run-start line instead of letting it go
       # quiet.
       {:update_cl, "Auto Content-Length", :toggle},
+      # The run's TLS fingerprint (#844) — the same knob `gori run fuzz --tls-preset` and MCP
+      # `fuzz_start{tls_preset}` set. Blank = none, i.e. the destination's own outbound_tls
+      # policy, which is what every sweep did before. A NAME (chrome / firefox / safari /
+      # curl), typed rather than cycled because this row is a text row like its neighbours; an
+      # unknown one is refused by `Fuzz::Plan.build` when the run starts, and the tab reports
+      # it — never applied-as-nothing, which would sweep with gori's bare hello under a
+      # heading naming a browser.
+      #
+      # RUN-level, not per request: keep-alive parks a socket whose handshake is already done.
+      {:tls_preset, "TLS fingerprint", :text},
+      # Race condition (last-byte-sync): N dedicated connections holding back
+      # the final byte, released together — bypasses Mode/payload sets entirely (see
+      # Fuzz::Config#race_count). Blank = off. A warm-up request is CLI/MCP-only for this phase.
+      {:race, "Race (N conns)", :text},
       # The SECOND length declaration a gRPC request carries — the 5-byte prefix in front of
-      # the message — and deliberately the OPPOSITE default to the row above it (DESIGN.md §7,
-      # the gRPC reframe entry): Content-Length is recomputed unless told not to, the gRPC
+      # the message — and deliberately the OPPOSITE default to Auto Content-Length (DESIGN.md
+      # §7, the gRPC reframe entry): Content-Length is recomputed unless told not to, the gRPC
       # prefix is left as the payload left it unless told to. ON recomputes it per request, so
       # a sweep whose payload changed the message length is not rejected at the framing layer.
       # `Fuzz::Config#reframe_grpc?` — the same knob `gori run fuzz --reframe-grpc` and MCP
@@ -97,72 +146,18 @@ module Gori::Tui
       # grpc-web-text; `Grpc.reframe` then declines a client-streaming body and a body that
       # frames end-to-end. ON over any of those is a no-op, not a rewrite.
       {:reframe_grpc, "gRPC reframe (unary)", :toggle},
-      {:m_status, "Match status", :text},
-      {:m_size, "Match size", :text},
-      {:m_words, "Match words", :text},
-      {:m_regex, "Match regex", :text},
-      {:f_status, "Filter status", :text},
-      {:f_size, "Filter size", :text},
-      {:f_words, "Filter words", :text},
-      {:f_regex, "Filter regex", :text},
-      # Appended LAST, deliberately: the rows above are referenced by hardcoded index in
-      # spec/tui/fuzz_advanced_overlay_spec.cr, and this is the one position that shifts none
-      # of them. (`gRPC reframe` DID shift them — it belongs beside the other length-declaration
-      # toggle, not at the bottom next to a connection count — so that spec moved with it.)
-      # Race condition (last-byte-sync): N dedicated connections holding back
-      # the final byte, released together — bypasses Mode/payload sets entirely (see
-      # Fuzz::Config#race_count). Blank = off. A warm-up request is CLI/MCP-only for this phase.
-      {:race, "Race (N conns)", :text},
       # Schema-known gRPC field positions (`gori run fuzz --field`, MCP `fields`). A NAME, not
       # a marker: the wire encoding of a value is not something `§…§` can usefully wrap. Blank
-      # = none, which is every sweep that came before. Appended after Race for the same reason
-      # Race was appended after the matchers: it renumbers no row a spec reaches by index. Two
-      # examples still moved with it — the ones pinning WHICH row is last and the arithmetic of
-      # a click on a scrolled list — because those are facts about the table's end, not about a
-      # row's number. The field NAMES for a flow are the ones the Repeater's ␣Pf:FIELDS form and
-      # the History protobuf tree already show for it, so this row is typed, not browsed.
+      # = none, which is every sweep that came before. The field NAMES for a flow are the ones
+      # the Repeater's ␣Pf:FIELDS form and the History protobuf tree already show for it, so
+      # this row is typed, not browsed.
       {:grpc_fields, "gRPC field(s)", :text},
-      # The run's TLS fingerprint (#844) — the same knob `gori run fuzz --tls-preset` and MCP
-      # `fuzz_start{tls_preset}` set. Blank = none, i.e. the destination's own outbound_tls
-      # policy, which is what every sweep did before. A NAME (chrome / firefox / safari /
-      # curl), typed rather than cycled because this row is a text row like its neighbours; an
-      # unknown one is refused by `Fuzz::Plan.build` when the run starts, and the tab reports
-      # it — never applied-as-nothing, which would sweep with gori's bare hello under a
-      # heading naming a browser.
-      #
-      # RUN-level, not per request: keep-alive parks a socket whose handshake is already done.
-      # Appended LAST for the reason the two rows above it were — it renumbers no row a spec
-      # reaches by index.
-      {:tls_preset, "TLS fingerprint", :text},
-      # The TIME dimension — `gori run fuzz --mt/--ft`, MCP `match:{time:…}`. Milliseconds,
-      # because that is what an operator types for a `SLEEP(5)` sweep (`>=4500`), and because
-      # a time-based blind payload is the one class whose entire signal is this row: status,
-      # size and body come back identical whether the sleep fired or not.
-      #
-      # Appended LAST for the reason Race, gRPC field(s) and TLS fingerprint were: the rows
-      # above are reached by hardcoded index in spec/tui/fuzz_advanced_overlay_spec.cr, and
-      # this is the one position that renumbers none of them.
-      {:m_time, "Match time (ms)", :text},
-      {:f_time, "Filter time (ms)", :text},
-      # `stop_on` (issue #1240) — `gori run fuzz --stop-after-matches` / `--stop-on`, MCP
-      # `stop_on`. `Stop after N hits` ends the run once the matchers have hit N times (1 = first
-      # hit); `Stop on` is a SEPARATE condition, one DIM:SPEC term (regex:admin, status:200,
-      # !regex:Invalid password — ! negates to a filter, "stop when the body no longer carries
-      # it"). A run either fires lands `condition_met`, not `stopped`. Appended LAST, like the
-      # rows above them, so no spec-indexed row is renumbered.
-      {:stop_after, "Stop after N hits", :text},
-      {:stop_on, "Stop on (DIM:SPEC)", :text},
-      # The result-capture filter for a saved run (Shift-E) / the private spool: on keeps only
-      # the interesting rows (matched + error/re-send/incomplete/stop), so a huge sweep does not
-      # spool one row per request. The pane, the counters and `idx` are unaffected. A toggle
-      # because the policy is exactly two-valued (all / interesting).
-      {:keep_interesting, "Keep interesting only", :toggle},
       # The request-time macro (#1350): Repeater sessions replayed BEFORE a candidate so a
       # rotating CSRF token or nonce is fresh when the candidate resolves its `$BIND.NAME`.
       # Blank steps = no macro, which is every sweep that came before. The four rows are one
       # feature and are text rows like their neighbours; a value that does not read is named by
-      # `FuzzerView#build_engine` when the run starts, never applied-as-nothing. Appended LAST for
-      # the reason every row above was: it renumbers no row a spec reaches by index.
+      # `FuzzerView#build_engine` when the run starts, never applied-as-nothing.
+      {:macro, "macro", :header},
       {:macro_steps, "Macro steps", :text},
       {:macro_every, "Macro cadence", :text},
       {:macro_expect, "Macro must rebind", :text},
@@ -171,7 +166,7 @@ module Gori::Tui
     LABEL_W = 22 # value column offset (widest label "gRPC reframe (unary)" + padding)
 
     def initialize(snap : AdvancedSnapshot)
-      @sel = 0
+      @sel = 1 # ROWS[0] is the engine header
       @scroll = 0
       @follow = snap.follow
       @calibrate = snap.calibrate
@@ -242,8 +237,8 @@ module Gori::Tui
       key = ev.key
       return :commit if key.escape?
       case
-      when key.tab?, key.down?    then @sel = (@sel + 1).clamp(0, ROWS.size - 1)
-      when key.back_tab?, key.up? then @sel = (@sel - 1).clamp(0, ROWS.size - 1)
+      when key.tab?, key.down?    then step(1)
+      when key.back_tab?, key.up? then step(-1)
       else
         current[2] == :toggle ? handle_toggle(key) : handle_text(ev)
       end
@@ -263,7 +258,7 @@ module Gori::Tui
         # load-bearing: without it @sel would step past the last row and `current` would
         # index ROWS out of range.
         return :commit if @sel == ROWS.size - 1
-        @sel += 1
+        step(1)
       else
         @fields[current[0]].handle_edit_key(ev)
       end
@@ -287,7 +282,16 @@ module Gori::Tui
     end
 
     def move(d : Int32) : Nil
-      @sel = (@sel + d).clamp(0, ROWS.size - 1)
+      d.abs.times { step(d.sign) }
+    end
+
+    # One row up (-1) or down (+1), hopping a section header; at either end @sel stays put.
+    private def step(d : Int32) : Nil
+      i = @sel + d
+      while 0 < i && i < ROWS.size && ROWS[i][2] == :header
+        i += d
+      end
+      @sel = i if 0 <= i && i < ROWS.size && ROWS[i][2] != :header
     end
 
     # --- result -------------------------------------------------------------
@@ -335,6 +339,8 @@ module Gori::Tui
       top = box.y + 1
       visible = list_capacity(box)
       # `ROWS` is the form's fixed row table — the same one the loop below breaks against.
+      # Show a section's header above its first row when the cursor arrives there from below.
+      @scroll = Viewport.scroll_to_show(@sel - 1, @scroll, visible, ROWS.size) if ROWS[@sel - 1][2] == :header
       @scroll = Viewport.scroll_to_show(@sel, @scroll, visible, ROWS.size)
       vx = box.x + 2 + LABEL_W
       (0...visible).each do |i|
@@ -363,6 +369,10 @@ module Gori::Tui
 
     private def render_row(screen : Screen, box : Rect, ri : Int32, y : Int32, vx : Int32) : Nil
       key, label, kind = ROWS[ri]
+      if kind == :header
+        screen.text(box.x + 2, y, "─ #{label} ─", Theme.muted, Theme.bg)
+        return
+      end
       foc = ri == @sel
       bg = foc ? Theme.accent_bg : Theme.bg
       screen.fill(Rect.new(box.x + 1, y, box.w - 2, 1), bg) if foc
@@ -389,7 +399,8 @@ module Gori::Tui
       i = my - (box.y + 1)
       return :stay if i < 0 || i >= list_capacity(box)
       ri = @scroll + i
-      @sel = ri if ri < ROWS.size
+      return :stay if ri >= ROWS.size || ROWS[ri][2] == :header # a header is not a target
+      @sel = ri
       # …then the caret, if the press landed inside a drawn field. The row pick above is
       # what focuses; this is what puts the caret where the operator pointed instead of
       # leaving it wherever the last keystroke did (Overlay#click_text_field).

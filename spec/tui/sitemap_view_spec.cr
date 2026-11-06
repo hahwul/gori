@@ -1132,12 +1132,14 @@ describe Gori::Tui::SitemapView do
         targets.should eq({acme => nil})
         label.should eq("http://acme.test")
 
-        10.times do # walk down to the /api folder row, whatever order the tree draws it in
-          break if view.export_targets.not_nil![1] == "http://acme.test/api"
+        # `/api` holds only `users`, so the two draw as ONE compact `api/users` row that
+        # stands for the deeper node.
+        10.times do # walk down to that folder row, whatever order the tree draws it in
+          break if view.export_targets.not_nil![1] == "http://acme.test/api/users"
           view.move(1)
         end
         targets, label = view.export_targets.not_nil!
-        label.should eq("http://acme.test/api")
+        label.should eq("http://acme.test/api/users")
         targets[acme].should eq(Set{"/api/users", "/api/users/7"})
       end
     end

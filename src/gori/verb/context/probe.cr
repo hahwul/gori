@@ -11,8 +11,10 @@ abstract class Gori::Verb::ExecContext
 
   # probe (passive/active scan issues — grouped by code+host)
   abstract def probe_move(delta : Int32) : Nil
-  abstract def probe_open : Nil  # open the selected issue's detail
-  abstract def probe_close : Nil # back to the list
+  abstract def probe_open : Nil         # open the selected issue's detail
+  abstract def probe_close : Nil        # back to the list
+  abstract def probe_collapse : Nil     # fold the group the cursor is on (or under)
+  abstract def probe_toggle_group : Nil # Display… → group a check seen on several hosts into one row
   # `⇧N`/`⇧P` inside the drill-in — open the next/previous finding without returning to the list.
   abstract def probe_step_item(delta : Int32) : Nil
   abstract def probe_query : Nil         # focus the `/` filter bar

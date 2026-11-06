@@ -26,7 +26,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       return
     end
     target = view.selected_endpoint(:container).try(&.[](:target)) || ep[:target]
-    open_discover_config(build_discover_seed(origin, target))
+    # A compact row also offers the folders it folds (`/api/v1/users` → `/api/v1/`, `/api/`).
+    open_discover_config(build_discover_seed(origin, [target] + view.selected_chain_paths))
   end
 
   # Marks (#442) enrich this WITHIN one host: the config popup's start-target list becomes the

@@ -299,7 +299,7 @@ module Gori::Tui
         # `probe.open-evidence` (go to source) since the key audit's F2, so the Global lens is
         # the menu entry `probe.scope-toggle` here. The token would have printed the Global
         # chord and been wrong on the one tab this row is about.
-        Item.new("Probe", "↑/↓ ↵ open · {probe.open-evidence} source · {probe.mode} mode · {probe.dismiss-selected} dismiss · {probe.toggle-closed} all · {probe.filter} filter · {space:probe.scope-toggle} scope · {probe.clear} clear issues"),
+        Item.new("Probe", "↑/↓ ↵ open · {probe.open-evidence} source · {probe.mode} mode · {probe.dismiss-selected} dismiss · {probe.toggle-closed} all · {probe.filter} filter · {space:probe.scope-toggle} scope · {probe.clear} clear findings"),
         # Evidence is hidden until the project freezes its first snapshot, so this row is where
         # an operator who just enabled the tab learns its keys — and `{evidence.delete}` is the
         # only one that destroys bytes no source can hand back, which is why it is named here

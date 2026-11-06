@@ -69,8 +69,7 @@ Two things survive on purpose. The redaction salt is kept, because discarding it
 | Section | Fields |
 |---------|--------|
 | **Theme** | Opener: the theme picker (built-ins plus your own) |
-| **Display** | Default detail pane, History list time, Line numbers, Wrap long lines, Preview body limit (KiB), Resource meter, Terminal title |
-| **Layout** | History Req/Res preview, Probe issue preview, Issues preview, History list order, Sitemap expand depth, Tab numbers, Tab bar slots |
+| **Display** | *lists:* History list order, History list time, History Req/Res preview, Probe finding preview, Issues preview, Sitemap expand depth · *message panes:* Default detail pane, Line numbers, Wrap long lines, Preview body limit (KiB) · *window:* Tab numbers, Tab bar slots, Resource meter, Terminal title |
 | **Companion** | Companion (Miss Ring), Placement, Motion, Notices, Agent replies |
 
 The Theme row previews the current theme inline, showing its name and a swatch of its palette. See the [Themes guide](/guide/themes/).

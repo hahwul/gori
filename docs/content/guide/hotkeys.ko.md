@@ -116,7 +116,7 @@ Ctrl-P  → settings:hotkeys
 규칙입니다. `Space`가 공백을 입력하는 자리에서는 `3`도 3을 입력합니다. `base64`, `sha256`,
 `rot13`을 변환 체인에 칠 수 있는 이유가 이것입니다.
 
-바는 기본적으로 번호를 그립니다(**Preferences → Layout → Tab numbers**, `settings:layout`).
+바는 기본적으로 번호를 그립니다(**Preferences → Display → Tab numbers**, `settings:display`).
 마지막 탭 바로 뒤의 알약은 `0:Tabs`로 읽힙니다. 키와 그 키가 여는 것을 나타냅니다. 오른쪽 끝에
 못박히는 대신 아홉 번째 슬롯에서 두 칸 뒤에 붙어서, `→`로 걷는 순서와 눈으로 읽는 순서가
 같아집니다. 탭이 알약 옆에 더는 들어가지 않을 때만 오른쪽 끝에 고정되고 탭이 스크롤합니다.
@@ -135,7 +135,7 @@ Ctrl-P  → settings:hotkeys
 때까지 바의 맨 오른쪽에 **번호 없이** 놓입니다. 사용자가 배치한 슬롯이 아니라 지금 서 있는
 자리이고, 어떤 숫자도 그것을 가리키지 않습니다.
 
-상한 없는 예전 바를 되돌리려면 **Preferences → Layout → Tab bar slots**를 끄세요. 바는 다시
+상한 없는 예전 바를 되돌리려면 **Preferences → Display → Tab bar slots**를 끄세요. 바는 다시
 `‹` `›`로 스크롤하고, `1`-`9`는 여전히 앞의 아홉 탭에 닿고, `0`은 여전히 모든 탭에 닿습니다.
 
 ### 키보드 레이아웃 {#keyboard-layouts}
@@ -349,7 +349,8 @@ Rewriter와 Colormarker의 **Enable/disable everywhere**가 `T`인 이유가 이
 | `g` · `q` · `J` | id 접기 · 쿼리 접기 · JS 참조 | `r` · `f` | gRPC reframe · gRPC 필드 편집기 |
 | `m` · `v` · `G` | Fuzzer: 매치만 · 분포 · 응답 모양별 묶기 | `t` | TLS 지문 |
 | `t` · `z` | Comparer: 요청/응답 · 변경 없는 구간 접기 | `o` · `b` | WebSocket 라이브 세션 · Engine.IO 하트비트 |
-| `a` | 모두 보기: Probe의 닫힌 이슈, Params 탭의 표준 헤더 | | |
+| `a` | 모두 보기: Probe의 닫힌 탐지 결과, Params 탭의 표준 헤더 | | |
+| `C` | Probe: 체크별로 묶기(기본 켜짐) | | |
 
 두 카드는 **sticky**입니다. 행을 실행하면 카드가 같은 행에서 다시 열리므로 한 번에 두세 개를
 바꿀 수 있고, 각 행은 상태를 보여줍니다. `●`는 켜짐, `○`는 꺼짐, TLS 프리셋 이름 같은 값도

@@ -115,6 +115,9 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   property? repeater_split_request : Bool = false # a SAML/GraphQL/WS tab: Display…'s envelope row
 
+  property? repeater_ws_tab : Bool = false   # a WebSocket tab: the WS-only Protocol… rows
+  property? repeater_grpc_tab : Bool = false # a gRPC tab: the gRPC-only Protocol… rows
+
   property fuzzer_results_saveable : Bool = false
 
   def fuzzer_results_saveable? : Bool

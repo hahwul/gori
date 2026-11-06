@@ -252,7 +252,7 @@ describe "Display… and Protocol… (#1274 WP9)" do
     members_of(display).should eq(%w[
       comparer.toggle-fold comparer.toggle-pane detail.toggle-hex detail.toggle-pretty
       detail.toggle-unicode detail.toggle-ws fuzz.dist fuzz.extractors fuzz.group fuzz.matched history.columns
-      history.toggle-follow history.toggle-static params.all-headers probe.toggle-closed repeater.toggle-diff repeater.toggle-envelope
+      history.toggle-follow history.toggle-static params.all-headers probe.toggle-closed probe.toggle-group repeater.toggle-diff repeater.toggle-envelope
       repeater.toggle-hex repeater.toggle-pretty repeater.toggle-resp-hex repeater.toggle-unicode
       sitemap.toggle-grouping sitemap.toggle-js-refs sitemap.toggle-query-fold sitemap.toggle-static
     ])
@@ -305,6 +305,28 @@ describe "Display… and Protocol… (#1274 WP9)" do
       family_card(scope, pane, ctx, protocol).entry_for('2').try(&.verb).try(&.id).should eq("#{prefix}.toggle-http2")
       family_card(scope, :target, ctx, protocol).entry_for('s').try(&.verb).try(&.id).should eq("#{prefix}.toggle-sni")
     end
+  end
+
+  # A plain HTTP tab's card listed the WebSocket and gRPC toggles too, each of which only
+  # toasted that it applies to another kind of tab.
+  it "lists the WebSocket and gRPC rows only on a tab of that transport" do
+    ids = ->(ctx : FakeExecContext) {
+      family_card(Gori::Verb::Scope::Repeater, :request, ctx, protocol).entries.compact_map(&.verb.try(&.id)).sort!
+    }
+    ctx = FakeExecContext.new
+    ctx.current_tab = :repeater
+    ids.call(ctx).should eq(%w[repeater.toggle-auto-content-length repeater.toggle-http2])
+    ctx.repeater_ws_tab = true
+    ids.call(ctx).should eq(%w[repeater.toggle-auto-content-length repeater.toggle-http2
+      repeater.toggle-ws-heartbeat repeater.toggle-ws-key repeater.toggle-ws-session])
+    ctx.repeater_ws_tab = false
+    ctx.repeater_grpc_tab = true
+    ids.call(ctx).should eq(%w[repeater.toggle-auto-content-length repeater.toggle-grpc-fields
+      repeater.toggle-grpc-reframe repeater.toggle-http2])
+    # A socket still open after `^V` left WS mode keeps its disconnect row.
+    ctx.repeater_grpc_tab = false
+    ctx.repeater_ws_session_connected = true
+    ids.call(ctx).should contain("repeater.toggle-ws-session")
   end
 
   # ^T drops a § marker on a tab with no split, so the menu row is its own verb, listed only

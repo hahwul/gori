@@ -44,7 +44,13 @@ module Gori::Tui
     # root's `scheme://host:port` label) is its IDENTITY — marks, the selection anchor and the
     # expand state, where `:19021/x` and `:19022/x` are two rows — and `root.host` (the bare
     # host) is what a host-keyed question takes: a tag, a scope rule, a flow lookup.
-    private record VisibleRow, node : Node, depth : Int32, guides : UInt64, root : Node do
+    #
+    # A COMPACT row (VS Code's compact folders) is a single-child folder chain drawn as one
+    # line: `segments` holds every label on it, and `node` is the chain's DEEPEST node, so
+    # expand/collapse, marks, tags and every path-taking action read the full path off it
+    # exactly as on an ordinary row. `depth` is the chain's first node's. nil on a plain row.
+    private record VisibleRow, node : Node, depth : Int32, guides : UInt64, root : Node,
+      segments : Array(String)? = nil do
       def key : String
         root.label
       end
@@ -332,7 +338,8 @@ module Gori::Tui
       @visible_cache = nil
       rows = visible_rows
       # Exact row, else the fold that swallowed it, else the top.
-      @selected = index_of_target(rows, prev_sel) || index_of_enclosing_fold(rows, prev_sel) || 0
+      @selected = index_of_target(rows, prev_sel) || index_of_enclosing_fold(rows, prev_sel) ||
+                  index_of_compact_row(rows, prev_sel) || 0
       @selected = @selected.clamp(0, {rows.size - 1, 0}.max)
       @scroll = prev_scroll.clamp(0, {rows.size - 1, 0}.max)
       @loaded = true
@@ -410,6 +417,14 @@ module Gori::Tui
 
     # Is `want` the folded node itself, or something beneath it? (Prefix-compared without
     # building a "#{path}/" string per candidate — this runs per row on every reload.)
+    # The previously selected folder can also vanish into a COMPACT row when a sibling went
+    # away (a filter, the scope lens, a prune): land on the row whose chain now holds it.
+    private def index_of_compact_row(rows : Array(VisibleRow), target : {String, String}?) : Int32?
+      return nil unless target
+      want_host, want_path = target
+      rows.index { |row| row.segments && row.key == want_host && encloses?(want_path, row.node.path) }
+    end
+
     private def encloses?(path : String, want : String) : Bool
       return true if path == want
       want.starts_with?(path) && want[path.size]? == '/'
@@ -1180,15 +1195,35 @@ module Gori::Tui
       # the pane's right BORDER and pushed label_end off-screen, so draw_cluster's
       # collision checks dropped this row's tag memo AND method chips. It's now clipped
       # (with an ellipsis) before whichever right column the row has.
-      lx = screen.text(lx0, y, row_label(node), label_color(host, node), bg, width: label_width(rect, node, host, lx0))
+      width = label_width(rect, node, host, lx0)
+      lx = screen.text(lx0, y, row_label(row, width), label_color(host, node), bg, width: width)
       draw_cluster(screen, rect, node, host, y, bg, lx)
     end
 
     # The drawn label. A node that a target deeper than `Sitemap::MAX_DEPTH` was cut onto
     # gets a visible marker: its `path` is only a PREFIX of the captured target, so without
     # this the row reads as an ordinary leaf and the operator has no way to tell.
-    private def row_label(node : Node) : String
-      node.truncated ? "#{node.label} …+depth" : node.label
+    # A compact row joins its chain with `/`, middle-truncated to `width` (`compact_label`).
+    private def row_label(row : VisibleRow, width : Int32) : String
+      node = row.node
+      last = node.truncated ? "#{node.label} …+depth" : node.label
+      return last unless segs = row.segments
+      SitemapView.compact_label(segs[0...-1] + [last], width)
+    end
+
+    # `a/b/c/d` when it fits in `width` columns, else the first segment, `…`, and as many
+    # trailing segments as fit — never fewer than the last (`a/…/c/d`, then `a/…/d`). What
+    # still overflows is left to the caller's clip.
+    def self.compact_label(segs : Array(String), width : Int32) : String
+      full = segs.join('/')
+      return full if segs.size < 3 || Screen.draw_width(full) <= width
+      tail = segs.last
+      i = segs.size - 2
+      while i > 0 && Screen.draw_width("#{segs.first}/…/#{segs[i]}/#{tail}") <= width
+        tail = "#{segs[i]}/#{tail}"
+        i -= 1
+      end
+      "#{segs.first}/…/#{tail}"
     end
 
     # The label's max width: it stops before the tag column (when the node carries a
@@ -1601,7 +1636,16 @@ module Gori::Tui
       stack = [{node, depth, guides, has_next}]
       while entry = stack.pop?
         n, d, g, hn = entry
-        rows << VisibleRow.new(n, d, g, root)
+        segs = nil
+        # Host rows never compact; below them, walk the chain down to its deepest node.
+        while d > 0 && compact?(n)
+          # A folded-through node is open by construction: mark it so, or a later sibling that
+          # breaks the chain would bring it back collapsed (the expand-depth default) and hide
+          # the subtree the operator had opened from the merged row.
+          n.expanded = true
+          (segs ||= [n.label]) << (n = n.children.first).label
+        end
+        rows << VisibleRow.new(n, d, g, root, segs)
         next unless n.expanded
         child_guides = hn ? (g | (1_u64 << d)) : g
         last = n.children.size - 1
@@ -1611,6 +1655,33 @@ module Gori::Tui
           i -= 1
         end
       end
+    end
+
+    # The folders a compact row hides, deepest first (`api/v1/users` → `/api/v1`, `/api`); empty
+    # on a plain row. Discover offers them as start targets, so a folder that draws no row of its
+    # own can still be crawled under.
+    def selected_chain_paths : Array(String)
+      paths = [] of String
+      return paths unless (row = visible_rows[@selected]?) && (segs = row.segments)
+      path = row.node.path
+      (segs.size - 1).times do
+        break unless (i = path.rindex('/')) && i > 0
+        paths << (path = path[0, i])
+      end
+      paths
+    end
+
+    # Whether `node` folds into its only child on one compact row: a plain folder — no method,
+    # tag, fold, or `js` aside of its own that the merged row would hide — whose child is a
+    # plain folder too. An endpoint leaf keeps its own row (as a file does in VS Code), and so
+    # does an id/query fold: a fold row cannot be marked or tagged, so swallowing its parent
+    # would take those away from the parent's path. The intermediate nodes' own expand state
+    # is moot: they draw no row.
+    private def compact?(node : Node) : Bool
+      return false unless node.children.size == 1 && node.methods.empty? && node.tag.nil?
+      return false if node.grouped || node.truncated || node.js_only?
+      child = node.children.first
+      !child.leaf? && !child.grouped
     end
 
     # `total` is `visible_rows.size` — the FLATTENED tree the caller already has in hand and

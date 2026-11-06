@@ -16,6 +16,35 @@ private def blank_snapshot : Gori::Tui::AdvancedSnapshot
     f_status: "", f_size: "", f_words: "", f_regex: "")
 end
 
+# Rows are reached by KEY, never by a hardcoded index, so a new row can go in any section.
+private def row_index(key : Symbol) : Int32
+  FuzzAdvancedOverlay::ROWS.index! { |r| r[0] == key }
+end
+
+# ↓ presses from the first row to `key`'s: headers are stepped over, so they are not counted.
+private def downs_to(key : Symbol) : Int32
+  FuzzAdvancedOverlay::ROWS.reject { |r| r[2] == :header }.index! { |r| r[0] == key }
+end
+
+# A snapshot field by row key (every non-header ROWS key names an AdvancedSnapshot field).
+private def field_of(snap : Gori::Tui::AdvancedSnapshot, key : Symbol) : String | Bool
+  {% begin %}
+    case key
+    {% for ivar in Gori::Tui::AdvancedSnapshot.instance_vars %}
+      when :{{ ivar.name.id }} then snap.{{ ivar.name.id }}
+    {% end %}
+    else raise "no snapshot field #{key}"
+    end
+  {% end %}
+end
+
+# The row keys whose value differs from `blank_snapshot` — "only this row was edited".
+private def changed_keys(snap : Gori::Tui::AdvancedSnapshot) : Array(Symbol)
+  FuzzAdvancedOverlay::ROWS.compact_map do |key, _, kind|
+    key if kind != :header && field_of(snap, key) != field_of(blank_snapshot, key)
+  end
+end
+
 describe Gori::Tui::FuzzAdvancedOverlay do
   it "edits the concurrency text row and reflects it in the snapshot" do
     ov = FuzzAdvancedOverlay.new(blank_snapshot)
@@ -26,7 +55,7 @@ describe Gori::Tui::FuzzAdvancedOverlay do
 
   it "toggles a boolean row with space (←/→ on text rows never toggles it)" do
     ov = FuzzAdvancedOverlay.new(blank_snapshot)
-    5.times { ov.handle_key(akey(Termisu::Input::Key::Down)) } # → Follow redirects (row 5, past Max requests)
+    downs_to(:follow).times { ov.handle_key(akey(Termisu::Input::Key::Down)) }
     ov.handle_key(akey(Termisu::Input::Key::Space))
     ov.snapshot.follow.should be_true
   end
@@ -74,10 +103,9 @@ describe Gori::Tui::FuzzAdvancedOverlay do
     # used to end on (`Keep interesting only`, #1240) is asserted on its own row below.
     ov = FuzzAdvancedOverlay.new(blank_snapshot)
     h = OverlayHarness.new(ov)
-    h.press(Termisu::Input::Key::Enter).should eq(:open) # row 0 → row 1
+    h.press(Termisu::Input::Key::Enter).should eq(:open) # first row → second
     h.commits.should eq(0)
-    keep = FuzzAdvancedOverlay::ROWS.index! { |r| r[0] == :keep_interesting }
-    keep.times { h.press(Termisu::Input::Key::Down) }
+    downs_to(:keep_interesting).times { h.press(Termisu::Input::Key::Down) }
     h.press(Termisu::Input::Key::Up) # the ↵ above already moved one row
     ov.snapshot.keep_interesting.should be_false
     h.press(Termisu::Input::Key::Enter).should eq(:open) # ↵ on a toggle row flips it
@@ -86,7 +114,7 @@ describe Gori::Tui::FuzzAdvancedOverlay do
 
     last = FuzzAdvancedOverlay.new(blank_snapshot)
     lh = OverlayHarness.new(last)
-    (FuzzAdvancedOverlay::ROWS.size - 1).times { lh.press(Termisu::Input::Key::Down) }
+    downs_to(:macro_on_failure).times { lh.press(Termisu::Input::Key::Down) }
     lh.type("stop")
     lh.press(Termisu::Input::Key::Enter).should eq(:open) # ↵ on the last (text) row: no commit, no overrun
     lh.commits.should eq(0)
@@ -103,7 +131,7 @@ describe Gori::Tui::FuzzAdvancedOverlay do
   it "a click inside focuses the row under the pointer and stays open" do
     ov = FuzzAdvancedOverlay.new(blank_snapshot)
     h = OverlayHarness.new(ov)
-    h.click_in_box(2, 6).should eq(:open) # rows start at box.y + 1 → row index 5 (Follow redirects)
+    h.click_in_box(2, 1 + row_index(:follow)).should eq(:open) # rows start at box.y + 1
     h.commits.should eq(0)
     h.press(Termisu::Input::Key::Space)
     ov.snapshot.follow.should be_true
@@ -112,7 +140,7 @@ describe Gori::Tui::FuzzAdvancedOverlay do
   it "the wheel moves the selected row (base handle_wheel delegates to move)" do
     ov = FuzzAdvancedOverlay.new(blank_snapshot)
     h = OverlayHarness.new(ov)
-    h.wheel(6) # → Calibrate (row 6)
+    h.wheel(downs_to(:calibrate))
     h.press(Termisu::Input::Key::Space)
     ov.snapshot.calibrate.should be_true
     ov.snapshot.follow.should be_false
@@ -143,7 +171,7 @@ describe Gori::Tui::FuzzAdvancedOverlay do
   it "toggles keep-alive, which starts on" do
     ov = FuzzAdvancedOverlay.new(blank_snapshot)
     ov.snapshot.keep_alive.should be_true
-    7.times { ov.handle_key(akey(Termisu::Input::Key::Down)) } # → Keep-alive (row 7)
+    downs_to(:keep_alive).times { ov.handle_key(akey(Termisu::Input::Key::Down)) }
     ov.handle_key(akey(Termisu::Input::Key::Space))
     ov.snapshot.keep_alive.should be_false
     ov.snapshot.calibrate.should be_false # the neighbouring toggles are untouched
@@ -151,22 +179,23 @@ describe Gori::Tui::FuzzAdvancedOverlay do
     ov.snapshot.update_cl.should be_true
   end
 
-  # The gRPC reframe row is the ONE toggle on this card whose default is off, and it sits
-  # directly under Auto Content-Length because they are the same kind of knob pointed at the
-  # two length declarations one gRPC request carries (DESIGN.md §7). It reaches the snapshot
+  # The gRPC reframe row is the ONE toggle on this card whose default is off, and it sits in
+  # the wire section with Auto Content-Length because they are the same kind of knob pointed at
+  # the two length declarations one gRPC request carries (DESIGN.md §7). It reaches the snapshot
   # like any other toggle — FuzzerView#apply_advanced is what puts it on `Fuzz::Config`.
   it "toggles gRPC reframe, which starts OFF (the headless default)" do
     ov = FuzzAdvancedOverlay.new(blank_snapshot)
     ov.snapshot.reframe_grpc.should be_false
-    9.times { ov.handle_key(akey(Termisu::Input::Key::Down)) } # → gRPC reframe (row 9)
+    downs_to(:reframe_grpc).times { ov.handle_key(akey(Termisu::Input::Key::Down)) }
     ov.handle_key(akey(Termisu::Input::Key::Space))
     ov.snapshot.reframe_grpc.should be_true
-    ov.snapshot.update_cl.should be_true # the neighbour above is untouched
+    ov.snapshot.update_cl.should be_true # the other length knob is untouched
     ov.snapshot.keep_alive.should be_true
   end
 
   it "renders the gRPC reframe row with its unary caveat in the label" do
     ov = FuzzAdvancedOverlay.new(blank_snapshot)
+    downs_to(:reframe_grpc).times { ov.handle_key(akey(Termisu::Input::Key::Down)) } # scroll it in
     backend = MemoryBackend.new(120, 30)
     ov.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
     backend.contains?("gRPC reframe (unary)").should be_true
@@ -189,22 +218,23 @@ describe Gori::Tui::FuzzAdvancedOverlay do
     box = h.box.not_nil!
     box.y.should eq(5) # rows run box.y+1 (6) .. 16; hint on 17, border on 18
 
+    visible = 11 # the 14-row card's list: box.y+1 .. box.bottom-3
+
     h.click_in_box(2, 12).should eq(:open) # the hint row
     h.click_in_box(2, 13).should eq(:open) # the bottom border
     h.type("9")
-    ov.snapshot.conc.should eq("209")  # focus never left row 0…
-    ov.snapshot.m_size.should eq("")   # …and did not land on an undrawn row (hint → +11)
-    ov.snapshot.m_words.should eq("")  # …nor on the one past it (border → +12)
-    ov.snapshot.m_status.should eq("") # …nor anywhere else in the match block
+    ov.snapshot.conc.should eq("209")            # focus never left the first row…
+    changed_keys(ov.snapshot).should eq([:conc]) # …and no undrawn row took it
 
-    # Positive control: the LAST drawn row is still a live click target. (Row +10 — "Match
-    # status" since the gRPC-reframe toggle joined the two length knobs above it.)
+    # Positive control: the last drawn TEXT row is still a live click target.
+    edge_i = (0...visible).to_a.reverse.find! { |i| FuzzAdvancedOverlay::ROWS[i][2] == :text }
+    edge_key = FuzzAdvancedOverlay::ROWS[edge_i][0]
     edge = FuzzAdvancedOverlay.new(blank_snapshot)
     eh = OverlayHarness.new(edge, area: body)
-    eh.click_in_box(2, 11).should eq(:open)
+    eh.click_in_box(2, 1 + edge_i).should eq(:open)
     eh.type("7")
-    edge.snapshot.m_status.should eq("7")
-    edge.snapshot.conc.should eq("20")
+    field_of(edge.snapshot, edge_key).should eq("#{field_of(blank_snapshot, edge_key)}7")
+    changed_keys(edge.snapshot).should eq([edge_key])
   end
 
   it "offsets a click by the scroll position once the list has scrolled" do
@@ -217,25 +247,95 @@ describe Gori::Tui::FuzzAdvancedOverlay do
     ov = FuzzAdvancedOverlay.new(blank_snapshot)
     h = OverlayHarness.new(ov, area: body)
     h.box.should_not be_nil
-    h.rendered?("Match time (ms)").should be_false # off-screen until the list scrolls
-    (FuzzAdvancedOverlay::ROWS.size - 1).times { h.press(Termisu::Input::Key::Down) }
-    h.rendered?("Match time (ms)").should be_true # this render is what advances @scroll
+    h.rendered?("Macro on failure").should be_false # off-screen until the list scrolls
+    downs_to(:macro_on_failure).times { h.press(Termisu::Input::Key::Down) }
+    h.rendered?("Macro on failure").should be_true # this render is what advances @scroll
 
-    # The list has scrolled, so the first VISIBLE row is no longer ROWS[0] (Concurrency):
-    # 11 rows are drawn, so the 3rd visible row is ROWS[size - 9], which is where this click
-    # must land. (WHICH row that is moves down by one every time a row is appended to the end of
-    # ROWS — the scroll needed to reach the new last row is one deeper — so this is a fact about
-    # the arithmetic, not about "Match time"; the #1240 stop_on/keep rows pushed it from Filter
-    # status to Filter regex, and the #1350 macro rows to here. The guard names the row so the
-    # next append fails on THIS line rather than on the assertion below.)
-    FuzzAdvancedOverlay::ROWS[FuzzAdvancedOverlay::ROWS.size - 9][0].should eq(:m_time)
-    h.click_in_box(2, 3).should eq(:open)
+    # The list has scrolled to its tail, so the first VISIBLE row is ROWS[size - 11], not
+    # ROWS[0]. Click the first text row at least two lines down the scrolled list: a click
+    # that ignored @scroll would land on an un-scrolled row near the top instead.
+    scroll = FuzzAdvancedOverlay::ROWS.size - 11
+    ov.@scroll.should eq(scroll)
+    ti = (scroll + 2...FuzzAdvancedOverlay::ROWS.size).find! { |i| FuzzAdvancedOverlay::ROWS[i][2] == :text }
+    key = FuzzAdvancedOverlay::ROWS[ti][0]
+    h.click_in_box(2, 1 + ti - scroll).should eq(:open)
     h.type("9")
-    ov.snapshot.m_time.should eq("9")  # lands near the top if the click ignores @scroll
-    ov.snapshot.retries.should eq("0") # …and the un-scrolled rows stay untouched
-    ov.snapshot.conc.should eq("20")
+    field_of(ov.snapshot, key).should eq("#{field_of(blank_snapshot, key)}9")
+    changed_keys(ov.snapshot).should eq([key]) # …and the un-scrolled rows stay untouched
 
     h.press(Termisu::Input::Key::Escape).should eq(:closed)
     h.commits.should eq(1)
+  end
+
+  it "groups the rows into six sections, in this order" do
+    sections = [] of {String, Array(String)}
+    FuzzAdvancedOverlay::ROWS.each do |_, label, kind|
+      kind == :header ? sections << {label, [] of String} : sections.last[1] << label
+    end
+    sections.should eq([
+      {"engine", ["Concurrency", "Rate (rps)", "Timeout (s)", "Retries", "Max requests",
+                  "Keep-alive", "Follow redirects", "Auto-calibrate"]},
+      {"match", ["Match status", "Match size", "Match words", "Match time (ms)", "Match regex"]},
+      {"filter", ["Filter status", "Filter size", "Filter words", "Filter time (ms)", "Filter regex"]},
+      {"stop", ["Stop after N hits", "Stop on (DIM:SPEC)", "Keep interesting only"]},
+      {"wire", ["Auto Content-Length", "TLS fingerprint", "Race (N conns)",
+                "gRPC reframe (unary)", "gRPC field(s)"]},
+      {"macro", ["Macro steps", "Macro cadence", "Macro must rebind", "Macro on failure"]},
+    ])
+  end
+
+  it "draws each section header, muted, above its rows" do
+    h = OverlayHarness.new(FuzzAdvancedOverlay.new(blank_snapshot), area: Gori::Tui::Rect.new(0, 0, 120, 50))
+    %w[engine match filter stop wire macro].each { |s| h.rendered?("─ #{s} ─").should be_true }
+  end
+
+  it "↑/↓/⇥/⇧⇥, ↵ and the wheel never rest on a header" do
+    headers = FuzzAdvancedOverlay::ROWS.each_index.select { |i| FuzzAdvancedOverlay::ROWS[i][2] == :header }.to_a
+    rows = FuzzAdvancedOverlay::ROWS.size
+    ov = FuzzAdvancedOverlay.new(blank_snapshot)
+    seen = [ov.@sel]
+    {Termisu::Input::Key::Down, Termisu::Input::Key::Tab}.each do |fwd|
+      rows.times { ov.handle_key(akey(fwd)); seen << ov.@sel }
+      {Termisu::Input::Key::Up, Termisu::Input::Key::BackTab}.each do |back|
+        rows.times { ov.handle_key(akey(back)); seen << ov.@sel }
+      end
+    end
+    ov.@sel.should eq(1) # clamps on the first row, under the engine header
+    (seen & headers).should be_empty
+    seen.uniq.sort!.should eq((0...rows).to_a - headers) # every other row is reachable
+
+    enter = FuzzAdvancedOverlay.new(blank_snapshot)
+    downs_to(:m_regex).times { enter.handle_key(akey(Termisu::Input::Key::Down)) }
+    enter.handle_key(akey(Termisu::Input::Key::Enter)) # ↵ on a text row is "next"…
+    enter.@sel.should eq(row_index(:f_status))         # …over the filter header
+
+    wheel = FuzzAdvancedOverlay.new(blank_snapshot)
+    wheel.handle_wheel(downs_to(:m_status))
+    wheel.@sel.should eq(row_index(:m_status))
+    wheel.handle_wheel(-1)
+    wheel.@sel.should eq(row_index(:calibrate))
+    wheel.handle_wheel(-rows)
+    wheel.@sel.should eq(row_index(:conc))
+  end
+
+  it "a click on a header does nothing" do
+    ov = FuzzAdvancedOverlay.new(blank_snapshot)
+    h = OverlayHarness.new(ov, area: Gori::Tui::Rect.new(0, 0, 120, 50))
+    downs_to(:m_size).times { h.press(Termisu::Input::Key::Down) }
+    h.click_in_box(2, 1 + row_index(:match)).should eq(:open)
+    h.click_in_box(2, 1 + row_index(:engine)).should eq(:open)
+    ov.@sel.should eq(row_index(:m_size))
+    h.commits.should eq(0)
+  end
+
+  it "keeps a section header on screen when ↑ reaches the section's first row" do
+    body = Gori::Tui::Rect.new(2, 4, 76, 16)
+    ov = FuzzAdvancedOverlay.new(blank_snapshot)
+    h = OverlayHarness.new(ov, area: body)
+    downs_to(:macro_on_failure).times { h.press(Termisu::Input::Key::Down) }
+    h.rendered?("─ stop ─").should be_false
+    (downs_to(:macro_on_failure) - downs_to(:stop_after)).times { h.press(Termisu::Input::Key::Up) }
+    h.rendered?("Stop after N hits").should be_true
+    h.rendered?("─ stop ─").should be_true # the header too, not just its first row
   end
 end

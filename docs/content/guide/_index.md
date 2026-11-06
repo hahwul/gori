@@ -55,7 +55,7 @@ Rearrange the nine in Preferences (`Ctrl-,`) → **Network & Tabs** → **Tabs**
 slots in order, everything below it is what `0` reaches, and the slot numbers renumber as you
 go. `⇧K`/`⇧J` move a row. Moving one up across the seam puts that tab on the bar and pushes the
 last slot off, so rearranging *is* choosing. `space` sends a row straight across. (If you would rather have the old
-unbounded bar, turn off **Layout → Tab bar slots**; `0` keeps working either way.)
+unbounded bar, turn off **Display → Tab bar slots**; `0` keeps working either way.)
 
 Global lenses that are not tabs: **capture** (`c`), **intercept** (`i`), and the **scope
 lens** (`s`) toggle from anywhere.

@@ -108,6 +108,7 @@ describe "Gori::Tui::ProbeController#drain_events" do
   it "reads the list once per generation, however many of the three signals arrive" do
     with_probe_controller do |controller, host, session|
       host.active_tab = :probe
+      controller.view.toggle_grouped # flat: every seeded host is a row of its own
       seed_issue(session.store, 1)
       before = controller.reloads
 
@@ -134,6 +135,7 @@ describe "Gori::Tui::ProbeController#drain_events" do
   it "spaces reloads while the generation keeps moving, and still lands the final state" do
     with_probe_controller do |controller, host, session|
       host.active_tab = :probe
+      controller.view.toggle_grouped # flat: every seeded host is a row of its own
       spacing = Gori::Tui::ProbeController::RELOAD_SPACING
       seed_issue(session.store, 1)
       controller.refresh_if_moved.should eq({true, true}) # leading edge: at once

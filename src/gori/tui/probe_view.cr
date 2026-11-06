@@ -16,13 +16,14 @@ require "./query_suggest"
 require "./suggest_popup"
 require "./issue_presentation"
 require "./viewport"
+require "./probe_group"
 
 module Gori::Tui
   # The Probe tab: a passive/active scan-issue list (already grouped by code+host at the
   # store) + a per-issue detail (affected URLs, remediation, sample evidence), topped by a
   # MODE band (OFF / PASSIVE / ACTIVE) and a detected-technologies summary. Mirrors
-  # IssuesView structurally; the issues ARE the groups (the DB upserts one row per
-  # (code, host)), so there's no in-view folding.
+  # IssuesView structurally. The DB upserts one row per (code, host); with grouping on, the
+  # list folds a code seen on several hosts into one row (`ProbeRow`).
   class ProbeView
     @registry : Verb::Registry? = nil
     include QueryBarPopup # the `/` bar: edits, ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫, `↓` dropdown
@@ -59,7 +60,15 @@ module Gori::Tui
       # The two places that show URLs hold a full row of their own: `@detail`, and `@preview`
       # for the list's bottom pane.
       @all = [] of Store::ProbeIssueRow
-      @issues = [] of Store::ProbeIssueRow
+      # The findings that survived the lenses and the query: what the detail's step, rail and
+      # `i/N` walk. `@issues` is the ROWS drawn from them (`ProbeRow.build`), which is what the
+      # cursor, the scroll and `PreviewPane`'s hit-tests index.
+      @findings = [] of Store::ProbeIssueRow
+      @issues = [] of ProbeRow
+      # Group by check (Display…), on by default and session-only like the closed lens. The
+      # expanded groups are keyed by code, so a live reload keeps them open.
+      @grouped = true
+      @expanded = Set(String).new
       @counts = StaticArray(Int32, 5).new(0) # severity tallies (Info..Critical) over @all
       @tech = [] of String
       @mode = Probe::Mode::Passive
@@ -99,7 +108,7 @@ module Gori::Tui
       @show_closed = false # default lens: open issues only (triaged ones drop out of view)
       @scope = nil.as(Scope?)
       @pre_scope_empty = false
-      # settings:layout Probe issue preview (list page bottom pane)
+      # settings:layout Probe finding preview (list page bottom pane)
       @preview_scroll = 0
       @preview_focus = :list # :list | :preview
       # code → description for custom-rule findings, so the detail pane shows the rule's own
@@ -136,10 +145,16 @@ module Gori::Tui
       @scope = scope
     end
 
-    # How many rows the list is currently showing. The Runner reads it across a reload to
+    # How many findings the list holds — the drill-in's step and rail count these, never the
+    # group rows.
+    def row_count : Int32
+      @findings.size
+    end
+
+    # How many rows the list is currently drawing. The controller reads it across a reload to
     # decide whether the frame needs a FULL terminal repaint or can ride the cell diff —
     # only a row appearing or disappearing can leave a stale tail behind.
-    def row_count : Int32
+    def list_size : Int32
       @issues.size
     end
 
@@ -221,7 +236,7 @@ module Gori::Tui
     # filter, or the show-closed toggle, opts back into the full set. The severity tallies
     # follow the same base (pre-text-filter) so dismissing visibly lowers them.
     private def apply_filter : Nil
-      prev_id = @issues[@selected]?.try(&.id)
+      prev = @issues[@selected]?
       filter = Probe::Filter.parse(@query)
       base = (@show_closed || filter.has_status_term?) ? @all : @all.select(&.status.open?)
       # Remember whether the triage lens alone already emptied the list — render_empty
@@ -229,19 +244,37 @@ module Gori::Tui
       @pre_scope_empty = base.empty?
       base = base.select { |i| @scope.try(&.host_in_scope?(i.host)) == true } if scope_active?
       recount(base)
-      @issues = filter.apply(base)
-      # Re-anchor by issue id (not index) so a data_version reload under live capture
-      # doesn't move the highlight to a different issue when the list order/count shifts.
-      @selected =
-        if prev_id && (idx = @issues.index { |i| i.id == prev_id })
-          idx
-        else
-          @selected.clamp(0, {@issues.size - 1, 0}.max)
-        end
+      @findings = filter.apply(base)
+      rebuild_rows(prev)
+    end
+
+    # Re-derive the rows from `@findings` and re-anchor the cursor on `prev` — by finding id
+    # (not index) so a data_version reload under live capture doesn't move the highlight to a
+    # different issue when the list order/count shifts.
+    private def rebuild_rows(prev : ProbeRow?) : Nil
+      @issues = ProbeRow.build(@findings, @grouped, @expanded)
+      @selected = prev.try { |r| row_index(r) } || @selected.clamp(0, {@issues.size - 1, 0}.max)
       # Keep the viewport valid when the list shrinks (dismiss/filter) or grows while
       # scrolled — otherwise a live reload can leave @scroll past the last row and look
       # like "nothing changed" until the next full enter.
       @scroll = @scroll.clamp(0, {@issues.size - 1, 0}.max)
+    end
+
+    # Where `row` sits in the rebuilt list: the same finding by id, else (grouped only) the
+    # first row of its code — the group it folded into, the group again, or the one host a
+    # group thinned to. The flat list keeps its old answer: by id, or clamp.
+    private def row_index(row : ProbeRow) : Int32?
+      unless row.group? && @grouped # a group toggled flat lands on its first host
+        idx = @issues.index { |r| !r.group? && r.issue.id == row.issue.id }
+        return idx if idx
+      end
+      return unless @grouped
+      # A host gone from an expanded group (dismissed, deleted): stay on the row that took its
+      # place when that is still one of the group's hosts, as the flat list keeps the index, so
+      # `c c c` walks the hosts instead of landing on the group's dismiss-all.
+      cur = @issues[@selected]?
+      return @selected if row.child? && cur && cur.child? && cur.code == row.code
+      @issues.index { |r| r.code == row.code }
     end
 
     private def scope_active? : Bool
@@ -257,6 +290,42 @@ module Gori::Tui
       @show_closed = !@show_closed
       apply_filter
       @show_closed
+    end
+
+    getter? grouped : Bool
+
+    # Display… → Group by check. Off is the flat list exactly as it was: one row per finding.
+    def toggle_grouped : Bool
+      @grouped = !@grouped
+      apply_filter
+      @grouped
+    end
+
+    # ↵/→/l on a group row: show its hosts. Already shown: nothing moves — a second click on the
+    # row must not walk the cursor off the row under the pointer; ↓ reaches the hosts.
+    # False on any other row, which opens as it always did.
+    def expand_selected : Bool
+      row = @issues[@selected]?
+      return false unless row && row.group?
+      if @expanded.add?(row.code)
+        rebuild_rows(row)
+        @preview_scroll = 0
+      end
+      true
+    end
+
+    # ←/h on a group row or one of its hosts: fold the group and land on it.
+    def collapse_selected : Bool
+      row = @issues[@selected]?
+      return false unless row && (row.group? || row.child?)
+      @expanded.delete(row.code)
+      rebuild_rows(row)
+      @preview_scroll = 0
+      true
+    end
+
+    def expanded?(code : String) : Bool
+      @expanded.includes?(code)
     end
 
     # Re-fetch the open detail (its status/affected may have changed) and its sample flow, and
@@ -276,7 +345,7 @@ module Gori::Tui
     # keypress that moved the cursor is answered on the frame it paints.
     def sync_preview(store : Store) : Nil
       return unless preview_enabled?
-      row = @issues[@selected]?
+      row = selected_issue
       return @preview = nil unless row
       return if @preview.try(&.id) == row.id
       @preview = store.get_probe_issue(row.id)
@@ -305,9 +374,25 @@ module Gori::Tui
       @preview_focus = :list
     end
 
-    # The issue under the cursor, or nil on an empty (or fully filtered) list.
+    # The finding under the cursor, or nil on an empty (or fully filtered) list and on a
+    # GROUP row, which is several findings.
     def selected_issue : Store::ProbeIssueRow?
+      @issues[@selected]?.try { |r| r.issue unless r.group? }
+    end
+
+    def selected_row : ProbeRow?
       @issues[@selected]?
+    end
+
+    # The list cursor is on a group row (and no detail covers it) — the shape the
+    # single-finding actions refuse.
+    def group_selected? : Bool
+      @detail.nil? && @issues[@selected]?.try(&.group?) == true
+    end
+
+    # The check code an action targets: the open detail's, else the cursor row's, group or not.
+    def target_code : String?
+      (@detail || @issues[@selected]?.try(&.issue)).try(&.code)
     end
 
     def selected_index : Int32
@@ -331,14 +416,14 @@ module Gori::Tui
     # every few seconds).
     def detail_row_index : Int32?
       d = @detail || return nil
-      @issues.index { |i| i.id == d.id }
+      @findings.index { |i| i.id == d.id }
     end
 
     # The rail's window of list context around the open item — see DrillIn.
     def rail_rows : Array(DrillIn::RailRow)
       n = rail_count
       return [] of DrillIn::RailRow if n == 0
-      @issues[rail_start, n].map do |i|
+      @findings[rail_start, n].map do |i|
         DrillIn::RailRow.new(severity_badge(i.severity), i.title, i.host.presence,
           severity_color(i.severity))
       end
@@ -356,7 +441,7 @@ module Gori::Tui
     # and hit-tested against another is a dead button (which is what ` ‹ list ` was).
     def detail_crumb : Frame::Crumb?
       issue = @detail || return nil
-      pos = detail_row_index.try { |i| "#{i + 1}/#{@issues.size}" }
+      pos = detail_row_index.try { |i| "#{i + 1}/#{@findings.size}" }
       Frame::Crumb.new("PROBE", issue.title, pos)
     end
 
@@ -379,7 +464,7 @@ module Gori::Tui
     # The issue an action targets: the open detail, else the list selection. The list's shape
     # has no URLs — see `fresh_target_issue` for the full row.
     def target_issue : Store::AnyProbeIssue?
-      @detail || @issues[@selected]?
+      @detail || selected_issue
     end
 
     def querying? : Bool
@@ -450,11 +535,25 @@ module Gori::Tui
     # --- detail / mutations ---------------------------------------------------
 
     def open_detail(store : Store) : Bool
-      row = @issues[@selected]?
+      row = selected_issue
       return false unless row
+      open_issue(store, row.id)
+    end
+
+    # The drill-in's ⇧N/⇧P and rail: open `@findings[idx]` and bring the list cursor to it —
+    # its own row, or its group's while that is folded. The step walks findings, never groups.
+    def open_finding(store : Store, idx : Int32) : Bool
+      f = @findings[idx]? || return false
+      @selected = row_index(ProbeRow.new(f)) || @selected
+      @preview_scroll = 0
+      @preview_focus = :list
+      open_issue(store, f.id)
+    end
+
+    private def open_issue(store : Store, id : Int64) : Bool
       # The list row has no URLs; the detail is the full finding. Gone since the last reload (a
       # peer deleted it) opens nothing — the next reload drops the row too.
-      issue = store.get_probe_issue(row.id)
+      issue = store.get_probe_issue(id)
       return false unless issue
       @detail = issue
       @detail_flow = issue.sample_flow_id.try { |fid| store.flow_row(fid) }
@@ -839,7 +938,26 @@ module Gori::Tui
     end
 
     private def selected_preview_lines : Array({Color, String})?
-      @issues[@selected]?.try { |issue| preview_lines(issue, @preview.try { |p| p.id == issue.id ? p : nil }) }
+      row = @issues[@selected]? || return nil
+      return group_preview_lines(row) if row.group?
+      issue = row.issue
+      preview_lines(issue, @preview.try { |p| p.id == issue.id ? p : nil })
+    end
+
+    # A group row's preview: the check once, then each host it fired on with its count.
+    private def group_preview_lines(row : ProbeRow) : Array({Color, String})
+      members = row.members || return [] of {Color, String}
+      issue = row.issue
+      lines = [] of {Color, String}
+      lines << {Theme.text_bright, "#{severity_badge(row.severity)}  #{issue.title}"}
+      lines << {Theme.muted, "#{Gori.plural(members.size, "host")}  ·  #{issue.category}  ·  ×#{Fmt.count(row.affected_count)}"}
+      rem = Probe.remediation(issue.code)
+      lines << {Theme.muted, rem} unless rem.empty?
+      lines << {Theme.accent, "HOSTS (#{members.size}) · → expands"}
+      members.first(8).each { |m| lines << {Theme.text, "#{m.host}  ×#{m.affected_count}"} }
+      more = members.size - 8
+      lines << {Theme.muted, "… +#{more} more"} if more > 0
+      lines
     end
 
     # `full` is the same finding with its URLs (`sync_preview`); without it — a draw that no
@@ -869,42 +987,66 @@ module Gori::Tui
       lines
     end
 
-    private def draw_row(screen : Screen, rect : Rect, issue : Store::ProbeIssueRow,
+    # A finding row, a GROUP row (`▸`/`▾`, its host count where the host goes, the summed
+    # `×N`, no status: its hosts may differ), or a group's host row (indented `· host`).
+    private def draw_row(screen : Screen, rect : Rect, row : ProbeRow,
                          y : Int32, selected : Bool, focused : Bool) : Nil
+      issue = row.issue
       bg = selected ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
       if selected
         screen.fill(Rect.new(rect.x, y, rect.w, 1), bg)
         screen.cell(rect.x, y, '▎', Theme.accent, bg)
       end
-      screen.text(rect.x + 1, y, severity_badge(issue.severity), severity_color(issue.severity), bg, Attribute::Bold)
-      screen.text(rect.x + 7, y, cat_tag(issue.category), Theme.muted, bg, width: 6)
-      # Right-to-left cluster: status · host · ×N(affected).
+      screen.text(rect.x + 1, y, severity_badge(row.severity), severity_color(row.severity), bg, Attribute::Bold)
+      screen.text(rect.x + 7, y, cat_tag(issue.category), Theme.muted, bg, width: 6) unless row.child?
+      rx = draw_row_cluster(screen, rect, row, y, bg)
+      title_x = rect.x + 14
+      tw = {rx - title_x, 0}.max
+      title = if row.group?
+                "#{expanded?(row.code) ? '▾' : '▸'} #{issue.title}"
+              else
+                row.child? ? "  · #{issue.host}" : issue.title
+              end
+      screen.text(title_x, y, title, selected ? Theme.text_bright : Theme.text, bg, width: tw)
+    end
+
+    # The right-to-left cluster: status · host · ×N(affected). Returns where the title must stop.
+    # The status a row draws: its own, or the one a group's hosts all share — a mixed group
+    # draws none (expand it to see).
+    private def row_status(row : ProbeRow) : Store::Status?
+      return row.issue.status unless members = row.members
+      statuses = members.map(&.status).uniq!
+      statuses.first if statuses.size == 1
+    end
+
+    private def draw_row_cluster(screen : Screen, rect : Rect, row : ProbeRow, y : Int32, bg : Color) : Int32
+      issue = row.issue
       rx = rect.right - 1
       # The "open" tag is redundant in the default open-only lens (every visible row is
       # open); show a status tag only once non-open rows can appear (show-closed / status:
       # filter), or when the row itself is non-open.
-      if @show_closed || !issue.status.open?
-        st = status_tag(issue.status)
-        screen.text(rx - st.size, y, st, status_color(issue.status), bg)
+      status = row_status(row)
+      if status && (@show_closed || !status.open?)
+        st = status_tag(status)
+        screen.text(rx - st.size, y, st, status_color(status), bg)
         rx -= st.size + 1
       end
-      if !issue.host.empty?
+      host = row.members.try { |m| "#{m.size} hosts" } || (row.child? ? "" : issue.host)
+      if !host.empty?
         # Right-align the host, but width-cap it: a host wider than its slot would otherwise
         # (screen.text with no width) run to the SCREEN edge, painting over the status tag and
         # title already drawn to its right. Cap to the span up to rx so it truncates instead.
-        hx = {rx - Screen.display_width(issue.host), rect.x}.max
-        screen.text(hx, y, issue.host, Theme.muted, bg, width: {rx - hx, 0}.max)
+        hx = {rx - Screen.display_width(host), rect.x}.max
+        screen.text(hx, y, host, Theme.muted, bg, width: {rx - hx, 0}.max)
         rx = hx - 1
       end
-      if issue.affected_count > 1
-        cnt = "×#{issue.affected_count}"
+      if row.affected_count > 1
+        cnt = "×#{row.affected_count}"
         cx = {rx - cnt.size, rect.x}.max
         screen.text(cx, y, cnt, Theme.muted, bg, width: {rx - cx, 0}.max)
         rx = cx - 1
       end
-      title_x = rect.x + 14
-      tw = {rx - title_x, 0}.max
-      screen.text(title_x, y, issue.title, selected ? Theme.text_bright : Theme.text, bg, width: tw)
+      rx
     end
 
     # The first token in the bar that is shaped like a field this backend does not have.
@@ -932,19 +1074,19 @@ module Gori::Tui
         lead = if u = unknown_query_field
                  FilterAst.unknown_field_note(u)
                else
-                 "no issues match"
+                 "no findings match"
                end
         msg = "#{lead} · #{@querying ? "esc clears the filter" : "/ to edit the filter"}"
         screen.text(rect.x + 1, top, msg, Theme.muted, width: w)
       elsif @pre_scope_empty && !@all.empty? && !@show_closed
-        screen.text(rect.x + 1, top, "no open issues · all #{@all.size} triaged · press a to show closed",
+        screen.text(rect.x + 1, top, "no open findings · all #{@all.size} triaged · press a to show closed",
           Theme.muted, width: w)
       elsif scope_active?
-        screen.text(rect.x + 1, top, "no issues in scope · s clears the scope lens", Theme.muted, width: w)
+        screen.text(rect.x + 1, top, "no findings in scope · s clears the scope lens", Theme.muted, width: w)
       else
         TrafficEmptyState.render(screen, list_rect, variant: :probe, listen: listen,
           capturing: capturing, scan_on: !@mode.off?,
-          title: @mode.off? ? "scanning is OFF" : "no issues yet")
+          title: @mode.off? ? "scanning is OFF" : "no findings yet")
       end
     end
 
@@ -1035,7 +1177,7 @@ module Gori::Tui
       # mirroring HistoryView/SitemapView) and, when filtering, the row count.
       # One right-anchored chain — see HistoryView#render_ql_bar.
       chips = [] of {String, Color}
-      chips << {@issues.size.to_s, Theme.muted} if filtering?
+      chips << {@findings.size.to_s, Theme.muted} if filtering?
       scope_on = scope_active?
       scope_chip = Hotkeys.menu_chip(@registry, "probe.scope-toggle")
       chips << (scope_on ? {"#{scope_chip} scope:#{@scope.try(&.size) || 0}", Theme.accent} : {"#{scope_chip} scope:off", Theme.muted})
@@ -1233,7 +1375,7 @@ module Gori::Tui
       end
     end
 
-    # `@issues` is the filtered findings list the draw loop walks. A filter or a dismiss
+    # `@issues` is the list of rows the draw loop walks. A filter or a dismiss
     # SHRINKS it under a stale @scroll, which is what the tail clamp catches — without it
     # the pane showed a trailing sliver. See `Viewport.clamp_scroll`.
     private def ensure_visible(h : Int32) : Nil

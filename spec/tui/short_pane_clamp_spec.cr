@@ -114,7 +114,7 @@ describe "RepeaterView RESPONSE border chrome on a narrow pane" do
   # contract). The three chips need ~27 columns from `rect.x + 12`, and RESPONSE is a
   # half-width split pane, so below ~88 cols the cluster ran through this card's own '╮'
   # and on over the OUTER frame's border — the row came out one cell longer than every
-  # sibling row, ending in "p:pretty" instead of a corner.
+  # sibling row, ending in "p:PRETTY" instead of a corner.
   it "keeps the chips inside the card on a narrow pane" do
     Gori::Settings.pretty_bodies_default = false
     view = RepeaterView.new
@@ -126,8 +126,8 @@ describe "RepeaterView RESPONSE border chrome on a narrow pane" do
     y.should_not be_nil
     row = b.row(y.not_nil!).rstrip
     row.should end_with("╮")                  # the card's own top-right corner survives
-    row.includes?("p:pretty").should be_false # the chip that did not fit is dropped whole
-    row.includes?("⇧D:diff").should be_true   # the ones that fit are still drawn
+    row.includes?("p:PRETTY").should be_false # the chip that did not fit is dropped whole
+    row.includes?("⇧D:DIFF").should be_true   # the ones that fit are still drawn
   end
 
   # Wide enough and every chip is back — the fix is a fit test, not a removal.
@@ -141,9 +141,9 @@ describe "RepeaterView RESPONSE border chrome on a narrow pane" do
     y = (0...24).find { |r| b.row(r).includes?("RESPONSE") }.not_nil!
     row = b.row(y).rstrip
     row.should end_with("╮")
-    row.includes?("⇧D:diff").should be_true
-    row.includes?("^X:hex").should be_true
-    row.includes?("p:pretty").should be_true
+    row.includes?("⇧D:DIFF").should be_true
+    row.includes?("^X:HEX").should be_true
+    row.includes?("p:PRETTY").should be_true
   end
 end
 

@@ -363,66 +363,6 @@ describe SettingsView do
     end
   end
 
-  it "saves and resets the LAYOUT section (previews, list order, sitemap depth)" do
-    dir = File.tempname("gori-settings-layout-view")
-    Dir.mkdir_p(dir)
-    prev_home = ENV["GORI_HOME"]?
-    prev = {
-      Gori::Settings.history_preview, Gori::Settings.probe_preview, Gori::Settings.issues_preview,
-      Gori::Settings.history_list_order, Gori::Settings.sitemap_expand_depth, Gori::Settings.tab_numbers?,
-      Gori::Settings.tab_slots?,
-    }
-    begin
-      ENV["GORI_HOME"] = dir
-      Gori::Settings.history_preview = false
-      Gori::Settings.probe_preview = false
-      Gori::Settings.issues_preview = false
-      Gori::Settings.history_list_order = "newest"
-      Gori::Settings.sitemap_expand_depth = -1
-      Gori::Settings.tab_numbers = false
-      Gori::Settings.tab_slots = false
-      v = SettingsView.new
-      v.reload(:layout)
-      v.section.should eq(:layout)
-      # Toggle three previews on, cycle list order → oldest, cycle depth all → 0
-      v.toggle_or_move(1) # history preview on
-      v.move_field(1)
-      v.toggle_or_move(1) # probe preview on
-      v.move_field(1)
-      v.toggle_or_move(1) # issues preview on
-      v.move_field(1)
-      v.toggle_or_move(1) # newest first → oldest first
-      v.move_field(1)
-      v.toggle_or_move(1) # all → 0
-      v.move_field(1)
-      v.toggle_or_move(1) # tab numbers on
-      v.move_field(1)
-      v.toggle_or_move(1) # tab bar slots on
-      v.save
-      Gori::Settings.tab_numbers?.should be_true
-      Gori::Settings.tab_slots?.should be_true
-      Gori::Settings.history_preview.should be_true
-      Gori::Settings.probe_preview.should be_true
-      Gori::Settings.issues_preview.should be_true
-      Gori::Settings.history_list_order.should eq("oldest")
-      Gori::Settings.sitemap_expand_depth.should eq(0)
-
-      v.reset_to_defaults
-      v.save
-      Gori::Settings.history_preview.should eq(Gori::Settings::DEFAULT_HISTORY_PREVIEW)
-      Gori::Settings.probe_preview.should eq(Gori::Settings::DEFAULT_PROBE_PREVIEW)
-      Gori::Settings.issues_preview.should eq(Gori::Settings::DEFAULT_ISSUES_PREVIEW)
-      Gori::Settings.history_list_order.should eq(Gori::Settings::DEFAULT_HISTORY_LIST_ORDER)
-      Gori::Settings.sitemap_expand_depth.should eq(Gori::Settings::DEFAULT_SITEMAP_EXPAND_DEPTH)
-      Gori::Settings.tab_numbers?.should eq(Gori::Settings::DEFAULT_TAB_NUMBERS)
-      Gori::Settings.tab_slots?.should eq(Gori::Settings::DEFAULT_TAB_SLOTS)
-    ensure
-      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
-      Gori::Settings.history_preview, Gori::Settings.probe_preview, Gori::Settings.issues_preview, Gori::Settings.history_list_order, Gori::Settings.sitemap_expand_depth, Gori::Settings.tab_numbers, Gori::Settings.tab_slots = prev
-      FileUtils.rm_rf(dir)
-    end
-  end
-
   it "saves and resets the extended NETWORK section (dial timeouts + capture limit)" do
     dir = File.tempname("gori-settings-net-view")
     Dir.mkdir_p(dir)
@@ -555,61 +495,126 @@ describe SettingsView do
     end
   end
 
-  it "saves and resets the DISPLAY section (detail pane, time format, gutter, wrap, preview cap, resource meter, terminal title)" do
+  # Display is the TUI's merge of the settings.json `layout` and `display` sections: 14 fields
+  # under three subheaders, which focus never lands on, persisted to the same two keys as before.
+  it "saves and resets the merged DISPLAY section (14 fields, 3 headers, both settings.json keys)" do
     dir = File.tempname("gori-settings-display-view")
     Dir.mkdir_p(dir)
     prev_home = ENV["GORI_HOME"]?
     prev = {
-      Gori::Settings.default_detail_pane, Gori::Settings.history_time_format,
+      Gori::Settings.history_list_order, Gori::Settings.history_time_format,
+      Gori::Settings.history_preview, Gori::Settings.probe_preview, Gori::Settings.issues_preview,
+      Gori::Settings.sitemap_expand_depth, Gori::Settings.default_detail_pane,
       Gori::Settings.show_gutter, Gori::Settings.wrap_lines?, Gori::Settings.preview_body_kib,
+      Gori::Settings.tab_numbers?, Gori::Settings.tab_slots?,
       Gori::Settings.resource_meter?, Gori::Settings.terminal_title,
     }
     begin
       ENV["GORI_HOME"] = dir
-      Gori::Settings.default_detail_pane = "request"
+      Gori::Settings.history_list_order = "newest"
       Gori::Settings.history_time_format = "absolute"
+      Gori::Settings.history_preview = false
+      Gori::Settings.probe_preview = false
+      Gori::Settings.issues_preview = false
+      Gori::Settings.sitemap_expand_depth = -1
+      Gori::Settings.default_detail_pane = "request"
       Gori::Settings.show_gutter = true
       Gori::Settings.wrap_lines = true
       Gori::Settings.preview_body_kib = 64
+      Gori::Settings.tab_numbers = false
+      Gori::Settings.tab_slots = false
       Gori::Settings.resource_meter = true
       Gori::Settings.terminal_title = "project"
+
+      fields = SettingsView::SECTIONS[:display]
+      fields.count(&.header).should eq(3)
+      fields.count { |f| !f.header }.should eq(14)
+      fields.select(&.header).map(&.label).should eq(["lists", "message panes", "window"])
+      SettingsView::SECTIONS.has_key?(:layout).should be_false
+
       v = SettingsView.new
       v.reload(:display)
       v.section.should eq(:display)
-      v.toggle_or_move(1) # detail pane: request → response (choice)
+      backend = MemoryBackend.new(120, 40)
+      v.render(Screen.new(backend), Rect.new(0, 0, 120, 40))
+      backend.contains?("─ lists ─").should be_true
+      backend.contains?("─ message panes ─").should be_true
+      backend.contains?("─ window ─").should be_true
+      backend.contains?("Probe finding preview").should be_true
+
+      # Focus starts on the first field (not the `lists` header), and every move_field below
+      # steps over a header: 13 moves visit exactly the 14 fields.
+      v.toggle_or_move(1) # history list order: newest → oldest (choice)
       v.move_field(1)
       v.toggle_or_move(1) # history list time: absolute → relative (choice)
       v.move_field(1)
-      v.toggle_or_move(1) # line numbers: on → off (bool)
+      v.toggle_or_move(1) # history preview on
       v.move_field(1)
-      v.toggle_or_move(1) # wrap long lines: on → off (bool)
+      v.toggle_or_move(1) # probe preview on
       v.move_field(1)
-      set_text(v, "128") # preview body limit (text)
+      v.toggle_or_move(1) # issues preview on
       v.move_field(1)
-      v.toggle_or_move(1) # resource meter: on → off (bool)
+      v.toggle_or_move(1) # sitemap depth: all → 0
+      v.move_field(1)     # skips `message panes`
+      v.toggle_or_move(1) # detail pane: request → response
       v.move_field(1)
-      v.toggle_or_move(1) # terminal title: project + tab → tab (choice)
-      v.save
-      Gori::Settings.default_detail_pane.should eq("response")
+      v.toggle_or_move(1) # line numbers off
+      v.move_field(1)
+      v.toggle_or_move(1) # wrap off
+      v.move_field(1)
+      set_text(v, "128")  # preview body limit (text)
+      v.move_field(1)     # skips `window`
+      v.toggle_or_move(1) # tab numbers on
+      v.move_field(1)
+      v.toggle_or_move(1) # tab bar slots on
+      v.move_field(1)
+      v.toggle_or_move(1) # resource meter off
+      v.move_field(1)
+      v.toggle_or_move(1) # terminal title: project + tab → tab
+      v.move_field(-3)
+      v.move_field(-1) # back up over `window` onto the preview limit
+      set_text(v, "0")
+      v.save.should contain("invalid preview body limit \"0\"")
+      set_text(v, "128")
+      v.save.should eq("settings saved")
+
+      Gori::Settings.history_list_order.should eq("oldest")
       Gori::Settings.history_time_format.should eq("relative")
+      Gori::Settings.history_preview.should be_true
+      Gori::Settings.probe_preview.should be_true
+      Gori::Settings.issues_preview.should be_true
+      Gori::Settings.sitemap_expand_depth.should eq(0)
+      Gori::Settings.default_detail_pane.should eq("response")
       Gori::Settings.show_gutter.should be_false
       Gori::Settings.wrap_lines?.should be_false
       Gori::Settings.preview_body_kib.should eq(128)
+      Gori::Settings.tab_numbers?.should be_true
+      Gori::Settings.tab_slots?.should be_true
       Gori::Settings.resource_meter?.should be_false
       Gori::Settings.terminal_title.should eq("tab")
+      raw = JSON.parse(File.read(Gori::Settings.path))
+      raw["layout"]["history_list_order"].as_s.should eq("oldest")
+      raw["display"]["terminal_title"].as_s.should eq("tab")
 
       v.reset_to_defaults
       v.save
-      Gori::Settings.default_detail_pane.should eq(Gori::Settings::DEFAULT_DETAIL_PANE)
+      Gori::Settings.history_list_order.should eq(Gori::Settings::DEFAULT_HISTORY_LIST_ORDER)
       Gori::Settings.history_time_format.should eq(Gori::Settings::DEFAULT_HISTORY_TIME_FORMAT)
+      Gori::Settings.history_preview.should eq(Gori::Settings::DEFAULT_HISTORY_PREVIEW)
+      Gori::Settings.probe_preview.should eq(Gori::Settings::DEFAULT_PROBE_PREVIEW)
+      Gori::Settings.issues_preview.should eq(Gori::Settings::DEFAULT_ISSUES_PREVIEW)
+      Gori::Settings.sitemap_expand_depth.should eq(Gori::Settings::DEFAULT_SITEMAP_EXPAND_DEPTH)
+      Gori::Settings.default_detail_pane.should eq(Gori::Settings::DEFAULT_DETAIL_PANE)
       Gori::Settings.show_gutter.should eq(Gori::Settings::DEFAULT_SHOW_GUTTER)
       Gori::Settings.wrap_lines?.should eq(Gori::Settings::DEFAULT_WRAP_LINES)
       Gori::Settings.preview_body_kib.should eq(Gori::Settings::DEFAULT_PREVIEW_BODY_KIB)
+      Gori::Settings.tab_numbers?.should eq(Gori::Settings::DEFAULT_TAB_NUMBERS)
+      Gori::Settings.tab_slots?.should eq(Gori::Settings::DEFAULT_TAB_SLOTS)
       Gori::Settings.resource_meter?.should eq(Gori::Settings::DEFAULT_RESOURCE_METER)
       Gori::Settings.terminal_title.should eq(Gori::Settings::DEFAULT_TERMINAL_TITLE)
     ensure
       prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
-      Gori::Settings.default_detail_pane, Gori::Settings.history_time_format, Gori::Settings.show_gutter, Gori::Settings.wrap_lines, Gori::Settings.preview_body_kib, Gori::Settings.resource_meter, Gori::Settings.terminal_title = prev
+      Gori::Settings.history_list_order, Gori::Settings.history_time_format, Gori::Settings.history_preview, Gori::Settings.probe_preview, Gori::Settings.issues_preview, Gori::Settings.sitemap_expand_depth, Gori::Settings.default_detail_pane, Gori::Settings.show_gutter, Gori::Settings.wrap_lines, Gori::Settings.preview_body_kib, Gori::Settings.tab_numbers, Gori::Settings.tab_slots, Gori::Settings.resource_meter, Gori::Settings.terminal_title = prev
       FileUtils.rm_rf(dir)
     end
   end
@@ -870,20 +875,15 @@ describe SettingsView do
       v.save.should eq("settings saved")
       Gori::Settings.command_modifier.should eq("alt") # a round-trip through the label lost this once
 
-      v.reload(:layout)
+      v.reload(:display)
       backend = MemoryBackend.new(120, 40)
       v.render(Screen.new(backend), box)
       backend.contains?("◉ oldest first").should be_true
       backend.contains?("◉ all").should be_true # depth -1 shows as "all"
+      backend.contains?("◉ project + tab").should be_true
       v.save.should eq("settings saved")
       Gori::Settings.history_list_order.should eq("oldest")
       Gori::Settings.sitemap_expand_depth.should eq(-1)
-
-      v.reload(:display)
-      backend = MemoryBackend.new(120, 40)
-      v.render(Screen.new(backend), box)
-      backend.contains?("◉ project + tab").should be_true
-      v.save.should eq("settings saved")
       Gori::Settings.terminal_title.should eq("project")
     ensure
       Gori::Settings.command_modifier, Gori::Settings.history_list_order, Gori::Settings.sitemap_expand_depth, Gori::Settings.terminal_title = prev
