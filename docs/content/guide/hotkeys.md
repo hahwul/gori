@@ -120,7 +120,7 @@ Decoder's CHAIN field), a digit is a character. It is the same rule `Space` foll
 `Space` types a space, `3` types a 3, which is what makes `base64`, `sha256` and `rot13`
 typeable into a conversion chain.
 
-The bar paints the numbers by default (**Preferences → Layout → Tab numbers**, `settings:layout`).
+The bar paints the numbers by default (**Preferences → Display → Tab numbers**, `settings:display`).
 The pill just past the last tab reads `0:Tabs`: the key, and what it opens. It sits two
 columns after the ninth slot rather than pinned to the right edge, so the order `→` walks and
 the order you read are the same one; only when the strip stops fitting beside it does it pin
@@ -140,7 +140,7 @@ One tab can still ride past the ninth slot: an off-bar tab you jumped to with `0
 far right of the bar, **without a number**, until you leave it. It is where you are standing,
 not a slot you arranged, and no digit points at it.
 
-If you want the old unbounded bar back, turn off **Preferences → Layout → Tab bar slots**.
+If you want the old unbounded bar back, turn off **Preferences → Display → Tab bar slots**.
 The bar then scrolls with `‹` `›` again, `1`-`9` still reach its first nine tabs, and `0`
 still reaches every tab.
 

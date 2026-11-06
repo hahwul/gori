@@ -522,7 +522,7 @@ module Gori::Tui
       out = [] of {SettingsCatalog::Section, Int32}
       group_sections.each do |sec|
         if sec.kind == :form
-          field_count(sec.sym).times { |i| out << {sec, i} }
+          field_count(sec.sym).times { |i| out << {sec, i} unless SettingsView.header?(sec.sym, i) }
         else
           out << {sec, -1}
         end
@@ -551,12 +551,7 @@ module Gori::Tui
 
     # The flat target index of a section's first field/opener within its group.
     private def target_index_of(section : Symbol) : Int32
-      i = 0
-      group_sections.each do |sec|
-        return i if sec.sym == section
-        i += sec.kind == :form ? field_count(sec.sym) : 1
-      end
-      0
+      targets.index(&.[0].sym.==(section)) || 0
     end
 
     private def height_of(gsym : Symbol) : Int32
@@ -575,7 +570,11 @@ module Gori::Tui
         header = row
         row += 1
         if sec.kind == :form
-          return ffield == 0 ? header : row + ffield if sec.sym == fsec.sym
+          if sec.sym == fsec.sym
+            lead = ffield
+            lead -= 1 if lead > 0 && SettingsView.header?(sec.sym, lead - 1) # keep its subheader in view
+            return lead == 0 ? header : row + lead
+          end
           row += field_count(sec.sym)
         else
           return header if sec.sym == fsec.sym
@@ -594,6 +593,7 @@ module Gori::Tui
         if sec.kind == :form
           fc = field_count(sec.sym)
           fc.times do |i|
+            next if SettingsView.header?(sec.sym, i) # a subheader row is not a target
             return ti if row + i == vrow
             ti += 1
           end

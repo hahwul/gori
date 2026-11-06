@@ -116,7 +116,7 @@ Ctrl-P  → settings:hotkeys
 규칙입니다. `Space`가 공백을 입력하는 자리에서는 `3`도 3을 입력합니다. `base64`, `sha256`,
 `rot13`을 변환 체인에 칠 수 있는 이유가 이것입니다.
 
-바는 기본적으로 번호를 그립니다(**Preferences → Layout → Tab numbers**, `settings:layout`).
+바는 기본적으로 번호를 그립니다(**Preferences → Display → Tab numbers**, `settings:display`).
 마지막 탭 바로 뒤의 알약은 `0:Tabs`로 읽힙니다. 키와 그 키가 여는 것을 나타냅니다. 오른쪽 끝에
 못박히는 대신 아홉 번째 슬롯에서 두 칸 뒤에 붙어서, `→`로 걷는 순서와 눈으로 읽는 순서가
 같아집니다. 탭이 알약 옆에 더는 들어가지 않을 때만 오른쪽 끝에 고정되고 탭이 스크롤합니다.
@@ -135,7 +135,7 @@ Ctrl-P  → settings:hotkeys
 때까지 바의 맨 오른쪽에 **번호 없이** 놓입니다. 사용자가 배치한 슬롯이 아니라 지금 서 있는
 자리이고, 어떤 숫자도 그것을 가리키지 않습니다.
 
-상한 없는 예전 바를 되돌리려면 **Preferences → Layout → Tab bar slots**를 끄세요. 바는 다시
+상한 없는 예전 바를 되돌리려면 **Preferences → Display → Tab bar slots**를 끄세요. 바는 다시
 `‹` `›`로 스크롤하고, `1`-`9`는 여전히 앞의 아홉 탭에 닿고, `0`은 여전히 모든 탭에 닿습니다.
 
 ### 키보드 레이아웃 {#keyboard-layouts}

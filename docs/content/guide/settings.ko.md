@@ -69,8 +69,7 @@ gori에 저장되는 모든 환경설정은 하나의 화면, **Preferences** �
 | 섹션 | 필드 |
 |------|------|
 | **Theme** | 오프너: 테마 선택기(내장 테마와 직접 만든 테마) |
-| **Display** | Default detail pane, History list time, Line numbers, Wrap long lines, Preview body limit (KiB), Resource meter, Terminal title |
-| **Layout** | History Req/Res preview, Probe issue preview, Issues preview, History list order, Sitemap expand depth, Tab numbers, Tab bar slots |
+| **Display** | *lists:* History list order, History list time, History Req/Res preview, Probe finding preview, Issues preview, Sitemap expand depth · *message panes:* Default detail pane, Line numbers, Wrap long lines, Preview body limit (KiB) · *window:* Tab numbers, Tab bar slots, Resource meter, Terminal title |
 | **Companion** | Companion (Miss Ring), Placement, Motion, Notices, Agent replies |
 
 Theme 행은 현재 테마를 인라인으로 미리 보여줍니다. 이름과 팔레트 스와치가 함께 표시됩니다. [테마 가이드](/ko/guide/themes/)를 참고하세요.

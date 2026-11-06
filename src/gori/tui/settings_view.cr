@@ -30,8 +30,13 @@ module Gori::Tui
     # in exactly one place, `render_field_value`. Nothing parses a label back: the four
     # `*_from_label` helpers this replaced turned a displayed string into a setting, so the
     # day a label was reworded (or translated) the save silently fell back to the default.
+    #
+    # `header` is a non-selectable subheader row (`─ lists ─`) that groups the fields below it.
+    # It holds a "" placeholder in `@values` so every row stays positional, and focus (↑/↓,
+    # click, reload) always steps over it.
     record Field, label : String, hint : String, bool : Bool = false, choices : Array(String)? = nil,
-      opener : Symbol? = nil, readonly : Bool = false, choice_labels : Hash(String, String)? = nil
+      opener : Symbol? = nil, readonly : Bool = false, choice_labels : Hash(String, String)? = nil,
+      header : Bool = false
 
     # The stored codes, in cycle order. `http+tls` sits next to `http` because it IS the same
     # proxy protocol with a TLS hop in front of it, and an operator cycling past HTTP is exactly
@@ -137,34 +142,6 @@ module Gori::Tui
     THEME_FIELDS = [
       Field.new("Theme", "TUI colour theme — ↑/↓ select, ↵ applies", choices: Theme.available),
     ]
-    # Layout: vertical list of per-area prefs (extend by appending fields + Settings keys).
-    LAYOUT_DEPTH_CHOICES = ["-1", "0", "1", "2", "3"] # Settings.sitemap_expand_depth, -1 = all
-    LAYOUT_DEPTH_LABELS  = {"-1" => "all"}
-    LAYOUT_ORDER_CHOICES = ["newest", "oldest"]
-    LAYOUT_ORDER_LABELS  = {"newest" => "newest first", "oldest" => "oldest first"}
-    LAYOUT_FIELDS        = [
-      Field.new("History Req/Res preview",
-        "list page: bottom pane shows selected flow request + response — ←/→/space toggles",
-        bool: true),
-      Field.new("Probe issue preview",
-        "list page: bottom pane shows selected issue summary — ←/→/space toggles",
-        bool: true),
-      Field.new("Issues preview",
-        "list page: bottom pane shows selected issue summary — ←/→/space toggles",
-        bool: true),
-      Field.new("History list order",
-        "newest first (default, live tail at top) or oldest first — ←/→ cycles",
-        choices: LAYOUT_ORDER_CHOICES, choice_labels: LAYOUT_ORDER_LABELS),
-      Field.new("Sitemap expand depth",
-        "how deep the tree opens after reload — ←/→ cycles (all = fully expanded)",
-        choices: LAYOUT_DEPTH_CHOICES, choice_labels: LAYOUT_DEPTH_LABELS),
-      Field.new("Tab numbers",
-        "paint 1:…9: on the tab bar, the keys the 1-9 jump answers to — ←/→/space toggles (on by default)",
-        bool: true),
-      Field.new("Tab bar slots",
-        "cap the bar at nine numbered slots (off: unbounded, scrolls with ‹ ›) — 0 reaches every tab either way",
-        bool: true),
-    ]
     # Statusline: an opt-in bottom row that runs a command and shows its output.
     STATUSLINE_FIELDS = [
       Field.new("Statusline",
@@ -177,20 +154,58 @@ module Gori::Tui
       Field.new("Timeout (s)",
         "how long one run may take before it is killed — seconds (min 1); may exceed the interval"),
     ]
-    # Display: message-body + chrome prefs (three choice fields, three bools, a text cap).
-    DISPLAY_PANE_CHOICES = ["request", "response"]
-    DISPLAY_TIME_CHOICES = ["absolute", "relative"]
+    # Display: one section in three subheaded blocks (lists · message panes · window). It is
+    # the TUI's merge of two settings.json sections, `layout` and `display`, which persist
+    # unchanged — `save` writes each field to the same Settings key it always had.
+    DISPLAY_DEPTH_CHOICES = ["-1", "0", "1", "2", "3"] # Settings.sitemap_expand_depth, -1 = all
+    DISPLAY_DEPTH_LABELS  = {"-1" => "all"}
+    DISPLAY_ORDER_CHOICES = ["newest", "oldest"]
+    DISPLAY_ORDER_LABELS  = {"newest" => "newest first", "oldest" => "oldest first"}
+    DISPLAY_PANE_CHOICES  = ["request", "response"]
+    DISPLAY_TIME_CHOICES  = ["absolute", "relative"]
     # Kept short: all three render inline on one row inside the settings box. "project" is
     # stored (Settings.terminal_title) and shown as "project + tab" since the title carries both.
     DISPLAY_TITLE_CHOICES = ["project", "tab", "off"]
     DISPLAY_TITLE_LABELS  = {"project" => "project + tab"}
-    DISPLAY_FIELDS        = [
-      Field.new("Default detail pane",
-        "which pane a freshly-opened History flow shows first — ←/→ cycles",
-        choices: DISPLAY_PANE_CHOICES),
+    # DISPLAY row indices (headers included), read positionally by `save`.
+    DISPLAY_LIST_ORDER      =  1
+    DISPLAY_LIST_TIME       =  2
+    DISPLAY_HISTORY_PREVIEW =  3
+    DISPLAY_PROBE_PREVIEW   =  4
+    DISPLAY_ISSUES_PREVIEW  =  5
+    DISPLAY_SITEMAP_DEPTH   =  6
+    DISPLAY_DETAIL_PANE     =  8
+    DISPLAY_GUTTER          =  9
+    DISPLAY_WRAP            = 10
+    DISPLAY_PREVIEW_KIB     = 11
+    DISPLAY_TAB_NUMBERS     = 13
+    DISPLAY_TAB_SLOTS       = 14
+    DISPLAY_RESOURCE_METER  = 15
+    DISPLAY_TERMINAL_TITLE  = 16
+    DISPLAY_FIELDS          = [
+      Field.new("lists", "", header: true),
+      Field.new("History list order",
+        "newest first (default, live tail at top) or oldest first — ←/→ cycles",
+        choices: DISPLAY_ORDER_CHOICES, choice_labels: DISPLAY_ORDER_LABELS),
       Field.new("History list time",
         "list time column: absolute (MM-DD HH:MM:SS) or relative (3s/5m/2h) — ←/→ cycles",
         choices: DISPLAY_TIME_CHOICES),
+      Field.new("History Req/Res preview",
+        "list page: bottom pane shows selected flow request + response — ←/→/space toggles",
+        bool: true),
+      Field.new("Probe finding preview",
+        "list page: bottom pane shows selected finding summary — ←/→/space toggles",
+        bool: true),
+      Field.new("Issues preview",
+        "list page: bottom pane shows selected issue summary — ←/→/space toggles",
+        bool: true),
+      Field.new("Sitemap expand depth",
+        "how deep the tree opens after reload — ←/→ cycles (all = fully expanded)",
+        choices: DISPLAY_DEPTH_CHOICES, choice_labels: DISPLAY_DEPTH_LABELS),
+      Field.new("message panes", "", header: true),
+      Field.new("Default detail pane",
+        "which pane a freshly-opened History flow shows first — ←/→ cycles",
+        choices: DISPLAY_PANE_CHOICES),
       Field.new("Line numbers",
         "show the line-number gutter on the message body views — ←/→/space toggles",
         bool: true),
@@ -199,6 +214,13 @@ module Gori::Tui
         bool: true),
       Field.new("Preview body limit (KiB)",
         "how many body bytes the History list preview reads/shows — KiB (min 1)"),
+      Field.new("window", "", header: true),
+      Field.new("Tab numbers",
+        "paint 1:…9: on the tab bar, the keys the 1-9 jump answers to — ←/→/space toggles (on by default)",
+        bool: true),
+      Field.new("Tab bar slots",
+        "cap the bar at nine numbered slots (off: unbounded, scrolls with ‹ ›) — 0 reaches every tab either way",
+        bool: true),
       Field.new("Resource meter",
         "show gori's own CPU/memory at the far right of the bottom bar — ←/→/space toggles",
         bool: true),
@@ -277,7 +299,6 @@ module Gori::Tui
       :mouse           => MOUSE_FIELDS,
       :keys            => KEYS_FIELDS,
       :theme           => THEME_FIELDS,
-      :layout          => LAYOUT_FIELDS,
       :statusline      => STATUSLINE_FIELDS,
       :display         => DISPLAY_FIELDS,
       :companion       => COMPANION_FIELDS,
@@ -310,6 +331,24 @@ module Gori::Tui
       SECTIONS[@section]
     end
 
+    # Whether row `i` of `section` is a subheader (the Preferences modal skips it as a target).
+    def self.header?(section : Symbol, i : Int32) : Bool
+      SECTIONS[section]?.try(&.[i]?).try(&.header) || false
+    end
+
+    # The nearest non-header row to `i`, searching `step`-wards first, then back.
+    private def selectable(i : Int32, step : Int32) : Int32
+      i = i.clamp(0, fields.size - 1)
+      {step, -step}.each do |dir|
+        j = i
+        while 0 <= j < fields.size && fields[j].header
+          j += dir
+        end
+        return j if 0 <= j < fields.size
+      end
+      i
+    end
+
     # Pull current values from the live Settings for `section` (called when the
     # editor opens). Defaults to :network so the no-arg picker call keeps working.
     def reload(section : Symbol = :network) : Nil
@@ -320,7 +359,6 @@ module Gori::Tui
                 when :mouse           then mouse_values
                 when :keys            then keys_values
                 when :theme           then [Theme.canonical(Settings.theme)]
-                when :layout          then layout_values
                 when :statusline      then statusline_values
                 when :display         then display_values
                 when :companion       then companion_values
@@ -330,8 +368,8 @@ module Gori::Tui
                 when :mcp_permissions then mcp_permission_values
                 else                       network_values
                 end
-      @focused = 0
-      @cursor = @values[0].size
+      @focused = selectable(0, 1)
+      @cursor = @values[@focused].size
       @preedit = ""
       @status = nil
       @saved = false
@@ -363,30 +401,28 @@ module Gori::Tui
                 ]
                 when :keys  then [Settings::DEFAULT_COMMAND_MODIFIER, Settings::DEFAULT_EDITOR_KEYSET, KEYSET_PLAYGROUND_SUMMARY]
                 when :theme then [Theme.canonical(Settings::DEFAULT_THEME)]
-                when :layout then [
-                  Settings::DEFAULT_HISTORY_PREVIEW ? "on" : "off",
-                  Settings::DEFAULT_PROBE_PREVIEW ? "on" : "off",
-                  Settings::DEFAULT_ISSUES_PREVIEW ? "on" : "off",
-                  Settings::DEFAULT_HISTORY_LIST_ORDER,
-                  Settings::DEFAULT_SITEMAP_EXPAND_DEPTH.to_s,
-                  Settings::DEFAULT_TAB_NUMBERS ? "on" : "off",
-                  Settings::DEFAULT_TAB_SLOTS ? "on" : "off",
-                ]
                 when :statusline then [
                   Settings::DEFAULT_STATUSLINE_ENABLED ? "on" : "off",
                   Settings::DEFAULT_STATUSLINE_COMMAND,
                   Settings::DEFAULT_STATUSLINE_INTERVAL.to_s,
                   Settings::DEFAULT_STATUSLINE_TIMEOUT.to_s,
                 ]
-                when :display then [
-                  Settings::DEFAULT_DETAIL_PANE,
+                when :display then display_row([
+                  Settings::DEFAULT_HISTORY_LIST_ORDER,
                   Settings::DEFAULT_HISTORY_TIME_FORMAT,
+                  Settings::DEFAULT_HISTORY_PREVIEW ? "on" : "off",
+                  Settings::DEFAULT_PROBE_PREVIEW ? "on" : "off",
+                  Settings::DEFAULT_ISSUES_PREVIEW ? "on" : "off",
+                  Settings::DEFAULT_SITEMAP_EXPAND_DEPTH.to_s,
+                  Settings::DEFAULT_DETAIL_PANE,
                   Settings::DEFAULT_SHOW_GUTTER ? "on" : "off",
                   Settings::DEFAULT_WRAP_LINES ? "on" : "off",
                   Settings::DEFAULT_PREVIEW_BODY_KIB.to_s,
+                  Settings::DEFAULT_TAB_NUMBERS ? "on" : "off",
+                  Settings::DEFAULT_TAB_SLOTS ? "on" : "off",
                   Settings::DEFAULT_RESOURCE_METER ? "on" : "off",
                   Settings::DEFAULT_TERMINAL_TITLE,
-                ]
+                ])
                 when :companion then [
                   Settings::DEFAULT_COMPANION ? "on" : "off",
                   Settings::DEFAULT_COMPANION_PLACEMENT,
@@ -427,8 +463,8 @@ module Gori::Tui
                       outbound_tls_summary,
                       hostnames_summary]
                 end
-      @focused = 0
-      @cursor = @values[0].size
+      @focused = selectable(0, 1)
+      @cursor = @values[@focused].size
       @preedit = ""
       @status = nil
     end
@@ -560,18 +596,6 @@ module Gori::Tui
       value.split(/[,\s]+/).compact_map(&.strip.presence)
     end
 
-    private def layout_values : Array(String)
-      [
-        Settings.history_preview ? "on" : "off",
-        Settings.probe_preview ? "on" : "off",
-        Settings.issues_preview ? "on" : "off",
-        Settings.history_list_order,
-        Settings.sitemap_expand_depth.to_s,
-        Settings.tab_numbers? ? "on" : "off",
-        Settings.tab_slots? ? "on" : "off",
-      ]
-    end
-
     private def statusline_values : Array(String)
       [
         Settings.statusline_enabled? ? "on" : "off",
@@ -582,15 +606,28 @@ module Gori::Tui
     end
 
     private def display_values : Array(String)
-      [
-        Settings.default_detail_pane,
+      display_row([
+        Settings.history_list_order,
         Settings.history_time_format,
+        Settings.history_preview ? "on" : "off",
+        Settings.probe_preview ? "on" : "off",
+        Settings.issues_preview ? "on" : "off",
+        Settings.sitemap_expand_depth.to_s,
+        Settings.default_detail_pane,
         Settings.show_gutter ? "on" : "off",
         Settings.wrap_lines? ? "on" : "off",
         Settings.preview_body_kib.to_s,
+        Settings.tab_numbers? ? "on" : "off",
+        Settings.tab_slots? ? "on" : "off",
         Settings.resource_meter? ? "on" : "off",
         Settings.terminal_title,
-      ]
+      ])
+    end
+
+    # The 14 DISPLAY values in field order → the positional row, with a "" under each header.
+    private def display_row(values : Array(String)) : Array(String)
+      it = values.each
+      DISPLAY_FIELDS.map { |f| f.header ? "" : it.next.as(String) }
     end
 
     # Positional, like every other *_values reader: a literal at each call site would drift
@@ -625,7 +662,7 @@ module Gori::Tui
         cycle(delta)
         return
       end
-      @focused = (@focused + delta).clamp(0, @values.size - 1)
+      @focused = selectable(@focused + delta, delta < 0 ? -1 : 1)
       @cursor = @values[@focused].size
       @preedit = ""
     end
@@ -813,17 +850,6 @@ module Gori::Tui
         @values = keys_values
         return persist
       end
-      if @section == :layout
-        Settings.history_preview = @values[0] == "on"
-        Settings.probe_preview = @values[1] == "on"
-        Settings.issues_preview = @values[2] == "on"
-        Settings.history_list_order = Settings.normalize_history_list_order(@values[3])
-        Settings.sitemap_expand_depth = Settings.normalize_sitemap_depth(@values[4].to_i? || Settings::DEFAULT_SITEMAP_EXPAND_DEPTH)
-        Settings.tab_numbers = @values[5] == "on"
-        Settings.tab_slots = @values[6] == "on"
-        @values = layout_values
-        return persist
-      end
       if @section == :statusline
         iv = @values[2].strip.to_i?
         unless iv && iv >= 1
@@ -843,19 +869,26 @@ module Gori::Tui
         return persist
       end
       if @section == :display
-        kib = @values[4].strip.to_i?
+        kib = @values[DISPLAY_PREVIEW_KIB].strip.to_i?
         unless kib && kib >= 1
           @status = "invalid preview limit"
-          return "settings: invalid preview body limit #{@values[4].inspect} (KiB, min 1)"
+          return "settings: invalid preview body limit #{@values[DISPLAY_PREVIEW_KIB].inspect} (KiB, min 1)"
         end
         kib = kib.clamp(1, Settings::MAX_PREVIEW_BODY_KIB) # keep kib*1024 within Int32
-        Settings.default_detail_pane = @values[0] == "response" ? "response" : "request"
-        Settings.history_time_format = @values[1] == "relative" ? "relative" : "absolute"
-        Settings.show_gutter = @values[2] == "on"
-        Settings.wrap_lines = @values[3] == "on"
+        Settings.history_list_order = Settings.normalize_history_list_order(@values[DISPLAY_LIST_ORDER])
+        Settings.history_time_format = @values[DISPLAY_LIST_TIME] == "relative" ? "relative" : "absolute"
+        Settings.history_preview = @values[DISPLAY_HISTORY_PREVIEW] == "on"
+        Settings.probe_preview = @values[DISPLAY_PROBE_PREVIEW] == "on"
+        Settings.issues_preview = @values[DISPLAY_ISSUES_PREVIEW] == "on"
+        Settings.sitemap_expand_depth = Settings.normalize_sitemap_depth(@values[DISPLAY_SITEMAP_DEPTH].to_i? || Settings::DEFAULT_SITEMAP_EXPAND_DEPTH)
+        Settings.default_detail_pane = @values[DISPLAY_DETAIL_PANE] == "response" ? "response" : "request"
+        Settings.show_gutter = @values[DISPLAY_GUTTER] == "on"
+        Settings.wrap_lines = @values[DISPLAY_WRAP] == "on"
         Settings.preview_body_kib = kib
-        Settings.resource_meter = @values[5] == "on"
-        Settings.terminal_title = Settings.normalize_terminal_title(@values[6])
+        Settings.tab_numbers = @values[DISPLAY_TAB_NUMBERS] == "on"
+        Settings.tab_slots = @values[DISPLAY_TAB_SLOTS] == "on"
+        Settings.resource_meter = @values[DISPLAY_RESOURCE_METER] == "on"
+        Settings.terminal_title = Settings.normalize_terminal_title(@values[DISPLAY_TERMINAL_TITLE])
         @values = display_values
         return persist
       end
@@ -1045,7 +1078,7 @@ module Gori::Tui
         i = @theme_scroll + row
         return i < Theme.available.size ? i : nil
       end
-      (0 <= row < fields.size) ? row : nil
+      (0 <= row < fields.size) && !fields[row].header ? row : nil
     end
 
     # Act on a clicked row: focus a field, or — in the THEME section — select that
@@ -1056,7 +1089,7 @@ module Gori::Tui
         @values[0] = names[idx.clamp(0, names.size - 1)] unless names.empty?
         return
       end
-      @focused = idx.clamp(0, @values.size - 1)
+      @focused = selectable(idx, 1)
       @cursor = @values[@focused].size
       @preedit = ""
     end
@@ -1088,11 +1121,16 @@ module Gori::Tui
     # `rect` (block == viewport, no extra clipping). Shared by the overlay and the tab.
     def render_fields_into(screen : Screen, rect : Rect, focused_idx : Int32, viewport : Rect = rect) : Nil
       flds = fields
-      label_w = flds.max_of { |f| Screen.draw_width(f.label) }
+      label_w = flds.reject(&.header).max_of { |f| Screen.draw_width(f.label) }
       flds.each_with_index do |field, i|
         ry = rect.y + i
         next if ry < viewport.y
         break if ry >= viewport.bottom
+        if field.header
+          screen.fill(Rect.new(rect.x, ry, rect.w, 1), Theme.panel)
+          screen.text(rect.x + 2, ry, "─ #{field.label} ─", Theme.muted, Theme.panel, width: {rect.w - 2, 1}.max)
+          next
+        end
         focused = i == focused_idx
         bg = focused ? Theme.accent_bg : Theme.panel
         screen.fill(Rect.new(rect.x, ry, rect.w, 1), bg)

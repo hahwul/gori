@@ -149,6 +149,23 @@ describe Gori::Tui::PreferencesView do
     backend.contains?("#{Gori::Settings::DEFAULT_BIND_HOST}9").should be_false
   end
 
+  # Display's `─ lists ─` / `─ message panes ─` / `─ window ─` rows are drawn but are not
+  # targets: ↓ from the last list field lands on the first message-pane field.
+  it "steps over Display's subheader rows" do
+    v = PreferencesView.new
+    v.open(:display)
+    hint = ->(view : PreferencesView) do
+      backend = MemoryBackend.new(100, 50)
+      view.render(Screen.new(backend), Rect.new(0, 0, 100, 50))
+      backend
+    end
+    b = hint.call(v)
+    b.contains?("─ lists ─").should be_true
+    b.contains?("newest first (default, live tail at top)").should be_true # History list order
+    6.times { v.handle_key(pkey(DOWN)) }
+    hint.call(v).contains?("which pane a freshly-opened History flow").should be_true # Default detail pane
+  end
+
   it "closes on Ctrl+, — the chord that opened it" do
     v = PreferencesView.new
     v.open_default

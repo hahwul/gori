@@ -6646,7 +6646,7 @@ module Gori::Tui
     # to the modal) would behave differently.
     private def open_settings_section(section : Symbol, back : PreferencesOverlay?) : Nil
       case section
-      when :network, :editor, :mouse, :keys, :layout, :statusline, :display, :companion, :notifications, :general, :mcp, :mcp_permissions
+      when :network, :editor, :mouse, :keys, :statusline, :display, :companion, :notifications, :general, :mcp, :mcp_permissions
         open_preferences(section)                                 # the unified grouped modal, positioned at this section
       when :theme             then open_overlay(theme_card(back)) # theme keeps its dedicated swatch-list card
       when :tabs              then open_overlay(tabs_editor(back))
@@ -6977,12 +6977,11 @@ module Gori::Tui
     # for settings side effects: the palette overlay (handle_settings_key) and the Settings
     # tab both route their save through here, so a saved change takes effect identically
     # from either surface. :network rebinds the live proxy + re-syncs the Project pane;
-    # :theme/:layout/:display refresh live; the mouse + pretty-print toggles always re-sync.
+    # :theme/:display refresh live; the mouse + pretty-print toggles always re-sync.
     def apply_settings_saved(section : Symbol, msg : String) : String
       toast = case section
               when :network   then apply_settings(msg).tap { @session.set_verify_upstream(Settings.verify_upstream?); @session.set_serve_landing(Settings.serve_landing?); project_controller.refresh_network }
               when :theme     then apply_theme(msg)
-              when :layout    then apply_layout(msg)
               when :display   then apply_display(msg)
               when :companion then apply_companion(msg)
               when :keys      then apply_keys(msg)
@@ -7020,20 +7019,13 @@ module Gori::Tui
       "#{save_msg} — ⌥ alias shadows your binding for #{shadowed.join(", ")} (now back to default)"
     end
 
-    # Layout prefs apply live: History reloads (list order) + preview; Sitemap rebuilds
-    # so the expand-depth policy is re-stamped on the tree.
-    private def apply_layout(save_msg : String) : String
+    # Display prefs apply live: the gutter, list time format and default pane are read at
+    # render time; History reloads (list order) and refreshes its preview (cap, default pane);
+    # Sitemap rebuilds so the expand-depth policy is re-stamped on the tree.
+    private def apply_display(save_msg : String) : String
       history_controller.view.reload(@session.store)
       history_controller.refresh_preview
       sitemap_controller.view.reload(@session.store) if sitemap_controller.view.loaded?
-      save_msg
-    end
-
-    # Display prefs apply live on the next frame — the gutter, list time format and default
-    # pane are read at render time. Only the preview body cap needs a nudge: refresh the
-    # History preview so a new cap (or default pane) is reflected on the current selection now.
-    private def apply_display(save_msg : String) : String
-      history_controller.refresh_preview
       save_msg
     end
 

@@ -66,10 +66,10 @@ module Gori::Tui
       # Appearance
       Section.new(:theme, "settings.theme", "Theme",
         "Switch the TUI colour theme (built-ins + your own from ~/.gori/themes/*.json)", :appearance, :opener),
+      # One section for what used to be Display + Layout; settings.json keeps both keys.
       Section.new(:display, "settings.display", "Display",
-        "Message-body rendering: default detail pane, list time format, line numbers, preview size", :appearance, :form),
-      Section.new(:layout, "settings.layout", "Layout",
-        "History list Req/Res preview, Sitemap default expand depth, tab-bar numbers", :appearance, :form),
+        "List order, time and previews, message-pane rendering, tab bar and window chrome", :appearance, :form,
+        keywords: %w[layout preview gutter wrap sitemap tab title meter]),
       Section.new(:companion, "settings.companion", "Companion",
         "Miss Ring — the mascot in the body's bottom-right corner, her motion, and her notices", :appearance, :form),
       # Editor & Keys

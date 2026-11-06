@@ -432,7 +432,7 @@ Inbound fingerprint *spoofing* (making the client's own handshake look like some
 
 ### layout
 
-Per-area TUI layout prefs (command palette → **Settings: Layout**). Omitted when every value is a factory default.
+Per-area TUI layout prefs (command palette → **Settings: Display**, which edits this and `display` together). Omitted when every value is a factory default.
 
 ```json
 {
