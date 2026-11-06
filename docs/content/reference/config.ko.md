@@ -909,7 +909,7 @@ salt는 **비밀**이며, `env`의 토큰 값과 같은 조건으로 보관됩�
 | `theme` | 활성 테마 이름 (기본값 `goridark`). [테마 가이드](/ko/guide/themes/) 참고 |
 | `mouse` | 마우스 지원 토글(기본 켜짐) |
 | `mouse_drag` | 드래그를 놓았을 때의 동작: `select`(기본값) 또는 `copy` |
-| `pretty_bodies` | 상세 뷰에서 JSON/XML 등의 본문을 pretty-print(기본 켜짐) |
+| `pretty_bodies` | 상세 뷰에서 JSON/XML 등의 본문을 pretty-print하고, HTTP/2 요청에서 나뉜 `cookie` 필드를 한 줄로 합쳐 표시(기본 켜짐, 표시 전용) |
 | `editor` | 외부 편집기 `command`와 Markdown 처리 |
 | `tabs` | 표시/숨김할 TUI 탭과 탭 바 순서 |
 | `hostname_overrides` | 전역 host → IP 다이얼 맵. 위의 [hostname_overrides](#hostname-overrides) 참고 |

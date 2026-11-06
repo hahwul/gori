@@ -8,6 +8,7 @@
 - Probe: fingerprint WordPress from the response body, with its version from the generator meta tag (#1780)
 - Repeater: a running TUI now shows the name and tags another session, `gori run repeater` or MCP gives a sub-tab, without a restart (#1807)
 - CLI: `gori run repeater show` prints `Authorization`, `Cookie`, `Set-Cookie` and API-key header values as `[REDACTED]` unless `--include-sensitive` is passed, as MCP `get_repeater_context` does (#1809)
+- History: Pretty bodies (`p`) also folds an HTTP/2 request's split `cookie` fields into one `cookie: a; b` line in the detail view; the captured bytes are unchanged (#1817)
 
 ## v0.9.1
 

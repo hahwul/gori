@@ -86,6 +86,39 @@ module Gori
       nil # last-resort net: Pretty must never raise into the render path
     end
 
+    # HTTP/2 lets a client split `cookie` into one field per cookie for HPACK (RFC 9113
+    # §8.2.3), so a browser's synthesized h2 head reads as a column of `cookie:` lines. Fold
+    # each ADJACENT run back into the single `; `-joined line that section prescribes for an
+    # h1 view (#1817), so no field moves. The caller passes only a flow recorded as HTTP/2:
+    # on HTTP/1.1 a repeated Cookie is the client's own anomaly and stays visible. Exact
+    # lowercase `cookie:` only: an uppercase or look-alike name is malformed h2 (RFC 9113
+    # §8.2.1) and keeps its own line, as does an empty value, so the fold never hides a name
+    # or invents a separator. Values are joined as captured: surrounding whitespace is itself
+    # malformed h2 (§8.2.1) and stays visible. One streaming pass, so a head with thousands of
+    # crumbs folds in linear time on the shared scheduler (P6). Display only, like the rest of
+    # this module; nil = nothing folded.
+    def fold_h2_cookies(head : Bytes) : Bytes?
+      run = false # the last line written is a cookie line
+      folded = false
+      first = true
+      text = String.build(head.size) do |io|
+        String.new(head).split("\r\n").each do |line|
+          value = line.starts_with?("cookie: ") ? line[8..] : ""
+          cookie = !value.strip.empty?
+          if cookie && run
+            io << "; " << value
+            folded = true
+          else
+            io << "\r\n" unless first
+            io << line
+          end
+          first = false
+          run = cookie
+        end
+      end
+      folded ? text.to_slice : nil
+    end
+
     # Decode escaped Unicode in a JSON body without changing its original whitespace. This is
     # the `u` layer when the operator has turned pretty reflow off; the decoded text remains a
     # display projection and is never used by the request write-back path.
