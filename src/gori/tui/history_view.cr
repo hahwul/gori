@@ -4538,6 +4538,12 @@ module Gori::Tui
                    else
                      {detail.response_head, detail.response_body}
                    end
+      # Pretty also folds an h2 request's split `cookie` fields into one line (#1817).
+      cookies_folded = false
+      if @pretty && request && head && detail.http_version == "HTTP/2" && (folded = Pretty.fold_h2_cookies(head))
+        head = folded
+        cookies_folded = true
+      end
       stored_bytes = body.try(&.size.to_i64) || 0_i64
       wire_bytes = if original
                      stored_bytes # kept whole: nothing was capped
@@ -4603,7 +4609,7 @@ module Gori::Tui
         head_lines << Highlight::Line.new
         head_lines << [Highlight::Span.new(
           "— binary body (#{Fmt.size(b.size.to_i64)}) — not shown as text; press ^X for the hex view —", Theme.muted)]
-        return DetailView.new(head_lines, EMPTY_BODY, :text, trailer, binary: true)
+        return DetailView.new(head_lines, EMPTY_BODY, :text, trailer, pretty: cookies_folded, binary: true)
       end
       # Pretty-print AFTER decode (so JSON/XML/… are reflowed from the decoded bytes),
       # display only — storage is untouched. nil = leave raw. `pretty.kind` overrides
@@ -4654,7 +4660,7 @@ module Gori::Tui
       # never showed one — this keeps the two response views consistent).
       count = pretty.try(&.unicode_escape_count) || Pretty.unicode_escape_count(head, src)
       DetailView.new(win.head, win.body, win.kind, trailer,
-        pretty: @pretty && (pretty.try(&.reflowed) || false),
+        pretty: cookies_folded || (@pretty && (pretty.try(&.reflowed) || false)),
         decoded_ranges: decoded_ranges,
         unicode_escape_count: count,
         unicode_decoded: @decode_unicode && count > 0)

@@ -694,7 +694,7 @@ module Gori
         Verb::Scope::HistoryDetail, [Verb::Chord.new("b")], intent: :whitespace, group: :view) { |ctx| ctx.toggle_reveal; nil }
 
       r.register Verb::Definition.new(
-        "detail.toggle-pretty", "Pretty bodies", "Pretty-print JSON/XML/form/… bodies (display only)",
+        "detail.toggle-pretty", "Pretty bodies", "Pretty-print JSON/XML/form/… bodies, fold h2 cookies (display only)",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("p")], intent: :pretty, group: :view) { |ctx| ctx.toggle_pretty; nil }
 
       r.register Verb::Definition.new(

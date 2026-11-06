@@ -3907,3 +3907,52 @@ describe "HistoryView#pretty_missing?" do
     end
   end
 end
+
+# #1817: a browser's h2 request splits `cookie` per cookie (RFC 9113 §8.2.3). Pretty folds
+# the run into one line for reading; off shows the fields as captured.
+describe "HistoryView h2 cookie folding" do
+  it "folds split h2 cookies under pretty and shows them raw when off" do
+    with_store do |store|
+      head = "GET / HTTP/2\r\nHost: h2.test\r\ncookie: a=1\r\ncookie: b=2\r\n\r\n"
+      store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "h2.test", port: 443,
+        method: "GET", target: "/", http_version: "HTTP/2",
+        head: head.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      rect = Rect.new(0, 0, 120, 20)
+
+      view.pretty = true
+      on = MemoryBackend.new(120, 20)
+      view.render_detail(Screen.new(on), rect)
+      on.contains?("cookie: a=1; b=2").should be_true
+      view.pretty_missing?.should be_false
+
+      view.pretty = false
+      off = MemoryBackend.new(120, 20)
+      view.render_detail(Screen.new(off), rect)
+      off.contains?("cookie: a=1; b=2").should be_false
+      off.contains?("cookie: b=2").should be_true
+    end
+  end
+
+  it "never folds an HTTP/1.1 request: a repeated Cookie there is the client's anomaly" do
+    with_store do |store|
+      # The request line says HTTP/2, but the flow went over HTTP/1.1: the recorded version decides.
+      head = "GET / HTTP/2\r\nHost: h1.test\r\ncookie: a=1\r\ncookie: b=2\r\n\r\n"
+      store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "h1.test", port: 443,
+        method: "GET", target: "/", http_version: "HTTP/1.1",
+        head: head.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.pretty = true
+      backend = MemoryBackend.new(120, 20)
+      view.render_detail(Screen.new(backend), Rect.new(0, 0, 120, 20))
+      backend.contains?("cookie: a=1; b=2").should be_false
+      backend.contains?("cookie: b=2").should be_true
+    end
+  end
+end

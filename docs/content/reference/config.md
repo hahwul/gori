@@ -911,7 +911,7 @@ A `colormarker` rule carries `when` (the History QL condition, `--when`), `color
 | `theme` | Active theme name (default `goridark`). See the [Themes guide](/guide/themes/) |
 | `mouse` | Mouse support toggle (on by default) |
 | `mouse_drag` | What releasing a drag does: `select` (default) or `copy` |
-| `pretty_bodies` | Pretty-print JSON/XML/etc. bodies in the detail view (on by default) |
+| `pretty_bodies` | Pretty-print JSON/XML/etc. bodies in the detail view, and fold an HTTP/2 request's split `cookie` fields into one line (on by default, display only) |
 | `editor` | External editor `command` and Markdown handling |
 | `tabs` | Which TUI tabs are shown/hidden, in tab-bar order |
 | `hostname_overrides` | Global host → IP dial map. See [hostname_overrides](#hostname-overrides) above |

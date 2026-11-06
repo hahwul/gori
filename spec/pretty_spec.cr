@@ -551,3 +551,33 @@ describe "Gori::Pretty markup output cap" do
     end
   end
 end
+
+describe "Gori::Pretty.fold_h2_cookies" do
+  it "folds an adjacent run of h2 cookie fields into one line (#1817)" do
+    head = "GET / HTTP/2\r\nHost: a\r\ncookie: a=1\r\ncookie: b=2\r\ncookie: c=3\r\naccept: */*\r\n\r\n"
+    String.new(Gori::Pretty.fold_h2_cookies(head.to_slice).not_nil!).should eq(
+      "GET / HTTP/2\r\nHost: a\r\ncookie: a=1; b=2; c=3\r\naccept: */*\r\n\r\n")
+  end
+
+  it "leaves non-adjacent cookie fields where they are" do
+    head = "GET / HTTP/2\r\ncookie: a=1\r\naccept: */*\r\ncookie: b=2\r\n\r\n"
+    Gori::Pretty.fold_h2_cookies(head.to_slice).should be_nil
+  end
+
+  it "keeps an uppercase or look-alike name on its own line: malformed h2 is the payload" do
+    ["Cookie: b=2", "coo\u212Aie: b=2"].each do |odd|
+      head = "GET / HTTP/2\r\ncookie: a=1\r\n#{odd}\r\n\r\n"
+      Gori::Pretty.fold_h2_cookies(head.to_slice).should be_nil
+    end
+  end
+
+  it "never invents a separator for an empty cookie field" do
+    head = "GET / HTTP/2\r\ncookie: a=1\r\ncookie: \r\ncookie: b=2\r\n\r\n"
+    Gori::Pretty.fold_h2_cookies(head.to_slice).should be_nil
+  end
+
+  it "does not fold a header that only starts with cookie" do
+    head = "GET / HTTP/2\r\ncookie: a=1\r\ncookie2: b=2\r\n\r\n"
+    Gori::Pretty.fold_h2_cookies(head.to_slice).should be_nil
+  end
+end
