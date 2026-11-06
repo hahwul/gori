@@ -55,6 +55,11 @@ abstract class Gori::Verb::ExecContext
   # (a SAML/GraphQL decode or a WebSocket handshake), so ^T flips a view rather than dropping
   # a marker.
   abstract def repeater_split_request? : Bool
+  # The Repeater is in front and the active tab is a WebSocket handshake / a gRPC call, so a
+  # transport-only Protocol… toggle (key reuse, live session, heartbeat / reframe, fields) has
+  # something to act on. A plain HTTP tab's card does not list them.
+  abstract def repeater_ws_tab? : Bool
+  abstract def repeater_grpc_tab? : Bool
 
   # Open the ACTIVE sub-tab's last response in the desktop's viewer — History's
   # `open_response_external` for a response that is not a stored flow but the result of the

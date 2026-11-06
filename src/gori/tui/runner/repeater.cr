@@ -219,4 +219,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return false unless current_tab == :repeater && (v = repeater_controller.current_view)
     v.decode_mode? || v.ws_mode?
   end
+
+  def repeater_ws_tab? : Bool
+    current_tab == :repeater && !!repeater_controller.current_view.try(&.ws_mode?)
+  end
+
+  def repeater_grpc_tab? : Bool
+    current_tab == :repeater && !!repeater_controller.current_view.try(&.grpc_mode?)
+  end
 end

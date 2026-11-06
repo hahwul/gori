@@ -237,6 +237,10 @@ module Gori
       # and show their key hints — actual keys are handled directly by the TUI) ---
       in_repeater = ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater }
       in_repeater_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater && ctx.repeater_read_mode? }
+      # Transport-only Protocol… members: a plain HTTP tab's card listed seven rows, four of
+      # which only toasted "applies to a WebSocket/gRPC tab". The handlers keep that refusal.
+      ws_tab = ->(ctx : Verb::ExecContext) { ctx.repeater_ws_tab? }
+      grpc_tab = ->(ctx : Verb::ExecContext) { ctx.repeater_grpc_tab? }
       # Copy is the one READ verb that must also work while TYPING: INS can build a
       # ⇧arrow selection but had no way to copy it, so the next printable replaced it
       # (TextArea#insert cuts the selection). READ keeps bare `y`; INS reaches the same
@@ -499,7 +503,7 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.toggle-ws-key", "Toggle Sec-WebSocket-Key reuse",
         "WebSocket: send the handshake's OWN Sec-WebSocket-Key instead of a fresh one — the only way to test an absent, short, duplicated or non-base64 key (off by default: a fresh key avoids a server's replay guard)",
-        Verb::Scope::Repeater, available: in_repeater, intent: :ws_key, section: :request) { |ctx| ctx.repeater_toggle_ws_key; nil }
+        Verb::Scope::Repeater, available: ws_tab, intent: :ws_key, section: :request) { |ctx| ctx.repeater_toggle_ws_key; nil }
       # A persistent WebSocket session (#1630): connect once (dial off the UI fiber), then `^R`
       # sends the MESSAGES cursor line on the open socket and this toggle disconnects. A
       # Protocol… member, so its letter comes from the family table and the card shows ●/○. No
@@ -507,11 +511,11 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.toggle-ws-session", "Live session (keep open)",
         "WebSocket: keep one socket open instead of the scripted one-shot send — ^R connects once and holds it, then ↵ sends the MESSAGES cursor line and ^R sends every line in order on the SAME socket, and the server's frames stream into the TRANSCRIPT pane; toggle off to disconnect. Nothing is written to History",
-        Verb::Scope::Repeater, available: in_repeater, intent: :ws_session, section: :request) { |ctx| ctx.repeater_toggle_ws_session; nil }
+        Verb::Scope::Repeater, available: ->(ctx : Verb::ExecContext) { ws_session_row?(ctx) }, intent: :ws_session, section: :request) { |ctx| ctx.repeater_toggle_ws_session; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-ws-heartbeat", "Engine.IO heartbeat",
         "WebSocket live session: answer the server's Engine.IO ping (`2`) with a pong (`3`) for the operator, so a long session is not timed out by a missed app-level heartbeat. Off by default (it writes into the socket unasked); takes effect at the next connect",
-        Verb::Scope::Repeater, available: in_repeater, intent: :ws_heartbeat, section: :request) { |ctx| ctx.repeater_toggle_ws_heartbeat; nil }
+        Verb::Scope::Repeater, available: ws_tab, intent: :ws_heartbeat, section: :request) { |ctx| ctx.repeater_toggle_ws_heartbeat; nil }
       # Binary (hex) send on the open socket — the other half of `^R`'s text send (#1630).
       # Palette-only: binary WS testing is the rarer case, and a letter-free palette verb keeps
       # the dense Repeater space menu clear. The TRANSCRIPT footer names the live keys.
@@ -527,7 +531,7 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.toggle-grpc-reframe", "Toggle gRPC reframe",
         "gRPC: recompute the 5-byte length prefix over the payload actually being sent (ON by default in this tab, so a ^X hex edit produces a well-formed unary message; turn it OFF to send the captured prefix, which is the `gori run repeater send` default and a standard parser test). Unary only — a 0-/multi-message body is sent verbatim either way",
-        Verb::Scope::Repeater, available: in_repeater, intent: :grpc_reframe, section: :request) { |ctx| ctx.repeater_toggle_grpc_reframe; nil }
+        Verb::Scope::Repeater, available: grpc_tab, intent: :grpc_reframe, section: :request) { |ctx| ctx.repeater_toggle_grpc_reframe; nil }
       # gRPC tab only, and no chord for the same reason `␣Pr` and `␣Pw` have none: the ctrl-
       # space in Repeater is dense, this is a per-payload decision rather than a mid-edit key,
       # and the GRPC REQUEST pane carries a `␣Pf:FIELDS` badge wherever the form is available —
@@ -535,7 +539,7 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.toggle-grpc-fields", "Toggle gRPC field editor",
         "gRPC: edit the request message BY FIELD through the loaded .proto — pick a schema-known field, type a value, and the message is re-encoded with every other byte copied from the capture. Needs a descriptor set that declares this rpc (Project → Proto schema) and a unary call; a field the schema does not declare, or one whose wire type it contradicts, stays read-only and is edited with ^X",
-        Verb::Scope::Repeater, available: in_repeater, intent: :grpc_fields, section: :request) { |ctx| ctx.repeater_toggle_grpc_fields; nil }
+        Verb::Scope::Repeater, available: grpc_tab, intent: :grpc_fields, section: :request) { |ctx| ctx.repeater_toggle_grpc_fields; nil }
       # The whole message as proto3 JSON in `$EDITOR`, and one `path=value` field (#1632) — the
       # routes to a field the capture never carried. Palette-only: the lexicon's `:edit` letter
       # is the strip's reserved rename here, and both are reached for once per finding rather
@@ -1143,6 +1147,12 @@ module Gori
       r.register Verb::Definition.new(
         "link.fuzzer.attach", "Link…", "Attach this fuzz session to an issue or note — or create one",
         Verb::Scope::Fuzzer, available: fuzz_linkable, intent: :link) { |ctx| ctx.link_attach; nil }
+    end
+
+    # The live-session row: a WebSocket tab, or a socket still open after `^V` left WS mode
+    # (disconnect stays reachable). Out of `register_history` for its complexity budget.
+    def self.ws_session_row?(ctx : Verb::ExecContext) : Bool
+      ctx.repeater_ws_tab? || ctx.repeater_ws_session_connected?
     end
 
     # Builds a registry with every built-in verb registered.

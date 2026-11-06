@@ -307,6 +307,28 @@ describe "Display… and Protocol… (#1274 WP9)" do
     end
   end
 
+  # A plain HTTP tab's card listed the WebSocket and gRPC toggles too, each of which only
+  # toasted that it applies to another kind of tab.
+  it "lists the WebSocket and gRPC rows only on a tab of that transport" do
+    ids = ->(ctx : FakeExecContext) {
+      family_card(Gori::Verb::Scope::Repeater, :request, ctx, protocol).entries.compact_map(&.verb.try(&.id)).sort!
+    }
+    ctx = FakeExecContext.new
+    ctx.current_tab = :repeater
+    ids.call(ctx).should eq(%w[repeater.toggle-auto-content-length repeater.toggle-http2])
+    ctx.repeater_ws_tab = true
+    ids.call(ctx).should eq(%w[repeater.toggle-auto-content-length repeater.toggle-http2
+      repeater.toggle-ws-heartbeat repeater.toggle-ws-key repeater.toggle-ws-session])
+    ctx.repeater_ws_tab = false
+    ctx.repeater_grpc_tab = true
+    ids.call(ctx).should eq(%w[repeater.toggle-auto-content-length repeater.toggle-grpc-fields
+      repeater.toggle-grpc-reframe repeater.toggle-http2])
+    # A socket still open after `^V` left WS mode keeps its disconnect row.
+    ctx.repeater_grpc_tab = false
+    ctx.repeater_ws_session_connected = true
+    ids.call(ctx).should contain("repeater.toggle-ws-session")
+  end
+
   # ^T drops a § marker on a tab with no split, so the menu row is its own verb, listed only
   # where there is an envelope to switch.
   it "lists the envelope row only on a tab that splits its request" do
