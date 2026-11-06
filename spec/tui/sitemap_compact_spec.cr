@@ -82,4 +82,50 @@ describe "SitemapView compact folder rows" do
     SitemapView.compact_label(segs, 31).should eq("api/…/workspaces/marketing-emea")
     SitemapView.compact_label(segs, 30).should eq("api/…/marketing-emea")
   end
+
+  it "offers the folders a compact row hides as Discover start targets" do
+    with_store do |store|
+      capture(store, "/api/v3/orgs/42/items")
+      view = SitemapView.new
+      view.reload(store)
+      view.select_index(1)
+      view.selected_chain_paths.should eq(%w[/api/v3/orgs /api/v3 /api])
+      view.select_index(2) # the endpoint leaf: a plain row
+      view.selected_chain_paths.should be_empty
+    end
+  end
+
+  it "keeps the cursor on the compact row that absorbed the selected folder" do
+    with_store do |store|
+      capture(store, "/a/b/x")
+      id = capture(store, "/a/c/y")
+      view = SitemapView.new
+      view.reload(store)
+      view.select_index(1) # `a`, with children b and c
+      store.delete_flow(id)
+      view.reload(store)
+      view.selected_index.should eq(1) # now the `a/b` row
+    end
+  end
+
+  it "keeps a subtree opened from a compact row open once a sibling breaks the chain" do
+    prev = Gori::Settings.sitemap_expand_depth
+    Gori::Settings.sitemap_expand_depth = 1 # `a` and `b` start collapsed
+    begin
+      with_store do |store|
+        capture(store, "/a/b/x")
+        view = SitemapView.new
+        view.reload(store)
+        view.row_count.should eq(2) # acme.test, a/b (collapsed)
+        view.select_index(1)
+        view.expand
+        view.row_count.should eq(3) # … and x under it
+        capture(store, "/a/z")
+        view.reload(store)
+        view.row_count.should eq(5) # a, b, x and the new z: the open subtree stays open
+      end
+    ensure
+      Gori::Settings.sitemap_expand_depth = prev
+    end
+  end
 end

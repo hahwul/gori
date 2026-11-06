@@ -338,7 +338,8 @@ module Gori::Tui
       @visible_cache = nil
       rows = visible_rows
       # Exact row, else the fold that swallowed it, else the top.
-      @selected = index_of_target(rows, prev_sel) || index_of_enclosing_fold(rows, prev_sel) || 0
+      @selected = index_of_target(rows, prev_sel) || index_of_enclosing_fold(rows, prev_sel) ||
+                  index_of_compact_row(rows, prev_sel) || 0
       @selected = @selected.clamp(0, {rows.size - 1, 0}.max)
       @scroll = prev_scroll.clamp(0, {rows.size - 1, 0}.max)
       @loaded = true
@@ -416,6 +417,14 @@ module Gori::Tui
 
     # Is `want` the folded node itself, or something beneath it? (Prefix-compared without
     # building a "#{path}/" string per candidate — this runs per row on every reload.)
+    # The previously selected folder can also vanish into a COMPACT row when a sibling went
+    # away (a filter, the scope lens, a prune): land on the row whose chain now holds it.
+    private def index_of_compact_row(rows : Array(VisibleRow), target : {String, String}?) : Int32?
+      return nil unless target
+      want_host, want_path = target
+      rows.index { |row| row.segments && row.key == want_host && encloses?(want_path, row.node.path) }
+    end
+
     private def encloses?(path : String, want : String) : Bool
       return true if path == want
       want.starts_with?(path) && want[path.size]? == '/'
@@ -1630,6 +1639,10 @@ module Gori::Tui
         segs = nil
         # Host rows never compact; below them, walk the chain down to its deepest node.
         while d > 0 && compact?(n)
+          # A folded-through node is open by construction: mark it so, or a later sibling that
+          # breaks the chain would bring it back collapsed (the expand-depth default) and hide
+          # the subtree the operator had opened from the merged row.
+          n.expanded = true
           (segs ||= [n.label]) << (n = n.children.first).label
         end
         rows << VisibleRow.new(n, d, g, root, segs)
@@ -1642,6 +1655,20 @@ module Gori::Tui
           i -= 1
         end
       end
+    end
+
+    # The folders a compact row hides, deepest first (`api/v1/users` → `/api/v1`, `/api`); empty
+    # on a plain row. Discover offers them as start targets, so a folder that draws no row of its
+    # own can still be crawled under.
+    def selected_chain_paths : Array(String)
+      paths = [] of String
+      return paths unless (row = visible_rows[@selected]?) && (segs = row.segments)
+      path = row.node.path
+      (segs.size - 1).times do
+        break unless (i = path.rindex('/')) && i > 0
+        paths << (path = path[0, i])
+      end
+      paths
     end
 
     # Whether `node` folds into its only child on one compact row: a plain folder — no method,
