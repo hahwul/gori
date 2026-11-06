@@ -96,7 +96,9 @@ describe "Gori::Tui::ProbeView grouping" do
       ctl.probe_open # ↵ on the group: expand, no detail
       view.detail_open?.should be_false
       view.list_size.should eq(3)
-      ctl.probe_open # already open: step onto its first host
+      ctl.probe_open # already open: nothing moves (a second click stays on its row)
+      view.selected_row.not_nil!.group?.should be_true
+      ctl.probe_move(1)
       view.selected_row.not_nil!.child?.should be_true
       ctl.probe_move(1)
       host = view.selected_issue.not_nil!.host
@@ -156,6 +158,46 @@ describe "Gori::Tui::ProbeView grouping" do
       host.confirms.last[0].should eq("DISMISS GROUP")
       store.probe_issue_rows.select(&.code.==("missing_hsts")).all?(&.status.false_positive?).should be_true
       store.probe_issue_rows.find!(&.code.==("missing_csp")).status.open?.should be_true
+    end
+  end
+
+  # `dismiss_open_by_code` ignores the query and the closed lens: it muted hosts the row did
+  # not show, and could not re-open a dismissed group.
+  it "dismisses only the hosts the group row shows, and re-opens a fully dismissed group" do
+    with_probe_group_controller do |ctl, host, store|
+      %w[a.test b.test c.test].each { |h| seed(store, "missing_hsts", h) }
+      view = ctl.view
+      view.reload(store)
+      view.start_query
+      "-host:c.test".each_char { |c| view.query_insert(c) }
+      view.stop_query
+      view.selected_row.not_nil!.members.not_nil!.size.should eq(2)
+      ctl.probe_dismiss
+      host.confirms.last.should eq({"DISMISS GROUP", "Dismiss 2 findings of “missing_hsts”?"})
+      by_host = store.probe_issue_rows.to_h { |r| {r.host, r.status} }
+      by_host["c.test"].open?.should be_true
+      by_host["a.test"].false_positive?.should be_true
+
+      view.toggle_show_closed
+      ctl.probe_dismiss
+      host.confirms.last.should eq({"DISMISS GROUP", "Re-open 2 findings of “missing_hsts”?"})
+      store.probe_issue_rows.all?(&.status.open?).should be_true
+    end
+  end
+
+  it "stays on the next host after dismissing one from an expanded group" do
+    with_probe_group_controller do |ctl, _, store|
+      %w[a.test b.test c.test].each { |h| seed(store, "missing_hsts", h) }
+      view = ctl.view
+      view.reload(store)
+      ctl.probe_open
+      ctl.probe_move(1)
+      first = view.selected_issue.not_nil!.host
+      ctl.probe_dismiss
+      view.reload(store)
+      row = view.selected_row.not_nil!
+      row.child?.should be_true
+      row.issue.host.should_not eq(first)
     end
   end
 

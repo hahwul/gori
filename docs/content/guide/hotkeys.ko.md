@@ -349,7 +349,7 @@ Rewriter와 Colormarker의 **Enable/disable everywhere**가 `T`인 이유가 이
 | `g` · `q` · `J` | id 접기 · 쿼리 접기 · JS 참조 | `r` · `f` | gRPC reframe · gRPC 필드 편집기 |
 | `m` · `v` · `G` | Fuzzer: 매치만 · 분포 · 응답 모양별 묶기 | `t` | TLS 지문 |
 | `t` · `z` | Comparer: 요청/응답 · 변경 없는 구간 접기 | `o` · `b` | WebSocket 라이브 세션 · Engine.IO 하트비트 |
-| `a` | 모두 보기: Probe의 닫힌 이슈, Params 탭의 표준 헤더 | | |
+| `a` | 모두 보기: Probe의 닫힌 탐지 결과, Params 탭의 표준 헤더 | | |
 | `C` | Probe: 체크별로 묶기(기본 켜짐) | | |
 
 두 카드는 **sticky**입니다. 행을 실행하면 카드가 같은 행에서 다시 열리므로 한 번에 두세 개를

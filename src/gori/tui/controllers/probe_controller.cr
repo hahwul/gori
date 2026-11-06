@@ -185,8 +185,18 @@ module Gori::Tui
       elsif @probe.preview_enabled?
         "↑/↓ move · ↵ open · ↹ preview · #{clear} clear · #{mode} mode · #{filt} filter · space cmds · esc tabs"
       else
-        # `esc tabs` — `probe.leave` is `focus_pane(:menu)`, the same destination the two
-        # shorter branches above already name. These two were the FINDINGS lines that did
+        findings_hint(clear, mode, filt)
+      end
+    end
+
+    private def findings_hint(clear : String, mode : String, filt : String) : String
+      if @probe.group_selected?
+        # A group row expands rather than opens, folds on ←, and dismisses its whole set; the
+        # single-host keys of the line below only answer "expand the group" here.
+        keys("↑/↓ move · ↵ expand · ← fold · {probe.dismiss-selected} dismiss all · {probe.copy-issue} copy · #{clear} clear · #{mode} mode · #{filt} filter · space cmds · esc tabs")
+      else
+        # `esc tabs` — `probe.leave` is `focus_pane(:menu)`, the same destination the
+        # shorter `body_hint` branches already name. These two were the FINDINGS lines that did
         # not, so the only two states an operator sits in for any length of time were the two
         # with no exit on them. It rides the end, after the keys that clip first.
         keys("↑/↓ move · ↵ open · {probe.open-evidence} source · {probe.repeater-evidence} repeater · {probe.promote-selected} promote · {probe.dismiss-selected} dismiss · {probe.delete-selected} delete · #{clear} clear · #{mode} mode · #{filt} filter · space cmds · esc tabs")
@@ -597,7 +607,7 @@ module Gori::Tui
       # probe_generation reload can shift the selection in between — so both the suppress and
       # the delete must target THIS issue by id, not whatever happens to be selected at confirm.
       id, code, host, title = i.id, i.code, i.host, i.title
-      @host.confirm("DELETE ISSUE", "Delete “#{title}” on #{host}?", confirm_label: "delete", danger: true) do
+      @host.confirm("DELETE FINDING", "Delete “#{title}” on #{host}?", confirm_label: "delete", danger: true) do
         # Suppress FIRST: delete's exec_task yields to the store writer, and an
         # in-flight Active/passive fiber can re-upsert the same (code, host) in
         # that window if suppress runs after delete.
@@ -622,7 +632,7 @@ module Gori::Tui
     # `c`: toggle dismiss (open ↔ false-positive) on the open/selected issue.
     def probe_dismiss : Nil
       # A group row is every host of one check: dismissing it is "dismiss all with this code".
-      return probe_dismiss_code if @probe.group_selected?
+      return probe_dismiss_group if @probe.group_selected?
       return unless @probe.target_issue
       was_st = @probe.toggle_dismiss(@host.session.store)
       return @host.status("finding no longer exists") unless was_st
@@ -652,6 +662,26 @@ module Gori::Tui
     # group from the cursor at answer time then dismissed every open issue sharing the OTHER
     # issue's code — and the toast took its count from the re-resolved issue and its code from
     # the prompt, so one sentence reported two different groups.
+    # `c` on a group row: the hosts the row stands for, and nothing else. `dismiss_open_by_code`
+    # ignores the `/` query and the closed lens, so it muted hosts the row did not show and
+    # could never re-open a dismissed group. The ids are captured before the confirm, for the
+    # reason `probe_dismiss_code` gives below. Any open member → dismiss the open ones; none
+    # open (show-closed) → re-open them all.
+    private def probe_dismiss_group : Nil
+      return unless (members = @probe.selected_row.try(&.members)) && (code = members.first?.try(&.code))
+      open = members.select(&.status.open?)
+      reopen = open.empty?
+      ids = (reopen ? members : open).map(&.id)
+      verb = reopen ? "re-open" : "dismiss"
+      @host.confirm("DISMISS GROUP", "#{verb.capitalize} #{Gori.plural(ids.size, "finding")} of “#{code}”?",
+        confirm_label: verb, danger: false) do
+        landed = reopen ? Store::Status::Open : Store::Status::FalsePositive
+        n = ids.count { |id| @host.session.store.update_probe_issue_status(id, landed) }
+        @probe.reload(@host.session.store)
+        @host.status("#{reopen ? "re-opened" : "dismissed"} #{Gori.plural(n, "finding")} of “#{code}”")
+      end
+    end
+
     def probe_dismiss_code : Nil
       return unless code = @probe.target_code
       @host.confirm("DISMISS GROUP", "Dismiss all open “#{code}” findings?", confirm_label: "dismiss", danger: false) do
@@ -668,7 +698,7 @@ module Gori::Tui
       @host.confirm("DISMISS GROUP", "Dismiss all open findings on #{host}?", confirm_label: "dismiss", danger: false) do
         n = ProbeController.dismiss_open_by_host(@host.session.store, host)
         @probe.reload(@host.session.store)
-        @host.status("dismissed #{Gori.plural(n, "issue")} on #{host}")
+        @host.status("dismissed #{Gori.plural(n, "finding")} on #{host}")
       end
     end
 

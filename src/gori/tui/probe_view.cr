@@ -268,7 +268,13 @@ module Gori::Tui
         idx = @issues.index { |r| !r.group? && r.issue.id == row.issue.id }
         return idx if idx
       end
-      @issues.index { |r| r.code == row.code } if @grouped
+      return unless @grouped
+      # A host gone from an expanded group (dismissed, deleted): stay on the row that took its
+      # place when that is still one of the group's hosts, as the flat list keeps the index, so
+      # `c c c` walks the hosts instead of landing on the group's dismiss-all.
+      cur = @issues[@selected]?
+      return @selected if row.child? && cur && cur.child? && cur.code == row.code
+      @issues.index { |r| r.code == row.code }
     end
 
     private def scope_active? : Bool
@@ -295,17 +301,16 @@ module Gori::Tui
       @grouped
     end
 
-    # ↵/→/l on a group row: show its hosts, or step onto the first one when they already are.
+    # ↵/→/l on a group row: show its hosts. Already shown: nothing moves — a second click on the
+    # row must not walk the cursor off the row under the pointer; ↓ reaches the hosts.
     # False on any other row, which opens as it always did.
     def expand_selected : Bool
       row = @issues[@selected]?
       return false unless row && row.group?
       if @expanded.add?(row.code)
         rebuild_rows(row)
-      else
-        @selected += 1
+        @preview_scroll = 0
       end
-      @preview_scroll = 0
       true
     end
 
@@ -1006,15 +1011,24 @@ module Gori::Tui
     end
 
     # The right-to-left cluster: status · host · ×N(affected). Returns where the title must stop.
+    # The status a row draws: its own, or the one a group's hosts all share — a mixed group
+    # draws none (expand it to see).
+    private def row_status(row : ProbeRow) : Store::Status?
+      return row.issue.status unless members = row.members
+      statuses = members.map(&.status).uniq!
+      statuses.first if statuses.size == 1
+    end
+
     private def draw_row_cluster(screen : Screen, rect : Rect, row : ProbeRow, y : Int32, bg : Color) : Int32
       issue = row.issue
       rx = rect.right - 1
       # The "open" tag is redundant in the default open-only lens (every visible row is
       # open); show a status tag only once non-open rows can appear (show-closed / status:
       # filter), or when the row itself is non-open.
-      if !row.group? && (@show_closed || !issue.status.open?)
-        st = status_tag(issue.status)
-        screen.text(rx - st.size, y, st, status_color(issue.status), bg)
+      status = row_status(row)
+      if status && (@show_closed || !status.open?)
+        st = status_tag(status)
+        screen.text(rx - st.size, y, st, status_color(status), bg)
         rx -= st.size + 1
       end
       host = row.members.try { |m| "#{m.size} hosts" } || (row.child? ? "" : issue.host)
