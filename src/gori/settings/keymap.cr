@@ -100,6 +100,8 @@ module Gori::Settings
     # v0.1.x called the Miss Ring verbs "pet".
     "pet.toggle"   => "companion.toggle",
     "settings.pet" => "settings.companion",
+    # Layout merged into the Display section.
+    "settings.layout" => "settings.display",
   }
 
   private def self.parse_keymap_bindings(node : JSON::Any?) : Hash(String, Array(String))

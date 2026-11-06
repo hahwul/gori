@@ -948,10 +948,11 @@ describe Gori::Settings do
     begin
       ENV["GORI_HOME"] = dir
       File.write(Gori::Settings.path,
-        %({"hotkeys":{"os":"auto","bindings":{"pet.toggle":["shift-r"],"settings.pet":["shift-g"]}}}))
+        %({"hotkeys":{"os":"auto","bindings":{"pet.toggle":["shift-r"],"settings.pet":["shift-g"],"settings.layout":["shift-l"]}}}))
       Gori::Settings.load
       Gori::Settings.keymap_overrides["companion.toggle"]?.should eq(["shift-r"])
       Gori::Settings.keymap_overrides["settings.companion"]?.should eq(["shift-g"])
+      Gori::Settings.keymap_overrides["settings.display"]?.should eq(["shift-l"]) # Layout merged into Display
       Gori::Settings.keymap_overrides.has_key?("pet.toggle").should be_false
 
       # A file carrying both keeps the current id's binding, not the legacy one.
