@@ -285,8 +285,8 @@ describe "RepeaterView#chrome_hit" do
     req = Rect.new(content.x, content.y, half, content.h)
 
     # RESPONSE chips start at resp.x + 12; the live diff chord is two display cells.
-    diff_label = " #{Gori::Hotkeys.binding_label(Gori::Verbs.registry, "repeater.toggle-diff", "⇧D")}:diff "
-    hex_label = " #{Gori::Hotkeys.binding_label(Gori::Verbs.registry, "repeater.toggle-resp-hex", "^X")}:hex "
+    diff_label = " #{Gori::Hotkeys.binding_label(Gori::Verbs.registry, "repeater.toggle-diff", "⇧D")}:DIFF "
+    hex_label = " #{Gori::Hotkeys.binding_label(Gori::Verbs.registry, "repeater.toggle-resp-hex", "^X")}:HEX "
     view.chrome_hit(rect, resp.x + 12, resp.y).should eq(:diff)
     view.chrome_hit(rect, resp.x + 12 + Screen.draw_width(diff_label) + 1, resp.y).should eq(:hex)
     view.chrome_hit(rect, resp.x + 12 + Screen.draw_width(diff_label) + 1 + Screen.draw_width(hex_label) + 1, resp.y).should eq(:pretty)

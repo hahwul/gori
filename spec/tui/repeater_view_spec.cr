@@ -84,13 +84,13 @@ describe Gori::Tui::RepeaterView do
     raw = MemoryBackend.new(120, 20)
     view.render(Screen.new(raw), Rect.new(0, 0, 120, 20))
     raw.contains?("\\u003c\\u200b").should be_true
-    raw.contains?("u:decode").should be_true
+    raw.contains?("u:DECODE").should be_true
 
     view.toggle_unicode_decoding
     decoded = MemoryBackend.new(120, 20)
     view.render(Screen.new(decoded), Rect.new(0, 0, 120, 20))
     decoded.contains?("<⟨ZWSP⟩").should be_true
-    decoded.contains?("u:wire").should be_true
+    decoded.contains?("u:WIRE").should be_true
     decoded.contains?("2 escapes").should be_true
   end
 
@@ -119,8 +119,8 @@ describe Gori::Tui::RepeaterView do
       view.load_blank
       backend = MemoryBackend.new(120, 20)
       view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
-      backend.contains?("⇧E:diff").should be_true
-      backend.contains?("d:diff").should be_false
+      backend.contains?("⇧E:DIFF").should be_true
+      backend.contains?("d:DIFF").should be_false
       backend.contains?("not sent yet").should be_true
       backend.contains?("press ⌥R to send").should be_true
       backend.contains?("resend").should be_false
@@ -343,8 +343,8 @@ describe Gori::Tui::RepeaterView do
     backend.contains?("PONG").should be_true
     # plain response mode: the diff toggle chip is inactive (muted), not lit — the
     # pane no longer carries a separate "response" chip (it's titled RESPONSE).
-    ry = (0...20).find { |y| backend.row(y).includes?("⇧D:diff") }.not_nil!
-    dx = backend.row(ry).index("diff").not_nil!
+    ry = (0...20).find { |y| backend.row(y).includes?("⇧D:DIFF") }.not_nil!
+    dx = backend.row(ry).index("DIFF").not_nil!
     backend.fg_at(dx, ry).should eq(Theme.muted) # diff segment inactive
   end
 
@@ -401,8 +401,8 @@ describe Gori::Tui::RepeaterView do
       view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
       backend.contains?("NEW").should be_true
       # response view kept — the diff toggle was NOT auto-opened (muted, inactive)
-      ry = (0...20).find { |y| backend.row(y).includes?("⇧D:diff") }.not_nil!
-      dx = backend.row(ry).index("diff").not_nil!
+      ry = (0...20).find { |y| backend.row(y).includes?("⇧D:DIFF") }.not_nil!
+      dx = backend.row(ry).index("DIFF").not_nil!
       backend.fg_at(dx, ry).should eq(Theme.muted) # diff tab NOT auto-opened
     end
   end
@@ -421,8 +421,8 @@ describe Gori::Tui::RepeaterView do
     view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
     backend.contains?("repeater error: connection refused").should be_true
     # fell back to the response view — the diff toggle is inactive (muted)
-    ry = (0...20).find { |y| backend.row(y).includes?("⇧D:diff") }.not_nil!
-    dx = backend.row(ry).index("diff").not_nil!
+    ry = (0...20).find { |y| backend.row(y).includes?("⇧D:DIFF") }.not_nil!
+    dx = backend.row(ry).index("DIFF").not_nil!
     backend.fg_at(dx, ry).should eq(Theme.muted)
   end
 
