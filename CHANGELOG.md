@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Probe: a check seen on several hosts is one row with its host count, expanded with `Enter`; `Space` → `Z` → **Group by check** turns it off, and the TUI now calls Probe's results findings (#1820)
+- Sitemap: a folder chain with one child at each step draws as one row, like `api/v3/orgs/…/items` (#1820)
+- Settings: Display and Layout are one **Display** section with lists, message panes and window subheaders; settings.json is unchanged (#1820)
+- Fuzzer: the Advanced popup groups its rows under engine, match, filter, stop, wire and macro (#1820)
+- Repeater: `Space` → **Protocol…** lists the WebSocket and gRPC rows only on those tabs, and the response pane's chips are upper-case like the request's (#1820)
 - TUI, MCP: a long session no longer holds memory for finished Discover runs, a filtered History's timestamps and CACHE signals, or deleted projects' agent questions (#1819)
 - Proxy: TLS stays in userspace when the system OpenSSL turns on kernel TLS, which made idle pooled connections read as closed and resets as a clean EOF (#1812)
 - Repeater: `Space` → **Past sends…** lists what a tab has sent and puts the tab back to one, request and response (#1808)
