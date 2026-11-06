@@ -55,6 +55,7 @@ module Gori
       {:compare_pane, 't'},
       {:fold_unchanged, 'z'},
       {:show_all, 'a'},
+      {:group_by_check, 'C'}, # Probe: one row per check seen on several hosts
     ], sticky: true)
 
     # "Protocol…" (`P`) holds the per-request transport settings of the Repeater and the

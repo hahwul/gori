@@ -74,6 +74,14 @@ describe "Gori::Verbs.register_probe" do
       r["probe.toggle-closed"].menu_key.should be_nil
     end
 
+    it "lists Group by check under Display…, menu-only, and folds a group on ←/h" do
+      r.menu_keys("probe.toggle-group").should eq(['Z', 'C'])
+      r["probe.toggle-group"].chords.should be_empty
+      verb_intents(r, "probe.toggle-group").should eq([:probe_toggle_group])
+      r["probe.collapse"].chords.should eq([typed_chord("left"), typed_chord("h")])
+      verb_intents(r, "probe.collapse").should eq([:probe_collapse])
+    end
+
     it "keeps the BULK dismissals menu-only, so no stray key mutes a whole host" do
       %w[probe.dismiss-code probe.dismiss-host probe.active-rescan].each do |id|
         r[id].chords.should be_empty

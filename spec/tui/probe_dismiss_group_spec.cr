@@ -44,6 +44,7 @@ describe "Probe bulk dismiss (group captured at confirm-open time)" do
       seed(store, "missing_csp", "z.test", Gori::Store::Severity::Medium)
 
       view = Gori::Tui::ProbeView.new
+      view.toggle_grouped # the flat list, where the cursor drift below lives
       view.reload(store)
       # What the operator saw in the prompt: `Dismiss all open "missing_csp" issues?`
       captured = view.target_issue.not_nil!.code
@@ -74,6 +75,7 @@ describe "Probe bulk dismiss (group captured at confirm-open time)" do
       seed(store, "missing_hsts", "y.test", Gori::Store::Severity::High)
 
       view = Gori::Tui::ProbeView.new
+      view.toggle_grouped # the flat list, where the cursor drift below lives
       view.reload(store)
       captured = view.target_issue.not_nil!.host
       captured.should eq("x.test")
@@ -98,6 +100,7 @@ describe "Probe bulk dismiss (group captured at confirm-open time)" do
       seed(store, "missing_hsts", "c.test", Gori::Store::Severity::Medium)
 
       view = Gori::Tui::ProbeView.new
+      view.toggle_grouped # the flat list, where the cursor drift below lives
       view.reload(store)
       captured = view.target_issue.not_nil!.code
 

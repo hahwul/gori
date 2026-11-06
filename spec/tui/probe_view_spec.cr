@@ -202,6 +202,7 @@ describe Gori::Tui::ProbeView do
       scope.active?.should be_false # configured but not enabled yet
 
       view = Gori::Tui::ProbeView.new
+      view.toggle_grouped # flat, so each host is drawn by name
       view.set_scope(scope)
       view.reload(store)
       view.empty?.should be_false

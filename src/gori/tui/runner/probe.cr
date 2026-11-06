@@ -7,6 +7,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   forward probe_open : Nil,
     probe_close : Nil,
+    probe_collapse : Nil,
+    probe_toggle_group : Nil,
     to: probe_controller
 
   # `⇧N`/`⇧P` in the drill-in — the next/previous finding, in place.
@@ -124,6 +126,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   # Probe findings list → the selected issue's sample flow (re-test the evidence in place).
   def probe_active_rescan : Nil
+    return if probe_controller.refuse_group?
     return (@toast = "select a finding first") unless probe_controller.view.target_issue
     return unless i = probe_target_now
     fid = i.sample_flow_id
@@ -166,6 +169,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # id the clear has since handed to a DIFFERENT capture. nil with nothing targeted, and nil
   # with a toast when the row is gone.
   private def probe_target_now : Store::ProbeIssue?
+    # A group row is several findings: name the way to one rather than act on any of them.
+    return nil if probe_controller.refuse_group?
     return nil unless probe_controller.view.target_issue
     issue = probe_controller.view.fresh_target_issue(@session.store)
     @toast = "finding no longer exists" unless issue

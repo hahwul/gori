@@ -363,6 +363,7 @@ and stays out of both cards.
 | `m` · `v` · `G` | Fuzzer: matched only · distribution · group by shape | `t` | TLS fingerprint |
 | `t` · `z` | Comparer: requests/responses · fold unchanged | `o` · `b` | WebSocket live session · Engine.IO heartbeat |
 | `a` | Show all: Probe's closed issues, the Params tab's standard headers | | |
+| `C` | Probe: group by check (on by default) | | |
 
 Both cards are **sticky**. After a row runs, the card comes back at the same row, so you can
 flip two or three settings in one visit, and each row shows its state: `●` on, `○` off, or a

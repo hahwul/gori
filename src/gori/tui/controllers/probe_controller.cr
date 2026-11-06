@@ -56,10 +56,12 @@ module Gori::Tui
       @probe.detail_open? ? Verb::Scope::ProbeDetail : Verb::Scope::Probe
     end
 
-    # Display…'s row (#1295): whether dismissed and promoted issues are listed too.
+    # Display…'s rows (#1295): whether dismissed and promoted issues are listed too, and
+    # whether a check seen on several hosts folds into one row.
     def menu_state(verb_id : String) : String?
       case verb_id
       when "probe.toggle-closed" then SpaceMenu.on_off(@probe.show_closed?)
+      when "probe.toggle-group"  then SpaceMenu.on_off(@probe.grouped?)
       end
     end
 
@@ -445,10 +447,10 @@ module Gori::Tui
     # stale tail the diff will not repair, but a row whose contents merely changed cannot.
     def refresh_from_store : Bool
       store = @host.session.store
-      before = @probe.row_count
+      before = @probe.list_size
       @probe.reload(store)
       @rules.reload(store)
-      @probe.row_count != before
+      @probe.list_size != before
     end
 
     # The live-refresh paths — the IssueEvent drain and the Runner's per-tick
@@ -541,8 +543,29 @@ module Gori::Tui
       @probe.move(delta)
     end
 
+    # ↵ on a group row expands it; on a finding it opens the detail.
     def probe_open : Nil
+      return if @probe.expand_selected
       @probe.open_detail(@host.session.store)
+    end
+
+    # ←/h on a group row or one of its hosts: fold the group.
+    def probe_collapse : Nil
+      @probe.collapse_selected
+    end
+
+    # Display… → Group by check.
+    def probe_toggle_group : Nil
+      on = @probe.toggle_grouped
+      @host.status(on ? "grouping findings by check" : "one row per finding")
+    end
+
+    # A single-finding action on a GROUP row would have to pick one of its hosts at random, so
+    # it refuses with the way forward instead. True when it refused.
+    def refuse_group? : Bool
+      return false if rules_tab? || !@probe.group_selected?
+      @host.status("expand the group and pick a host")
+      true
     end
 
     def probe_close : Nil
@@ -560,14 +583,15 @@ module Gori::Tui
       target = here + delta
       return if target < 0 || target >= @probe.row_count
       desc = @probe.desc_focused?
-      # `select_index`, not `move`: `move` routes to the PREVIEW pane whenever that side holds
-      # focus, and its focus survives opening the detail. A step would scroll a hidden pane.
-      @probe.select_index(target)
-      probe_open
+      # Not `move`: `move` routes to the PREVIEW pane whenever that side holds focus, and its
+      # focus survives opening the detail. A step would scroll a hidden pane. By FINDING, not
+      # list row: a group row is not something the detail can show.
+      @probe.open_finding(@host.session.store, target)
       @probe.focus_desc! if desc
     end
 
     def probe_delete : Nil
+      return if refuse_group?
       return unless i = @probe.target_issue
       # Capture the id/code/host NOW: the confirm resolves on a later tick, and a background
       # probe_generation reload can shift the selection in between — so both the suppress and
@@ -597,6 +621,8 @@ module Gori::Tui
 
     # `c`: toggle dismiss (open ↔ false-positive) on the open/selected issue.
     def probe_dismiss : Nil
+      # A group row is every host of one check: dismissing it is "dismiss all with this code".
+      return probe_dismiss_code if @probe.group_selected?
       return unless @probe.target_issue
       was_st = @probe.toggle_dismiss(@host.session.store)
       return @host.status("finding no longer exists") unless was_st
@@ -627,8 +653,7 @@ module Gori::Tui
     # issue's code — and the toast took its count from the re-resolved issue and its code from
     # the prompt, so one sentence reported two different groups.
     def probe_dismiss_code : Nil
-      return unless i = @probe.target_issue
-      code = i.code
+      return unless code = @probe.target_code
       @host.confirm("DISMISS GROUP", "Dismiss all open “#{code}” findings?", confirm_label: "dismiss", danger: false) do
         n = ProbeController.dismiss_open_by_code(@host.session.store, @host.session.scope, code)
         @probe.reload(@host.session.store)
@@ -637,6 +662,7 @@ module Gori::Tui
     end
 
     def probe_dismiss_host : Nil
+      return if refuse_group?
       return unless i = @probe.target_issue
       host = i.host
       @host.confirm("DISMISS GROUP", "Dismiss all open findings on #{host}?", confirm_label: "dismiss", danger: false) do
@@ -944,15 +970,20 @@ module Gori::Tui
       @probe.detail_clear_selection
     end
 
+    # A finding OR a group row — both copy (`probe_copy`).
     def probe_issue_selected? : Bool
-      !rules_tab? && !@probe.detail_open? && !@probe.selected_issue.nil?
+      !rules_tab? && !@probe.detail_open? && !@probe.selected_row.nil?
     end
 
     # `y` wherever the tab is: the detail's URLs when the detail is open, else the issue row
     # under the cursor as a report line with its affected URLs beneath (#964's shape).
     def probe_copy : Nil
       return probe_detail_copy if probe_detail_readable?
-      return unless @probe.selected_issue && probe_issue_selected?
+      return unless probe_issue_selected?
+      if members = @probe.selected_row.try(&.members)
+        # A group: one report line per host, the shape a single row's head line has.
+        return copy_text(members.join('\n') { |m| "[#{m.severity}] #{m.title} · #{m.host}" }, "finding group")
+      end
       # The list row carries only the URL COUNT; the copy wants the URLs, read fresh by id.
       return @host.status("finding no longer exists") unless issue = @probe.fresh_target_issue(@host.session.store)
       head = "[#{issue.severity}] #{issue.title} · #{issue.host}"

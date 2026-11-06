@@ -130,6 +130,9 @@ describe "toggle-family row state (#1274 WP9)" do
       probe.menu_state("probe.toggle-closed").should eq("off")
       probe.probe_toggle_closed
       probe.menu_state("probe.toggle-closed").should eq("on")
+      probe.menu_state("probe.toggle-group").should eq("on") # grouped by default
+      probe.probe_toggle_group
+      probe.menu_state("probe.toggle-group").should eq("off")
 
       target = TargetController.new(host)
       target.jump_subtab(TargetController::SUBS.index("Params").not_nil!)

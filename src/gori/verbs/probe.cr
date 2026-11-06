@@ -50,6 +50,16 @@ module Gori
         "probe.toggle-closed", "Show closed", "Toggle between open-only and all findings (incl. dismissed)",
         Verb::Scope::Probe, [Verb::Chord.new("a")], group: :view, intent: :show_all) { |ctx| ctx.probe_toggle_closed; nil }
 
+      # Display… → fold a check that fired on several hosts into one row; ↵/→ expands it and
+      # ←/h folds it again. Menu-only: a view lens, like the scope toggle below.
+      r.register Verb::Definition.new(
+        "probe.toggle-group", "Group by check", "Fold a check that fired on several hosts into one row",
+        Verb::Scope::Probe, [] of Verb::Chord, group: :view, intent: :group_by_check) { |ctx| ctx.probe_toggle_group; nil }
+
+      r.register Verb::Definition.new(
+        "probe.collapse", "Collapse group", "Fold the group the cursor is on", Verb::Scope::Probe,
+        [Verb::Chord.new("left"), Verb::Chord.new("h")], hidden: true) { |ctx| ctx.probe_collapse; nil }
+
       # Toggle the scope lens from Probe too (the lens key itself is the Global `s`; Sitemap
       # mirrors it). scope_toggle_lens reloads the active Probe list, and the bar shows
       # the `s scope` chip — so the toggle is reachable where its effect is visible.
