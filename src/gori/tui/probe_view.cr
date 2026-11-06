@@ -99,7 +99,7 @@ module Gori::Tui
       @show_closed = false # default lens: open issues only (triaged ones drop out of view)
       @scope = nil.as(Scope?)
       @pre_scope_empty = false
-      # settings:layout Probe issue preview (list page bottom pane)
+      # settings:layout Probe finding preview (list page bottom pane)
       @preview_scroll = 0
       @preview_focus = :list # :list | :preview
       # code → description for custom-rule findings, so the detail pane shows the rule's own
@@ -932,19 +932,19 @@ module Gori::Tui
         lead = if u = unknown_query_field
                  FilterAst.unknown_field_note(u)
                else
-                 "no issues match"
+                 "no findings match"
                end
         msg = "#{lead} · #{@querying ? "esc clears the filter" : "/ to edit the filter"}"
         screen.text(rect.x + 1, top, msg, Theme.muted, width: w)
       elsif @pre_scope_empty && !@all.empty? && !@show_closed
-        screen.text(rect.x + 1, top, "no open issues · all #{@all.size} triaged · press a to show closed",
+        screen.text(rect.x + 1, top, "no open findings · all #{@all.size} triaged · press a to show closed",
           Theme.muted, width: w)
       elsif scope_active?
-        screen.text(rect.x + 1, top, "no issues in scope · s clears the scope lens", Theme.muted, width: w)
+        screen.text(rect.x + 1, top, "no findings in scope · s clears the scope lens", Theme.muted, width: w)
       else
         TrafficEmptyState.render(screen, list_rect, variant: :probe, listen: listen,
           capturing: capturing, scan_on: !@mode.off?,
-          title: @mode.off? ? "scanning is OFF" : "no issues yet")
+          title: @mode.off? ? "scanning is OFF" : "no findings yet")
       end
     end
 

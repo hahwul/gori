@@ -51,7 +51,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       navigate_link_ref(Store::LinkRefKind::Repeater, rid)
       return
     end
-    @toast = "this issue has no sample evidence"
+    @toast = "this finding has no sample evidence"
   end
 
   # ↵ on the AFFECTED URLS list: open the flow THAT url was captured on, which for a group of
@@ -62,7 +62,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # per-URL flow id — so the row is resolved through the store by URL, narrowed by the issue's
   # own host (the group is keyed by (code, host), so every URL on the list is on it).
   def probe_open_affected : Nil
-    return (@toast = "open an issue first") unless issue = probe_controller.view.detail_issue
+    return (@toast = "open a finding first") unless issue = probe_controller.view.detail_issue
     return (@toast = "no affected URL selected") unless url = probe_controller.probe_affected_url
     # The sample flow's METHOD, so a group that fired on `GET /v1/me` cannot open the `POST`
     # to the same URL — see Store#flow_id_for_url, which ranks on it first.
@@ -102,7 +102,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       navigate_link_ref(Store::LinkRefKind::Repeater, rid)
       return
     end
-    @toast = "this issue has no sample evidence"
+    @toast = "this finding has no sample evidence"
   end
 
   # History list / open detail → the selected (or open) flow, or every MARKED flow (#442).
@@ -124,10 +124,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   # Probe findings list → the selected issue's sample flow (re-test the evidence in place).
   def probe_active_rescan : Nil
-    return (@toast = "select an issue first") unless probe_controller.view.target_issue
+    return (@toast = "select a finding first") unless probe_controller.view.target_issue
     return unless i = probe_target_now
     fid = i.sample_flow_id
-    return (@toast = "this issue has no captured flow to re-scan") unless fid
+    return (@toast = "this finding has no captured flow to re-scan") unless fid
     detail = @session.store.get_flow(fid)
     return (@toast = "evidence no longer captured (pruned)") unless detail
     open_probe_active_overlay(detail)
@@ -168,7 +168,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   private def probe_target_now : Store::ProbeIssue?
     return nil unless probe_controller.view.target_issue
     issue = probe_controller.view.fresh_target_issue(@session.store)
-    @toast = "issue no longer exists" unless issue
+    @toast = "finding no longer exists" unless issue
     issue
   end
 

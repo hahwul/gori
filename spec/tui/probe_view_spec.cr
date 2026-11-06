@@ -127,7 +127,7 @@ describe Gori::Tui::ProbeView do
   end
 
   # The other half of the same signal: once the query is committed and the list is empty, the
-  # muted paint is gone from view and "no issues match" is all that is left — the same words a
+  # muted paint is gone from view and "no findings match" is all that is left — the same words a
   # correct query with no findings earns.
   it "names a misspelled filter field in the empty-state" do
     view_store do |store|
@@ -236,7 +236,7 @@ describe Gori::Tui::ProbeView do
       b = MemoryBackend.new(80, 20)
       view.render(Gori::Tui::Screen.new(b), Gori::Tui::Rect.new(0, 0, 80, 20))
       rows = (0...20).map { |y| b.row(y) }.join("\n")
-      rows.should contain("no issues in scope")
+      rows.should contain("no findings in scope")
       rows.should contain("s clears the scope lens")
     end
   end

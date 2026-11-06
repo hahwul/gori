@@ -578,7 +578,7 @@ module Gori::Tui
         # in-flight Active/passive fiber can re-upsert the same (code, host) in
         # that window if suppress runs after delete.
         @host.session.probe.suppress(code, host)
-        @host.status("delete NOT applied (project busy) — the issue is unchanged") unless @probe.delete_by_id(@host.session.store, id)
+        @host.status("delete NOT applied (project busy) — the finding is unchanged") unless @probe.delete_by_id(@host.session.store, id)
       end
     end
 
@@ -588,7 +588,7 @@ module Gori::Tui
       # that, and an advertised key that answers with nothing at all reads as a key that
       # failed. `activity_clear` says the same thing for the same reason.
       return @host.status("probe: nothing to clear") if @probe.empty?
-      @host.confirm("CLEAR ISSUES", "Delete ALL Probe issues for this project?\nThis can't be undone.",
+      @host.confirm("CLEAR FINDINGS", "Delete ALL Probe findings for this project?\nThis can't be undone.",
         confirm_label: "clear", danger: true) do
         @probe.clear(@host.session.store)
         @host.session.probe.clear_suppressions
@@ -599,18 +599,18 @@ module Gori::Tui
     def probe_dismiss : Nil
       return unless @probe.target_issue
       was_st = @probe.toggle_dismiss(@host.session.store)
-      return @host.status("issue no longer exists") unless was_st
+      return @host.status("finding no longer exists") unless was_st
       was, st = was_st
-      return @host.status("dismiss NOT applied (project busy) — the issue is unchanged") if st == was
+      return @host.status("dismiss NOT applied (project busy) — the finding is unchanged") if st == was
       # A synchronous user action → transient toast (the list updates in place too),
       # matching the rest of the app; the notification center is for async events.
-      @host.status(st.open? ? "issue re-opened" : "issue dismissed")
+      @host.status(st.open? ? "finding re-opened" : "finding dismissed")
     end
 
     # `a`: flip the open-only ⇄ show-closed lens.
     def probe_toggle_closed : Nil
       showing = @probe.toggle_show_closed
-      @host.status(showing ? "showing closed issues" : "showing open issues only")
+      @host.status(showing ? "showing closed findings" : "showing open findings only")
     end
 
     # Space-menu bulk actions: mute every OPEN issue sharing the targeted issue's code / host
@@ -629,17 +629,17 @@ module Gori::Tui
     def probe_dismiss_code : Nil
       return unless i = @probe.target_issue
       code = i.code
-      @host.confirm("DISMISS GROUP", "Dismiss all open “#{code}” issues?", confirm_label: "dismiss", danger: false) do
+      @host.confirm("DISMISS GROUP", "Dismiss all open “#{code}” findings?", confirm_label: "dismiss", danger: false) do
         n = ProbeController.dismiss_open_by_code(@host.session.store, @host.session.scope, code)
         @probe.reload(@host.session.store)
-        @host.status("dismissed #{n} \"#{code}\" issue#{n == 1 ? "" : "s"}")
+        @host.status("dismissed #{n} \"#{code}\" finding#{n == 1 ? "" : "s"}")
       end
     end
 
     def probe_dismiss_host : Nil
       return unless i = @probe.target_issue
       host = i.host
-      @host.confirm("DISMISS GROUP", "Dismiss all open issues on #{host}?", confirm_label: "dismiss", danger: false) do
+      @host.confirm("DISMISS GROUP", "Dismiss all open findings on #{host}?", confirm_label: "dismiss", danger: false) do
         n = ProbeController.dismiss_open_by_host(@host.session.store, host)
         @probe.reload(@host.session.store)
         @host.status("dismissed #{Gori.plural(n, "issue")} on #{host}")
@@ -954,9 +954,9 @@ module Gori::Tui
       return probe_detail_copy if probe_detail_readable?
       return unless @probe.selected_issue && probe_issue_selected?
       # The list row carries only the URL COUNT; the copy wants the URLs, read fresh by id.
-      return @host.status("issue no longer exists") unless issue = @probe.fresh_target_issue(@host.session.store)
+      return @host.status("finding no longer exists") unless issue = @probe.fresh_target_issue(@host.session.store)
       head = "[#{issue.severity}] #{issue.title} · #{issue.host}"
-      copy_text(issue.affected.empty? ? head : "#{head}\n#{issue.affected.join('\n')}", "issue")
+      copy_text(issue.affected.empty? ? head : "#{head}\n#{issue.affected.join('\n')}", "finding")
     end
 
     # `y`: the selected URLs, or every affected URL when nothing is selected. This list IS the

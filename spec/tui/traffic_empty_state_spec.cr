@@ -203,7 +203,7 @@ describe Gori::Tui::TrafficEmptyState do
     rect = Rect.new(0, 0, 60, 12)
     TrafficEmptyState.render(Screen.new(backend), rect,
       variant: :probe, listen: {"127.0.0.1", 8070}, capturing: true, scan_on: true)
-    backend.contains?("no issues yet").should be_true
+    backend.contains?("no findings yet").should be_true
     backend.contains?("PROBE").should be_true
     backend.contains?("scan").should be_true
     backend.contains?("m:MODE").should be_true

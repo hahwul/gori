@@ -9,28 +9,28 @@ module Gori
     def self.register_probe(r : Verb::Registry) : Nil
       # --- list (Verb::Scope::Probe) ---
       r.register Verb::Definition.new(
-        "probe.down", "Select next issue", "Move down", Verb::Scope::Probe,
+        "probe.down", "Select next finding", "Move down", Verb::Scope::Probe,
         [Verb::Chord.new("down"), Verb::Chord.new("j")], hidden: true) { |ctx| ctx.probe_move(1); nil }
 
       r.register Verb::Definition.new(
-        "probe.up", "Select previous issue", "Move up", Verb::Scope::Probe,
+        "probe.up", "Select previous finding", "Move up", Verb::Scope::Probe,
         [Verb::Chord.new("up"), Verb::Chord.new("k")], hidden: true) { |ctx| ctx.probe_move(-1); nil }
 
       # open carries an explicit 'v' mnemonic — its primary chord is enter/l, which would
       # otherwise front the space menu with the unintuitive 'l'. 'o' is the MENU letter of
       # open-evidence (parity with the detail scope); its chord is `s`, see below.
       r.register Verb::Definition.new(
-        "probe.open", "Open issue", "View the selected issue's detail", Verb::Scope::Probe,
+        "probe.open", "Open finding", "View the selected finding's detail", Verb::Scope::Probe,
         [Verb::Chord.new("enter"), Verb::Chord.new("l"), Verb::Chord.new("right")], mnemonic: 'v', group: :view) { |ctx| ctx.probe_open; nil }
 
       r.register Verb::Definition.new(
-        "probe.filter", "Filter issues", "Filter the list (severity:/status:/category:/host:/code:/free text)",
+        "probe.filter", "Filter findings", "Filter the list (severity:/status:/category:/host:/code:/free text)",
         Verb::Scope::Probe, [Verb::Chord.new("/")], group: :view, intent: :filter) { |ctx| ctx.probe_query; nil }
 
       # `y` on the LIST (#964's shape): the issue as a report line with its affected URLs
       # under it. The detail scope's own `y` copies the selected affected URLs.
       r.register Verb::Definition.new(
-        "probe.copy-issue", "Copy issue", "Copy the selected issue (severity, title, host) and its affected URLs",
+        "probe.copy-issue", "Copy finding", "Copy the selected finding (severity, title, host) and its affected URLs",
         Verb::Scope::Probe, [Verb::Chord.new("y")],
         available: ->(ctx : Verb::ExecContext) { ctx.probe_issue_selected? }, intent: :copy) { |ctx| ctx.read_copy; nil }
 
@@ -43,18 +43,18 @@ module Gori
       # `c`: one-key dismiss for the selected row (open ⇄ false-positive). The high-value
       # triage action; mutes recurring noise so it drops out of the default open-only lens.
       r.register Verb::Definition.new(
-        "probe.dismiss-selected", "Dismiss issue", "Toggle dismiss (false-positive ⇄ open) on the selected issue",
+        "probe.dismiss-selected", "Dismiss finding", "Toggle dismiss (false-positive ⇄ open) on the selected finding",
         Verb::Scope::Probe, [Verb::Chord.new("c")], group: :triage) { |ctx| ctx.probe_dismiss; nil }
 
       r.register Verb::Definition.new(
-        "probe.toggle-closed", "Show closed", "Toggle between open-only and all issues (incl. dismissed)",
+        "probe.toggle-closed", "Show closed", "Toggle between open-only and all findings (incl. dismissed)",
         Verb::Scope::Probe, [Verb::Chord.new("a")], group: :view, intent: :show_all) { |ctx| ctx.probe_toggle_closed; nil }
 
       # Toggle the scope lens from Probe too (the lens key itself is the Global `s`; Sitemap
       # mirrors it). scope_toggle_lens reloads the active Probe list, and the bar shows
       # the `s scope` chip — so the toggle is reachable where its effect is visible.
       r.register Verb::Definition.new(
-        "probe.scope-toggle", "Toggle scope lens", "Filter issues to in-scope hosts on/off",
+        "probe.scope-toggle", "Toggle scope lens", "Filter findings to in-scope hosts on/off",
         Verb::Scope::Probe, [] of Verb::Chord, intent: :scope_lens, group: :scope) { |ctx| ctx.scope_toggle_lens; nil } # the Global `s` is the key
 
       # Bulk dismiss — space-menu only (mnemonic, no stray hotkey): mute a whole check
@@ -62,11 +62,11 @@ module Gori
       # (parity with the detail scope). Capitals: the bulk forms of `c`'s one-issue dismiss,
       # and `h` is a navigation letter inside the menu (#1274).
       r.register Verb::Definition.new(
-        "probe.dismiss-code", "Dismiss all with this code", "Mute every open issue sharing the selected issue's check code",
+        "probe.dismiss-code", "Dismiss all with this code", "Mute every open finding sharing the selected finding's check code",
         Verb::Scope::Probe, mnemonic: 'G', group: :triage) { |ctx| ctx.probe_dismiss_code; nil }
 
       r.register Verb::Definition.new(
-        "probe.dismiss-host", "Dismiss all on this host", "Mute every open issue on the selected issue's host",
+        "probe.dismiss-host", "Dismiss all on this host", "Mute every open finding on the selected finding's host",
         Verb::Scope::Probe, mnemonic: 'H', group: :triage) { |ctx| ctx.probe_dismiss_host; nil }
 
       # Detail-parity actions on the selected row (no need to drill in first).
@@ -82,25 +82,25 @@ module Gori
       # is visible. The MENU letter stays 'o' — a space-menu letter is its own keyspace, it is
       # reached after `space`, and these letters are stable action identities.
       r.register Verb::Definition.new(
-        "probe.open-evidence", "Go to source", "Open the selected issue's sample flow in History",
+        "probe.open-evidence", "Go to source", "Open the selected finding's sample flow in History",
         Verb::Scope::Probe, [Verb::Chord.new("s")], mnemonic: 'o', group: :view) { |ctx| ctx.probe_open_flow; nil }
 
       r.register Verb::Definition.new(
-        "probe.repeater-evidence", "Repeater evidence", "Send the selected issue's sample flow to Repeater",
+        "probe.repeater-evidence", "Repeater evidence", "Send the selected finding's sample flow to Repeater",
         Verb::Scope::Probe, [Verb::Chord.new("r")], group: :send, intent: :to_repeater, pinned: true) { |ctx| ctx.probe_repeater_flow; nil }
 
       # Re-run the ACTIVE checks against the selected issue's sample flow (menu-only 'A') — opens
       # a confirm with the expected request count. 'a' is toggle-closed; capital 'A' is free.
       r.register Verb::Definition.new(
-        "probe.active-rescan", "Run active scan", "Re-run the Probe active checks against the selected issue's sample flow",
+        "probe.active-rescan", "Run active scan", "Re-run the Probe active checks against the selected finding's sample flow",
         Verb::Scope::Probe, mnemonic: 'A', group: :send) { |ctx| ctx.probe_active_rescan; nil }
 
       r.register Verb::Definition.new(
-        "probe.promote-selected", "Promote to issue", "Create a Issue from the selected issue",
+        "probe.promote-selected", "Promote to issue", "Create an Issue from the selected finding",
         Verb::Scope::Probe, [Verb::Chord.new("p")], group: :triage) { |ctx| ctx.probe_promote; nil }
 
       r.register Verb::Definition.new(
-        "probe.delete-selected", "Delete issue", "Delete the selected issue",
+        "probe.delete-selected", "Delete finding", "Delete the selected finding",
         Verb::Scope::Probe, [Verb::Chord.new("d")], group: :danger, intent: :delete) { |ctx| ctx.probe_delete; nil }
 
       # ⇧X — the one chord every "wipe this tab" verb answers, each in its own scope:
@@ -127,7 +127,7 @@ module Gori
       # typed capital to shift+lowercase, so the capital spelling never fires. `menu_key` skips
       # shift chords, hence the intent's lexicon letter.
       r.register Verb::Definition.new(
-        "probe.clear", "Clear issues", "Delete all Probe issues for this project", Verb::Scope::Probe,
+        "probe.clear", "Clear findings", "Delete all Probe findings for this project", Verb::Scope::Probe,
         [Verb::Chord.new("x", shift: true)],
         intent: :wipe, group: :wipe) { |ctx| ctx.probe_clear; nil }
 
@@ -137,7 +137,7 @@ module Gori
 
       # --- detail (Verb::Scope::ProbeDetail) ---
       r.register Verb::Definition.new(
-        "probe.close", "Back to list", "Return to the issue list", Verb::Scope::ProbeDetail,
+        "probe.close", "Back to list", "Return to the finding list", Verb::Scope::ProbeDetail,
         [Verb::Chord.new("escape"), Verb::Chord.new("left"), Verb::Chord.new("h")], hidden: true) { |ctx| ctx.probe_close; nil }
 
       # ⇧N/⇧P: the next/previous FINDING, without leaving the drill-in. Same spelling as
@@ -184,15 +184,15 @@ module Gori
         Verb::Scope::ProbeDetail, [Verb::Chord.new("r")], intent: :to_repeater, pinned: true) { |ctx| ctx.probe_repeater_flow; nil }
 
       r.register Verb::Definition.new(
-        "probe.promote", "Promote to issue", "Create a Issue from this issue", Verb::Scope::ProbeDetail,
+        "probe.promote", "Promote to issue", "Create an Issue from this finding", Verb::Scope::ProbeDetail,
         [Verb::Chord.new("p")]) { |ctx| ctx.probe_promote; nil }
 
       r.register Verb::Definition.new(
-        "probe.dismiss", "Dismiss issue", "Toggle dismiss (false-positive ⇄ open) on this issue",
+        "probe.dismiss", "Dismiss finding", "Toggle dismiss (false-positive ⇄ open) on this finding",
         Verb::Scope::ProbeDetail, [Verb::Chord.new("c")]) { |ctx| ctx.probe_dismiss; nil }
 
       r.register Verb::Definition.new(
-        "probe.delete", "Delete issue", "Delete this issue", Verb::Scope::ProbeDetail,
+        "probe.delete", "Delete finding", "Delete this finding", Verb::Scope::ProbeDetail,
         [Verb::Chord.new("d")], group: :danger, intent: :delete) { |ctx| ctx.probe_delete; nil }
 
       # --- Rules sub-tab (Verb::Scope::ProbeRules) ---

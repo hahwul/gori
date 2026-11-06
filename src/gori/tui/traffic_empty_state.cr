@@ -135,7 +135,7 @@ module Gori::Tui
       when :repeater          then "no repeater open"
       when :fuzzer            then "no fuzz session open"
       when :fuzzer_results    then running ? "running…" : "no results yet"
-      when :probe             then scan_on ? "no issues yet" : "scanning is OFF"
+      when :probe             then scan_on ? "no findings yet" : "scanning is OFF"
       when :issues            then "no issues yet"
       when :discover          then "no runs yet"
       when :comparer          then "nothing to compare"
