@@ -187,6 +187,7 @@ module Gori
         # Keep status :running until the final batch + summary commit. Project switching is
         # gated by that state, so this ordering prevents the writer from following @store to a
         # different project between the last event and the flush.
+        fjob.release_ordering # first: the engine has returned, and a raise below must not skip it
         finish_fuzz_persistence(fjob, fjob.status == :running ? :error : fjob.status)
         finalize_job(fjob)
       end

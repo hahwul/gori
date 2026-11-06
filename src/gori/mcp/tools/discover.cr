@@ -188,6 +188,7 @@ module Gori
         Log.error(exception: ex) { "discover job #{djob.id} crashed" }
         djob.error_msg ||= ex.message || "internal discover job error"
       ensure
+        djob.release_engine
         finalize_job(djob)
       end
 

@@ -179,6 +179,14 @@ describe "MCP discover reports a budget-capped sweep as incomplete" do
       st = poll_until_done(tools, "discover_status", start["job_id"].as_s, 45)
       st["status"].as_s.should eq("done")
       st["incomplete_reason"].raw.should be_nil
+      # A retained job lets its engine go: up to MAX_JOBS_RETAINED finished crawls otherwise
+      # each keep their frontier and seen sets.
+      job = tools.@discover_jobs[start["job_id"].as_s]
+      deadline = Time.instant + 5.seconds
+      until job.finalized? || Time.instant > deadline
+        sleep 0.01.seconds
+      end
+      job.@engine.should be_nil
     end
   end
 end

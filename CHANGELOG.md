@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- TUI, MCP: a long session no longer holds memory for finished Discover runs, a filtered History's timestamps and CACHE signals, or deleted projects' agent questions (#1819)
 - Proxy: TLS stays in userspace when the system OpenSSL turns on kernel TLS, which made idle pooled connections read as closed and resets as a clean EOF (#1812)
 - Repeater: `Space` → **Past sends…** lists what a tab has sent and puts the tab back to one, request and response (#1808)
 - Decoder: SHA3-256 and SHA3-512 hashes, and `html-encode-all`, which encodes every code point as a numeric entity (#1781, #1782)

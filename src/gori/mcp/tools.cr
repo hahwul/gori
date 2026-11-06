@@ -1121,6 +1121,13 @@ module Gori
           end
         end
 
+        # Once the job is terminal `pageable?` stops reading the mark, so the set is dead weight:
+        # up to FUZZ_MAX_REQUESTS indices on a stalled run, kept for every retained job.
+        # Reassigned, not `clear`ed: Hash#clear keeps its buckets.
+        def release_ordering : Nil
+          @done_ahead = Set(Int64).new
+        end
+
         # Whether `fuzz_results` may page this row now (see `done_prefix`).
         def pageable?(r : Fuzz::Result) : Bool
           status != :running || r.index < @done_prefix
@@ -1343,13 +1350,22 @@ module Gori
         # `results` index → flow id, filled as each batch commits.
         getter flow_ids = {} of Int32 => Int64
 
-        def initialize(id : String, @engine : Discover::Engine, audit : JobAudit,
+        # Nil once the run ends: a retained job keeps its results, and only `halt` reads the
+        # engine (frontier, seen sets, clusters), which is a no-op on a finished crawl.
+        @engine : Discover::Engine?
+
+        def initialize(id : String, engine : Discover::Engine, audit : JobAudit,
                        db_path : String? = nil)
+          @engine = engine
           super(id, audit, db_path)
         end
 
+        def release_engine : Nil
+          @engine = nil
+        end
+
         private def halt : Nil
-          @engine.stop
+          @engine.try(&.stop)
         end
       end
 
