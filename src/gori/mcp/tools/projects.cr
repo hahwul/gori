@@ -450,6 +450,8 @@ module Gori
         slug = reg.slug_of(proj)
         reg.delete(proj) # raises Gori::Error if another instance holds the capture lock
         @delete_tokens.delete(token)
+        # Kept across a switch so a switch back can still expire them; a deleted project has no back.
+        @asked_questions.reject! { |(path, _), _| path == proj.db_path }
         Result.new({deleted: true, name: proj.name, id: id, slug: slug, db_path: proj.db_path}.to_json)
       end
 

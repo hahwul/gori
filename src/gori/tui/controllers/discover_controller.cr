@@ -503,7 +503,11 @@ module Gori::Tui
                        :done
                      end
         finish_job(run, ev)
+        # A finished row stays for the session; its engine (frontier, seen sets, clusters) is
+        # only needed to stop/pause a live crawl, so let it go.
+        run.engine = nil
       when Discover::ErrorEvent
+        run.engine = nil
         run.status = :error
         run.error_msg = ev.message
         @host.jobs.finish(run.job_id, :error, ev.message)

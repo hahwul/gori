@@ -702,7 +702,9 @@ module Gori::Tui
       values = @columns.values(detail, count)
       # This fetch already has the detail in hand, so derive the CACHE column's signal from the
       # SAME read rather than letting `cache_status_for` open a second one for the same row
-      # (#1247). `||=` so a signal already memoised (a narrower earlier frame) is kept.
+      # (#1247). `||=` so a signal already memoised (a narrower earlier frame) is kept. Bounded
+      # like `cache_status_for`'s insert, which only runs while the CACHE column is shown.
+      @cache_memo.clear if @cache_memo.size >= COL_CACHE_MAX
       @cache_memo[key] ||= Gori::CacheStatus.classify(detail.response_head)
       # A bound the window itself cannot reach: MAX_ROWS is 5000 and the cache only ever gains a
       # row that was drawn, so this fires on a long session of scrolling rather than on a
@@ -3504,10 +3506,13 @@ module Gori::Tui
     # function of now and has to be recomputed each frame (it is `Fmt.ago`, cheap).
     private def fmt_time_memo(created_at : Int64, short : Bool = false) : String
       return fmt_time(created_at) if Settings.history_time_format == "relative"
-      if short
-        return @short_time_memo.fetch(created_at) { @short_time_memo[created_at] = fmt_time(created_at, true) }
+      memo = short ? @short_time_memo : @time_memo
+      memo.fetch(created_at) do
+        # Bounded HERE, at the insert: `trim_window` runs only on the unfiltered live append, so
+        # a filtered History (a Scope lens alone is one) would otherwise keep a string per flow.
+        memo.clear if memo.size > @max_rows
+        memo[created_at] = fmt_time(created_at, short)
       end
-      @time_memo.fetch(created_at) { @time_memo[created_at] = fmt_time(created_at) }
     end
 
     # Does the full-width TIME leave the row too little for HOST+PATH plus the built-in
@@ -4417,8 +4422,6 @@ module Gori::Tui
       # otherwise accumulate an entry per flow ever seen. Cleared rather than pruned per dropped
       # id: it refills from a screenful of rows on the next frame.
       @color_memo.clear if @color_memo.size > @max_rows
-      @time_memo.clear if @time_memo.size > @max_rows
-      @short_time_memo.clear if @short_time_memo.size > @max_rows
       @path_memo.clear if @path_memo.size > @max_rows
     end
 
