@@ -45,7 +45,7 @@ describe "MCP frozen evidence" do
 
       full = mcp_ok_json(tools, "get_evidence", %({"id":#{eid}}))
       full["request_head"].as_s.should start_with("POST /login HTTP/1.1")
-      full["response_head"].as_s.should contain("Set-Cookie: [REDACTED]")
+      full["response_head"].as_s.should contain("Set-Cookie: sid=[REDACTED]")
       full["sensitive_headers_redacted"].as_bool.should be_true # get_flow's own flag, same contract
       full["response_body"]["text"].as_s.should eq("welcome")
       raw = mcp_ok_json(tools, "get_evidence", %({"id":#{eid},"include_sensitive":true,"body_mode":"none"}))

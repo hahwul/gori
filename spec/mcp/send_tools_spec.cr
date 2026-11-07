@@ -133,7 +133,7 @@ describe Gori::MCP::Server do
         resp["result"]["isError"].as_bool.should be_false
         payload = mcp_tool_payload(resp)
         flow_id = payload["recorded_flow_id"].as_i64
-        payload["headers"].as_a.find { |header| header["name"].as_s == "Set-Cookie" }.not_nil!["value"].as_s.should eq("[REDACTED]")
+        payload["headers"].as_a.find { |header| header["name"].as_s == "Set-Cookie" }.not_nil!["value"].as_s.should eq("session=[REDACTED]")
         payload["sensitive_headers_redacted"].as_bool.should be_true
         detail = store.get_flow(flow_id).not_nil!
         detail.row.target.should eq("/audit")

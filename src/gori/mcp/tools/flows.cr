@@ -460,7 +460,7 @@ module Gori
         values = prepared.row_values(store, row.id, matcher)
         prepared.columns.map_with_index do |c, i|
           v = values[i]? || ""
-          v = "[REDACTED]" if !include_sensitive && !v.empty? && Gori::DisplayColumns.sensitive?(c)
+          v = Gori::DisplayColumns.redacted(c, v) if !include_sensitive && !v.empty? && Gori::DisplayColumns.sensitive?(c)
           {c.label, v}
         end
       end
@@ -980,7 +980,7 @@ module Gori
           s.field "hide_static", boolprop("omit static assets (images, fonts, audio/video; never svg/css/js or status >= 400); = QL `-static:true`")
           s.field "strict", boolprop("refuse a query with an invalid term (else it is dropped, BROADENING the result, and named in `ignored_terms`; ql_explain previews which would drop)")
           s.field "lenient", boolprop("free-text an unknown `field:` instead of refusing (a typo then matches nothing, like an empty project)")
-          s.field "columns", strarrprop("extract a value from each flow onto the row's `columns`. Spec [LABEL=][req|res:]kind:selector, kind cookie|header|regex|position|jsonpath, e.g. \"req:header:authorization\", \"RID=jsonpath:data.id\"; side defaults to response. \"\" is a MISS, not an empty value. Sensitive header/cookie columns read \"[REDACTED]\" unless include_sensitive. Each costs a read per row (body kinds up to 512 KiB)")
+          s.field "columns", strarrprop("extract a value from each flow onto the row's `columns`. Spec [LABEL=][req|res:]kind:selector, kind header|cookie (the head; header = its last value) or regex|position|jsonpath (the BODY only), e.g. \"req:header:authorization\", \"RID=jsonpath:data.id\"; side defaults to response. \"\" is a MISS, not an empty value. Sensitive header/cookie columns read \"[REDACTED]\" unless include_sensitive (a set-cookie header keeps its attributes). Each costs a read per row (body kinds up to 512 KiB)")
           s.field "include_sensitive", boolprop("unredact sensitive `columns`")
           s.field "count_only", boolprop("return only {count} of matching flows; refuses `ids`/`before_id`/`since`/`columns`")
           s.field "sort", enumprop("rank instead of newest-first: the top `limit` matches by duration or response size, no cursor", HISTORY_SORTS)

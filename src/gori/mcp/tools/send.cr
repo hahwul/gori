@@ -1150,7 +1150,7 @@ module Gori
                     j.object do
                       j.field "name", Serialize.text(header.name)
                       if sensitive
-                        j.field "value", "[REDACTED]"
+                        j.field "value", Redact.redacted_value(header.name, header.value)
                       else
                         # The BODY already had a base64 fallback for bytes JSON cannot carry;
                         # a header value did not, so an 8-bit byte here came back as `�` and
