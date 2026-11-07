@@ -61,17 +61,17 @@ class Gori::Tui::RepeaterView
   end
 
   # The request card's title says WHAT this card is in the pane it sits in. WHICH transport
-  # `^R` will dial is the TARGET band's ` ^V:… ` chip, in one place, on every tab.
+  # `^R` will dial is the TARGET band's transport chip, in one place, on every tab.
   #
   # Both facts used to live here — "HANDSHAKE (h1)", "REQUEST (h2)" — because nothing else on
   # screen carried the transport. That cost the card up to five columns of title, and the
   # badge chain measures its left stop from the title: at 100 columns (a 49-wide request
-  # column) an h2 tab pushed its own ` ↵:READ ` chip past `min_x` and drew no mode chip at all.
+  # column) an h2 tab pushed its own ` READ ` chip past `min_x` and drew no mode chip at all.
   #
   # An overridden handshake tab is titled REQUEST, not HANDSHAKE: `^R` sends it as an
   # ordinary request and reads a response, the MESSAGES pane is gone, and the card is one
   # card again — it IS a request pane. That the request happens to be an upgrade handshake is
-  # the ` ^V:WS→h1 ` chip's line, and the bytes' own.
+  # the ` WS→HTTP/1.1 ` chip's line, and the bytes' own.
   private def render_request_label : String
     return "HANDSHAKE REQUEST" if ws_mode? # one of TWO cards here — MESSAGES is the other
     return "GRPC REQUEST" if @grpc_mode
@@ -88,35 +88,35 @@ class Gori::Tui::RepeaterView
     right_edge = rect.right - 1     # leave the right border cell untouched
     # Primary action rides the REQUEST border (discoverable without the footer chord):
     # rightmost, a gold button while idle, recessed while a send is in flight.
-    send_edge = Frame.action_badge(screen, right_edge, rect.y, min_x, key_label("repeater.send", "^R"), "SEND", !@inflight)
+    send_edge = Frame.action_badge(screen, right_edge, rect.y, min_x, "SEND", !@inflight)
     if @grpc_mode # head as text; a unary call's payload is hex-editable (^X → MSG/HEX)
-      # `␣Pr:FRAME` chains left of the hex chip and is drawn in BOTH halves of this branch,
+      # ` FRAME ` chains left of the hex chip and is drawn in BOTH halves of this branch,
       # because the state it reports matters most exactly while the payload is being hex-edited:
       # off, the five captured length bytes go out in front of the edited payload. Drawn only
       # where it is live (`grpc_reframable?`) — the same condition `chrome_hit` lists it under.
       if h = @req_hex_edit
-        hex_edge = Frame.toggle_badge(screen, send_edge, rect.y, min_x, key_label("repeater.toggle-hex", "^X"), "HEX", true)
-        hex_edge = Frame.toggle_badge(screen, hex_edge, rect.y, min_x, menu_chip("repeater.toggle-grpc-reframe"), "FRAME", @grpc_reframe) if @grpc_reframable
-        # `␣Pf:FIELDS` chains left of FRAME in every state it is available in, for the same
+        hex_edge = Frame.toggle_badge(screen, send_edge, rect.y, min_x, "HEX", true)
+        hex_edge = Frame.toggle_badge(screen, hex_edge, rect.y, min_x, "FRAME", @grpc_reframe) if @grpc_reframable
+        # ` FIELDS ` chains left of FRAME in every state it is available in, for the same
         # reason FRAME is drawn in both hex states: the operator has to be able to SEE that a
         # typed editor exists over the bytes they are currently overtyping (#828).
-        Frame.toggle_badge(screen, hex_edge, rect.y, min_x, menu_chip("repeater.toggle-grpc-fields"), "FIELDS", false) if grpc_fields_available?
+        Frame.toggle_badge(screen, hex_edge, rect.y, min_x, "FIELDS", false) if grpc_fields_available?
         @scroll_req = h.render(screen, rect.inset(1, 1), focused, @scroll_req)
       elsif @grpc_fields
         # The FIELDS form replaces the head editor the way the hex buffer does — one pane,
         # one editor, and `␣Pf` is the way back to the head.
         fields_edge = send_edge
-        fields_edge = Frame.toggle_badge(screen, fields_edge, rect.y, min_x, key_label("repeater.toggle-hex", "^X"), "MSG", false) if @grpc_reframable
-        fields_edge = Frame.toggle_badge(screen, fields_edge, rect.y, min_x, menu_chip("repeater.toggle-grpc-reframe"), "FRAME", @grpc_reframe) if @grpc_reframable
-        Frame.toggle_badge(screen, fields_edge, rect.y, min_x, menu_chip("repeater.toggle-grpc-fields"), "FIELDS", true)
+        fields_edge = Frame.toggle_badge(screen, fields_edge, rect.y, min_x, "MSG", false) if @grpc_reframable
+        fields_edge = Frame.toggle_badge(screen, fields_edge, rect.y, min_x, "FRAME", @grpc_reframe) if @grpc_reframable
+        Frame.toggle_badge(screen, fields_edge, rect.y, min_x, "FIELDS", true)
         render_grpc_fields(screen, rect.inset(1, 1), focused)
       else
         msg_edge = send_edge
         if @grpc_reframable
-          msg_edge = Frame.toggle_badge(screen, send_edge, rect.y, min_x, key_label("repeater.toggle-hex", "^X"), "MSG", false)
-          msg_edge = Frame.toggle_badge(screen, msg_edge, rect.y, min_x, menu_chip("repeater.toggle-grpc-reframe"), "FRAME", @grpc_reframe)
+          msg_edge = Frame.toggle_badge(screen, send_edge, rect.y, min_x, "MSG", false)
+          msg_edge = Frame.toggle_badge(screen, msg_edge, rect.y, min_x, "FRAME", @grpc_reframe)
         end
-        msg_edge = Frame.toggle_badge(screen, msg_edge, rect.y, min_x, menu_chip("repeater.toggle-grpc-fields"), "FIELDS", false) if grpc_fields_available?
+        msg_edge = Frame.toggle_badge(screen, msg_edge, rect.y, min_x, "FIELDS", false) if grpc_fields_available?
         # The gRPC head is a mode-switched text editor like every other non-hex request card
         # (`i`/esc, READ selection, and — since the read chrome landed here — a visible NORMAL
         # caret), so it carries the chip too. It was skipped while its READ caret was invisible;
@@ -135,25 +135,26 @@ class Gori::Tui::RepeaterView
       # editor is NOT the key on the wire — which is worth a badge on its own, because the
       # pane otherwise reads as byte-exact. ON sends the block as written.
       #
-      # The NOR/INS chip chains left of it, over the SAME badge list `chrome_hit` measures
+      # The READ/INS chip chains left of it, over the SAME badge list `chrome_hit` measures
       # (`ws_badges`), so the click and the draw agree about where each one sits. Without it
       # the WS handshake was the one editor pane in the tree whose input mode was not on
       # screen anywhere — and the pane it belongs to is a `restore`-lands-in-READ tab.
       Frame.mode_badge(screen, Frame.right_badge_edge(right_edge, min_x, ws_badges), rect.y, min_x, request_insert?)
-      Frame.toggle_badge(screen, send_edge, rect.y, min_x, menu_chip("repeater.toggle-ws-key"), "KEY", @ws_keep_key)
+      Frame.toggle_badge(screen, send_edge, rect.y, min_x, "KEY", @ws_keep_key)
       @editor.conceal_spans = [] of {Int32, Int32} # WS messages aren't §-marker HTTP text — no stale concealment
       @editor.chain_peek_text = nil
       render_plain_request_editor(screen, rect.inset(1, 1), focused, ins)
       return
     end
     if h = @req_hex_edit
-      Frame.toggle_badge(screen, send_edge, rect.y, min_x, key_label("repeater.toggle-hex", "^X"), "HEX", true)
+      Frame.toggle_badge(screen, send_edge, rect.y, min_x, "HEX", true)
       @scroll_req = h.render(screen, rect.inset(1, 1), focused, @scroll_req)
       return
     end
-    cl_x = Frame.toggle_badge(screen, send_edge, rect.y, min_x, key_label("repeater.toggle-auto-content-length", "^L"), cl_badge_name(min_x, right_edge), @auto_content_length)
-    mode_x = Frame.toggle_badge(screen, cl_x, rect.y, min_x, key_label("repeater.pretty-request", "^U"), "PRETTY", false)
-    mark_x = Frame.mode_badge(screen, mode_x, rect.y, min_x, request_insert?) # the REAL mode — see Frame.mode_badge
+    # No PRETTY badge beside it any more: prettifying the request is an action with no state
+    # to report, so the chip was a key hint dressed as a toggle. `^U` is in the pane's footer.
+    cl_x = Frame.toggle_badge(screen, send_edge, rect.y, min_x, cl_badge_name(min_x, right_edge), @auto_content_length)
+    mark_x = Frame.mode_badge(screen, cl_x, rect.y, min_x, request_insert?) # the REAL mode — see Frame.mode_badge
     # The INERT half only. `literal_markers?` is a state nothing else on screen shows: the
     # `§` in this buffer are the capture's own bytes, they will go out verbatim, and `^T`
     # is what declares them markers instead — a warning with its own escape hatch, which is
@@ -168,7 +169,7 @@ class Gori::Tui::RepeaterView
     # SAML/GraphQL tab `^T` switches ENVELOPE ⇄ DECODED instead of inserting a §, so a badge
     # reading `^T:MARK` there names a key that does something else entirely.
     if !decode_mode? && literal_markers?
-      Frame.toggle_badge(screen, mark_x, rect.y, min_x, key_label("repeater.toggle-decoded", "^T"), "MARK", false)
+      Frame.toggle_badge(screen, mark_x, rect.y, min_x, "MARK", false)
     end
     update_request_marker_tint
     render_plain_request_editor(screen, rect.inset(1, 1), focused, ins)

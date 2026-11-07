@@ -580,8 +580,7 @@ module Gori::Tui
       # No border TITLE — see MinerView#render_summary: the tab bar and the sub-tab strip above
       # already name this tab. SAMPLES/ANALYSIS below keep theirs; those name panes.
       Frame.card(screen, rect, border: focused ? Theme.focus_gold : Theme.border, bg: Theme.bg)
-      chord, name = @running ? {"^X", "STOP"} : {"^R", "RUN"}
-      Frame.toggle_badge(screen, rect.right - 1, rect.y, rect.x + 2, chord, name, @running)
+      Frame.toggle_badge(screen, rect.right - 1, rect.y, rect.x + 2, @running ? "STOP" : "RUN", @running)
       x = rect.x + 2
       y = rect.y + 1
       # Guarded like every line below it: on a 1-2 row card `rect.y + 1` is the bottom
@@ -882,15 +881,14 @@ module Gori::Tui
       @sel
     end
 
-    # Hit-test the SEQUENCER card's run control — same dress as the Repeater's ` ^R:SEND `
-    # and the Fuzzer's ` ^R:RUN `, which both answer a click. Mirrors render_config.
+    # Hit-test the SEQUENCER card's run control — same dress as the Repeater's ` SEND `
+    # and the Fuzzer's ` RUN `, which both answer a click. Mirrors render_config.
     def config_chrome_hit(rect : Rect, mx : Int32, my : Int32) : Symbol?
       return nil if @focus == :detail
       cfg, _, _ = pane_rects(rect)
       return nil if cfg.empty?
-      chord, name = @running ? {"^X", "STOP"} : {"^R", "RUN"}
       Frame.right_badge_hit(mx, my, cfg.y, cfg.right - 1, cfg.x + 2,
-        [{:run, chord, name}] of {Symbol, String, String})
+        [{:run, @running ? "STOP" : "RUN"}] of {Symbol, String})
     end
   end
 end

@@ -157,10 +157,10 @@ describe "RepeaterView WebSocket transport override" do
     b = draw.call(http)
     b.contains?("HANDSHAKE").should be_false # not a handshake pane any more — a request pane
     b.row(rect.y + 3).should contain("REQUEST")
-    b.row(rect.y).should contain("^V:WS→HTTP/1.1") # …and the band is what says it was a handshake
-    b.row(rect.y + 3).should contain("↵:READ")     # the request card keeps its mode chip at 100 cols
+    b.row(rect.y).should contain(" WS→HTTP/1.1 ") # …and the band is what says it was a handshake
+    b.row(rect.y + 3).should contain(" READ ")    # the request card keeps its mode chip at 100 cols
 
     http.cycle_ws_transport # → h2
-    draw.call(http).row(rect.y).should contain("^V:WS→HTTP/2")
+    draw.call(http).row(rect.y).should contain(" WS→HTTP/2 ")
   end
 end

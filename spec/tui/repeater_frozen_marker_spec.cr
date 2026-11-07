@@ -41,14 +41,14 @@ describe "RepeaterView's frozen-evidence marker" do
     backend.fg_at(border.index!("frozen ×2"), y).should eq(Theme.syn_header)
   end
 
-  it "is dropped whole when it would run into the chips, like the ⚠ — never truncated" do
+  it "is dropped whole when it would run into the title, like the ⚠ — never truncated" do
     view = RepeaterView.new
     view.load_blank
     view.frozen_count = 1
     view.apply(Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, "PONG".to_slice, nil, 1000_i64))
-    # A 120-column terminal gives RESPONSE ~60 columns: chips + latency leave no room.
-    backend = MemoryBackend.new(120, 20)
-    view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
+    # A 60-column terminal gives RESPONSE ~30 columns: the title and the latency leave no room.
+    backend = MemoryBackend.new(60, 20)
+    view.render(Screen.new(backend), Rect.new(0, 0, 60, 20))
     rows(backend, 20).any?(&.includes?("frozen")).should be_false
   end
 end

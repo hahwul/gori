@@ -59,11 +59,11 @@ module Gori::Tui
     def render_decode(screen : Screen, rect : Rect, *, input : TextArea, input_mode : InputMode,
                       input_read : TextReadState, decoded : String, attacks : Array(Jwt::Attack),
                       input_jwe : Bool = false,
-                      pane : Symbol, focused : Bool, lens_chord : String) : Nil
+                      pane : Symbol, focused : Bool) : Nil
       return if rect.empty?
       input_c, dec_c, atk_c = decode_layout(rect)
 
-      render_input(screen, input_c, input, focused && pane == :input, input_mode, input_read, lens_chord) unless input_c.empty?
+      render_input(screen, input_c, input, focused && pane == :input, input_mode, input_read) unless input_c.empty?
       unless dec_c.empty?
         lines = decoded_lines(decoded)
         @dec_lines = lines.size
@@ -75,15 +75,14 @@ module Gori::Tui
     # ===================== ENCODE lens =====================
     def render_encode(screen : Screen, rect : Rect, *, header : TextArea, payload : TextArea,
                       secret : String, secret_cx : Int32, secret_pre : String, alg : String,
-                      output : String, output_ok : Bool, pane : Symbol, focused : Bool,
-                      lens_chord : String) : Nil
+                      output : String, output_ok : Bool, pane : Symbol, focused : Bool) : Nil
       return if rect.empty?
       hdr_c, pay_c, sec_c, out_c = encode_layout(rect)
 
       unless hdr_c.empty?
         render_json_editor(screen, hdr_c, "HEADER", header, focused && pane == :header)
         # HEADER is this lens' top card, so it carries the way back — see draw_lens_chip.
-        draw_lens_chip(screen, hdr_c, :encode, lens_chord)
+        draw_lens_chip(screen, hdr_c, :encode)
       end
       render_json_editor(screen, pay_c, "PAYLOAD", payload, focused && pane == :payload) unless pay_c.empty?
       render_secret(screen, sec_c, secret, secret_cx, secret_pre, alg, focused && pane == :secret) unless sec_c.empty?
@@ -126,8 +125,7 @@ module Gori::Tui
       pem = Gori::Jwt::Asym.alg?(alg)
       Frame.card(screen, card, pem ? "KEY" : "SECRET", bg: Theme.bg, border: Frame.pane_border(active))
       # ` ^A:ALG ` badge (cycled by jwt.cycle-alg) — lit when a real key matters.
-      Frame.toggle_badge(screen, card.right - 1, card.y, card.x + 9,
-        key_label("jwt.cycle-alg", "^A"), alg, alg != "none")
+      Frame.toggle_badge(screen, card.right - 1, card.y, card.x + 9, alg, alg != "none")
       c = card.inset(1, 1)
       return if c.h <= 0
       screen.text(c.x, c.y, "› ", Theme.accent, Theme.bg)
@@ -235,7 +233,7 @@ module Gori::Tui
     # click; this one, on the sibling tool tab, did not.
     def secret_alg_hit(card : Rect, mx : Int32, my : Int32, alg : String) : Bool
       !Frame.right_badge_hit(mx, my, card.y, card.right - 1, card.x + 9,
-        [{:alg, key_label("jwt.cycle-alg", "^A"), alg}] of {Symbol, String, String}).nil?
+        [{:alg, alg}] of {Symbol, String}).nil?
     end
 
     def attacks_at_top? : Bool

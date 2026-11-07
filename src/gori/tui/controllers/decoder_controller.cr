@@ -384,7 +384,7 @@ module Gori::Tui
       if regions.input.contains?(mx, my)
         s.pane = :input
         @popup.close
-        # NOR/INS border chip toggles insert (same as ↵ / esc); don't move caret.
+        # READ/INS border chip toggles insert (same as ↵ / esc); don't move caret.
         if Frame.mode_badge_hit(mx, my, regions.input.y, regions.input.right - 1,
              regions.input.x + 6, s.input_mode == InputMode::Insert)
           s.input_mode = s.input_mode == InputMode::Insert ? InputMode::Read : InputMode::Insert
@@ -579,12 +579,14 @@ module Gori::Tui
       when :output
         # `^Y` is the same Copy verb as `y` now (it exists so the key survives INS on INPUT),
         # so it is not re-listed here as a second, different action.
-        keys("↑/↓ move · ⇧arrows select · #{y} copy · ^F find · ↑-top chain · space cmds · {decoder.mode} mode · esc sub-tabs")
+        keys("↑/↓ move · #{y} copy · ^F find · ↑-top chain · space cmds · {decoder.mode} mode · esc sub-tabs")
       when :input
         if s.input_mode == InputMode::Insert
-          keys("type to edit · ⇧arrows select · ^Y copy · {editor.find} find · esc read · ↓ chain · {decoder.clear} clear · {decoder.mode} mode · ^N new · ^W close · ↑ sub-tabs")
+          # Seven tokens, the focused pane's own. The strip used to run to eleven and pushed
+          # the CPU/MEM read-out off the row. `^Y copy` stays: a bare `y` is a literal here.
+          keys("type · ^Y copy · ↓ chain · {decoder.mode} mode · {decoder.clear} clear · ^N new · esc read")
         else
-          keys("{editor.insert}/↵ edit · ⇧arrows select · #{y} copy · {editor.find} find · space cmds · ↓/↹ chain · {decoder.mode} mode · ^N new · esc sub-tabs")
+          keys("{editor.insert}/↵ edit · {editor.find} find · ↓/↹ chain · {decoder.mode} mode · ^N new · space cmds · esc sub-tabs")
         end
       else
         ""

@@ -58,12 +58,9 @@ describe "the editor keyset, from the surfaces" do
       rep.repeater_new
       rep.current_view.not_nil!.focus_pane(:request)
       with_keyset("helix") { rep.body_hint(:body).should contain("i/↵ edit") }
-      with_keyset("vim") do
-        hint = rep.body_hint(:body)
-        hint.should contain("i/↵ edit") # `i` is vim's letter too
-        hint.should contain("u undo")   # …and ^Z is not
-        hint.should contain("/ find")
-      end
+      with_keyset("vim") { rep.body_hint(:body).should contain("i/↵ edit") } # `i` is vim's letter too
+      # The keyset's respelling of find (`^F` → `/`) is read off the Notes footer below: the
+      # Repeater's request strip no longer lists find or undo (seven tokens, the pane's own).
 
       host.tab = :notes
       notes = Gori::Tui::NotesController.new(host)

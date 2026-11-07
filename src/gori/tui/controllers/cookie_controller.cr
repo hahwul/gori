@@ -112,7 +112,7 @@ module Gori::Tui
           salt_preset: salt_preset_label(s),
           verify_state: s.verify_state, crack_note: s.crack_note,
           secret: s.secret, secret_cx: s.secret_cx, secret_pre: s.secret_pre,
-          pane: s.pane, focused: focused, lens_chord: lens_chord)
+          pane: s.pane, focused: focused)
       else
         s.view.render_forge(screen, body,
           payload: s.payload, format: display_format(s), resolved_format: effective_format(s),
@@ -120,7 +120,7 @@ module Gori::Tui
           salt_preset: salt_preset_label(s),
           secret: s.secret, secret_cx: s.secret_cx, secret_pre: s.secret_pre,
           output: s.output, output_ok: s.output_ok?,
-          pane: s.pane, focused: focused, lens_chord: lens_chord)
+          pane: s.pane, focused: focused)
       end
     end
 
@@ -211,7 +211,7 @@ module Gori::Tui
         pay_c, opts_c, sec_c, out_c = s.view.forge_layout(body)
         if pay_c.contains?(mx, my)
           enter_pane(s, :payload)
-          if s.view.lens_chip_hit(pay_c, mx, my, :forge, lens_chord)
+          if s.view.lens_chip_hit(pay_c, mx, my, :forge)
             toggle_mode
           else
             s.payload.click_to_cursor(pay_c.inset(1, 1), mx, my)

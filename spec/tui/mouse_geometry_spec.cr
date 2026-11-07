@@ -15,24 +15,24 @@ describe Gori::Tui::Frame do
   # used to `break` out of the loop while its own doc comment claimed "(same as draw)".
   describe ".right_badge_hit" do
     it "skips a badge that does not fit and keeps testing the shorter ones, like the draw" do
-      # ` ^R:SEND ` is 9 cells and ` ^L:CL ` is 7. At a width where SEND cannot be drawn but CL
+      # ` SEND ` is 6 cells and ` CL ` is 4. At a width where SEND cannot be drawn but CL
       # can, CL is on screen — and used to be un-clickable.
-      badges = [{:send, "^R", "SEND"}, {:cl, "^L", "CL"}] of {Symbol, String, String}
+      badges = [{:send, "SEND"}, {:cl, "CL"}] of {Symbol, String}
       right_edge = 20
-      min_x = 13 # SEND would start at 11 (< min_x); CL starts at 13 (fits)
-      Frame.right_badge_hit(14, 0, 0, right_edge, min_x, badges).should eq(:cl)
+      min_x = 16 # SEND would start at 14 (< min_x); CL starts at 16 (fits)
+      Frame.right_badge_hit(17, 0, 0, right_edge, min_x, badges).should eq(:cl)
     end
 
     it "returns the same edge the draw does, so the next badge chains correctly" do
-      badges = [{:send, "^R", "SEND"}, {:cl, "^L", "CL"}] of {Symbol, String, String}
-      # SEND skipped (edge unchanged at 20), CL drawn at 13 → the next badge's edge is 13.
-      Frame.right_badge_edge(20, 13, badges).should eq(13)
+      badges = [{:send, "SEND"}, {:cl, "CL"}] of {Symbol, String}
+      # SEND skipped (edge unchanged at 20), CL drawn at 16 → the next badge's edge is 16.
+      Frame.right_badge_edge(20, 16, badges).should eq(16)
     end
   end
 
   # `Frame.chip` does not clip itself, so a caller that stops drawing at a limit must tell the
-  # hit-test — the Repeater's RESPONSE cluster is half-width and used to run through its own
-  # '╮' on the draw side only.
+  # hit-test — the Repeater's gRPC transcript chip sits on a half-width card and stops at the
+  # latency meta.
   describe ".left_chip_hit" do
     chips = [{:diff, " d:diff "}, {:hex, " ^X:hex "}] of {Symbol, String}
 
@@ -296,7 +296,7 @@ end
 
 # Review findings, each pinned so the fix is a rule rather than a patch.
 describe "code-review fixes" do
-  it "keeps the ^T:MARK badge off a decode split, where ^T means something else" do
+  it "keeps the MARK badge off a decode split, where ^T means something else" do
     # `repeater.toggle-decoded` is context-sensitive: on a SAML/GraphQL tab `^T` switches
     # ENVELOPE ⇄ DECODED instead of inserting a §. `req_split?` routes those through the SAME
     # `render_request`, so the badge was drawn — and clickable — reading `^T:MARK` while the
@@ -306,7 +306,7 @@ describe "code-review fixes" do
     draw = draw_src[/# NOT on a decode split either\..*?end/m].not_nil!
     draw.should contain("!decode_mode?")
     hit_src = File.read(File.join(root, "pointer.cr"))
-    hit = hit_src[/` \^T:MARK ` chains LEFT.*?return :mark/m].not_nil!
+    hit = hit_src[/` MARK ` chains LEFT.*?return :mark/m].not_nil!
     hit.should contain("!decode_mode?")
   end
 

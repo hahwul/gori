@@ -184,7 +184,7 @@ private def body_start(s : String) : Int32
 end
 
 describe Gori::Tui::FuzzerView do
-  it "paints live bindings on the template and results chips" do
+  it "paints the template and results chips without their chords, whatever the bindings" do
     previous = Gori::Settings.keymap_overrides
     begin
       Gori::Settings.keymap_overrides = {
@@ -199,24 +199,25 @@ describe Gori::Tui::FuzzerView do
       rect = Rect.new(0, 0, 120, 34)
       backend = MemoryBackend.new(rect.w, rect.h)
       view.render(Screen.new(backend), rect)
-      backend.contains?("⌥R:RUN").should be_true
-      backend.contains?("⌥P:PRETTY").should be_true
-      backend.contains?("^R:RUN").should be_false
+      backend.contains?(" RUN ").should be_true
+      backend.contains?("⌥R").should be_false
+      backend.contains?("PRETTY").should be_false # an action with no state has no chip
 
       view.append_result(fuzz_result(0, 200, 10))
       view.focus_pane(:results)
       backend = MemoryBackend.new(rect.w, rect.h)
       view.render(Screen.new(backend), rect)
-      backend.contains?("⌥V:DIST").should be_true
-      backend.contains?("⌥M:MATCH").should be_true
-      backend.contains?("⌥O:").should be_true
+      backend.contains?(" DIST ").should be_true
+      backend.contains?(" MATCH ").should be_true
+      backend.contains?("⌥V").should be_false
+      backend.contains?("⌥O").should be_false
     ensure
       Gori::Settings.keymap_overrides = previous
     end
   end
 
   # `fuzz.sort` is a menu row with no chord: bare `o` in RESULTS is unbound.
-  it "names the sort chip's menu route when it has no chord" do
+  it "names the sort order on the RESULTS border as a bare value" do
     view = loaded_fuzzer
     view.set_registry(Gori::Verbs.registry)
     view.append_result(fuzz_result(0, 200, 10))
@@ -224,9 +225,8 @@ describe Gori::Tui::FuzzerView do
     rect = Rect.new(0, 0, 120, 34)
     backend = MemoryBackend.new(rect.w, rect.h)
     view.render(Screen.new(backend), rect)
-    chip = Gori::Hotkeys.menu_chip(Gori::Verbs.registry, "fuzz.sort")
-    backend.contains?("#{chip}:index").should be_true
-    backend.contains?(" o:index").should be_false
+    backend.contains?(" index ").should be_true
+    backend.contains?(":index").should be_false
   end
 
   describe "decoded response detail" do
@@ -836,9 +836,9 @@ describe Gori::Tui::FuzzerView do
       3.times { |i| view.append_result(fuzz_result(i, 200, 1200)) }
       backend = MemoryBackend.new(50, 30)
       view.render(Screen.new(backend), Rect.new(0, 0, 50, 30))
-      # the sidebar CARD (title " DIST ") is gone; the always-on " v:DIST " toggle badge
-      # on the RESULTS border is not the sidebar, so match the spaced card title.
-      backend.contains?(" DIST ").should be_false
+      # the sidebar CARD (title "─ DIST ─") is gone; the always-on " DIST " toggle badge
+      # on the RESULTS border is not the sidebar, so match the card title with its rules.
+      backend.contains?("─ DIST ─").should be_false
       backend.contains?("RESULTS").should be_true
     end
 
@@ -858,8 +858,8 @@ describe Gori::Tui::FuzzerView do
       view.toggle_dist # hide
       backend = MemoryBackend.new(120, 30)
       view.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
-      # sidebar CARD gone; the muted " v:DIST " toggle badge on the RESULTS border remains
-      backend.contains?(" DIST ").should be_false
+      # sidebar CARD gone; the muted " DIST " toggle badge on the RESULTS border remains
+      backend.contains?("─ DIST ─").should be_false
     end
   end
 

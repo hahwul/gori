@@ -2240,7 +2240,7 @@ gori run repeater create --tls-preset chrome …     # store it on the session
 gori run fuzz --flow 42 --auto --tls-preset chrome # the whole sweep, one handshake
 ```
 
-In the TUI it is `␣Pt` on a Repeater tab (a `␣Pt:…` chip on the TARGET band), persisted with the tab so a reopened one sends what it sent before, and the Fuzzer's **TLS fingerprint** row on the `^O` advanced card. Over MCP it is `send_request{tls_preset}` and `fuzz_start{tls_preset}`, both echoed back so a result set says which handshake produced it.
+In the TUI it is `␣Pt` on a Repeater tab (a ` TLS … ` chip on the TARGET band), persisted with the tab so a reopened one sends what it sent before, and the Fuzzer's **TLS fingerprint** row on the `^O` advanced card. Over MCP it is `send_request{tls_preset}` and `fuzz_start{tls_preset}`, both echoed back so a result set says which handshake produced it.
 
 The override **narrows** the destination policy rather than replacing it:
 

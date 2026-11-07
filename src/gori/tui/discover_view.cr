@@ -460,8 +460,8 @@ module Gori::Tui
       end
       # The badge tracks the SELECTED row, which is what ^R/^X act on — so a stopped run
       # selected while another still crawls offers RUN, not STOP.
-      chord, name = r.running? ? {"^X", "STOP"} : {"^R", "RUN"}
-      badge_x = Frame.toggle_badge(screen, rect.right - 1, rect.y, rect.x + RUNS_TITLE.size + 4, chord, name, r.running?)
+      name = r.running? ? "STOP" : "RUN"
+      badge_x = Frame.toggle_badge(screen, rect.right - 1, rect.y, rect.x + RUNS_TITLE.size + 4, name, r.running?)
       # The count rides `border_meta`, not the title, like the FINDINGS card below it: a title
       # that grows a digit moves every `min_x` derived from its width — the run badge's is.
       # AFTER the badge and stopped at its left edge, because this border already carries one
@@ -772,15 +772,14 @@ module Gori::Tui
       nil
     end
 
-    # Hit-test the RUNS card's run control (^R:RUN / ^X:STOP). It tracks the SELECTED row,
+    # Hit-test the RUNS card's run control (RUN / STOP). It tracks the SELECTED row,
     # exactly as render_runs draws it, so the click acts on the run the badge is describing.
     def run_chrome_hit(rect : Rect, mx : Int32, my : Int32) : Symbol?
       r = current || return nil
       card, _ = pane_rects(rect)
       return nil if card.empty?
-      chord, name = r.running? ? {"^X", "STOP"} : {"^R", "RUN"}
       Frame.right_badge_hit(mx, my, card.y, card.right - 1, card.x + RUNS_TITLE.size + 4,
-        [{:run, chord, name}] of {Symbol, String, String})
+        [{:run, r.running? ? "STOP" : "RUN"}] of {Symbol, String})
     end
 
     private def select_run(idx : Int32) : Nil

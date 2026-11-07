@@ -16,8 +16,8 @@ include Gori::Tui
 #      ""; JWT (which paints purely from its read cursor) moved a caret nobody could see.
 #   C. Every READ/INS chip was drawn from `focused && insert?` while its hit-test and its click
 #      handler read `insert?` alone. A pane that retained INS while focus moved away drew the
-#      wider " ↵:READ " chip over a 5-cell " INS " hit rect — dead cells on its left — and clicking a chip
-#      that said "↵:READ" turned insert OFF.
+#      wider " READ " chip over a 5-cell " INS " hit rect — dead cells on its left — and clicking a chip
+#      that said " READ " turned insert OFF.
 #   D. The READ band and block caret measured the RAW line in the two panes that CONCEAL text
 #      (`§value¦chain§`), so both landed N columns right of what they addressed, and the band —
 #      which re-draws its own text — put the hidden `¦chain` back on screen. Copy was correct
@@ -38,10 +38,9 @@ describe "READ-mode chrome + border badge parity" do
       row = b.row(border_y)
 
       # Both are legible and neither is inside the other.
-      row.should contain("↵:READ")
+      row.should contain(" READ ")
       row.should contain("§2")
-      row.index("§2").not_nil!.should be < row.index("↵:READ").not_nil! # count chains LEFT
-      row.should_not contain("↵: §")                                    # the overlap's signature
+      row.index("§2").not_nil!.should be < row.index(" READ ").not_nil! # count chains LEFT
     end
 
     it "keeps the mode chip clickable with the count beside it" do
@@ -51,7 +50,7 @@ describe "READ-mode chrome + border badge parity" do
       rect = Rect.new(0, 0, 120, 30)
       b = MemoryBackend.new(120, 30)
       view.render(Screen.new(b), rect)
-      col = b.row(border_y).index("↵:READ").not_nil!
+      col = b.row(border_y).index(" READ ").not_nil!
       view.template_chrome_hit(rect, col + 1, border_y).should eq(:mode)
     end
   end
@@ -120,7 +119,7 @@ describe "READ-mode chrome + border badge parity" do
       view.render(Screen.new(b), rect)
       row = b.row(border_y)
       row.should contain("INS")
-      row.should_not contain("↵:READ") # the label no longer lies about the mode
+      row.should_not contain(" READ ") # the label no longer lies about the mode
 
       # Every cell of the drawn chip hit-tests as :mode, and the run is exactly " INS " wide.
       hits = (0...120).select { |x| view.chrome_hit(rect, x, border_y) == :mode }

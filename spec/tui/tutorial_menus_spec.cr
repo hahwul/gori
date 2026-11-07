@@ -114,7 +114,7 @@ describe "Gori::Tui::Tutorial mock sub-tab strips" do
     Tour.focus_badge(:menu).should eq("TABS")
     Tour.focus_badge(:strip).should eq("SUBTABS")
     Tour.focus_badge(:body).should eq("BODY")
-    Tour.focus_badge(:body, insert: true).should eq("EDITOR")
+    Tour.focus_badge(:body, insert: true).should eq("INS")
     # The badge's reservation fits its widest word, so the chips never shift under it.
     [:menu, :strip, :body].each do |lvl|
       (Tour.focus_badge(lvl, true).size + 2).should be <= Tour::BADGE_W

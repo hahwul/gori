@@ -42,17 +42,6 @@ private class DetailHost < FakeHost
 end
 
 describe "the core-loop hints" do
-  describe "F17 — the History detail strip names the key that makes a selection" do
-    it "says `x select`, which until now lived only in the space menu" do
-      TuiContract.with_session("hint-f17") do |session|
-        host = DetailHost.new(session)
-        ctl = HistoryController.new(host)
-        ctl.view.set_detail_focus(:body)
-        ctl.body_hint(:body).should contain("x select")
-      end
-    end
-  end
-
   describe "F6 — the History DETAIL strip names the key that leaves for the Repeater" do
     it "says `^R repeater` at BOTH detail levels, where it has always worked" do
       TuiContract.with_session("hint-f6") do |session|
@@ -113,27 +102,6 @@ describe "the core-loop hints" do
     end
   end
 
-  describe "F11 — `y` says WHICH bytes it is about to copy" do
-    it "reads `y copy all` with no selection and `y copy` with one" do
-      TuiContract.with_session("hint-f11") do |session|
-        host = TuiContract::Host.new(session)
-        host.tab = :repeater
-        ctl = RepeaterController.new(host)
-        ctl.repeater_new
-        v = ctl.current_view.not_nil!
-        v.focus_pane(:response)
-        ctl.body_hint(:body).should contain("y copy all")
-
-        v.focus_pane(:request)
-        ctl.select_line # `x` — a band in READ, the state `y` copies
-        ctl.selection_active?.should be_true
-        hint = ctl.body_hint(:body)
-        hint.should contain("y copy")
-        hint.should_not contain("copy all")
-      end
-    end
-  end
-
   describe "F3 — the EDITOR strip leads with the way out" do
     it "puts `esc read` and `↹ text` first, where a 132-column cut cannot reach them" do
       TuiContract.with_session("hint-f3") do |session|
@@ -148,7 +116,7 @@ describe "the core-loop hints" do
         hint.should start_with("esc read · ↹ text ·")
         # …and the tokens that take the `…` are the ones about editing, which is what the
         # hand is already doing.
-        hint.index("esc read").not_nil!.should be < hint.index("^G goto").not_nil!
+        hint.index("esc read").not_nil!.should be < hint.index("^Y copy").not_nil!
       end
     end
   end
@@ -327,18 +295,14 @@ describe "the core-loop hints" do
       end
     end
 
-    it "names ⇧↹ in the pane strips that were the only place the ring was described" do
+    it "names esc's real destination in every pane strip" do
       TuiContract.with_session("ring-f2-hint") do |session|
         host = TuiContract::Host.new(session)
         host.tab = :repeater
         ctl = RepeaterController.new(host)
         ctl.repeater_new
         v = ctl.current_view.not_nil!
-        {:target, :request, :response}.each do |pane|
-          v.focus_pane(pane)
-          ctl.body_hint(:body).should contain("⇧↹ back"), "the #{pane} strip does not name ⇧↹"
-        end
-        # esc is still the way UP, and still says so — `sub-tabs`, because that is where
+        # esc is the way UP, and still says so — `sub-tabs`, because that is where
         # `handle_body_key` sends it once a session exists (the strip is drawn from the
         # first one). This read `esc tabs` and pinned a destination the key never had.
         v.focus_pane(:response)

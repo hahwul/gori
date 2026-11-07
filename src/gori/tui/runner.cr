@@ -3304,20 +3304,30 @@ module Gori::Tui
         when :menu    then "TABS"
         when :subtabs then "SUBTABS"
         else
-          # The controller names its own body state (TabController#body_badge) — the same
-          # answer `body_editor?` reads, asked one level wider so a view-owned drill-in can
-          # say DETAIL too. History's arrives above, off `@overlay`.
-          badge = case @tabs[@active_tab]?.try(&.body_badge)
-                  when :editor then "EDITOR"
-                  when :detail then "DETAIL"
-                  else              "BODY"
-                  end
-          # …and, on a tab whose body is several panes, WHICH pane (TabController#
-          # body_pane_label). The badge is the only always-drawn slot that can answer it.
-          pane = @tabs[@active_tab]?.try(&.body_pane_label)
-          pane ? "#{badge} · #{pane}" : badge
+          body_focus_label(@tabs[@active_tab]?)
         end
       end
+    end
+
+    # The body's own word. The controller names its state (TabController#body_badge) — the
+    # same answer `body_editor?` reads, asked one level wider so a view-owned drill-in can say
+    # DETAIL too (History's arrives in `focus_label`, off `@overlay`).
+    #
+    # On a text pane the badge is the pane's MODE, in the word the pane's own border chip
+    # uses: READ or INS (`TabController#editor_pane?`). EDITOR / BODY stay for the one-line
+    # inputs (a filter bar) and the lists, which have no READ to be in. On a tab whose body is
+    # several panes, WHICH pane comes first (`body_pane_label`), so `TARGET · READ` reads the
+    # way the border does; a pane with no mode to name is the label alone (`RESPONSE`).
+    private def body_focus_label(ctl : TabController?) : String
+      editor = ctl.try(&.editor_pane?) || false
+      badge = case ctl.try(&.body_badge)
+              when :editor then editor ? "INS" : "EDITOR"
+              when :detail then "DETAIL"
+              else              editor ? "READ" : "BODY"
+              end
+      pane = ctl.try(&.body_pane_label)
+      return badge unless pane
+      badge == "BODY" ? pane : "#{pane} · #{badge}"
     end
 
     # Whether the focused body region captures typed characters as text (an

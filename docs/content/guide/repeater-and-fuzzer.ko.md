@@ -292,7 +292,7 @@ gori run fuzz --flow 42 --field role --payloads ROLE_ADMIN,ROLE_USER,99
 `SPEC`은 필드 이름, 중첩 메시지 경로(`profile.age`), 필드 번호, 또는 반복 필드의 특정
 occurrence(`tags[1]`)입니다. 해당 rpc를 해석할 descriptor set(`protoc --descriptor_set_out` 파일이나
 `gori run grpc reflect`로 받아온 것)이 필요합니다. 필드 이름은
-같은 플로우에서 Repeater의 `␣Pf:FIELDS` 폼과 History의 protobuf 트리가 이미 보여 주는 그 이름입니다.
+같은 플로우에서 Repeater의 ` FIELDS ` 폼과 History의 protobuf 트리가 이미 보여 주는 그 이름입니다.
 
 스플라이스가 할 수 있는 일에서 두 가지가 따라옵니다. 필드는 **캡처된 메시지에 실제로 있어야**
 합니다. gori는 occurrence를 교체할 뿐 추가하지 않으므로, 기본값으로 남아 와이어에 없는 proto3

@@ -423,8 +423,8 @@ module Gori::Tui
       msg = catch_on ? "Catch is ON — each matching request waits here until you decide." : "Holds each matching request here until you forward or drop it."
       flow = "request ──► ⏸ held ──► #{go}#{key("f", "intercept.forward")} forward · #{key("d", "intercept.drop")} drop"
       catch_hint = catch_on ? "catch is ON — press to stop holding" : "catch is OFF — press to start holding"
-      direction_chip = body_focused ? " #{key("c", "intercept.direction")}:#{catch_direction} " : " DIR:#{catch_direction} "
-      direction_hint = "#{"#{go}#{key("c", "intercept.direction")}: " unless body_focused}hold requests, responses or both"
+      direction_chip = " DIR #{catch_direction} " # the state alone, as the live bar draws it; `c` is named in the rows below
+      direction_hint = "#{go}#{key("c", "intercept.direction")}: hold requests, responses or both"
       condition = "▸ #{go}#{key("/", "intercept.filter")} condition: only hold matches (host: path:)"
       min_w = [msg, flow, condition, "▸ #{direction_chip}  #{direction_hint}"].max_of { |l| Screen.display_width(l) }
       inner, ix, iw = begin_card(screen, rect, :intercept, headline, "INTERCEPT", inner_h, min_w)
@@ -815,7 +815,7 @@ module Gori::Tui
       screen.text(ix, y, bullet, Theme.muted, bg)
       bx = ix + bullet.size
       # Claimed-family chips (^N/^W/^P) follow the configured modifier; ^R and the
-      # "i:CATCH"-style chips are untouched (retag's token set is closed) — those follow a
+      # "CATCH ON"-style chips are untouched (retag's token set is closed) — those follow a
       # REBIND instead, through `verb`.
       x = Frame.chip(screen, bx, y, Hotkeys.retag(chip_text(chord, verb)), true) + 1
       screen.text(x, y, " #{label}", Theme.text, bg, width: {ix + iw - x, 0}.max)

@@ -998,7 +998,7 @@ module Gori::Tui
     end
 
     # The three doors into the mock's INS mode — the Edit lesson's `i`/↵, the shared shell's
-    # `i`/↵ on the REQUEST pane, and a click on the Edit lesson's NOR/INS chip — spelled the
+    # `i`/↵ on the REQUEST pane, and a click on the Edit lesson's READ/INS chip — spelled the
     # same three lines each. One home, so they cannot disagree about the field.
     private def enter_insert : Nil
       @edit_insert = true
@@ -1033,7 +1033,7 @@ module Gori::Tui
       !chord.ctrl && !chord.alt && !chord.shift && chord.key == ch.to_s
     end
 
-    # The mock REQUEST card's NOR/INS chip, inverted at `render_request_pane`'s own three
+    # The mock REQUEST card's READ/INS chip, inverted at `render_request_pane`'s own three
     # numbers — and behind its own `w < 8 || h < 3` bail — so the live cells are exactly the
     # painted ones, and a card too small to draw a badge cannot answer for one.
     private def edit_badge_hit?(mx : Int32, my : Int32) : Bool
@@ -1444,7 +1444,7 @@ module Gori::Tui
       # lesson's try-it on the way past.
       #
       # What the pointer means here is what it means in the app it is teaching (#1124): a
-      # press on the card's NOR/INS chip toggles the mode, and a press anywhere else places a
+      # press on the card's READ/INS chip toggles the mode, and a press anywhere else places a
       # caret and changes no mode. This card has no caret to place, so the body is inert —
       # which is the honest mock of "a click does not open the editor". The chip that used to
       # be painted and dead is the live cell instead, and the lesson's ask is still `i`.
@@ -2488,12 +2488,13 @@ module Gori::Tui
       end
     end
 
-    # The badge's word per focus level, as the app's reads (EDITOR while INS is on).
+    # The badge's word per focus level, as the app's reads (INS while insert is on — the
+    # tour's body is a text pane, so its badge is the pane's mode, as the Runner's is).
     def self.focus_badge(level : Symbol, insert : Bool = false) : String
       case level
       when :menu  then "TABS"
       when :strip then "SUBTABS"
-      else             insert ? "EDITOR" : "BODY"
+      else             insert ? "INS" : "BODY"
       end
     end
 

@@ -337,7 +337,7 @@ module Gori::Tui
       (v = current_view) ? (v.pane_insert?(v.focus) ? :editor : :body) : :body
     end
 
-    # Which of the three panes the keys are landing in (`BODY · RESPONSE`). This tab is the
+    # Which of the three panes the keys are landing in (`TARGET · READ`, `RESPONSE`). This tab is the
     # reason the seam exists: entering the body restores the LAST-focused pane, so `5 ↵ ↵`
     # lands somewhere the screen did not say, and the number of `↹` presses to reach the
     # response could only be found by pressing one and looking.
@@ -355,13 +355,10 @@ module Gori::Tui
       v = current_view
       return "↹/esc tabs · ^N new" unless v
       reg = @host.session.registry
-      y = Hotkeys.binding_label(reg, "repeater.copy", "y")
-      # `i` (INSERT), `^Z`, `^G` and `^F` are `Scope::Editor` verbs now, so the footer reads
-      # them off the effective keymap like every other key it names — a rebind, or a keyset
-      # that respells the editor family, reaches this strip without a second edit here.
+      # `i` (INSERT) and `^F` are `Scope::Editor` verbs now, so the footer reads them off the
+      # effective keymap like every other key it names — a rebind, or a keyset that respells
+      # the editor family, reaches this strip without a second edit here.
       ins = Hotkeys.binding_label(reg, "editor.insert", "i")
-      undo = Hotkeys.binding_label(reg, "editor.undo", "^Z")
-      goto = Hotkeys.binding_label(reg, "editor.goto-line", "^G")
       find = Hotkeys.binding_label(reg, "editor.find", "^F")
       send = Hotkeys.binding_label(reg, "repeater.send", "^R")
       hex = Hotkeys.binding_label(reg, "repeater.toggle-hex", "^X")
@@ -378,14 +375,15 @@ module Gori::Tui
       word = Hotkeys.binding_label(reg, "repeater.mark-word", "^K")
       point = Hotkeys.binding_label(reg, "repeater.toggle-decoded", "^T")
       marks = "#{params} params · #{word} word · #{point} point"
-      # ^R send lives on the REQUEST border chip (` ^R:SEND `) — not re-listed in the
-      # request-focus footer (discoverability is the border badge; keys still work).
+      # The REQUEST border's ` SEND ` button no longer spells its key, and its PRETTY chip is
+      # gone, so both keys are named here — the footer is where a pane's keys live now.
+      pretty_req = Hotkeys.binding_label(reg, "repeater.pretty-request", "^U")
+      cl = Hotkeys.binding_label(reg, "repeater.toggle-auto-content-length", "^L")
       return "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · #{hex}/esc exit" if v.request_hex?
-      # `y` is one verb with two behaviours — the selection when there is one, the WHOLE pane
-      # when there is not (`Runner#read_copy`) — and the token said "copy" for both, so the
-      # first `y` on an unselected response put 256 bytes on the clipboard and announced
-      # "copied all" after the fact. The strip says which one it is about to be.
-      read_common = "⇧arrows select · #{y} copy#{selection_active? ? "" : " all"} · space cmds"
+      # Selection and copy are not named in a READ strip: they are the same keys in every text
+      # pane, and the space menu lists both (`x Select line`, `y Copy`). Seven tokens is the
+      # budget — a strip past it loses its tail to the CPU/MEM read-out before it loses words.
+      read_common = "space cmds"
       if v.ws_mode?
         # The response column has two cards on a WS tab, so name the card being read and the
         # key that swaps them — the same shape `ws_hint` uses for the request column's two.
@@ -393,19 +391,21 @@ module Gori::Tui
         return ws_hint(v)
       end
       if v.grpc_mode?
-        return v.focus == :response ? "↑/↓ move · #{read_common} · ←/→ char · #{find} find · #{send} send · ↹ pane · ⇧↹ back · esc sub-tabs" : grpc_hint(v)
+        return v.focus == :response ? "↑/↓ move · #{find} find · #{send} send · ↹ pane · #{read_common} · esc sub-tabs" : grpc_hint(v)
       end
       return decode_hint(v) if v.decode_mode? && v.focus == :request
       case v.focus
       when :target
         if v.target_insert?
-          v.editing_sni? ? "type SNI · #{sni}/↵/esc URL · #{send} send" : "type URL · #{sni} SNI · ↵ request · #{send} send · ↹ pane · ⇧↹ back · esc read"
+          v.editing_sni? ? "type SNI · #{sni}/↵/esc URL · #{send} send" : "type URL · #{sni} SNI · ↵ request · #{send} send · ↹ pane · esc read"
         else
-          "#{ins}/↵ edit · #{read_common} · #{sni} SNI · #{send} send · ↹ pane · ⇧↹ back · esc sub-tabs"
+          "#{ins}/↵ edit · #{sni} SNI · #{send} send · ↹ pane · #{read_common} · esc sub-tabs"
         end
       when :response
         nav = v.resp_navigable? ? "↑/↓ move" : "↑/↓ scroll"
-        "#{nav} · #{read_common} · #{diff} diff · ←/→ char · #{hex} hex · #{pretty} pretty · #{find} find · ↵/#{send} send · ↹ pane · ⇧↹ back · esc sub-tabs"
+        # diff/hex/pretty are named here and nowhere else now: the RESPONSE border states
+        # which of them is ON, and no longer carries a keyed chip for each.
+        "#{nav} · #{diff} diff · #{hex} hex · #{pretty} pretty · #{send} send · #{read_common} · esc sub-tabs"
       when :request
         if v.request_insert?
           # `↹ text`, not `↹ pane`: in INSERT, Tab inserts a TAB CHARACTER (handle_editor_tab
@@ -421,14 +421,13 @@ module Gori::Tui
           # past the cut. Every other token here describes editing, which is what the operator
           # is already doing.
           #
-          # `^Z` stays a LITERAL here while READ names `{editor.undo}`: this is the INS ladder's
-          # own guard, which answers before the keymap and is not what a keyset moves.
-          "esc read · ↹ text · type to edit · ⇧arrows select · ^Y copy · ^Z undo · #{marks} · #{goto} goto · #{find} find · #{hex} hex"
+          # Seven tokens: the way out, the copy that survives INS, send, and the marker trio.
+          "esc read · ↹ text · ^Y copy · #{send} send · #{marks}"
         else
           # The way back on an overridden handshake tab: the MESSAGES pane is hidden there, so
           # `^T` — the key that would otherwise reveal it — is not drawn to point at it.
           back = v.ws_http_only? ? keys(" · {repeater.toggle-http2} websocket") : ""
-          "#{ins}/↵ edit · #{read_common} · #{marks} · #{undo} undo · #{goto} goto · #{find} find · #{hex} hex#{back} · ↹ pane · ⇧↹ back · esc sub-tabs"
+          "#{ins}/↵ edit · #{send} send · #{pretty_req} pretty · #{cl} auto-len · #{point} mark#{back} · #{read_common} · esc sub-tabs"
         end
       else
         ""
@@ -450,11 +449,11 @@ module Gori::Tui
         # `↹ text`, not `↹ pane`, for the same reason as well: `editor_captures_tab?` is
         # `request_text_editing?`, which has no gRPC arm, so Tab splices a TAB into the
         # head/metadata. The old token promised a focus move and silently corrupted a header.
-        "esc read · ↹ text · type head/metadata · ⇧arrows select · ^Y copy"
+        "esc read · ↹ text · type head/metadata · ^Y copy"
       else
         msg = v.grpc_reframable? ? "{repeater.toggle-hex} hex-edit payload · " : ""
         fields = v.grpc_fields_available? ? "#{chip("repeater.toggle-grpc-fields")} fields · " : ""
-        keys("i/↵ edit head · #{msg}#{fields}⇧arrows select · {repeater.copy} copy · space cmds · ↹ pane")
+        keys("i/↵ edit head · #{msg}#{fields}space cmds · ↹ pane")
       end
     end
 
@@ -594,13 +593,13 @@ module Gori::Tui
             else
               "GraphQL query/vars"
             end
-      mode = v.request_insert? ? "type to edit · ⇧arrows select · ^Y copy" : "i/↵ edit · ⇧arrows select · {repeater.copy} copy · space cmds"
+      mode = v.request_insert? ? "type · ^Y copy" : "i/↵ edit · space cmds"
       keys("#{mode} #{sub} · {repeater.toggle-decoded} switch · ^G goto · ^F find · esc read · #{tab_token(v)}")
     end
 
     private def ws_hint(v : RepeaterView) : String
       sub = v.req_pane == :envelope ? "handshake request" : "messages"
-      mode = v.request_insert? ? "type to edit · ⇧arrows select · ^Y copy" : "i/↵ edit · ⇧arrows select · {repeater.copy} copy · space cmds"
+      mode = v.request_insert? ? "type · ^Y copy" : "i/↵ edit · space cmds"
       # `^V http` is listed because this key used to REFUSE here ("transport is fixed"), so
       # nothing in the tab suggested a handshake could be sent as an ordinary request.
       keys("#{mode} #{sub} · {repeater.toggle-decoded} switch · {repeater.toggle-http2} http · ^G goto · ^F find · esc read · #{tab_token(v)}")
@@ -621,7 +620,7 @@ module Gori::Tui
     # reachable and nothing said so.
     private def ws_resp_hint(v : RepeaterView, read_common : String, send : String) : String
       card = v.resp_pane == :handshake ? "handshake response" : "transcript"
-      keys("↑/↓ move #{card} · #{read_common} · ←/→ char · {repeater.toggle-decoded} switch · ^F find · #{send} send · ↹ pane · ⇧↹ back · esc sub-tabs")
+      keys("↑/↓ move #{card} · {repeater.toggle-decoded} switch · ^F find · #{send} send · ↹ pane · #{read_common} · esc sub-tabs")
     end
 
     # --- request-pane toggles (keymap-driven verbs; carry the pane-gating + status) ---
@@ -762,7 +761,7 @@ module Gori::Tui
       if view.grpc_mode?
         # A unary gRPC call hex-edits its message PAYLOAD; a 0- or multi-message body has no
         # unambiguous single payload to edit. What happens to the length prefix in front of
-        # that payload is `␣Pr:FRAME`'s answer, not this one — so the toast reads the toggle
+        # that payload is ` FRAME `'s answer, not this one — so the toast reads the toggle
         # rather than promising the recompute it used to be fused with.
         if !view.grpc_reframable?
           @host.status("gRPC hex edit needs a single-message body (this call has #{view.grpc_msg_count}) — sent verbatim")
@@ -2098,7 +2097,7 @@ module Gori::Tui
         # so the clone sends the handshake its source would"), and leaving it out of the INSERT
         # meant the row said "no override" until some later save-on-leave committed: a peer
         # session reconciling the project, `repeater list` and MCP all read nil off the row
-        # while the chip on screen read `␣Pt:chrome`, and a crash before that save lost it.
+        # while the chip on screen read ` TLS chrome `, and a crash before that save lost it.
         tls_preset: view.tls_preset)
       id == 0 ? nil : id
     end

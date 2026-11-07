@@ -102,8 +102,8 @@ describe Gori::Tui::TrafficEmptyState do
     backend.contains?("INTERCEPT").should be_true
     backend.contains?("Holds each matching request here").should be_true
     backend.contains?("catch is OFF — press to start holding").should be_true
-    backend.contains?("c:REQ").should be_true
-    backend.contains?("c:REQ   hold requests, responses or both").should be_true
+    backend.contains?("DIR REQ").should be_true
+    backend.contains?("hold requests, responses or both").should be_true
     backend.contains?("f forward · d drop").should be_true
     backend.contains?("/ condition").should be_true
   end
@@ -117,7 +117,7 @@ describe Gori::Tui::TrafficEmptyState do
         variant: :intercept, capturing: false, catch_on: false, body_focused: false,
         catch_direction: "REQ")
       backend.contains?("focus body").should be_false
-      backend.contains?("DIR:REQ").should be_true
+      backend.contains?("DIR REQ").should be_true
       backend.contains?("c:REQ").should be_false
       backend.contains?("↓ then f forward · d drop").should be_true
       backend.contains?("↓ then c: hold requests, responses or both").should be_true

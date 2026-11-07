@@ -2,43 +2,35 @@
 # visible line, gutter, selection, search), the transcript forms, the whitespace reveal and the
 # diff. Reopens Gori::Tui::RepeaterView (see tui/repeater_view.cr).
 class Gori::Tui::RepeaterView
-  # The RESPONSE pane's top-border chrome: keyed toggle chips + the right-aligned
-  # latency·size of the last send. Each chip carries its shortcut (⇧D DIFF · ^X HEX ·
-  # p PRETTY, upper-case like the REQUEST and TARGET borders' badges beside it) so the
-  # toggle is discoverable in place, and lights when active. Plain response mode needs no
-  # chip of its own — it's simply none of these lit (the pane is already titled RESPONSE).
+  # The RESPONSE pane's top-border chrome: the right-aligned latency·size of the last send,
+  # followed by the views that are ON (`diff`, `hex`, `pretty`, `unicode`). It used to carry a
+  # keyed chip per toggle (` ⇧D:DIFF  ^X:HEX  p:PRETTY `) whether or not it was lit, so a
+  # half-width pane spent twenty cells on keys before saying anything about the response. The
+  # border now states what is showing; the keys are the pane's footer's (`body_hint`).
   private def render_response_chrome(screen : Screen, rect : Rect) : Nil
-    # These chips are LEFT-anchored, and `Frame.chip` does not clip (unlike its sibling
-    # `Frame.toggle_badge`, which draws nothing when it doesn't fit). RESPONSE is a
-    # half-width split pane, so below ~88 cols the cluster ran through this card's own
-    # '╮' corner and on over the outer frame's border. Stop at the first chip that would
-    # cross `limit`; the meta/⚠ read-out after this was already fit-guarded.
-    limit = rect.right - 1 # keep the corner
-    chips_end = rect.x + 12
-    response_chips.each do |(_, label, lit)|
-      break if chips_end + Screen.draw_width(label) > limit
-      chips_end = Frame.chip(screen, chips_end, rect.y, label, lit) + 1
-    end
-    # The right-anchored read-outs chain leftwards from the corner: latency·size, then the
-    # ⚠ for a cut-short body, then the frozen-copy marker.
-    right = (result = shown_result) ? draw_response_meta(screen, rect, result, chips_end) : rect.right - 1
+    chips_end = rect.x + 12 # clear of the " RESPONSE " title
+    # The right-anchored read-outs chain leftwards from the corner: latency·size + the lit
+    # views, then the ⚠ for a cut-short body, then the frozen-copy marker.
+    right = if result = shown_result
+              draw_response_meta(screen, rect, result, chips_end)
+            elsif (states = response_states).empty?
+              rect.right - 1
+            else
+              Frame.border_meta(screen, rect, "", states.join(" · "), min_x: chips_end + 1) || rect.right - 1
+            end
     draw_frozen_marker(screen, rect, right, chips_end)
   end
 
-  # One source for response-chip drawing and mouse hit-testing. Unicode decode is offered only
+  # The response views that are ON, as the border names them. Unicode decode counts only
   # while the plain response is visible and the JSON formatter found escaped codepoints.
-  private def response_chips : Array({Symbol, String, Bool})
-    resp_plain = !@resp_hex && @resp_mode == :response
-    chips = [
-      {:diff, " #{key_label("repeater.toggle-diff", "⇧D")}:DIFF", !@resp_hex && @resp_mode == :diff},
-      {:hex, " #{key_label("repeater.toggle-resp-hex", "^X")}:HEX", @resp_hex},
-      {:pretty, " #{key_label("repeater.toggle-pretty", "p")}:PRETTY", resp_plain && !@reveal && resp_pretty_applied?},
-    ] of {Symbol, String, Bool}
-    if resp_plain && !@reveal && resp_unicode_escape_count > 0
-      label = resp_unicode_decoded? ? "WIRE" : "DECODE"
-      chips << {:unicode, " #{key_label("repeater.toggle-unicode", "u")}:#{label}", resp_unicode_decoded?}
-    end
-    chips
+  private def response_states : Array(String)
+    resp_plain = !@resp_hex && @resp_mode != :diff
+    states = [] of String
+    states << "diff" if !@resp_hex && @resp_mode == :diff
+    states << "hex" if @resp_hex
+    states << "pretty" if resp_plain && !@reveal && resp_pretty_applied?
+    states << "unicode" if resp_plain && resp_unicode_decoded?
+    states
   end
 
   private def key_label(id : String, fallback : String) : String
@@ -58,7 +50,8 @@ class Gori::Tui::RepeaterView
   # the meta actually landed; when the meta did not fit there is nothing to hang it on, and
   # the row is already too tight to carry it.
   private def draw_response_meta(screen : Screen, rect : Rect, result : Repeater::Result, chips_end : Int32) : Int32
-    meta_x = Frame.border_meta(screen, rect, "", result_meta(result), min_x: chips_end + 1)
+    meta = ([result_meta(result)] + response_states).join(" · ")
+    meta_x = Frame.border_meta(screen, rect, "", meta, min_x: chips_end + 1)
     return rect.right - 1 unless meta_x
     return meta_x unless result.incomplete?
     warn = "⚠ incomplete"
@@ -104,7 +97,7 @@ class Gori::Tui::RepeaterView
   # The GRPC RESPONSE transcript's title, and where a chip cluster may start on its border:
   # past `Frame.card`'s " TITLE " (drawn from rect.x + 2) plus a column of air. ONE derivation,
   # read by the draw below and by `chrome_hit` — a chip drawn at one x and hit-tested at
-  # another is a dead cell, which is the defect `␣Pw:KEY` had.
+  # another is a dead cell, which is the defect the WS ` KEY ` chip had.
   GRPC_TITLE = "GRPC RESPONSE"
 
   private def grpc_chip_x(rect : Rect) : Int32
@@ -115,7 +108,7 @@ class Gori::Tui::RepeaterView
   # state it is in. A method rather than a literal in each place for the reason `grpc_chip_x`
   # is one: the draw and the hit-test must not be able to disagree about its width.
   private def grpc_chip_label : String
-    @pretty ? " #{key_label("repeater.toggle-pretty", "p")}:BYTES " : " #{key_label("repeater.toggle-pretty", "p")}:TREE "
+    Frame.badge_text(@pretty ? "TREE" : "BYTES")
   end
 
   # …and where that chip must STOP. `Frame.chip` does not clip itself and this card is a

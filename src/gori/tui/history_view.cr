@@ -2659,6 +2659,13 @@ module Gori::Tui
       @decode_unicode
     end
 
+    # Whether the open pane holds JSON `\uXXXX` escapes `u` could decode. The footer names the
+    # key only then — the condition the strip's old `u:decode` chip appeared under.
+    def detail_unicode_offer? : Bool
+      return false if @detail.nil?
+      detail_view.unicode_escape_count > 0
+    end
+
     # Decode JSON Unicode escapes on demand, retaining the wire spelling in storage and
     # request write-back.
     def toggle_unicode_decoding : Nil
@@ -3625,23 +3632,6 @@ module Gori::Tui
       nil
     end
 
-    # Mode chips after the pane strip + status word (x:hex / b:ws / p:pretty).
-    # Geometry matches render_detail. Miss → nil.
-    def detail_mode_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
-      return nil if @detail.nil? || my != rect.y
-      x = rect.x + 1
-      detail_panes.each do |pane|
-        x += detail_pane_label(pane).size + 2 + 1
-      end
-      hex = detail_hex?(@detail.not_nil!)
-      dv = detail_view
-      ws = reveal_active?(hex, dv)
-      # status word + 1-col gap, then chips (same as render)
-      start = x + 1 + detail_mode_status(hex, ws, dv).size + 1
-      chips = detail_mode_chips(hex, ws, dv).map { |(id, label, _)| {id, label} }
-      Frame.left_chip_hit(mx, my, rect.y, start, chips, limit: rect.right) # render's own clip
-    end
-
     # Compact mode word shown before the toggle chips (and asserted by specs).
     private def detail_mode_status(hex : Bool, ws : Bool, dv : DetailView) : String
       return "HEX" if hex
@@ -3663,44 +3653,6 @@ module Gori::Tui
       @reveal && !hex && !dv.binary && !log_pane?
     end
 
-    # Mode toggle chips for the detail strip: {id, label, lit}.
-    private def detail_mode_chips(hex : Bool, ws : Bool, dv : DetailView) : Array({Symbol, String, Bool})
-      if hex
-        [{:hex, " #{key_label("detail.toggle-hex", "^X")}:text ", true}] of {Symbol, String, Bool}
-      elsif ws
-        [{:ws, " #{key_label("detail.toggle-ws", "b")}:raw ", true}] of {Symbol, String, Bool}
-      elsif log_pane?
-        # A synthetic log (MESSAGES / FRAMES / EVENTS) and the decoded panes are gori's own text
-        # over rows or a projection — there are no raw bytes to dump and no body of the wire's to
-        # reflow, so all three keys are no-ops here (`toggle_detail_hex` self-gates on this same
-        # predicate, `reveal_lines` answers nil, `@pretty` is read only by the gRPC and plain-body
-        # branches). Offering the chips advertised three controls that did nothing.
-        [] of {Symbol, String, Bool}
-      elsif dv.grpc
-        # Before the plain `binary` arm, which offers hex alone: on a gRPC pane `p` is live
-        # and switches each payload between the protobuf tree and its hex preview. The label
-        # names what the key WILL do (the `p:raw` / `p:pretty` convention below), `lit` the
-        # state it is in.
-        [
-          {:hex, " #{key_label("detail.toggle-hex", "^X")}:hex ", false},
-          {:pretty, " #{key_label("detail.toggle-pretty", "p")}:#{dv.pretty ? "bytes" : (dv.grpc_json ? "json" : "tree")} ", dv.pretty},
-        ] of {Symbol, String, Bool}
-      elsif dv.binary
-        [{:hex, " #{key_label("detail.toggle-hex", "^X")}:hex ", false}] of {Symbol, String, Bool}
-      else
-        chips = [
-          {:hex, " #{key_label("detail.toggle-hex", "^X")}:hex ", false},
-          {:ws, " #{key_label("detail.toggle-ws", "b")}:ws ", false},
-          {:pretty, " #{key_label("detail.toggle-pretty", "p")}:#{dv.pretty ? "raw" : "pretty"} ", dv.pretty},
-        ] of {Symbol, String, Bool}
-        if dv.unicode_escape_count > 0
-          label = dv.unicode_decoded ? "wire" : "decode"
-          chips << {:unicode, " #{key_label("detail.toggle-unicode", "u")}:#{label} ", dv.unicode_decoded}
-        end
-        chips
-      end
-    end
-
     def render_detail(screen : Screen, rect : Rect, focused : Bool = true, strip_focused : Bool = false,
                       step_meta : String? = nil) : Nil
       return if rect.empty?
@@ -3720,17 +3672,13 @@ module Gori::Tui
       hex = detail_hex?(detail)
       dv = detail_view
       ws = reveal_active?(hex, dv)
-      nav = detail_navigable? ? "↑/↓←/→ · ⇧sel · y" : "↑/↓ scroll"
-      # Status word + mode toggle chips (mouse + same chords as keys), then muted nav. Every
-      # piece is bounded by the pane's right border (`rect.right`): the row is wider than a
-      # sub-110-column pane, and a draw with no `width:` ran over the `│` (#1376). A chip is
-      # drawn whole or not at all — a clipped `^X:h…` is not a button anyone can read.
-      x = draw_detail_hint(screen, x + 1, rect, detail_mode_status(hex, ws, dv)) + 1
-      detail_mode_chips(hex, ws, dv).each do |(_, label, lit)|
-        break if x + Screen.draw_width(label) > rect.right
-        x = Frame.chip(screen, x, rect.y, label, lit) + 1
-      end
-      draw_detail_hint(screen, x + 1, rect, "· #{nav} · space · esc")
+      # The status word (PRETTY / RAW / HEX / BINARY …) and nothing else: the strip used to
+      # carry a keyed chip per toggle plus a nav crib (`^X:hex  b:ws  p:pretty · ↑/↓←/→ · ⇧sel
+      # · y · space · esc`), eleven tokens beside three pane tabs. The strip names the panes and
+      # the reading on screen; the keys are the footer's (`HistoryController#body_hint`).
+      # Bounded by the pane's right border (`rect.right`): a draw with no `width:` ran over the
+      # `│` on a sub-110-column pane (#1376).
+      draw_detail_hint(screen, x + 1, rect, detail_mode_status(hex, ws, dv))
       Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
 
       # The text rect and the footer strip under it come from ONE derivation

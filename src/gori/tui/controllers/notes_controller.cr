@@ -195,7 +195,7 @@ module Gori::Tui
       @host.focus_body
       body = notes_body_rect(rect)
       @press_on_editor = false
-      # NOR/INS chip on the editor top border toggles insert (same as ↵ / esc).
+      # READ/INS chip on the editor top border toggles insert (same as ↵ / esc).
       if Frame.mode_badge_hit(mx, my, body.y, body.right - 1, body.x + 1, @notes.insert_mode?)
         if @notes.insert_mode?
           @notes.exit_insert!
@@ -219,7 +219,7 @@ module Gori::Tui
     # the click — and the whole tab body is the editor, so "true" was the honest answer while
     # `drag_to_cursor` refused every gesture the pane was not already in INSERT for.
     #
-    # That refusal is gone (#1124), so the flag has to say it instead: pressing the NOR/INS
+    # That refusal is gone (#1124), so the flag has to say it instead: pressing the READ/INS
     # chip and twitching the mouse would otherwise toggle the mode and then drag a band open
     # from a cell of the border — and, under `settings:mouse` drag-copy, put it on the
     # clipboard. `IssuesController#@detail_press` is the same guard for the same reason.
@@ -238,7 +238,7 @@ module Gori::Tui
 
     def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
       body = notes_body_rect(rect)
-      # The NOR/INS chip is a button, not text — a double-click there is two toggles.
+      # The READ/INS chip is a button, not text — a double-click there is two toggles.
       return false if Frame.mode_badge_hit(mx, my, body.y, body.right - 1, body.x + 1, @notes.insert_mode?)
       # …and `select_word_at` clamps like the press does, so the rows the editor was NOT drawn
       # into would otherwise take a word from the last visible line — a band `y` then copies,
@@ -360,10 +360,9 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       if @notes.insert_mode?
-        keys("type to edit · ⇧arrows select · ^Y copy · esc read · ^N new · ^W close · {editor.goto-line} goto · {editor.find} find · ^1-9 · ↑ sub-tabs")
+        keys("type · ^Y copy · {editor.goto-line} goto · {editor.find} find · ^N new · ^W close · esc read")
       else
-        y = Hotkeys.binding_label(@host.session.registry, "notes.copy", "y")
-        keys("{editor.insert}/↵ edit · ⇧arrows select · #{y} copy · space cmds · ^N new · ^W close · {editor.goto-line} goto · {editor.find} find · esc sub-tabs")
+        keys("{editor.insert}/↵ edit · {editor.goto-line} goto · {editor.find} find · ^N new · ^W close · space cmds · esc sub-tabs")
       end
     end
 

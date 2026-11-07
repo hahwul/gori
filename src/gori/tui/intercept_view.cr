@@ -966,8 +966,8 @@ module Gori::Tui
     end
 
     # Filter-bar click zones, matching render_filter_bar left-to-right:
-    #   " i:CATCH ON/OFF " chip → :catch
-    #   direction label (c:REQ / c:RES / c:ALL) → :direction
+    #   " CATCH ON/OFF " chip → :catch
+    #   direction label (DIR REQ / DIR RES / DIR ALL) → :direction
     #   rest of the bar → :condition (start query edit)
     # Nil while the bar is an input line (@querying) or off the bar row.
     def bar_zone_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
@@ -1193,22 +1193,17 @@ module Gori::Tui
       Interceptor.direction_note(@query, @direction, "#{key_label("intercept.direction", "c")} for RES or ALL")
     end
 
-    # The catch-direction chip: `c`-chord + which direction, coloured by enabled state.
-    # Dim when intercept is OFF (nothing is held yet, so the chip advertises what WILL be
-    # caught once toggled on).
+    # The catch-direction chip: which leg is caught, coloured by enabled state. Dim when
+    # intercept is OFF (nothing is held yet, so the chip advertises what WILL be caught once
+    # toggled on). The `c` that cycles it is the footer's; the chip is the state.
     private def direction_chip : {String, Color}
-      label = @body_focused ? "#{key_label("intercept.direction", "c")}:#{direction_label}" : "DIR:#{direction_label}"
-      {label, @enabled ? Theme.accent : Theme.muted}
+      {"DIR #{direction_label}", @enabled ? Theme.accent : Theme.muted}
     end
 
+    # ON/OFF spelled out, not lit-vs-dim alone: that does not read on a low-contrast theme.
+    # One label whether or not the body has focus — the key (`i`) is the footer's.
     private def catch_chip_label : String
-      if @body_focused
-        # The chord names the key, but ON/OFF stays spelled out: lit-vs-dim alone does not
-        # read on a low-contrast theme.
-        " #{key_label("intercept.toggle", "i")}:CATCH #{@enabled ? "ON" : "OFF"} "
-      else
-        " CATCH:#{@enabled ? "ON" : "OFF"} "
-      end
+      Frame.badge_text("CATCH #{@enabled ? "ON" : "OFF"}")
     end
 
     private def key_label(id : String, fallback : String) : String
@@ -1231,7 +1226,7 @@ module Gori::Tui
 
     # 3 cells wide, like REQ/RES, so the label column never shifts. The colour follows the
     # LEG rather than the protocol: a WS message travelling client→server is caught by the
-    # same `c:REQ` chip an HTTP request is, so it reads in the same colour.
+    # same ` DIR REQ ` chip an HTTP request is, so it reads in the same colour.
     private def kind_badge(kind : Interceptor::Kind) : {String, Color}
       case kind
       in .request?  then {"REQ", Theme.yellow}

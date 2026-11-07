@@ -294,7 +294,7 @@ gori run fuzz --flow 42 --field role --payloads ROLE_ADMIN,ROLE_USER,99
 `SPEC` is a field name, a path into a nested message (`profile.age`), a field number, or
 `tags[1]` for one occurrence of a repeated field. It needs a descriptor set that resolves the
 rpc (a `protoc --descriptor_set_out` file or a `gori run grpc reflect` fetch); the field names
-are the ones the Repeater's `␣Pf:FIELDS` form and the History protobuf tree already show for
+are the ones the Repeater's ` FIELDS ` form and the History protobuf tree already show for
 the same flow.
 
 Two things follow from what a splice can do. The field has to be **present on the captured

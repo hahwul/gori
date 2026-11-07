@@ -43,18 +43,14 @@ module Gori::Tui
         # nibble cursor and no selection, and `^Y` copies the whole payload.
         "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^R forward · esc queue"
       elsif @intercept.text_insert?
-        # `⇧arrows select · ^Y copy`: this editor is the one INS strip in the tree that named
-        # NEITHER, which is why the guard spec's "advertises a band, names no copy key" rule
-        # could not see it. Both are live — `handle_edit_key` routes ⇧arrows through
-        # `edit_motion_key`, and `intercept.copy` carries `^Y` on the wider `intercept_copyable?`
-        # gate precisely for this pane. Bare `y` IS bound on the queue now, but it is a literal
-        # character while typing (and `text_input_active?` stands the keymap down here), so `^Y`
-        # is still the only copy there is in this strip.
-        "type to edit · ⇧arrows select · ^Y copy · ^R forward · esc read · ⇧↹ queue"
+        # `^Y copy`: `intercept.copy` carries `^Y` on the wider `intercept_copyable?` gate
+        # precisely for this pane. Bare `y` IS bound on the queue, but it is a literal character
+        # while typing (and `text_input_active?` stands the keymap down here), so `^Y` is the
+        # only copy there is in this strip, and the strip has to say so.
+        "type · ^Y copy · ^R forward · esc read · ⇧↹ queue"
       elsif @intercept.text_read?
-        y = Hotkeys.binding_label(reg, "intercept.copy", "y")
         f = Hotkeys.binding_label(reg, "intercept.forward", "f")
-        keys("{editor.insert}/↵ edit · ⇧arrows select · #{y} copy · #{f}/^R forward · space cmds · esc queue")
+        keys("{editor.insert}/↵ edit · #{f}/^R forward · space cmds · esc queue")
       elsif @intercept.querying?
         "type condition · ↹ complete · ↵ apply · esc clear"
       else

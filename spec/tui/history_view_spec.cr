@@ -2441,13 +2441,11 @@ describe Gori::Tui::HistoryView do
       raw = MemoryBackend.new(100, 20)
       view.render_detail(Screen.new(raw), Rect.new(0, 0, 100, 20), focused: false)
       raw.contains?("\\u003c\\u200b").should be_true
-      raw.contains?("u:decode").should be_true
 
       view.toggle_unicode_decoding
       decoded = MemoryBackend.new(100, 20)
       view.render_detail(Screen.new(decoded), Rect.new(0, 0, 100, 20), focused: false)
       decoded.contains?("<⟨ZWSP⟩").should be_true
-      decoded.contains?("u:wire").should be_true
       decoded.contains?("2 escapes").should be_true
     end
   end
@@ -3619,7 +3617,7 @@ describe "HistoryView at 80–110 columns" do
     end
   end
 
-  # The detail header row (pane chips, mode chips, nav hint) is wider than a sub-110-column
+  # The detail header row (pane chips, status word) used to run wider than a sub-110-column
   # pane, and the hint was drawn without a width, straight over the right `│`.
   it "keeps the detail header row inside the pane's right border" do
     with_store do |store|
@@ -3635,7 +3633,7 @@ describe "HistoryView at 80–110 columns" do
       end
       wide = MemoryBackend.new(160, 16)
       view.render_detail(Screen.new(wide), Rect.new(1, 1, 158, 14))
-      wide.row(1).should contain("space · esc")
+      wide.row(1).should contain("REQUEST")
     end
   end
 end

@@ -180,14 +180,14 @@ describe "Gori::Tui::CookieController" do
   end
 
   describe "forge lens" do
-    it "paints the rebound format chord on the OPTIONS card" do
+    it "paints the format on the OPTIONS card as a state, whatever the chord" do
       previous = Gori::Settings.keymap_overrides
       begin
         Gori::Settings.keymap_overrides = {"cookie.cycle-format" => ["alt-a"]}
         with_cookie_controller do |ctl|
           ctl.session_from_text(FLASK)
-          screen_has?(render(ctl), "⌥A:auto").should be_true
-          screen_has?(render(ctl), "^A:auto").should be_false
+          screen_has?(render(ctl), " auto ").should be_true
+          screen_has?(render(ctl), "⌥A").should be_false
         end
       ensure
         Gori::Settings.keymap_overrides = previous
@@ -197,15 +197,15 @@ describe "Gori::Tui::CookieController" do
     it "shows a concrete format in FORGE but keeps auto for a later DECODE paste" do
       with_cookie_controller do |ctl|
         ctl.session_from_text(FLASK)
-        screen_has?(render(ctl), "^A:auto").should be_true
+        screen_has?(render(ctl), " auto ").should be_true
         ctl.toggle_mode
         ctl.command_section.should eq(:payload) # FORGE panes start on :payload
         # The OPTIONS badge resolves to a concrete format (FORGE can't mint under `auto`)…
-        screen_has?(render(ctl), "^A:flask").should be_true
+        screen_has?(render(ctl), " flask ").should be_true
         ctl.toggle_mode
         # …but the pinned format is untouched, so a later paste of another framework's cookie
         # still auto-detects instead of being decoded under a format FORGE silently pinned.
-        screen_has?(render(ctl), "^A:auto").should be_true
+        screen_has?(render(ctl), " auto ").should be_true
       end
     end
 
@@ -250,13 +250,13 @@ describe "Gori::Tui::CookieController" do
     it "steps auto → flask → rack → django in the DECODE lens" do
       with_cookie_controller do |ctl|
         ctl.session_from_text(FLASK)
-        screen_has?(render(ctl), "^A:auto").should be_true
+        screen_has?(render(ctl), " auto ").should be_true
         ctl.cycle_format
-        screen_has?(render(ctl), "^A:flask").should be_true
+        screen_has?(render(ctl), " flask ").should be_true
         ctl.cycle_format
-        screen_has?(render(ctl), "^A:rack").should be_true
+        screen_has?(render(ctl), " rack ").should be_true
         ctl.cycle_format
-        screen_has?(render(ctl), "^A:django").should be_true
+        screen_has?(render(ctl), " django ").should be_true
       end
     end
   end
@@ -273,13 +273,13 @@ describe "Gori::Tui::CookieController" do
       with_cookie_controller do |ctl|
         ctl.session_from_text(sess)
         # The salt badge is visible even while the format pin stays `auto` (resolved = django).
-        screen_has?(render(ctl), "salt:signing").should be_true
+        screen_has?(render(ctl), "salt signing").should be_true
         ctl.focus_last # :secret
         type(ctl, SECRET)
         screen_has?(render(ctl), "bad key").should be_true # blank/default salt = wrong salt
         ctl.cycle_salt_preset                              # → session salt
         b = render(ctl)
-        screen_has?(b, "salt:session").should be_true
+        screen_has?(b, "salt session").should be_true
         screen_has?(b, "verified").should be_true # the correct secret now verifies
       end
     end
@@ -325,7 +325,7 @@ describe "Gori::Tui::CookieController" do
         ctl.focus_last        # :secret
         type(ctl, SECRET)
         b = render(ctl)
-        screen_has?(b, "algo:sha1").should be_true # inferred from the 27-char signature
+        screen_has?(b, "algo sha1").should be_true # inferred from the 27-char signature
         screen_has?(b, "verified").should be_true  # the correct secret verifies, no algo toggle
       end
     end
@@ -340,7 +340,7 @@ describe "Gori::Tui::CookieController" do
         type(ctl, SECRET)
         ctl.cycle_algorithm # from the detected sha1 → pin sha256
         b = render(ctl)
-        screen_has?(b, "algo:sha256").should be_true
+        screen_has?(b, "algo sha256").should be_true
         screen_has?(b, "bad key").should be_true # the pinned algo now mismatches the sha1 cookie
       end
     end

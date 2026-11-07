@@ -115,7 +115,7 @@ describe "RepeaterView RESPONSE border chrome on a narrow pane" do
   # half-width split pane, so below ~88 cols the cluster ran through this card's own '╮'
   # and on over the OUTER frame's border — the row came out one cell longer than every
   # sibling row, ending in "p:PRETTY" instead of a corner.
-  it "keeps the chips inside the card on a narrow pane" do
+  it "keeps the RESPONSE border bare on a blank tab and whole on a narrow pane" do
     Gori::Settings.pretty_bodies_default = false
     view = RepeaterView.new
     view.load_blank
@@ -125,25 +125,25 @@ describe "RepeaterView RESPONSE border chrome on a narrow pane" do
     y = (0...24).find { |r| b.row(r).includes?("RESPONSE") }
     y.should_not be_nil
     row = b.row(y.not_nil!).rstrip
-    row.should end_with("╮")                  # the card's own top-right corner survives
-    row.includes?("p:PRETTY").should be_false # the chip that did not fit is dropped whole
-    row.includes?("⇧D:DIFF").should be_true   # the ones that fit are still drawn
+    row.should end_with("╮")                # the card's own top-right corner survives
+    row.includes?("PRETTY").should be_false # no keyed chips: the border states lit views only
+    row.includes?("DIFF").should be_false
   end
 
-  # Wide enough and every chip is back — the fix is a fit test, not a removal.
-  it "still draws all three chips when there is room" do
+  # A view that is ON is named on the border, lower-case beside the latency·size.
+  it "names the lit response views on the border when there is room" do
     Gori::Settings.pretty_bodies_default = false
     view = RepeaterView.new
     view.load_blank
+    view.toggle_resp_hex
     b = MemoryBackend.new(120, 24)
     view.render(Screen.new(b), Rect.new(0, 0, 120, 24))
 
     y = (0...24).find { |r| b.row(r).includes?("RESPONSE") }.not_nil!
     row = b.row(y).rstrip
     row.should end_with("╮")
-    row.includes?("⇧D:DIFF").should be_true
-    row.includes?("^X:HEX").should be_true
-    row.includes?("p:PRETTY").should be_true
+    row.includes?(" hex ").should be_true
+    row.includes?("^X").should be_false # the key is the footer's
   end
 end
 

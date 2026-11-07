@@ -1281,7 +1281,7 @@ module Gori::Tui
 
     # --- config pane (calm summary) ------------------------------------------
     # A single row cursor @cfg_row (↑/↓) walks: one row per payload set, then the
-    # Add / Mode / Advanced rows (Run is the TEMPLATE border's ^R:RUN badge now, not a
+    # Add / Mode / Advanced rows (Run is the TEMPLATE border's RUN badge now, not a
     # cursor row). There is NO text field and NO caret in-pane — all text entry lives in the
     # Set / Advanced overlays — so ←/→ can only ever cycle (Mode), which removes the old
     # caret-vs-cycle overload and the axis mismatch.
@@ -1292,7 +1292,7 @@ module Gori::Tui
     end
 
     # The kind of row under the cursor: :set | :add | :mode | :advanced. (Run is no longer a
-    # config row — it moved to the TEMPLATE border's ^R:RUN badge.)
+    # config row — it moved to the TEMPLATE border's RUN badge.)
     def config_row : Symbol
       @cfg_row < @sets.size ? :set : (CONFIG_TAIL[@cfg_row - @sets.size]? || :advanced)
     end
@@ -3050,7 +3050,7 @@ module Gori::Tui
       Frame.mode_badge(screen, rect.right - 1, rect.y, rect.x + 8, target_insert?)
       # An at-a-glance SNI marker on the top border, CHAINED left of the mode chip rather
       # than placed at `rect.right - size - 1` — which is inside the mode chip's own cells.
-      # Setting an override used to paint over the right of ` ↵:READ `, leaving `↵: SNI ` on
+      # Setting an override used to paint over the right of ` READ `, leaving `↵: SNI ` on
       # the border, and `target_chrome_hit` still measured the full mode rect underneath, so
       # clicking the visible SNI letters toggled insert. Repeater hit this first and fixed it
       # the same way (`repeater_view.cr#target_chrome_chain`); this is that fix, ported.
@@ -3074,18 +3074,18 @@ module Gori::Tui
       Frame.card(screen, rect, label, bg: Theme.bg, border: Frame.pane_border(focused))
       badge = " §#{pc} "
       min_x = rect.x + label.size + 4
-      # ^R:RUN rides the TEMPLATE border as the primary action — rightmost, mirroring the
-      # Repeater's ^R:SEND so the muscle memory transfers. A gold button while idle, recessed
+      # RUN rides the TEMPLATE border as the primary action — rightmost, mirroring the
+      # Repeater's SEND so the muscle memory transfers. A gold button while idle, recessed
       # while a run streams (^X stops it). The old CONFIG "Run" row is gone; the request-count
       # estimate stays there as a passive summary (render_run_summary).
-      run_x = Frame.action_badge(screen, rect.right - 1, rect.y, min_x,
-        key_label("fuzz.run", "^R"), "RUN", !running?)
-      pretty_x = Frame.toggle_badge(screen, run_x, rect.y, min_x,
-        key_label("fuzz.pretty-template", "^U"), "PRETTY", false)
+      run_x = Frame.action_badge(screen, rect.right - 1, rect.y, min_x, "RUN", !running?)
+      # No PRETTY chip beside it: prettifying the template is an action with no state to show,
+      # so the chip was a key hint dressed as a toggle. `^U` is in the pane's footer.
+      pretty_x = run_x
       # The mode chip states the pane's REAL mode, not `focused && …`: `template_chrome_hit` and
       # `apply_chrome_click` both read `template_insert?` alone, so gating the LABEL on focus made
-      # an unfocused pane that had retained INS draw " ↵:READ " (8 cols) over a 5-col " INS " hit
-      # rect — dead cells on the left of the chip — and a click on a chip reading "↵:READ" then
+      # an unfocused pane that had retained INS draw " READ " (8 cols) over a 5-col " INS " hit
+      # rect — dead cells on the left of the chip — and a click on a chip reading "READ" then
       # EXITED insert mode. Focus is still carried, by the border colour below.
       mode_x = Frame.mode_badge(screen, pretty_x, rect.y, min_x, template_insert? || @chain_focused)
       # …and `§N` chains off the mode chip's left edge. It used to be drawn at `pretty_x - 4`,
@@ -3140,7 +3140,7 @@ module Gori::Tui
     # The calm CONFIG summary: a header, the payload-set rows + an Add row, then the
     # Mode / Advanced rows + a passive run-size read-out anchored at the bottom. One row
     # cursor (@cfg_row), no text field, no caret — so ←/→ can only cycle Mode. All editing
-    # drills into the Set / Advanced overlays; the run itself is the TEMPLATE's ^R:RUN badge.
+    # drills into the Set / Advanced overlays; the run itself is the TEMPLATE's RUN badge.
     private def render_config(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
       Frame.card(screen, rect, "CONFIG", bg: Theme.bg, border: Frame.pane_border(focused))
@@ -3258,7 +3258,7 @@ module Gori::Tui
     end
 
     # A passive read-out of the run size (mode × sets × markers) at the CONFIG foot. NOT a
-    # cursor row — the run action lives on the TEMPLATE border's ^R:RUN badge now; this just
+    # cursor row — the run action lives on the TEMPLATE border's RUN badge now; this just
     # reports what that badge will send, updating live as the config changes. Muted so it
     # reads as a summary, not a button. Blank when there are no sets yet (the empty-sets
     # guidance already fills that space); "unknown" when a set's size can't be sized cheaply.
@@ -3395,12 +3395,9 @@ module Gori::Tui
       # that resumes after it (`╭─ RESULTS 0 sent · 0 hit────` read as one glued token).
       screen.text(rect.x + 11, rect.y, "#{count} ", Theme.muted, Theme.bg)
       min_x = rect.x + 11 + count.size + 1 # badges never overwrite the count
-      rx = Frame.toggle_badge(screen, rect.right - 1, rect.y, min_x,
-        key_label("fuzz.dist", "v"), "DIST", @show_dist)
-      rx = Frame.toggle_badge(screen, rx, rect.y, min_x,
-        key_label("fuzz.matched", "m"), "MATCH", @matched_only)
-      Frame.toggle_badge(screen, rx, rect.y, min_x,
-        sort_key_label, sort_chip, false) # sort: a value chip, never lit
+      rx = Frame.toggle_badge(screen, rect.right - 1, rect.y, min_x, "DIST", @show_dist)
+      rx = Frame.toggle_badge(screen, rx, rect.y, min_x, "MATCH", @matched_only)
+      Frame.toggle_badge(screen, rx, rect.y, min_x, sort_chip, false) # sort: a value chip, never lit
       inner = rect.inset(1, 1)
       view = sorted_results
       @sel = @sel.clamp(0, {view.size - 1, 0}.max)
@@ -4275,13 +4272,13 @@ module Gori::Tui
       return nil if pane.w < 2 || my != pane.y
       min_x = pane.x + 11 + results_count_label.size + 1
       Frame.right_badge_hit(mx, my, pane.y, pane.right - 1, min_x, [
-        {:dist, key_label("fuzz.dist", "v"), "DIST"},
-        {:match, key_label("fuzz.matched", "m"), "MATCH"},
-        {:sort, sort_key_label, sort_chip},
-      ] of {Symbol, String, String})
+        {:dist, "DIST"},
+        {:match, "MATCH"},
+        {:sort, sort_chip},
+      ] of {Symbol, String})
     end
 
-    # Hit-test the TEMPLATE border chrome (^R:RUN, ^U:PRETTY, NOR/INS). Geometry mirrors
+    # Hit-test the TEMPLATE border chrome (RUN, READ/INS). Geometry mirrors
     # render_template. Miss → nil (caller falls through to caret/focus).
     def template_chrome_hit(rect : Rect, mx : Int32, my : Int32) : Symbol?
       left = template_card_rect(rect) || return nil
@@ -4289,10 +4286,7 @@ module Gori::Tui
       label = @http2 ? "TEMPLATE (h2)" : "TEMPLATE"
       min_x = left.x + label.size + 4
       right_edge = left.right - 1
-      badges = [
-        {:run, key_label("fuzz.run", "^R"), "RUN"},
-        {:pretty, key_label("fuzz.pretty-template", "^U"), "PRETTY"},
-      ] of {Symbol, String, String}
+      badges = [{:run, "RUN"}] of {Symbol, String}
       if hit = Frame.right_badge_hit(mx, my, left.y, right_edge, min_x, badges)
         return hit
       end
@@ -4304,7 +4298,7 @@ module Gori::Tui
     # anyway so it can answer `nil` for itself: without this the mode chip's rect still covered
     # those cells and a press on them flipped insert mode.
     #
-    # Hit-test the TARGET border NOR/INS chip. Geometry matches render_target through the
+    # Hit-test the TARGET border READ/INS chip. Geometry matches render_target through the
     # shared `target_sni_x`.
     def target_chrome_hit(rect : Rect, mx : Int32, my : Int32) : Symbol?
       return nil unless @loaded
