@@ -1,0 +1,6 @@
+fixture: scale
+tier: 0
+grade: set
+prompt: |
+  One response body in this capture leaks an internal database hostname ending
+  in ".internal". Which flow is it? Answer with its flow id.
