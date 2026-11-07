@@ -11,6 +11,10 @@
 # operator's gori settings nor a repo CLAUDE.md leaks in; `--setting-sources ""` and
 # `--strict-mcp-config` keep the operator's Claude Code settings, hooks and other MCP
 # servers out. The raw stream of each run stays under eval/out/runs/<stamp>/ for reading.
+#
+# The `script` profile is the control: no gori at all, the same capture handed over as a HAR
+# file plus Bash, the way an agent works when nobody gave it a proxy. It answers whether gori
+# MCP beats scripting, not just whether an agent can use it.
 require "file_utils"
 require "json"
 require "option_parser"
@@ -25,11 +29,20 @@ PROFILES = {
   "recon"   => ["--tools=@recon"],
   "full"    => [] of String,
   "full-ro" => ["--read-only"],
+  "script"  => [] of String, # no gori: capture.har + Bash/Read (see SCRIPT_RULE)
 }
+SCRIPT       = "script"
+SCRIPT_TOOLS = %w[Bash Read]
 
 ANSWER_RULE = "Use only the gori MCP tools to inspect the capture. When you are done, end " \
               "your reply with exactly one final line of the form `ANSWER: <JSON value>` " \
               "(a JSON array, string or number)."
+
+SCRIPT_RULE = "The HTTP capture is ./capture.har, a HAR 1.2 export from an intercepting proxy, " \
+              "oldest flow first. A flow's id is its 1-based position in log.entries. Inspect " \
+              "it with shell tools (python3, jq); stay inside the current directory. When you " \
+              "are done, end your reply with exactly one final line of the form " \
+              "`ANSWER: <JSON value>` (a JSON array, string or number)."
 
 record Task, id : String, fixture : String, tier : Int32, grade : String, prompt : String
 record Job, task : Task, profile : String, rep : Int32
@@ -71,7 +84,7 @@ end
 # An errored run (CLI failure, budget cut, rate limit) or one whose isolation leaked says
 # nothing about the agent, so it is counted apart and kept out of pass rates and medians.
 def void?(r : Hash(String, JSON::Any)) : Bool
-  r["error"].as_bool || r["foreign_tools"].as_i64 > 0
+  r["error"].as_bool || r["foreign_tools"].as_i64 > 0 || r["peeked"]?.try(&.as_bool) == true
 end
 
 def pct(now : Float64, base : Float64) : String
@@ -127,7 +140,8 @@ def summarize(results : Array(Hash(String, JSON::Any)), baseline : Array(Hash(St
     end
   end
   if (bad = results.size - ok.size) > 0
-    puts "#{bad} run(s) errored or saw non-gori tools — not counted above; read their stream.jsonl"
+    puts "#{bad} run(s) errored, saw tools outside their profile or reached for the answer key " \
+         "— not counted above; read their stream.jsonl"
   end
 end
 
@@ -154,6 +168,27 @@ end
 stamp = Time.local.to_s("%Y%m%d-%H%M%S")
 run_dir = File.join(EVAL, "out", "runs", stamp)
 FileUtils.mkdir_p(run_dir)
+
+# The script profile's capture: each fixture exported once through gori's own HAR writer.
+# SCRIPT_RULE names a flow by its position, which is its id only while every flow made it
+# into the HAR (the writer skips incomplete ones) and ids run 1..N (fixtures never delete).
+hars = {} of String => String
+if profiles.includes?(SCRIPT)
+  tasks.map(&.fixture).uniq!.each do |fx|
+    db = File.join(EVAL, "out", "fixtures", "#{fx}.db")
+    har = File.join(run_dir, "#{fx}.har")
+    env = {"GORI_HOME" => File.join(run_dir, "export_home")}
+    File.open(har, "w") do |io|
+      st = Process.run(GORI_BIN, ["run", "history", "--db", db, "--format", "har", "--limit", "1000000"],
+        env: env, output: io, error: Process::Redirect::Inherit)
+      abort "HAR export of #{fx} failed" unless st.success?
+    end
+    entries = JSON.parse(File.read(har))["log"]["entries"].as_a.size
+    flows = `#{GORI_BIN} run history --db #{Process.quote(db)} --count`.to_i? || -1
+    abort "#{fx}.har has #{entries} entries for #{flows} flows: positions are not ids" unless entries == flows
+    hars[fx] = har
+  end
+end
 
 # A set member's canonical spelling, so 58, 58.0 and "58" match, a full URL names its path,
 # and a set of paths works the same as one of ids.
@@ -182,43 +217,62 @@ def grade(task : Task, answer : JSON::Any?, truth : JSON::Any) : Bool
   end
 end
 
-# The gori tools a run called, in order; how many tools init listed that are not gori's
-# (anything above zero means the isolation leaked); and the final `result` event.
-def read_stream(path : String) : {Array(String), Int32, JSON::Any?}
+# The tools a run called, in order (gori's without their prefix); how many tools init listed
+# that its profile does not grant (anything above zero means the isolation leaked); whether a
+# call reached for the answer key or this run directory (the script profile's Bash can read
+# anything on the host, so that run says nothing); and the final `result` event.
+def read_stream(path : String, script : Bool) : {Array(String), Int32, Bool, JSON::Any?}
   calls = [] of String
   foreign = 0
+  peeked = false
   result = nil
   File.each_line(path) do |line|
     ev = JSON.parse(line) rescue next
     case ev["type"]?.try(&.as_s?)
     when "system"
       if ev["subtype"]?.try(&.as_s?) == "init"
-        foreign = ev["tools"].as_a.count { |t| !t.as_s.starts_with?("mcp__gori__") }
+        foreign = ev["tools"].as_a.count do |t|
+          script ? !SCRIPT_TOOLS.includes?(t.as_s) : !t.as_s.starts_with?("mcp__gori__")
+        end
       end
     when "assistant"
       ev.dig?("message", "content").try(&.as_a?).try &.each do |blk|
-        calls << blk["name"].as_s.lchop("mcp__gori__") if blk["type"]? == "tool_use"
+        next unless blk["type"]? == "tool_use"
+        calls << blk["name"].as_s.lchop("mcp__gori__")
+        input = blk["input"]?.to_json
+        peeked ||= input.includes?("truth.json") || input.includes?(EVAL) || input.includes?("results.jsonl")
       end
     when "result" then result = ev
     end
   end
-  {calls, foreign, result}
+  {calls, foreign, peeked, result}
 end
 
-def run_one(job : Job, run_dir : String, model : String, budget : String, truth : JSON::Any) : Hash(String, JSON::Any)
-  dir = File.join(run_dir, "#{job.task.id}.#{job.profile}.#{job.rep}")
-  cwd = File.join(dir, "cwd")
-  home = File.join(dir, "gori_home")
-  FileUtils.mkdir_p([cwd, home])
-  db = File.join(dir, "fixture.db")
-  FileUtils.cp(File.join(EVAL, "out", "fixtures", "#{job.task.fixture}.db"), db)
-
-  mcp = {mcpServers: {gori: {command: GORI_BIN, args: ["mcp", "--db", db] + PROFILES[job.profile],
-                             env: {GORI_HOME: home}}}}.to_json
-  args = ["-p", job.task.prompt, "--model", model, "--output-format", "stream-json", "--verbose",
-          "--setting-sources", "", "--strict-mcp-config", "--mcp-config", mcp,
-          "--tools", "", "--allowedTools", "mcp__gori", "--append-system-prompt", ANSWER_RULE,
-          "--max-budget-usd", budget, "--no-session-persistence"]
+def run_one(job : Job, run_dir : String, model : String, budget : String, truth : JSON::Any,
+            har : String?) : Hash(String, JSON::Any)
+  name = "#{job.task.id}.#{job.profile}.#{job.rep}"
+  dir = File.join(run_dir, name)
+  common = ["-p", job.task.prompt, "--model", model, "--output-format", "stream-json", "--verbose",
+            "--setting-sources", "", "--strict-mcp-config",
+            "--max-budget-usd", budget, "--no-session-persistence"]
+  if har
+    # Outside the repo, so a `ls ..` from the agent's shell does not land beside the answer key.
+    cwd = File.join(Dir.tempdir, "gori-eval-#{File.basename(run_dir)}", name)
+    FileUtils.mkdir_p([dir, cwd])
+    FileUtils.cp(har, File.join(cwd, "capture.har"))
+    args = common + ["--tools", SCRIPT_TOOLS.join(','), "--allowedTools", SCRIPT_TOOLS.join(','),
+                     "--append-system-prompt", SCRIPT_RULE]
+  else
+    cwd = File.join(dir, "cwd")
+    home = File.join(dir, "gori_home")
+    FileUtils.mkdir_p([cwd, home])
+    db = File.join(dir, "fixture.db")
+    FileUtils.cp(File.join(EVAL, "out", "fixtures", "#{job.task.fixture}.db"), db)
+    mcp = {mcpServers: {gori: {command: GORI_BIN, args: ["mcp", "--db", db] + PROFILES[job.profile],
+                               env: {GORI_HOME: home}}}}.to_json
+    args = common + ["--mcp-config", mcp, "--tools", "", "--allowedTools", "mcp__gori",
+                     "--append-system-prompt", ANSWER_RULE]
+  end
   stream = File.join(dir, "stream.jsonl")
   started = Time.instant
   File.open(stream, "w") do |sout|
@@ -228,7 +282,7 @@ def run_one(job : Job, run_dir : String, model : String, budget : String, truth 
   end
   elapsed = (Time.instant - started).total_seconds
 
-  calls, foreign, result = read_stream(stream)
+  calls, foreign, peeked, result = read_stream(stream, !har.nil?)
   text = result.try(&.["result"]?).try(&.as_s?) || ""
   answer = text.lines.reverse_each.find(&.starts_with?("ANSWER:")).try do |l|
     raw = l.lchop("ANSWER:").strip.strip('`').strip
@@ -254,6 +308,7 @@ def run_one(job : Job, run_dir : String, model : String, budget : String, truth 
     "seconds"       => JSON::Any.new(elapsed.round(1)),
     "error"         => JSON::Any.new(result.nil? || result.try(&.["is_error"]?).try(&.as_bool?) == true),
     "foreign_tools" => JSON::Any.new(foreign.to_i64),
+    "peeked"        => JSON::Any.new(peeked),
   }
 end
 
@@ -267,7 +322,8 @@ jobs.times do
   spawn do
     while job = queue.receive?
       truth = truths[job.task.fixture][job.task.id]
-      rows.send(run_one(job, run_dir, model, budget, truth))
+      har = job.profile == SCRIPT ? hars[job.task.fixture] : nil
+      rows.send(run_one(job, run_dir, model, budget, truth, har))
     end
   end
 end
