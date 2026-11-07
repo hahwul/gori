@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- MCP, CLI: `list_history{sort}` and `gori run history --sort` list the slowest or largest flows first (#1828)
 - MCP, CLI: a redacted `Set-Cookie` keeps its cookie name and attributes (`sid=[REDACTED]; Path=/; HttpOnly`), so `HttpOnly`/`Secure`/`SameSite` are readable without `include_sensitive` (#1827)
 - Export: each HAR entry names its flow in `_goriFlowId`, so what a script finds in the file points back to the flow in gori (#1825)
 - MCP: list replies are held to about 40 KB instead of 64 KB, which dense JSON pushed past Claude Code's output cap (#1823)
