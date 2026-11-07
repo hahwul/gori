@@ -44,7 +44,9 @@ status:404
 ### One side only: `req.` / `resp.`
 
 `header:` and `body:` search **both the request and the response**. Prefix either with `req.` or
-`resp.` to search one side.
+`resp.` to search one side. Both are a substring of the head, so `header:authorization` also
+matches a request whose only such header is `X-Authorization-Debug`; to test one header's
+**name**, anchor it as a regex at a line start: `req.header~(?im)^authorization:`.
 
 | Field | Meaning |
 | --- | --- |
@@ -54,6 +56,7 @@ status:404
 ```text
 resp.body:secrettoken                 a token only the response carries
 resp.header:set-cookie                responses that set a cookie
+-req.header~(?im)^authorization:      requests with no Authorization header
 -resp.body:abcd                       responses whose body lacks abcd
 req.body~(?i)password                 regex over the request body only
 NOT (req.body:token OR resp.body:token)
