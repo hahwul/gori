@@ -225,7 +225,7 @@ module Gori
           s.field "verdicts", strarrprop("only these verdicts: added, gone, changed, unchanged, removed (default all)")
           s.field "issues", boolprop("include the retest of the baseline's open issues (default true)")
           s.field "limit", limitprop("max endpoint groups to read per side", DIFF_LIMIT)
-          s.field "offset", intprop("endpoint rows to skip (default 0); `has_more`/`total` say what a ~64 KB reply left")
+          s.field "offset", intprop("endpoint rows to skip (default 0); `has_more`/`total` say what a ~#{REPLY_ROWS_BUDGET // 1024} KB reply left")
           s.field "lenient", boolprop("free-text an unknown `field:` instead of refusing (a typo then matches nothing)")
         end
       end
