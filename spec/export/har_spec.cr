@@ -239,6 +239,15 @@ describe Gori::Export::Har do
     end
   end
 
+  it "names each entry's flow by its id in the exporting project" do
+    with_store do |store|
+      capture_flow(store) # so the exported flow's id is not its position (1)
+      detail = capture_flow(store)
+      har, _ = export([detail])
+      JSON.parse(har)["log"]["entries"][0][Gori::Export::Har::FLOW_ID].as_i64.should eq(detail.row.id)
+    end
+  end
+
   it "round-trips: a HAR gori writes imports back as the same flow" do
     with_store do |store|
       detail = capture_flow(store,

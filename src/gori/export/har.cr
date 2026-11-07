@@ -39,7 +39,8 @@ module Gori
     # For a COMPLETE flow everything a HAR carries — method (its exact case included), url,
     # version, ordered headers with their framing, body bytes, status, reason, timing —
     # survives, and export→import→export is a fixed point apart from the absolute-form
-    # request line and the `headersSize` that follows from it, above. A flow that is NOT
+    # request line and the `headersSize` that follows from it, above, and `_goriFlowId`
+    # (FLOW_ID), which names the flow in whichever project the export came from. A flow that is NOT
     # complete has no fixed point to be: HAR records neither `state` nor gori's `error`
     # string, so a pending / refused / aborted flow is SKIPPED by name and counted
     # (`skip_reason`), never written as a fabricated success.
@@ -103,6 +104,12 @@ module Gori
       # differ" means re-running the importer per entry, so it is always carried instead.
       RAW_REQUEST_HEAD  = "_goriRawRequestHead"
       RAW_RESPONSE_HEAD = "_goriRawResponseHead"
+
+      # The flow's id in the project it was exported from, so whatever a script finds in the
+      # HAR names the flow to open in gori. Position cannot: a filtered export, or one that
+      # skipped an incomplete flow, shifts it. Import does not read it (a flow gets the id
+      # its new project hands out), so a re-export carries the new id, not this one.
+      FLOW_ID = "_goriFlowId"
 
       # gori records one round-trip duration, not a phase breakdown, so `send`/`receive`
       # are the spec's own "not applicable" (-1) rather than a fabricated 0, and `time`
@@ -316,6 +323,7 @@ module Gori
         scrubbed = lossy_head?(row, req, resp, version)
 
         j.object do
+          j.field FLOW_ID, row.id
           j.field "startedDateTime", iso_micros(row.created_at)
           j.field "time", duration_ms(row.duration_us)
           j.field "request" do
