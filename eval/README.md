@@ -16,7 +16,9 @@ crystal run eval/run.cr -- --report=eval/out/runs/<stamp> --baseline=eval/out/ru
 ```
 
 Needs the `claude` CLI, logged in. Each run gets a copy of the fixture db, an empty
-`GORI_HOME` and an empty cwd, and `claude` runs with `--setting-sources ""
+`GORI_HOME` and an empty cwd under the system temp dir (a cwd inside the repo hands the agent
+the repo's `AGENTS.md` and Claude Code project memory; the summary voids such a run), and
+`claude` runs with `--setting-sources ""
 --strict-mcp-config --tools ""`, so the only tools the agent sees are gori's. The summary
 flags any run whose init listed another tool.
 
