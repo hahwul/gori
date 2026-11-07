@@ -148,7 +148,8 @@ module Gori
 
       AND/OR/NOT count only UPPERCASE and unquoted ("AND" is a literal). Precedence NOT > AND > OR.
 
-      Fields (: value match, ~ regex):
+      Fields (: value match, a case-insensitive SUBSTRING on host path url header; ~ regex):
+      path:/v1/ also hits /api/v1/x and host:shop.test hits cdn.shop.test — anchor: path~^/v1/ host~^shop\\.test$
         host port path method scheme proto status size reqsize respsize dur header body ws rpc url stub rewritten static src via scope cache
 
       Sides: header: and body: search REQUEST AND RESPONSE; prefix req. or resp. (res.) for one side —

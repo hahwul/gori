@@ -958,7 +958,9 @@ module Gori
           "List captured HTTP flows, newest first, as light rows (no bodies; get_flow for " \
           "detail). Optional gori QL `query`, e.g. 'host:example.com status:>=500 size:>10000 " \
           "dur:>500', 'header:set-cookie' (a substring of the head; one header NAME is " \
-          "'req.header~(?im)^authorization:'), 'body~secret\\d+' (`~` = regex, dur in ms; " \
+          "'req.header~(?im)^authorization:'), 'body~secret\\d+' (`~` = regex, dur in ms; `:` on " \
+          "host/path/url is a case-insensitive SUBSTRING, so 'path:/v1/' also hits '/api/v1/', " \
+          "anchor with 'path~^/v1/'; " \
           "ql_reference for full syntax). Returns " \
           "{flows, returned, limit, order, has_more, next_before_id | next_since}, not a bare " \
           "array. Page OLDER: pass `next_before_id` as `before_id` until `has_more` is false. " \
