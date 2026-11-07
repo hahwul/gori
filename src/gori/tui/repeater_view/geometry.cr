@@ -39,8 +39,7 @@ class Gori::Tui::RepeaterView
   # so from REQUEST or RESPONSE the Protocol card has no `t` row and the chip would name a key
   # that does nothing there. The fingerprint itself stays on the band either way.
   private def tls_chip_label : String
-    route = @focus == :target ? "#{menu_chip("repeater.cycle-tls-preset")}:" : ""
-    " #{route}TLS #{@tls_preset || "default"} "
+    Frame.badge_text("TLS #{@tls_preset || "default"}")
   end
 
   # The TARGET band's right-to-left chrome after the READ/INS mode chip: the SNI marker, the

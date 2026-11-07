@@ -59,11 +59,11 @@ module Gori::Tui
                       resolved_format : String, algorithm : String, salt : String, salt_cx : Int32,
                       salt_pre : String, salt_preset : String, verify_state : Symbol,
                       crack_note : String?, secret : String, secret_cx : Int32,
-                      secret_pre : String, pane : Symbol, focused : Bool, lens_chord : String) : Nil
+                      secret_pre : String, pane : Symbol, focused : Bool) : Nil
       return if rect.empty?
       input_c, dec_c, opts_c, sec_c = decode_layout(rect)
 
-      render_input(screen, input_c, input, focused && pane == :input, input_mode, input_read, lens_chord) unless input_c.empty?
+      render_input(screen, input_c, input, focused && pane == :input, input_mode, input_read) unless input_c.empty?
       unless dec_c.empty?
         lines = decoded_lines(decoded)
         @dec_lines = lines.size
@@ -78,14 +78,14 @@ module Gori::Tui
                      resolved_format : String, algorithm : String, salt : String, salt_cx : Int32,
                      salt_pre : String, salt_preset : String, secret : String, secret_cx : Int32,
                      secret_pre : String, output : String, output_ok : Bool, pane : Symbol,
-                     focused : Bool, lens_chord : String) : Nil
+                     focused : Bool) : Nil
       return if rect.empty?
       pay_c, opts_c, sec_c, out_c = forge_layout(rect)
 
       unless pay_c.empty?
         render_payload(screen, pay_c, payload, format, focused && pane == :payload)
         # PAYLOAD is this lens' top card, so it carries the way back — see draw_lens_chip.
-        draw_lens_chip(screen, pay_c, :forge, lens_chord)
+        draw_lens_chip(screen, pay_c, :forge)
       end
       render_opts(screen, opts_c, format, resolved_format, algorithm, salt, salt_cx, salt_pre, salt_preset, focused && pane == :opts) unless opts_c.empty?
       render_secret(screen, sec_c, secret, secret_cx, secret_pre, :none, nil, focused && pane == :secret) unless sec_c.empty?
@@ -135,12 +135,11 @@ module Gori::Tui
       Frame.card(screen, card, "OPTIONS", bg: Theme.bg, border: Frame.pane_border(active))
       min_x = card.x + OPTS_MIN_X
       # ^A:format — always lit (there is always a format in play).
-      fx = Frame.toggle_badge(screen, card.right - 1, card.y, min_x,
-        key_label("cookie.cycle-format", "^A"), format, true)
+      fx = Frame.toggle_badge(screen, card.right - 1, card.y, min_x, format, true)
       # algo:<hmac> then salt:<preset> — click-only chips chained left, drawn only for Django.
       if resolved == "django"
-        ax = Frame.toggle_badge(screen, fx, card.y, min_x, "algo", algorithm, true)
-        Frame.toggle_badge(screen, ax, card.y, min_x, "salt", salt_preset, true)
+        ax = Frame.toggle_badge(screen, fx, card.y, min_x, "algo #{algorithm}", true)
+        Frame.toggle_badge(screen, ax, card.y, min_x, "salt #{salt_preset}", true)
       end
       c = card.inset(1, 1)
       return if c.h <= 0
@@ -175,10 +174,10 @@ module Gori::Tui
     # to match render; `format` (display) is the ^A label whose WIDTH positions the rest.
     def opts_badge_hit(card : Rect, mx : Int32, my : Int32, format : String, resolved : String,
                        algorithm : String, salt_preset : String) : Symbol?
-      badges = [{:format, key_label("cookie.cycle-format", "^A"), format}] of {Symbol, String, String}
+      badges = [{:format, format}] of {Symbol, String}
       if resolved == "django"
-        badges << {:algorithm, "algo", algorithm}
-        badges << {:salt, "salt", salt_preset}
+        badges << {:algorithm, "algo #{algorithm}"}
+        badges << {:salt, "salt #{salt_preset}"}
       end
       Frame.right_badge_hit(mx, my, card.y, card.right - 1, card.x + OPTS_MIN_X, badges)
     end

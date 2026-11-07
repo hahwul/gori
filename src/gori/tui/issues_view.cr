@@ -173,7 +173,7 @@ module Gori::Tui
     # `enter_notes_insert!` used to lead this method, so aiming the caret also armed the
     # editor — and the next bare letter was typed rather than run, which is how a `y` meant
     # as copy became a `y` typed over the selection. The mode is entered the way the keyboard
-    # enters it (`i` / ↵) or by clicking the NOR/INS chip this card draws on its own border.
+    # enters it (`i` / ↵) or by clicking the READ/INS chip this card draws on its own border.
     # See `NotesView#click_to_cursor`, which this mirrors, and `RepeaterView#place_request_caret`.
     def notes_click_to_cursor(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
       notes_rect = notes_body_rect(rect)
@@ -907,7 +907,7 @@ module Gori::Tui
         # row, which the tick re-anchors but does not re-read per issue, so the baseline an
         # edit is measured against has to be taken from the row this detail is holding now.
         #
-        # Skipped over unsaved text. The NOR/INS chip exits INS without saving, so re-entry is
+        # Skipped over unsaved text. The READ/INS chip exits INS without saving, so re-entry is
         # the ordinary way back into an edit in progress — and a re-seed there would hand the
         # operator the STORED notes with their own paragraph gone and nothing said. (`^W` is
         # the discard, and it re-seeds unconditionally.)
@@ -1551,7 +1551,7 @@ module Gori::Tui
     end
 
     # The RELATED and NOTES rects for a detail interior — ONE derivation, so `render_detail`
-    # and the four hit-tests in `IssuesController` (the NOR/INS chip, click-to-cursor, drag,
+    # and the four hit-tests in `IssuesController` (the READ/INS chip, click-to-cursor, drag,
     # double-click) can never disagree about which row a click landed on. `render_detail` and
     # `notes_card_rect` used to derive the same arithmetic independently, with the controller
     # reading only the second: move one and not the other and clicks land on the wrong rows
@@ -1644,7 +1644,7 @@ module Gori::Tui
     # A filled "chip": ` LABEL ` painted with `color` as the background. Returns the
     # x just past it so chips lay out left-to-right.
     # The buffer holds text no `seed_notes` put there. Deliberately mode-INDEPENDENT: the
-    # NOR/INS chip (and a click on it) leaves INS without saving, so unsaved text outlives the
+    # READ/INS chip (and a click on it) leaves INS without saving, so unsaved text outlives the
     # editor, and a "dirty" test that asked the mode instead would call that buffer clean and
     # let the next re-seed erase it.
     def notes_dirty? : Bool

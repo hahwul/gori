@@ -202,8 +202,7 @@ module Gori::Tui
       # is forced (HEX/B64), muted for AUTO (which just follows the bytes). Replaces the
       # old title-embedded mode label so the chord is discoverable in place.
       name, forced = out_mode_badge
-      Frame.toggle_badge(screen, card.right - 1, card.y, card.x + header.size + 4,
-        key_label("decoder.mode", "^X"), name, forced)
+      Frame.toggle_badge(screen, card.right - 1, card.y, card.x + header.size + 4, name, forced)
       render_output(screen, card.inset(1, 1), result, focused: active)
     end
 
@@ -470,8 +469,8 @@ module Gori::Tui
       name, _ = out_mode_badge
       min_x = card.x + output_header(result).size + 4
       !Frame.right_badge_hit(mx, my, card.y, card.right - 1, min_x, [
-        {:mode, key_label("decoder.mode", "^X"), name},
-      ] of {Symbol, String, String}).nil?
+        {:mode, name},
+      ] of {Symbol, String}).nil?
     end
 
     private def key_label(id : String, fallback : String) : String

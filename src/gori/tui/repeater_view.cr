@@ -116,8 +116,8 @@ module Gori::Tui
     # the commonest workflow there is.
     getter? evidence : Bool
 
-    # The registry the border chips read their menu letters from (`␣Pr:FRAME`, `␣Pw:KEY`,
-    # `␣Pt:…`), set by the controller that makes the view (#1295). Nil in a bare view, whose
+    # The registry the border chips read their menu letters from (` FRAME `, the WS ` KEY ` chip,
+    # the TLS chip), set by the controller that makes the view (#1295). Nil in a bare view, whose
     # chips then read `␣` alone (`Hotkeys.menu_chip`).
     property menu_registry : Verb::Registry? = nil
 

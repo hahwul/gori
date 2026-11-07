@@ -158,7 +158,7 @@ describe "HistoryView gRPC detail" do
   # The mode strip has to name the state and the key that changes it. `binary` alone used to
   # suppress the pretty chip here, which would have left `p` changing the pane with nothing
   # on screen saying so.
-  it "offers a p: chip and names which reading is on screen" do
+  it "names which reading of the payload is on screen" do
     pb_tmp_store do |store|
       view = seed.call(store, grpc_frame(PB_BODY))
       rect = Rect.new(0, 0, 160, 24)
@@ -167,28 +167,24 @@ describe "HistoryView gRPC detail" do
       on = MemoryBackend.new(160, 24)
       view.render_detail(Screen.new(on), rect)
       on.row(rect.y).should contain("PROTOBUF")
-      on.row(rect.y).should contain("p:bytes")
 
       view.pretty = false
       off = MemoryBackend.new(160, 24)
       view.render_detail(Screen.new(off), rect)
       off.row(rect.y).should contain("BYTES")
-      off.row(rect.y).should contain("p:tree")
-      # ^X (the byte-exact dump of the whole body) never left either.
-      off.row(rect.y).should contain("^X:hex")
     end
   end
 
-  # The chip is drawn AND clickable — a chip only one of those is true for is the defect
-  # `␣Pw:KEY` had. Both come off `detail_mode_chips`, so this pins them together.
-  it "hit-tests the p: chip it draws" do
+  # The strip states which reading of the payload is on screen and carries no keyed chip:
+  # `p` is the footer's (`HistoryController#body_hint`).
+  it "names the payload reading on the strip without a p: chip" do
     pb_tmp_store do |store|
       view = seed.call(store, grpc_frame(PB_BODY))
       rect = Rect.new(0, 0, 160, 24)
       b = MemoryBackend.new(160, 24)
       view.render_detail(Screen.new(b), rect)
-      col = b.row(rect.y).index("p:").not_nil!
-      view.detail_mode_at(rect, col, rect.y).should eq(:pretty)
+      b.row(rect.y).should match(/PROTOBUF|BYTES|JSON/)
+      b.row(rect.y).should_not contain("p:")
     end
   end
 

@@ -48,7 +48,7 @@ module Gori::Tui
 
     # ---- INPUT (editable, INS/READ like the Decoder input) ----
     private def render_input(screen : Screen, card : Rect, input : TextArea, active : Bool,
-                             mode : InputMode, read : TextReadState, lens_chord : String) : Nil
+                             mode : InputMode, read : TextReadState) : Nil
       reading = active && mode == InputMode::Read
       insert = active && mode == InputMode::Insert
       Frame.card(screen, card, "INPUT", bg: Theme.bg, border: Frame.pane_border(active))
@@ -60,7 +60,7 @@ module Gori::Tui
       Frame.mode_badge(screen, card.right - 1, card.y, card.x + INPUT_MIN_X, mode == InputMode::Insert)
       # …and the lens chip chains LEFT of it (`draw_lens_chip` re-derives that edge rather
       # than taking this return, so the hit-test can compute it the same way).
-      draw_lens_chip(screen, card, :decode, lens_chord, mode == InputMode::Insert)
+      draw_lens_chip(screen, card, :decode, mode == InputMode::Insert)
       body = card.inset(1, 1)
       input.render(screen, body, cursor: insert, gauge: true, gauge_focused: active)
       paint_read_chrome(screen, body, input, read) if reading
@@ -73,7 +73,7 @@ module Gori::Tui
     # Help and in the footer and nowhere on the panes themselves.
     #
     # The NAME is where `^T` GOES, and the `→` says so. Naming the CURRENT lens — the way
-    # the sibling ` ↵:READ ` chip names its own mode — would repeat what the card titles
+    # the sibling ` READ ` chip names its own mode — would repeat what the card titles
     # under it already state, and ` ^T:DECODE ` riding a decoding pane reads as "^T decodes
     # this", i.e. as a key that does something else. `chord` comes from the keymap, so a
     # rebind moves this and the footer together — and `lens_chord:` is REQUIRED on both
@@ -96,21 +96,21 @@ module Gori::Tui
       end
     end
 
-    private def draw_lens_chip(screen : Screen, card : Rect, mode : Symbol, chord : String,
+    private def draw_lens_chip(screen : Screen, card : Rect, mode : Symbol,
                                insert : Bool = false) : Nil
       edge, min_x = lens_chip_geom(card, mode, insert)
-      Frame.toggle_badge(screen, edge, card.y, min_x, chord, lens_name(mode), false)
+      Frame.toggle_badge(screen, edge, card.y, min_x, lens_name(mode), false)
     end
 
     # Hit-test the lens chip on the lens' top card — the controller's `handle_click` runs it
     # for INPUT in DECODE and the top card of the other lens. `insert` is INPUT's REAL mode
     # (the chip chains past a badge whose two labels differ in width), and is unread on the
     # other side.
-    def lens_chip_hit(card : Rect, mx : Int32, my : Int32, mode : Symbol, chord : String,
+    def lens_chip_hit(card : Rect, mx : Int32, my : Int32, mode : Symbol,
                       insert : Bool = false) : Bool
       edge, min_x = lens_chip_geom(card, mode, insert)
       !Frame.right_badge_hit(mx, my, card.y, edge, min_x,
-        [{:lens, chord, lens_name(mode)}] of {Symbol, String, String}).nil?
+        [{:lens, lens_name(mode)}] of {Symbol, String}).nil?
     end
 
     # ---- read-only scrollable text card (DECODED / OUTPUT) ----

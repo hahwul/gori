@@ -155,7 +155,6 @@ module Gori::Tui
       v = current_view
       return "↹/esc tabs · ^N new" unless v
       reg = @host.session.registry
-      y = Hotkeys.binding_label(reg, "fuzzer.copy", "y")
       run = Hotkeys.binding_label(reg, "fuzz.run", "^R")
       stop = Hotkeys.binding_label(reg, "fuzz.stop", "^X")
       save_key = Hotkeys.binding_label(reg, "fuzz.save-results", "⇧E")
@@ -165,7 +164,7 @@ module Gori::Tui
       word = Hotkeys.binding_label(reg, "fuzz.mark-word", "^K")
       point = Hotkeys.binding_label(reg, "fuzz.insert-marker", "^T")
       marks = "#{params} params · #{word} word · #{point} point"
-      read_common = "⇧arrows select · #{y} copy · space cmds"
+      pretty = Hotkeys.binding_label(reg, "fuzz.pretty-template", "^U")
       sni = Hotkeys.binding_label(reg, "fuzz.toggle-sni", "^S")
       case v.focus
       when :target
@@ -174,7 +173,7 @@ module Gori::Tui
         elsif v.target_insert?
           "type URL · #{sni} SNI · ↵/↓ template · #{run} run · ↹ pane · esc read"
         else
-          keys("{editor.insert}/↵ edit · #{read_common} · #{sni} SNI · #{run} run · ↹ pane · esc sub-tabs")
+          keys("{editor.insert}/↵ edit · #{sni} SNI · #{run} run · ↹ pane · space cmds · esc sub-tabs")
         end
       when :template
         if v.template_insert?
@@ -182,13 +181,15 @@ module Gori::Tui
           # same thing it does in the Repeater's request editor. The old wording promised a
           # focus move Tab has never made from an editor in INSERT.
           #
-          # `^Y copy` sits right after the select token it completes: this footer already told
-          # you a band could be built here and then named no key that copies one. In INSERT the
-          # `y` the READ footer advertises is a literal character — and typing it over the band
-          # REPLACES it, which is the whole reason `fuzzer.copy` carries a ctrl chord.
-          "type · ⇧arrows select · ^Y copy · ^Z undo · #{marks} · ^O config · #{run} run · esc read · ↹ text"
+          # `^Y copy` is named in INSERT because the `y` the READ footer would offer is a
+          # literal character here — and typing it over a band REPLACES it, which is the whole
+          # reason `fuzzer.copy` carries a ctrl chord. `esc read · ↹ text` lead, as the
+          # Repeater's INS strip does: the two tokens that say a loop key has become text.
+          "esc read · ↹ text · ^Y copy · #{run} run · #{marks}"
         else
-          keys("{editor.insert}/↵ edit · #{read_common} · #{marks} · {editor.undo} undo · {editor.find} find · ^O config · #{run} run · ↹ pane · esc sub-tabs")
+          # `#{pretty} pretty` since the TEMPLATE border lost its PRETTY chip: the footer is
+          # now the one place the key is named.
+          keys("{editor.insert}/↵ edit · #{run} run · #{pretty} pretty · #{point} mark · ^O config · space cmds · esc sub-tabs")
         end
       when :config then config_hint(v, run)
       when :results
@@ -210,7 +211,7 @@ module Gori::Tui
         fold = v.grouped? ? " · ←/→ fold" : ""
         "↑/↓ select · ↵ detail#{fold} · #{keys("{space:fuzz.sort} sort · {fuzz.matched} matched · {fuzz.dist} dist · {space:fuzz.group} shapes")}#{save} · " \
         "#{run} run · #{stop} stop · space cmds · esc sub-tabs"
-      when :detail then "↑/↓ move · #{read_common} · ←/→ pane · ^F find · esc back"
+      when :detail then "↑/↓ move · ←/→ pane · ^F find · space cmds · esc back"
       else              "↹/esc sub-tabs"
       end
     end

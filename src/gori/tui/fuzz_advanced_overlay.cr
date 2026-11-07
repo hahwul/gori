@@ -149,7 +149,7 @@ module Gori::Tui
       # Schema-known gRPC field positions (`gori run fuzz --field`, MCP `fields`). A NAME, not
       # a marker: the wire encoding of a value is not something `§…§` can usefully wrap. Blank
       # = none, which is every sweep that came before. The field NAMES for a flow are the ones
-      # the Repeater's ␣Pf:FIELDS form and the History protobuf tree already show for it, so
+      # the Repeater's FIELDS form and the History protobuf tree already show for it, so
       # this row is typed, not browsed.
       {:grpc_fields, "gRPC field(s)", :text},
       # The request-time macro (#1350): Repeater sessions replayed BEFORE a candidate so a

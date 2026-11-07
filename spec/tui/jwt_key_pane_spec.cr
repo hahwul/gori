@@ -34,7 +34,7 @@ private def render_encode_lens(alg : String, secret : String = "") : MemoryBacke
   JwtView.new.render_encode(Screen.new(b), Rect.new(0, 0, W, H),
     header: TextArea.new(%({"typ":"JWT"})), payload: TextArea.new("{}"),
     secret: secret, secret_cx: 0, secret_pre: "", alg: alg,
-    output: "", output_ok: true, pane: :header, focused: true, lens_chord: "^T")
+    output: "", output_ok: true, pane: :header, focused: true)
   b
 end
 
@@ -43,7 +43,7 @@ private def render_decode_lens(token : String, input_jwe : Bool = false) : Memor
   JwtView.new.render_decode(Screen.new(b), Rect.new(0, 0, W, H),
     input: TextArea.new(token), input_mode: InputMode::Read,
     input_read: TextReadState.new, decoded: "", attacks: [] of Gori::Jwt::Attack,
-    input_jwe: input_jwe, pane: :input, focused: true, lens_chord: "^T")
+    input_jwe: input_jwe, pane: :input, focused: true)
   b
 end
 

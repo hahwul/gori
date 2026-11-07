@@ -169,7 +169,7 @@ module Gori::Tui
         Item.new("⇧arrows", "select text (line or char)"),
         Item.new("{fuzz.automark} · {fuzz.mark-word} · {fuzz.insert-marker}", "auto-mark params · mark word · mark point (manual §)"),
         # NOT `^U clear §` — that was wrong twice over: ^U is fuzz.pretty-template (the tab's
-        # own ` ^U:PRETTY ` badge says so), and clear-marks has no chord at all. The advertised
+        # own ` PRETTY ` badge says so), and clear-marks has no chord at all. The advertised
         # key silently reflowed the template you had just finished marking by hand.
         Item.new("^U", "pretty-print the template body ({space:fuzz.clear-marks} clears §)", "fuzz.pretty-template"),
         Item.new("^V", "toggle transport HTTP/1.1 ↔ HTTP/2", "fuzz.toggle-http2"),

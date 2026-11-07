@@ -156,7 +156,7 @@ describe Gori::Tui::InterceptView do
         listen: {"127.0.0.1", 8070}, capturing: true)
       backend.contains?("no held messages").should be_true
       backend.contains?("INTERCEPT").should be_true
-      backend.contains?("i:CATCH").should be_true
+      backend.contains?("CATCH").should be_true
     end
   end
 
@@ -684,8 +684,8 @@ describe "Intercept filter bar" do
       view.reload(ic)
       backend = MemoryBackend.new(100, 8)
       view.render(Screen.new(backend), Rect.new(0, 0, 100, 8))
-      backend.row(0).includes?("c:REQ").should be_true   # default direction chip (c cycles it)
-      backend.row(0).includes?("i:CATCH").should be_true # master catch toggle badge
+      backend.row(0).includes?("DIR REQ").should be_true # default direction chip (c cycles it)
+      backend.row(0).includes?("CATCH").should be_true   # master catch toggle badge
       backend.contains?("/ condition").should be_true    # field hint
     end
   end
@@ -696,12 +696,12 @@ describe "Intercept filter bar" do
       view.reload(ic)
       on = MemoryBackend.new(100, 8)
       view.render(Screen.new(on), Rect.new(0, 0, 100, 8), focused: true)
-      on.row(0).should contain("i:CATCH ON")
+      on.row(0).should contain("CATCH ON")
       ic.toggle
       view.reload(ic)
       off = MemoryBackend.new(100, 8)
       view.render(Screen.new(off), Rect.new(0, 0, 100, 8), focused: true)
-      off.row(0).should contain("i:CATCH OFF")
+      off.row(0).should contain("CATCH OFF")
     end
   end
 
@@ -712,11 +712,11 @@ describe "Intercept filter bar" do
       view.reload(ic)
       backend = MemoryBackend.new(100, 8)
       view.render(Screen.new(backend), Rect.new(0, 0, 100, 8))
-      backend.row(0).includes?("c:RES").should be_true
+      backend.row(0).includes?("DIR RES").should be_true
     end
   end
 
-  it "shows rebound catch keys only while the body owns focus" do
+  it "spells the catch chips as state, never as a key, focused or not" do
     previous = Gori::Settings.keymap_overrides
     begin
       Gori::Settings.keymap_overrides = {"intercept.direction" => ["shift-c"],
@@ -728,13 +728,15 @@ describe "Intercept filter bar" do
 
         focused = MemoryBackend.new(100, 8)
         view.render(Screen.new(focused), Rect.new(0, 0, 100, 8), focused: true)
-        focused.row(0).should contain("⇧C:REQ")
-        focused.row(0).should contain("⇧I:CATCH")
+        focused.row(0).should contain("DIR REQ")
+        focused.row(0).should contain("CATCH ON")
+        focused.row(0).should_not contain("⇧C")
+        focused.row(0).should_not contain("⇧I")
 
         unfocused = MemoryBackend.new(100, 8)
         view.render(Screen.new(unfocused), Rect.new(0, 0, 100, 8), focused: false)
-        unfocused.row(0).should contain("DIR:REQ")
-        unfocused.row(0).should contain("CATCH:ON")
+        unfocused.row(0).should contain("DIR REQ")
+        unfocused.row(0).should contain("CATCH ON")
         unfocused.row(0).should_not contain("⇧C")
         unfocused.row(0).should_not contain("⇧I")
       end
@@ -925,8 +927,8 @@ describe "Intercept filter bar" do
       view.reload(ic)
       backend = MemoryBackend.new(100, 12)
       view.render(Screen.new(backend), Rect.new(0, 0, 100, 12))
-      backend.row(0).includes?("c:REQ").should be_true # bar on the top row
-      backend.contains?("QUEUE").should be_true        # queue card still drawn below
+      backend.row(0).includes?("DIR REQ").should be_true # bar on the top row
+      backend.contains?("QUEUE").should be_true          # queue card still drawn below
       backend.contains?("acme.test/login").should be_true
     end
   end
@@ -1245,7 +1247,7 @@ describe "Intercept edit caveats" do
       view.render(Screen.new(backend), Rect.new(0, 0, 110, 10))
       backend.contains?("NO-EDIT").should be_false
       backend.contains?("HEAD-ONLY").should be_false
-      backend.contains?("e:EDIT").should be_true
+      backend.contains?(" EDIT ").should be_true
     end
   end
 end

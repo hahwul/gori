@@ -42,7 +42,7 @@ describe Gori::Tui::DecoderView do
     b.contains?("plain text").should be_true
   end
 
-  it "paints the rebound output-mode chord on the OUTPUT card" do
+  it "paints the output mode on the OUTPUT card as a state, whatever the chord" do
     previous = Gori::Settings.keymap_overrides
     begin
       Gori::Settings.keymap_overrides = {"decoder.mode" => ["alt-x"]}
@@ -54,8 +54,8 @@ describe Gori::Tui::DecoderView do
       view.render(Screen.new(backend), Rect.new(0, 0, 80, 30),
         input: input, chain: "", chain_cx: 0, chain_pre: "",
         result: result, pane: :output, focused: true, popup: ChainComplete.new)
-      backend.contains?("⌥X:AUTO").should be_true
-      backend.contains?("^X:AUTO").should be_false
+      backend.contains?(" AUTO ").should be_true
+      backend.contains?("⌥X").should be_false
     ensure
       Gori::Settings.keymap_overrides = previous
     end

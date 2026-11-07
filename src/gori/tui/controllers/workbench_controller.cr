@@ -581,12 +581,12 @@ module Gori::Tui
     # share: the border's READ/INS chip, the lens chip chained left of it, else the caret.
     private def click_input_card(s : S, card : Rect, mx : Int32, my : Int32) : Nil
       enter_pane(s, :input)
-      # NOR/INS border chip toggles insert (same as ↵ / esc); don't move caret.
+      # READ/INS border chip toggles insert (same as ↵ / esc); don't move caret.
       if Frame.mode_badge_hit(mx, my, card.y, card.right - 1, card.x + WorkbenchView::INPUT_MIN_X,
            s.input_mode == InputMode::Insert)
         s.input_mode = s.input_mode == InputMode::Insert ? InputMode::Read : InputMode::Insert
         s.input_read.sync_from(s.input) if s.input_mode == InputMode::Read
-      elsif s.view.lens_chip_hit(card, mx, my, :decode, lens_chord, s.input_mode == InputMode::Insert)
+      elsif s.view.lens_chip_hit(card, mx, my, :decode, s.input_mode == InputMode::Insert)
         # ` ^T:→ENCODE ` / ` ^T:→FORGE `, chained left of the mode chip. Same act as the chord.
         toggle_mode
       elsif s.input_mode == InputMode::Insert

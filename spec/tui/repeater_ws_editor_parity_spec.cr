@@ -18,7 +18,7 @@ include Gori::Tui
 #   * the cross-pane arrow step lived inline in `edit_move` (INS only), so a WebSocket tab —
 #     which `restore` leaves in READ mode — could not reach HANDSHAKE from MESSAGES with the
 #     arrows at all; and
-#   * `␣Pw:KEY` was drawn by `render_request` but absent from `chrome_hit`'s badge list, so
+#   * the WS ` KEY ` chip was drawn by `render_request` but absent from `chrome_hit`'s badge list, so
 #     the badge was a dead cell.
 #
 # The shared seam is `request_sub_rect` / `request_hit` / `place_request_caret` /
@@ -313,7 +313,7 @@ describe "RepeaterView WebSocket editor parity" do
       view, b = render_ws.call(rect, true)
       env, _ = sub_rects.call(view, rect)
       border_y = env.y - 1 # the card's top border, one row above its content
-      col = col_of.call(b, border_y, "#{Gori::Hotkeys.menu_chip(Gori::Verbs.registry, "repeater.toggle-ws-key")}:KEY")
+      col = col_of.call(b, border_y, " KEY ")
       view.chrome_hit(rect, col + 2, border_y).should eq(:ws_key)
     end
 
@@ -322,16 +322,16 @@ describe "RepeaterView WebSocket editor parity" do
       view, b = render_ws.call(rect, true)
       env, _ = sub_rects.call(view, rect)
       border_y = env.y - 1
-      col = col_of.call(b, border_y, "↵:READ")
+      col = col_of.call(b, border_y, " READ ")
       view.chrome_hit(rect, col + 1, border_y).should eq(:mode)
     end
 
-    it "still reports ^R:SEND" do
+    it "still reports SEND" do
       rect = Rect.new(0, 0, 100, 30)
       view, b = render_ws.call(rect, true)
       env, _ = sub_rects.call(view, rect)
       border_y = env.y - 1
-      col = col_of.call(b, border_y, "^R:SEND")
+      col = col_of.call(b, border_y, " SEND ")
       view.chrome_hit(rect, col + 2, border_y).should eq(:send)
     end
   end

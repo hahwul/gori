@@ -96,12 +96,12 @@ module Gori::Tui
         s.view.render_decode(screen, body,
           input: s.input, input_mode: s.input_mode, input_read: s.input_read,
           decoded: s.decoded, attacks: s.attacks, input_jwe: s.input_jwe?,
-          pane: s.pane, focused: focused, lens_chord: lens_chord)
+          pane: s.pane, focused: focused)
       else
         s.view.render_encode(screen, body,
           header: s.header, payload: s.payload, secret: s.secret, secret_cx: s.secret_cx,
           secret_pre: s.secret_pre, alg: s.alg, output: s.output, output_ok: s.output_ok?,
-          pane: s.pane, focused: focused, lens_chord: lens_chord)
+          pane: s.pane, focused: focused)
       end
     end
 
@@ -219,7 +219,7 @@ module Gori::Tui
         if hdr_c.contains?(mx, my)
           enter_pane(s, :header)
           # ` ^T:→DECODE ` on this card's border — the way back, and the same act as the chord.
-          if s.view.lens_chip_hit(hdr_c, mx, my, :encode, lens_chord)
+          if s.view.lens_chip_hit(hdr_c, mx, my, :encode)
             toggle_mode
           else
             s.header.click_to_cursor(hdr_c.inset(1, 1), mx, my)

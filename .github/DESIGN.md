@@ -3916,7 +3916,8 @@ above. #1295.
 - **A chip is a menu path too.** A border badge or a tight hint spells it with
   `Hotkeys.menu_chip` (`␣Pr`), and the guard that refuses a literal `space → X` refuses a
   literal `␣X`. A view takes the session's registry from its controller; without one the chip
-  is a bare `␣`.
+  is a bare `␣`. (The border-badge half is superseded by the 2026-11-07 entry: a badge no
+  longer spells a key or a path at all. The guard and `menu_chip` for a tight hint stand.)
 - **One chord may advertise two verbs** when one of them answers both panes: the Repeater's
   `^X` toggles the focused pane's hex, so the response row declares `chord_of:` and shows it. A
   scope still binds a chord to one verb; boot checks the chord is live in the row's section.
@@ -5216,3 +5217,44 @@ qualified name) through `Env.slot_env_warning` on a slot write (MCP, `gori run s
 send-time `Run.unbound_overlay_note` (MCP sends and Authorize, `gori run` summaries). A report,
 not a refusal; the remedy is the rule plus a `rules` claim, or `$$BIND.X`. A bare `$id`/`$NOSUCH`,
 and every name under the bare grammar, stays silent.
+
+### 2026-11-07: a border badge states, the footer names the key, and the badge is one word
+
+Refines: the 2026-09-26 "a chip is a menu path too" bullet, the 2026-09-12 editor-keys entry
+(the READ/INS chip), and §5's chrome. Operator feedback on the TUI was "complex" and "hard",
+and a walk through the demo project showed why before any key was pressed: the Repeater's three
+borders carried twelve keys in five notations (`^V:HTTP/1.1`, `␣Pt:TLS default`, `↵:READ`,
+`^U:PRETTY`, `⇧D:DIFF`, `p:PRETTY`), the History detail strip carried eight beside its three
+pane tabs, and a footer could run to eleven tokens and push the CPU/MEM read-out off the row.
+
+- **A border badge states what IS; it does not spell a key.** `Frame.badge_text` is the one
+  padded ` NAME ` every badge draws and hit-tests (`toggle_badge`, `state_badge`,
+  `action_badge`, `right_badge_hit`); the `chord:` half of the old ` chord:NAME ` is gone from
+  the helpers and every caller. The transport reads ` HTTP/1.1 `, the fingerprint ` TLS
+  default `, a toggle its name lit or muted (` AUTO-LEN `, ` CL `, ` FRAME `, ` DIST `), a run
+  control ` RUN ` / ` STOP `, the Intercept bar ` CATCH ON ` and ` DIR REQ `. A badge with no
+  state to report and no action of its own — the request's PRETTY, the template's PRETTY —
+  is not drawn: it was a key hint dressed as a toggle.
+- **SEND and RUN stay buttons**, the one primary action per pane, gold when ready. The RESPONSE
+  pane's chips (`DIFF`/`HEX`/`PRETTY`/`unicode`) and the History detail strip's (`hex`/`ws`/
+  `pretty`/`unicode`) are not chips any more: the border and strip name only the views that are
+  ON (`61ms · 277B · pretty`, the strip's `PRETTY`/`RAW`/`HEX` word), and a click there is a
+  click on a border. That is the one deliberate loss of a mouse target; the keys are unchanged.
+- **The READ badge is the INS badge's twin.** ` READ ` (6 cells) beside ` INS ` (5), both the
+  pane's real mode, drawn unconditionally (the 2026-10-04 contract). ` ↵:READ ` was a key hint
+  in a badge's clothing, and the one place on screen the two modes looked like different kinds
+  of thing.
+- **The footer names the focused pane's keys, in one notation, about seven tokens.** `key
+  label` with ` · ` between, modifiers `^` `⇧` `⌥`, glyphs `↵ esc ↹`. What the border stopped
+  spelling moves here, for the pane that has focus only (`^R send · ^U pretty · ^L auto-len`
+  on REQUEST, `⇧D diff · ^X hex · p pretty` on RESPONSE, `^X hex · p pretty` on a History
+  detail). Selection and READ-mode copy are not named: they are the same keys in every text
+  pane and the space menu lists both. `^Y copy` stays in every INS strip, because a bare `y`
+  is a literal there (`spec/tui/editor_footer_copy_key_spec.cr`'s rule C still holds).
+- **The focus label says the pane and its mode.** `TARGET · READ`, `REQUEST · INS`, and
+  `RESPONSE` alone where there is no mode to name (`Runner#focus_label`); a bare editor pane
+  is `READ` / `INS`. `EDITOR` and `BODY` remain for a one-line input and a list, which have no
+  READ to be in. The tour's badge follows (`Tutorial.focus_badge`).
+
+Not changed, on purpose: how READ and INS are entered and left, every chord, the space menu
+and the palette. The mode model itself is muscle memory and is a separate decision.

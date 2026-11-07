@@ -46,7 +46,7 @@ describe InterceptController do
       ctl.editor_enter_insert.should be_true
       ctl.view.text_insert?.should be_true
       ctl.body_takes_text?.should be_true
-      ctl.body_hint(:body).should contain("type to edit")
+      ctl.body_hint(:body).should start_with("type ·")
       ctl.handle_body_key(char_key('X')).should be_true
       String.new(ctl.view.forward_bytes(it)).should start_with("XGET /api/x")
 
@@ -107,11 +107,11 @@ describe InterceptController do
   it "badges the open editor with its real mode, and the closed one with `e`" do
     with_held do |ctl, _it|
       backend = TuiContract.render(ctl)
-      backend.contains?("e:EDIT").should be_true
+      backend.contains?(" EDIT ").should be_true
       ctl.pane_advance(1)
       backend = TuiContract.render(ctl)
       backend.contains?(Frame.mode_badge_label(false).strip).should be_true
-      backend.contains?("e:EDIT").should be_false
+      backend.contains?(" EDIT ").should be_false
       ctl.editor_enter_insert
       TuiContract.render(ctl).contains?(Frame.mode_badge_label(true)).should be_true
     end

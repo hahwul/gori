@@ -483,11 +483,10 @@ module Gori::Tui
       # directly above it already say so — `MINER` here was the third printing of the word.
       # The FINDINGS card below keeps its title: it names a pane, not the tab.
       Frame.card(screen, rect, border: focused ? Theme.focus_gold : Theme.border, bg: Theme.bg)
-      # Run control on the border: while mining a lit ` ^X:STOP `, otherwise a muted
+      # Run control on the border: while mining a lit ` STOP `, otherwise a muted
       # ` ^R:MINE ` (run / re-run) — so both chords stay in view once findings fill the
       # pane. A state-swapping badge, not a boolean toggle: the chord itself changes.
-      chord, name = @running ? {"^X", "STOP"} : {"^R", "MINE"}
-      Frame.toggle_badge(screen, rect.right - 1, rect.y, rect.x + 2, chord, name, @running)
+      Frame.toggle_badge(screen, rect.right - 1, rect.y, rect.x + 2, @running ? "STOP" : "MINE", @running)
       x = rect.x + 2
       y = rect.y + 1
       # Guarded like every line below it: on a 1-2 row card `rect.y + 1` is the bottom
@@ -723,15 +722,14 @@ module Gori::Tui
     end
 
     # Hit-test the MINER card's run control. It is drawn in the same dress as the Repeater's
-    # ` ^R:SEND ` and the Fuzzer's ` ^R:RUN `, both of which answer a click; this one and its
+    # ` SEND ` and the Fuzzer's ` RUN `, both of which answer a click; this one and its
     # Sequencer/Discover twins did not. Geometry mirrors render_summary exactly.
     def summary_chrome_hit(rect : Rect, mx : Int32, my : Int32) : Symbol?
       return nil if @focus == :detail
       sum, _ = pane_rects(rect)
       return nil if sum.empty?
-      chord, name = @running ? {"^X", "STOP"} : {"^R", "MINE"}
       Frame.right_badge_hit(mx, my, sum.y, sum.right - 1, sum.x + 2,
-        [{:run, chord, name}] of {Symbol, String, String})
+        [{:run, @running ? "STOP" : "MINE"}] of {Symbol, String})
     end
   end
 end

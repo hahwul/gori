@@ -6,14 +6,14 @@ require "file_utils"
 include Gori::Tui
 
 # The JWT tab's two lenses are complete workbenches, so neither one showed that the other
-# existed: `^T` was named in Help and in the status footer and nowhere on the panes. The chip
-# rides the TOP card of each lens — INPUT in DECODE, HEADER in ENCODE — and is clickable, so
-# the draw and `JwtView#lens_chip_hit` must agree cell for cell.
+# existed. The ` →ENCODE ` / ` →DECODE ` chip rides the TOP card of each lens — INPUT in
+# DECODE, HEADER in ENCODE — and is clickable, so the draw and `JwtView#lens_chip_hit` must
+# agree cell for cell. The key that switches (`^T`) is the footer's and Help's.
 private W     = 100
 private H     =  34
 private TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhIn0.sig"
 
-private def render_lens(mode : Symbol, *, insert : Bool = false, chord : String = "^T",
+private def render_lens(mode : Symbol, *, insert : Bool = false,
                         w : Int32 = W, h : Int32 = H) : {JwtView, MemoryBackend, Rect}
   view = JwtView.new
   b = MemoryBackend.new(w, h)
@@ -23,12 +23,12 @@ private def render_lens(mode : Symbol, *, insert : Bool = false, chord : String 
       input: TextArea.new(TOKEN),
       input_mode: insert ? InputMode::Insert : InputMode::Read,
       input_read: TextReadState.new, decoded: "", attacks: [] of Gori::Jwt::Attack,
-      pane: :input, focused: true, lens_chord: chord)
+      pane: :input, focused: true)
   else
     view.render_encode(Screen.new(b), rect,
       header: TextArea.new(%({"alg":"HS256"})), payload: TextArea.new("{}"),
       secret: "", secret_cx: 0, secret_pre: "", alg: "HS256",
-      output: "", output_ok: true, pane: :header, focused: true, lens_chord: chord)
+      output: "", output_ok: true, pane: :header, focused: true)
   end
   {view, b, rect}
 end
@@ -63,7 +63,7 @@ describe "JWT lens chip" do
     _, b, rect = render_lens(:decode)
     card, _, _ = JwtView.new.decode_layout(rect)
     row = b.row(card.y)
-    row.should contain("^T:→ENCODE")
+    row.should contain("→ENCODE")
     row.should contain("INPUT")
   end
 
@@ -71,7 +71,7 @@ describe "JWT lens chip" do
     _, b, rect = render_lens(:encode)
     card, _, _, _ = JwtView.new.encode_layout(rect)
     row = b.row(card.y)
-    row.should contain("^T:→DECODE")
+    row.should contain("→DECODE")
     row.should contain("HEADER")
   end
 
@@ -80,12 +80,12 @@ describe "JWT lens chip" do
     # the card directly under INPUT: one chip per lens, on the card the eye starts at.
     _, b, rect = render_lens(:encode)
     _, pay_c, _, _ = JwtView.new.encode_layout(rect)
-    b.row(pay_c.y).should_not contain("^T:")
+    b.row(pay_c.y).should_not contain("→DECODE")
 
     _, b2, rect2 = render_lens(:decode)
     _, dec_c, atk_c = JwtView.new.decode_layout(rect2)
-    b2.row(dec_c.y).should_not contain("^T:")
-    b2.row(atk_c.y).should_not contain("^T:")
+    b2.row(dec_c.y).should_not contain("→ENCODE")
+    b2.row(atk_c.y).should_not contain("→ENCODE")
   end
 
   it "chains clear of INPUT's READ/INS chip instead of over it" do
@@ -97,21 +97,21 @@ describe "JWT lens chip" do
       row = b.row(card.y)
       mode = Frame.mode_badge_label(insert).strip
       row.should contain(mode)
-      row.should contain("^T:→ENCODE")
-      row.index("^T:→ENCODE").not_nil!.should be < row.index(mode).not_nil!
+      row.should contain("→ENCODE")
+      row.index("→ENCODE").not_nil!.should be < row.index(mode).not_nil!
     end
   end
 
   it "hit-tests exactly the cells it drew, on both lenses" do
     {
-      {:decode, "^T:→ENCODE", ->(r : Rect) { JwtView.new.decode_layout(r)[0] }},
-      {:encode, "^T:→DECODE", ->(r : Rect) { JwtView.new.encode_layout(r)[0] }},
+      {:decode, "→ENCODE", ->(r : Rect) { JwtView.new.decode_layout(r)[0] }},
+      {:encode, "→DECODE", ->(r : Rect) { JwtView.new.encode_layout(r)[0] }},
     }.each do |(mode, label, layout)|
       view, b, rect = render_lens(mode)
       card = layout.call(rect)
-      hits = (0...W).select { |x| view.lens_chip_hit(card, x, card.y, mode, "^T") }
+      hits = (0...W).select { |x| view.lens_chip_hit(card, x, card.y, mode) }
       hits.should_not be_empty
-      # ` chord:NAME ` — the drawn run plus its two padding cells.
+      # ` NAME ` — the drawn run plus its two padding cells.
       (hits.last - hits.first + 1).should eq(label.size + 2)
       at = b.row(card.y).index(label).not_nil!
       hits.should contain(at)
@@ -119,7 +119,7 @@ describe "JWT lens chip" do
       hits.should_not contain(at - 2) # left of the pad
       hits.should_not contain(at + label.size + 1)
       # Only the border row answers.
-      view.lens_chip_hit(card, at, card.y + 1, mode, "^T").should be_false
+      view.lens_chip_hit(card, at, card.y + 1, mode).should be_false
     end
   end
 
@@ -128,20 +128,8 @@ describe "JWT lens chip" do
     card, _, _ = JwtView.new.decode_layout(rect)
     (0...W).each do |x|
       next unless Frame.mode_badge_hit(x, card.y, card.y, card.right - 1, card.x + JwtView::INPUT_MIN_X, false)
-      view.lens_chip_hit(card, x, card.y, :decode, "^T").should be_false
+      view.lens_chip_hit(card, x, card.y, :decode).should be_false
     end
-  end
-
-  it "follows a rebound chord in both the label and the hit rect" do
-    # `JwtController` resolves the chord through the keymap, so the chip must not hardcode
-    # its own width either — the footer and the chip name the same key.
-    view, b, rect = render_lens(:decode, chord: "⌥E")
-    card, _, _ = JwtView.new.decode_layout(rect)
-    row = b.row(card.y)
-    row.should contain("⌥E:→ENCODE")
-    row.should_not contain("^T:")
-    at = row.index("⌥E:→ENCODE").not_nil!
-    view.lens_chip_hit(card, at, card.y, :decode, "⌥E").should be_true
   end
 
   # The whole point of a chip over a footer line is that it can be pressed. These aim at the
@@ -152,23 +140,23 @@ describe "JWT lens chip" do
         rect = Rect.new(0, 0, W, 40)
         b = MemoryBackend.new(W, 40)
         draw.call(b)
-        y = (0...40).find { |r| b.row(r).includes?("^T:→ENCODE") }.not_nil!
-        x = b.row(y).index("^T:→ENCODE").not_nil!
+        y = (0...40).find { |r| b.row(r).includes?("→ENCODE") }.not_nil!
+        x = b.row(y).index("→ENCODE").not_nil!
         ctl.handle_click(rect, x + 1, y)
 
         b2 = MemoryBackend.new(W, 40)
         draw.call(b2)
         b2.contains?("PAYLOAD").should be_true # the ENCODE lens is on screen …
-        b2.contains?("^T:→DECODE").should be_true
+        b2.contains?("→DECODE").should be_true
 
-        y2 = (0...40).find { |r| b2.row(r).includes?("^T:→DECODE") }.not_nil!
-        x2 = b2.row(y2).index("^T:→DECODE").not_nil!
+        y2 = (0...40).find { |r| b2.row(r).includes?("→DECODE") }.not_nil!
+        x2 = b2.row(y2).index("→DECODE").not_nil!
         ctl.handle_click(rect, x2 + 1, y2)
 
         b3 = MemoryBackend.new(W, 40)
         draw.call(b3)
         b3.contains?("ATTACKS").should be_true # … and back
-        b3.contains?("^T:→ENCODE").should be_true
+        b3.contains?("→ENCODE").should be_true
       end
     end
 
@@ -177,15 +165,15 @@ describe "JWT lens chip" do
         rect = Rect.new(0, 0, W, 40)
         b = MemoryBackend.new(W, 40)
         draw.call(b)
-        y = (0...40).find { |r| b.row(r).includes?("^T:→ENCODE") }.not_nil!
-        x = b.row(y).index("^T:→ENCODE").not_nil!
+        y = (0...40).find { |r| b.row(r).includes?("→ENCODE") }.not_nil!
+        x = b.row(y).index("→ENCODE").not_nil!
 
         ctl.handle_click(rect, x - 3, y)     # bare border, left of the chip's pad
         ctl.handle_click(rect, x + 2, y + 2) # the INPUT body — a caret click
 
         b2 = MemoryBackend.new(W, 40)
         draw.call(b2)
-        b2.contains?("^T:→ENCODE").should be_true # still the DECODE lens
+        b2.contains?("→ENCODE").should be_true # still the DECODE lens
         b2.contains?("PAYLOAD").should be_false
       end
     end
@@ -203,13 +191,13 @@ describe "JWT lens chip" do
         ctl.load_decoded # fills HEADER/PAYLOAD from the token, landing in ENCODE
         b = MemoryBackend.new(W, 40)
         draw.call(b)
-        ey = (0...40).find { |r| b.row(r).includes?("^T:→DECODE") }.not_nil!
-        ctl.handle_click(rect, b.row(ey).index("^T:→DECODE").not_nil! + 1, ey) # back to DECODE
+        ey = (0...40).find { |r| b.row(r).includes?("→DECODE") }.not_nil!
+        ctl.handle_click(rect, b.row(ey).index("→DECODE").not_nil! + 1, ey) # back to DECODE
 
         b2 = MemoryBackend.new(W, 40)
         draw.call(b2)
-        y = (0...40).find { |r| b2.row(r).includes?("^T:→ENCODE") }.not_nil!
-        x = b2.row(y).index("^T:→ENCODE").not_nil!
+        y = (0...40).find { |r| b2.row(r).includes?("→ENCODE") }.not_nil!
+        x = b2.row(y).index("→ENCODE").not_nil!
 
         # First the gesture the guard must NOT cost: a drag inside INPUT still selects.
         ty = (0...40).find { |r| b2.row(r).includes?("eyJ") }.not_nil!
@@ -223,27 +211,9 @@ describe "JWT lens chip" do
         ctl.@sessions[ctl.subtab_index].header.selection?.should be_false
       end
     end
-
-    # The view half of the rebind is covered above by passing a chord straight in — which is
-    # exactly what this one does NOT do. Swap `lens_chord` back for a literal `"^T"` in
-    # `render_body` and every other example here still passes, while an operator who rebound
-    # the switch reads a chip naming a key that does nothing.
-    it "paints the chord the keymap actually holds, not the default" do
-      Gori::Settings.keymap_overrides = {"jwt.toggle-mode" => ["alt-e"]}
-      begin
-        with_jwt_controller do |_, draw|
-          b = MemoryBackend.new(W, 40)
-          draw.call(b)
-          b.contains?("⌥E:→ENCODE").should be_true
-          b.contains?("^T:→ENCODE").should be_false
-        end
-      ensure
-        Gori::Settings.keymap_overrides = {} of String => Array(String)
-      end
-    end
   end
 
-  it "paints the rebound signing algorithm chord on the SECRET card" do
+  it "paints the signing algorithm on the SECRET card as a state, not a key" do
     previous = Gori::Settings.keymap_overrides
     begin
       Gori::Settings.keymap_overrides = {"jwt.cycle-alg" => ["alt-a"]}
@@ -251,8 +221,8 @@ describe "JWT lens chip" do
         ctl.toggle_mode
         b = MemoryBackend.new(W, 40)
         draw.call(b)
-        b.contains?("⌥A:HS256").should be_true
-        b.contains?("^A:HS256").should be_false
+        b.contains?(" HS256 ").should be_true
+        b.contains?("⌥A").should be_false
       end
     ensure
       Gori::Settings.keymap_overrides = previous
@@ -265,6 +235,6 @@ describe "JWT lens chip" do
     view, b, rect = render_lens(:decode, w: 24)
     card, _, _ = JwtView.new.decode_layout(rect)
     b.row(card.y).should_not contain("→ENCODE")
-    (0...24).any? { |x| view.lens_chip_hit(card, x, card.y, :decode, "^T") }.should be_false
+    (0...24).any? { |x| view.lens_chip_hit(card, x, card.y, :decode) }.should be_false
   end
 end

@@ -346,7 +346,7 @@ module Gori::Tui
     # `count · s scope · ⌁follow`, Sitemap's `count · s scope · g:fold`, and the bare
     # `count · s scope` in Issues and Probe. Same shape, four copies, and they had already
     # drifted on the gap — a TWO-column step after the count, a ONE-column step between the
-    # chips, in the same method. `toggle_badge` is not this: it fills a `" chord:NAME "` pill,
+    # chips, in the same method. `toggle_badge` is not this: it fills a `" NAME "` pill,
     # where these are plain fg-coloured words on the bar.
     def self.right_text_chain(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32,
                               chips : Array({String, Color}), bg : Color = Theme.bg) : Int32
@@ -392,19 +392,18 @@ module Gori::Tui
 
     # A left-aligned mode/toggle chip at (x,y), returning the x past it. `lit` (active)
     # paints bright text on an accent fill; off is a muted, background-less label. Used
-    # for keyed toggle chips on a pane's top border (e.g. Repeater's `⇧D:diff`/`^X:hex`).
+    # for toggle chips on a pane's top border (e.g. the Comparer's ` REQ `/` RES `).
     def self.chip(screen : Screen, x : Int32, y : Int32, label : String, lit : Bool) : Int32
       screen.text(x, y, label, lit ? Theme.text_bright : Theme.muted, lit ? Theme.accent_bg : Theme.bg)
     end
 
     # One right-aligned toggle badge for a top border, ending just before `right_edge`
-    # (exclusive). Renders " chord:NAME ", lit (accent bg) when `on`, muted with NO
-    # background when off — so a disabled toggle is a quiet hint whose shortcut stays in
-    # view. Returns the badge's left x (chain the next badge to its left there), or
+    # (exclusive). Renders " NAME ", lit (accent bg) when `on`, muted with NO
+    # background when off — so a disabled toggle is a quiet hint of the state it would set. Returns the badge's left x (chain the next badge to its left there), or
     # `right_edge` unchanged when it doesn't fit (nothing drawn).
     def self.toggle_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32,
-                          chord : String, name : String, on : Bool) : Int32
-      text = " #{chord}:#{name} "
+                          name : String, on : Bool) : Int32
+      text = badge_text(name)
       x = right_edge - Screen.draw_width(text)
       return right_edge if x < min_x
       screen.text(x, y, text, on ? Theme.text_bright : Theme.muted, on ? Theme.accent_bg : Theme.bg)
@@ -412,16 +411,16 @@ module Gori::Tui
     end
 
     # A right-chained badge that reports STATE rather than an on/off toggle, so it carries its
-    # own colours instead of `toggle_badge`'s lit/muted pair. Same `" chord:NAME "` geometry, so
+    # own colours instead of `toggle_badge`'s lit/muted pair. Same `" NAME "` geometry, so
     # it chains with the others and hit-tests through `right_badge_hit` unchanged.
     #
-    # For a chip whose NAME is the state (Repeater's ` ^V:WS ` / ` ^V:h1 `), muted-when-off is
+    # For a chip whose NAME is the state (Repeater's ` WS ` / ` HTTP/1.1 ` transport), muted-when-off is
     # the wrong dress: there is no "off", and a grey chip reads as a disabled one. Callers pass
     # a fill so the resting state is still legible and an exceptional state can shout.
     def self.state_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32,
-                         chord : String, name : String, fg : Color, bg : Color,
+                         name : String, fg : Color, bg : Color,
                          attr : Attribute = Attribute::None) : Int32
-      text = " #{chord}:#{name} "
+      text = badge_text(name)
       x = right_edge - Screen.draw_width(text)
       return right_edge if x < min_x
       screen.text(x, y, text, fg, bg, attr)
@@ -429,17 +428,17 @@ module Gori::Tui
     end
 
     # READ/INS mode chip on an editor pane's top border (Repeater REQUEST, Decoder INPUT,
-    # Notes, …). READ advertises ↵ (and i) as the way into insert; INS is a plain lit label
-    # (esc exits — already in the status strip). Clickable via `mode_badge_hit`. Returns
+    # Notes, …). Both are plain labels of the pane's mode: READ muted, INS lit (the keys that
+    # switch them, `i`/↵ and esc, are the footer's job). Clickable via `mode_badge_hit`. Returns
     # the badge's left x for chaining, or `right_edge` when it doesn't fit.
     #
     # `insert` must be the pane's REAL mode — never `focused && insert?`. The two labels are
-    # different WIDTHS (" ↵:READ " is 8 cells, " INS " is 5), and `mode_badge_hit` is called from a
+    # different WIDTHS (" READ " is 6 cells, " INS " is 5), and `mode_badge_hit` is called from a
     # click handler that has no idea which pane had focus when the frame was drawn; every caller's
     # hit-test therefore passes the bare mode. Gating the label on focus desynchronised the two:
     # a pane that retained INS while focus moved away (no view exits insert on a focus change)
     # drew the wider READ chip over a 5-cell hit rect — dead cells on its left — and a click
-    # on a chip reading "↵:READ" ran the INS branch and turned insert OFF. Focus belongs in the
+    # on a chip reading "READ" ran the INS branch and turned insert OFF. Focus belongs in the
     # BORDER (`Frame.pane_border(focused, insert:)`), not in this label.
     def self.mode_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32,
                         insert : Bool) : Int32
@@ -465,7 +464,16 @@ module Gori::Tui
     # badge painted a few cells away reading "↵:NOR", which is a poor first lesson in a
     # vocabulary. One name, and it is the one the prose already uses.
     def self.mode_badge_label(insert : Bool) : String
-      insert ? " INS " : " ↵:READ "
+      insert ? " INS " : " READ "
+    end
+
+    # The padded run every border badge draws and hit-tests: ` NAME `. A badge used to spell
+    # its chord too (` ^R:SEND `, ` ⇧D:DIFF `, ` ␣Pt:TLS default `), so three panes' borders
+    # carried a dozen keys in five notations before any data. The border now states what IS
+    # (the protocol, the mode, a lit toggle); the key that changes it is the focused pane's
+    # footer's job, through `{verb.id}` tokens that follow a rebind.
+    def self.badge_text(name : String) : String
+      " #{name} "
     end
 
     # Hit-test for a single `mode_badge` at the same geometry as draw. Miss → false.
@@ -490,10 +498,10 @@ module Gori::Tui
     # to pass the next (leftward) badge, including `mode_badge`. Same skip-past-min_x rule
     # as draw/hit. Pure geometry for chrome hit-tests that need to chain mode after others.
     def self.right_badge_edge(right_edge : Int32, min_x : Int32,
-                              badges : Array({Symbol, String, String})) : Int32
+                              badges : Array({Symbol, String})) : Int32
       edge = right_edge
-      badges.each do |(_, chord, name)|
-        text = " #{chord}:#{name} "
+      badges.each do |(_, name)|
+        text = badge_text(name)
         x = edge - Screen.draw_width(text)
         next if x < min_x # `next`, not `break` — see right_badge_hit
         edge = x
@@ -502,16 +510,16 @@ module Gori::Tui
     end
 
     # The one PRIMARY-action badge on a pane's top border — the button that actually fires
-    # the request: Repeater's ` ^R:SEND `, Fuzzer's ` ^R:RUN `. Geometry + text are identical
-    # to `toggle_badge` (same " chord:NAME " string), so a click still hit-tests through
+    # the request: Repeater's ` SEND `, Fuzzer's ` RUN `. Geometry + text are identical
+    # to `toggle_badge` (same " NAME " string), so a click still hit-tests through
     # `right_badge_hit` and neighbours chain off the returned left x unchanged. Only the
     # dress differs: a solid gold pill with auto-contrast ink + bold when `ready`, so the
     # trigger reads as a filled button that stands apart from the muted toggles beside it;
     # a recessed accent-band pill (shortcut still legible) while the action is in flight, so
     # ^R/^X stay discoverable. Returns the badge's left x, or `right_edge` when it doesn't fit.
     def self.action_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32,
-                          chord : String, name : String, ready : Bool) : Int32
-      text = " #{chord}:#{name} "
+                          name : String, ready : Bool) : Int32
+      text = badge_text(name)
       x = right_edge - Screen.draw_width(text)
       return right_edge if x < min_x
       if ready
@@ -545,23 +553,23 @@ module Gori::Tui
     end
 
     # Hit-test for a right-chained `Frame.toggle_badge` run. `badges` is
-    # `{id, chord, name}` in **right-to-left** order (first entry is rightmost,
+    # `{id, name}` in **right-to-left** order (first entry is rightmost,
     # matching successive `toggle_badge` calls that pass the previous return as
-    # the next right_edge). Labels are `" #{chord}:#{name} "`. A badge that
+    # the next right_edge). Labels are `badge_text(name)`. A badge that
     # would sit left of `min_x` is skipped (same as draw). Miss → nil.
     #
     # `next`, not `break`, and that is the whole point: `toggle_badge` returns its
     # `right_edge` UNCHANGED when it does not fit, so the chain keeps going and a shorter
     # badge further along still draws at that same edge. This loop used to `break` while
     # claiming "(same as draw)" in the line above — so on the Repeater's request border, at a
-    # width where ` ^R:SEND ` (9) does not fit but ` ^L:CL ` (7) does, CL was drawn and
+    # width where ` SEND ` (6) does not fit but ` CL ` (4) does, CL was drawn and
     # un-clickable, and every badge left of it hit-tested against an edge that never moved.
     def self.right_badge_hit(mx : Int32, my : Int32, y : Int32, right_edge : Int32, min_x : Int32,
-                             badges : Array({Symbol, String, String})) : Symbol?
+                             badges : Array({Symbol, String})) : Symbol?
       return nil if my != y
       edge = right_edge
-      badges.each do |(id, chord, name)|
-        text = " #{chord}:#{name} "
+      badges.each do |(id, name)|
+        text = badge_text(name)
         x = edge - Screen.draw_width(text)
         next if x < min_x
         return id if mx >= x && mx < x + Screen.draw_width(text)

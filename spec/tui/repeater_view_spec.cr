@@ -84,13 +84,13 @@ describe Gori::Tui::RepeaterView do
     raw = MemoryBackend.new(120, 20)
     view.render(Screen.new(raw), Rect.new(0, 0, 120, 20))
     raw.contains?("\\u003c\\u200b").should be_true
-    raw.contains?("u:DECODE").should be_true
+    raw.contains?(" unicode ").should be_false # the border names the state only once it is ON
 
     view.toggle_unicode_decoding
     decoded = MemoryBackend.new(120, 20)
     view.render(Screen.new(decoded), Rect.new(0, 0, 120, 20))
     decoded.contains?("<⟨ZWSP⟩").should be_true
-    decoded.contains?("u:WIRE").should be_true
+    decoded.contains?(" unicode ").should be_true
     decoded.contains?("2 escapes").should be_true
   end
 
@@ -110,17 +110,17 @@ describe Gori::Tui::RepeaterView do
     backend.contains?("press ^R to send").should be_true
   end
 
-  it "uses live response key bindings and describes an unsent response as a first send" do
+  it "uses the live send binding and describes an unsent response as a first send" do
     previous = Gori::Settings.keymap_overrides
     begin
-      Gori::Settings.keymap_overrides = {"repeater.toggle-diff" => ["shift-e"], "repeater.send" => ["alt-r"]}
+      Gori::Settings.keymap_overrides = {"repeater.send" => ["alt-r"]}
       view = RepeaterView.new
       view.menu_registry = Gori::Verbs.registry
       view.load_blank
       backend = MemoryBackend.new(120, 20)
       view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
-      backend.contains?("⇧E:DIFF").should be_true
-      backend.contains?("d:DIFF").should be_false
+      # The RESPONSE border carries no keyed chips: nothing is lit on a blank tab, so it is bare.
+      backend.contains?("DIFF").should be_false
       backend.contains?("not sent yet").should be_true
       backend.contains?("press ⌥R to send").should be_true
       backend.contains?("resend").should be_false
@@ -341,11 +341,10 @@ describe Gori::Tui::RepeaterView do
     backend = MemoryBackend.new(120, 20)
     view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
     backend.contains?("PONG").should be_true
-    # plain response mode: the diff toggle chip is inactive (muted), not lit — the
-    # pane no longer carries a separate "response" chip (it's titled RESPONSE).
-    ry = (0...20).find { |y| backend.row(y).includes?("⇧D:DIFF") }.not_nil!
-    dx = backend.row(ry).index("DIFF").not_nil!
-    backend.fg_at(dx, ry).should eq(Theme.muted) # diff segment inactive
+    # plain response mode: the border names no `diff` state (it does only while the diff
+    # view is ON — the pane is already titled RESPONSE).
+    ry = (0...20).find { |y| backend.row(y).includes?("RESPONSE") }.not_nil!
+    backend.row(ry).should_not contain(" diff ")
   end
 
   it "explains there is nothing to diff when a blank's response pane is toggled to diff" do
@@ -400,10 +399,9 @@ describe Gori::Tui::RepeaterView do
       backend = MemoryBackend.new(120, 20)
       view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
       backend.contains?("NEW").should be_true
-      # response view kept — the diff toggle was NOT auto-opened (muted, inactive)
-      ry = (0...20).find { |y| backend.row(y).includes?("⇧D:DIFF") }.not_nil!
-      dx = backend.row(ry).index("DIFF").not_nil!
-      backend.fg_at(dx, ry).should eq(Theme.muted) # diff tab NOT auto-opened
+      # response view kept — the diff view was NOT auto-opened, so the border does not say `diff`
+      ry = (0...20).find { |y| backend.row(y).includes?("RESPONSE") }.not_nil!
+      backend.row(ry).should_not contain(" diff ")
     end
   end
 
@@ -420,10 +418,9 @@ describe Gori::Tui::RepeaterView do
     backend = MemoryBackend.new(120, 20)
     view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
     backend.contains?("repeater error: connection refused").should be_true
-    # fell back to the response view — the diff toggle is inactive (muted)
-    ry = (0...20).find { |y| backend.row(y).includes?("⇧D:DIFF") }.not_nil!
-    dx = backend.row(ry).index("DIFF").not_nil!
-    backend.fg_at(dx, ry).should eq(Theme.muted)
+    # fell back to the response view — the border no longer says `diff`
+    ry = (0...20).find { |y| backend.row(y).includes?("RESPONSE") }.not_nil!
+    backend.row(ry).should_not contain(" diff ")
   end
 
   it "renders received response head next to the error on an errored send (#1428)" do
@@ -1411,7 +1408,7 @@ describe Gori::Tui::RepeaterView do
     grid.should_not contain("PREVIEW") # the ^Q modal is NOT auto-shown
   end
 
-  it "draws ^T:MARK only while the capture's § are INERT, never once they are live" do
+  it "draws MARK only while the capture's § are INERT, never once they are live" do
     # The badge is a WARNING with an escape hatch — "these § are the origin's bytes and go out
     # verbatim; ^T declares them markers" — which nothing else on screen says. Once they ARE
     # markers the editor tints them and `§N` rides the border, so the lit half of the badge
@@ -1426,16 +1423,16 @@ describe Gori::Tui::RepeaterView do
     ev.restore("https://a.test", "GET /?q=§v§ HTTP/1.1\nHost: a.test\n\n", false, false, evidence: true)
     ev.focus_pane(:request)
     ev.literal_markers?.should be_true
-    grid.call(ev).should contain("^T:MARK") # inert → the warning stands
+    grid.call(ev).should contain(" MARK ") # inert → the warning stands
 
     ev.insert_marker # declares the buffer a template
     ev.literal_markers?.should be_false
-    grid.call(ev).should_not contain("^T:MARK")
+    grid.call(ev).should_not contain(" MARK ")
 
     draft = RepeaterView.new # a draft's § were always live — it never carried the badge
     draft.restore("https://a.test", "GET /?q=§v§ HTTP/1.1\nHost: a.test\n\n", false, false)
     draft.focus_pane(:request)
-    grid.call(draft).should_not contain("^T:MARK")
+    grid.call(draft).should_not contain(" MARK ")
   end
 
   describe "#adopt_capture_markers (provenance across a reopen)" do
@@ -2355,7 +2352,7 @@ describe Gori::Tui::RepeaterView do
     view.request_insert?.should be_false
     backend2 = MemoryBackend.new(120, 24)
     view.render(Screen.new(backend2), Rect.new(0, 0, 120, 24))
-    backend2.contains?("↵:READ").should be_true
+    backend2.contains?("READ").should be_true
   end
 
   it "resp_move + selection returns plain text for copy" do

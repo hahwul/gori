@@ -33,10 +33,8 @@ describe "FuzzerView TARGET border chrome" do
   it "leaves the mode chip intact when an SNI override is set" do
     row = border_row(sni_fuzzer("alt.example.com"), rect)
     row.should contain("SNI")
-    # `↵:READ` in full. Before the fix the row read `↵: SNI `, the marker having eaten the
-    # chip's last three cells.
-    row.should contain(Frame.mode_badge_label(false).strip)
-    row.should_not contain("↵: SNI")
+    # ` READ ` in full. Before the fix the SNI marker ate the chip's last three cells.
+    row.should contain(Frame.mode_badge_label(false))
   end
 
   it "does not answer the mode chip for a press on the SNI marker" do
@@ -54,7 +52,7 @@ describe "FuzzerView TARGET border chrome" do
     # simply stopped working.
     view = sni_fuzzer("alt.example.com")
     row = border_row(view, rect)
-    mode_x = row.index("↵:READ").not_nil!
+    mode_x = row.index(Frame.mode_badge_label(false).strip).not_nil!
     view.target_chrome_hit(rect, mode_x, rect.y).should eq(:mode)
   end
 

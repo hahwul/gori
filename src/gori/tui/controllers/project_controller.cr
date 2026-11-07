@@ -75,9 +75,9 @@ module Gori::Tui
         settings_hint
       else
         if @project_view.desc_insert_mode?
-          keys("type to edit · ⇧arrows select · ^Y copy · esc read · ↑/↓/↔ move · {editor.goto-line} goto · {editor.find} find · ^E $EDITOR")
+          keys("type · ^Y copy · {editor.goto-line} goto · {editor.find} find · ^E $EDITOR · esc read")
         else
-          keys("{editor.insert}/↵ edit · ⇧arrows select · {project.copy} copy · space cmds · ↑/↓ move · {editor.goto-line} goto · {editor.find} find · esc sub-tabs")
+          keys("{editor.insert}/↵ edit · {editor.goto-line} goto · {editor.find} find · ^E $EDITOR · space cmds · esc sub-tabs")
         end
       end
     end
@@ -269,7 +269,7 @@ module Gori::Tui
         end
       when :desc
         @project_view.focus_pane(:desc)
-        # NOR/INS chip on the DESCRIPTION card border toggles insert (same as ↵ / esc).
+        # READ/INS chip on the DESCRIPTION card border toggles insert (same as ↵ / esc).
         if desc = @project_view.desc_card_rect(rect)
           if Frame.mode_badge_hit(mx, my, desc.y, desc.right - 1, desc.x + 2,
                @project_view.desc_insert_mode?)
@@ -310,7 +310,7 @@ module Gori::Tui
     end
 
     # Whether the last press landed IN the DESCRIPTION card rather than on the chip strip
-    # above it or on the NOR/INS badge its own border carries. `supports_drag?` is asked with
+    # above it or on the READ/INS badge its own border carries. `supports_drag?` is asked with
     # no coordinates — `drag_press_target?` runs it right after the click — so the click is
     # what has to record where it began; `IssuesController#@detail_press` is the same guard.
     #

@@ -26,8 +26,8 @@ describe "wide-label geometry" do
   end
 
   it "hit-tests a right-chained badge over the cells its Hangul name occupies" do
-    badges = [{:send, "^R", "전송"}] of {Symbol, String, String}
-    w = Screen.draw_width(" ^R:전송 ") # 9 cells
+    badges = [{:send, "전송"}] of {Symbol, String}
+    w = Screen.draw_width(" 전송 ") # 6 cells
     Frame.right_badge_edge(20, 0, badges).should eq(20 - w)
     Frame.right_badge_hit(20 - w, 0, 0, 20, 0, badges).should eq(:send)
     Frame.right_badge_hit(19, 0, 0, 20, 0, badges).should eq(:send)

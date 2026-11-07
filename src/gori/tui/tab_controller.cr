@@ -1479,7 +1479,7 @@ module Gori::Tui
       ""
     end
 
-    # The focused pane's own name, appended to the body badge (`BODY · RESPONSE`). nil — the
+    # The focused pane's own name, put before the body badge (`TARGET · READ`, or `RESPONSE` alone where there is no mode). nil — the
     # bare badge — for every tab with one body, which is most of them.
     #
     # It exists for the multi-pane workbench tabs, where entering the body RESTORES the pane

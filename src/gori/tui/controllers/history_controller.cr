@@ -215,12 +215,6 @@ module Gori::Tui
         @history.set_detail_focus(:strip) # a chip click parks focus on the strip
         return
       end
-      if mode = @history.detail_mode_at(inner, mx, my)
-        @host.focus_body
-        @history.set_detail_focus(:strip) # the mode chips live on the strip row too
-        toggle_detail_mode(mode)
-        return
-      end
       # `detail_text_rect`, not a second Rect built here: that helper's own comment says it
       # exists so click, drag and double-click cannot land on three slightly different rects —
       # and this arm was the third copy. Same rect, same rows: the helper answers nil exactly
@@ -538,16 +532,24 @@ module Gori::Tui
         # it was named in neither, at 132 columns or at 240. The measured cost was two keys:
         # the operator walked ↑/← back to the LIST to reach the one key that already worked
         # where they were standing.
+        # `^X hex` and `p pretty` on both detail lines: the strip used to carry them as keyed
+        # chips beside the pane tabs, and now states only the reading on screen. Selection and
+        # copy are not named — they are the same keys in every text pane, and the space menu
+        # lists both (`x Select line`, `y Copy`).
+        hex = Hotkeys.binding_label(reg, "detail.toggle-hex", "^X")
+        pretty = Hotkeys.binding_label(reg, "detail.toggle-pretty", "p")
         if @history.detail_strip_focus?
-          return "←/→ panes · ↓/↵ enter · #{step}↑/← list · #{repeater} repeater · ↹ pane · space cmds · esc back"
+          return "←/→ panes · ↓/↵ enter · #{step}#{hex} hex · #{pretty} pretty · #{repeater} repeater · esc back"
         end
-        nav = @history.detail_navigable? ? "↑/↓ move · ←/→ caret" : "↑/↓ scroll"
-        dy = Hotkeys.binding_label(reg, "detail.copy", "y")
-        # `x select` beside the copy token. It is the key that makes the selection the space
-        # menu's `S Send selection to…` acts on, and it lived only in the menu: the route from
-        # a response to the Decoder began with a key nothing on screen named.
-        dx = Hotkeys.binding_label(reg, "detail.select-line", "x")
-        return "#{nav} · ⇧arrows select · #{dx} select · #{dy} copy · #{repeater} repeater · #{step}↑ strip · ↹ pane · space cmds · esc back"
+        nav = @history.detail_navigable? ? "↑/↓ move" : "↑/↓ scroll"
+        # `u decode` / `u wire` only while the pane has escapes to decode, as the strip's chip
+        # used to be: a key that does nothing here is not named here.
+        uni = if @history.detail_unicode_offer?
+                " · #{Hotkeys.binding_label(reg, "detail.toggle-unicode", "u")} #{@history.unicode_decoded? ? "wire" : "decode"}"
+              else
+                ""
+              end
+        return "#{nav} · #{hex} hex · #{pretty} pretty#{uni} · #{repeater} repeater · #{step}↑ strip · space cmds · esc back"
       end
       return "type query · ↹ complete · ↵ apply · esc clear" if @history.querying?
       # #898 gave this list `d` and `⇧X` and named neither here. `⇧X` is the one that goes in:

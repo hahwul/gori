@@ -236,17 +236,17 @@ describe "Frame.left_chip_hit / right_badge_hit" do
 
   it "maps right-chained badges right-to-left and skips ones past min_x" do
     # Rightmost first (matches successive toggle_badge calls).
-    badges = [{:cl, "^L", "CL"}, {:mark, "^K", "MARK"}, {:pretty_req, "^U", "PRETTY"}] of {Symbol, String, String}
+    badges = [{:cl, "CL"}, {:mark, "MARK"}, {:pretty_req, "AUTO-LEN"}] of {Symbol, String}
     y = 3
     right = 40
-    # " ^L:CL " = 7 → [33,40); " ^K:MARK " = 9 → [24,33); " ^U:PRETTY " = 11 → [13,24)
-    Frame.right_badge_hit(35, y, y, right, 0, badges).should eq(:cl)
-    Frame.right_badge_hit(28, y, y, right, 0, badges).should eq(:mark)
-    Frame.right_badge_hit(15, y, y, right, 0, badges).should eq(:pretty_req)
-    Frame.right_badge_hit(12, y, y, right, 0, badges).should be_nil
+    # " CL " = 4 → [36,40); " MARK " = 6 → [30,36); " AUTO-LEN " = 10 → [20,30)
+    Frame.right_badge_hit(37, y, y, right, 0, badges).should eq(:cl)
+    Frame.right_badge_hit(32, y, y, right, 0, badges).should eq(:mark)
+    Frame.right_badge_hit(22, y, y, right, 0, badges).should eq(:pretty_req)
+    Frame.right_badge_hit(19, y, y, right, 0, badges).should be_nil
     # min_x that clips the leftmost badge(s)
-    Frame.right_badge_hit(15, y, y, right, 20, badges).should be_nil # PRETTY would start at 13 < 20
-    Frame.right_badge_hit(28, y, y, right, 20, badges).should eq(:mark)
+    Frame.right_badge_hit(22, y, y, right, 25, badges).should be_nil # AUTO-LEN would start at 20 < 25
+    Frame.right_badge_hit(32, y, y, right, 25, badges).should eq(:mark)
   end
 
   it "hits the READ/INS mode badge and chains left of right-aligned badges" do
@@ -264,7 +264,7 @@ describe "Frame.left_chip_hit / right_badge_hit" do
     Frame.mode_badge_hit(right - 2, y, y, right, 0, true).should be_true
     Frame.mode_badge_hit(right - 6, y, y, right, 0, true).should be_false
     # Chained left of SEND+CL: edge after badges is where mode_badge draws.
-    badges = [{:send, "^R", "SEND"}, {:cl, "^L", "CL"}] of {Symbol, String, String}
+    badges = [{:send, "SEND"}, {:cl, "CL"}] of {Symbol, String}
     edge = Frame.right_badge_edge(right, 0, badges)
     Frame.mode_badge_hit(edge - 2, y, y, edge, 0, false).should be_true
     Frame.mode_badge_hit(edge, y, y, edge, 0, false).should be_false
@@ -272,7 +272,7 @@ describe "Frame.left_chip_hit / right_badge_hit" do
 end
 
 describe "RepeaterView#chrome_hit" do
-  it "hits response ⇧D/^X/p chips and request SEND/CL/PRETTY badges on the border row" do
+  it "hits the request SEND/CL badges and the mode chips on the border row, and nothing on RESPONSE" do
     view = RepeaterView.new
     view.load_blank
     rect = Rect.new(0, 0, 100, 24)
@@ -284,25 +284,20 @@ describe "RepeaterView#chrome_hit" do
     resp = Rect.new(content.x + half + 1, content.y, {content.w - half - 1, 0}.max, content.h)
     req = Rect.new(content.x, content.y, half, content.h)
 
-    # RESPONSE chips start at resp.x + 12; the live diff chord is two display cells.
-    diff_label = " #{Gori::Hotkeys.binding_label(Gori::Verbs.registry, "repeater.toggle-diff", "⇧D")}:DIFF "
-    hex_label = " #{Gori::Hotkeys.binding_label(Gori::Verbs.registry, "repeater.toggle-resp-hex", "^X")}:HEX "
-    view.chrome_hit(rect, resp.x + 12, resp.y).should eq(:diff)
-    view.chrome_hit(rect, resp.x + 12 + Screen.draw_width(diff_label) + 1, resp.y).should eq(:hex)
-    view.chrome_hit(rect, resp.x + 12 + Screen.draw_width(diff_label) + 1 + Screen.draw_width(hex_label) + 1, resp.y).should eq(:pretty)
+    # RESPONSE carries no chips: its border states the lit views, and a click there is a
+    # click on the border.
+    (resp.x + 12..resp.x + 40).each { |x| view.chrome_hit(rect, x, resp.y).should be_nil }
 
-    # REQUEST right-chain: rightmost is SEND, then CL, PRETTY, then READ/INS
-    send_label = " ^R:SEND "
+    # REQUEST right-chain: rightmost is SEND, then CL, then READ/INS
+    send_label = Frame.badge_text("SEND")
     send_x = (req.right - 1) - send_label.size
     view.chrome_hit(rect, send_x + 1, req.y).should eq(:send)
-    cl_label = " ^L:CL "
+    # Without the chords the whole chain fits at 100 columns, so `^L` spells AUTO-LEN here.
+    cl_label = Frame.badge_text("AUTO-LEN")
     cl_x = send_x - cl_label.size
     view.chrome_hit(rect, cl_x + 1, req.y).should eq(:cl)
-    pretty_label = " ^U:PRETTY "
-    pretty_x = cl_x - pretty_label.size
-    view.chrome_hit(rect, pretty_x + 1, req.y).should eq(:pretty_req)
     mode_label = Frame.mode_badge_label(false) # the READ label
-    mode_x = pretty_x - mode_label.size
+    mode_x = cl_x - mode_label.size
     view.chrome_hit(rect, mode_x + 1, req.y).should eq(:mode)
 
     # TARGET READ/INS on the top band
@@ -325,19 +320,20 @@ describe "RepeaterView plain-word badges" do
 
     req_y = rect.y + 3
     row = b.row(req_y)
-    row.should contain("^L:AUTO-LEN")
-    row.should contain("↵:READ")
-    col = row.index!("^L:AUTO-LEN")
+    row.should contain("AUTO-LEN")
+    row.should contain("READ")
+    row.should_not contain("^L") # the border states the toggle; the footer names its key
+    col = row.index!("AUTO-LEN")
     view.chrome_hit(rect, col, req_y).should eq(:cl)
-    view.chrome_hit(rect, col + "^L:AUTO-LEN".size - 1, req_y).should eq(:cl)
+    view.chrome_hit(rect, col + "AUTO-LEN".size - 1, req_y).should eq(:cl)
 
     tls = b.row(rect.y).index!("TLS default")
     view.chrome_hit(rect, tls, rect.y).should eq(:tls_preset)
   end
 
-  # The fingerprint verb is `section: :target`: its menu route is spelled only where TARGET
-  # has focus, and the hit-test follows the same label.
-  it "names the TLS chip's menu route only while TARGET has focus" do
+  # The TLS chip is the state alone, whichever pane has focus — its menu route is the footer's
+  # and the space menu's — and the hit-test follows the same label.
+  it "spells the TLS chip as its state in every pane, and hit-tests it there" do
     view = RepeaterView.new
     view.load_blank
     rect = Rect.new(0, 0, 120, 24)
@@ -346,19 +342,19 @@ describe "RepeaterView plain-word badges" do
       b = MemoryBackend.new(120, 24)
       view.render(Screen.new(b), rect, focused: true)
       chip = b.row(rect.y)[%r{ \S*TLS default }]
-      (pane == :target ? chip.should(contain("␣:")) : chip.should(eq(" TLS default ")))
+      chip.should eq(" TLS default ")
       view.chrome_hit(rect, b.row(rect.y).index!(chip) + chip.size - 2, rect.y).should eq(:tls_preset)
     end
   end
 end
 
 describe "InterceptView#bar_zone_at" do
-  it "maps i:CATCH / direction / condition to separate zones" do
+  it "maps CATCH / direction / condition to separate zones" do
     view = InterceptView.new
     rect = Rect.new(0, 0, 80, 1)
     # " i:CATCH OFF " at x+1, then gap, then "c:REQ" (default)
     view.bar_zone_at(rect, 2, 0).should eq(:catch)
-    view.bar_zone_at(rect, 1 + " i:CATCH OFF ".size + 1, 0).should eq(:direction) # start of c:REQ
+    view.bar_zone_at(rect, 1 + " CATCH OFF ".size + 1, 0).should eq(:direction) # start of DIR REQ
     view.bar_zone_at(rect, 40, 0).should eq(:condition)
     view.bar_zone_at(rect, 2, 1).should be_nil # off the bar row
   end

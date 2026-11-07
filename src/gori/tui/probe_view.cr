@@ -1097,7 +1097,7 @@ module Gori::Tui
       tallies_x = render_tallies(screen, rect, x + 1) # right-aligned, but never left of the mode chip
       # The CLOSED lens toggle chains left of the tallies; lit when showing closed/dismissed
       # issues, muted (its default open-only) otherwise — so the `a` chord stays in view.
-      cx = Frame.toggle_badge(screen, tallies_x, rect.y, x + 1, key_label("probe.toggle-closed", "a"), "CLOSED", @show_closed)
+      cx = Frame.toggle_badge(screen, tallies_x, rect.y, x + 1, "CLOSED", @show_closed)
       unless @tech.empty?
         screen.text(x, rect.y, @tech.join(" "), Theme.green, width: {cx - x - 1, 0}.max)
       end
@@ -1155,13 +1155,13 @@ module Gori::Tui
       # `render_tallies` and the same `min_x` it hands the badge.
       floor = cx + chip_w + 2
       Frame.right_badge_hit(mx, my, rect.y, tallies_left(rect, floor), floor,
-        [{:closed, key_label("probe.toggle-closed", "a"), "CLOSED"}] of {Symbol, String, String})
+        [{:closed, "CLOSED"}] of {Symbol, String})
     end
 
     # The MODE chip's text, in one place: the draw positions everything after it from this
     # width, and so does `mode_band_hit`.
     private def mode_chip_label : String
-      " #{key_label("probe.mode", "m")}:#{@mode.title} "
+      Frame.badge_text(@mode.title)
     end
 
     private def render_filter_bar(screen : Screen, rect : Rect, y : Int32) : Nil

@@ -444,7 +444,7 @@ module Gori::Tui
     # Fuzzer template, the Decoder / JWT / Cookie inputs) already splits the click this way;
     # this pane, the Issue notes card and the Project description were the three that did not.
     # INSERT is now entered the way the keyboard enters it — `i` / ↵ — or by clicking the
-    # NOR/INS chip the card's own border draws.
+    # READ/INS chip the card's own border draws.
     def click_to_cursor(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
       inner = editor_rect(rect)
       if insert_mode?

@@ -67,7 +67,7 @@ class Gori::Tui::RepeaterView
     # An at-a-glance SNI marker on the top border (right of the title) whenever an
     # override is set, so a custom SNI is visible even before the row is reached.
     screen.text(sni_x, rect.y, SNI_BADGE, Theme.text_bright, Theme.accent_bg) if sni_x
-    # ` ␣Pt:tls ` / ` ␣Pt:chrome ` — the TLS fingerprint THIS TAB will present (#844), and the
+    # ` TLS default ` / ` TLS chrome ` — the TLS fingerprint THIS TAB will present (#844), and the
     # only thing on screen saying `␣Pt` has anything to offer. It rides the TARGET band for the
     # same reason `^V` does: this is where "how do we connect" already lives.
     #
@@ -82,18 +82,18 @@ class Gori::Tui::RepeaterView
       fg, bg = tls_preset_live? ? {Theme.text_bright, Theme.accent_bg} : {Theme.muted, Theme.bg}
       screen.text(tls_x, rect.y, tls_chip_label, fg, bg)
     end
-    # ` ^V:HTTP/1.1 ` / ` ^V:HTTP/2 ` / ` ^V:WS ` — the transport `^R` will dial, and the only thing on
+    # ` HTTP/1.1 ` / ` HTTP/2 ` / ` WS ` — the transport `^R` will dial, and the only thing on
     # screen saying `^V` has anything to offer. It rides the TARGET band rather than the
     # REQUEST border because that is where the rest of "how do we connect" already lives
     # (the URL, the SNI override) and because the request border is a half-width column that
-    # already drops its NOR/INS chip when a fifth badge is chained onto it.
+    # already drops its READ/INS chip when a fifth badge is chained onto it.
     #
     # Two dresses, no third: a filled chip at rest (the NAME is the state, so muted grey
     # would read as "disabled"), and a BOLD ACCENT pill when the operator has overridden
     # auto-detection — a handshake tab that will NOT speak WebSocket is the one thing on this
     # band worth interrupting a glance for.
     #
-    # Accent, not the ^R:SEND gold it used to borrow. This chip rides the TARGET card's top
+    # Accent, not the SEND gold it used to borrow. This chip rides the TARGET card's top
     # border, and that border IS `focus_gold` when the card has focus — so an overridden
     # transport on a focused card put two golds on one edge and "gold means focus is here"
     # stopped being readable. Gold is focus and the brand mark; nothing else.
@@ -103,7 +103,7 @@ class Gori::Tui::RepeaterView
                      else
                        {Theme.text_bright, Theme.accent_bg, Attribute::None}
                      end
-      Frame.state_badge(screen, tr_edge, rect.y, target_chip_min(rect), key_label("repeater.toggle-http2", "^V"), transport_label, fg, bg, attr)
+      Frame.state_badge(screen, tr_edge, rect.y, target_chip_min(rect), transport_label, fg, bg, attr)
     end
     url_active = focused && @target_field == :url
     sni_active_row = focused && @target_field == :sni

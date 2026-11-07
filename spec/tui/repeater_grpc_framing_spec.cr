@@ -120,8 +120,8 @@ describe "RepeaterView gRPC framing failure" do
       # The request card's top border: below the 3-row TARGET band.
       border_y = rect.y + 3
       row = b.row(border_y)
-      row.should contain("↵:READ")
-      col = row.index("↵:READ").not_nil!
+      row.should contain(" READ ")
+      col = row.index("READ").not_nil!
       view.chrome_hit(rect, col + 1, border_y).should eq(:mode)
 
       # And it reports the mode it is in, rather than a fixed label.
@@ -144,7 +144,7 @@ describe "RepeaterView gRPC framing failure" do
       view.toggle_request_hex.should be_true
       b = MemoryBackend.new(160, 24)
       view.render(Screen.new(b), rect)
-      b.row(border_y).should_not contain("↵:READ")
+      b.row(border_y).should_not contain(" READ ")
       (0...160).each { |x| view.chrome_hit(rect, x, border_y).should_not eq(:mode) }
     end
   end
@@ -265,16 +265,13 @@ describe "RepeaterView gRPC reframe toggle" do
     end
   end
 
-  # Drawn AND hit-testable, in both halves of the gRPC branch — the defect `␣Pw:KEY` had, and
-  # the state matters most exactly while the payload is being hex-edited.
-  # The badge's menu path is the registry's (`Hotkeys.menu_chip`, #1295): `␣` plus the keys
-  # that reach Protocol…'s reframe row, and a bare `␣` in a view nobody gave a registry.
+  # Drawn AND hit-testable, in both halves of the gRPC branch — the defect the WS KEY chip
+  # had, and the state matters most exactly while the payload is being hex-edited. The badge
+  # is the state word alone; its menu path is the footer's and Help's.
   it "draws a clickable FRAME badge in both the MSG and HEX states" do
     reg = Gori::Verbs.registry
-    chip = "#{Gori::Hotkeys.menu_chip(reg, "repeater.toggle-grpc-reframe")}:FRAME"
-    chip.should eq("␣#{reg.menu_keys("repeater.toggle-grpc-reframe").not_nil!.join}:FRAME")
     {reg, nil}.each do |registry|
-      label = registry ? chip : "␣:FRAME"
+      label = "FRAME"
       grpc_tmp_store do |store|
         view = unary.call(store)
         view.menu_registry = registry

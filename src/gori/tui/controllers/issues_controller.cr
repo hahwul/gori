@@ -36,7 +36,7 @@ module Gori::Tui
     # `commit_pending_edits`).
     #
     # Gated on INS exactly as `commit` is, so the prompt describes what will actually happen. A
-    # dirty buffer the NOR/INS chip stepped out of is dropped at quit too — but by the INS gate,
+    # dirty buffer the READ/INS chip stepped out of is dropped at quit too — but by the INS gate,
     # not by this conflict, and a line blaming a peer for it would send the operator looking for
     # a collision that is not the reason. That silence is older than this guard and is its own
     # question.
@@ -300,9 +300,9 @@ module Gori::Tui
         # Dropped whole when there is nowhere to step — see DrillIn::Host's `step_available?`.
         step = @issues.step_available? ? "{issue.next-item}/{issue.prev-item} issue · " : ""
         if @issues.notes_insert_mode?
-          "type to edit · ⇧arrows select · ^Y copy · esc save · ^W discard"
+          "type · ^Y copy · esc save · ^W discard"
         elsif @issues.notes_focused?
-          keys("↑/↓ move · ⇧arrows select · {issue.copy} copy · {editor.insert}/↵ edit · #{step}space cmds · ↹/←/esc related")
+          keys("↑/↓ move · {editor.insert}/↵ edit · #{step}space cmds · ↹/←/esc related")
         else
           # `↹/↓ notes` and nothing else for the way down: `i` no longer enters the editor
           # from here (it prints `insert_key_refusal` instead, like the five workbench tabs
@@ -544,7 +544,7 @@ module Gori::Tui
         return true
       end
       card = @issues.notes_card_rect(inner)
-      # NOR/INS chip on the NOTES card border toggles insert. `↵` on the way IN, and on the way
+      # READ/INS chip on the NOTES card border toggles insert. `↵` on the way IN, and on the way
       # out the `^W`-less half of `esc`: it drops to READ without saving, which is what makes
       # re-entry the ordinary way back into an edit in progress (see `enter_notes_insert!`,
       # which skips its re-seed over unsaved text for exactly this). Deliberately NOT
@@ -867,7 +867,7 @@ module Gori::Tui
     # three callers cannot honour.
     def commit : Nil
       # Still INS-gated, deliberately, now that `IssuesView#notes_dirty?` can be true in READ
-      # (the NOR/INS chip leaves the editor without saving). `esc` is this pane's save key and
+      # (the READ/INS chip leaves the editor without saving). `esc` is this pane's save key and
       # the chip is not — flushing a buffer the operator stepped out of would persist an edit
       # they never committed, on a tab switch they may not connect to it. What that buffer
       # needed was to stop being silently ERASED, and it no longer is: the tick and a re-entry

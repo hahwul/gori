@@ -11,7 +11,7 @@ shot = "jwt"
 The **JWT** tab is a workbench for JSON Web Tokens: decode one, edit its claims and re-sign it, and generate the classic attack payloads to test against the server. It goes further than the [Decoder](/guide/decoder/)'s read-only `jwt-decode` converter, which only shows you the parts.
 
 <figure class="tui-shot">
-  <img src="/images/tui/jwt.svg" alt="gori JWT tab with a decoded HS256 token: the INPUT token under a ^T:→ENCODE lens chip, the decoded header JSON, and an ATTACKS list of 23 generated payloads including alg=none case variants and signature stripping" width="1206" height="520">
+  <img src="/images/tui/jwt.svg" alt="gori JWT tab with a decoded HS256 token: the INPUT token under a →ENCODE lens chip, the decoded header JSON, and an ATTACKS list of 23 generated payloads including alg=none case variants and signature stripping" width="1206" height="520">
   <figcaption>The <strong>JWT</strong> tab decodes a token live (header, payload, signature) and lists ready-to-send attack payloads: alg:none, weak-secret, and header injection.</figcaption>
 </figure>
 
@@ -19,7 +19,7 @@ Select a token anywhere (a **History** detail pane, **Notes**, …) and `Space` 
 
 ## Two Lenses
 
-One session, two views, toggled with `Ctrl-T`. The top card of each lens carries the switch on its border (` ^T:→ENCODE ` on INPUT, ` ^T:→DECODE ` on HEADER), and clicking it does the same thing as the key:
+One session, two views, toggled with `Ctrl-T`. The top card of each lens carries the switch on its border (` →ENCODE ` on INPUT, ` →DECODE ` on HEADER), and clicking it does the same thing as the key:
 
 - **Decode**: paste a token into INPUT and the header, payload, and signature decode live. Below them is a selectable list of generated **attack payloads**.
 - **Encode**: edit the HEADER and PAYLOAD as JSON, choose an algorithm (`Ctrl-A` cycles the HMAC family, then `RS`/`PS`/`ES` at 256/384/512, `EdDSA`, and `none`), set a SECRET, and the re-signed token appears live in OUTPUT. For an asymmetric algorithm the card becomes **KEY** and takes a path to a PEM private key instead of a typed secret.

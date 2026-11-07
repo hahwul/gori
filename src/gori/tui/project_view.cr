@@ -792,7 +792,7 @@ module Gori::Tui
     # The `enter_desc_insert!` that used to lead this method is gone (#1124): a click is how
     # you aim, not how you ask to type, and arming the editor here meant the next bare letter
     # was typed rather than run — `y` putting a `y` in the description instead of copying,
-    # over whatever was selected. INS is entered by `i` / ↵ or by clicking the NOR/INS chip
+    # over whatever was selected. INS is entered by `i` / ↵ or by clicking the READ/INS chip
     # this card draws on its own border. `NotesView#click_to_cursor` is the twin of this.
     def desc_click_to_cursor(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
       return unless card = card_rect(rect, :desc)

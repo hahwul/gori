@@ -428,7 +428,7 @@ describe Gori::Tui::ProbeView do
       view.reload(store)
       b = MemoryBackend.new(30, 20) # narrow: tallies would otherwise overpaint the mode chip
       view.render(Gori::Tui::Screen.new(b), Gori::Tui::Rect.new(0, 0, 30, 20))
-      b.row(0).should contain("m:PASSIVE") # the mode chip text survives intact
+      b.row(0).should contain(" PASSIVE ") # the mode chip text survives intact
     end
   end
 
@@ -442,8 +442,9 @@ describe Gori::Tui::ProbeView do
         view.reload(store)
         backend = MemoryBackend.new(100, 16)
         view.render(Gori::Tui::Screen.new(backend), Gori::Tui::Rect.new(0, 0, 100, 16))
-        backend.row(0).should contain("⇧M:PASSIVE")
-        backend.row(0).should contain("⇧A:CLOSED")
+        backend.row(0).should contain(" PASSIVE ")
+        backend.row(0).should contain(" CLOSED ")
+        backend.row(0).should_not contain("⇧M") # the border states the mode; the footer names the key
         backend.contains?("␣s scope:off").should be_true
       end
     ensure
