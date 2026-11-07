@@ -58,6 +58,33 @@ module Gori
       rows
     end
 
+    # What `ranked` orders by, highest first.
+    enum Rank
+      Slowest # duration_us
+      Largest # response_size
+
+      def column : String
+        slowest? ? "duration_us" : "response_size"
+      end
+    end
+
+    # The flows matching `filter` (every flow when nil) ranked by `by`, highest first and ties
+    # newest first: "the slowest request", "the largest response". An agent without it hunted
+    # the slowest flow with `dur:>N` guesses, five calls for one row. A top-N, not a pager: a
+    # rank is not stable while capture appends, so it takes no cursor. Both columns sit in
+    # `idx_flows_list` (V37), so the sort reads that covering index, never a row's BLOB
+    # overflow chain. A flow with no response yet (NULL) ranks last. Raises on a failed query.
+    def ranked(filter : QL::Filter?, by : Rank, limit : Int32, control : QueryControl? = nil) : Array(FlowRow)
+      args = filter ? filter.args.dup : [] of DB::Any
+      args << limit
+      where = filter ? "WHERE #{filter.sql} " : ""
+      rows = [] of FlowRow
+      controlled_query("#{SELECT_ROW} #{where}ORDER BY #{by.column} DESC, id DESC LIMIT ?", args, control) do |rs|
+        rs.each { rows << read_row(rs) }
+      end
+      rows
+    end
+
     # Newest-first flows matching a compiled QL filter. `before_id` is a cursor for
     # paging into older matches (stable as new rows append, unlike OFFSET).
     # `raise_on_error` propagates a SQLite execution failure (a malformed FTS phrase,
