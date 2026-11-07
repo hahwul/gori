@@ -353,6 +353,7 @@ module Gori
         no_columns = false
         count_only = false
         limit_given = false
+        rank = nil.as(Store::Rank?)
         redaction = RedactFlags.new
 
         args = normalize_query_flag(args)
@@ -364,6 +365,9 @@ module Gori
           p.on("-qQL", "--query=QL", "Filter with a QL query (host: status:>=500 size:>10000 dur:>500 header: body~rx …)") { |v| query = once(query, v, "-q/--query") }
           p.on("-nN", "--limit=N", "Max rows, newest first (default 50)") { |v| limit = parse_count(v, "--limit"); limit_given = true }
           p.on("--count", "Print how many flows match (the same filters as the listing) instead of listing them") { count_only = true }
+          p.on("--sort=RANK", "List the top -n matches by slowest (duration) or largest (response size) instead of newest first") do |v|
+            rank = Store::Rank.parse?(v) || abort("gori run history: --sort is slowest or largest, got #{v.inspect}")
+          end
           p.on("--view=NAME", "Apply a saved History view — ANDed with -q, like the TUI's `v` picker (see `gori run views`)") { |v| view_name = v }
           p.on("--in-scope", "Only flows in the project's configured scope (the TUI's `s` lens; capture still records everything)") { in_scope = true }
           p.on("--hide-static", "Leave out static assets — images, fonts, media (the TUI's hide-static lens; same as -q -static:true)") { hide_static = true }
@@ -396,7 +400,9 @@ module Gori
         end
         # `--count` prints a number (#1648); the flags that shape ROWS contradict it. Before the
         # `--redact` refusal below, which would otherwise send `--count --redact` to `--format har`.
+        abort "gori run history: --sort ranks a listing, and a HAR log is written oldest first — drop one" if rank && format == :har
         if count_only
+          abort "gori run history: --sort ranks rows and --count prints none — pass one" if rank
           if err = history_count_clash(column_specs, no_columns, format, !redaction.mode.nil?, include_sensitive)
             abort err
           end
@@ -544,6 +550,13 @@ module Gori
           rows =
             if scope_unconfigured
               [] of Store::FlowRow
+            elsif by = rank
+              # The same top-N `list_history{sort}` reads (`Store#ranked`), filtered or not.
+              begin
+                store.ranked(combined, by, limit_probe(limit))
+              rescue ex
+                abort_closing(store, "gori run history: #{failed} failed: #{ex.message}")
+              end
             elsif c = combined
               begin
                 store.search(c, limit_probe(limit), raise_on_error: true)
@@ -594,7 +607,7 @@ module Gori
             # Said on STDERR in the streaming formats too, for the reason the empty note below
             # gives: STDOUT is a pipe, and the consumer reading it cannot see the flags the
             # command was invoked with.
-            (note = history_truncation_note(truncated, limit)) && STDERR.puts("gori run history: #{note}")
+            (note = history_truncation_note(truncated, limit, rank)) && STDERR.puts("gori run history: #{note}")
             # The same sentence the text and HAR branches print, on the same channel. JSON-Lines
             # answered an empty listing with ZERO bytes and a silent STDERR — so "I saw no
             # traffic" and "a standing --view/--in-scope lens excluded all of it" read identically
@@ -632,7 +645,7 @@ module Gori
           elsif rows.empty?
             STDERR.puts empty_listing_note(query, view_label, in_scope, hide_static)
           else
-            (note = history_truncation_note(truncated, limit)) && STDERR.puts("gori run history: #{note}")
+            (note = history_truncation_note(truncated, limit, rank)) && STDERR.puts("gori run history: #{note}")
             # `include_sensitive: true` on purpose — the text listing is out of #1002's scope
             # (it is the interactive read, not the feed a script or an agent captures) and the
             # note above promises the flag changes `--format json` alone. Stated at the call
@@ -776,9 +789,9 @@ module Gori
       # there IS more and which flag moves it, which the over-read below establishes exactly.
       #
       # Pure and public for the reason `empty_listing_note` is: the command ends in `exit`.
-      def self.history_truncation_note(truncated : Bool, limit : Int32) : String?
+      def self.history_truncation_note(truncated : Bool, limit : Int32, rank : Store::Rank? = nil) : String?
         return nil unless truncated
-        "showing the newest #{limit} — more rows match. Raise -n/--limit, or narrow with -q."
+        "showing the #{rank.try(&.to_s.downcase) || "newest"} #{limit} — more rows match. Raise -n/--limit, or narrow with -q."
       end
 
       # One row past the page, so the cut is a FACT rather than the `rows.size >= limit` guess

@@ -10,6 +10,18 @@ private def seed_count_flow(store : Gori::Store, host : String, status : Int32) 
   id
 end
 
+private def seed_ranked_flow(store : Gori::Store, host : String, dur_us : Int64?, size : Int32) : Int64
+  id = store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_i64, scheme: "https", host: host, port: 443,
+    method: "GET", target: "/", http_version: "HTTP/1.1",
+    head: "GET / HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
+  return id unless dur_us # no response yet
+  store.update_response(Gori::Store::CapturedResponse.new(
+    flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice, body: Bytes.new(size),
+    body_size: size.to_i64, duration_us: dur_us))
+  id
+end
+
 describe Gori::Store do
   # #1680: a row feed says why a flow failed without a `show` per errored flow — filled by
   # `with_errors`, never by `SELECT_ROW` (the list index does not carry `error`).
@@ -65,6 +77,22 @@ describe Gori::Store do
         filter = Gori::QL.parse("host:a.test")
         store.flow_ids(filter).should eq(store.search(filter, 10).map(&.id).reverse!)
         store.flow_ids(filter).should eq([ids[0], ids[2]])
+      end
+    end
+  end
+
+  describe "#ranked" do
+    it "returns the top flows by duration or response size, ties newest first, unanswered last" do
+      with_store do |store|
+        fast = seed_ranked_flow(store, "a.test", 5_000_i64, 900)
+        slow = seed_ranked_flow(store, "a.test", 90_000_i64, 10)
+        tie = seed_ranked_flow(store, "b.test", 90_000_i64, 20)
+        pending = seed_ranked_flow(store, "a.test", nil, 0)
+        store.ranked(nil, Gori::Store::Rank::Slowest, 10).map(&.id).should eq([tie, slow, fast, pending])
+        store.ranked(nil, Gori::Store::Rank::Slowest, 1).map(&.id).should eq([tie])
+        store.ranked(nil, Gori::Store::Rank::Largest, 1).map(&.id).should eq([fast])
+        filter = Gori::QL.parse("host:a.test")
+        store.ranked(filter, Gori::Store::Rank::Slowest, 2).map(&.id).should eq([slow, fast])
       end
     end
   end

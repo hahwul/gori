@@ -277,6 +277,31 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "sort ranks the top matches with no cursor, and refuses paging arguments" do
+      with_store do |store|
+        mcp_seed_flow(store, "a.test", "GET", "/s", 200, resp_body: Bytes.new(10))
+        big = mcp_seed_flow(store, "a.test", "GET", "/b", 200, resp_body: Bytes.new(5000))
+        mid = mcp_seed_flow(store, "a.test", "GET", "/m", 200, resp_body: Bytes.new(300))
+        mcp_seed_flow(store, "b.test", "GET", "/x", 200, resp_body: Bytes.new(9000))
+
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"host:a.test","sort":"largest","limit":2}}})
+        reply = mcp_tool_payload(mcp_drive(store, call)[0])
+        reply["flows"].as_a.map(&.["id"].as_i64).should eq([big, mid])
+        reply["order"].as_s.should eq("largest_first")
+        reply["has_more"].as_bool.should be_true
+        reply["next_before_id"]?.should be_nil
+
+        [%("before_id":#{big}), %("since":0), %("ids":[#{big}]), %("count_only":true)].each do |arg|
+          bad = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_history","arguments":{"sort":"largest",#{arg}}}})
+          resp = mcp_drive(store, bad)[0]
+          resp["result"]["isError"].as_bool.should be_true
+          resp["result"]["content"][0]["text"].as_s.should contain("'sort'")
+        end
+        bad = %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_history","arguments":{"sort":"oldest"}}})
+        mcp_drive(store, bad)[0]["result"]["isError"].as_bool.should be_true
+      end
+    end
+
     # A query SQLite cannot run is one answer on both paths, never a page that reads as
     # "nothing matched" beside a count that says it failed.
     it "answers a query that did not run as INTERNAL on the row path, as count_only does" do

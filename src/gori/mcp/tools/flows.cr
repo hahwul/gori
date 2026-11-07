@@ -74,6 +74,19 @@ module Gori
                        "does not apply — drop it", "INVALID_ARGUMENT", field: clash)
           end
         end
+        # `sort` ranks instead of paging (`Store#ranked`): a top-N with no cursor, so every
+        # argument that pages or names the rows contradicts it and is refused, not ignored.
+        rank = nil.as(Store::Rank?)
+        if sort = str(h, "sort")
+          rank = Store::Rank.parse?(sort)
+          return err("'sort' is #{HISTORY_SORTS.join(" or ")}, got #{sort.inspect}", "INVALID_ARGUMENT",
+            field: "sort") unless rank
+          clash = ids ? "ids" : before_id ? "before_id" : since_id ? "since" : count_only ? "count_only" : nil
+          if clash
+            return err("'sort' returns the top `limit` flows ranked, with no cursor, so '#{clash}' does not " \
+                       "apply — drop it", "INVALID_ARGUMENT", field: clash)
+          end
+        end
         # A forward cursor is judged against the highest id this project has EVER issued, not
         # the newest surviving flow. Since V39 an id is never reissued, so a cursor at a deleted
         # newest flow, or one held across a clear, still sees the next capture: refusing it (as
@@ -177,7 +190,7 @@ module Gori
         rows = begin
           # Read BEFORE the page, so a flow committed between the two still wakes the wait.
           mark = history_mark(filtered) if wait_ms > 0
-          page = history_rows(filter, filtered, scope_unconfigured, fetch, before_id, since_id)
+          page = history_rows(filter, filtered, scope_unconfigured, fetch, before_id, since_id, rank)
           # `wait_ms`: the flows are written by another process, so each slice reads the mark
           # (indexed scalars) and re-runs the page only once it moves. A new flow the filter
           # rejects moves it too, and the wait goes on. A filtered re-read can scan bodies
@@ -199,7 +212,7 @@ module Gori
                 reread_at = Time.instant + HISTORY_REREAD_GAP
                 next false if store.fts_dirty?
               end
-              page = history_rows(filter, filtered, scope_unconfigured, fetch, before_id, since_id)
+              page = history_rows(filter, filtered, scope_unconfigured, fetch, before_id, since_id, rank)
               reread_at = Time.instant + HISTORY_REREAD_GAP
               mark = now
               !page.empty?
@@ -237,11 +250,11 @@ module Gori
             # Which end of the list the caller is holding. `since` flips the order, which the
             # schema documented and nothing in the payload did — so an agent reading rows[0]
             # as "the newest" was right on one path and wrong on the other.
-            j.field "order", tailing ? "oldest_first" : "newest_first"
+            j.field "order", rank ? "#{rank.to_s.downcase}_first" : tailing ? "oldest_first" : "newest_first"
             j.field "has_more", has_more
             # The cursor to pass back, spelled as the argument it goes in, so continuing does
             # not require re-deriving which end of `flows` to read the id off.
-            if last = rows.last?
+            if !rank && (last = rows.last?)
               j.field(tailing ? "next_since" : "next_before_id", last.id)
             end
             emit_cut(j, cut)
@@ -251,6 +264,9 @@ module Gori
           end
         end)
       end
+
+      # `list_history{sort}`'s values, `Store::Rank`'s members spelled for the schema.
+      HISTORY_SORTS = Store::Rank.values.map(&.to_s.downcase)
 
       # The least time between two filtered `list_history` re-reads while a wait is held.
       HISTORY_REREAD_GAP = 1.second
@@ -266,9 +282,11 @@ module Gori
       end
 
       private def history_rows(filter : QL::Filter, filtered : Bool, scope_unconfigured : Bool, fetch : Int32,
-                               before_id : Int64?, since_id : Int64?) : Array(Store::FlowRow)
+                               before_id : Int64?, since_id : Int64?, rank : Store::Rank? = nil) : Array(Store::FlowRow)
         if scope_unconfigured
           [] of Store::FlowRow
+        elsif rank
+          store.ranked(filtered ? filter : nil, rank, fetch, history_control)
         elsif filtered
           store.search(filter, fetch, before_id, since_id, raise_on_error: true, control: history_control)
         else
@@ -965,6 +983,7 @@ module Gori
           s.field "columns", strarrprop("extract a value from each flow onto the row's `columns`. Spec [LABEL=][req|res:]kind:selector, kind cookie|header|regex|position|jsonpath, e.g. \"req:header:authorization\", \"RID=jsonpath:data.id\"; side defaults to response. \"\" is a MISS, not an empty value. Sensitive header/cookie columns read \"[REDACTED]\" unless include_sensitive. Each costs a read per row (body kinds up to 512 KiB)")
           s.field "include_sensitive", boolprop("unredact sensitive `columns`")
           s.field "count_only", boolprop("return only {count} of matching flows; refuses `ids`/`before_id`/`since`/`columns`")
+          s.field "sort", enumprop("rank instead of newest-first: the top `limit` matches by duration or response size, no cursor", HISTORY_SORTS)
         end
 
         tool j, "list_events",

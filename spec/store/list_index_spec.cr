@@ -86,6 +86,16 @@ describe "History list covering index (schema V37)" do
     end
   end
 
+  it "ranks (Store#ranked) off the covering index, never the table" do
+    with_store do |store|
+      sel = Gori::Store::SELECT_ROW
+      Gori::Store::Rank.values.each do |rank|
+        plan = query_plan(store, "#{sel} ORDER BY #{rank.column} DESC, id DESC LIMIT 50")
+        plan.should contain("COVERING INDEX idx_flows_list")
+      end
+    end
+  end
+
   it "keeps an exact status on its own index" do
     with_store do |store|
       search_plan(store, "status:500").should contain("INDEX idx_flows_status (status=?)")
