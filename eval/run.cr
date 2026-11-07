@@ -7,8 +7,9 @@
 #   crystal run eval/run.cr -- --report eval/out/runs/<stamp> [--baseline <older stamp dir>]
 #
 # Build the fixtures first (`just eval-fixtures`) and gori itself (`just build`). Every run
-# gets its own copy of the fixture db, its own GORI_HOME and an empty cwd, so neither the
-# operator's gori settings nor a repo CLAUDE.md leaks in; `--setting-sources ""` and
+# gets its own copy of the fixture db, its own GORI_HOME and an empty cwd OUTSIDE the repo,
+# so neither the operator's gori settings nor the repo's AGENTS.md and Claude Code project
+# memory leak in (a cwd under eval/out/ inherited both); `--setting-sources ""` and
 # `--strict-mcp-config` keep the operator's Claude Code settings, hooks and other MCP
 # servers out. The raw stream of each run stays under eval/out/runs/<stamp>/ for reading.
 #
@@ -234,6 +235,8 @@ def read_stream(path : String, script : Bool) : {Array(String), Int32, Bool, JSO
         foreign = ev["tools"].as_a.count do |t|
           script ? !SCRIPT_TOOLS.includes?(t.as_s) : !t.as_s.starts_with?("mcp__gori__")
         end
+        # A cwd inside the repo hands the agent AGENTS.md and the repo's project memory.
+        foreign += 1 if ev["cwd"]?.try(&.as_s?).try(&.starts_with?(ROOT))
       end
     when "assistant"
       ev.dig?("message", "content").try(&.as_a?).try &.each do |blk|
@@ -255,17 +258,17 @@ def run_one(job : Job, run_dir : String, model : String, budget : String, truth 
   common = ["-p", job.task.prompt, "--model", model, "--output-format", "stream-json", "--verbose",
             "--setting-sources", "", "--strict-mcp-config",
             "--max-budget-usd", budget, "--no-session-persistence"]
+  # Outside the repo: under it, Claude Code reads the repo's AGENTS.md and project memory into
+  # every run, and a `ls ..` from the script profile's shell lands beside the answer key.
+  cwd = File.join(Dir.tempdir, "gori-eval-#{File.basename(run_dir)}", name)
+  FileUtils.mkdir_p([dir, cwd])
   if har
-    # Outside the repo, so a `ls ..` from the agent's shell does not land beside the answer key.
-    cwd = File.join(Dir.tempdir, "gori-eval-#{File.basename(run_dir)}", name)
-    FileUtils.mkdir_p([dir, cwd])
     FileUtils.cp(har, File.join(cwd, "capture.har"))
     args = common + ["--tools", SCRIPT_TOOLS.join(','), "--allowedTools", SCRIPT_TOOLS.join(','),
                      "--append-system-prompt", SCRIPT_RULE]
   else
-    cwd = File.join(dir, "cwd")
     home = File.join(dir, "gori_home")
-    FileUtils.mkdir_p([cwd, home])
+    FileUtils.mkdir_p(home)
     db = File.join(dir, "fixture.db")
     FileUtils.cp(File.join(EVAL, "out", "fixtures", "#{job.task.fixture}.db"), db)
     mcp = {mcpServers: {gori: {command: GORI_BIN, args: ["mcp", "--db", db] + PROFILES[job.profile],
