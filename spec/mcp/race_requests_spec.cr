@@ -91,7 +91,7 @@ describe Gori::MCP::Server do
         resp = mcp_drive(store, call, verify_upstream: false)[0]
         members = mcp_tool_payload(resp)["members"].as_a
         members.each do |m|
-          m["head"].as_s.should contain("Set-Cookie: [REDACTED]")
+          m["head"].as_s.should contain("Set-Cookie: sid=[REDACTED]")
           m["head"].as_s.should_not contain("secret")
           m["body"]["size"].as_i.should eq(Gori::MCP::Tools::REPLY_ROWS_BUDGET)
           m["body"]["truncated"].as_bool.should be_true
@@ -116,7 +116,7 @@ describe Gori::MCP::Server do
         members.each do |m|
           m["head_truncated"].as_bool.should be_true
           m["head_size"].as_i.should be > 40_000
-          m["head"].as_s.should contain("Set-Cookie: [REDACTED]")
+          m["head"].as_s.should contain("Set-Cookie: sid=[REDACTED]")
           m["body"]["text"].as_s.bytesize.should be > 0
         end
         origin.close

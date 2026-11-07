@@ -45,7 +45,7 @@ describe "MCP agent ergonomics" do
         url = "http://127.0.0.1:#{port}/x"
 
         redacted = erg_json(tools, "send_request", %({"url":"#{url}","allow_unscoped":true}))
-        set_cookie_of(redacted).should eq("[REDACTED]")
+        set_cookie_of(redacted).should eq("sid=[REDACTED]")
 
         aliased = erg_json(tools, "send_request",
           %({"url":"#{url}","allow_unscoped":true,"include_sensitive":true}))

@@ -734,7 +734,7 @@ module Gori
           v = values[i]? || ""
           if !include_sensitive && !v.empty? && DisplayColumns.sensitive?(c)
             redacted = true
-            v = "[REDACTED]"
+            v = DisplayColumns.redacted(c, v)
           end
           {c.label, v}
         end

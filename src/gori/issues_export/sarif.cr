@@ -485,7 +485,7 @@ module Gori
           key = seen[name.downcase] ||= name
           withhold = withheld?(key, include_sensitive)
           redacted ||= withhold
-          (fields[key] ||= [] of String) << (withhold ? "[REDACTED]" : one_line(h.value))
+          (fields[key] ||= [] of String) << (withhold ? Redact.redacted_value(key, one_line(h.value)) : one_line(h.value))
           last = key
         end
         return {nil, nil} if fields.empty?
