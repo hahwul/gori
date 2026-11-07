@@ -3047,9 +3047,12 @@ module Gori
       # a reply: a list_history row is ~450 bytes and a sitemap entry more, so the advertised
       # `limit` maximums produced 190–230 KB replies that Claude Code turned into a "result
       # exceeds maximum allowed tokens" error. Kept well under that client's cap (25k tokens),
-      # the tightest one known.
+      # the tightest one known. Sized by MEASURED tokens, not bytes÷4: dense list JSON runs
+      # ~2.6 bytes a token, so the 64 KB this once was sat on the cap itself, and 6 of 64 eval
+      # runs had a 65,364-character list_history reply refused on their first call. 40 KB is
+      # 20k tokens even at 2 bytes a token.
       # ponytail: one constant for every client; a `gori mcp` flag if a roomier client wants it.
-      REPLY_ROWS_BUDGET = 64 * 1024
+      REPLY_ROWS_BUDGET = 40 * 1024
 
       # Each of `rows` serialized on its own, as many as fit REPLY_ROWS_BUDGET, in order. Always
       # at least one, so a page whose first row alone is larger still moves the cursor. The
