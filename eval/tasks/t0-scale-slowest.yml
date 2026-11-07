@@ -1,0 +1,6 @@
+fixture: scale
+tier: 0
+grade: exact
+prompt: |
+  What is the path (without the query string) of the single slowest request in
+  this capture? Answer with the path.

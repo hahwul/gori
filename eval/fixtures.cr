@@ -223,8 +223,43 @@ def build_ops(path : String) : Hash(String, JSON::Any)
   }
 end
 
+# A capture at a real session's scale (20k flows), for the question the small fixtures cannot
+# ask: does an answer that one dump or one page holds at 136 flows still come out right when
+# it does not? Each fact is one row among the noise, or a count past one page.
+def build_scale(path : String) : Hash(String, JSON::Any)
+  store = S.open(path)
+  t = 1_780_000_000_000_000_i64
+  hosts = %w[api.big.test www.big.test cdn.big.test auth.big.test telemetry.big.test]
+  five_xx = 0_i64
+  needle = 0_i64
+  slow_path = "/api/v2/reports/export"
+  20_000.times do |i|
+    t += 50_000
+    host = hosts[i % hosts.size]
+    status = i % 23 == 0 ? 503 : (i % 11 == 0 ? 404 : 200)
+    five_xx += 1 if status >= 500
+    html = i % 5 == 0
+    body = html ? %(<html><body>page #{i} <a href="/p/#{i % 300}">x</a></body></html>) : %({"id":#{i},"items":[#{(0...(i % 20)).map { |k| %({"sku":"S#{k}","q":#{k}}) }.join(',')}],"token":"tok#{i}"})
+    # t0-scale-needle: one body leaks an internal database address, mid-capture.
+    body = %({"id":#{i},"debug":{"upstream":"db-primary.internal:5432"},"token":"tok#{i}"}) if i == 13_337
+    # t0-scale-slowest: every other request is 5–304 ms; this one took ~10 s.
+    slow = i == 8_421
+    fid = add_flow(store, t, host: host, target: slow ? slow_path : "/api/v#{i % 3}/res#{i % 400}?page=#{i % 17}",
+      method: i % 7 == 0 ? "POST" : "GET", status: status, ctype: html ? "text/html" : "application/json",
+      body: body, dur_ms: slow ? 9_870 : 5 + i % 300)
+    needle = fid if i == 13_337
+  end
+  store.close
+  {
+    "t1-scale-5xx-count" => JSON::Any.new(five_xx),
+    "t0-scale-needle"    => JSON::Any.new([JSON::Any.new(needle)]),
+    "t0-scale-slowest"   => JSON::Any.new(slow_path),
+  }
+end
+
 FileUtils.mkdir_p(OUT)
-{"shop" => ->build_shop(String), "events" => ->build_events(String), "ops" => ->build_ops(String)}.each do |name, build|
+{"shop" => ->build_shop(String), "events" => ->build_events(String), "ops" => ->build_ops(String),
+ "scale" => ->build_scale(String)}.each do |name, build|
   db = File.join(OUT, "#{name}.db")
   FileUtils.rm_rf(Dir.glob("#{db}*")) # the db, its -wal/-shm, and gori's <db>.agents/ dir
   truth = build.call(db)

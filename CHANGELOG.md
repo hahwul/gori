@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Export: each HAR entry names its flow in `_goriFlowId`, so what a script finds in the file points back to the flow in gori (#1825)
+- MCP: list replies are held to about 40 KB instead of 64 KB, which dense JSON pushed past Claude Code's output cap (#1823)
 - TUI: pane borders state only what is on (`HTTP/1.1 · TLS default`, `READ`/`INS`, a lit `AUTO-LEN` or `diff · pretty`) instead of spelling every key, the READ badge matches the INS badge, the footer names the focused pane's keys in one notation (`^R send`), and its label says the pane and its mode (`REQUEST · INS`); keys and mouse buttons for Send/Run are unchanged, the keyed toggle chips are gone (#1821)
 - Probe: a check seen on several hosts is one row with its host count, expanded with `Enter`; `Space` → `Z` → **Group by check** turns it off, and the TUI now calls Probe's results findings (#1820)
 - Sitemap: a folder chain with one child at each step draws as one row, like `api/v3/orgs/…/items` (#1820)

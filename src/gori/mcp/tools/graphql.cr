@@ -137,7 +137,7 @@ module Gori
           "rewritten as the introspection query (ACTIVE, scope-gated, same headers)." do |s|
           s.field "flow_id", intprop("captured GraphQL flow (its response, or its request with send:true)"), required: true
           s.field "filter", strprop("case-insensitive name filter: root fields, and types by name or field name")
-          s.field "max_bytes", intprop("cap on the sdl text (default and max 65536)")
+          s.field "max_bytes", intprop("cap on the sdl text (default and max #{REPLY_ROWS_BUDGET})")
           s.field "send", boolprop("re-send the request as an introspection query (ACTIVE)")
           s.field "legacy", boolprop("send:true only: the query without subscriptionType/directives, for an older server")
           s.field "insecure", boolprop("send:true only: skip upstream TLS verification")
