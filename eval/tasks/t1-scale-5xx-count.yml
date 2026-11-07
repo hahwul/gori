@@ -1,0 +1,6 @@
+fixture: scale
+tier: 1
+grade: exact
+prompt: |
+  How many captured flows in this capture got a 5xx response? Answer with the
+  exact number.
