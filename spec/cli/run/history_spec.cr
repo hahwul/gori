@@ -1652,6 +1652,10 @@ describe "gori run history — the --limit cut" do
     note.not_nil!.should contain("--limit")
   end
 
+  it "says which end a --sort listing is cut at" do
+    Gori::CLI::Run.history_truncation_note(true, 50, Gori::Store::Rank::Slowest).not_nil!.should contain("the slowest 50")
+  end
+
   it "reads the over-read row as 'there are more', and drops it from the listing" do
     # limit 3, four rows came back → the fourth is the probe, not a row to print.
     Gori::CLI::Run.limit_page([1, 2, 3, 4], 3).should eq({[1, 2, 3], true})
