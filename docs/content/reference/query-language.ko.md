@@ -43,7 +43,9 @@ status:404
 
 ### 한쪽 방향만 보기: `req.` / `resp.` {#one-side-only-req-resp}
 
-`header:`와 `body:`는 **요청과 응답을 모두** 뒤집니다. 한쪽만 보려면 `req.` 또는 `resp.`를 앞에 붙입니다.
+`header:`와 `body:`는 **요청과 응답을 모두** 뒤집니다. 한쪽만 보려면 `req.` 또는 `resp.`를 앞에 붙입니다. 둘 다 헤더 영역의 부분 문자열이라 `header:authorization`은
+`X-Authorization-Debug`만 있는 요청에도 걸립니다. 헤더 **이름**을 확인하려면 줄 시작에 고정한 정규식으로
+`req.header~(?im)^authorization:`처럼 씁니다.
 
 | 필드 | 뜻 |
 | --- | --- |
@@ -53,6 +55,7 @@ status:404
 ```text
 resp.body:secrettoken                 응답 본문에만 들어있는 토큰
 resp.header:set-cookie                쿠키를 내려주는 응답
+-req.header~(?im)^authorization:      Authorization 헤더가 없는 요청
 -resp.body:abcd                       응답 본문에 abcd가 없는 것
 req.body~(?i)password                 요청 본문 정규식(한쪽만)
 NOT (req.body:token OR resp.body:token)

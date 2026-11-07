@@ -153,6 +153,8 @@ module Gori
 
       Sides: header: and body: search REQUEST AND RESPONSE; prefix req. or resp. (res.) for one side —
       req.body:token resp.header:set-cookie -resp.body:abcd. req.size/resp.size = reqsize/respsize.
+      header: is a substring of the head, so header:authorization also hits X-Authorization-Debug;
+      one header NAME: req.header~(?im)^authorization: (-req.header~… = requests without it).
 
       Comparisons (status port size reqsize respsize dur): status:>=500  port:8443  size:>10000  dur:<2s (ms default; ms|s)
       Status class: status:5xx  status:4xx
