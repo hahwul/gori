@@ -77,6 +77,13 @@ module Gori
       kind.cookie? || (kind.header? && Redact.sensitive_header?(selector))
     end
 
+    # What a sensitive column's value prints as: a header column through `Redact.redacted_value`
+    # (a `set-cookie` column keeps its attributes), a cookie column — a value by construction —
+    # wholly `[REDACTED]`.
+    def self.redacted(c : Store::DisplayColumn, value : String) : String
+      c.kind.header? ? Redact.redacted_value(c.selector, value) : "[REDACTED]"
+    end
+
     # A column set with its regexes already compiled — the shape every row loop should hold.
     #
     # `TokenExtract.regex` compiles its pattern when it is not handed one, which on a row loop is

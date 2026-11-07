@@ -358,8 +358,10 @@ describe Gori::Issues::Export do
 
         # Redacted (the default, #1191), each field still counts as its own.
         redacted = only_result(store)["webResponse"]
-        redacted["headers"]["Set-Cookie"].as_s.should eq("[REDACTED]\n[REDACTED]")
-        redacted["properties"]["gori/setCookie"].as_a.map(&.as_s).should eq(["[REDACTED]", "[REDACTED]"])
+        # A Set-Cookie keeps its name and attributes; only the value is withheld.
+        kept = ["sid=[REDACTED]; Expires=Wed, 21 Oct 2030 07:28:00 GMT; Path=/", "theme=[REDACTED]; Path=/"]
+        redacted["headers"]["Set-Cookie"].as_s.should eq(kept.join('\n'))
+        redacted["properties"]["gori/setCookie"].as_a.map(&.as_s).should eq(kept)
       end
     end
 
@@ -385,7 +387,7 @@ describe Gori::Issues::Export do
         req["headers"]["Accept"].as_s.should eq("*/*") # everything else as captured
         req["properties"]["gori/sensitiveHeadersRedacted"].as_bool.should be_true
         resp = res["webResponse"]
-        resp["headers"]["Set-Cookie"].as_s.should eq("[REDACTED]")
+        resp["headers"]["Set-Cookie"].as_s.should eq("sid=[REDACTED]")
         resp["headers"]["Server"].as_s.should eq("nginx")
         resp["properties"]["gori/sensitiveHeadersRedacted"].as_bool.should be_true
 

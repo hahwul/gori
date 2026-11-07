@@ -210,11 +210,12 @@ module Gori
           else
             colon = line.index(0x3a_u8)
             sensitive_continuation = false
-            if colon && Redact.sensitive_header?(String.new(line[0, colon]).scrub)
+            name = String.new(line[0, colon || 0]).scrub
+            if colon && Redact.sensitive_header?(name)
               # A malformed head may begin directly with Authorization/Cookie rather than a
               # request/status line. Fail closed on that header-shaped first line too.
               buffer.write(line[0, colon])
-              buffer << ": [REDACTED]"
+              buffer << ": " << Redact.redacted_value(name, String.new(line[colon + 1, line.size - colon - 1]).scrub.strip)
               sensitive_continuation = true
             else
               buffer.write(line)
@@ -512,7 +513,7 @@ module Gori
           next line unless colon
           name = line[0, colon]
           next line unless Redact.sensitive_header?(name)
-          "#{name}: [REDACTED]#{"\r" if line.ends_with?('\r')}"
+          "#{name}: #{Redact.redacted_value(name, line[(colon + 1)..].rchop('\r').strip)}#{"\r" if line.ends_with?('\r')}"
         end.join('\n')
       end
 

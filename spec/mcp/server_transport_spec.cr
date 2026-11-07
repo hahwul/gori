@@ -600,7 +600,7 @@ describe Gori::MCP::Server do
         p["request_head"].as_s.should_not contain("topsecret")
         p["request_head"].as_s.should_not contain("sid=abc")
         p["request_head"].as_s.should contain("Host: h.test") # non-sensitive kept
-        p["response_head"].as_s.should contain("Set-Cookie: [REDACTED]")
+        p["response_head"].as_s.should contain("Set-Cookie: sid=[REDACTED]")
         p["response_head"].as_s.should_not contain("sid=xyz")
         p["sensitive_headers_redacted"].as_bool.should be_true
 

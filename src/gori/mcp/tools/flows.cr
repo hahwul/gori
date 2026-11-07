@@ -442,7 +442,7 @@ module Gori
         values = prepared.row_values(store, row.id, matcher)
         prepared.columns.map_with_index do |c, i|
           v = values[i]? || ""
-          v = "[REDACTED]" if !include_sensitive && !v.empty? && Gori::DisplayColumns.sensitive?(c)
+          v = Gori::DisplayColumns.redacted(c, v) if !include_sensitive && !v.empty? && Gori::DisplayColumns.sensitive?(c)
           {c.label, v}
         end
       end
