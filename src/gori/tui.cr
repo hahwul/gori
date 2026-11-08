@@ -112,7 +112,6 @@ module Gori
   end
 end
 
-require "./tui/input_idle_backoff_patch" # carried termisu patch — see the file
 require "./tui/geometry"
 require "./tui/theme"
 require "./tui/screen"
