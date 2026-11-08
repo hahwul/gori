@@ -1,25 +1,16 @@
 # Changelog
 
-## Unreleased
+## v0.9.2
 
-- MCP, CLI: `list_history{sort}` and `gori run history --sort` list the slowest or largest flows first (#1828)
-- MCP, CLI: a redacted `Set-Cookie` keeps its cookie name and attributes (`sid=[REDACTED]; Path=/; HttpOnly`), so `HttpOnly`/`Secure`/`SameSite` are readable without `include_sensitive` (#1827)
-- Export: each HAR entry names its flow in `_goriFlowId`, so what a script finds in the file points back to the flow in gori (#1825)
-- MCP: list replies are held to about 40 KB instead of 64 KB, which dense JSON pushed past Claude Code's output cap (#1823)
-- TUI: pane borders state only what is on (`HTTP/1.1 · TLS default`, `READ`/`INS`, a lit `AUTO-LEN` or `diff · pretty`) instead of spelling every key, the READ badge matches the INS badge, the footer names the focused pane's keys in one notation (`^R send`), and its label says the pane and its mode (`REQUEST · INS`); keys and mouse buttons for Send/Run are unchanged, the keyed toggle chips are gone (#1821)
-- Probe: a check seen on several hosts is one row with its host count, expanded with `Enter`; `Space` → `Z` → **Group by check** turns it off, and the TUI now calls Probe's results findings (#1820)
-- Sitemap: a folder chain with one child at each step draws as one row, like `api/v3/orgs/…/items` (#1820)
-- Settings: Display and Layout are one **Display** section with lists, message panes and window subheaders; settings.json is unchanged (#1820)
-- Fuzzer: the Advanced popup groups its rows under engine, match, filter, stop, wire and macro (#1820)
-- Repeater: `Space` → **Protocol…** lists the WebSocket and gRPC rows only on those tabs, and the response pane's chips are upper-case like the request's (#1820)
-- TUI, MCP: a long session no longer holds memory for finished Discover runs, a filtered History's timestamps and CACHE signals, or deleted projects' agent questions (#1819)
-- Proxy: TLS stays in userspace when the system OpenSSL turns on kernel TLS, which made idle pooled connections read as closed and resets as a clean EOF (#1812)
-- Repeater: `Space` → **Past sends…** lists what a tab has sent and puts the tab back to one, request and response (#1808)
-- Decoder: SHA3-256 and SHA3-512 hashes, and `html-encode-all`, which encodes every code point as a numeric entity (#1781, #1782)
-- Probe: fingerprint WordPress from the response body, with its version from the generator meta tag (#1780)
-- Repeater: a running TUI now shows the name and tags another session, `gori run repeater` or MCP gives a sub-tab, without a restart (#1807)
-- CLI: `gori run repeater show` prints `Authorization`, `Cookie`, `Set-Cookie` and API-key header values as `[REDACTED]` unless `--include-sensitive` is passed, as MCP `get_repeater_context` does (#1809)
-- History: Pretty bodies (`p`) also folds an HTTP/2 request's split `cookie` fields into one `cookie: a; b` line in the detail view; the captured bytes are unchanged (#1817)
+- TUI: leaner screens: pane borders show only what is on, footers name the focused pane's keys, Probe groups a check seen on several hosts, Sitemap folds one-child folder chains, and Settings, Fuzzer Advanced and Repeater menus are regrouped (#1820, #1821)
+- Repeater: `Space` → **Past sends…** restores what a tab sent, and a running TUI picks up sub-tab names and tags set elsewhere (#1807, #1808)
+- MCP: list replies held to about 40 KB, `list_history{sort}` and `gori run history --sort`, and QL hints that `host:`/`path:`/`url:`/`header:` match a substring (#1823, #1824, #1828, #1829)
+- Redaction: a redacted `Set-Cookie` keeps its name and attributes, and `gori run repeater show` withholds credential headers unless `--include-sensitive` is passed (#1809, #1827)
+- Export: each HAR entry names its flow in `_goriFlowId` (#1825)
+- Decoder: SHA3-256/512 and `html-encode-all`; Probe fingerprints WordPress (#1780, #1781, #1782)
+- History: Pretty bodies fold an HTTP/2 request's split `cookie` fields into one line (#1817)
+- Proxy: TLS stays in userspace when the system OpenSSL turns on kernel TLS (#1812)
+- Long sessions no longer hold memory for finished work (#1819)
 
 ## v0.9.1
 
