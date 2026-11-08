@@ -86,7 +86,7 @@ describe "the termisu pin the carried paste patch is written against" do
     lock = File.read(File.join(__DIR__, "..", "..", "shard.lock"))
     pinned = lock[/termisu:.*?commit\.([0-9a-f]{40})/m, 1]?
 
-    pinned.should eq("ca964e5f9256990d9d1e6aa5ca3aa1fb2635fb6b")
+    pinned.should eq("8fbb3fd51a784996b4e63ee915142b290fcfa4c3")
   end
 end
 
@@ -95,7 +95,7 @@ end
 # and every example passes over a frozen copy that has diverged. #1125 is what that looks like:
 # upstream rewrote `read_paste_end_tail` in the same bump, this file's pin fired, and the
 # re-read still concluded "pin moved only". So compare each surviving override's signature
-# against the installed shard, the same way `input_idle_backoff_spec.cr` does.
+# against the installed shard.
 describe "the carried paste patch's overrides" do
   it "still match the signatures termisu defines" do
     upstream = File.read(File.join(__DIR__, "..", "..", "lib", "termisu",
