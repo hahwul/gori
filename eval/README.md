@@ -1,7 +1,7 @@
 # Agent eval
 
 Measures whether an agent with gori MCP attached gets capture-analysis tasks right, and at
-what cost, per catalogue profile (`@minimal`, `@recon`, full, full `--read-only`), against a
+what cost, per catalogue profile (`@minimal`, `@recon`, full, full `--read-only`, full `deferred`), against a
 `script` control with no gori at all. It exists to decide the default catalogue and how long
 tool descriptions should be, and whether gori beats plain scripting at all — not to gate CI:
 runs are nondeterministic and cost money. CI only format-checks and type-checks `eval/*.cr`
@@ -21,6 +21,12 @@ the repo's `AGENTS.md` and Claude Code project memory; the summary voids such a 
 `claude` runs with `--setting-sources ""
 --strict-mcp-config --tools ""`, so the only tools the agent sees are gori's. The summary
 flags any run whose init listed another tool.
+
+`--tools ""` also drops Claude Code's `ToolSearch`, so those profiles load every gori schema
+upfront. The `deferred` profile keeps `ToolSearch` and serves the full catalogue, so only the
+tool names load and the agent fetches each schema before calling it: Claude Code's default.
+It is the profile to judge Claude Code's input-token cost by; the others measure a client
+that loads the whole catalogue, such as Codex. Its `calls` include the `ToolSearch` calls.
 
 The `script` profile is the control. The agent gets no MCP server, only `Bash` and `Read`, and
 the same fixture as `capture.har` (exported by `gori run history --format har`) in a cwd under
