@@ -2,7 +2,7 @@
 # profile, and grades the answers against the fixture's answer key:
 #
 #   crystal run eval/run.cr -- [--model sonnet] [--n 3] [--jobs 4]
-#                              [--profiles minimal,recon,full,full-ro] [--tasks t0-*]
+#                              [--profiles minimal,recon,full,full-ro,deferred] [--tasks t0-*]
 #                              [--baseline eval/out/runs/<stamp>]
 #   crystal run eval/run.cr -- --report eval/out/runs/<stamp> [--baseline <older stamp dir>]
 #
@@ -30,10 +30,15 @@ PROFILES = {
   "recon"   => ["--tools=@recon"],
   "full"    => [] of String,
   "full-ro" => ["--read-only"],
-  "script"  => [] of String, # no gori: capture.har + Bash/Read (see SCRIPT_RULE)
+  # The full catalogue the way Claude Code serves it by default: tool search on, so only the
+  # tool NAMES load and the agent fetches each schema with ToolSearch before calling it. The
+  # other gori profiles pass `--tools ""`, which drops ToolSearch and loads every schema upfront.
+  "deferred" => [] of String,
+  "script"   => [] of String, # no gori: capture.har + Bash/Read (see SCRIPT_RULE)
 }
 SCRIPT       = "script"
 SCRIPT_TOOLS = %w[Bash Read]
+DEFERRED     = "deferred"
 
 ANSWER_RULE = "Use only the gori MCP tools to inspect the capture. When you are done, end " \
               "your reply with exactly one final line of the form `ANSWER: <JSON value>` " \
@@ -218,11 +223,17 @@ def grade(task : Task, answer : JSON::Any?, truth : JSON::Any) : Bool
   end
 end
 
+# Whether `profile` grants `tool`: a tool init lists outside it means the isolation leaked.
+def granted?(profile : String, tool : String) : Bool
+  return SCRIPT_TOOLS.includes?(tool) if profile == SCRIPT
+  tool.starts_with?("mcp__gori__") || (profile == DEFERRED && tool == "ToolSearch")
+end
+
 # The tools a run called, in order (gori's without their prefix); how many tools init listed
 # that its profile does not grant (anything above zero means the isolation leaked); whether a
 # call reached for the answer key or this run directory (the script profile's Bash can read
 # anything on the host, so that run says nothing); and the final `result` event.
-def read_stream(path : String, script : Bool) : {Array(String), Int32, Bool, JSON::Any?}
+def read_stream(path : String, profile : String) : {Array(String), Int32, Bool, JSON::Any?}
   calls = [] of String
   foreign = 0
   peeked = false
@@ -232,9 +243,7 @@ def read_stream(path : String, script : Bool) : {Array(String), Int32, Bool, JSO
     case ev["type"]?.try(&.as_s?)
     when "system"
       if ev["subtype"]?.try(&.as_s?) == "init"
-        foreign = ev["tools"].as_a.count do |t|
-          script ? !SCRIPT_TOOLS.includes?(t.as_s) : !t.as_s.starts_with?("mcp__gori__")
-        end
+        foreign = ev["tools"].as_a.count { |t| !granted?(profile, t.as_s) }
         # A cwd inside the repo hands the agent AGENTS.md and the repo's project memory.
         foreign += 1 if ev["cwd"]?.try(&.as_s?).try(&.starts_with?(ROOT))
       end
@@ -273,7 +282,8 @@ def run_one(job : Job, run_dir : String, model : String, budget : String, truth 
     FileUtils.cp(File.join(EVAL, "out", "fixtures", "#{job.task.fixture}.db"), db)
     mcp = {mcpServers: {gori: {command: GORI_BIN, args: ["mcp", "--db", db] + PROFILES[job.profile],
                                env: {GORI_HOME: home}}}}.to_json
-    args = common + ["--mcp-config", mcp, "--tools", "", "--allowedTools", "mcp__gori",
+    tools = job.profile == DEFERRED ? "ToolSearch" : ""
+    args = common + ["--mcp-config", mcp, "--tools", tools, "--allowedTools", "mcp__gori,ToolSearch",
                      "--append-system-prompt", ANSWER_RULE]
   end
   stream = File.join(dir, "stream.jsonl")
@@ -285,7 +295,7 @@ def run_one(job : Job, run_dir : String, model : String, budget : String, truth 
   end
   elapsed = (Time.instant - started).total_seconds
 
-  calls, foreign, peeked, result = read_stream(stream, !har.nil?)
+  calls, foreign, peeked, result = read_stream(stream, job.profile)
   text = result.try(&.["result"]?).try(&.as_s?) || ""
   answer = text.lines.reverse_each.find(&.starts_with?("ANSWER:")).try do |l|
     raw = l.lchop("ANSWER:").strip.strip('`').strip
