@@ -91,7 +91,7 @@ module Gori::Tui
       # A `ReadPane`, not a `TextArea`: it is generated text, so the pane must take focus and
       # a selection (that is what makes `y` and the space menu's copy reach it) without ever
       # taking an edit.
-      @desc = ReadPane.new(wrap: true)
+      @desc = ReadPane.new(wrap: true, words: true)
       # What `@desc` was last sourced with — see `sync_desc`.
       @desc_text = ""
       # Which detail pane the keyboard and the read verbs address. See `DETAIL_PANES`.

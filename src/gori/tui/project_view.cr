@@ -81,6 +81,7 @@ module Gori::Tui
       # as one logical line per paragraph, so the `follow_x` sideways pan this used to carry
       # showed one screenful of each and hid the rest behind ⇧←/→.
       @desc_area.wrap = true
+      @desc_area.word_wrap = true
       @desc_dirty = false
       @desc_mode = InputMode::Read
       @desc_read = TextReadState.new

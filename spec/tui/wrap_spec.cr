@@ -27,6 +27,49 @@ describe Gori::Tui::Wrap do
       lay.end_of(0).should eq(0)
     end
 
+    # `words:` is for prose panes: break at the last space that fits, never mid-word.
+    it "breaks prose at a space under `words`, and wire text by column without it" do
+      line = "Demo target for www.hahwul.com and Repeater"
+      lay = Wrap.layout(line, 20, words: true)
+      rows = (0...lay.rows).map { |r| line[lay.start_of(r)...lay.end_of(r)] }
+      rows.should eq(["Demo target for ", "www.hahwul.com and ", "Repeater"])
+      rows.join.should eq(line)
+      rows_of(line, 20).first.should eq("Demo target for www.")
+    end
+
+    # The ASCII byte walk is a fast path, so it must break exactly where the cluster walk does.
+    it "breaks ASCII prose exactly as the cluster walk does" do
+      line = "Demo target for www.hahwul.com and Repeater (incl. a WS and a token-bound tab)/Fuzzer x"
+      {5, 7, 11, 20, 33}.each do |w|
+        fast = Wrap.layout(line, w, words: true)
+        # An empty conceal run hides nothing but takes the line off the ASCII path.
+        slow = Wrap.layout(line, w, [{line.size, line.size}], words: true)
+        (0...fast.rows).map { |r| fast.start_of(r) }.should eq((0...slow.rows).map { |r| slow.start_of(r) })
+      end
+    end
+
+    it "still breaks a word longer than the row under `words`, by column" do
+      line = "a #{"x" * 25} b"
+      lay = Wrap.layout(line, 10, words: true)
+      rows = (0...lay.rows).map { |r| line[lay.start_of(r)...lay.end_of(r)] }
+      rows.should eq(["a ", "x" * 10, "x" * 10, "xxxxx b"])
+    end
+
+    # A space that would overflow carries the word before it down: no row wider than `width`
+    # (the drawer would end it in `…`). With no earlier space, the space opens the next row.
+    it "never lets an overflowing space widen a row" do
+      line = "hello world foo"
+      lay = Wrap.layout(line, 11, words: true)
+      rows = (0...lay.rows).map { |r| line[lay.start_of(r)...lay.end_of(r)] }
+      rows.should eq(["hello ", "world foo"])
+      rows.each { |r| Screen.display_width(r).should be <= 11 }
+      rows_of_words = ->(l : String, w : Int32) do
+        lw = Wrap.layout(l, w, words: true)
+        (0...lw.rows).map { |r| l[lw.start_of(r)...lw.end_of(r)] }
+      end
+      rows_of_words.call("helloworld foo", 10).should eq(["helloworld", " foo"])
+    end
+
     it "breaks an ASCII line every `width` columns and loses nothing" do
       line = ("abcdefghij" * 5) # 50 chars
       rows_of(line, 12).should eq(["abcdefghijab", "cdefghijabcd", "efghijabcdef", "ghijabcdefgh", "ij"])

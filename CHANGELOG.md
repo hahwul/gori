@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- TUI: Notes, Issue notes and the Project and Probe descriptions wrap between words instead of mid-word
+
 ## v0.9.2
 
 - TUI: leaner screens: pane borders show only what is on, footers name the focused pane's keys, Probe groups a check seen on several hosts, Sitemap folds one-child folder chains, and Settings, Fuzzer Advanced and Repeater menus are regrouped (#1820, #1821)

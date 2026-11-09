@@ -97,25 +97,46 @@ module Gori::Tui
     # chars stay inside whichever row their neighbours land on: a run's edges are `¦`/`§`,
     # both Grapheme_Cluster_Break=Other, so a run never straddles a cluster and a break can
     # never fall inside one.
+    #
+    # `words` breaks prose after the last space that fits instead of mid-word (a description,
+    # a note). A row never grows past `width` for its space — the drawer ends a too-wide row in
+    # `…` — so a word that exactly fills a row moves down with the space after it, and with no
+    # earlier space on the row that space opens the next one. A word longer than the row still
+    # breaks by cluster. Wire bytes never take it.
     def self.layout(line : String, width : Int32, conceal : Array({Int32, Int32})? = nil,
-                    *, reveal : Bool = false) : Layout
+                    *, reveal : Bool = false, words : Bool = false) : Layout
       len = line.size
       # A degenerate width can't be divided into; one row, clipped by the drawer as before.
       return Layout.new(len, 1, [0]) if width <= 0
       ascii = Screen.printable_ascii?(line)
       if ascii && (conceal.nil? || conceal.empty?)
-        return Layout.new(len, width, nil) # uniform grid — see Layout
+        # A `words` line with no space has nowhere to break but the grid, and one with spaces
+        # takes a byte walk: a pasted body in a note must not cost a grapheme walk per keystroke.
+        return Layout.new(len, width, nil) unless words && line.byte_index(0x20)
+        return Layout.new(len, width, ascii_word_starts(line, width))
       end
       # `reveal` is Reveal.styled's visible whitespace markers. Tabs and controls can be
       # narrower there than their default named badges, so wrap at what is actually drawn —
       # and printable ASCII has neither, so it wraps as it always does.
       reveal &&= !ascii
+      Layout.new(len, width, wrap_starts(line, width, conceal, reveal, words))
+    end
+
+    # The char index each row of `line` starts at — `layout`'s cluster walk.
+    private def self.wrap_starts(line : String, width : Int32, conceal : Array({Int32, Int32})?,
+                                 reveal : Bool, words : Bool) : Array(Int32)
       starts = [0]
       col = 0
       i = 0
+      brk = 0     # `words`: char index just past the last space on this row (0 = none yet)
+      brk_col = 0 # …and the row's width up to that index
       line.each_grapheme do |g|
-        n = g.size
-        w = hidden?(conceal, i) ? 0 : (reveal ? Reveal.grapheme_cols(g.to_s) : Screen.grapheme_cols(g.to_s))
+        str = g.to_s
+        w = cluster_cols(str, conceal, i, reveal)
+        if words && brk > starts.last && col > 0 && col + w > width
+          starts << brk # carry the partial word down
+          col -= brk_col
+        end
         # `col > 0`: a cluster too wide for the whole row keeps its own row rather than
         # being split — the one case where a row overflows `width` on purpose.
         if col > 0 && col + w > width
@@ -123,9 +144,37 @@ module Gori::Tui
           col = 0
         end
         col += w
-        i += n
+        i += g.size
+        if words && (str == " " || str == "\t")
+          brk = i
+          brk_col = col
+        end
       end
-      Layout.new(len, width, starts)
+      starts
+    end
+
+    # `wrap_starts(words: true)` for printable ASCII: one byte is one char is one column.
+    private def self.ascii_word_starts(line : String, width : Int32) : Array(Int32)
+      starts = [0]
+      bytes = line.to_slice
+      row = 0
+      brk = 0
+      i = 0
+      while i < bytes.size
+        if i - row >= width
+          row = brk > row ? brk : i # carry the partial word down, else break by column
+          starts << row
+          next # `i` again: past `brk` it now sits inside the new row
+        end
+        brk = i + 1 if bytes[i] == 0x20
+        i += 1
+      end
+      starts
+    end
+
+    private def self.cluster_cols(str : String, conceal : Array({Int32, Int32})?, i : Int32, reveal : Bool) : Int32
+      return 0 if hidden?(conceal, i)
+      reveal ? Reveal.grapheme_cols(str) : Screen.grapheme_cols(str)
     end
 
     def self.draw_width(line : String, reveal : Bool = false) : Int32
@@ -839,6 +888,7 @@ module Gori::Tui
       return lo if target <= 0
       col = 0
       i = lo
+      last = lo # start of the row's last visible cluster
       while i < hi
         if conceal && (run = conceal.find { |(ra, rb)| i >= ra && i < rb })
           i = {run[1], hi}.min
@@ -852,9 +902,19 @@ module Gori::Tui
           return run ? {run[1], hi}.min : e
         end
         col += w
+        last = i
         i = e
       end
-      hi
+      past_row_end(line, lo, hi, last)
+    end
+
+    # Past the row's text: the break, `hi` — except on a row a `words` layout ended at its
+    # space. That row is usually shorter than the pane, and `hi` is the next row's first index
+    # (`Layout#row_of`), so a ↑/↓ or a click past the text landed on the wrong row. The space
+    # is the break there, and it is still on this row.
+    private def self.past_row_end(line : String, lo : Int32, hi : Int32, last : Int32) : Int32
+      return hi if hi >= line.size || hi <= lo
+      line[last] == ' ' ? last : hi
     end
 
     # `seg`, whose first char is at line index `off`, with the concealed chars removed.

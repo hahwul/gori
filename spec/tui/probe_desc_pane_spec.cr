@@ -83,9 +83,11 @@ private def row_of(backend, text : String) : Int32
 end
 
 # Every row the DESCRIPTION card drew, joined — the text as an operator can actually read it.
+# The pane wraps between words (`ReadPane words:`), so each break was a space the row's
+# right-padding strip removed; the join puts it back.
 private def desc_text(backend, inner, view) : String
   body = view.desc_rect(inner).not_nil!
-  (body.y...body.bottom).map { |y| backend.row(y)[body.x, body.w].rstrip }.reject(&.empty?).join
+  (body.y...body.bottom).map { |y| backend.row(y)[body.x, body.w].rstrip }.reject(&.empty?).join(" ")
 end
 
 describe "the Probe detail's DESCRIPTION pane" do

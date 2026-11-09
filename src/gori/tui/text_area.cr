@@ -223,6 +223,16 @@ module Gori::Tui
       @wrap_cache.clear
     end
 
+    getter? word_wrap : Bool = false
+
+    # Prose editors (a description, a note) break at spaces instead of mid-word — see
+    # `Wrap.layout(words:)`. Only meaningful with `wrap=` on.
+    def word_wrap=(on : Bool) : Nil
+      return if @word_wrap == on
+      @word_wrap = on
+      @wrap_cache.clear
+    end
+
     # Conceal ranges arrive fresh from the owner every frame and are derived from the
     # buffer, but NOT always via an edit: toggling ^K (markers live ⇄ inert) swaps them
     # wholesale without touching @edits. The wrap memo is keyed on @edits, so it has to be
@@ -1709,7 +1719,7 @@ module Gori::Tui
       # The caret line while an IME is composing changes with every jamo WITHOUT bumping
       # @edits, so it must never enter the memo — a stale layout there desyncs the caret
       # from the row it is drawn on.
-      return Wrap.layout(drawn_line(li), cw, cr, reveal: @reveal) if li == @cy && !@preedit.empty?
+      return Wrap.layout(drawn_line(li), cw, cr, reveal: @reveal, words: @word_wrap) if li == @cy && !@preedit.empty?
       if @wrap_rev != @edits || @wrap_w != cw
         @wrap_cache.clear
         @wrap_rev = @edits
@@ -1719,7 +1729,7 @@ module Gori::Tui
         return hit
       end
       @wrap_cache.clear if @wrap_cache.size >= WRAP_CACHE_CAP
-      @wrap_cache[li] = Wrap.layout(@lines[li], cw, cr, reveal: @reveal)
+      @wrap_cache[li] = Wrap.layout(@lines[li], cw, cr, reveal: @reveal, words: @word_wrap)
     end
 
     # A `Wrap` layout provider bound to this buffer at content width `cw`.
