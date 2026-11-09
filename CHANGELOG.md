@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- History: a wide flow detail shows the request beside the response (`⇧Z` → Request beside response turns it off), and `esc` from a detail's text steps back to its pane strip before it closes the detail
+- History: a wide flow detail shows the request beside the response (`⇧Z` → Request beside response turns it off), and `esc` from a detail's text steps back to its pane strip before it closes the detail (#1835)
 - TUI: Notes, Issue notes and the Project and Probe descriptions wrap between words instead of mid-word (#1833)
 - TUI: a selected Fuzzer hit keeps its ✓, a restored fuzz run no longer toasts over another tab, and the `^P` query line, the tab-bar footer and Intercept's empty card are clearer (#1833)
 - TUI: the header keeps the project name on a narrow terminal, and sub-tab names use the strip's width instead of stopping at about 16 columns (#1834)
