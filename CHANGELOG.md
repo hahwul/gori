@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.9.3
 
 - History: a wide flow detail shows the request beside the response (`⇧Z` → Request beside response turns it off), and `esc` from a detail's text steps back to its pane strip before it closes the detail (#1835)
 - TUI: Notes, Issue notes and the Project and Probe descriptions wrap between words instead of mid-word (#1833)
