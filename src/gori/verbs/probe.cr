@@ -60,12 +60,13 @@ module Gori
         "probe.collapse", "Collapse group", "Fold the group the cursor is on", Verb::Scope::Probe,
         [Verb::Chord.new("left"), Verb::Chord.new("h")], hidden: true) { |ctx| ctx.probe_collapse; nil }
 
-      # Toggle the scope lens from Probe too (the lens key itself is the Global `s`; Sitemap
-      # mirrors it). scope_toggle_lens reloads the active Probe list, and the bar shows
-      # the `s scope` chip — so the toggle is reachable where its effect is visible.
+      # Toggle the scope lens from Probe too. Menu-only here: Probe's own `s` goes to the
+      # finding's source flow (DESIGN.md §7, "one question per letter"), so the Global `s`
+      # never reaches the lens from this list, and the bar's chip spells the menu path
+      # (`␣s scope:off`) instead of History's bare `s`.
       r.register Verb::Definition.new(
         "probe.scope-toggle", "Toggle scope lens", "Filter findings to in-scope hosts on/off",
-        Verb::Scope::Probe, [] of Verb::Chord, intent: :scope_lens, group: :scope) { |ctx| ctx.scope_toggle_lens; nil } # the Global `s` is the key
+        Verb::Scope::Probe, [] of Verb::Chord, intent: :scope_lens, group: :scope) { |ctx| ctx.scope_toggle_lens; nil } # menu-only: Probe's `s` is go-to-source
 
       # Bulk dismiss — space-menu only (mnemonic, no stray hotkey): mute a whole check
       # code, or a whole host, in one confirmed action. 'r' is reserved for repeater-evidence
