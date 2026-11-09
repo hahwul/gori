@@ -853,7 +853,8 @@ describe "NotesView::Note#label (line source)" do
     texts.each do |text|
       note = Gori::Tui::NotesView::Note.new(1_i64, text)
       want = if t = Gori::Notes.title(note.area.text)
-               t.size > 15 ? "#{t[0, 14]}…" : t
+               max = Gori::Tui::Chrome::SUBTAB_LABEL_MAX
+               t.size > max ? "#{t[0, max - 1]}…" : t
              else
                "note 4"
              end

@@ -13,7 +13,7 @@ module Gori::Tui
     DRAIN_CAP = 512 # bounded per-tick drain so a fast run can't starve render
 
     def subtab_labels : Array(String)
-      @sessions.map_with_index { |t, i| "#{i + 1}:#{t.view.label(18)}" }
+      @sessions.map_with_index { |t, i| "#{i + 1}:#{t.view.label(Chrome::SUBTAB_LABEL_MAX)}" }
     end
 
     # Show the strip from the FIRST session (not ≥2): a single session still labels its

@@ -56,7 +56,8 @@ module Gori::Tui
       # several times a frame, and `text` joins the whole note to read its first line.
       def label(idx : Int32) : String
         if t = Notes.title(@area.each_line)
-          t.size > 15 ? "#{t[0, 14]}…" : t
+          max = Chrome::SUBTAB_LABEL_MAX
+          t.size > max ? "#{t[0, max - 1]}…" : t
         else
           "note #{idx + 1}"
         end
