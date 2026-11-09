@@ -57,6 +57,7 @@ abstract class Gori::Verb::ExecContext
   abstract def toggle_reveal : Nil
   # Decode JSON Unicode escapes in the req/res display without changing the captured bytes.
   abstract def toggle_unicode_escapes : Nil
+  abstract def toggle_detail_split : Nil # request beside response on a wide detail (saved)
   # Is the open flow's WebSocket MESSAGES pane on screen? Gates `detail.narrow-messages`.
   abstract def detail_messages_pane? : Bool
   # Narrow the MESSAGES pane to the last ^F query (in SQL, past the display window), or

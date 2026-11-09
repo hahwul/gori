@@ -5258,3 +5258,29 @@ pane tabs, and a footer could run to eleven tokens and push the CPU/MEM read-out
 
 Not changed, on purpose: how READ and INS are entered and left, every chord, the space menu
 and the palette. The mode model itself is muscle memory and is a separate decision.
+
+
+### 2026-11-10: a wide History detail draws the request beside the response
+
+The detail showed one pane at a time, so a 140-column terminal read a five-line request above
+twenty blank rows and needed `→` to see the answer. From DETAIL_SPLIT_MIN_W (122) columns of
+interior, the detail splits into two cards, as the Repeater's panes are: the request side
+(REQUEST, ORIGINAL) on the left, every other pane on the right. The pane chips ride the cards'
+top borders, the focused card is gold and the shell around them stays plain, so where the focus
+is reads at a glance.
+
+- **The keys are the chain they were.** `←/→` still walk REQUEST → RESPONSE → … and still close
+  the detail left of REQUEST; only what is drawn changes. READ stays the entry mode, so moving to
+  the other half is the `←`/`→` it always was.
+- **One half is the detail, the other a view of it.** The focused half is the full renderer
+  (caret, selection, hex, search, hit-tests through `detail_text_rect`). The other shows the last
+  pane its side held, read-only, from the line it was left at, and a pane focused again comes back
+  there. A click on that half focuses its pane.
+- **esc steps out one level.** From the text it goes to the strip, where `←/→` reach the other
+  card; from the strip it closes the detail; `q` still leaves from anywhere. It used to close from
+  the text, which sent an operator who wanted the request beside a response back to the list.
+  The open lands where Settings' default detail pane says, split or not.
+- **A saved preference, not a per-open peek.** `history_split_detail` (settings:layout, on by
+  default) is how the operator likes to read, so `⇧Z` → Request beside response writes it, unlike
+  hex, which is a per-open look.
+

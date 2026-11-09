@@ -341,6 +341,16 @@ module Gori::Tui
       @detail_text_i = -1
       @detail_text = ""
       @detail_search_memo = Wrap::SearchMemo.new # ^F whole-line scans of the detail body
+      # Split detail (request | the rest, side by side) — see `split_detail?`. `@split_room` is
+      # whether the last drawn pane was wide enough, read where no rect is at hand (the open's
+      # landing pane, a pane switch's scroll memory). Each side remembers its last pane, and
+      # each pane its {scroll, caret line}, so the half that is not focused shows where you
+      # left it and gets it back on ←/→.
+      @split_room = false
+      @split_left = :request
+      @split_right = :response
+      @split_marks = {} of Symbol => {Int32, Int32}
+      @split_companion = nil.as({Symbol, DetailView}?)
       @detail_pane = initial_detail_pane
       @detail_focus = :strip                 # :strip (chip row) | :body (caret/text) — two-level detail focus
       @search_hl = ""                        # active ^F query → highlight in the detail body
@@ -1733,6 +1743,9 @@ module Gori::Tui
       load_detail_logs(store)
       @detail_scroll = 0
       detail_wrap_reset
+      @split_marks.clear
+      @split_left = :request
+      @split_right = :response
       @detail_pane = initial_detail_pane
       @detail_focus = :strip # open lands on the strip (sub-tabs/chips); down-arrow enters the body
       drop_detail_cache
@@ -2829,6 +2842,157 @@ module Gori::Tui
       panes
     end
 
+    # --- split detail ---------------------------------------------------------
+    # A detail pane this wide (the framed interior) draws two halves: the request side on the
+    # left, everything else on the right. ←/→ walk the same chain as ever; only what is drawn
+    # changes. The focused half is the full detail renderer (caret, selection, hex, search);
+    # the other is a read-only view of the last pane its side showed, from where it was left.
+    DETAIL_SPLIT_MIN_W = 122
+
+    # The panes that draw in the left half: a request, as sent or as the client wrote it.
+    SPLIT_LEFT_PANES = {:request, :original}
+
+    # Whether `rect` (the detail's interior) is split. Width and the setting, nothing else.
+    def split_detail?(rect : Rect) : Bool
+      Settings.history_split_detail? && rect.w >= DETAIL_SPLIT_MIN_W
+    end
+
+    # The same answer where no rect is at hand, from the width the detail or list last drew at.
+    private def split_enabled? : Bool
+      Settings.history_split_detail? && @split_room
+    end
+
+    # The divider's column: the middle of `rect`.
+    private def split_divider_x(rect : Rect) : Int32
+      rect.x + rect.w // 2
+    end
+
+    # Which half the focused pane draws in.
+    private def split_focus_left? : Bool
+      SPLIT_LEFT_PANES.includes?(@detail_pane)
+    end
+
+    # The pane the other half shows: its side's last pane, else that side's first.
+    def split_companion_pane : Symbol
+      want = split_focus_left? ? @split_right : @split_left
+      return want if detail_panes.includes?(want)
+      split_focus_left? ? :response : :request
+    end
+
+    # The two cards under a split — {left, right}, a column apart like the Repeater's — above
+    # the footer, whose rows follow the cards' bottom border with no rule of their own.
+    private def split_cards(inner : Rect) : {Rect, Rect}
+      fh = detail_footer_height(inner)
+      h = inner.h - (fh > 0 ? fh - 1 : 0)
+      dx = split_divider_x(inner)
+      {Rect.new(inner.x, inner.y, dx - inner.x, h), Rect.new(dx + 1, inner.y, inner.right - dx - 1, h)}
+    end
+
+    # {focused card, other card}.
+    private def split_focus_cards(inner : Rect) : {Rect, Rect}
+      left, right = split_cards(inner)
+      split_focus_left? ? {left, right} : {right, left}
+    end
+
+    # A card's text rows, or nil when it has none.
+    private def card_text(card : Rect) : Rect?
+      t = card.inset(1, 1)
+      t.w > 0 && t.h > 0 ? t : nil
+    end
+
+    # Whether the last drawn detail was split — the controller frames the shell plain then,
+    # because the focused CARD carries the gold, as the Repeater's panes do.
+    def split_shown? : Bool
+      split_enabled?
+    end
+
+    # The text rect of the half NOT focused, or nil when the detail is not split. Read by the
+    # controller's click hit-test: a click there focuses that pane.
+    def split_companion_rect(inner : Rect) : Rect?
+      return nil unless split_detail?(inner)
+      card_text(split_focus_cards(inner)[1])
+    end
+
+    # Focus the pane the other half shows (a click on it).
+    def focus_split_companion : Nil
+      set_detail_pane(split_companion_pane)
+    end
+
+    # The other half's content: the pane's own DetailView, built as if it were focused (the
+    # builder reads `@detail_pane` and nothing it writes), memoised until the detail cache drops.
+    private def split_companion_view(pane : Symbol) : DetailView
+      if (c = @split_companion) && c[0] == pane
+        return c[1]
+      end
+      focused = @detail_pane
+      @detail_pane = pane
+      dv = begin
+        build_detail_view
+      ensure
+        @detail_pane = focused
+      end
+      @split_companion = {pane, dv}
+      dv
+    end
+
+    # The other half, read-only: no caret, no selection, no search band, from the line it was
+    # left at. Wraps like the focused half (`Settings.wrap_lines?`), else clips at its edge.
+    private def render_split_companion(screen : Screen, r : Rect) : Nil
+      pane = split_companion_pane
+      dv = split_companion_view(pane)
+      total = dv.total
+      gw = Settings.show_gutter ? {Gutter.width(total), r.w}.min : 0
+      cw = {r.w - gw, 0}.max
+      return if cw <= 0 || total <= 0
+      li = (@split_marks[pane]?.try(&.[0]) || 0).clamp(0, total - 1)
+      y = r.y
+      while y < r.bottom && li < total
+        text = dv.line_text(li)
+        lay = detail_wrap? ? Wrap.layout(text, cw) : nil
+        styled = dv.line_at(li)
+        (lay ? lay.rows : 1).times do |sub|
+          break if y >= r.bottom
+          a, b = lay ? {lay.start_of(sub), lay.end_of(sub)} : {0, text.size}
+          draw_detail_gutter(screen, r.x, y, gw, Wrap::Row.new(li, sub, a, b), false)
+          Highlight.draw(screen, r.x + gw, y, Highlight.slice_chars(styled, a, b), width: cw)
+          y += 1
+        end
+        li += 1
+      end
+    end
+
+    # The split's chrome: two cards, the focused one gold while the detail holds focus at
+    # either level, the pane chips on each card's top border (`detail_chip_layout`), and the
+    # mode word at the focused card's right end. Returns the focused card's text rect.
+    private def render_split_chrome(screen : Screen, rect : Rect, focused : Bool, strip_focused : Bool,
+                                    mode : String) : Rect
+      fc, oc = split_focus_cards(rect)
+      Frame.card(screen, oc, bg: Theme.bg, border: Theme.border)
+      Frame.card(screen, fc, bg: Theme.bg, border: Frame.pane_border(focused || strip_focused))
+      chips_end = render_detail_chips(screen, rect, strip_focused)
+      mx = fc.right - 2 - (mode.size + 2)
+      screen.text(mx, rect.y, " #{mode} ", Theme.muted, Theme.bg) if !mode.empty? && mx > chips_end
+      card_text(fc) || Rect.new(fc.x + 1, fc.y + 1, 0, 0)
+    end
+
+    # Everything a split draws but the focused card's text: both cards, the footer under them,
+    # and the other card's read-only view. Returns the focused card's text rect.
+    private def render_split(screen : Screen, rect : Rect, focused : Bool, strip_focused : Bool, mode : String) : Rect
+      body = render_split_chrome(screen, rect, focused, strip_focused, mode)
+      render_split_footer(screen, rect)
+      split_companion_rect(rect).try { |other| render_split_companion(screen, other) }
+      body
+    end
+
+    # The footer under the cards: the same lines as the unsplit strip, across the full width.
+    private def render_split_footer(screen : Screen, rect : Rect) : Nil
+      return if detail_footer_height(rect) == 0
+      y = split_cards(rect)[0].bottom
+      detail_footer_lines.each_with_index do |line, i|
+        Highlight.draw(screen, rect.x + 1, y + i, line, width: {rect.w - 2, 0}.max)
+      end
+    end
+
     # The decoded-protocol panes the opened flow carries, in chip order (each ivar was filled
     # by decode_protocols; nil/empty means not offered).
     private def decoded_panes : Array(Symbol)
@@ -2869,12 +3033,19 @@ module Gori::Tui
     end
 
     private def set_detail_pane(pane : Symbol) : Nil
+      @split_marks[@detail_pane] = {@detail_scroll, @detail_read.cy}
+      SPLIT_LEFT_PANES.includes?(pane) ? (@split_left = pane) : (@split_right = pane)
       @detail_pane = pane
       @detail_scroll = 0
       detail_wrap_reset
       drop_detail_cache       # pane switch changes the content
       @detail_hex_bytes = nil # …and the hex source bytes
       @detail_read.reset
+      # Split, the pane was on screen in its half: it comes back where it was left.
+      if split_enabled? && (mark = @split_marks[pane]?)
+        @detail_scroll = mark[0]
+        @detail_read.move_to(mark[1], 0)
+      end
     end
 
     # Public wrapper around the private set_detail_pane — lets the Runner switch
@@ -2926,6 +3097,7 @@ module Gori::Tui
     def render_list(screen : Screen, rect : Rect, focused : Bool = true, *,
                     listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
+      @split_room = rect.w >= DETAIL_SPLIT_MIN_W # the open lands before the detail ever draws
       list_rect, preview_rect = list_split(rect)
       # No preview pane at this size (or after a resize down — list_split collapses it below
       # rect.h 12, i.e. any terminal under 20 rows) ⇒ snap focus back to the list, or
@@ -3623,13 +3795,31 @@ module Gori::Tui
     # 1-col gap between. Returns the pane symbol whose chip is under (mx,my), else nil.
     def detail_pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
       return nil if @detail.nil? || my != rect.y
-      x = rect.x + 1
-      detail_panes.each do |pane|
-        w = detail_pane_label(pane).size + 2 # " LABEL "
+      detail_chip_layout(rect).each do |(pane, x, w)|
         return pane if mx >= x && mx < x + w
-        x += w + 1 # render's trailing 1-col gap between chips
       end
       nil
+    end
+
+    # Each pane chip's {pane, x, width} — ONE layout for render_detail_chips and the click
+    # hit-test. A chip is " LABEL " with a 1-col gap after it. Split, the request-side panes
+    # start in the left half and the rest at the right half's edge.
+    private def detail_chip_layout(rect : Rect) : Array({Symbol, Int32, Int32})
+      out = [] of {Symbol, Int32, Int32}
+      split = split_detail?(rect)
+      lx = split ? rect.x + 2 : rect.x + 1 # split: on each card's top border, past its corner
+      rx = split ? split_cards(rect)[1].x + 2 : 0
+      detail_panes.each do |pane|
+        w = detail_pane_label(pane).size + 2
+        if split && !SPLIT_LEFT_PANES.includes?(pane)
+          out << {pane, rx, w}
+          rx += w + 1
+        else
+          out << {pane, lx, w}
+          lx += w + 1
+        end
+      end
+      out
     end
 
     # Compact mode word shown before the toggle chips (and asserted by specs).
@@ -3668,23 +3858,12 @@ module Gori::Tui
       end
       # Pane strip: show ALL panes as chips with the active one highlighted, so it's
       # obvious there's more behind (←/→ walk `detail_panes`, in that order).
-      x = render_detail_chips(screen, rect, strip_focused)
+      @split_room = rect.w >= DETAIL_SPLIT_MIN_W
       hex = detail_hex?(detail)
       dv = detail_view
       ws = reveal_active?(hex, dv)
-      # The status word (PRETTY / RAW / HEX / BINARY …) and nothing else: the strip used to
-      # carry a keyed chip per toggle plus a nav crib (`^X:hex  b:ws  p:pretty · ↑/↓←/→ · ⇧sel
-      # · y · space · esc`), eleven tokens beside three pane tabs. The strip names the panes and
-      # the reading on screen; the keys are the footer's (`HistoryController#body_hint`).
-      # Bounded by the pane's right border (`rect.right`): a draw with no `width:` ran over the
-      # `│` on a sub-110-column pane (#1376).
-      draw_detail_hint(screen, x + 1, rect, detail_mode_status(hex, ws, dv))
-      Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
-
-      # The text rect and the footer strip under it come from ONE derivation
-      # (`detail_text_rect`), shared with the controller's click/drag hit-test.
-      body = detail_text_rect(rect) || Rect.new(rect.x + 1, rect.y + 2, {rect.w - 2, 0}.max, 0)
-      render_detail_footer(screen, rect, body, focused)
+      mode = detail_mode_status(hex, ws, dv)
+      body = split_detail?(rect) ? render_split(screen, rect, focused, strip_focused, mode) : render_detail_chrome(screen, rect, focused, strip_focused, mode)
       if hex && (bytes = detail_pane_bytes)
         @detail_last_h = body.h # the page step (detail_page_rows) reads it in hex too
         HexView.render(screen, body, bytes, @detail_scroll)
@@ -3699,6 +3878,26 @@ module Gori::Tui
       render_detail_body(screen, body, focused: focused)
     end
 
+    # The unsplit chrome: the pane strip, the mode word, the rule under them and the footer.
+    # Returns the text rect.
+    private def render_detail_chrome(screen : Screen, rect : Rect, focused : Bool, strip_focused : Bool,
+                                     mode : String) : Rect
+      x = render_detail_chips(screen, rect, strip_focused)
+      # The status word (PRETTY / RAW / HEX / BINARY …) and nothing else: the strip used to
+      # carry a keyed chip per toggle plus a nav crib (`^X:hex  b:ws  p:pretty · ↑/↓←/→ · ⇧sel
+      # · y · space · esc`), eleven tokens beside three pane tabs. The strip names the panes and
+      # the reading on screen; the keys are the footer's (`HistoryController#body_hint`).
+      # Bounded by the pane's right border (`rect.right`): a draw with no `width:` ran over the
+      # `│` on a sub-110-column pane (#1376).
+      draw_detail_hint(screen, x + 1, rect, mode)
+      Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
+      # The text rect and the footer strip under it come from ONE derivation
+      # (`detail_text_rect`), shared with the controller's click/drag hit-test.
+      body = detail_text_rect(rect) || Rect.new(rect.x + 1, rect.y + 2, {rect.w - 2, 0}.max, 0)
+      render_detail_footer(screen, rect, body, focused)
+      body
+    end
+
     # The fewest text rows the body keeps when the footer strip competes for height. Below
     # this the footer is dropped whole rather than squeezing the pane to a sliver: the bytes
     # are what the drill-in is FOR, the strip is what gori says about them.
@@ -3711,6 +3910,12 @@ module Gori::Tui
     # is a dead row, which is exactly what a footer added on the render side alone would
     # have made of the last lines of the pane.
     def detail_text_rect(inner : Rect) : Rect?
+      return card_text(split_focus_cards(inner)[0]) if split_detail?(inner)
+      full_text_rect(inner)
+    end
+
+    # The text rows across the whole interior, split or not.
+    private def full_text_rect(inner : Rect) : Rect?
       top = inner.y + 2 # pane strip + mode row
       h = inner.bottom - top
       return nil if h <= 0
@@ -3855,16 +4060,23 @@ module Gori::Tui
       screen.text(x, rect.y, text, Theme.muted, width: room)
     end
 
+    # Split, the companion's chip wears the at-rest band (it is on screen, not focused), and
+    # the returned x — where the mode word goes — is past the FOCUSED half's last chip.
     private def render_detail_chips(screen : Screen, rect : Rect, strip_focused : Bool) : Int32
-      x = rect.x + 1
-      detail_panes.each do |pane|
+      companion = split_detail?(rect) ? split_companion_pane : nil
+      focus_left = split_focus_left?
+      end_x = rect.x + 1
+      detail_chip_layout(rect).each do |(pane, cx, _)|
         active = pane == @detail_pane
-        fg = active ? (strip_focused ? Theme.ink_on(Theme.focus_gold) : Theme.text_bright) : Theme.muted
-        bg = active ? (strip_focused ? Theme.focus_gold : Theme.accent_bg) : Theme.bg
-        x = screen.text(x, rect.y, " #{detail_pane_label(pane)} ", fg, bg,
+        shown = active || pane == companion
+        fg = active && strip_focused ? Theme.ink_on(Theme.focus_gold) : (shown ? Theme.text_bright : Theme.muted)
+        bg = active && strip_focused ? Theme.focus_gold : (shown ? Theme.accent_bg : Theme.bg)
+        x = screen.text(cx, rect.y, " #{detail_pane_label(pane)} ", fg, bg,
           attr: active ? Attribute::Bold : Attribute::None) + 1
+        same_side = companion.nil? || SPLIT_LEFT_PANES.includes?(pane) == focus_left
+        end_x = x if same_side
       end
-      x
+      end_x
     end
 
     # The normal (non-hex, non-reveal) detail body: request/response/decoded-pane text,
@@ -4393,6 +4605,7 @@ module Gori::Tui
     # RepeaterView#drop_resp_view_cache).
     private def drop_detail_cache : Nil
       @detail_cache = nil
+      @split_companion = nil
       @detail_styled_cache.clear
       # …and the wrap memo, which is keyed by (line index, width) only: new content at the
       # same index would be laid out against the OLD line's breaks. `refresh_detail` reaches
