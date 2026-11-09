@@ -152,11 +152,14 @@ describe "the JWT and Cookie workbench controllers" do
       end
     end
 
-    it "labels a chip by its custom name, capped at 18 columns, and a blank rename reverts it" do
+    # The builder caps at SUBTAB_LABEL_MAX; the strip clips further only when it has to.
+    it "labels a chip by its custom name, capped at SUBTAB_LABEL_MAX, and a blank rename reverts it" do
       each_tool do |ctl, _host, _t|
         ctl.apply_rename(ctl.view_at(0).not_nil!, "  a rather long session name  ")
         ctl.view_at(0).try(&.name).should eq("a rather long session name")
-        ctl.subtab_labels.should eq(["1:a rather long ses…"])
+        ctl.subtab_labels.should eq(["1:a rather long session name"])
+        ctl.apply_rename(ctl.view_at(0).not_nil!, "n" * 50)
+        ctl.subtab_labels.should eq(["1:#{"n" * 39}…"])
         ctl.apply_rename(ctl.view_at(0).not_nil!, "   ")
         ctl.view_at(0).try(&.name).should be_nil
         ctl.subtab_labels.should eq(["1:empty"])

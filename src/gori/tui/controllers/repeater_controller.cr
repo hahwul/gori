@@ -232,7 +232,7 @@ module Gori::Tui
     end
 
     def subtab_labels : Array(String)
-      @repeaters.map_with_index { |tab, i| "#{i + 1}:#{tab.view.label(18)}#{tab.view.tags_label(12)}" }
+      @repeaters.map_with_index { |tab, i| "#{i + 1}:#{tab.view.label(Chrome::SUBTAB_LABEL_MAX)}#{tab.view.tags_label(12)}" }
     end
 
     # Overridden for the LABEL: 40 columns rather than the chip's 18, which the

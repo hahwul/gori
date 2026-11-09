@@ -143,3 +143,70 @@ describe "Chrome tab menu — chip geometry in display columns" do
     segs[1][1].x.should be >= segs[0][1].right
   end
 end
+
+# Names used to be cut to ~16 columns by each tab's label builder, which cannot see the strip,
+# so a wide terminal showed `1:Demo engagemen…` beside sixty empty columns. The strip fits
+# them now: whole names when there is room, one shared name budget when there is not.
+describe "Chrome sub-tab strip — names fit the strip's width" do
+  long = ["1:Demo engagement — recon notes", "2:Workbench cross-links", "3:IDOR probe #idor #auth"]
+
+  it "shows whole names when the strip has room" do
+    b = MemoryBackend.new(140, 1)
+    Chrome.render_tab_strip(Screen.new(b), Rect.new(0, 0, 140, 1), long, 0, false)
+    long.each { |l| b.row(0).should contain(l) }
+  end
+
+  it "clips every name alike, keeping the index and the tags, when the strip is narrow" do
+    b = MemoryBackend.new(80, 1)
+    Chrome.render_tab_strip(Screen.new(b), Rect.new(0, 0, 80, 1), long, 0, false)
+    row = b.row(0)
+    row.should contain("3:IDOR probe #idor #auth") # short enough to stay whole
+    row.should contain("1:Demo engagement — r…")
+    row.should contain("2:Workbench cross-lin…") # the same name budget as chip 1
+    # Render and hit-test read one layout, so every segment still covers its drawn label.
+    Chrome.strip_segments(Rect.new(0, 0, 80, 1), long, 0).size.should eq(3)
+  end
+
+  it "keeps SUBTAB_NAME_FLOOR columns of a name and scrolls past that" do
+    many = (1..12).map { |i| "#{i}:#{"n" * 30}" }
+    segs = Chrome.strip_segments(Rect.new(0, 0, 80, 1), many, 0)
+    segs.size.should be < many.size # it scrolls rather than clip below the floor
+    segs.first[1].w.should eq(2 + Screen.display_width("1:") + Chrome::SUBTAB_NAME_FLOOR)
+  end
+end
+
+# The top bar used to drop the project name first at 80 columns (`𝓰𝓸𝓻𝓲 ·…`) while ⌘ and ⚙
+# — two chords' mouse twins — stayed. The name now keeps its columns and those step aside.
+private def top_bar_row(w : Int32, project : String, probe : String = "probe:passive") : String
+  b = MemoryBackend.new(w, 1)
+  Chrome.render_top_bar(Screen.new(b), Rect.new(0, 0, w, 1), project: project,
+    scope: "scope:off(7)", probe: probe, rules: "rules:2", listen: "localhost:18997")
+  b.row(0)
+end
+
+private def top_bar_hit(w : Int32, x : Int32, project : String) : Symbol?
+  Chrome.top_bar_chip_at(Rect.new(0, 0, w, 1), x, 0, project: project,
+    scope: "scope:off(7)", probe: "probe:passive", rules: "rules:2", listen: "localhost:18997")
+end
+
+describe "Chrome top bar — the project name outlasts the chips" do
+  # 76: the bar's rect on an 80-column terminal, inside the frame's two-column margins.
+  it "keeps the name at 80 columns by yielding ⌘ first" do
+    row = top_bar_row(76, "demo")
+    row.should contain("· demo ")
+    row.should contain("● localhost:18997")
+    row.should_not contain("⌘")
+    # The click map follows the chips that are drawn: no ⌘ to press.
+    (0...76).none? { |x| top_bar_hit(76, x, "demo") == :palette }.should be_true
+  end
+
+  it "keeps every chip on a wide bar" do
+    row = top_bar_row(140, "demo")
+    row.should contain("· demo")
+    row.should contain("⚙")
+  end
+
+  it "never drops an active probe chip for the name" do
+    top_bar_row(60, "a-long-project-name", "probe:active").should contain("probe:active")
+  end
+end

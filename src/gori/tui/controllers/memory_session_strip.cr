@@ -39,10 +39,11 @@ module Gori::Tui
       true
     end
 
-    # The chip label: the custom name, else the tool's summary, capped ~18 cols.
+    # The chip label: the custom name, else the tool's summary. The strip clips it to fit.
     private def session_label(s) : String
       raw = (n = s.view.name) ? n : session_summary(s)
-      raw.size > 18 ? raw[0, 17] + "…" : raw
+      max = Chrome::SUBTAB_LABEL_MAX
+      raw.size > max ? raw[0, max - 1] + "…" : raw
     end
 
     # Filter-aware strip nav: ←/→ skip hidden chips; ^1-9 to a hidden chip drops the filter

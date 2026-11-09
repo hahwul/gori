@@ -403,6 +403,7 @@ module Gori::Tui
         listeners: listeners, listener_errors: listener_errors, authorize: authorize,
         session: session, agents: agents, asks: asks)
 
+      chips = fit_top_chips(chips, rect, name_x, project)
       # Bound the project name and floor the chips past it, so neither overwrites the
       # other at narrow widths (previously the name was unbounded and render_chips got
       # no min_x, so the chips slid left and collided with the project name).
@@ -410,6 +411,26 @@ module Gori::Tui
       name_end = screen.text(name_x, rect.y, "· #{project}", Theme.muted, Theme.bg,
         width: {chips_left - name_x - 1, 0}.max)
       render_chips(screen, rect, chips, bg: Theme.bg, min_x: name_end + 1)
+    end
+
+    # The project name's claim on a narrow bar: up to this many columns of `· name` are kept
+    # before the chips may squeeze it. Which project the next request lands in is the one fact
+    # on this row an operator cannot afford to lose, and the chips used to win every column.
+    TOP_NAME_RESERVE = 24
+
+    # The chips that step aside for the name, in order: two that repeat a chord (`^P`, `^,`),
+    # then two readouts. Probe yields only while it is not sending — an orange `probe:active`
+    # is gori putting requests on the target. Every state that warns (red, orange, yellow) stays.
+    TOP_YIELDING = {:palette, :settings, :rules, :probe}
+
+    private def self.fit_top_chips(chips : Array(Chip), rect : Rect, name_x : Int32, project : String) : Array(Chip)
+      want = {Screen.display_width("· #{project}"), TOP_NAME_RESERVE}.min
+      room = rect.right - name_x - want - 2
+      TOP_YIELDING.each do |tag|
+        break if chips_width(chips) <= room
+        chips = chips.reject { |c| c.tag == tag && !(tag == :probe && c.label.ends_with?(":active")) }
+      end
+      chips
     end
 
     # The right-aligned top-bar chips, TAGGED so render and the click hit-test share
@@ -560,7 +581,8 @@ module Gori::Tui
                              capturing : Bool = true, write_failures : Int32 = 0,
                              bypass : Int32 = 0, listeners : Int32 = 0,
                              listener_errors : Int32 = 0, authorize : String = "",
-                             session : String = "", agents : String = "", asks : Int32 = 0) : Symbol?
+                             session : String = "", agents : String = "", asks : Int32 = 0,
+                             project : String = "") : Symbol?
       return nil unless rect.contains?(mx, my)
       chips = top_bar_chips(scope: scope, probe: probe, rules: rules, intercept: intercept,
         sandbox: sandbox, listen: listen, unread: unread, capturing: capturing,
@@ -568,6 +590,7 @@ module Gori::Tui
         listeners: listeners, listener_errors: listener_errors, authorize: authorize,
         session: session, agents: agents, asks: asks)
       name_x = rect.x + 1 + Screen.display_width(WORDMARK) + 1
+      chips = fit_top_chips(chips, rect, name_x, project)
       rects = chip_layout(rect, chips, name_x + 1)
       chips.each_with_index do |chip, i|
         next unless chip.clickable
@@ -928,6 +951,7 @@ module Gori::Tui
       # they would agree with each other and disagree with the screen — a click on the visible
       # tail of one chip landing on the next. `x`, `rect.right` and scroll_start's `avail` were
       # always columns; they were merely being fed character counts.
+      labels = fit_chip_labels(labels, vis, {rect.w - 2, 0}.max)
       widths = labels.map { |l| Screen.display_width(l) + 2 } # one space of padding each side
       # Window over the VISIBLE positions so the active chip stays on-screen; reserve a
       # column on each edge for the ‹ / › overflow markers.
@@ -948,6 +972,46 @@ module Gori::Tui
         last = pos
       end
       {segs, start, last, vis.size - 1}
+    end
+
+    # The longest sub-tab name a strip label builder hands over (`N:` and ` #tags` aside).
+    # The strip, not the builder, decides how much of it shows: a builder cannot see the width.
+    SUBTAB_LABEL_MAX = 40
+
+    # The name columns every chip keeps before the strip scrolls instead of clipping further.
+    SUBTAB_NAME_FLOOR = 16
+
+    # `labels` with every name zone (`chip_zones`: between `N:` and ` #tags`) clipped to ONE
+    # shared column budget — the widest that lets every visible chip fit in `avail`, never
+    # under SUBTAB_NAME_FLOOR. A strip with room shows whole names; a crowded one clips them
+    # all alike, then scrolls. Binary search: the strip is laid out several times a frame.
+    private def self.fit_chip_labels(labels : Array(String), vis : Array(Int32), avail : Int32) : Array(String)
+      return labels if strip_width(labels, vis) <= avail
+      lo = SUBTAB_NAME_FLOOR
+      hi = vis.max_of { |i| name_cols(labels[i]) } - 1
+      return labels.map { |l| clip_chip_name(l, lo) } if hi <= lo
+      while lo < hi
+        mid = (lo + hi + 1) // 2
+        strip_width(labels.map { |l| clip_chip_name(l, mid) }, vis) <= avail ? (lo = mid) : (hi = mid - 1)
+      end
+      labels.map { |l| clip_chip_name(l, lo) }
+    end
+
+    private def self.strip_width(labels : Array(String), vis : Array(Int32)) : Int32
+      vis.sum { |i| Screen.display_width(labels[i]) + 2 } + 2 * {vis.size - 1, 0}.max
+    end
+
+    private def self.name_cols(label : String) : Int32
+      num_end, tag_start = chip_zones(label)
+      Screen.display_width(label[num_end...tag_start])
+    end
+
+    # `label` with its name zone cut to `budget` columns and ended in `…`; index and tags kept.
+    private def self.clip_chip_name(label : String, budget : Int32) : String
+      num_end, tag_start = chip_zones(label)
+      name = label[num_end...tag_start]
+      return label if Screen.display_width(name) <= budget
+      "#{label[0, num_end]}#{name[0, Screen.column_for(name, budget - 1)]}…#{label[tag_start..]}"
     end
 
     # The header hairline (row 1) under the logo row, above the tab menu.

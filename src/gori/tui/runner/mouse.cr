@@ -489,7 +489,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       write_failures: @session.store.write_failures, bypass: Settings.passthrough_count,
       listeners: listener_chip_count, listener_errors: @session.listener_errors.size,
       authorize: authorize_chip_label, session: session_slot_chip, agents: agent_chip,
-      asks: answerable_questions.size)
+      asks: answerable_questions.size, project: @session.project.name)
     return false unless tag
     run_top_bar_chip(tag)
     true
