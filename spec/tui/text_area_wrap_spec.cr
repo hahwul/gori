@@ -115,6 +115,21 @@ describe "Gori::Tui::TextArea soft wrap" do
   end
 
   describe "caret movement across a wrap boundary" do
+    # A `word_wrap` row ends at its space, short of the pane, so a goal column past its text
+    # must stay on it: answering the break moved ↑ nowhere (the next row's first index).
+    it "steps ↑/↓ by one row under word wrap even when the row is shorter than the goal" do
+      ta = Gori::Tui::TextArea.new("Demo target for www.hahwul.com and Repeater")
+      ta.word_wrap = true
+      ed, _ = wrap_render("", 20, 6, gutter: false, ta: ta)
+      ed.place_cursor(0, 34) # row 1 ("www.hahwul.com and "), column 18
+      ed.move(-1, 0)
+      ed.cx.should eq(15) # row 0's break space, not 16 (row 1's first index)
+      ed.move(1, 0)
+      ed.cx.should eq(31) # row 1, column 15
+      ed.move(1, 0)
+      ed.cx.should eq(43) # the last row ends the line, so past its text is the end
+    end
+
     it "steps ↓ onto the continuation row of the SAME logical line" do
       ed, _ = wrap_render("#{"0123456789" * 4}\nnext", 20, 6, gutter: false)
       ed.place_cursor(0, 5)

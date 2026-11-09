@@ -89,6 +89,7 @@ module Gori::Tui
       # a pasted payload or a paragraph of reproduction steps is one logical line — so the
       # `follow_x` sideways pan this used to carry showed one screenful and hid the rest.
       @notes.wrap = true
+      @notes.word_wrap = true
       # The stored text the notes buffer was last SEEDED from — the common ancestor of this
       # window's edit and whatever a peer has since written. `@detail.notes` cannot serve: the
       # data_version tick re-reads the row while INS is open (the other detail fields have to

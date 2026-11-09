@@ -172,6 +172,11 @@ module Gori::Tui
       # query line (caret always at end; preedit shown underlined there)
       screen.text(box.x + 2, box.y + 1, "›", Theme.accent, Theme.panel)
       screen.input_line(box.x + 4, box.y + 1, @query, @qcx, @preedit, Theme.text_bright, Theme.panel, width: w - 6)
+      # The browse lists app commands only, so say the search reaches further: a tab's
+      # chord-only and palette-only actions are found by name and nowhere listed here.
+      if (hint = search_hint) && @query.empty? && @preedit.empty?
+        screen.text(box.x + 6, box.y + 1, hint, Theme.muted, Theme.panel, width: {w - 8, 0}.max)
+      end
 
       Frame.tee_divider(screen, box, box.y + 2)
 
@@ -197,6 +202,12 @@ module Gori::Tui
           screen.text(box.x + 3, ry, "─ #{row[0]} ─", Theme.muted, Theme.panel)
         end
       end
+    end
+
+    # The empty query line's placeholder, or nil without captured tab actions.
+    def search_hint : String?
+      return nil if @tab_all.empty?
+      "type to search — this tab's #{Gori.plural(@tab_all.size, "action")} too"
     end
 
     # One result row at `ry`: selection bar, category sigil, title, and the hint column.

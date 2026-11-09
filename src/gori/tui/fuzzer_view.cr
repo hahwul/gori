@@ -3412,7 +3412,8 @@ module Gori::Tui
       end
       # Grouped, the first column is the cluster's size (`▸×12`, `▾` when open) and a member's
       # index is indented under it, so the column is two cells wider.
-      header = @grouped ? "  ×N    payload                 status  len      words   time" : "  #   payload                 status  len      words   time"
+      # Three lead cells: the cursor `▎`, the hit `✓`, a gap — see render_result_row.
+      header = @grouped ? "   ×N    payload                 status  len      words   time" : "   #   payload                 status  len      words   time"
       if (extract_cols = view.first?.try(&.extractors)) && !extract_cols.empty?
         header = "#{header}#{" " * (TIME_COL_W - 4)}#{extract_cells(extract_cols.map(&.label.upcase))}"
       end
@@ -3465,14 +3466,17 @@ module Gori::Tui
       screen.fill(Rect.new(inner.x, y, inner.w, 1), bg) if selected
       # A cluster header is ✓ when ANY member matched, not only its representative.
       hit = group && group.header ? group.cluster.matched > 0 : r.matched?
-      screen.cell(inner.x, y, selected ? '▎' : (hit ? '✓' : ' '), hit ? Theme.accent : Theme.muted, bg)
+      # The cursor and the hit mark own separate cells: one cell shared by both hid the
+      # selected row's ✓, so the border's `3 hit` showed two.
+      screen.cell(inner.x, y, '▎', Theme.accent, bg) if selected
+      screen.cell(inner.x + 1, y, '✓', Theme.accent, bg) if hit && inner.w > 1
       payload = r.payloads.join(", ")
       line = "#{index_cell(r, group)} #{payload_cell(payload)}"
       # `width:` on BOTH of these: they used to draw unclamped, so a payload cell that
       # measured short (see payload_cell) pushed the status cell past `inner.right`, over
       # the card's right border and across the gap into the DIST sidebar.
-      x = screen.text(inner.x + 2, y, line, selected ? Theme.text_bright : Theme.text, bg,
-        width: {inner.right - (inner.x + 2), 0}.max)
+      x = screen.text(inner.x + 3, y, line, selected ? Theme.text_bright : Theme.text, bg,
+        width: {inner.right - (inner.x + 3), 0}.max)
       sc = r.status.try(&.to_s) || (r.error ? "ERR" : "—")
       x = screen.text(x + 1, y, sc.ljust(7), status_color(r), bg, width: {inner.right - (x + 1), 0}.max)
       # A send that never got a response has no length/words/duration worth showing — the

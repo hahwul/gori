@@ -105,7 +105,7 @@ describe Gori::Tui::TrafficEmptyState do
     backend.contains?("DIR REQ").should be_true
     backend.contains?("hold requests, responses or both").should be_true
     backend.contains?("f forward · d drop").should be_true
-    backend.contains?("/ condition").should be_true
+    backend.contains?("condition — only hold matches").should be_true
   end
 
   # From the tab bar the queue's keys are spelled behind the key that enters it, never bare
@@ -120,9 +120,14 @@ describe Gori::Tui::TrafficEmptyState do
       backend.contains?("DIR REQ").should be_true
       backend.contains?("c:REQ").should be_false
       backend.contains?("↓ then f forward · d drop").should be_true
-      backend.contains?("↓ then c: hold requests, responses or both").should be_true
-      backend.contains?("↓ then / condition").should be_true
-      backend.contains?(" i   catch is OFF").should be_true
+      # Key column, then label column: the queue keys carry their ↓ route inside the chip.
+      row = ->(text : String) { (0...13).map { |y| backend.row(y) }.find!(&.includes?(text)) }
+      dir = row.call("DIR REQ — hold requests, responses or both")
+      dir.should contain("▸  ↓ c   DIR REQ")
+      row.call("condition — only hold matches").should contain("▸  ↓ /   condition")
+      catch_row = row.call("catch is OFF")
+      catch_row.should contain("▸  i     catch is OFF")
+      catch_row.index("catch").should eq(dir.index("DIR REQ"))
       backend.contains?("tab bar").should be_true
       backend.contains?("…").should be_false
     end

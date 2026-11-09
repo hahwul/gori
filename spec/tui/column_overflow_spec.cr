@@ -133,12 +133,14 @@ describe "FuzzerView results payload cell" do
     view.focus_pane(:results)
     view.append_result(Gori::Fuzz::Result.new(
       0_i64, ["ab"], nil, 200, 1200_i64, 40, 5, 1000_i64, nil, false, false, nil))
-    b = MemoryBackend.new(36, 24)
-    view.render(Screen.new(b), Rect.new(0, 0, 36, 24), true)
+    # 37, not 36: the row's lead cells are `▎✓ ` (three), which puts the status cell's end
+    # exactly at `inner.right` one column wider than it used to be.
+    b = MemoryBackend.new(37, 24)
+    view.render(Screen.new(b), Rect.new(0, 0, 37, 24), true)
 
     row_y = (0...24).find { |y| b.row(y).includes?("  #   payload") }.not_nil! + 1
     b.row(row_y).should contain("200") # the row really rendered
-    b.row(row_y)[35].should eq(Frame::V)
+    b.row(row_y)[36].should eq(Frame::V)
   end
 end
 

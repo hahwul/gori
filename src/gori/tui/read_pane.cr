@@ -102,7 +102,7 @@ module Gori::Tui
     # falls back to the one-row-per-line model with the h-scroll it carried before wrap existed
     # — see `wrapping?` and `ensure_visible_x`.
     def initialize(*, @gutter : Bool = false, @line_select_only : Bool = false,
-                   @wrap : Bool = false)
+                   @wrap : Bool = false, @words : Bool = false)
       @cursor = ReadCursor.new
       # Per-line wrap memo, keyed on the content width it was built for. Dropped by `source`
       # (the content is different text now) and by a width change.
@@ -729,7 +729,7 @@ module Gori::Tui
         return hit
       end
       @wrap_cache.clear if @wrap_cache.size >= WRAP_CACHE_CAP
-      @wrap_cache[li] = Wrap.layout(line(li), cw)
+      @wrap_cache[li] = Wrap.layout(line(li), cw, words: @words)
     end
 
     private def layout_fn(cw : Int32) : Int32 -> Wrap::Layout

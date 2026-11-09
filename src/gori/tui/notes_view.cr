@@ -43,6 +43,7 @@ module Gori::Tui
         # logical line is the NORMAL case here, not the exception — so the `follow_x` sideways
         # pan this used to carry hid all but one screenful of nearly every note it held.
         @area.wrap = true
+        @area.word_wrap = true
       end
 
       # Sub-tab label: the note's title (`Notes.title` — first line with text, trimmed,
