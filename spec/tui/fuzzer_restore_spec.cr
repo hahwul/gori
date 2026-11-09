@@ -211,6 +211,17 @@ describe "FuzzerController saved-run restore" do
     end
   end
 
+  # The restore runs at boot under whatever tab is showing, so its toast landed on History.
+  it "restores the latest saved run without a status toast" do
+    with_fuzz_restore_project do |host, sessions|
+      run = seed_saved_fuzz_run(host.session.store, sessions[0], "quiet")
+      controller = FuzzerController.new(host)
+      drain_until(controller) { controller.current_view.not_nil!.saved_run_id == run }
+      host.statuses.none?(&.includes?("loaded fuzz run")).should be_true
+      controller.stop_all
+    end
+  end
+
   it "drops an automatic load completion after the view generation changes" do
     with_fuzz_restore_project do |host, sessions|
       seed_saved_fuzz_run(host.session.store, sessions[0], "old")

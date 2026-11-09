@@ -340,6 +340,22 @@ describe Gori::Tui::FuzzerView do
       backend.contains?("nope; you may not").should be_true
     end
 
+    # The cursor and the hit mark used to share one cell, so the selected hit lost its ✓ and
+    # the border's `N hit` outnumbered the marks on screen.
+    it "keeps the selected row's hit mark beside the cursor" do
+      view = loaded_fuzzer
+      view.focus_pane(:results)
+      view.append_result(Gori::Fuzz::Result.new(0_i64, ["p0"], nil, 200, 12_i64, 2, 1, 1000_i64,
+        nil, true, false, nil))
+      view.append_result(Gori::Fuzz::Result.new(1_i64, ["p1"], nil, 200, 12_i64, 2, 1, 1000_i64,
+        nil, true, false, nil))
+      backend = MemoryBackend.new(120, 30)
+      view.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
+      rows = (0...30).map { |y| backend.row(y) }
+      rows.find!(&.includes?(" p0 ")).should contain("▎✓ 0")
+      rows.find!(&.includes?(" p1 ")).should contain(" ✓ 1")
+    end
+
     it "renders a granted call distinctly from a denied one" do
       view = loaded_fuzzer
       view.focus_pane(:results)

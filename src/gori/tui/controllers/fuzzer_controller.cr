@@ -1008,6 +1008,10 @@ module Gori::Tui
           @spool.delete(old)
         end
         event.view.load_saved_run(run, event.window, event.clusters)
+        # A successful automatic restore stays quiet: it runs at boot under whatever tab is
+        # showing, and on a sub-tab's first selection, and either way the RESULTS border says
+        # `saved #N`. A load the operator asked for speaks, and so does a failure, wherever.
+        return if event.automatic
         # Off the VIEW, not the handover window: this sentence claims what the pane is
         # showing, so it has to be counted where the pane reads.
         shown_rows = event.view.retained_result_count
