@@ -20,7 +20,10 @@ module Gori::Settings
   MOUSE_DRAG_MODES   = %w[select copy]
   DEFAULT_MOUSE_DRAG = "select"
   # Layout (settings:layout): list previews off by default; Sitemap fully expanded.
-  DEFAULT_HISTORY_PREVIEW      = false
+  DEFAULT_HISTORY_PREVIEW = false
+  # On: a History detail at least DETAIL_SPLIT_MIN_W columns wide draws the request beside the
+  # response (or whichever pane follows it). Off, or narrower: one pane at a time, as before.
+  DEFAULT_HISTORY_SPLIT_DETAIL = true
   DEFAULT_PROBE_PREVIEW        = false
   DEFAULT_ISSUES_PREVIEW       = false
   DEFAULT_HISTORY_LIST_ORDER   = "newest" # "newest" | "oldest" — list sort direction
@@ -100,6 +103,7 @@ module Gori::Settings
   # Layout prefs (settings:layout). *_preview: list page shows a bottom detail pane.
   # history_list_order: "newest" (top) or "oldest" (top). sitemap_expand_depth: -1 = all.
   class_property history_preview : Bool = DEFAULT_HISTORY_PREVIEW
+  class_property? history_split_detail : Bool = DEFAULT_HISTORY_SPLIT_DETAIL
   class_property probe_preview : Bool = DEFAULT_PROBE_PREVIEW
   class_property issues_preview : Bool = DEFAULT_ISSUES_PREVIEW
   class_property history_list_order : String = DEFAULT_HISTORY_LIST_ORDER
@@ -167,6 +171,7 @@ module Gori::Settings
   private def self.parse_layout(node : JSON::Any?) : Nil
     return unless o = node.try(&.as_h?)
     self.history_preview = load_bool(o, "history_preview", history_preview)
+    self.history_split_detail = load_bool(o, "history_split_detail", history_split_detail?)
     self.probe_preview = load_bool(o, "probe_preview", probe_preview)
     self.issues_preview = load_bool(o, "issues_preview", issues_preview)
     if ord = o["history_list_order"]?.try(&.as_s?)
@@ -277,6 +282,7 @@ module Gori::Settings
 
   defaulted_section layout, "layout",
     {"history_preview", history_preview, DEFAULT_HISTORY_PREVIEW},
+    {"history_split_detail", history_split_detail?, DEFAULT_HISTORY_SPLIT_DETAIL},
     {"probe_preview", probe_preview, DEFAULT_PROBE_PREVIEW},
     {"issues_preview", issues_preview, DEFAULT_ISSUES_PREVIEW},
     {"history_list_order", history_list_order, DEFAULT_HISTORY_LIST_ORDER},

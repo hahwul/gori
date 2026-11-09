@@ -2264,6 +2264,9 @@ describe Gori::Tui::HistoryView do
         body_truncated: true,
         body_size: 150_000_i64))
 
+      # One pane at a time: the banner sentence is under test, not a half-width wrap of it.
+      prev_split = Gori::Settings.history_split_detail?
+      Gori::Settings.history_split_detail = false
       view = HistoryView.new
       view.reload(store)
       view.open_detail(store).should be_true
@@ -2280,6 +2283,8 @@ describe Gori::Tui::HistoryView do
       view.render_detail(Screen.new(backend_resp), Rect.new(0, 0, 140, 20))
       backend_resp.contains?("body truncated at capture cap, 18 of 150000 bytes").should be_true
       backend_resp.contains?("Settings → Network / capture_max_mib").should be_true
+    ensure
+      Gori::Settings.history_split_detail = prev_split.not_nil!
     end
   end
 

@@ -101,6 +101,7 @@ module Gori::Tui
       when "history.toggle-follow" then SpaceMenu.on_off(@history.follow?)
       when "detail.toggle-hex"     then SpaceMenu.on_off(@history.hex_view?)
       when "detail.toggle-unicode" then SpaceMenu.on_off(@history.unicode_decoded?)
+      when "detail.toggle-split"   then SpaceMenu.on_off(Settings.history_split_detail?)
       end
     end
 
@@ -119,7 +120,9 @@ module Gori::Tui
         strip_here = body_focused && @history.detail_strip_focus?
         body_here = body_focused && !@history.detail_strip_focus?
         @history.step_keys = step_key_labels
-        BodyChrome.framed(screen, rect, body_here) { |inner| @history.render_drill(screen, inner, body_here, strip_here) }
+        # Split, the focused CARD wears the gold (as the Repeater's panes do), so the shell does not.
+        shell = body_here && !@history.split_shown?
+        BodyChrome.framed(screen, rect, shell) { |inner| @history.render_drill(screen, inner, body_here, strip_here) }
       else
         # The list's user-defined columns (#819) read flow bytes for the rows they are about to
         # draw, and the list holds no store of its own — same seam, and same reason, as the
@@ -219,12 +222,19 @@ module Gori::Tui
       # exists so click, drag and double-click cannot land on three slightly different rects —
       # and this arm was the third copy. Same rect, same rows: the helper answers nil exactly
       # where the inline version clamped the height to 0, and a 0-height rect was already a
-      # no-op (`ReadCursor#click_to_cursor` returns on `rect.empty?`). The `my >= inner.y + 2`
-      # guard stays: without it a click on the strip row that missed every chip would newly
-      # pull focus down to the text level.
-      return unless my >= inner.y + 2
+      # no-op (`ReadCursor#click_to_cursor` returns on `rect.empty?`). The `my >= body.y`
+      # guard below stays: without it a click on the strip row that missed every chip would
+      # newly pull focus down to the text level.
+      #
+      # The other half of a split detail: a click there focuses its pane.
+      if (other = @history.split_companion_rect(inner)) && other.contains?(mx, my)
+        @history.focus_split_companion
+        @history.set_detail_focus(:strip)
+        return
+      end
       body = detail_text_rect(rect)
       return unless body
+      return unless my >= body.y # the strip row (and its rule, unsplit) is not text
       # The footer strip under the text (status · sizes · latency · provenance) is a readout,
       # not text: a click on it must not pull focus down and park the caret on the last text
       # row, which is what `detail_click_to_cursor`'s clamp would do with a row past the
@@ -462,6 +472,11 @@ module Gori::Tui
         # answers false there and the plain form falls through too.
       when key.home? && !ev.ctrl? && !ev.alt? then return @history.detail_line_edge(-1)
       when key.end? && !ev.ctrl? && !ev.alt?  then return @history.detail_line_edge(1)
+        # esc steps out ONE level: the text to the strip, where ←/→ reach the other pane (the
+        # other card, split). The strip's esc falls through to `detail.close`, and `q` still
+        # leaves from anywhere. It used to close from the text too, which put an operator
+        # reading a response back on the list when all they wanted was the request beside it.
+      when key.escape? && !ev.ctrl? && !ev.alt? then @history.set_detail_focus(:strip)
       else
         return false
       end
@@ -549,7 +564,7 @@ module Gori::Tui
               else
                 ""
               end
-        return "#{nav} · #{hex} hex · #{pretty} pretty#{uni} · #{repeater} repeater · #{step}↑ strip · space cmds · esc back"
+        return "#{nav} · #{hex} hex · #{pretty} pretty#{uni} · #{repeater} repeater · #{step}space cmds · esc strip"
       end
       return "type query · ↹ complete · ↵ apply · esc clear" if @history.querying?
       # #898 gave this list `d` and `⇧X` and named neither here. `⇧X` is the one that goes in:

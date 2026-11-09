@@ -364,6 +364,7 @@ and stays out of both cards.
 | `t` · `z` | Comparer: requests/responses · fold unchanged | `o` · `b` | WebSocket live session · Engine.IO heartbeat |
 | `a` | Show all: Probe's closed findings, the Params tab's standard headers | | |
 | `C` | Probe: group by check (on by default) | | |
+| `S` | History detail: request beside response (on by default, saved) | | |
 
 Both cards are **sticky**. After a row runs, the card comes back at the same row, so you can
 flip two or three settings in one visit, and each row shows its state: `●` on, `○` off, or a

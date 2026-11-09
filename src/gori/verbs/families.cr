@@ -56,6 +56,7 @@ module Gori
       {:fold_unchanged, 'z'},
       {:show_all, 'a'},
       {:group_by_check, 'C'}, # Probe: one row per check seen on several hosts
+      {:split_detail, 'S'},   # History detail: request beside response
     ], sticky: true)
 
     # "Protocol…" (`P`) holds the per-request transport settings of the Repeater and the

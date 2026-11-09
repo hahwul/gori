@@ -108,6 +108,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   forward toggle_detail_hex : Nil, to: history_controller
 
+  # Request beside response — a saved layout preference, so it outlives this session.
+  def toggle_detail_split : Nil
+    Settings.history_split_detail = !Settings.history_split_detail?
+    saved = Settings.save
+    state = Settings.history_split_detail? ? "on" : "off"
+    @toast = saved ? "request beside response: #{state}" : "request beside response: #{state} — could not save to #{Settings.path}"
+  end
+
   def toggle_unicode_escapes : Nil
     history_controller.toggle_unicode_decoding
   end

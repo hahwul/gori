@@ -701,6 +701,12 @@ module Gori
         "detail.toggle-pretty", "Pretty bodies", "Pretty-print JSON/XML/form/… bodies, fold h2 cookies (display only)",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("p")], intent: :pretty, group: :view) { |ctx| ctx.toggle_pretty; nil }
 
+      # Side by side: the request beside the response on a wide pane. Menu-only (Display…), and a
+      # setting rather than a per-open peek like hex: it is how the operator likes to read.
+      r.register Verb::Definition.new(
+        "detail.toggle-split", "Request beside response", "On a wide pane, draw the request next to the response (saved)",
+        Verb::Scope::HistoryDetail, intent: :split_detail, group: :view) { |ctx| ctx.toggle_detail_split; nil }
+
       r.register Verb::Definition.new(
         "detail.toggle-unicode", "Decode Unicode escapes", "Display JSON \\u escapes as characters (display only)",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("u")], intent: :unicode, group: :view) { |ctx| ctx.toggle_unicode_escapes; nil }
