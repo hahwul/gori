@@ -250,8 +250,7 @@ module Gori::Tui
 
     # --- sub-tab tag filter (issue #121; machinery lifted to TabController) ---
     # Repeater opts in with the full field language (incl. tags) and, unlike the ≥2
-    # default, shows the guidance bar from the FIRST session (its History-style
-    # discoverability row, documented on subtab_filter_shown? below).
+    # default, shows the bar from the FIRST session (documented on subtab_filter_shown? below).
     def subtab_filter_enabled? : Bool
       true
     end
@@ -261,7 +260,7 @@ module Gori::Tui
     end
 
     # The filter bar occupies a body row whenever the strip is up (from the first session),
-    # so idle users see `/ filter · tag: name: …` without having to discover `/` first.
+    # so `/ filter` is on screen without having to discover `/` first; the fields follow it.
     def subtab_filter_shown? : Bool
       subtab_filter_enabled? && subtab_strip_shown?
     end

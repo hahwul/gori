@@ -49,24 +49,6 @@ describe Gori::Tui::QuerySuggest do
     end
   end
 
-  describe ".idle_hint" do
-    it "carries the caller's own prefix and still names the negation" do
-      hint = QuerySuggest.idle_hint("/ filter")
-      hint.should start_with("/ filter")
-      hint.should contain("-term excludes")
-    end
-
-    it "drops whole items to fit a width — operators first, then fields, never a mid-token cut" do
-      QuerySuggest.idle_hint("/ filter", width: 90).should eq(
-        "/ filter  ·  host:  path:  resp.body:  status:  method:  header:  ·  -term excludes")
-      QuerySuggest.idle_hint("/ filter", width: 76).should eq(
-        "/ filter  ·  host:  path:  resp.body:  status:  method:  header:")
-      QuerySuggest.idle_hint("/ filter", width: 34).should eq("/ filter  ·  host:  path:")
-      QuerySuggest.idle_hint("/ filter", width: 20).should eq("/ filter  ·  host:")
-      QuerySuggest.idle_hint("/ filter", width: 10).should eq("/ filter")
-    end
-  end
-
   describe ".line" do
     it "explains the field Tab would take, and only while completing a NAME" do
       # A field candidate: the description is the point — `resp.body:` is not self-describing.

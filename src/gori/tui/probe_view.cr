@@ -1187,7 +1187,7 @@ module Gori::Tui
         label = @query.blank? ? "(in-scope only)" : ": #{@query}"
         screen.text(rect.x + 1, y, label, Theme.text, width: left_w)
       else
-        screen.text(rect.x + 1, y, QuerySuggest.idle_hint("/ filter", Probe::Filter::HINT_FIELDS, left_w), Theme.muted, width: left_w)
+        screen.text(rect.x + 1, y, "/ filter", Theme.muted, width: left_w)
       end
     end
 

@@ -40,7 +40,7 @@ module Gori::Tui
     # anchors to the column the query text starts in and must not re-measure it.
     QUERY_PREFIX = "filter › "
 
-    # The idle bar's one-liner and the cold-start suggestion row, both GENERATED from this
+    # The cold-start suggestion row (the idle bar says only `/ filter`), GENERATED from this
     # backend's vocabulary rather than written out. The literal they replace named `severity:`,
     # `cvss:>=7`, `status:` and `host:` but not `title:`, and no boolean operator at all — the
     # exact drift `QuerySuggest`'s own header cites Issues for.
@@ -1324,7 +1324,7 @@ module Gori::Tui
           Highlight.filter_query(@query, Theme.text, FilterAst::SEPS_FIELD, known: QUERY_KNOWN, shaped: Issues::Filter::FIELD_SHAPED),
           Theme.text, width: {rect.x + 1 + left_w - qx, 0}.max)
       else
-        screen.text(rect.x + 1, rect.y, QuerySuggest.idle_hint("/ filter", Issues::Filter::HINT_FIELDS, left_w), Theme.muted, width: left_w)
+        screen.text(rect.x + 1, rect.y, "/ filter", Theme.muted, width: left_w)
       end
     end
 

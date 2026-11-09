@@ -128,7 +128,7 @@ module Gori
     # on and therefore the chip most operators look at all day — rendered as `v:History + Re…`.
     #
     # Spelled out, not `rptr`: this is the first chip a newcomer reads, and an abbreviation
-    # there is jargon. The filter hint gives way before the chips do (`QuerySuggest.idle_hint`).
+    # there is jargon.
     CHIP_LABELS = {DEFAULT_ID => "history+repeater"}
 
     BUILTINS = [

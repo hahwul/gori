@@ -95,6 +95,27 @@ describe Gori::Tui::HistoryView do
   # so a (future) valid-JSON/XML fixture can't silently reflow and shift assertions.
   before_each { Gori::Settings.pretty_bodies_default = false }
 
+  # The grammar is named where it is read — the moment `/` opens — not on every idle frame
+  # after it has been learned, where it also crowded the right-hand chips off a narrow bar.
+  it "names only the key on the idle filter bar, and the grammar once `/` opens" do
+    with_store do |store|
+      add_flow(store, "GET", "/x", 200)
+      view = HistoryView.new
+      view.reload(store)
+      idle = MemoryBackend.new(140, 12)
+      view.render_list(Screen.new(idle), Rect.new(0, 0, 140, 12))
+      idle.row(0).should contain("/ filter")
+      idle.row(0).should_not contain("host:")
+      idle.row(0).should_not contain("-term excludes")
+
+      view.start_query
+      open = MemoryBackend.new(140, 12)
+      view.render_list(Screen.new(open), Rect.new(0, 0, 140, 12))
+      open.contains?("host:").should be_true
+      open.contains?("-term excludes").should be_true
+    end
+  end
+
   # Trigram indexing is off the capture commit (Store V4), so a `body:` filter in a LIVE view
   # can legitimately be answered from an index that hasn't caught up. The view must not stall
   # to fix that (the one-shot CLI/MCP surfaces drain instead) — it must SAY it, or an operator

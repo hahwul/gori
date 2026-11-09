@@ -99,14 +99,18 @@ describe "the Issues filter bar's completion" do
       view = IssuesView.new
       view.reload(store)
 
+      # The idle bar names the key and nothing else; the grammar waits for `/`.
       idle = render(view).row(0)
-      # Every field, `title:` included — the literal this replaced listed four of five and no
-      # operator at all.
-      Gori::Issues::Filter::ALIASES.each_key { |f| idle.should contain("#{f}:") }
-      idle.should contain("-term excludes")
+      idle.should contain("/ filter")
+      idle.should_not contain("-term excludes")
 
       view.start_query
-      render(view).row(1).should contain("-term excludes")
+      cold = render(view).row(1)
+      cold.should contain("-term excludes")
+      cold.should contain("severity:") # the drawn row names fields, not only the constant
+      # Every field, `title:` included — the literal this replaced listed four of five and no
+      # operator at all.
+      Gori::Issues::Filter::ALIASES.each_key { |f| IssuesView::QUERY_HINT.should contain("#{f}:") }
 
       # The TAIL is asserted on the constant, not the drawn row: `cold_hint` deliberately lets
       # the terminal truncate everything past `-term excludes`, so a `should_not contain` on a
@@ -236,12 +240,15 @@ describe "the Probe filter bar's completion" do
       view = ProbeView.new
       view.reload(store)
       idle = render(view).row(1)
-      Gori::Probe::Filter::ALIASES.each_key { |f| idle.should contain("#{f}:") }
-      idle.should contain("-term excludes")
+      idle.should contain("/ filter")
+      idle.should_not contain("-term excludes")
 
       view.start_query
-      render(view).row(2).should contain("-term excludes")
+      cold = render(view).row(2)
+      cold.should contain("-term excludes")
+      cold.should contain("severity:") # the drawn row names fields, not only the constant
       hint = ProbeView::QUERY_HINT
+      Gori::Probe::Filter::ALIASES.each_key { |f| hint.should contain("#{f}:") }
       hint.should contain(">= < on severity")
       hint.should_not contain("~regex")
       hint.should_not contain("dur")

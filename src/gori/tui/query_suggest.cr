@@ -247,23 +247,6 @@ module Gori::Tui
       !idx.nil? && idx + "-term excludes".size <= width
     end
 
-    # The row shown on the IDLE bar, before the filter is even open. Shorter than `cold_hint` —
-    # it shares the line with the row count — and names the negation when there is room for it.
-    #
-    # `width` is the room left of the bar's chips. Whole items give way, never a mid-token cut
-    # (`resp.bo…`, `-term…`): the operator clauses first, then field chips from the right. The
-    # fields go last because they are what a newcomer types first; the operators are a step on,
-    # and the `cold_hint` row names them the moment `/` opens.
-    def self.idle_hint(prefix : String, fields : Array(String) = QL::HINT_FIELDS, width : Int32? = nil) : String
-      ops = ["-term excludes", "AND OR NOT ( )"]
-      n = {fields.size, HINT_MAX}.min
-      loop do
-        line = ([prefix, sample(fields.first(n))] + ops).reject(&.empty?).join("  ·  ")
-        return line if width.nil? || n == 0 || Screen.display_width(line) <= width
-        ops.empty? ? (n -= 1) : ops.pop
-      end
-    end
-
     # `fields` as `name:` chips. Capped rather than trusted: a caller may hand over its whole pool
     # (the colour-rule overlay's is eighteen names long), and an uncapped sample would push the
     # operator tail past the right edge of every bar in the app.

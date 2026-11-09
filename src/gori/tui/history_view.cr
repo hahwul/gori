@@ -107,8 +107,9 @@ module Gori::Tui
     # while Intercept's listed both — so an operator looking for "everything EXCEPT" found nothing
     # on the two surfaces most likely to be asked the question.
     #
-    # `idle_hint` fills the idle bar (press `/` to start filtering); QUERY_HINT sits on the
-    # suggestion row at a cold start (already editing, nothing to Tab-complete yet).
+    # The idle bar says only `/ filter`: the grammar is named the moment `/` opens, where it is
+    # read, rather than on every frame after it is learned. QUERY_HINT sits on the suggestion
+    # row at that cold start (editing, nothing to Tab-complete yet).
     QUERY_HINT = QuerySuggest.cold_hint(help_key: true)
     # The editing bar's label. A constant because `render_query_popup` has to line the dropdown
     # up under the token, which means knowing exactly how far the query text is indented.
@@ -4300,11 +4301,10 @@ module Gori::Tui
         screen.styled_text(qx, rect.y, @query, Highlight.filter_query(@query, Theme.text, known: QL_KNOWN, shaped: QL::FIELD_SHAPED),
           Theme.text, width: {rect.x + 1 + left_w - qx, 0}.max)
       else
-        # No QL query typed — whether or not a Scope lens is active. Surface the filter
-        # affordance + fields rather than a bare "(in-scope only)": the Scope lens is
-        # already signalled by the `s` chip on the right, so this row isn't wasted
-        # repeating it, and the user's next move here is to ADD a query atop the lens.
-        screen.text(rect.x + 1, rect.y, QuerySuggest.idle_hint("/ filter", width: left_w), Theme.muted, width: left_w)
+        # No QL query typed — whether or not a Scope lens is active. The key, not the grammar
+        # (that is named once `/` opens), and not "(in-scope only)": the Scope lens is already
+        # signalled by the `s` chip on the right, and the next move here is to ADD a query.
+        screen.text(rect.x + 1, rect.y, "/ filter", Theme.muted, width: left_w)
       end
     end
 

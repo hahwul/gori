@@ -1397,7 +1397,7 @@ module Gori::Tui
     # own hairline drawn BELOW it (chips ─── filter ─── body, matching Target/Sitemap):
     #   editing  → `filter › <input>` [+ `↹ name:…` suggestions]
     #   active   → `: <query>`
-    #   idle     → `/ filter  ·  name:  host:  method:` (this tab's advertised fields)
+    #   idle     → `/ filter` (the fields are named once `/` opens: `filter_edit_hint`)
     # Right side always shows visible/total chip counts.
     private def render_subtab_filter_bar(screen : Screen, rect : Rect, *, subtabs_focused : Bool) : Nil
       return if rect.w < 8 || rect.h < 1
@@ -1419,7 +1419,8 @@ module Gori::Tui
           Highlight.filter_query(@subtab_filter, Theme.text, FilterAst::SEPS_FIELD),
           Theme.text, Theme.panel, width: {count_x - 1 - px, 0}.max)
       else
-        screen.text(rect.x, row_y, "/ filter  ·  #{filter_fields.map { |f| "#{f}:" }.join("  ")}", Theme.muted, Theme.panel, width: left_w)
+        # The fields are named once `/` opens (`filter_edit_hint`), not on every idle frame.
+        screen.text(rect.x, row_y, "/ filter", Theme.muted, Theme.panel, width: left_w)
       end
       screen.text(count_x, row_y, count, vis == 0 ? Theme.red : Theme.muted, Theme.panel)
 

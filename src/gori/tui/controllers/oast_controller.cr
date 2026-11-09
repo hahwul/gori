@@ -924,8 +924,9 @@ module Gori::Tui
       end
     end
 
-    # Three-state filter bar (mirrors the History/Intercept bar): editing → `filter › <input>`;
-    # committed non-blank → `: <query>`; idle → the field hint.
+    # Three-state filter bar (mirrors the History/Intercept bar): editing → `filter › <input>`,
+    # naming the fields until the first keystroke; committed non-blank → `: <query>`; idle →
+    # `/ filter`. One row, so the fields ride the empty input rather than a hint row of their own.
     private def render_filter_bar(screen : Screen, rect : Rect) : Nil
       return if rect.empty?
       screen.fill(Rect.new(rect.x, rect.y, rect.w, 1), Theme.bg)
@@ -935,11 +936,14 @@ module Gori::Tui
         base = rect.x + 1 + prefix.size
         screen.input_line(base, rect.y, @filter.value, @filter.caret, @filter.preedit,
           Theme.text_bright, Theme.bg, width: {rect.w - prefix.size - 2, 0}.max)
+        if @filter.value.empty? && @filter.preedit.empty?
+          screen.text(base + 2, rect.y, "fields: proto  method  source  dest  provider", Theme.muted, Theme.bg,
+            width: {rect.right - 1 - (base + 2), 0}.max)
+        end
       elsif !@filter.value.blank?
         screen.text(rect.x + 1, rect.y, ": #{@filter.value}", Theme.text, Theme.bg, width: rect.w - 2)
       else
-        screen.text(rect.x + 1, rect.y, "/ filter  ·  proto  method  source  dest  provider",
-          Theme.muted, Theme.bg, width: rect.w - 2)
+        screen.text(rect.x + 1, rect.y, "/ filter", Theme.muted, Theme.bg, width: rect.w - 2)
       end
     end
 
