@@ -20,7 +20,7 @@ Installs under `/usr/local` when writable, otherwise `~/.local`. Override with `
 
 The installer asks the GitHub API which release is latest, and that API allows only **60 unauthenticated requests per hour per IP**, so behind shared CI or NAT egress it can answer `403`. Both the installer and `gori update` fall back to the rate-limit-free release redirect automatically, so they keep working; you should see a line like `resolved v0.9.2 via ... (no API call)`.
 
-To use the authenticated 5000/hour limit instead, export a token first. Note that it has to be exported rather than prefixed onto `curl`, because the script runs in the piped `bash`, which would not inherit a `curl`-scoped variable:
+To use the authenticated 5000/hour limit instead, export a token first. It has to be exported rather than prefixed onto `curl`, because the script runs in the piped `bash`, which would not inherit a `curl`-scoped variable:
 
 ```bash
 export GITHUB_TOKEN=<personal access token>

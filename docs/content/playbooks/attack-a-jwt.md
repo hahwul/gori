@@ -64,7 +64,7 @@ gori run jwt eyJhbGci... --attacks
 gori run jwt eyJhbGci... --attacks --key ./server-public.pem   # ...plus algorithm confusion
 ```
 
-To hand-craft a header-injection token rather than take the generated set — point `kid` at a file, set a `jku`/`jwk` to key material you control — edit the header on `--encode` with `--set-header FIELD=VALUE` (repeatable) or `--header JSON`; `alg` still comes from `--alg`:
+To hand-craft a header-injection token rather than take the generated set (point `kid` at a file, or set a `jku`/`jwk` to key material you control), edit the header on `--encode` with `--set-header FIELD=VALUE` (repeatable) or `--header JSON`; `alg` still comes from `--alg`:
 
 ```bash
 gori run jwt eyJhbGci... --encode --set-header kid=../../dev/null --secret ''   # empty-key kid traversal

@@ -72,7 +72,7 @@ p=$(jq -r .project); gori run notes --all --project "$p" | awk '/^- \[ \]/ { n++
 ```
 {% end %}
 
-Everything in [the context](#context) is fair game too (`\(.flows)`, `\(.issues)`, the
+Every field in [the context](#context) can go in too (`\(.flows)`, `\(.issues)`, the
 mode flags), but read the top bar first: a segment that repeats a chip costs you a row and
 tells you nothing. The shape that pays is the one above, gori's own data crossed with
 something gori has no way to know:
@@ -181,7 +181,7 @@ A command that fails without printing anything reports its exit status instead o
 
 Every one of these markers is drawn in the caution colour rather than in body text, so a statusline that has stopped working never reads as one reporting bad news.
 
-`timeout` is deliberately separate from `interval`. Because runs never overlap, a script slower than `interval` simply refreshes as fast as it can rather than being killed on every run; only `timeout` ends one.
+`timeout` is deliberately separate from `interval`. Because runs never overlap, a script slower than `interval` refreshes as fast as it can rather than being killed on every run; only `timeout` ends one.
 
 A command that backgrounds work (`curl … &`) must clean up after itself: gori kills the shell it started (`/bin/sh`, or `cmd.exe` on Windows), and cannot reach anything that shell forked. That shell shares gori's own process group, so signalling the group would take gori down with it. A timed-out run is sent `SIGTERM` before `SIGKILL`, so a `trap … TERM` around `cmd & wait` gets to tidy up; the simpler answer is to bound the command itself (`curl --max-time 2`, `timeout 2 …`).
 

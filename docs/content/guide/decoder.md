@@ -85,7 +85,7 @@ A few entries only go one way, and the chain will not undo them. `shell-escape` 
 
 - Decode a JWT or nested Base64 blob from History without mutating the flow
 - Build the same transform you'll apply as a Fuzzer payload processor
-- Quickly hash or URL-encode values while writing Repeater requests
+- Hash or URL-encode values while writing Repeater requests
 
 Decoder does not send network traffic; it's pure local transformation.
 

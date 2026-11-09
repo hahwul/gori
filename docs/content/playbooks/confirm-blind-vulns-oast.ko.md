@@ -7,9 +7,9 @@ weight = 100
 group = "워크벤치"
 +++
 
-블라인드 SSRF, 블라인드 XXE, 원격 파일 포함, 대역 외(out-of-band) 인젝션. 그 어느 것도 응답으로 답하지 않습니다. 대신 *다른* 서버로 연결을 뻗습니다. **OAST**는 그 서버를 내 손에 쥐여 줍니다. gori가 리스너에 묶인 페이로드 URL을 발급하고, 그것을 요청에 심으면, 대상이 그리로 보내는 모든 DNS·HTTP 콜백이 가리킬 수 있는 히트로 도착합니다. 이 플레이북은 확인 하나를 처음부터 끝까지 약 10분에 실행합니다.
+블라인드 SSRF, 블라인드 XXE, 원격 파일 포함, 대역 외(out-of-band) 인젝션. 그 어느 것도 응답으로 답하지 않습니다. 대신 *다른* 서버로 연결을 뻗습니다. **OAST**는 그 서버를 내 손에 쥐여 줍니다. gori가 리스너에 묶인 페이로드 URL을 발급하고, 그 URL을 요청에 심으면, 대상이 그리로 보내는 모든 DNS·HTTP 콜백이 증거로 내밀 수 있는 히트로 도착합니다. 이 플레이북은 확인 과정 하나를 약 10분 동안 처음부터 끝까지 진행합니다.
 
-> **시작하기 전에.** 먼저 [엔게이지먼트 준비](/ko/playbooks/set-up-an-engagement/)를 마치고, 후보 인젝션 지점을 하나 준비하세요. 서버가 URL을 가져오거나 원격 파일을 포함하거나 호스트명을 해석하게 만들 수 있는 파라미터, 헤더, 필드입니다. 콜백은 그 메타데이터를 보는 공개 인터랙션 서버에 도달하므로, OAST는 테스트 권한이 있는 시스템에만 실행하고, 민감한 작업에는 self-hosted 프로바이더를 선호하세요.
+> **시작하기 전에.** 먼저 [엔게이지먼트 준비](/ko/playbooks/set-up-an-engagement/)를 마치고, 후보 인젝션 지점을 하나 준비하세요. 서버가 URL을 가져오거나 원격 파일을 포함하거나 호스트명을 해석하게 만들 수 있는 파라미터, 헤더, 필드입니다. 콜백은 그 메타데이터를 보는 공개 인터랙션 서버에 도달하므로, OAST는 테스트 권한이 있는 시스템에만 실행하고, 민감한 작업에는 가급적 self-hosted 프로바이더를 쓰세요.
 
 ## 1. 리스너를 시작하고 페이로드 받기 {#1-start-a-listener-and-grab-a-payload}
 
@@ -22,13 +22,13 @@ gori run oast listen         # 임시: 등록이 프로세스와 함께 사라�
 gori run oast listen --save  # …프로젝트 세션으로 저장
 ```
 
-그냥 `listen`은 저장소를 쓰지 않아 등록이 프로세스와 함께 사라집니다. 몇 시간 뒤에 오는 콜백에겐 페이로드가 이미 죽어 있다는 뜻이죠. `--save`는 이를 프로젝트에 기록합니다. `gori run oast list`에 보이고, 나중 프로세스에서 `gori run oast resume ID`로 이어받고, 정리는 `gori run oast release ID`입니다. MCP에서는 `oast_start`의 `persist: true`가 같은 스위치이고, 목록·재개·해제는 `list_oast_sessions`, `oast_resume`, `oast_release`입니다. TUI의 `Ctrl-R`은 원래부터 세션을 저장하며, `Shift-R`(`Space` `R`, **Resume listener…**)로 재개합니다.
+그냥 `listen`은 저장소를 쓰지 않아 등록이 프로세스와 함께 사라집니다. 몇 시간 뒤에 도착하는 콜백이라면 그때는 페이로드가 이미 죽어 있다는 뜻입니다. `--save`는 이를 프로젝트에 기록합니다. `gori run oast list`에 보이고, 나중 프로세스에서 `gori run oast resume ID`로 이어받고, 정리는 `gori run oast release ID`입니다. MCP에서는 `oast_start`의 `persist: true`가 같은 스위치이고, 목록·재개·해제는 `list_oast_sessions`, `oast_resume`, `oast_release`입니다. TUI의 `Ctrl-R`은 원래부터 세션을 저장하며, `Shift-R`(`Space` `R`, **Resume listener…**)로 재개합니다.
 
 **체크포인트.** OAST 탭에 살아 있는 payload URL이 보이고, **Callbacks** 표는 비어 대기 중입니다.
 
 ## 2. 페이로드 심기 {#2-plant-the-payload}
 
-그 payload URL을 가져다 대상이 역참조할 만한 곳에 넣습니다. 후보 요청을 **Repeater**(History에서 `Ctrl-R`)나 **Fuzzer**(`Shift-I`)로 보낸 뒤, `Space` `O`(**Insert OAST payload**)로 URL을 커서 위치에 떨굽니다. 서버 측 페치나 원격 포함을 유발할 만한 곳이라면 어디든 심으세요: URL 파라미터, 파일·페이지·템플릿 필드, `Host`나 `X-Forwarded-For` 헤더, XXE용 XML 엔티티, 웹훅 필드. 요청을 전송합니다.
+그 payload URL을 가져다 대상이 역참조할 만한 곳에 넣습니다. 후보 요청을 **Repeater**(History에서 `Ctrl-R`)나 **Fuzzer**(`Shift-I`)로 보낸 뒤, `Space` `O`(**Insert OAST payload**)로 URL을 커서 위치에 삽입합니다. 서버 측 페치나 원격 포함을 유발할 만한 곳이라면 어디든 심으세요: URL 파라미터, 파일·페이지·템플릿 필드, `Host`나 `X-Forwarded-For` 헤더, XXE용 XML 엔티티, 웹훅 필드. 요청을 전송합니다.
 
 **체크포인트.** 페이로드를 실은 요청이 대상에 도달했습니다. 여기서 응답은 평범해도 괜찮습니다. 핵심은 *서버*가 그다음 대역 밖에서 하는 일입니다.
 
@@ -41,9 +41,9 @@ gori run oast listen --save  # …프로젝트 세션으로 저장
   <figcaption><strong>OAST</strong> 탭은 페이로드를 등록하고, 대상이 그리로 보내는 모든 DNS·HTTP·SMTP 콜백을 복호화하고 타임스탬프를 붙여 나열합니다.</figcaption>
 </figure>
 
-> 콜백은 대상이 닿을 이유가 없던 서버에 도달했다는 증거입니다. 콜백의 부재는 안전하다는 증거가 **아닙니다**. 이그레스(egress)가 필터링될 수 있습니다. 이 경로가 조용했다는 것일 뿐입니다. 침묵만으로 후보를 닫지 마세요.
+> 콜백은 대상이 닿을 이유가 없던 서버에 도달했다는 증거입니다. 콜백이 없다고 안전하다는 증거는 **아닙니다**(이그레스가 필터링될 수 있습니다). 이 경로가 조용했다는 뜻일 뿐입니다. 침묵만으로 후보를 닫지 마세요.
 
-**체크포인트.** **Callbacks** 표에 2단계에서 심은 페이로드와 맞는 행이 최소 하나 놓입니다.
+**체크포인트.** **Callbacks** 표에 2단계에서 심은 페이로드와 맞는 행이 최소 하나 있습니다.
 
 ## 4. 히트를 Issue로 바꾸기 {#4-turn-a-hit-into-an-issue}
 

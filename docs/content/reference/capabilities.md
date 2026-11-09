@@ -28,7 +28,7 @@ does once the project has a scope, and the TUI does not ask).
 | **HTTP/3** | No | No | No | No |
 
 The [Proxy & History guide](/guide/proxy/) explains the buffering, WebSocket, gRPC, and HTTP/3
-details. “Full” capture is still subject to the configured body-storage cap: traffic continues
+details. "Full" capture is still subject to the configured body-storage cap: traffic continues
 byte-exact after the cap and the flow reports both captured and wire sizes.
 
 ## Entry points

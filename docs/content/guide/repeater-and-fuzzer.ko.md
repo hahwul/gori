@@ -56,9 +56,9 @@ WebSocket Repeater는 `permessage-deflate`를 협상하지 않고, 캡처 프록
 
 #### 라이브 세션 {#websocket-live-session}
 
-위의 스크립트 재생은 메시지마다 다시 다이얼합니다. Burp의 WebSocket Repeater처럼 소켓 **하나**를 열어 둔 채 그 위에서 대화하려면 **Live session (keep open)** — `Space` → `P` **Protocol…**, 그다음 **Live session**(`o`) — 을 켜세요. 핸드셰이크에 붙는 끈적한 토글입니다. 켜면 `^R`이 스크립트를 돌리는 대신 한 번 연결해 소켓을 열어 둡니다. 왼쪽 MESSAGES 목록이 작성 칸이 됩니다 — `↵`는 커서 줄을, `^R`은 모든 줄을 순서대로 보내고 — 보낸 줄마다 오른쪽 끝에 `✓ ss.mmm`이 표시됩니다. 오른쪽 TRANSCRIPT는 프레임이 도착하는 대로 양방향을 흘려보내며, 보낸 것은 `ss.mmm → …`, 서버가 보낸 것은 `← …`로, gori가 대신 답한 하트비트에는 `↺`가 붙습니다. 소켓이 열려 있는 동안 MESSAGES 제목은 `● LIVE`, TRANSCRIPT 제목은 `● open <기간>`을 보여 주고, 상태 바에는 URL과 `↑보냄 ↓받음`, 기간이 실립니다. `Ctrl-P` → **Send WS message as binary (hex)**는 커서 줄을 헥스로 읽어 바이너리 프레임으로 보냅니다.
+위의 스크립트 재생은 메시지마다 다시 다이얼합니다. Burp의 WebSocket Repeater처럼 소켓 **하나**를 열어 둔 채 그 위에서 대화하려면 **Live session (keep open)**을 켜세요. `Space` → `P` **Protocol…**, 그다음 **Live session**(`o`)에 있습니다. 핸드셰이크에 붙는 sticky 토글입니다. 켜면 `^R`이 스크립트를 돌리는 대신 한 번 연결해 소켓을 열어 둡니다. 왼쪽 MESSAGES 목록이 작성 칸이 됩니다. `↵`는 커서 줄을, `^R`은 모든 줄을 순서대로 보내고, 보낸 줄마다 오른쪽 끝에 `✓ ss.mmm`이 표시됩니다. 오른쪽 TRANSCRIPT는 프레임이 도착하는 대로 양방향을 흘려보내며, 보낸 것은 `ss.mmm → …`, 서버가 보낸 것은 `← …`로, gori가 대신 답한 하트비트에는 `↺`가 붙습니다. 소켓이 열려 있는 동안 MESSAGES 제목은 `● LIVE`, TRANSCRIPT 제목은 `● open <기간>`을 보여 주고, 상태 바에는 URL과 `↑보냄 ↓받음`, 기간이 실립니다. `Ctrl-P` → **Send WS message as binary (hex)**는 커서 줄을 헥스로 읽어 바이너리 프레임으로 보냅니다.
 
-**Live session**을 끄면 연결이 끊어지고(gori가 `CLOSE`를 보낸 뒤 끊습니다), 서브탭을 닫거나 프로젝트를 떠나거나 종료할 때도 소켓이 닫힙니다. **Engine.IO heartbeat**(`Space` → `P`, 그다음 `b`)는 세션이 열려 있는 동안 서버의 Engine.IO 핑(`2`)에 퐁(`3`)으로 대신 답해, 앱 수준 하트비트를 놓쳐 긴 소켓이 끊기지 않게 합니다. 기본값은 꺼짐이고 다음 연결부터 적용됩니다. 트랜스크립트는 메모리에만 두고 상한이 있어 — 긴 세션은 가장 오래된 줄부터 버리며 몇 개를 버렸는지 알려 줍니다 — 모든 Repeater WebSocket 전송과 마찬가지로 History에는 아무것도 기록되지 않습니다.
+**Live session**을 끄면 연결이 끊어지고(gori가 `CLOSE`를 보낸 뒤 끊습니다), 서브탭을 닫거나 프로젝트를 떠나거나 종료할 때도 소켓이 닫힙니다. **Engine.IO heartbeat**(`Space` → `P`, 그다음 `b`)는 세션이 열려 있는 동안 서버의 Engine.IO 핑(`2`)에 퐁(`3`)으로 대신 답해, 앱 수준 하트비트를 놓쳐 긴 소켓이 끊기지 않게 합니다. 기본값은 꺼짐이고 다음 연결부터 적용됩니다. 트랜스크립트는 메모리에만 두고 상한이 있습니다. 긴 세션은 가장 오래된 줄부터 버리며 몇 개를 버렸는지 알려 줍니다. 모든 Repeater WebSocket 전송과 마찬가지로 History에는 아무것도 기록되지 않습니다.
 
 명령줄에서 Repeater를 실행하거나, `repeater ws`로 WebSocket 세션을 열어 둘 수 있습니다.
 
@@ -274,7 +274,7 @@ gori run fuzz delete RUN_ID --yes
 
 `Content-Length`는 페이로드가 삽입될 때마다 다시 계산되고, 템플릿에 본문은 있는데 길이 선언이 아예 없으면 **추가**되므로, 일반적인 스윕은 항상 일관된 상태를 유지합니다. `--no-update-content-length`(MCP `update_content_length: false`, 또는 Fuzzer ADVANCED 카드의 **Auto Content-Length** 끄기)는 이 두 가지를 모두 끕니다. 본문과 어긋나는 길이 자체가 CL / CL-TE 디싱크 테스트의 목적이기 때문입니다. `--verbatim`(MCP `verbatim: true`)은 Repeater에서처럼 한발 더 나아가 템플릿을 쓰인 그대로 보냅니다. 토큰을 확장하지 않고(`$ENV.KEY`, `$BIND.NAME`, `$GEN.*`는 리터럴로 남고 `$$`도 소비되지 않음), 단독 LF를 승격하지 않으며, 클라이언트 힌트도 붙이지 않으므로 페이로드가 바꾸는 것은 `§…§` 삽입뿐입니다. TUI Fuzzer에는 아직 이 토글이 없습니다.
 
-뒤쪽 절반은 들리는 것보다 중요합니다. HTTP/1.1 요청 본문에는 연결 종료로 경계를 잡는 형태가 없어서, `Content-Length`도 청크 `Transfer-Encoding`도 없는 본문은 오리진이 **길이 0인 본문**으로 읽습니다. 페이로드는 읽히지 않은 채 나가는데 모든 행은 여전히 상태 코드를 보고합니다. `--verbatim`이 템플릿을 바로 그 형태로 남기는 경우, gori는 실행이 조용히 지나가게 두지 않고 첫 전송 전에 이를 알려줍니다.
+뒤쪽 절반이 생각보다 중요합니다. HTTP/1.1 요청 본문에는 연결 종료로 경계를 잡는 형태가 없어서, `Content-Length`도 청크 `Transfer-Encoding`도 없는 본문은 오리진이 **길이 0인 본문**으로 읽습니다. 페이로드는 읽히지 않은 채 나가는데 모든 행은 여전히 상태 코드를 보고합니다. `--verbatim`이 템플릿을 바로 그 형태로 남기는 경우, gori는 실행이 조용히 지나가게 두지 않고 첫 전송 전에 이를 알려줍니다.
 
 gRPC 템플릿에는 두 번째 길이 선언(각 메시지 앞의 5바이트 접두사)이 있으며, 기본값은 반대입니다. gori는 페이로드가 남긴 그대로 두고, 실행이 끝날 때 한 번 알려줍니다(`2 of 3 requests left it stale`, MCP `fuzz_status`의 `grpc_stale_prefix`). 의도적으로 잘못된 접두사를 테스트할 때는 이것이 맞는 동작이지만, 평범한 단항 호출을 스윕하는데 모든 요청이 프레이밍 계층에서 거부된다면 원하는 동작이 아닙니다. `--reframe-grpc`(MCP `reframe_grpc: true`, 또는 Fuzzer ADVANCED 카드의 **gRPC reframe (unary)** 토글)는 요청마다 접두사를 다시 계산합니다. 세 표면 모두 기본값은 꺼짐이며, 단일 메시지에만 적용됩니다. 클라이언트 스트리밍 본문, `grpc-web-text` 본문, 그리고 이미 프레이밍이 깨진 시드는 그대로 두고 여전히 보고합니다.
 
@@ -349,7 +349,7 @@ WebSocket 세션에 대한 `--repeater N`은 핸드셰이크와 **세션에 저�
 
 `ws_close_code`와 `ws_frames_in`은 `--format json`과 MCP `fuzz_results`에도 같은 방식으로, WebSocket 행에만 나타납니다.
 
-적용되지 않는 옵션이 여섯 있습니다. 셋은 거부되고 셋은 무의미합니다. `--race`는 거부됩니다. 레이스 그룹은 바이트가 동일한 요청 복사본들이어서 프레임 교환 형태가 없기 때문입니다. `--http2`는 `Upgrade: websocket` 템플릿에서만 거부됩니다. HTTP/2에는 업그레이드 메커니즘이 없으므로(RFC 9113 §8.1) h2 위의 WebSocket은 RFC 8441 확장 `CONNECT`로 열리며, 시드 자체가 그 형태라면 플래그 없이도 HTTP/2로 스윕합니다. 핸드셰이크 바이트가 그렇게 말하기 때문입니다. `--record-history`도 거부됩니다. 프레임 교환은 요청/응답 플로우가 아니어서, 기록하면 전사가 비어 있는 WebSocket인 척하는 History 항목이 남기 때문입니다. `--follow-redirects`, `--timeout`, `--ac`는 여기서 그냥 무의미하며, 실행 시작 시 한 번 그렇게 알려 줍니다. 각 거부 메시지는 원하는 동작을 얻는 방법이 `--ws-http-only`일 때 그 사실을 함께 알려 줍니다. 그 플래그를 쓰면 평범한 HTTP 스윕이므로 셋 다 동작하며 History 기록도 됩니다. 송신 프레임이 없는 WebSocket 시드 역시 평범한 HTTP로 스윕합니다. 핸드셰이크만 있는 “프레임” 실행은 페이로드마다 소켓을 열어 아무것도 보내지 않을 뿐이기 때문입니다.
+적용되지 않는 옵션이 여섯 있습니다. 셋은 거부되고 셋은 무의미합니다. `--race`는 거부됩니다. 레이스 그룹은 바이트가 동일한 요청 복사본들이어서 프레임 교환 형태가 없기 때문입니다. `--http2`는 `Upgrade: websocket` 템플릿에서만 거부됩니다. HTTP/2에는 업그레이드 메커니즘이 없으므로(RFC 9113 §8.1) h2 위의 WebSocket은 RFC 8441 확장 `CONNECT`로 열리며, 시드 자체가 그 형태라면 플래그 없이도 HTTP/2로 스윕합니다. 핸드셰이크 바이트가 그렇게 말하기 때문입니다. `--record-history`도 거부됩니다. 프레임 교환은 요청/응답 플로우가 아니어서, 기록하면 전사가 비어 있는 WebSocket인 척하는 History 항목이 남기 때문입니다. `--follow-redirects`, `--timeout`, `--ac`는 여기서 무의미하며, 실행 시작 시 한 번 그렇게 알려 줍니다. 각 거부 메시지는 원하는 동작을 얻는 방법이 `--ws-http-only`일 때 그 사실을 함께 알려 줍니다. 그 플래그를 쓰면 평범한 HTTP 스윕이므로 셋 다 동작하며 History 기록도 됩니다. 송신 프레임이 없는 WebSocket 시드 역시 평범한 HTTP로 스윕합니다. 핸드셰이크만 있는 "프레임" 실행은 페이로드마다 소켓을 열어 아무것도 보내지 않을 뿐이기 때문입니다.
 
 ### 매크로로 회전하는 토큰 다루기 {#rotating-tokens-with-a-macro}
 
