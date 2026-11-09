@@ -2,8 +2,8 @@
 
 ## Unreleased
 
-- TUI: Notes, Issue notes and the Project and Probe descriptions wrap between words instead of mid-word
-- TUI: a selected Fuzzer hit keeps its ✓, a restored fuzz run no longer toasts over another tab, and the `^P` query line, the tab-bar footer and Intercept's empty card are clearer
+- TUI: Notes, Issue notes and the Project and Probe descriptions wrap between words instead of mid-word (#1833)
+- TUI: a selected Fuzzer hit keeps its ✓, a restored fuzz run no longer toasts over another tab, and the `^P` query line, the tab-bar footer and Intercept's empty card are clearer (#1833)
 
 ## v0.9.2
 
