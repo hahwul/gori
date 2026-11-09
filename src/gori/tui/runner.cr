@@ -2966,7 +2966,7 @@ module Gori::Tui
     # "nothing bound here" from one row above a list header that reads `/ filter`: true about
     # the SIDEBAR scope and useless, because the key the operator wanted was `↵` and nothing
     # said so. The letter deliberately does not fall through (that is the tab bar's own
-    # decision, see the `1-9/0 tabs` hint); it is ANSWERED instead.
+    # decision: the bar's digits jump to tabs); it is ANSWERED instead.
     #
     # `verb` names what the key does down there, so the line teaches the pair rather than just
     # refusing: `‹/› — press ↵ to enter the list, then / filter`.
@@ -3376,7 +3376,11 @@ module Gori::Tui
         # were the only unadvertised keys at this focus with an effect outside the current tab.
         # `{tab.help}` sits in the escape-hatch tail with `^P cmds`, which Chrome.fit_hints keeps
         # when the row is narrow: it drops the head's extras first.
-        return Hotkeys.expand(@session.registry, "←/→ switch tab · ↹/↵ enter · 1-9/0 tabs · {capture.toggle} capture · {intercept.toggle} intercept · ^P cmds · {tab.help} help · q projects · ^D quit") if @focus == :menu
+        #
+        # Seven tokens, so the CPU/MEM readout keeps its room at a common width (it yields to
+        # hints — Chrome::YIELDING_CHIPS). Not here: `1-9/0 tabs`, which the bar's own `1:`…`0:Tabs`
+        # labels already say, and `^D quit`, which Help lists and the project picker offers.
+        return Hotkeys.expand(@session.registry, "←/→ switch tab · ↹/↵ enter · {capture.toggle} capture · {intercept.toggle} intercept · ^P cmds · {tab.help} help · q projects") if @focus == :menu
         if @focus == :subtabs
           # On the ⌕ affordance the strip's own keys are the wrong story — ↵ lists every
           # sub-tab here instead of entering one. Only ever reached when the pill is really

@@ -423,10 +423,16 @@ module Gori::Tui
       msg = catch_on ? "Catch is ON — each matching request waits here until you decide." : "Holds each matching request here until you forward or drop it."
       flow = "request ──► ⏸ held ──► #{go}#{key("f", "intercept.forward")} forward · #{key("d", "intercept.drop")} drop"
       catch_hint = catch_on ? "catch is ON — press to stop holding" : "catch is OFF — press to start holding"
-      direction_chip = " DIR #{catch_direction} " # the state alone, as the live bar draws it; `c` is named in the rows below
-      direction_hint = "#{go}#{key("c", "intercept.direction")}: hold requests, responses or both"
-      condition = "▸ #{go}#{key("/", "intercept.filter")} condition: only hold matches (host: path:)"
-      min_w = [msg, flow, condition, "▸ #{direction_chip}  #{direction_hint}"].max_of { |l| Screen.display_width(l) }
+      # Every row is ` KEY ` + what it does, labels in one column. The queue keys carry their
+      # `↓` route inside the chip (a sequence, as `␣Pr` is); `DIR REQ` is the state the live
+      # bar shows, so it leads the label rather than standing in for a key.
+      dir_chip = " #{queue_chip(body_focused, key("c", "intercept.direction"))} "
+      cond_chip = " #{queue_chip(body_focused, key("/", "intercept.filter"))} "
+      dir_label = "DIR #{catch_direction} — hold requests, responses or both"
+      cond_label = "condition — only hold matches (host: path:)"
+      pad = [" #{key("i", "intercept.toggle")} ", dir_chip, cond_chip, Hotkeys.retag(" ^P ")].max_of { |c| Screen.display_width(c) }
+      min_w = [msg, flow].max_of { |l| Screen.display_width(l) }
+      min_w = {min_w, 2 + pad + 2 + [catch_hint, dir_label, cond_label].max_of { |l| Screen.display_width(l) }}.max
       inner, ix, iw = begin_card(screen, rect, :intercept, headline, "INTERCEPT", inner_h, min_w)
       y = inner.y
 
@@ -438,11 +444,10 @@ module Gori::Tui
         screen.text(ix, y, capture_off_hint, Theme.yellow, Theme.bg, width: iw)
         y += 1
       end
-      y = draw_chord_hint(screen, ix, y, iw, " i ", catch_hint, bullet: "▸ ", verb: "intercept.toggle")
-      y = draw_chord_hint(screen, ix, y, iw, direction_chip, direction_hint, bullet: "▸ ",
-        verb: body_focused ? "intercept.direction" : nil)
-      screen.text(ix, y, condition, Theme.muted, Theme.bg, width: iw)
-      draw_palette_hint(screen, ix, y + 1, iw, bullet: "▸ ")
+      y = draw_chord_hint(screen, ix, y, iw, " i ", catch_hint, bullet: "▸ ", verb: "intercept.toggle", pad: pad)
+      y = draw_chord_hint(screen, ix, y, iw, dir_chip, dir_label, bullet: "▸ ", pad: pad)
+      y = draw_chord_hint(screen, ix, y, iw, cond_chip, cond_label, bullet: "▸ ", pad: pad)
+      draw_palette_hint(screen, ix, y, iw, bullet: "▸ ", pad: pad)
     end
 
     # "FUZZ RUN", not "RESULTS": this card draws INSIDE the pane the Fuzzer titles RESULTS, and a
@@ -735,6 +740,11 @@ module Gori::Tui
       body_focused ? "" : "#{key("↓", "sidebar.enter")} then "
     end
 
+    # A queue key as a chip: bare inside the body, behind its `↓` route from the tab bar.
+    private def queue_chip(body_focused : Bool, k : String) : String
+      body_focused ? k : "#{key("↓", "sidebar.enter")} #{k}"
+    end
+
     private def medium_intercept_action_hint(body_focused : Bool) : String
       "#{queue_route(body_focused)}#{key("f", "intercept.forward")} forward · #{key("d", "intercept.drop")} drop · #{key("/", "intercept.filter")} condition"
     end
@@ -760,8 +770,9 @@ module Gori::Tui
     # A palette row reads as the route it is — ` ^P ` → Open browser — never as a ` ^P ` chip
     # that looks like the verb's own chord.
     private def draw_palette_hint(screen : Screen, ix : Int32, y : Int32, iw : Int32, *, bullet : String,
-                                  label : String = "→ #{verb_title("browser.open", "Open browser")}") : Int32
-      draw_chord_hint(screen, ix, y, iw, " ^P ", label, bullet: bullet, verb: "app.palette")
+                                  label : String = "→ #{verb_title("browser.open", "Open browser")}",
+                                  pad : Int32 = 0) : Int32
+      draw_chord_hint(screen, ix, y, iw, " ^P ", label, bullet: bullet, verb: "app.palette", pad: pad)
     end
 
     # How to reach `verb` (`Tutorial.reach`: its own chord, a menu path, or `^P → <title>`);
@@ -810,7 +821,7 @@ module Gori::Tui
 
     private def draw_chord_hint(screen : Screen, ix : Int32, y : Int32, iw : Int32,
                                 chord : String, label : String, *, bullet : String,
-                                verb : String? = nil) : Int32
+                                verb : String? = nil, pad : Int32 = 0) : Int32
       bg = Theme.bg
       screen.text(ix, y, bullet, Theme.muted, bg)
       bx = ix + bullet.size
@@ -818,6 +829,7 @@ module Gori::Tui
       # "CATCH ON"-style chips are untouched (retag's token set is closed) — those follow a
       # REBIND instead, through `verb`.
       x = Frame.chip(screen, bx, y, Hotkeys.retag(chip_text(chord, verb)), true) + 1
+      x = {x, bx + pad + 1}.max # `pad`: the widest chip of a list, so its labels share a column
       screen.text(x, y, " #{label}", Theme.text, bg, width: {ix + iw - x, 0}.max)
       y + 1
     end

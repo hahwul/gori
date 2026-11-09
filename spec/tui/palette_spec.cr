@@ -307,9 +307,33 @@ describe Gori::Tui::PaletteState, "tab actions" do
     plain.render(Screen.new(a), Rect.new(0, 0, 80, 24))
     scoped.render(Screen.new(b), Rect.new(0, 0, 80, 24))
     24.times do |y|
+      # The query line is the one difference: its placeholder promises the tab search.
+      next b.row(y).should(contain("type to search")) if a.row(y).includes?("›")
       b.row(y).should eq(a.row(y))
       80.times { |x| b.fg_at(x, y).should eq(a.fg_at(x, y)) }
     end
+  end
+
+  # The browse is app commands only; the empty query line says the search reaches the tab.
+  it "tells an empty query line that typing also searches the tab's actions" do
+    ctx = FakeExecContext.new
+    reg = Gori::Verb::Registry.new
+    reg.register(Gori::Verb::Definition.new("demo.global", "Zap", "", Gori::Verb::Scope::Global) { |_| nil })
+    reg.register(Gori::Verb::Definition.new("demo.tail", "Zip all", "", Gori::Verb::Scope::Body, menu: :palette) { |_| nil })
+    palette = PaletteState.new(reg)
+    palette.capture(history_body, ctx)
+    palette.reset(ctx)
+    palette.results.map(&.id).should eq(["demo.global"]) # the browse itself is unchanged
+    backend = MemoryBackend.new(80, 24)
+    palette.render(Screen.new(backend), Rect.new(0, 0, 80, 24))
+    backend.contains?("type to search — this tab's 1 action too").should be_true
+
+    "zi".each_char { |c| palette.append(c, ctx) }
+    typed = MemoryBackend.new(80, 24)
+    palette.render(Screen.new(typed), Rect.new(0, 0, 80, 24))
+    typed.contains?("type to search").should be_false
+
+    PaletteState.new(reg).search_hint.should be_nil # no captured tab, nothing to promise
   end
 
   it "ranks tab matches ahead of Global ones, under a THIS TAB header" do
