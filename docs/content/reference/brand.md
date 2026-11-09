@@ -44,7 +44,7 @@ Three variants, each shipped as SVG, PNG and WebP. The raster files are
 | **Gradient** | Large display only: a title slide, a sticker, a hero. The ramp is `#f7ecd0 → #e9d49d → #d9c28b → #8c7458`, and it turns to mud below about 96 px |
 
 On disk the three are `gori`, `gori_dark` and `gori_white`, and the header's
-download menu labels them **Mark**, **Dark** and **Color**. Note that
+download menu labels them **Mark**, **Dark** and **Color**.
 `gori_white` is the *gradient*, not a white knockout: the filename predates the
 labels and other things point at it, so it keeps the name. There is no reversed
 white-on-dark mark; on a dark background, use the flat gold.

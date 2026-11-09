@@ -72,7 +72,7 @@ p=$(jq -r .project); gori run notes --all --project "$p" | awk '/^- \[ \]/ { n++
 ```
 {% end %}
 
-물론 [컨텍스트](#context)의 모든 필드도 쓸 수 있습니다(`\(.flows)`, `\(.issues)`, 모드
+[컨텍스트](#context)의 모든 필드도 쓸 수 있습니다(`\(.flows)`, `\(.issues)`, 모드
 플래그들). 다만 상단 바를 먼저 보세요. 칩을 그대로 되풀이하는 세그먼트는 한 줄을 쓰고
 아무것도 알려주지 않습니다. 값을 하는 모양은 위의 것들, 즉 gori의 데이터와 gori가 알 길이
 없는 사실을 엮는 쪽입니다:
@@ -158,14 +158,14 @@ printf '\n'
 | `upstream_rules` | integer | 적용 중인 [업스트림 규칙](/ko/reference/config/#upstream-rules) 수. 0이 아니면 라우팅이 목적지별로 갈라지므로 `upstream` 하나로는 트래픽 경로를 설명할 수 없음 |
 | `upstream_env` | string | `upstream`이 비어 있고 규칙에도 걸리지 않을 때 트래픽을 보내는 프로세스 프록시 환경변수, 예: `HTTPS_PROXY → http proxy corp.example:3128`. 규칙 테이블이 범위를 좁히면 `· destinations no upstream rule claims`가 덧붙음(프로젝트의 **Destination host**가 좁히면 `the project destination filter admits`, 둘 다면 `and`로 이어짐); 환경변수에 닿는 경로가 없으면(프로젝트 고정, 비어 있지 않은 `upstream`, `*` 규칙) 비어 있음. 자격증명은 절대 담지 않음 |
 | `scope.active` / `scope.rules` | bool / integer | [스코프](/ko/guide/proxy/#scope) 필터가 실제로 작동 중인지(렌즈가 켜져 있고 **동시에** 규칙이 하나 이상), 그리고 규칙이 몇 개인지 |
-| `scope.sandbox` | bool | [Sandbox](/ko/guide/proxy/#sandbox)가 스코프 밖 목적지를 기록만 안 하는 게 아니라 아예 차단하고 있는지 |
+| `scope.sandbox` | bool | [Sandbox](/ko/guide/proxy/#sandbox)가 스코프 밖 목적지를 기록만 하지 않는 것이 아니라 아예 차단하고 있는지 |
 | `intercept.enabled` | bool | catch가 켜져 있는지. 켜져 있는 동안 실제 클라이언트가 붙잡혀 있음 |
 | `intercept.queued` | integer | 지금 결정을 기다리는 메시지 수 |
 | `intercept.direction` | string | `requestonly`(기본값) · `responseonly` · `both`. 어느 쪽 방향을 붙잡는지 |
 | `probe` | string | [스캐너](/ko/guide/scanning/#probe-the-scanner) 모드: `off` · `passive` · `active` · `aggressive` |
 | `issues` | integer | 이 프로젝트에 기록된 이슈 수 |
 | `jobs.running` | integer | 진행 중인 백그라운드 작업 수 (fuzz · mine · discover 등). 활동 칩이 세는 것과 같은 작업이라, 전송 중인 Repeater 요청은 포함되지 않음 |
-| `jobs.label` | string \| null | 상태 바의 활동 칩이 말하는 문구, 예: `"fuzzing 1"`. 실행 중인 게 없으면 `null` |
+| `jobs.label` | string \| null | 상태 바의 활동 칩이 말하는 문구, 예: `"fuzzing 1"`. 실행 중인 것이 없으면 `null` |
 
 `scope`부터 아래는 이미 캡처한 것이 아니라 **gori가 다음에 무엇을 할지**를 설명합니다. 상단 바의 칩들이 나르는 바로 그 사실이라, 위를 올려다보지 않고도 "intercept가 아직 켜져 있나?"를 statusline이 답할 수 있습니다. 필드는 추가만 되었고 `version`은 `1` 그대로입니다. 이전 컨텍스트에 맞춰 쓴 스크립트는 똑같이 동작합니다.
 

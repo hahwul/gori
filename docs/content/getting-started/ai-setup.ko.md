@@ -46,15 +46,15 @@ Pi는 [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter) 같은 MCP 
 
 ## 2. 프로젝트 바인딩 (또는 에이전트가 고르게) {#2-bind-a-project-or-let-the-agent-pick-one}
 
-각 gori 프로젝트는 별도의 데이터베이스입니다. 설치 후 `gori mcp`는 항상 연결됩니다.
+각 gori 프로젝트는 별도의 데이터베이스입니다. 설치 후 `gori mcp`는 어떻게 시작되든 연결됩니다. 시작 방식에 따른 동작은 다음과 같습니다.
 
 | 클라이언트가 MCP를 띄우는 방식 | 동작 |
 |-------------------------------|------|
-| Git 리포지토리 안 | 그 워크스페이스를 자체 gori 프로젝트에 path-bind |
+| Git 리포지토리 안 | 그 워크스페이스를 전용 gori 프로젝트에 경로 기준으로 바인딩 |
 | Git 밖 (Desktop / 전역 에이전트에서 흔함) | **unbound**로 시작. 핸드셰이크는 성공하고, 에이전트가 트래픽 도구보다 먼저 `list_projects` / `create_project` / `switch_project` 호출 |
 | `--project` / `--db`로 설치 | 첫 도구 호출부터 그 프로젝트 제공 |
 
-에이전트가 먼저 `project_info`를 호출하게 하세요. `bound`가 false이면 프로젝트를 나열하거나 생성한 뒤(unbound일 때 create는 자동 바인딩), 필요하면 switch 합니다. bound이면 데이터를 변경하기 전에 이름·데이터베이스 경로·선택 출처를 확인합니다.
+에이전트가 먼저 `project_info`를 호출하게 하세요. `bound`가 false이면 프로젝트를 나열하거나 생성한 뒤(unbound일 때 create는 자동 바인딩), 필요하면 다른 프로젝트로 전환합니다. bound이면 데이터를 변경하기 전에 이름·데이터베이스 경로·선택 출처를 확인합니다.
 
 설치할 때 프로젝트를 고정하려면(에이전트가 다른 프로젝트로 옮기지 못하게 하려면 `--pin-project`도 더합니다):
 
@@ -67,7 +67,7 @@ gori mcp --db /path/to/project.db --install-claude-code   # 특정 데이터베�
 
 ## 3. 읽기 전용으로 안전하게 넘기기 {#3-hand-off-safely-with-read-only}
 
-기본적으로 서버는 실시간 요청을 보내고 이슈를 기록하는 액션 도구도 노출합니다. 에이전트(또는 대상에 대해 완전히 신뢰하지는 않는 동료)에게 읽기 도구만 주려면, 읽기 전용으로 설치하세요.
+기본적으로 서버는 실제 요청을 보내고 이슈를 기록하는 액션 도구도 노출합니다. 에이전트(또는 대상을 전적으로 맡기기는 꺼려지는 동료)에게 읽기 도구만 주려면, 읽기 전용으로 설치하세요.
 
 ```bash
 gori mcp --read-only --install-claude-code
@@ -75,11 +75,11 @@ gori mcp --read-only --install-claude-code
 
 읽기 전용은 `list_history`, `get_flow`, `list_sitemap` 등 검사 도구를 유지하면서 `send_request`, 이슈 쓰기, 인터셉트 변경 도구를 비활성화합니다. `decode`, `jwt_decode` 같은 순수 계산 헬퍼는 네트워크나 데이터를 절대 건드리지 않으므로 그대로 사용할 수 있습니다. gori 안에서 정하려면 **Settings → AI → MCP permissions**에서 도구 묶음(트래픽 전송, 인터셉트 제어, 프로젝트 데이터 편집, 스코프, 프로젝트)마다 **on**, **ask**, **off**를 고르면 다음 `gori mcp` 시작부터 적용됩니다. **ask**는 호출마다 승인 카드로 먼저 물어봅니다([Preferences에서 권한 정하기](/ko/guide/mcp/#permissions-from-preferences)).
 
-전체 카탈로그는 컨텍스트도 차지합니다. 클라이언트는 첫 질문 전에 모든 도구의 스키마를 읽어 세션 내내 들고 있습니다. `--tools=@recon`(캡처 읽기와 매핑, 요청 재전송, 이슈·노트 기록)이나 `--tools=@minimal`(History와 플로우 읽기, 운영자와 대화)은 작은 이름 붙은 묶음만 제공하며 `--read-only`와 함께 쓸 수 있습니다. 크기 비교는 [노출할 도구 고르기](/ko/guide/mcp/#choosing-which-tools-are-exposed)에 있습니다.
+전체 카탈로그는 컨텍스트도 차지합니다. 클라이언트는 첫 질문 전에 모든 도구의 스키마를 읽어 세션 내내 들고 있습니다. `--tools=@recon`(캡처 읽기와 매핑, 요청 재전송, 이슈·노트 기록)이나 `--tools=@minimal`(History와 플로우 읽기, 운영자와 대화)은 이름이 붙은 작은 묶음만 제공하며 `--read-only`와 함께 쓸 수 있습니다. 크기 비교는 [노출할 도구 고르기](/ko/guide/mcp/#choosing-which-tools-are-exposed)에 있습니다.
 
 ## 4. 첫 요청 보내기 {#4-drive-your-first-request}
 
-도구가 보이면 에이전트에게 평범한 말로 지시하세요. 에이전트가 의도를 읽기·액션 도구로 매핑합니다.
+도구가 보이면 에이전트에게 평범한 말로 지시하세요. 에이전트가 그 의도를 읽기 도구와 액션 도구로 옮깁니다.
 
 > "`/login`에 대한 마지막 POST 20개를 나열하고, 가장 최근 것을 다른 비밀번호로 재전송한 뒤, 상태 코드가 바뀌면 이슈를 열어줘."
 

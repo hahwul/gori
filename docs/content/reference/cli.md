@@ -381,7 +381,7 @@ Both sides' `status · size · time` and the A→B delta print above the diff, s
 
 ### run diff
 
-The retest report: diff two **projects** at endpoint scale, where [`run compare`](#run-compare) diffs two messages. It answers the question half of an engagement is: *what changed since last time?*
+The retest report: diff two **projects** at endpoint scale, where [`run compare`](#run-compare) diffs two messages. It answers the question half of every engagement comes down to: *what changed since last time?*
 
 ```bash
 gori run diff --from q1-audit --to q3-retest --format md
@@ -624,7 +624,7 @@ gori run repeater move 5 --to 1        # make it the first tab
 gori run repeater move 5 --down
 ```
 
-**`repeater delete <repeater-id> [<repeater-id>…] --yes`**: close one or more saved sessions and renumber the strip. `--yes` is required, and every id is checked before the first delete, so one unknown id refuses the whole call, so a typo cannot half-empty the workbench. Each line names the tab number the session *had* (read once, before anything shifts); `--format json` returns `deleted` (with `was_tui_index`), `failed`, and `remaining`. A session that could not be removed leaves a non-zero exit.
+**`repeater delete <repeater-id> [<repeater-id>…] --yes`**: close one or more saved sessions and renumber the strip. `--yes` is required, and every id is checked before the first delete, so one unknown id refuses the whole call and a typo cannot half-empty the workbench. Each line names the tab number the session *had* (read once, before anything shifts); `--format json` returns `deleted` (with `was_tui_index`), `failed`, and `remaining`. A session that could not be removed leaves a non-zero exit.
 
 **`repeater race <repeater-id> <repeater-id> [<repeater-id>…]`**: fire several saved sessions as one synchronized race, so N distinct requests reach the server in one narrow window (a TOCTOU across different endpoints). Over HTTP/1.1 each request goes on its own connection and the last byte of every one is released together; over HTTP/2 they share one connection as a single-packet attack. Every session must resolve to one origin and share the transport, or the race is refused. `--http2` / `--http1` override the sessions' stored setting; `--max-requests=N` refuses a group larger than N rather than splitting it; `--verbatim`, `--slot=NAME`, `--reframe-grpc`, `--tls-preset=NAME`, `-k`, `--timeout`, `--allow-unscoped` and `--format text|json` behave as on `repeater send`. `--format json` is the object MCP `race_requests` returns: `responded` and `won_2xx` counts, and per member the session `id`, status, size, timing, response `head` and `body` in `repeater send`'s shape. A race is not stored, so this is the only copy of the bodies; `--max-body=BYTES` caps each one. For many copies of *one* request, use `fuzz --race=N`.
 
@@ -2127,7 +2127,7 @@ rewriter  (can carry commands)
 …
 ```
 
-A section marked *not set* is still a valid name for `--sections`: exporting it simply carries nothing (gori says so on stderr), and importing one writes it for the first time.
+A section marked *not set* is still a valid name for `--sections`: exporting it carries nothing (gori says so on stderr), and importing one writes it for the first time.
 
 | Flag | Applies to | Description |
 | ------ | ----------- | ------------- |
@@ -2143,13 +2143,13 @@ A section you do not select, or that the profile does not carry, is left **exact
 - **List and table sections replace wholesale**: `upstream_rules`, `outbound_tls`, `listeners`, `scan_rules`, `hostname_overrides`, `tabs`, and the rest. A profile carrying `"upstream_rules": []` clears the table; that is how "no rules" is stated.
 - **Object-of-scalars sections apply key by key**: `network`, `editor`, `probe`. A key the profile omits keeps its current value, so a team profile that pins `network.upstream_proxy` does not also reset everyone's `bind_port` to a default it never mentioned.
 
-Note that `export` omits a section sitting at its factory default, so a profile is a set of values to *apply*, not a snapshot of a whole configuration: exporting from a machine where a value is default will not reset that value on a machine where it is not. Pass `--dry-run` to see which sections an import would touch. It errs on the side of listing one, so a section it does *not* name is guaranteed to be a no-op.
+`export` omits a section sitting at its factory default, so a profile is a set of values to *apply*, not a snapshot of a whole configuration: exporting from a machine where a value is default will not reset that value on a machine where it is not. Pass `--dry-run` to see which sections an import would touch. It errs on the side of listing one, so a section it does *not* name is guaranteed to be a no-op.
 
 Import goes through the same writer the TUI uses, so it keeps the atomic write and cannot clobber a concurrently-running gori's edit to, or deletion of, a section it did not touch. Unrecognised sections in the file are reported and ignored: they reach neither the live settings nor the file.
 
 If gori cannot load your `settings.json` (unparseable, unreadable, or a `--config` pointing at something it cannot open), both `export` and `import` refuse rather than proceeding. Every section is at its factory default at that point, so an import would persist those defaults over every section the profile does not name, and an export would write them out as if they were yours. Fix or remove the file first; an unparseable one is kept alongside it as `settings.json.corrupt`. `--dry-run` is the exception: it writes nothing, so it still runs, and says on stderr that the comparison is against defaults.
 
-`env`, `decoder` and `oast_providers` are excluded from an export by default: `env` holds token values, `decoder` holds your saved chain library (open sub-tabs live in the project store, not here), and `oast_providers` holds self-hosted interactsh tokens. Naming one explicitly (`--sections env`) is how you consent to include it. Note that `upstream_rules` is safe to share: it stores a username and an environment-variable *name*, never a password.
+`env`, `decoder` and `oast_providers` are excluded from an export by default: `env` holds token values, `decoder` holds your saved chain library (open sub-tabs live in the project store, not here), and `oast_providers` holds self-hosted interactsh tokens. Naming one explicitly (`--sections env`) is how you consent to include it. `upstream_rules` is safe to share: it stores a username and an environment-variable *name*, never a password.
 
 A profile never carries, and an import never changes, the values that decide how this install's existing data is read: the token grammar (`env.syntax`), the token prefix (`env.prefix`) and the redaction salt (`redaction.salt`). An import keeps the local values, and says on stderr when the profile's grammar or prefix differed. Imported global rewriter rules, colormarker rules and saved views are numbered from this install's own counters, so a project's override of a deleted local rule never attaches to an imported one.
 

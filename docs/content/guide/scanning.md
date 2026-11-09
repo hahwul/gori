@@ -158,7 +158,7 @@ Marks survive a filter change, a re-sort (including the one your own severity ed
 
 ## Notes & Comparer
 
-Two more tools round out analysis:
+Two more tools support analysis:
 
 - **Notes**: free-form, per-project Markdown documents (multiple notes per project). Create, edit, and close notes from the Notes tab; headless, `gori run notes` / `gori run notes --all` list or dump them and `gori run notes create` / `update` / `append` / `delete` write them. Agents can manage notes over MCP (`list_notes`, `get_note`, `create_note`, …).
 - **Comparer**: load two messages into slots A and B for a side-by-side diff, useful for spotting how a response changed between requests. The tab is off the bar by default: press **`0`** and type "comparer", or send a flow to it.

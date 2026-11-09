@@ -244,7 +244,7 @@ letters are the same either way: `n` from the strip is `T` `n` from a pane. **Pa
 
 ### The same nine letters on all nine strips
 
-The bucket is one table to learn, not nine. A tab that does not have an action simply omits
+The bucket is one table to learn, not nine. A tab that does not have an action omits
 the row; it never spends that letter on something else.
 
 | Key | Action | Direct chord |
@@ -484,7 +484,7 @@ Today the per-OS defaults are identical: in a terminal, `Ctrl`+letter chords rea
 
 The chord family listed under *Reserved keys* is fixed because a hardcoded guard runs before the keymap. That's a problem when your terminal never delivers the Ctrl form at all:
 
-- **`Ctrl-1`…`Ctrl-9` is undeliverable on many terminals**: there is no control character for it, so the sub-tab jumps simply never arrive. You never need it: **`⇧1`-`⇧9`** is the primary sub-tab jump (see [The digit family](#digits)), and on a sub-tab strip **`f`** lists and searches every open sub-tab, from whichever chip you are standing on. (The **`⌕`** at the strip's left edge opens the same list; click it, or press `←` from the first chip.)
+- **`Ctrl-1`…`Ctrl-9` is undeliverable on many terminals**: there is no control character for it, so the sub-tab jumps never arrive. You never need it: **`⇧1`-`⇧9`** is the primary sub-tab jump (see [The digit family](#digits)), and on a sub-tab strip **`f`** lists and searches every open sub-tab, from whichever chip you are standing on. (The **`⌕`** at the strip's left edge opens the same list; click it, or press `←` from the first chip.)
 - **A multiplexer eats the chord first.** tmux's default prefix is `Ctrl-B`, which gori also uses for reveal-whitespace.
 
 **Preferences → Editor & Keys → Keys → Command modifier** (`Ctrl-,`), or **`settings:keys`** in the palette, switches that family between `Ctrl` and `Option (⌥)`. It is an **alias, not a swap**: with Option selected, `⌥P` opens the palette *and* `^P` still does. Only the advertised form changes: status hints, the Help tab and the palette all start showing `⌥P`, `⌥N`, `⌥1-9`.
@@ -527,7 +527,7 @@ An absent action uses the profile default. Unknown ids and unparseable chords ar
 
 ## Limitations
 
-- Only an action's **primary** chord is shown/edited; navigation aliases (e.g. the arrow-key duplicates of `j` / `k`) aren't listed.
+- Only an action's **primary** chord is shown/edited; navigation aliases (the arrow-key duplicates of `j` / `k`, for example) aren't listed.
 - Every surface that names a rebindable chord reads it from the effective keymap: the **command palette**, the **space menu**, the **Help** tab and its popup, the status-bar hint strips, and the empty-state cards. What stays literal is not a verb: the claimed `^P` / `^N` / `^W` / `^1-9` family (the sub-tab alias) and structural keys (`esc`, `↵`, arrows, `↹`).
 - Space-menu **mnemonic** letters are stable action identities (Helix-like); rebinding changes the *direct* chord, not the space-menu letter.
 - Where the **sub-tab strip** binds a letter for an action, the menu spells that action with the same letter: `t` marks the sub-tab, `f` lists and searches the sub-tabs, `⇧T` marks the whole strip, and `e` renames. Rename used to be `r` on the strip, but `r` is `Run`/`Send` (the menu echo of `Ctrl-R`) in the Repeater, Fuzzer, Miner and Sequencer, so the strip moved to the menu's `e` rather than the other way round; `r` on the strip now does nothing. See [the space menu](#space-menu) for the whole table.

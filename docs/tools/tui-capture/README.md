@@ -55,48 +55,48 @@ ONLY=scenes SCENES="project issues" docs/tools/tui-capture/capture.sh
 Captures are reproducible but not pixel-identical run to run (timestamps,
 durations, and live response bodies vary), so eyeball the output before
 committing. The theme gallery on the Themes page (`theme-<name>.svg`) is shot in
-the same run by `shoot_themes` — the History scene under each gallery palette.
+the same run by `shoot_themes`: the History scene under each gallery palette.
 
-A scene on the bar reaches its tab by positional jump — the bar is nine numbered
+A scene on the bar reaches its tab by positional jump. The bar is nine numbered
 slots, so `1`-`9` are Project · Target · History · Intercept · Repeater · Fuzzer ·
 Probe · Issues · Notes and nothing else. A scene off the bar reaches its tab by
 NAME, with `0` (Go to tab…), type, `↵`: that is what the guide tells a reader to
 press, and it is the only navigation here that cannot silently retarget. A
 positional jump is a position in `Chrome::TABS` minus `DEFAULT_HIDDEN`, and a tab
-moving on or off the bar slides every digit to its right — the Decoder scene once
+moving on or off the bar slides every digit to its right. The Decoder scene once
 shipped a picture of the OAST tab for three weeks that way. When the catalog
 changes, read the tab strip back out of a capture and fix the numbers.
 
 `0` lands in the BODY (the picker drills in, like the palette's "Go to …"), so an
-off-bar scene needs no `Tab` after it — and the tab it opens rides the far right
+off-bar scene needs no `Tab` after it. The tab it opens rides the far right
 of the bar without a number until you leave it, which is supposed to be in the
 shot.
 
 `statusline.svg` is the one scene that edits `settings.json` before firing: the statusline
 ships off, so there is nothing to photograph until a command is configured. It runs last in
 `shoot_all` and puts the plain settings back, and it shoots the same History screen as the
-first scene on purpose — the picture is about the extra row at the bottom, so the rest of
+first scene on purpose: the picture is about the extra row at the bottom, so the rest of
 the frame has to be something the reader already recognises.
 
 Its row is a SCRIPT, not a one-liner: `write_statusline_script` plants
 `$GORI_HOME/statusline.sh`, byte-identical to the one the guide prints under "When one line
 is not enough", and settings point at it. The row used to print the project, the bind
-address and the probe mode — each of them already a chip two rows above — so the hero
+address and the probe mode, each of them already a chip two rows above, so the hero
 picture argued against the feature it was selling. It now says what the chrome cannot: the
 life left in the token under test, a 5xx count, and the first unchecked task in the notes.
 
 `statusline-token.svg`, `statusline-errors.svg` and `statusline-todo.svg` are the gallery on
 the Statusline guide, and they are **strips**: one row, rendered with no window chrome
 (`run_strip` → `ansi2svg.py --tail 1`). Each is the row produced by the command printed above
-it on that page, so the commands live in `write_statusline_settings` — one place — rather than
+it on that page, so the commands live in one place, `write_statusline_settings`, rather than
 being retyped per scene. All three call `gori run` (jwt · history · notes), which is why the
 pane puts the built binary on PATH: the shot has to be of the command a reader would type,
 not of a path only this script knows. Only the token is staged (`write_demo_token` mints one
 an hour out into `$GORI_HOME`); the 5xx count and the notes come off the seeded project.
 
 Every palette pass starts from the same project: the seeded DB is snapshotted after
-seeding and restored at the top of each pass. Scenes mutate it — the Issues scene promotes
-findings — so without that the second pass photographed a project the first had already
+seeding and restored at the top of each pass. Scenes mutate it (the Issues scene promotes
+findings), so without that the second pass photographed a project the first had already
 changed, and a strip counting anything the Issues scene touches disagreed with its own
 light twin.
 
@@ -109,12 +109,12 @@ shot once per `SHOTS` palette like the scenes are (the traffic top-up happens
 only on the first pass, so light and dark show the same flows).
 
 Its window chrome carries the `𝓰𝓸𝓻𝓲` wordmark instead of a `gori · Scene`
-caption — it stands for the tool, not for one screen. Decorative glyphs say
+caption. It stands for the tool, not for one screen. Decorative glyphs say
 nothing out loud, so the shot passes `SHOT_ARIA` and `ansi2svg.py` writes that
 as the SVG's `aria-label` instead of the title.
 
 It is also the only shot with Miss Ring on (`write_settings <theme> companion`); she
-ships on now, so the doc scenes switch her off explicitly instead — she occupies
+ships on now, so the doc scenes switch her off explicitly instead. She occupies
 three rows of exactly the corner most of them are photographing. Her corner is why
 `seed_readme_extra` stops at ten: the flow list has to end a few rows short of
 the bottom or she covers live SIZE/DUR cells.

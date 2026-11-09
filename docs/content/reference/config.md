@@ -128,7 +128,7 @@ gori does not intercept HTTP/3: QUIC is UDP, and every gori listener is a TCP so
 
 It is off by default on purpose. gori edits a response you did not ask it to edit only where *not* editing it would make gori lie about what it captured. The `Sec-WebSocket-Extensions` strip is that case, because a negotiated `permessage-deflate` leaves every stored frame a deflate stream presented as the payload. An `Alt-Svc` left in place corrupts nothing gori records; it only means the client may leave. That is a call about the test in front of you, so it is a switch the human throws.
 
-**With it off, gori says so instead.** A response that advertises h3 and reaches the client un-stripped now carries an advisory naming the evidence and the setting: *"kept 1 Alt-Svc HTTP/3 advertisement (`h3=":443"`) in this response — gori does not intercept HTTP/3, so a client acting on it leaves the proxy and what it does there is missing from History (settings network.strip_alt_svc is off)."* It appears on both HTTP/1.1 and HTTP/2, in the same places the removal advisory appears. Nothing on the wire changes: the origin's head reaches the client byte for byte, and only the flow gains a sentence. Each host is also named once in `gori.log`, and the passive probe's existing `tech_http3` fingerprint still raises its own once-per-host `Alt-Svc: <host> advertised HTTP/3` event, clickable through to the Probe tab, so the session-level view of "which hosts are inviting clients away" is where it already was. What was missing, and is what this adds, is the per-flow record: a gap in History that nothing explains reads exactly like an origin that had nothing more to say.
+**With it off, gori says so instead.** A response that advertises h3 and reaches the client un-stripped now carries an advisory naming the evidence and the setting: *"kept 1 Alt-Svc HTTP/3 advertisement (`h3=":443"`) in this response — gori does not intercept HTTP/3, so a client acting on it leaves the proxy and what it does there is missing from History (settings network.strip_alt_svc is off)."* It appears on both HTTP/1.1 and HTTP/2, in the same places the removal advisory appears. Nothing on the wire changes: the origin's head reaches the client byte for byte, and only the flow gains a sentence. Each host is also named once in `gori.log`, and the passive probe's existing `tech_http3` fingerprint still raises its own once-per-host `Alt-Svc: <host> advertised HTTP/3` event, clickable through to the Probe tab, so the session-level view of "which hosts are inviting clients away" is where it already was. What was missing is the per-flow record, and that is what this adds: a gap in History that nothing explains reads exactly like an origin that had nothing more to say.
 
 Removal is per **field**, and only for fields that advertise h3. `Alt-Svc: clear` is never removed: RFC 7838 §3 makes it the instruction to *forget* cached alternatives, which is the one spelling that helps here. A plain `h2=":8443"` alternative is never removed either; that is another TCP port, still tunnelled through gori.
 
@@ -365,7 +365,7 @@ This is a separate table from [`upstream_rules`](#upstream-rules) on purpose. Bo
 | `session_tickets` | bool | `false` drops the `session_ticket` extension from the hello. Omitted = OpenSSL's default (on) |
 | `ocsp_stapling` | bool | `true` adds the `status_request` extension, which browsers send and stock OpenSSL does not. Omitted = off |
 
-**Why `min_version` exists.** gori cannot reach a TLS 1.0/1.1-only appliance out of the box, and `verify_upstream: false` does not help; that turns off certificate *verification*, not protocol negotiation. Crystal's TLS client context disables TLS 1.0 and 1.1 in its constructor, so lowering the floor here is the only way. A legacy appliance usually needs `permissive: true` as well, because distributions build OpenSSL at a security level that rejects the old cipher suites outright.
+**Why `min_version` exists.** gori cannot reach a TLS 1.0/1.1-only appliance with its default settings, and `verify_upstream: false` does not help; that turns off certificate *verification*, not protocol negotiation. Crystal's TLS client context disables TLS 1.0 and 1.1 in its constructor, so lowering the floor here is the only way. A legacy appliance usually needs `permissive: true` as well, because distributions build OpenSSL at a security level that rejects the old cipher suites outright.
 
 **Why `max_version` exists.** A floor alone cannot choose a version. Against any origin that also speaks TLS 1.3 (which is every modern one) the handshake lands on 1.3 however low the floor is, so `min_version: "tls1.0"` never answered *"does this target still accept TLS 1.0?"*, and `ciphers` never applied either, because OpenSSL's cipher list governs TLS 1.2 and below only. Setting both bounds is what makes "negotiate TLS 1.2 with `AES128-SHA`" expressible:
 
@@ -375,7 +375,7 @@ This is a separate table from [`upstream_rules`](#upstream-rules) on purpose. Bo
 
 Pinning both to the same value offers exactly that one version, so a handshake failure is a real answer: the target does not accept it. A `min_version` above `max_version` is rejected at save time, because that pair offers no version at all, and OpenSSL's error would name the origin rather than the settings file.
 
-**Certificates are file paths, not inline material.** A private key does not belong in `settings.json`, which is shareable and exportable ([#439](https://github.com/hahwul/gori/issues/439)). A passphrase-protected key is rejected at save time: OpenSSL would prompt for the passphrase on the terminal the TUI owns, so gori would simply appear to hang. Decrypt it first with `openssl pkey -in key.pem -out plain.pem`.
+**Certificates are file paths, not inline material.** A private key does not belong in `settings.json`, which is shareable and exportable ([#439](https://github.com/hahwul/gori/issues/439)). A passphrase-protected key is rejected at save time: OpenSSL would prompt for the passphrase on the terminal the TUI owns, so gori would appear to hang. Decrypt it first with `openssl pkey -in key.pem -out plain.pem`.
 
 The policy is looked up on the **dialled** host, not on an SNI override: a certificate and a protocol floor belong to the machine actually being talked to, whereas the Repeater's SNI field deliberately lies about the name for domain-fronting and vhost tests.
 
@@ -460,7 +460,7 @@ Per-area TUI layout prefs (command palette → **Settings: Display**, which edit
 
 ### statusline
 
-An opt-in extra row at the very bottom of the TUI (Preferences → **General** → **Statusline**). When enabled, gori runs a shell command on an interval and renders its stdout as that row. Think of it as a customizable status bar, inspired by Claude Code's status line. Disabled by default; the section is omitted from `settings.json` until you change it.
+An opt-in extra row at the very bottom of the TUI (Preferences → **General** → **Statusline**). When enabled, gori runs a shell command on an interval and renders its stdout as that row. It is a customizable status bar, inspired by Claude Code's status line. Disabled by default; the section is omitted from `settings.json` until you change it.
 
 ```json
 {
@@ -482,7 +482,7 @@ An opt-in extra row at the very bottom of the TUI (Preferences → **General** �
 
 The command's stdout is parsed for ANSI/SGR colour escapes (16-colour, 256-colour, and truecolor, plus bold/underline/etc.), so you can produce coloured segments. Only the first line is used; output is truncated to the terminal width. It never blocks the UI.
 
-`timeout` is deliberately separate from `interval`. Runs never overlap (gori launches the next one only after the previous has finished), so a script slower than `interval` simply refreshes as fast as it can rather than being killed on every run. A run that does exceed `timeout` is terminated and the row reads `⋯ (timed out)`.
+`timeout` is deliberately separate from `interval`. Runs never overlap (gori launches the next one only after the previous has finished), so a script slower than `interval` refreshes as fast as it can rather than being killed on every run. A run that does exceed `timeout` is terminated and the row reads `⋯ (timed out)`.
 
 Edits take effect immediately: saving a new `command`, `interval` or `timeout` re-runs the command on the next frame instead of waiting out the current interval.
 

@@ -8,7 +8,7 @@ gori ships as one binary for macOS, Linux and Windows, but not every platform ge
 
 ## Tier 1 {#tier-1}
 
-Tier 1 platforms can be thought of as "the whole of gori". Each one:
+Tier 1 platforms are "the whole of gori". Each one:
 
 - gets a pre-built binary on every [GitHub Release](https://github.com/hahwul/gori/releases/latest) and is covered by the [curl installer](/getting-started/installation/#quick-install-curl) and [Homebrew](/getting-started/installation/#homebrew),
 - is built from source in CI or at release, and its release binary is run before it is published,
@@ -26,7 +26,7 @@ The spec suite does not run on macOS or Linux arm64 in CI, so a regression speci
 
 ## Tier 2 {#tier-2}
 
-Tier 2 platforms can be thought of as "works, with known gaps". Each one builds and passes its own CI, ships release binaries, but may have known gaps, listed below.
+Tier 2 platforms are "works, with known gaps". Each one builds and passes its own CI and ships release binaries, but may have known gaps, listed below.
 
 | Target | Release asset | Other channels | Tested by |
 |--------|---------------|----------------|-----------|

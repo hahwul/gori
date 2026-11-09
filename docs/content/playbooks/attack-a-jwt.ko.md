@@ -13,9 +13,9 @@ JWT는 서버가 서명을 검사하는 만큼만 믿을 수 있습니다. 이 �
 
 ## 1. JWT 탭으로 토큰 보내기 {#1-send-a-token-to-the-jwt-tab}
 
-**JWT** 탭은 기본적으로 바 밖에 있습니다. **`0`**을 누르고 "jwt"를 입력하거나 `Ctrl-P` → **Go to JWT**를 쓰세요. 토큰을 자주 다룬다면 Preferences에서 아홉 슬롯 중 하나를 내주면 됩니다. 토큰을 찾습니다. 캡처한 플로우를 **History**에서 열고, 요청 상세에서 `Bearer ` 뒤의 토큰 텍스트를 선택한 뒤 `Space` `S`(**Send selection to…**) → `j` **JWT**. 그러면 새 JWT 서브탭이 시드되고, Decode 렌즈에서 토큰이 **header**, **payload**, **signature**로 라이브 디코드됩니다.
+**JWT** 탭은 기본적으로 바 밖에 있습니다. **`0`**을 누르고 "jwt"를 입력하거나 `Ctrl-P` → **Go to JWT**를 쓰세요. 토큰을 자주 다룬다면 Preferences에서 아홉 슬롯 중 하나를 내주면 됩니다. 토큰을 찾습니다. 캡처한 플로우를 **History**에서 열고, 요청 상세에서 `Bearer ` 뒤의 토큰 텍스트를 선택한 뒤 `Space` `S`(**Send selection to…**) → `j` **JWT**를 누르세요. 그러면 새 JWT 서브탭이 시드되고, Decode 렌즈에서 토큰이 **header**, **payload**, **signature**로 라이브 디코드됩니다.
 
-디코드는 토큰이 *주장하는* 바를 보여 줄 뿐, 서명을 검사하지는 않습니다. 그래서 깔끔하게 디코드되는 토큰이라고 서버가 반드시 믿는 토큰은 아닙니다. 그것이 이 플레이북의 나머지가 답하는 질문입니다.
+디코드는 토큰이 *주장하는* 바를 보여 줄 뿐, 서명을 검사하지는 않습니다. 그래서 깔끔하게 디코드되는 토큰이라고 서버가 반드시 믿는 토큰은 아닙니다. 이 플레이북의 나머지 부분이 바로 이 질문에 답합니다.
 
 <figure class="tui-shot">
   <img src="/images/tui/jwt.svg" alt="디코드된 HS256 토큰이 있는 gori JWT 탭: →ENCODE 렌즈 칩 아래의 INPUT 토큰, 디코드된 header JSON, 그리고 alg=none 대소문자 변형과 서명 제거를 포함한 생성된 페이로드의 ATTACKS 목록" width="1206" height="520">
@@ -64,14 +64,14 @@ gori run jwt eyJhbGci... --attacks
 gori run jwt eyJhbGci... --attacks --key ./server-public.pem   # ...algorithm confusion까지
 ```
 
-생성된 세트를 쓰는 대신 헤더 주입 토큰을 직접 만들려면 — `kid`를 파일로 겨누거나, `jku`/`jwk`를 내가 통제하는 키 자료로 설정 — `--encode`에서 `--set-header FIELD=VALUE`(반복 가능)나 `--header JSON`으로 헤더를 편집하세요. `alg`는 여전히 `--alg`에서 옵니다:
+생성된 세트를 쓰는 대신 헤더 주입 토큰을 직접 만들려면(`kid`를 파일로 겨누거나 `jku`/`jwk`를 내가 통제하는 키 자료로 설정하는 경우) `--encode`에서 `--set-header FIELD=VALUE`(반복 가능)나 `--header JSON`으로 헤더를 편집하세요. `alg`는 여전히 `--alg`에서 옵니다:
 
 ```bash
 gori run jwt eyJhbGci... --encode --set-header kid=../../dev/null --secret ''   # 빈 키 kid 경로 조작
 gori run jwt --encode --header '{"jku":"https://you/jwks.json"}' --payload '{"sub":"admin"}' --alg RS256 --key ./yours.pem
 ```
 
-공개키는 대상이 공개하는 것이면 무엇이든 됩니다. JWKS의 `x5c` 인증서도 순수 `PUBLIC KEY` 블록과 똑같이 동작하며, gori가 어느 쪽이든 서버가 들고 있을 SPKI PEM으로 환원합니다.
+공개키는 대상이 공개하는 것이면 무엇이든 됩니다. JWKS의 `x5c` 인증서도 순수 `PUBLIC KEY` 블록과 똑같이 동작하며, gori가 어느 쪽이든 서버가 들고 있을 SPKI PEM으로 변환합니다.
 
 MCP에서는 `jwt_attacks` 도구가 같은 키를 `public_key`로 받아 동일한 목록을 반환합니다(`jwt_decode` / `jwt_verify` / `jwt_encode`가 1·2단계를 담당. 직접 만든 헤더는 `jwt_encode`의 `header`에 헤더 JSON 전체로 넘깁니다. 필드 단위의 `--set-header`에 해당하는 인자는 없습니다). 모두 `--read-only`에서도 쓸 수 있는 읽기 도구로, 네트워크를 건드리지 않고 아무것도 쓰지 않습니다. 다만 `key` / `public_key`를 경로로 주면 디스크에서 파일을 읽습니다.
 
@@ -81,12 +81,12 @@ MCP에서는 `jwt_attacks` 도구가 같은 키를 `public_key`로 받아 동일
 
 ## 4. 재생하고 확인하기 {#4-replay-and-confirm}
 
-위조 토큰은 서버가 볼 때까지 아무것도 증명하지 못합니다. 페이로드를 하나 고르세요(2단계에서 변조한 토큰이든, 3단계의 프리셋이든). `y`로 복사한 뒤 캡처한 요청을 **Repeater**에서 열어 `Authorization` 헤더에 붙여 넣고 `Ctrl-R`로 다시 보냅니다. 잘못된 토큰에 대해 엔드포인트가 반환해야 할 것과 상태를 대조해 읽으세요:
+위조 토큰은 서버가 볼 때까지 아무것도 증명하지 못합니다. 페이로드를 하나 고르세요(2단계에서 변조한 토큰이든, 3단계의 프리셋이든). `y`로 복사한 뒤 캡처한 요청을 **Repeater**에서 열어 `Authorization` 헤더에 붙여 넣고 `Ctrl-R`로 다시 보냅니다. 상태 코드를 잘못된 토큰에 엔드포인트가 반환해야 할 값과 비교하세요:
 
 - `401` 또는 `403`은 서버가 위조를 거부했다는 뜻입니다. 서명을 검증한 것입니다.
-- 거부를 기대한 자리에 `200`이 나오면 검증하지 *않은* 것입니다. 토큰이 내 조건대로 받아들여졌습니다.
+- 거부를 기대한 자리에 `200`이 나오면 검증하지 *않은* 것입니다. 조작한 토큰이 그대로 받아들여졌습니다.
 
-**체크포인트.** 받아들여진 위조(성공 상태)와 거부된 위조(`401` / `403`)를 구분할 수 있고, 서버가 어떤 프리셋을(있다면) 통과시켰는지 압니다.
+**체크포인트.** 받아들여진 위조(성공 상태)와 거부된 위조(`401` / `403`)를 구분할 수 있고, 서버가 통과시킨 프리셋이 있다면 어느 것인지 압니다.
 
 ## 다음 단계 {#next-steps}
 

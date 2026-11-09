@@ -56,9 +56,9 @@ The WebSocket Repeater does not negotiate `permessage-deflate`, and the capture 
 
 #### A live session {#websocket-live-session}
 
-The scripted replay above re-dials for every message. To keep ONE socket open and talk on it the way Burp's WebSocket Repeater does, turn on **Live session (keep open)** — `Space` → `P` **Protocol…**, then **Live session** (`o`). It is a sticky toggle on the handshake: with it on, `^R` connects once and holds the socket open instead of running the script. The MESSAGES list on the left is the composer — `↵` sends the line under the cursor, and `^R` sends every line in order — and each line it sends is marked `✓ ss.mmm` at its right edge. The right-hand TRANSCRIPT streams both directions as the frames arrive, each row `ss.mmm → …` for what you sent and `← …` for what the server pushed, with `↺` on a heartbeat gori answered for you. The MESSAGES title shows `● LIVE` and the TRANSCRIPT title `● open <duration>` while the socket is up, and the status bar carries the URL, `↑sent ↓recv` and the duration. `Ctrl-P` → **Send WS message as binary (hex)** sends the cursor line as a binary frame, the line read as hex.
+The scripted replay above re-dials for every message. To keep ONE socket open and talk on it the way Burp's WebSocket Repeater does, turn on **Live session (keep open)**, under `Space` → `P` **Protocol…** as **Live session** (`o`). It is a sticky toggle on the handshake: with it on, `^R` connects once and holds the socket open instead of running the script. The MESSAGES list on the left is the composer: `↵` sends the line under the cursor, and `^R` sends every line in order. Each line it sends is marked `✓ ss.mmm` at its right edge. The right-hand TRANSCRIPT streams both directions as the frames arrive, each row `ss.mmm → …` for what you sent and `← …` for what the server pushed, with `↺` on a heartbeat gori answered for you. The MESSAGES title shows `● LIVE` and the TRANSCRIPT title `● open <duration>` while the socket is up, and the status bar carries the URL, `↑sent ↓recv` and the duration. `Ctrl-P` → **Send WS message as binary (hex)** sends the cursor line as a binary frame, the line read as hex.
 
-Toggle **Live session** off to disconnect (gori sends a `CLOSE` and hangs up), and closing the sub-tab, leaving the project or quitting all close the socket too. **Engine.IO heartbeat** (`Space` → `P`, then `b`) answers the server's Engine.IO ping (`2`) with a pong (`3`) for the duration of the session, so a long-lived socket is not timed out by a missed app-level heartbeat; it is off by default and takes effect at the next connect. The transcript is held in memory only and capped — a long session drops its oldest rows, and the transcript says how many — and, like every Repeater WebSocket send, nothing of it is written to History.
+Toggle **Live session** off to disconnect (gori sends a `CLOSE` and hangs up), and closing the sub-tab, leaving the project or quitting all close the socket too. **Engine.IO heartbeat** (`Space` → `P`, then `b`) answers the server's Engine.IO ping (`2`) with a pong (`3`) for the duration of the session, so a long-lived socket is not timed out by a missed app-level heartbeat; it is off by default and takes effect at the next connect. The transcript is held in memory only and capped: a long session drops its oldest rows, and the transcript says how many. Like every Repeater WebSocket send, nothing of it is written to History.
 
 Replay from the command line, optionally against a new target, or keep a WebSocket session open with `repeater ws`:
 
@@ -146,7 +146,7 @@ that is already running **follows** the switch on its own: it picks up the new g
 the project it has open, and says what it did (a notification and an ACTIVITY row in the TUI, a log
 line for MCP).
 
-`env.syntax = bare` is the opt-out: bare `$KEY` for an env var, bare `$NAME` for a binding, `$$` for a literal `$`. Each project re-spells itself **back** the next time it opens, escaping a literal `$NAME` that would otherwise start resolving. Note that bare is the ambiguous grammar: a GraphQL `$id` in a body really does collide with an env var named `id`, which is what the escape and `--verbatim` are for. Generators have no bare spelling: `$GEN.UUID` remains literal under the bare grammar. The rest of this documentation spells tokens the namespaced way; on a bare install, read ENV and BIND tokens without the namespace (`$KEY`, `$NAME`).
+`env.syntax = bare` is the opt-out: bare `$KEY` for an env var, bare `$NAME` for a binding, `$$` for a literal `$`. Each project re-spells itself **back** the next time it opens, escaping a literal `$NAME` that would otherwise start resolving. Bare is the ambiguous grammar: a GraphQL `$id` in a body really does collide with an env var named `id`, which is what the escape and `--verbatim` are for. Generators have no bare spelling: `$GEN.UUID` remains literal under the bare grammar. The rest of this documentation spells tokens the namespaced way; on a bare install, read ENV and BIND tokens without the namespace (`$KEY`, `$NAME`).
 
 ## Fuzzer
 
@@ -259,7 +259,7 @@ The ordinary `gori run fuzz …` command remains ephemeral. Over MCP, pass `save
 
 ### What "verbatim" turns off
 
-`--verbatim` (MCP `verbatim: true`) means the same thing on the Repeater and the Fuzzer: the bytes you wrote are what the socket gets. `--no-update-content-length` (MCP `update_content_length: false`) is the Content-Length subset — the one switch for a CL / CL-TE desync payload that still uses `$ENV`/`$BIND`/`$GEN`. One axis separates them, the `$VAR` row:
+`--verbatim` (MCP `verbatim: true`) means the same thing on the Repeater and the Fuzzer: the bytes you wrote are what the socket gets. `--no-update-content-length` (MCP `update_content_length: false`) is the Content-Length subset, the one switch for a CL / CL-TE desync payload that still uses `$ENV`/`$BIND`/`$GEN`. One axis separates them, the `$VAR` row:
 
 | What gori would otherwise do | `--verbatim` | `--no-update-content-length` |
 | --- | --- | --- |
@@ -269,7 +269,7 @@ The ordinary `gori run fuzz …` command remains ephemeral. Over MCP, pass `save
 | lowercase an HTTP/2 field name | off | on |
 | add `chrome` client hints | off | on |
 
-The session slot's header overlay still applies under both, and the URL of a `send_request{url}` still expands — those are the request's destination, not its bytes. `spec/verbatim_semantics_spec.cr` pins this table so the two flags cannot drift back into one.
+The session slot's header overlay still applies under both, and the URL of a `send_request{url}` still expands. Those are the request's destination, not its bytes. `spec/verbatim_semantics_spec.cr` pins this table so the two flags cannot drift back into one.
 
 ### Framing a Sweep
 
@@ -356,7 +356,7 @@ Results read like any other sweep, because the inbound frames **are** the respon
 
 `ws_close_code` and `ws_frames_in` appear in `--format json` and in MCP `fuzz_results` the same way, and only on WebSocket rows.
 
-Six knobs do not apply: three are refused and three are inert. `--race` is refused outright (a race group is byte-identical copies of one request, which has no framed-exchange form), and so is `--record-history`, because a framed exchange is not a request/response flow and writing one would produce a History entry that claims to be a WebSocket with an empty transcript. `--http2` is refused only on an `Upgrade: websocket` template: HTTP/2 has no upgrade mechanism (RFC 9113 §8.1), so a WebSocket over h2 is opened by an RFC 8441 extended `CONNECT` instead, and a seed that IS one sweeps over HTTP/2 with no flag needed, because the handshake bytes say so. `--follow-redirects`, `--timeout` and `--ac` are simply inert here and the run says so once, up front, rather than pretending otherwise. Each refusal names `--ws-http-only` where that is the way to get what you asked for; under that flag the run is an ordinary HTTP sweep, so all three work, recording included. A WebSocket seed that carries no outbound frames is swept as plain HTTP too: a handshake-only “framed” run would dial a socket per payload just to send nothing.
+Six knobs do not apply: three are refused and three are inert. `--race` is refused outright (a race group is byte-identical copies of one request, which has no framed-exchange form), and so is `--record-history`, because a framed exchange is not a request/response flow and writing one would produce a History entry that claims to be a WebSocket with an empty transcript. `--http2` is refused only on an `Upgrade: websocket` template: HTTP/2 has no upgrade mechanism (RFC 9113 §8.1), so a WebSocket over h2 is opened by an RFC 8441 extended `CONNECT` instead, and a seed that IS one sweeps over HTTP/2 with no flag needed, because the handshake bytes say so. `--follow-redirects`, `--timeout` and `--ac` are inert here and the run says so once, up front, rather than pretending otherwise. Each refusal names `--ws-http-only` where that is the way to get what you asked for; under that flag the run is an ordinary HTTP sweep, so all three work, recording included. A WebSocket seed that carries no outbound frames is swept as plain HTTP too: a handshake-only "framed" run would dial a socket per payload just to send nothing.
 
 ### Rotating Tokens with a Macro
 

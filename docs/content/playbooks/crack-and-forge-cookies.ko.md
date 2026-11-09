@@ -7,15 +7,15 @@ weight = 80
 group = "워크벤치"
 +++
 
-서명된 세션 쿠키는 서버가 클라이언트가 바꿀 수 있는 값을 신뢰하지 않게 막습니다. 서명 비밀키가 비밀로 남아 있는 한요. 이 플레이북은 캡처한 Flask, Rack, Django 쿠키를 읽고, 후보 비밀키를 대조하고, 그것을 서명하는 비밀키를 무차별 대입으로 찾고, 원하는 클레임을 담아 쿠키를 다시 서명한 뒤, 서버가 그 위조를 받아들이는지 재생해 확인합니다. 약 10분에, 워드리스트 실행 시간을 더하세요.
+서명 비밀키가 비밀로 지켜지는 한, 서명된 세션 쿠키는 클라이언트가 바꿀 수 있는 값을 서버가 신뢰하지 않게 막아 줍니다. 이 플레이북은 캡처한 Flask, Rack, Django 쿠키를 읽고, 후보 비밀키를 대조하고, 쿠키를 서명한 비밀키를 무차별 대입으로 찾고, 원하는 클레임을 담아 쿠키를 다시 서명한 뒤, 서버가 그 위조를 받아들이는지 재생해 확인합니다. 약 10분에 워드리스트 실행 시간을 더한 만큼 잡으세요.
 
-**Cookie** 탭에서 이 모든 작업을 대화형으로 할 수 있습니다(기본적으로 탭 바 밖에 있으니 **`0`**을 누르고 "cookie"를 입력하거나 `Ctrl-P` → **Go to Cookie**를 쓰세요. [Cookie 가이드](/ko/guide/cookie/) 참고). 이 플레이북은 같은 엔진을 셸에서 구동해 모든 단계를 스크립트로 만들 수 있게 합니다. `gori run cookie` 서브커맨드(스토어 없는 로컬 연산으로, 쿠키는 인수나 stdin에서 받습니다)와 네 개의 MCP 도구입니다.
+**Cookie** 탭에서 이 모든 작업을 대화형으로 할 수 있습니다(기본적으로 탭 바 밖에 있으니 **`0`**을 누르고 "cookie"를 입력하거나 `Ctrl-P` → **Go to Cookie**를 쓰세요. [Cookie 가이드](/ko/guide/cookie/) 참고). 이 플레이북은 같은 엔진을 셸에서 구동해 모든 단계를 스크립트로 만들 수 있게 합니다. 사용하는 것은 `gori run cookie` 서브커맨드(스토어 없는 로컬 연산으로, 쿠키는 인수나 stdin에서 받습니다)와 MCP 도구 네 개입니다.
 
 > **시작하기 전에.** gori를 프록시로 실행해 두고, 서명된 세션 쿠키를 설정하는 응답을 캡처하세요. 로그인 응답의 `Set-Cookie` 헤더가 흔한 출처입니다. 크랙 단계에는 후보 비밀키 워드리스트(한 줄에 하나)도 필요합니다. 공격 권한이 있는 호스트의 쿠키만 테스트하세요. 예시는 `api.example.com`을 대상으로 합니다.
 
 ## 1. 쿠키 디코드 {#1-decode-the-cookie}
 
-캡처한 응답의 `Set-Cookie` 헤더에서 쿠키 값을 복사해 디코드합니다. 디코드는 키 없이도 쿠키를 **payload**, **timestamp**, **signature**로 파싱하므로, 캡처한 어떤 쿠키에도 동작합니다. gori가 프레임워크를 자동 감지하거나(**Flask**, **Rack**, **Django**) `--type`으로 고정할 수 있습니다:
+캡처한 응답의 `Set-Cookie` 헤더에서 쿠키 값을 복사해 디코드합니다. 디코드는 키 없이도 쿠키를 **payload**, **timestamp**, **signature**로 파싱하므로, 캡처한 어떤 쿠키에도 동작합니다. gori가 프레임워크(**Flask**, **Rack**, **Django**)를 자동으로 감지하며, `--type`으로 직접 고정할 수도 있습니다:
 
 ```bash
 gori run cookie 'eyJ1c2VyIjoi...'                 # decode is the default; framework auto-detected
@@ -24,7 +24,7 @@ gori run cookie 'eyJ1c2VyIjoi...' --type flask    # force the format
 
 MCP에서는 `cookie_decode` 도구입니다. 디코드는 쿠키가 *주장하는* 바를 드러낼 뿐 서명을 검사하지는 않습니다. 세션의 내용을 알려 줄 뿐, 서버가 그것을 신뢰할지는 알려 주지 않습니다.
 
-**체크포인트.** 디코드된 payload, 그 timestamp, signature가 출력됩니다.
+**체크포인트.** 디코드된 payload와 timestamp, signature가 출력됩니다.
 
 ## 2. 후보 비밀키로 검증 {#2-verify-against-a-candidate-secret}
 
@@ -36,7 +36,7 @@ gori run cookie 'eyJ1c2VyIjoi...' --verify --secret hunter2
 
 MCP에서는 `cookie_verify`입니다. 하나의 질문에 답합니다. 이 비밀키가 이 서명을 만들어 내는가?
 
-**체크포인트.** 검증이 후보 비밀키가 그 쿠키를 서명하는지 여부를 보고합니다.
+**체크포인트.** 검증은 후보 비밀키가 그 쿠키를 서명하는지 여부를 보고합니다.
 
 ## 3. 비밀키 크랙 {#3-crack-the-secret}
 
@@ -72,5 +72,5 @@ Flask와 Django에서는 `--payload`가 서명할 세션 JSON입니다. Django�
 ## 다음 단계 {#next-steps}
 
 - [토큰 무작위성 평가](/ko/playbooks/grade-token-randomness/): 토큰이 서명되지 않았다면, 대신 예측 가능한지 시험하기
-- [CLI Reference](/ko/reference/cli/#run-cookie): `--salt`, `--algorithm`, `--timestamp`을 포함한 `gori run cookie`의 모든 플래그
+- [CLI Reference](/ko/reference/cli/#run-cookie): `--salt`, `--algorithm`, `--timestamp`를 포함한 `gori run cookie`의 모든 플래그
 - [JWT 공격](/ko/playbooks/attack-a-jwt/): 서명된 JSON Web Token을 위한 자매 워크플로우
