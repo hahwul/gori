@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Probe: `gori run probe promote --format json` prints the new Issue id as MCP `probe_promote` does (#1784)
+
 ## v0.9.3
 
 - History: a wide flow detail shows the request beside the response (`⇧Z` → Request beside response turns it off), and `esc` from a detail's text steps back to its pane strip before it closes the detail (#1835)
