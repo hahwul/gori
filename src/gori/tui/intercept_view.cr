@@ -1118,7 +1118,7 @@ module Gori::Tui
         return
       end
       if @query.blank?
-        screen.text(x, rect.y, QuerySuggest.idle_hint("/ condition", InterceptFilter::HINT_FIELDS, left_w), Theme.muted, width: left_w)
+        screen.text(x, rect.y, "/ condition", Theme.muted, width: left_w)
       else
         # The committed condition stays highlighted — this readout is what you scan to
         # check WHY something is (or isn't) being held.

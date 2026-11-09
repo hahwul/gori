@@ -1441,11 +1441,10 @@ module Gori::Tui
         screen.styled_text(qx, rect.y, @query, Highlight.filter_query(@query, Theme.text, known: QL_KNOWN, shaped: QL_SHAPED),
           Theme.text, width: {rect.x + 1 + left_w - qx, 0}.max)
       else
-        # No QL query typed — whether or not a Scope lens is active. Surface the filter
-        # affordance + fields rather than a bare "(in-scope only)": the Scope lens is
-        # already signalled by the `s` chip on the right, so this row isn't wasted
-        # repeating it, and the user's next move here is to ADD a query atop the lens.
-        screen.text(rect.x + 1, rect.y, QuerySuggest.idle_hint("/ filter", ["tag"] + QL::HINT_FIELDS, left_w), Theme.muted, width: left_w)
+        # No QL query typed — whether or not a Scope lens is active. The key, not the grammar
+        # (that is named once `/` opens), and not "(in-scope only)": the Scope lens is already
+        # signalled by the `s` chip on the right, and the next move here is to ADD a query.
+        screen.text(rect.x + 1, rect.y, "/ filter", Theme.muted, width: left_w)
       end
     end
 
