@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- CLI: `gori run sitemap tag --list --format json` (or `--json`) prints the `[{host, path, tag}]` array MCP `list_sitemap_tags` returns (#1783)
+
 ## v0.9.3
 
 - History: a wide flow detail shows the request beside the response (`⇧Z` → Request beside response turns it off), and `esc` from a detail's text steps back to its pane strip before it closes the detail (#1835)

@@ -19,6 +19,10 @@ module Gori::CLI::Run
   def self.sitemap_tag_row_for_spec(host : String, path : String, tag : String) : String
     sitemap_tag_row(host, path, tag)
   end
+
+  def self.sitemap_tags_json_for_spec(rows : Array({ {String, String}, String })) : String
+    sitemap_tags_json(rows)
+  end
 end
 
 private def sitemap_store(&)
@@ -427,6 +431,24 @@ describe "gori run sitemap tag --list — the TSV line" do
   it "names controls in the host and path halves too, and leaves ordinary text untouched" do
     Gori::CLI::Run.sitemap_tag_row_for_spec("acme.test", "/a\nb", "ok").should eq("acme.test/a⟨LF⟩b\tok")
     Gori::CLI::Run.sitemap_tag_row_for_spec("acme.test", "/api", "payment flow").should eq("acme.test/api\tpayment flow")
+  end
+end
+
+describe "gori run sitemap tag --list --format json" do
+  it "prints the [{host, path, tag}] array MCP list_sitemap_tags returns" do
+    json = Gori::CLI::Run.sitemap_tags_json_for_spec([{ {"acme.test", "/api"}, "payment flow" }])
+    JSON.parse(json).should eq(JSON.parse(%([{"host":"acme.test","path":"/api","tag":"payment flow"}])))
+  end
+
+  it "keeps a tab and a newline in the tag intact" do
+    json = Gori::CLI::Run.sitemap_tags_json_for_spec([{ {"acme.test", "/a\nb"}, "multi\nline\tcol 한글 <b>" }])
+    row = JSON.parse(json).as_a.first
+    row["path"].as_s.should eq("/a\nb")
+    row["tag"].as_s.should eq("multi\nline\tcol 한글 <b>")
+  end
+
+  it "prints an empty array when there are no tags" do
+    Gori::CLI::Run.sitemap_tags_json_for_spec([] of { {String, String}, String }).should eq("[]")
   end
 end
 
