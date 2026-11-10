@@ -135,7 +135,7 @@ gori
 ```
 
 The proxy listens on `127.0.0.1:8070` by default, and a short first-run wizard picks the
-**global default** bind and theme (projects can pin their own later). To intercept HTTPS, trust
+theme, and the **global default** bind when that port is taken (projects can pin their own later). To intercept HTTPS, trust
 gori's root CA. The quickest path is the palette's **Open browser** (`Ctrl-P`), which launches a
 browser already trusted and proxied. Captured traffic lands in **History**; press `Ctrl-P` for the
 command palette or `Space` for context actions.

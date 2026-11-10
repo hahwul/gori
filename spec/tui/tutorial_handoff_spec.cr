@@ -11,14 +11,19 @@ describe "Gori::Tui::Tutorial.first_session_steps" do
     Tour.first_session_steps(Tour::Handoff::Session, 71)[0].should contain("Back in your session")
   end
 
-  # The new-project form is name → description → tags, and ↵ on each advances: three, not two.
-  it "counts one ↵ per field of the new-project form" do
+  # A first project opens on the name's ↵ (`ProjectPicker.name_creates?`, #1841); a later one
+  # is name → description → tags, one ↵ each. The card cannot know which reader it has, so it
+  # names both counts wherever the line has room. The narrow Shell line does not (33 columns,
+  # and it also has to say `gori`), and keeps the first project's count.
+  it "names one ↵ for the first project and three for a later one" do
     Gori::Tui::ProjectPicker::NEW_FIELDS.size.should eq(3)
     [Tour::Handoff::Picker, Tour::Handoff::Shell].each do |handoff|
-      Tour.first_session_steps(handoff, 71)[0].should contain("↵ ×3")
-      Tour.first_session_steps(handoff, 40)[0].should_not contain("twice")
+      line = Tour.first_session_steps(handoff, 71)[0]
+      line.should contain("name → ↵ (")
+      line.should contain("×3")
     end
-    Tour.first_session_steps(Tour::Handoff::Shell, 40)[0].should contain("↵↵↵")
+    Tour.first_session_steps(Tour::Handoff::Picker, 40)[0].should contain("×3")
+    Tour.first_session_steps(Tour::Handoff::Shell, 40)[0].should contain("name → ↵")
   end
 
   # The capture lesson printed the persisted global bind, so `gori -p 18794` was told 18080.

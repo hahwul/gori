@@ -92,6 +92,33 @@ describe Gori::Tui::SetupWizard do
     end
   end
 
+  describe ".first_step" do
+    it "always opens `gori wizard` on NETWORK" do
+      SW.first_step(false, "127.0.0.1", "0").should eq(SW::Step::Bind)
+    end
+
+    it "opens a first run on THEME while the default address is usable" do
+      SW.first_step(true, "127.0.0.1", "0").should eq(SW::Step::Appearance)
+      SW.first_step(true, "", "0").should eq(SW::Step::Appearance) # blank = loopback
+    end
+
+    it "asks a first run about an address that is invalid or already taken" do
+      SW.first_step(true, "not an ip", "0").should eq(SW::Step::Bind)
+      SW.first_step(true, "127.0.0.1", "99999").should eq(SW::Step::Bind)
+      SW.first_step(true, "127.0.0.1", "").should eq(SW::Step::Bind)
+      listener = begin
+        TCPServer.new("127.0.0.1", 0)
+      rescue Socket::Error
+        pending!("cannot bind a loopback listener in this environment")
+      end
+      begin
+        SW.first_step(true, "127.0.0.1", listener.local_address.port.to_s).should eq(SW::Step::Bind)
+      ensure
+        listener.close
+      end
+    end
+  end
+
   # Only "address in use" is a warning; a host this machine cannot bind, or a sandbox that
   # forbids binding altogether, must read as free — the app reports those itself at launch.
   describe ".port_in_use?" do

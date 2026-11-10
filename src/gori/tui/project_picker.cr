@@ -1645,6 +1645,7 @@ module Gori::Tui
 
     private def handle_new(ev : Termisu::Event::Key) : Project | Symbol?
       key = ev.key
+      composing = !@preedit.empty?
       @preedit = "" # any committed key ends an in-progress IME composition
       @flash = nil  # …and dismisses the last refusal, as on the list
       if key.escape?
@@ -1668,6 +1669,11 @@ module Gori::Tui
             # is one more wording to keep in step with the rule.
             set_flash(ProjectPicker.failed_flash("create", @name,
               Gori::Error.new(ProjectRegistry::UNSLUGGABLE_NAME)), ok: false)
+          elsif ProjectPicker.name_creates?(@projects.size) && !composing
+            # Not while an IME composition is open: its last syllable is not in @name yet,
+            # and a create is not something the next key can take back. That ↵ advances
+            # instead, as it always has.
+            return create_from_form
           else
             @new_field = :desc
           end
@@ -1694,6 +1700,21 @@ module Gori::Tui
     end
 
     NEW_FIELDS = [:name, :desc, :tags]
+
+    # Whether ↵ on the name creates the project outright. The very first project does (#1841):
+    # two optional fields were two more confirmations between a new user and the app, and both
+    # can be written later from the Project tab. ↓ still reaches them from the name.
+    def self.name_creates?(project_count : Int32) : Bool
+      project_count == 0
+    end
+
+    # The form's footer for a field that is not the tags row.
+    # Widest first, like the wizard's `footer_hints`: `centered` does not clip, so a hint
+    # wider than the screen would lose its tail, which is the exit.
+    def self.new_form_hint(field : Symbol, project_count : Int32, width : Int32) : String
+      return "↵ next   ↑/↓ fields   esc cancel" unless field == :name && name_creates?(project_count)
+      ["↵ create   ↑/↓ description, tags   esc cancel", "↵ create   ↑/↓ fields   esc cancel"].find(&.size.<=(width)) || "↵ create   esc cancel"
+    end
 
     # ↓ / tab to the next field, ↑ / shift-tab to the previous one, wrapping. Any other key is
     # not a move.
@@ -2650,7 +2671,7 @@ module Gori::Tui
       hint = if @new_field == :tags
                "↵ add/create   tab complete   ←/→ pick   ⌫ remove   ↑/↓ fields   esc cancel"
              else
-               "↵ next   ↑/↓ fields   esc cancel"
+               ProjectPicker.new_form_hint(@new_field, @projects.size, w)
              end
       centered(screen, h - 2, hint, Theme.muted, w)
     end

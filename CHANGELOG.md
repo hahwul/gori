@@ -8,6 +8,7 @@
 - CLI: `gori run sitemap tag --list --format json` (or `--json`) prints the `[{host, path, tag}]` array MCP `list_sitemap_tags` returns (#1783)
 - Help: Shortcuts names the header chips, History's view chip and the Fuzzer's `§N`, MATCH and DIST chips and Mode formula (#1845)
 - Project: the empty Description card says it holds free-text notes (#1845)
+- First run: the wizard asks for the listen address only when the default is taken, its tour offer lands on Skip, and the first project opens on its name's `Enter` (#1846)
 
 ## v0.9.3
 

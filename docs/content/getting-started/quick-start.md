@@ -18,9 +18,9 @@ With no subcommand, gori opens the project picker. The proxy starts when you ope
 gori
 ```
 
-The first launch runs a short [setup wizard](#first-run-wizard) (global bind, theme, and the Miss Ring mascot), then offers a [guided UI tour](#guided-ui-tour). You can take the tour now or skip it and come back; this page covers the same ground against live traffic.
+The first launch runs a short [setup wizard](#first-run-wizard) (theme and the Miss Ring mascot, plus the global bind when the default port is taken), then offers a [guided UI tour](#guided-ui-tour). The offer lands on **Skip**; pick the tour there, or run it later from the palette; this page covers the same ground against live traffic.
 
-At the picker, select **New project**, enter a name, then press `Enter` three times (the description and the tags are optional). On the tags row, `,` or `Enter` adds a tag and `Tab` completes one of the tags your other projects already use; type `#tag` in the picker's search to find the projects carrying it. The guided tour returns you to this picker when it finishes on first launch.
+At the picker, select **New project**, enter a name and press `Enter`. Your first project opens at once; for a later one `Enter` moves on to the optional description and tags (three `Enter` in all), and `↓` reaches those fields on the first one too. On the tags row, `,` or `Enter` adds a tag and `Tab` completes one of the tags your other projects already use; type `#tag` in the picker's search to find the projects carrying it. The guided tour returns you to this picker when it finishes on first launch.
 
 To find which project captured something (a token, a host, an endpoint), press `Ctrl-F` at the picker and type it. gori searches the flows of every project by host and path, and by body text once you have typed three characters, then lists the hits under each project. `Enter` opens that project with the flow's detail showing. `Esc` stops a search that is still running, and closes the search once it has finished.
 
@@ -235,7 +235,7 @@ Re-run the guided setup (global proxy bind default, then theme, then Miss Ring) 
 gori wizard
 ```
 
-The listen IP defaults to `127.0.0.1` (this computer only); `0.0.0.0` lets other devices reach the proxy. The first `Enter` moves from IP to port, and the next continues. The choice becomes the shared default in `settings.json`; a project can pin a different address from its Project tab. If the port is busy, `Enter` again keeps it. `Esc` twice skips the wizard.
+On the first launch the wizard opens on the theme step when the default address (`127.0.0.1:8070`) is free, and `Shift-Tab` steps back to the bind step; `gori wizard` always starts there. The listen IP defaults to `127.0.0.1` (this computer only); `0.0.0.0` lets other devices reach the proxy. The first `Enter` moves from IP to port, and the next continues. The choice becomes the shared default in `settings.json`; a project can pin a different address from its Project tab. If the port is busy, `Enter` again keeps it. `Esc` twice skips the wizard.
 
 The final **Review** step recaps what you picked, names your [editor keyset](/guide/hotkeys/#editor-keysets) and where to change it (the wizard never sets it), and carries one editable row: **Shortcuts**, which `←`/`→` flips between `Ctrl` and `Option (⌥)` for gori's built-in chord family (`^P` `^N` `^W` `^1-9`). Choosing Option *adds* `⌥` aliases rather than replacing Ctrl, which is useful when your terminal or multiplexer never delivers the Ctrl form. See [Command modifier](/guide/hotkeys/#command-modifier) for the macOS Option-as-Meta requirement.
 
