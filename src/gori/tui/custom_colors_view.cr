@@ -40,8 +40,8 @@ module Gori::Tui
     def render(screen : Screen, rect : Rect, colors : Array(Settings::ColormarkerColor),
                sel : Int32, scroll : Int32, focused : Bool) : Nil
       return if rect.w < 6 || rect.h < LIST_MIN_H
-      Frame.card(screen, rect, "CUSTOM COLORS", bg: Theme.bg, border: Frame.pane_border(focused))
-      Frame.border_meta(screen, rect, "CUSTOM COLORS", "#{colors.size}")
+      Frame.card(screen, rect, "CUSTOM COLOURS", bg: Theme.bg, border: Frame.pane_border(focused))
+      Frame.border_meta(screen, rect, "CUSTOM COLOURS", "#{colors.size}")
       inner = rect.inset(1, 1)
       return if inner.empty?
 

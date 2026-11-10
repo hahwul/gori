@@ -504,7 +504,7 @@ module Gori::Tui
     # network values. It is an engagement property for the same reason the timeouts are.
     SETTINGS_LABELS = ["Scope lens", "Sandbox", "Bind IP", "Bind Port", "Proxy protocol",
                        "Proxy host", "Proxy port", "Destination host", "Proxy auth", "Username",
-                       "Password", "Connect timeout", "Idle timeout", "Capture limit", "Proto schema"]
+                       "Password", "Connect timeout (s)", "Idle timeout (s)", "Capture limit (MiB)", "Proto schema"]
     SETTINGS_SCOPE_ROW         =  0
     SETTINGS_SANDBOX_ROW       =  1
     SETTINGS_FIELD_BASE        =  2 # first inline-editable network-field row
@@ -522,7 +522,7 @@ module Gori::Tui
     SETTINGS_USERNAME_INDEX    = SETTINGS_USERNAME_ROW - SETTINGS_FIELD_BASE
     SETTINGS_PASSWORD_INDEX    = SETTINGS_PASSWORD_ROW - SETTINGS_FIELD_BASE
     SETTINGS_PROTOS_FIELD      = 12
-    SETTINGS_LABEL_W           = 16 # value column starts past the widest label ("Connect timeout")
+    SETTINGS_LABEL_W           = 19 # value column starts past the widest label ("Capture limit (MiB)")
     # LABELS, not stored codes — this card round-trips them through `downcase` (see
     # `settings_upstream_proxy`), so each one must be the setting's own spelling in caps.
     # `HTTP+TLS` is Settings::UPSTREAM_TLS_KIND: an HTTP CONNECT proxy reached over TLS, as
@@ -2030,7 +2030,10 @@ module Gori::Tui
     # One OVERVIEW row: its label, its value, an optional value colour (nil = Theme.text), and
     # whether the value truncates from the LEFT. Paths do: the tail names the project, and
     # `Screen#fit`'s right-side ellipsis is precisely the half that identifies it.
-    private record OvRow, label : String, value : String, fg : Color? = nil, elide : Bool = false
+    # `short` is the form a value takes when the column cannot hold it: a clipped
+    # `● ca…` or `(4…` says less than the short form does.
+    private record OvRow, label : String, value : String, fg : Color? = nil, elide : Bool = false,
+      short : String? = nil
 
     # A semantic group of rows plus the ONE line it folds to when the band cannot afford them
     # individually. Same contract as `render_severity` → `render_severity_tally` right below:
@@ -2130,14 +2133,14 @@ module Gori::Tui
       end
       [
         OvGroup.new(ident, fold_identity),
-        OvGroup.new([OvRow.new("Proxy", proxy_value, proxy_color)], proxy_value),
+        OvGroup.new([OvRow.new("Proxy", proxy_value, proxy_color, short: proxy_short)], proxy_value),
         OvGroup.new([
           OvRow.new("Flows", @flow_count.to_s),
           OvRow.new("Captured", human_size(@total_captured)),
           OvRow.new("Issues", issues_value),
           OvRow.new("DB Size", human_size(@db_size)),
         ], fold_volume),
-        OvGroup.new([OvRow.new("Created", created_value)], fold_provenance),
+        OvGroup.new([OvRow.new("Created", created_value, short: @created.try { |c| format_time(c) })], fold_provenance),
         OvGroup.new([OvRow.new("Technologies", tech_value)], "tech #{tech_value}"),
       ]
     end
@@ -2164,8 +2167,14 @@ module Gori::Tui
     # The address an operator points a client at, plus whether the proxy is actually on it.
     # Mirrors the top bar's listen chip (`Chrome.listen_chip`) so the two never disagree.
     private def proxy_value : String
+      "#{proxy_short} #{@capturing ? "capturing" : "paused"}"
+    end
+
+    # The address and the state mark alone, for a column too narrow for the word. The long
+    # form is built on this one, so the two cannot name different addresses or states.
+    private def proxy_short : String
       addr = BindAddress.display(Settings.effective_bind_host, Settings.effective_bind_port)
-      "#{addr} #{@capturing ? "● capturing" : "‖ paused"}"
+      "#{addr} #{@capturing ? "●" : "‖"}"
     end
 
     private def proxy_color : Color
@@ -2260,6 +2269,9 @@ module Gori::Tui
         screen.text(x0, y, row.label + ":", Theme.text_bright, width: {label_w - 1, 0}.max)
         next unless vw > 0
         value = row.elide ? elide_left(row.value, vw) : row.value
+        if (short = row.short) && Screen.display_width(value) > vw
+          value = short
+        end
         screen.text(vx, y, value, row.fg || Theme.text, width: vw)
       end
     end
@@ -2831,7 +2843,7 @@ module Gori::Tui
       x = screen.text(vx, y, on ? "ON" : "OFF", on ? Theme.red : Theme.muted, bg, Attribute::Bold)
       note, nc =
         if !on
-          {"· off — all traffic passes", Theme.muted}
+          {"· all traffic passes", Theme.muted}
         elsif @scope.include_count == 0
           {"⚠ no scope → ALL blocked", Theme.red}
         else
