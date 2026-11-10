@@ -61,3 +61,24 @@ describe Gori::ProjectRegistry do
     end
   end
 end
+
+describe "ProjectPicker's first project (#1841)" do
+  it "creates on the name's ↵ only while there is no project yet" do
+    ProjectPicker.name_creates?(0).should be_true
+    ProjectPicker.name_creates?(1).should be_false
+  end
+
+  it "says so in the form's footer, on the name field only" do
+    ProjectPicker.new_form_hint(:name, 0, 100).should contain("↵ create")
+    ProjectPicker.new_form_hint(:desc, 0, 100).should contain("↵ next")
+    ProjectPicker.new_form_hint(:name, 3, 100).should contain("↵ next")
+  end
+
+  it "keeps the exit in the footer on a narrow terminal" do
+    [100, 44, 40, 30, 20].each do |width|
+      hint = ProjectPicker.new_form_hint(:name, 0, width)
+      hint.should contain("esc cancel")
+      hint.size.should be <= width if width >= 21
+    end
+  end
+end

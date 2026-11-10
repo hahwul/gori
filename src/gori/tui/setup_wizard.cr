@@ -138,7 +138,10 @@ module Gori::Tui
       Review # recap + finish
     end
 
-    def initialize(@term : Termisu, @tour_handoff : Tutorial::Handoff = Tutorial::Handoff::Shell)
+    # `first_run` is the auto-launch (App#run_tui, no settings.json yet), as opposed to
+    # `gori wizard`: see `SetupWizard.first_step`.
+    def initialize(@term : Termisu, @tour_handoff : Tutorial::Handoff = Tutorial::Handoff::Shell,
+                   @first_run : Bool = false)
       # Held as the base Backend: TermisuBackend is generic over the terminal type.
       @backend = TermisuBackend.new(@term).as(Backend)
       @step = Step::Bind
@@ -180,7 +183,10 @@ module Gori::Tui
       @keys_route = nil.as(String?) # REVIEW's "change in …": `Verbs.registry` is not free
       # Review step — offer a guided TUI tour after setup. `@launch_tutorial` is set
       # on finish and read by `run` (below) to launch the tour in this same terminal.
-      @offer = :tour # :tour | :skip
+      # Lands on :skip (#1841): the tour is ten cards about an app the user has not seen yet,
+      # and one ↵ should not be what starts it. It stays one ↑ away, and `help.tour` runs it
+      # from inside a session.
+      @offer = :skip # :tour | :skip
       @launch_tutorial = false
       # Review step also stages the command modifier (see Settings.command_modifier): a
       # first-run chance to pick ⌥ before hitting a terminal that eats Ctrl+digit. Kept on
@@ -203,6 +209,8 @@ module Gori::Tui
       Theme.load_custom # pick up any user themes dropped under <GORI_HOME>/themes
       @theme_name = Theme.canonical(@theme_name)
       @theme_baseline = Theme.active_name
+      @step = SetupWizard.first_step(@first_run, @ip, @port)
+      warn_busy_default if @first_run && @step.bind?
       @running = true
       loop do
         render
@@ -429,6 +437,28 @@ module Gori::Tui
       @step = Step::Appearance
     end
 
+    # Where the wizard opens. A first run skips NETWORK while the default it would offer is
+    # usable (#1841): a newcomer cannot judge a listen address, and REVIEW recaps it. The step
+    # is still there, one ⇧⇥ back from THEME. `gori wizard` is someone asking to see every
+    # choice, and an address that is invalid or already taken is the one case the first run
+    # has a question to ask.
+    def self.first_step(first_run : Bool, host : String, port : String) : Step
+      return Step::Bind unless first_run
+      return Step::Bind if Settings.bind_host_error(host) || !valid_port?(port)
+      port_in_use?(effective_ip(host), port.strip.to_i) ? Step::Bind : Step::Appearance
+    end
+
+    # A first run that opens on NETWORK because the default port is taken says so at once,
+    # on the field to change. Without it the step looked like an ordinary question and the
+    # reason only surfaced two ↵ later. `@port_warned` is set, so ↵ still keeps the value.
+    private def warn_busy_default : Nil
+      return if Settings.bind_host_error(@ip) || !valid_port?(@port)
+      return unless SetupWizard.port_in_use?(effective_ip, @port.strip.to_i)
+      switch_bind_field(:port)
+      @port_warned = "#{effective_ip}:#{@port.strip}"
+      @status = "port #{@port.strip} busy · ↵ keep"
+    end
+
     # Whether something already listens on `host`:`port` — a probe bind, released at once.
     # ONLY "address in use" counts: a host this machine cannot bind (a remote IP, a typo
     # that parses) is not this screen's question, and a sandbox that forbids binding at all
@@ -443,9 +473,13 @@ module Gori::Tui
       false
     end
 
-    private def valid_port?(s : String) : Bool
+    def self.valid_port?(s : String) : Bool
       p = s.strip.to_i?
       !p.nil? && 0 <= p <= 65535
+    end
+
+    private def valid_port?(s : String) : Bool
+      SetupWizard.valid_port?(s)
     end
 
     private def bind_value : String
@@ -567,9 +601,13 @@ module Gori::Tui
       @running = false
     end
 
-    private def effective_ip : String
-      ip = @ip.strip
+    def self.effective_ip(ip : String) : String
+      ip = ip.strip
       ip.empty? ? "127.0.0.1" : ip
+    end
+
+    private def effective_ip : String
+      SetupWizard.effective_ip(@ip)
     end
 
     # --- mouse ---------------------------------------------------------------
