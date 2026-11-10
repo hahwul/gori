@@ -463,7 +463,7 @@ module Gori
       # current_tab == :history).
       def for_scope(scope : Scope, ctx : ExecContext, query : String = "") : Array(Definition)
         candidates = self.select { |v| !v.hidden? && v.scope == scope && v.available?(ctx) }
-        # Empty Global browse: curated palette order (Settings → Go to → rest → exit).
+        # Empty Global browse: curated palette order (see `browse_palette`).
         # Other scopes keep registration order; fuzzy queries always rank by score.
         return browse_palette(candidates) if query.empty? && scope == Scope::Global
         rank(candidates, query)
@@ -518,24 +518,36 @@ module Gori
 
       KEYWORD_MIN_QUERY = 2
 
+      # What a first session needs before anything else, in this order: the empty-state cards
+      # send the operator here for the first two (`^P → Open browser`).
+      PALETTE_START = %w[browser.open ca.export help.tour]
+
       # Ctrl-P empty-query order (stable within each group via registration index):
-      #   1. Settings
+      #   1. PALETTE_START
       #   2. Go to … tab jumps, then other Navigation
-      #   3. Everything else (Action / System / …)
-      #   4. Back to projects, then Quit gori (exit paths always last)
+      #   3. Settings — the one generic row; a section's own row is found by typing
+      #   4. Everything else (Action / System / …)
+      #   5. Back to projects, then Quit gori (exit paths always last)
+      # Settings led this list with one row per section, so the browse opened on a screenful
+      # of preferences and the commands the cards name were below the fold.
       private def browse_palette(candidates : Array(Definition)) : Array(Definition)
-        candidates.each_with_index.to_a.sort_by { |(v, i)| {palette_group(v), i} }.map { |(v, _)| v }
+        listed = candidates.reject { |v| v.category.settings? && v.id != "settings.open" }
+        listed.each_with_index.to_a.sort_by { |(v, i)| {palette_group(v), i} }.map { |(v, _)| v }
       end
 
-      private def palette_group(v : Definition) : Int32
-        return 90 if v.id == "app.back"
-        return 99 if v.id == "app.quit"
-        case v.category
-        in Category::Settings   then 0
-        in Category::Navigation then v.id.starts_with?("tab.") ? 1 : 2
-        in Category::Action     then 10
-        in Category::System     then 10
+      private def palette_group(v : Definition) : {Int32, Int32}
+        return {90, 0} if v.id == "app.back"
+        return {99, 0} if v.id == "app.quit"
+        if at = PALETTE_START.index(v.id)
+          return {0, at}
         end
+        group = case v.category
+                in Category::Settings   then 3
+                in Category::Navigation then v.id.starts_with?("tab.") ? 1 : 2
+                in Category::Action     then 10
+                in Category::System     then 10
+                end
+        {group, 0}
       end
     end
   end

@@ -379,6 +379,23 @@ describe Gori::Tui::FuzzerView do
     end
   end
 
+  describe "#run_step" do
+    it "names the first prerequisite a run still lacks, then :run" do
+      view = loaded_fuzzer
+      view.run_step.should eq(Gori::Tui::TrafficEmptyState::FuzzStep::Mark)
+      view.auto_mark
+      view.run_step.should eq(Gori::Tui::TrafficEmptyState::FuzzStep::Payloads)
+      view.apply_set(nil, Gori::Tui::SetSpec.new(:list, "a"))
+      view.run_step.should eq(Gori::Tui::TrafficEmptyState::FuzzStep::Run)
+    end
+
+    it "is nil for a race, which draws from no position and no set" do
+      view = loaded_fuzzer
+      view.config.race_count = 2
+      view.run_step.should be_nil
+    end
+  end
+
   describe "#auto_mark" do
     # Fuzz::Template.auto_mark is a deliberate no-op once ANY § is present: it will not
     # double-mark, and it must not clear the operator's own markers to re-derive them.
