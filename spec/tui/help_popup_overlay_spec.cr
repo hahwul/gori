@@ -249,6 +249,38 @@ describe Gori::Tui::HelpPopupOverlay do
       ov.query.should be_empty
     end
 
+    # Bare `?` opens this card, so `?` again is the way on to the Help tab — but only while
+    # browsing: in search it is a character like any other.
+    it "leaves for the Help tab on `?`, and types it while searching" do
+      ov = shortcuts
+      full = 0
+      ov.on_full = -> { full += 1; nil }
+      h = OverlayHarness.new(ov)
+      ov.hint.should contain("? Help tab")
+      h.press(Termisu::Input::Key::Slash, '?')
+      full.should eq(1)
+      begin_search(h)
+      h.press(Termisu::Input::Key::Slash, '?')
+      full.should eq(1)
+      ov.query.should eq("?")
+    end
+
+    # A paste is typed key by key. Over a read-only card a pasted `?` would close it and
+    # switch tabs, and a pasted `/` would open the search: only the search box takes one.
+    it "takes a paste only into the search box" do
+      ov = shortcuts
+      h = OverlayHarness.new(ov)
+      ov.takes_pasted?(ev('?')).should be_false
+      begin_search(h)
+      ov.takes_pasted?(ev('?')).should be_true
+    end
+
+    it "offers no Help-tab key on a card that has nowhere to go" do
+      ov = HelpPopupOverlay.query_reference
+      ov.hint.should_not contain("Help tab")
+      OverlayHarness.new(ov).press(Termisu::Input::Key::Slash, '?').should eq(:open)
+    end
+
     it "drops every OTHER ctrl chord instead of typing its letter into search" do
       # This is what `!ev.ctrl? && !ev.alt?` on the printable arm buys, and it is NOT what the
       # ^P example above proves: ^P is claimed by an earlier arm, so that one passes with or

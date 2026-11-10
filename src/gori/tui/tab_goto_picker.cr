@@ -80,6 +80,17 @@ module Gori::Tui
       "type to filter · ↑/↓ select · ↵ open · esc cancel"
     end
 
+    # Did another tool's name for this tab find it (`Chrome::TAB_KEYWORDS`)? The whole query
+    # has to START such a name, as in the palette, so `mat` still opens the Rewriter its line
+    # names rather than a Fuzzer reached through the middle of "automate". Target answers for
+    # Discover's names too: Discover is its sub-tab and has no row here.
+    def self.alias?(sym : Symbol, query : String) : Bool
+      return false if query.size < 2
+      names = Chrome.tab_keywords(sym)
+      names += Chrome.tab_keywords(:discover) if sym == :target
+      names.any?(&.starts_with?(query))
+    end
+
     # Every whitespace-separated term must appear (case-insensitive); an all-digit term also
     # matches the row whose SLOT it is, so `0` then `3` is the long way round to `3` rather
     # than a query that finds nothing. Resets the cursor to the top.
@@ -89,7 +100,8 @@ module Gori::Tui
     # settings", and Project is row 1, so typing `target` used to select PROJECT and ↵ went
     # there — the one query a reader is most likely to type for Target. Ranking is the fix
     # rather than rewording the line, since the collision is structural: twenty-one summaries
-    # about one tool will keep naming each other's tabs.
+    # about one tool will keep naming each other's tabs. Last come the rows that show NO
+    # matching text at all, found only by `alias?`.
     protected def refilter : Nil
       terms = query.downcase.split.map { |t| {t, (m = t.match(/\A(\d):?\z/)) ? m[1] : nil} }
       if terms.empty?
@@ -97,13 +109,18 @@ module Gori::Tui
       else
         named = [] of Row
         described = [] of Row
+        aliased = [] of Row
+        q = query.downcase.strip
         @indexed.each do |(row, hay, slot)|
-          next unless terms.all? { |(t, n)| hay.includes?(t) || (n && n == slot) }
+          unless terms.all? { |(t, n)| hay.includes?(t) || (n && n == slot) }
+            aliased << row if TabGotoPicker.alias?(row.sym, q)
+            next
+          end
           # The name half of the haystack is everything before the summary — `label sym`.
           by_name = terms.all? { |(t, n)| "#{row.label} #{row.sym}".downcase.includes?(t) || (n && n == slot) }
           (by_name ? named : described) << row
         end
-        @filtered = named + described
+        @filtered = named + described + aliased
       end
       @selected = 0
       @scroll = 0

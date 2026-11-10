@@ -11,7 +11,7 @@ describe "Runner.unbound_key_hint" do
     hint = Runner.unbound_key_hint(Gori::Verb::Chord.new("x")).not_nil!
     hint.should contain("‹x›")
     hint.should contain("space menu")
-    hint.should contain("{tab.help} help")
+    hint.should contain("{help.hotkeys} help")
   end
 
   it "spells a typed capital as the shifted chord it arrived as" do
@@ -34,7 +34,7 @@ describe "Runner.unbound_key_hint" do
     registry = Gori::Verbs.registry
     line = Gori::Hotkeys.expand(registry, Runner.unbound_key_hint(Gori::Verb::Chord.new("x")).not_nil!)
     line.should contain("? help")
-    line.should_not contain("{tab.help}")
+    line.should_not contain("{help.hotkeys}")
   end
 
   it "tells a text editor in READ how to type, from the live keymap" do
@@ -69,5 +69,20 @@ describe "Runner.read_mode_global?" do
   it "appends the way to type, resolved against the live keymap" do
     Gori::Hotkeys.expand(registry, Runner.read_mode_note("capture off"))
       .should eq("capture off · READ: i/↵ to type")
+  end
+end
+
+# `c` and `i` are bare letters live on the tab bar a session lands on: one closes the listener,
+# the other holds every request, and neither shows on the tab being looked at. When a KEY
+# tripped one, its toast names that key as the way back.
+describe "Runner.undo_key_note" do
+  it "keeps the key on the toast's own segment, where a narrow status row cannot drop it" do
+    note = Runner.undo_key_note("intercept ON — held traffic waits", "i", "turns it off")
+    note.should eq("intercept ON — held traffic waits (i turns it off)")
+    note.should_not contain(" · ")
+    # 80×24 leaves the tab bar 59 hint columns beside the companion chip.
+    note.size.should be <= 59
+    read = Runner.read_mode_note(Runner.undo_key_note("capture off", "c", "turns it back on"))
+    Gori::Hotkeys.expand(Gori::Verbs.registry, read).size.should be <= 59
   end
 end

@@ -165,7 +165,7 @@ module Gori
         Verb::Scope::Body, available: history_targets, intent: :copy_as, group: :copy) { |ctx| ctx.copy_as_open; nil }
 
       r.register Verb::Definition.new(
-        "history.repeater", "Repeater flow", "Open the selected flow in the Repeater tab",
+        "history.repeater", "Send to Repeater", "Open the selected flow in the Repeater tab",
         Verb::Scope::Body, [Verb::Chord.new("r", ctrl: true)],
         available: history_targets, mnemonic: 'r', intent: :to_repeater, pinned: true, group: :send) { |ctx| ctx.repeater_selected; nil }
 
@@ -250,7 +250,7 @@ module Gori
       end
 
       r.register Verb::Definition.new(
-        "repeater.send", "Send repeater", "Resend the request byte-exact and diff the response",
+        "repeater.send", "Send request", "Resend the request byte-exact and diff the response",
         Verb::Scope::Repeater, [Verb::Chord.new("r", ctrl: true)],
         available: in_repeater, intent: :run) { |ctx| ctx.repeater_send; nil }
       # Send's other half (#1631): an event stream reads until the origin ends it, so the TUI
@@ -737,7 +737,7 @@ module Gori
       # + mnemonic; repeater/issue/fuzz close the detail first so it doesn't float over
       # the destination tab.
       r.register Verb::Definition.new(
-        "detail.repeater", "Repeater flow", "Open this flow in the Repeater tab",
+        "detail.repeater", "Send to Repeater", "Open this flow in the Repeater tab",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("r", ctrl: true)],
         mnemonic: 'r', intent: :to_repeater, pinned: true, group: :send) { |ctx| ctx.close_detail; ctx.repeater_selected; nil }
 

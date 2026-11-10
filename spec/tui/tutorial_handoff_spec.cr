@@ -60,7 +60,7 @@ describe "Gori::Tui::Tutorial.first_session_steps" do
     registry = Gori::Verbs.registry
     [71, 33].each do |width|
       text = Tour.first_session_steps(Tour::Handoff::Shell, width, registry).join('\n')
-      %w[browser.open ca.export capture.toggle history.repeater repeater.send tab.help help.tour].each do |id|
+      %w[browser.open ca.export capture.toggle history.repeater repeater.send help.hotkeys help.tour].each do |id|
         text.should contain(Tour.reach(registry, id))
       end
     end

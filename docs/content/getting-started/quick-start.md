@@ -109,7 +109,7 @@ You don't need to memorize tab-specific keys. Two keys reach every action:
 
 Both show each action's shortcut beside it, so opening them is also how you learn the keys. Try it now on the flow you just captured:
 
-1. In **History**, press `↓` to select your flow, then `Space`. The letter on the left of a row runs it; the key on the right (`^R` beside **Repeater flow**) does the same without the menu. A row marked `›`, such as `>` **Send flow to…**, opens a second card; `Esc` steps back. Press `Esc` until the menu closes.
+1. In **History**, press `↓` to select your flow, then `Space`. The letter on the left of a row runs it; the key on the right (`^R` beside **Send to Repeater**) does the same without the menu. A row marked `›`, such as `>` **Send flow to…**, opens a second card; `Esc` steps back. Press `Esc` until the menu closes.
 2. Press `Ctrl-P` and type `send`. The History actions come first under `THIS TAB`, each with the key or menu path that reaches it (`␣ > c` means `Space`, `>`, `c`). Press `Esc`.
 
 <figure class="tui-shot">
@@ -139,7 +139,7 @@ gori is a row of tabs. The default order starts Project → Target → **History
 | `Esc` | Pop focus back toward the tab bar |
 | `Tab` / `Shift-Tab` | Move focus between the tab bar and panes |
 
-Mouse works when enabled (Preferences → **Editor & Keys** → **Mouse**): click a tab, click a row to select, click again to open. The **Help** tab (`?`) is the full key cheatsheet inside the app.
+Mouse works when enabled (Preferences → **Editor & Keys** → **Mouse**): click a tab, click a row to select, click again to open. `?` opens the full key cheatsheet as a popup, starting at the tab you are on.
 
 ## 5. Read a flow in History
 
@@ -215,7 +215,7 @@ Keep this table nearby until the chords stick:
 |-----|--------|--------|
 | `Space` | Focused pane | Space menu: this pane's actions, one letter each |
 | `Ctrl-P` | Anywhere | Command palette: type any action's name |
-| `?` | Anywhere | Help: the full key sheet |
+| `?` | Anywhere | Help: the key sheet as a popup, starting at this tab |
 | `Ctrl-,` | Anywhere | Preferences (all settings in one modal) |
 | `c` / `i` / `s` | Anywhere | Capture / intercept / scope lens |
 | `[` `]` · `1`-`9` | Anywhere | Switch tabs |

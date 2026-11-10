@@ -174,7 +174,7 @@ module Gori
         ctx.current_tab == :repeater && ctx.repeater_read_mode? && !ctx.editor_pane?
       end
       r.register Verb::Definition.new(
-        "repeater.send-enter", "Send repeater (↵)", "Resend the request byte-exact and diff the response",
+        "repeater.send-enter", "Send request (↵)", "Resend the request byte-exact and diff the response",
         Verb::Scope::Repeater, [Verb::Chord.new("enter")],
         hidden: true, available: in_repeater_response) { |ctx| ctx.repeater_send; nil }
     end

@@ -354,7 +354,7 @@ describe "the core-loop hints" do
       ctrl_r = Gori::Verb::Chord.new("r", ctrl: true)
       below = Runner.body_scope_verb(ctrl_r, Gori::Verb::Scope::Body, keymap, reg).not_nil!
       below.id.should eq("history.repeater")
-      Runner.enter_first_hint(ctrl_r, below.title).should eq("‹^R› — press ↵ to enter the list, then ^R repeater flow")
+      Runner.enter_first_hint(ctrl_r, below.title).should eq("‹^R› — press ↵ to enter the list, then ^R send to repeater")
       # Alt is a terminal's Meta prefix on the bar, not a body chord.
       Runner.body_scope_verb(Gori::Verb::Chord.new("r", alt: true), Gori::Verb::Scope::Body, keymap, reg).should be_nil
     end

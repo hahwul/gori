@@ -289,7 +289,10 @@ describe "Gori::Verbs.register_core" do
         ctx.call_names.should eq([:focus_tab])
         ctx.args_for(:focus_tab).should eq([tab])
       end
-      r["tab.help"].chords.should eq([typed_chord("?")])
+      # Bare `?` is the Shortcuts POPUP, which keeps the pane the question was asked from;
+      # the Help tab is reached through it (`?` again), the `0` picker or the palette.
+      r["tab.help"].chords.should be_empty
+      r["help.hotkeys"].chords.should eq([typed_chord("?")])
       verb_intents(r, "tab.discover").should eq([:goto_discover]) # a Target sub-tab, not a tab
     end
 

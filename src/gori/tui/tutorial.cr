@@ -103,8 +103,8 @@ module Gori::Tui
     # pointing past TABS set @p_tab to a tab no chip matches, so the palette closed onto a
     # bar with NOTHING highlighted. Help is the tab that lost its index — it starts off the
     # bar now (Chrome::DEFAULT_HIDDEN), which is exactly why its row still reads "Open Help"
-    # and carries no number: the palette is one of the doors (`?`, `0`, ^P) that reach a tab
-    # no digit does.
+    # and carries no number: the palette is one of the doors (`?` twice, `0`, ^P) that reach a
+    # tab no digit does.
     #
     # These are the APP half, the one an empty query browses. `Settings: Companion` is there so
     # the lesson's query (PALETTE_DEMO_QUERY) finds a row in both groups, as it does in the app.
@@ -289,7 +289,7 @@ module Gori::Tui
       browser, ca = reach(registry, "browser.open"), reach(registry, "ca.export")
       cap, ins = reach(registry, "capture.toggle"), reach(registry, "editor.insert")
       to_rep, send = reach(registry, "history.repeater"), reach(registry, "repeater.send")
-      help, tour = reach(registry, "tab.help"), reach(registry, "help.tour")
+      help, tour = reach(registry, "help.hotkeys"), reach(registry, "help.tour")
       if width < 66
         first = case handoff
                 when Handoff::Picker  then "New project: name → ↵ (later ×3)"
@@ -378,7 +378,7 @@ module Gori::Tui
     # No `i` here: outside an editor it is intercept, and a cheat-sheet line has no room to
     # say which (#1380). The Intercept lesson is where that is taught.
     def self.done_extra_lines(width : Int32, registry : Verb::Registry = Verbs.registry) : {String, String}
-      pal, help = reach(registry, "app.palette"), reach(registry, "tab.help")
+      pal, help = reach(registry, "app.palette"), reach(registry, "help.hotkeys")
       if width < 50
         {"Keys: 1-9 · space · #{pal} · #{help} help", "Re-run: gori tutorial"}
       elsif width < 71
@@ -1826,7 +1826,7 @@ module Gori::Tui
       when Step::Capture   then "CONNECT & CAPTURE · proxy, CA, #{reach("capture.toggle")}"
       when Step::Intercept then "INTERCEPT · #{reach("intercept.toggle")} hold, #{reach("intercept.forward")} forward"
       when Step::Practice  then "TRY IT · four moves, six checks"
-      when Step::Leave     then "HELP & LEAVING · #{reach("tab.help")} · ^D"
+      when Step::Leave     then "HELP & LEAVING · #{reach("help.hotkeys")} · ^D"
       else                      "YOU'RE READY"
       end
     end
@@ -2388,8 +2388,10 @@ module Gori::Tui
       iw = {box.w - 4, 1}.max
       y = box.y + 2
       rows = [
-        {reach("tab.help"), "Help: every key, by where you are"},
-        {reach("help.hotkeys"), "the same, as a popup"},
+        {reach("help.hotkeys"), "Help: every key, starting where you are"},
+        # A literal: it is the popup's own key (like its `/`), not `help.hotkeys`' chord, so
+        # it does not follow a rebind of the key that opened the card.
+        {"?", "inside that popup: the full Help tab"},
         {"^D / ^C ×2", "quit — the first press only asks"},
         {reach("app.back-key"), "on the tab bar: back to the project picker"},
         {"esc", "one level up; never quits"},

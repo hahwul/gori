@@ -1922,9 +1922,37 @@ module Gori::Tui
       verb = @session.registry[id]
       from_read = Runner.read_mode_global?(verb, chord, editor_read_mode?)
       before = @toast
-      @toast = verb.call(self) || @toast
+      call_keyed(id, chord)
       tag_read_mode_toast(before) if from_read
       true
+    end
+
+    # Run the verb a KEY resolved to. The two proxy switches a bare letter flips (`c` closes
+    # the listener, `i` starts holding every request) are live on the tab bar a session lands
+    # on, and neither shows on the tab being looked at: the client just stops loading. So when
+    # this press left one of them in that state, its toast names the key back — the chord that
+    # was just pressed, which from this same focus is by construction the one that undoes it.
+    # A flip from the palette or a click names no key: from there the letter may mean
+    # something else (Probe's `c`, an editor's `i`).
+    private def call_keyed(id : String, chord : Verb::Chord) : Nil
+      was = proxy_switch_tripped?(id)
+      @toast = @session.registry[id].call(self) || @toast
+      return unless was == false && proxy_switch_tripped?(id) && (toast = @toast)
+      @toast = Runner.undo_key_note(toast, Hotkeys.display_label(chord), id == "capture.toggle" ? "turns it back on" : "turns it off")
+    end
+
+    # Is the switch `id` flips in the state that stops a client's traffic? nil for any other verb.
+    private def proxy_switch_tripped?(id : String) : Bool?
+      case id
+      when "capture.toggle"   then !@session.capturing?
+      when "intercept.toggle" then @session.interceptor.enabled?
+      end
+    end
+
+    # In brackets on the toast's own segment, not after a ` · `: `Chrome.fit_hints` drops
+    # trailing segments first, and the key is the half a narrow status row must keep.
+    def self.undo_key_note(toast : String, key : String, does : String) : String
+      "#{toast} (#{key} #{does})"
     end
 
     # A Global breath letter (`c` capture, `s` scope lens) that fired from a text editor in
@@ -1953,7 +1981,7 @@ module Gori::Tui
     private def dispatch_global_chord(ev : Termisu::Event::Key) : Bool
       return false unless chord = Keybind.from_event(ev)
       return false unless id = @keymap.resolve_global(chord, @session.registry, self)
-      @toast = @session.registry[id].call(self) || @toast
+      call_keyed(id, chord)
       true
     end
 
@@ -2951,7 +2979,7 @@ module Gori::Tui
 
     # The line for a printable the operator typed that nothing in the current scope (or
     # Global) binds. Only for a BARE character: a modified chord is deliberate, and the named
-    # keys are navigation that some scopes legitimately leave unbound. `{tab.help}` resolves
+    # keys are navigation that some scopes legitimately leave unbound. `{help.hotkeys}` resolves
     # through `Hotkeys.expand` at the call site so a rebound `?` is what the line names.
     # `read_mode`: the focused pane is a text editor in READ, so the operator was most likely
     # typing — the way to type is the answer, not "nothing bound".
@@ -2959,7 +2987,7 @@ module Gori::Tui
       return nil if chord.ctrl || chord.alt || chord.key.size != 1
       key = "‹#{Hotkeys.display_label(chord)}›"
       return "#{key} — READ mode: #{EditorPane::INSERT_KEYS} to type · space menu" if read_mode
-      "#{key} — nothing bound here · space menu · {tab.help} help"
+      "#{key} — nothing bound here · space menu · {help.hotkeys} help"
     end
 
     # …and the same line for a key that IS bound — one level down. On the tab bar `/` answered
@@ -3374,13 +3402,13 @@ module Gori::Tui
         # keypress lands on one of them — and both change what the PROXY does, from a tab that
         # shows neither: `i` starts holding every request, `c` stops recording entirely. They
         # were the only unadvertised keys at this focus with an effect outside the current tab.
-        # `{tab.help}` sits in the escape-hatch tail with `^P cmds`, which Chrome.fit_hints keeps
+        # `{help.hotkeys}` sits in the escape-hatch tail with `^P cmds`, which Chrome.fit_hints keeps
         # when the row is narrow: it drops the head's extras first.
         #
         # Seven tokens, so the CPU/MEM readout keeps its room at a common width (it yields to
         # hints — Chrome::YIELDING_CHIPS). Not here: `1-9/0 tabs`, which the bar's own `1:`…`0:Tabs`
         # labels already say, and `^D quit`, which Help lists and the project picker offers.
-        return Hotkeys.expand(@session.registry, "←/→ switch tab · ↹/↵ enter · {capture.toggle} capture · {intercept.toggle} intercept · ^P cmds · {tab.help} help · q projects") if @focus == :menu
+        return Hotkeys.expand(@session.registry, "←/→ switch tab · ↹/↵ enter · {capture.toggle} capture · {intercept.toggle} intercept · ^P cmds · {help.hotkeys} help · q projects") if @focus == :menu
         if @focus == :subtabs
           # On the ⌕ affordance the strip's own keys are the wrong story — ↵ lists every
           # sub-tab here instead of entering one. Only ever reached when the pill is really
@@ -4145,18 +4173,20 @@ module Gori::Tui
       open_overlay(ov)
     end
 
-    # Help's cheat-sheet as a popup over the current pane (the help.hotkeys palette entry).
-    # Read-only, so there is no on_commit.
+    # Help's cheat-sheet as a popup over the current pane (`help.hotkeys`, bare `?`).
+    # Read-only, so there is no on_commit. `?` again inside it goes on to the Help tab.
     #
     # `@active_tab` is what makes this worth having over `tab.help`: the card opens on the
     # section for the tab the operator is standing in, so the question they arrived with is
     # already on screen. The registry goes through so the key column follows a rebind — the
     # popup renders HelpView's own rows, not a copy of SECTIONS.
     def open_help_shortcuts : Nil
+      return if @active_tab == :help # the same rows are the page already on screen
       ov = HelpPopupOverlay.shortcuts(@session.registry, @active_tab)
       # Same ordering rule as open_passthrough: drop this modal BEFORE raising the palette,
       # and via leave_overlay so no pop-back lands on top of it.
       ov.on_palette = -> { jump_to_palette }
+      ov.on_full = -> { leave_overlay; focus_tab(:help) }
       open_overlay(ov)
     end
 

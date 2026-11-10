@@ -61,8 +61,37 @@ module Gori::Tui
       :issues      => "what you found, ranked and written up",
       :evidence    => "frozen snapshots the project archived",
       :notes       => "scratch notes kept with the project",
-      :help        => "the keyboard cheat-sheet — ? anywhere",
+      :help        => "the full keyboard cheat-sheet",
     }
+
+    # What OTHER tools call this tab's job, lowercase — the words someone arriving from Burp,
+    # ZAP or Caido types into `^P` or the `0` picker before they know gori's names. Read by the
+    # `tab.*` verbs' `keywords:` and by TabGotoPicker; both match a query that is a PREFIX of a
+    # keyword, so the FIRST word of an entry is what has to be foreign. Other tools' words
+    # only, never gori's own: "proxy history" would answer `proxy` with a jump to History.
+    # `:discover` is Target's sub-tab, which has its own `tab.discover` jump.
+    TAB_KEYWORDS = {
+      :target      => ["site map", "spider", "crawl"],
+      :discover    => ["crawler", "spider", "dirbuster", "content discovery", "forced browsing"],
+      :history     => ["logger"],
+      :intercept   => ["breakpoint"],
+      :repeater    => ["replay", "resend", "requester"],
+      :fuzzer      => ["intruder", "automate", "bruteforce", "brute force"],
+      :miner       => ["param miner", "arjun"],
+      :oast        => ["collaborator", "interactsh", "oob", "out-of-band"],
+      :sequencer   => ["entropy", "randomness"],
+      :decoder     => ["encoder", "base64"],
+      :rewriter    => ["match and replace", "tamper"],
+      :colormarker => ["highlight"],
+      :probe       => ["scanner", "audit", "vulnerability"],
+      :authorize   => ["autorize", "authz", "idor", "access control"],
+      :issues      => ["vulnerabilities"],
+      :notes       => ["notepad", "organizer"],
+    }
+
+    def self.tab_keywords(sym : Symbol) : Array(String)
+      TAB_KEYWORDS[sym]? || [] of String
+    end
 
     # This tab's one line, or "" for an unknown key — a future tab renders a blank column
     # rather than raising on the render path.
@@ -89,7 +118,8 @@ module Gori::Tui
     # — the capture-triage-retest-record loop, end to end. OAST, Decoder, JWT, Comparer and
     # Rewriter are workbenches an operator reaches FOR, not ones they live in; they start
     # behind `0` alongside the specialised tabs that were already hidden. Help joins them
-    # because `?` opens it from anywhere, which is a better affordance than a slot.
+    # because `?` opens its cheat-sheet as a popup from anywhere (and `?` again goes on to the
+    # tab), which is a better affordance than a slot.
     #
     # `TABS` is deliberately NOT reordered to achieve this: its order is what reconcile uses
     # to slot a NEW tab next to its catalog neighbours in an existing config, so it has to keep

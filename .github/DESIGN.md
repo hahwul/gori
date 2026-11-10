@@ -5284,3 +5284,20 @@ is reads at a glance.
   default) is how the operator likes to read, so `⇧Z` → Request beside response writes it, unlike
   hex, which is a per-open look.
 
+### 2026-11-10: `?` is the Shortcuts popup, and the Help tab is one more `?` away
+
+**Problem.** `?` is the key a new operator presses first, and it answered with the Help tab at
+GLOBAL, whichever tab it was pressed from: the pane, the selection and the place were gone, and
+the section they wanted was a scroll away. The card that opens on the current tab's section and
+closes back onto the pane already existed (`help.hotkeys`), reachable only by typing its name
+into `^P`.
+
+**Decision.**
+
+- **`?` is `help.hotkeys`.** The chord moves from `tab.help`, which keeps no chord of its own.
+  `{help.hotkeys}` is the token for "the help key" in hints, Help rows and the tour.
+- **`?` again, inside the popup, opens the Help tab.** It is the popup's own key like `/`, live
+  only while browsing (in search it is a character), and only on the Shortcuts card: the Query
+  reference a filter bar's `?` opens has nowhere further to go.
+- **The tab stays where it was.** `0`, the palette's Go to Help and a saved bar slot reach it.
+

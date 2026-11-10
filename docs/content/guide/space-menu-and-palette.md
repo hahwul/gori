@@ -15,7 +15,7 @@ gori has hundreds of actions, and you do not need to learn their keys up front. 
 | `Space` | The **space menu**: what you do most in the pane you are in, one letter per action | You know roughly what you want to do *here* |
 | `Ctrl-P` | The **command palette**: every action, found by typing its name | You don't know where something lives, or you rarely need it |
 
-Both show each action's own key beside it, so every visit teaches you the shortcut, and you need them less the more you use them. `?` opens the **Help** tab, the full key sheet.
+Both show each action's own key beside it, so every visit teaches you the shortcut, and you need them less the more you use them. `?` opens the full key sheet as a popup, starting at the tab you are on.
 
 > **Learn it hands-on.** `gori tutorial` (or `Ctrl-P` → **Guided tour** from inside a session) has a lesson on each, on a mock UI where nothing you press is real.
 
@@ -31,7 +31,7 @@ Press `Space` in any list or pane. A card opens with the actions for **where you
 How to read the card:
 
 - **The letter on the left runs the row.** Press `y` and the flow is copied; the menu closes.
-- **The key on the right is the row's shortcut.** `r Repeater flow ^R` means `Ctrl-R` sends to the Repeater from the list, with no menu at all. A row without one is reached through the menu (or the palette).
+- **The key on the right is the row's shortcut.** `r Send to Repeater ^R` means `Ctrl-R` sends to the Repeater from the list, with no menu at all. A row without one is reached through the menu (or the palette).
 - **A `›` row opens a second card** instead of running. See [Second cards](#cards).
 - **Rows are grouped by purpose**: VIEW, SEND, TRIAGE, COPY, and so on. Delete sits under DANGER and a whole-tab wipe under WIPE, always last, and a wipe asks before it acts.
 
@@ -116,7 +116,7 @@ The full list is in [Hotkeys → Actions only the palette lists](/guide/hotkeys/
 
 You need a project with a few captured flows. The [Quick Start](/getting-started/quick-start/) gets you there.
 
-1. Press `3` for **History** and `↓` to select a flow. Press `Space` and read the card: find the `›` rows, and the `^R` beside **Repeater flow**. Press `Esc`.
+1. Press `3` for **History** and `↓` to select a flow. Press `Space` and read the card: find the `›` rows, and the `^R` beside **Send to Repeater**. Press `Esc`.
 
    **Checkpoint.** You can say, without opening the menu, which key sends the selected flow to the Repeater.
 
