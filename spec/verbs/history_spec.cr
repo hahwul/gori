@@ -275,6 +275,14 @@ describe "Gori::Verbs.register_history" do
       r["repeater.duplicate-subtab"].available?(on(:repeater)).should be_false # zero sessions
     end
 
+    it "keeps New at level 1 in a pane view, beside Paste cURL" do
+      # Both are strip verbs; unpinned, a pane view folds them into Sub-tabs… — which on an
+      # empty tab put the one action that works under the rows that cannot.
+      r.menu_keys("repeater.new").should eq(['n'])
+      r.menu_keys("repeater.paste-curl").should eq(['U'])
+      r["repeater.new"].available?(on(:repeater)).should be_true
+    end
+
     it "keeps the marker actions on the :request section and the diff toggles on :response" do
       {"repeater.insert-marker" => :repeater_insert_marker,
        "repeater.mark-word"     => :repeater_mark_word,
