@@ -270,7 +270,7 @@ describe "ProjectView DESCRIPTION empty state" do
       view.reload(project, store)
       view.focus_pane(:desc)
       b = render_tab(view, 100, 30, focused: true)
-      b.contains?("Target, scope, credentials, rules.").should be_true
+      b.contains?("target, scope, credentials, rules.").should be_true
       b.contains?("PROJECT").should be_true
     end
   end
@@ -283,7 +283,7 @@ describe "ProjectView DESCRIPTION empty state" do
       view.enter_desc_insert!
       b = render_tab(view, 100, 30, focused: true)
       # A "no description yet" sitting under the caret reads as text just deleted.
-      b.contains?("Target, scope, credentials, rules.").should be_false
+      b.contains?("target, scope, credentials, rules.").should be_false
     end
   end
 
@@ -319,7 +319,7 @@ describe "ProjectView DESCRIPTION empty state" do
       view.focus_pane(:desc)
       b = render_tab(view, 100, 30, focused: true)
       b.contains?("engagement notes here").should be_true
-      b.contains?("Target, scope, credentials, rules.").should be_false
+      b.contains?("target, scope, credentials, rules.").should be_false
     end
   end
 end

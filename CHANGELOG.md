@@ -6,6 +6,8 @@
 - Fuzzer: the idle results card lists what a run still needs (a marked position, then a payload set) and marks the next step, and with no session open `Space` offers New fuzz session instead of Run and Stop (#1843, #1844)
 - Probe: `gori run probe promote --format json` prints the new Issue id as MCP `probe_promote` does (#1784)
 - CLI: `gori run sitemap tag --list --format json` (or `--json`) prints the `[{host, path, tag}]` array MCP `list_sitemap_tags` returns (#1783)
+- Help: Shortcuts names the header chips, History's view chip and the Fuzzer's `§N`, MATCH and DIST chips and Mode formula (#1845)
+- Project: the empty Description card says it holds free-text notes (#1845)
 
 ## v0.9.3
 

@@ -29,7 +29,7 @@ module Gori::Tui
     # {section title, items} — the source of the rendered rows.
     SECTIONS = [
       {"GLOBAL", [
-        Item.new("^P", "command palette", "app.palette"),
+        Item.new("^P", "command palette (or click ⌘)", "app.palette"),
         Item.new("space", "focus-area action menu"),
         # The family's bare key (`Verb::Family#chord`, #1295): no `space` needed on a tab that sends flows.
         # Read from History's opener, so a user who put a Global verb on `>` (which then wins it,
@@ -40,6 +40,11 @@ module Gori::Tui
         Item.new("c", "toggle capture", "capture.toggle"),
         Item.new("i", "toggle intercept", "intercept.toggle"),
         Item.new("s", "toggle scope lens (or click scope:N)", "scope.toggle-lens"),
+        # The header's standing chips, named once (#1842): nothing else says what they stand
+        # for. `Chrome.top_bar_chips` draws scope and probe always and notify while something
+        # is unread; `listen_chip` owns the three states of the dot.
+        Item.new("header", "scope: the lens · probe: scan mode · notify:N unread, when any"),
+        Item.new("● address", "green capturing · yellow OFF · red (N) failed writes · click toggles"),
         Item.new("^P →", "Match & Replace — open the Rewriter tab", "rules.edit"),
         Item.new("^P →", "Notifications — the notification center (or click the notify badge)", "app.notifications"),
         Item.new("^, / ⚙", "preferences — every setting (also ^P → Settings)", "settings.open"),
@@ -100,6 +105,7 @@ module Gori::Tui
         Item.new("⇧F", "create an issue", "issue.create"),
         Item.new("{space:history.toggle-follow}", "follow newest — the ⌁follow chip on the filter bar toggles it too", "history.toggle-follow"),
         Item.new("/", "filter (query language — see the Query page)", "history.query"),
+        Item.new("v", "view… — a saved filter under the bar; the {history.view}:name chip names it", "history.view"),
         Item.new("y", "copy flow", "history.copy"),
         Item.new("{space:history.copy-as}", "copy as… — urls · hosts · cURL · raw · req+res pair", "history.copy-as"),
         Item.new("d", "delete selected/marked flows (asks first)", "history.delete"),
@@ -180,7 +186,10 @@ module Gori::Tui
         Item.new("set editor", "↹/↑↓ fields · List: ^S saves it as a wordlist · Project: captured data · esc applies"),
         Item.new("{fuzz.run} · {fuzz.stop}", "run · stop"),
         Item.new("↑/↓ · ↵", "results: select · open detail"),
-        Item.new("{space:fuzz.sort} · {fuzz.matched}", "sort · matched-only"),
+        Item.new("{space:fuzz.sort} · {fuzz.matched}", "sort · matched-only (the MATCH chip)"),
+        Item.new("v", "results: status and length distribution (the DIST chip)", "fuzz.dist"),
+        Item.new("§N", "on TEMPLATE's border: N markers placed"),
+        Item.new("Mode formula", "requests a run sends — sniper's P×N is positions × payloads"),
         Item.new("{space:fuzz.group}", "group results by response shape · ←/→ fold · {space:fuzz.sort} orders rare/common/first", "fuzz.group"),
         Item.new("e", "rename the sub-tab (on the strip)"),
         Item.new("⇧←/→", "detail: scroll a long line sideways"),
