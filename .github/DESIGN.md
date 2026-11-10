@@ -5301,3 +5301,24 @@ into `^P`.
   reference a filter bar's `?` opens has nowhere further to go.
 - **The tab stays where it was.** `0`, the palette's Go to Help and a saved bar slot reach it.
 
+### 2026-11-11: keys stay written `^X`, and three places say what the caret means
+
+**Problem.** `Ctrl+R` reads more easily than `^R` on first sight, and nothing in the app said
+what the caret stands for. The project picker, the first screen there is, spelled `ctrl-n`
+while every screen after it spelled `^N`.
+
+**Decision.** The spelling stays. `^R` is two cells where `ctrl+r` is six, an 80-column tab bar
+has 59 columns of hint and already drops segments, and the caret is one glyph of a set (`⇧F`,
+`⌥P`, `↵`, `↹`) that would have to be spelled out with it. What was missing is the bridge, so
+it is stated once at each first contact: the wizard's REVIEW row (`^P = Ctrl+P`), the first row
+of Help's GLOBAL section and the tour's welcome. The picker spells `^N` like the rest.
+
+### 2026-11-11: an empty tab's menu leads with the one thing it can do (`START`)
+
+`space` on a project with no flows listed Mark all and Clear history and nothing that brings
+traffic in. A `:start` band now heads `SpaceMenu::GROUP_ORDER`. It holds a row only while the
+tab is empty (History's Open browser, `history.proxied-browser`, gated on
+`history_awaiting_traffic?`), and the rows with nothing to act on stand down for the same
+stretch. The menu follows `HistoryView#project_empty?` (no flow at all, whatever is typed in
+the bar); the card and the footer follow `awaiting_first_flow?`, which also wants an empty bar.
+

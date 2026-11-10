@@ -1387,6 +1387,18 @@ module Gori::Tui
       @rows.empty?
     end
 
+    # The project holds no flow at all, whatever the bar says. What the space menu reads:
+    # nothing to mark or wipe, one thing to do.
+    def project_empty? : Bool
+      @rows.empty? && @no_flows
+    end
+
+    # ...and nobody typed a query, so the list is the first-run card. What the footer reads:
+    # it names the card's action only while the card is what is on screen.
+    def awaiting_first_flow? : Bool
+      project_empty? && @query.blank? && !@searching_shown && !@search_error
+    end
+
     # Selected list row (nil when empty) — used to name the flow in the delete confirm.
     def selected_row : Store::FlowRow?
       @rows[@selected]?
@@ -3277,7 +3289,7 @@ module Gori::Tui
         # naming the filter that excluded nothing is useless when there was nothing to exclude.
         # A typed query is the one exception: the operator just wrote it and is owed the answer
         # that it matched nothing.
-        if @no_flows && @query.blank? && !@searching_shown && !@search_error
+        if awaiting_first_flow?
           list_rect = Rect.new(time_x, list_top, rect.right - time_x, list_h)
           TrafficEmptyState.render(screen, list_rect, variant: :history, listen: listen, capturing: capturing)
           return

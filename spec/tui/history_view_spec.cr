@@ -2476,6 +2476,22 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  # The card and footer follow "nothing here and nothing typed"; the space menu follows "the
+  # project holds no flow", which a query in the bar does not change.
+  it "tells an empty project from the first-run card" do
+    with_store do |store|
+      view = HistoryView.new
+      view.project_empty?.should be_false # not loaded yet: claim nothing
+      view.reload(store)
+      view.project_empty?.should be_true
+      view.awaiting_first_flow?.should be_true
+      view.set_query("zzz")
+      view.reload(store)
+      view.project_empty?.should be_true
+      view.awaiting_first_flow?.should be_false
+    end
+  end
+
   it "renders an empty-state when no flows are captured" do
     with_store do |store|
       view = HistoryView.new

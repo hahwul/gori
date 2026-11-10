@@ -78,9 +78,10 @@ module Gori::Tui
     # the key above it by accident, and the widest blast radius sits at the very end).
     # A verb's Verb::Definition#group picks its band; :none-tagged verbs are not
     # subdivided at all (see #split_semantic).
-    GROUP_ORDER = [:view, :send, :triage, :copy, :scope, :danger, :wipe]
+    GROUP_ORDER = [:start, :view, :send, :triage, :copy, :scope, :danger, :wipe]
 
     GROUP_LABELS = {
+      :start  => "START",  # the one thing an empty tab can do — listed only while it is empty
       :view   => "VIEW",   # inspect / filter / display toggles — changes what you SEE
       :send   => "SEND",   # hand the selection to another tool (Repeater, Fuzzer, …)
       :triage => "TRIAGE", # mark, tag, file, link, promote — engagement bookkeeping

@@ -62,6 +62,10 @@ module Gori::Tui
     # act on every mark, so a hint still reading "fwd" would understate what `f` is about to
     # do. (`i on/off` and `↹ detail` come off the base line to make room: the i:CATCH chip
     # already carries its own chord, and Tab is the app-wide focus ring.)
+    #
+    # Forward, drop and edit lead the base line. `Chrome.fit_hints` drops segments from the
+    # right, so the order is what an 80-column row keeps: with mark and range first it showed
+    # the batch gesture and neither key that lets a held request go.
     private def queue_hint(reg : Verb::Registry) : String
       f = Hotkeys.binding_label(reg, "intercept.forward", "f")
       d = Hotkeys.binding_label(reg, "intercept.drop", "d")
@@ -75,7 +79,11 @@ module Gori::Tui
       filt = Hotkeys.binding_label(reg, "intercept.filter", "/")
       catch = Hotkeys.binding_label(reg, "intercept.direction", "c")
       y = Hotkeys.binding_label(reg, "intercept.copy", "y")
-      "↑/↓ move · #{mark} mark · ⇧↑/↓ range · ↵/e edit · #{f} fwd · #{d} drop · #{fa} all · #{y} copy · #{filt} filter · #{catch} catch · space cmds · esc tabs"
+      InterceptController.queue_keys(f, d, mark, fa, y, filt, catch)
+    end
+
+    def self.queue_keys(f : String, d : String, mark : String, fa : String, y : String, filt : String, catch : String) : String
+      "↑/↓ move · #{f} fwd · #{d} drop · ↵/e edit · #{mark} mark · ⇧↑/↓ range · #{fa} all · #{y} copy · #{filt} filter · #{catch} catch · space cmds · esc tabs"
     end
 
     def goto_symbol : Symbol? # the held-message editor is ^G/^F-searchable

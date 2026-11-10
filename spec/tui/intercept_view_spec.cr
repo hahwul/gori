@@ -1500,3 +1500,15 @@ describe "Intercept toggle-off toast" do
     InterceptController.toggle_status(r, true).should contain("NOT applied")
   end
 end
+
+# The queue's footer on an 80-column terminal showed `t mark · ⇧↑/↓ range` and neither key that
+# lets a held request go: the hint drops segments from the right, and the batch gesture came first.
+describe "Intercept queue hint on a narrow row" do
+  it "keeps forward and drop when the row has room for two actions" do
+    full = InterceptController.queue_keys("f", "d", "t", "⇧F", "y", "/", "c")
+    fitted = Chrome.fit_hints(full, 59) # 80×24 beside the companion chip
+    fitted.should contain("f fwd")
+    fitted.should contain("d drop")
+    fitted.should contain("space cmds")
+  end
+end

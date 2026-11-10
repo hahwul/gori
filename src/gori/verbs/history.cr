@@ -7,6 +7,12 @@ require "./families"
 
 module Gori
   module Verbs
+    # On History, and the project is (`awaiting`) or is not still empty. A method, not two
+    # `&&` lambdas: each one counts against `register_history`'s complexity ceiling.
+    def self.history_awaiting?(ctx : Verb::ExecContext, awaiting : Bool) : Bool
+      ctx.current_tab == :history && ctx.history_awaiting_traffic? == awaiting
+    end
+
     def self.register_history(r : Verb::Registry) : Nil
       in_history = ->(ctx : Verb::ExecContext) { ctx.current_tab == :history }
       history_selected = ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_id.nil? }
@@ -16,6 +22,17 @@ module Gori
       # available when every mark has scrolled out from under the cursor. Batch verbs use
       # this; genuinely single-target ones keep history_selected.
       history_targets = ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_ids.empty? }
+      # The project holds no flow: nothing to mark or wipe, one thing to do (get traffic in).
+      history_has_flows = ->(ctx : Verb::ExecContext) { Verbs.history_awaiting?(ctx, false) }
+      history_awaiting = ->(ctx : Verb::ExecContext) { Verbs.history_awaiting?(ctx, true) }
+
+      # `space` on an empty project answered "what can I do here" with Mark all and Clear
+      # history. This is the Global `browser.open` as a row of its own, listed only while the
+      # project is empty; the other two stand down for the same stretch. A tab row sharing a
+      # Global verb's title is the shape `scope.lens-toggle` and `detail.toggle-ws` have.
+      r.register Verb::Definition.new(
+        "history.proxied-browser", "Open browser", "Launch a browser pre-trusting gori's CA, routed via the proxy",
+        Verb::Scope::Body, available: history_awaiting, mnemonic: 'b', group: :start) { |ctx| ctx.open_browser_picker; nil }
 
       # --- content pane (Body) navigation: arrow keys / hjkl ---
       r.register Verb::Definition.new(
@@ -120,7 +137,7 @@ module Gori
       r.register Verb::Definition.new(
         "history.mark-all", "Mark all (filtered)", "Mark every flow the current filter shows",
         Verb::Scope::Body, [Verb::Chord.new("t", shift: true)],
-        available: in_history, intent: :mark_all, group: :triage) { |ctx| ctx.history_mark_all; nil }
+        available: history_has_flows, intent: :mark_all, group: :triage) { |ctx| ctx.history_mark_all; nil }
 
       # esc clears too (HistoryController#handle_body_key shadows body.to-menu only while
       # marks are set) — that's the reflex; this is the discoverable form. Menu-only: 'N' is
@@ -231,7 +248,7 @@ module Gori
       r.register Verb::Definition.new(
         "history.clear", "Clear history", "Delete ALL History flows for this project (asks first)",
         Verb::Scope::Body, [Verb::Chord.new("x", shift: true)],
-        available: in_history, intent: :wipe, group: :wipe) { |ctx| ctx.history_clear; nil }
+        available: history_has_flows, intent: :wipe, group: :wipe) { |ctx| ctx.history_clear; nil }
 
       # --- repeater workbench (request editing is inline; these power the palette
       # and show their key hints — actual keys are handled directly by the TUI) ---

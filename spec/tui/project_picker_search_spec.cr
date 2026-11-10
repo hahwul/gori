@@ -165,3 +165,41 @@ describe "ProjectPicker.quick_create_name" do
     ProjectPicker.quick_create_name("#web").should be_nil
   end
 end
+
+# The footer trims from the right, so on an 80-column terminal the first tokens to go were the
+# way to Settings and the way out.
+describe "ProjectPicker.fit_hint_tokens" do
+  buttons = [
+    ProjectPicker::HintToken.new("^D delete", :delete), ProjectPicker::HintToken.new("^, settings", :settings),
+    ProjectPicker::HintToken.new("^C quit", :quit), ProjectPicker::HintToken.new("^F search all", :search_all),
+  ]
+  # The three shapes `list_hint_tokens` builds: an action row, a project row with marks, and
+  # the empty Search row.
+  shapes = {
+    "an action row" => [
+      ProjectPicker::HintToken.new("↑/↓ select"), ProjectPicker::HintToken.new("↵ open", :open),
+      ProjectPicker::HintToken.new(ProjectPicker::SEARCH_HINT),
+      ProjectPicker::HintToken.new("^N new", :new), ProjectPicker::HintToken.new("^T temp", :temp),
+    ] + buttons,
+    "a project row" => [
+      ProjectPicker::HintToken.new("↑/↓ select"), ProjectPicker::HintToken.new("↵ open", :open),
+      ProjectPicker::HintToken.new("space actions", :space),
+      ProjectPicker::HintToken.new("tab mark"), ProjectPicker::HintToken.new("esc clear"),
+    ] + buttons,
+  }
+
+  shapes.each do |name, tokens|
+    it "keeps Settings and Quit whole on #{name} at 80 columns" do
+      fitted = ProjectPicker.fit_hint_tokens(tokens, 80)
+      quit = fitted.index!(&.action.==(:quit))
+      ProjectPicker.hint_width(fitted[0..quit]).should be <= 80
+      fitted.map(&.action).should contain(:settings)
+      # Buttons are never the ones given up.
+      fitted.count(&.action).should eq(tokens.count(&.action))
+    end
+  end
+
+  it "keeps every token where they all fit" do
+    shapes.each_value { |tokens| ProjectPicker.fit_hint_tokens(tokens, 140).size.should eq(tokens.size) }
+  end
+end

@@ -49,6 +49,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     history_target_flow_ids
   end
 
+  def history_awaiting_traffic? : Bool
+    history_controller.view.project_empty?
+  end
+
   forward marked_flow_count : Int32,
     history_mark_toggle : Nil,
     history_mark_all : Nil,

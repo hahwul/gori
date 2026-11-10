@@ -20,6 +20,8 @@ abstract class Gori::Verb::ExecContext
   # (P1). `selected_flow_id` above is UNCHANGED — it still means the cursor row alone, so
   # every single-only verb needs no edit.
   abstract def selected_flow_ids : Array(Int64)
+  # The project holds no flow at all (a typed query does not change that).
+  abstract def history_awaiting_traffic? : Bool
   # The TRUE mark count — 0 means "cursor mode", which selected_flow_ids.size cannot say
   # (it returns 1 either way). Gates the clear-marks verb and drives the menu titles.
   abstract def marked_flow_count : Int32

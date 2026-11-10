@@ -2239,7 +2239,7 @@ module Gori::Tui
         # The moment a name search comes up empty is the moment the operator may have meant
         # "which project SAW this" — say where that search lives (#1229).
         if !@query.empty? && res_rows > 1
-          screen.text(box.x + 3, list_top + 1, "ctrl-f searches every project's flows",
+          screen.text(box.x + 3, list_top + 1, Hotkeys.retag("^F searches every project's flows"),
             Theme.muted, Theme.panel, width: {cw - 5, 1}.max)
         end
       else
@@ -2276,7 +2276,7 @@ module Gori::Tui
       companion = draw_companion(screen, w, h)
       render_notice_row(screen, companion, w, h)
 
-      if tokens = list_hint_tokens
+      if tokens = list_hint_tokens(w)
         render_hint(screen, tokens, h - 2, w)
       else
         hint = case
@@ -2382,7 +2382,11 @@ module Gori::Tui
     # tinted and hit-tested. nil in the modal modes (:compress/:compressing/:space), which
     # keep the old flat string — their hints describe keys inside an overlay that already
     # owns the mouse, so there's nothing here to press.
-    private def list_hint_tokens : Array(HintToken)?
+    #
+    # Chords are spelled `^N`, as every screen after this one spells them (the wizard's REVIEW
+    # and Help say what the caret means), and go through `Hotkeys.retag` because `run` folds
+    # the alt command modifier for the claimed letters here too.
+    private def list_hint_tokens(w : Int32) : Array(HintToken)?
       return nil unless @mode == :list
       tokens = [
         HintToken.new("↑/↓ select"),
@@ -2406,29 +2410,46 @@ module Gori::Tui
         tokens << HintToken.new("tab mark")
         tokens << HintToken.new("esc clear") unless @marks.empty?
       elsif !(@selected == 2 && @query.empty?)
-        tokens << HintToken.new("type to search")
+        tokens << HintToken.new(SEARCH_HINT)
       end
       if @selected < 3
-        tokens << HintToken.new("ctrl-n new", :new)
-        tokens << HintToken.new("ctrl-t temp", :temp)
+        tokens << HintToken.new(Hotkeys.retag("^N new"), :new)
+        tokens << HintToken.new("^T temp", :temp)
       end
-      tokens << HintToken.new("ctrl-d delete", :delete)
-      tokens << HintToken.new("ctrl-, settings", :settings)
-      tokens << HintToken.new("ctrl-c quit", :quit)
+      tokens << HintToken.new("^D delete", :delete)
+      tokens << HintToken.new(Hotkeys.retag("^, settings"), :settings)
+      tokens << HintToken.new("^C quit", :quit)
       # LAST, after quit, and on purpose: the row trims from the right, and on the action rows
       # it already needs ~111 columns, so a token placed anywhere earlier would push quit off a
       # 120-column terminal. Here it costs no other token anything; it shows wherever there is
       # room for it, and the list's "no matches" line names the chord where there is not.
-      tokens << HintToken.new("ctrl-f search all", :search_all)
-      tokens
+      tokens << HintToken.new(Hotkeys.retag("^F search all"), :search_all)
+      ProjectPicker.fit_hint_tokens(tokens, w)
+    end
+
+    SEARCH_HINT = "type to search"
+
+    # The row trims from the right, so on a narrow terminal the first thing to go was the way
+    # to Settings and the way out. The INERT tokens go before any button, right to left:
+    # they name a gesture (`tab mark`, `type to search`, `↑/↓ select`) the list itself shows,
+    # while a button is the only place its chord is written.
+    def self.fit_hint_tokens(tokens : Array(HintToken), w : Int32) : Array(HintToken)
+      kept = tokens.dup
+      while hint_width(kept) > w && (i = kept.rindex(&.action.nil?))
+        kept.delete_at(i)
+      end
+      kept
+    end
+
+    def self.hint_width(tokens : Array(HintToken)) : Int32
+      tokens.sum { |t| Screen.display_width(t.label) } + HINT_GAP * {tokens.size - 1, 0}.max
     end
 
     # The tokens' cell rects, centered on row `y`. THE single geometry source — `render_hint`
     # draws from it and `hint_action_at` hit-tests against it, so the cells a token occupies
     # and the cells that respond to a click are the same cells by construction.
     private def hint_rects(tokens : Array(HintToken), y : Int32, w : Int32) : Array(Rect)
-      total = tokens.sum { |t| Screen.display_width(t.label) } + HINT_GAP * {tokens.size - 1, 0}.max
-      x = {(w - total) // 2, 0}.max
+      x = {(w - ProjectPicker.hint_width(tokens)) // 2, 0}.max
       tokens.map do |t|
         tw = Screen.display_width(t.label)
         rect = Rect.new(x, y, tw, 1)
@@ -2450,7 +2471,7 @@ module Gori::Tui
     # whose hint isn't tokenized).
     private def hint_action_at(mx : Int32, my : Int32, w : Int32, h : Int32) : Symbol?
       return nil unless my == h - 2
-      return nil unless tokens = list_hint_tokens
+      return nil unless tokens = list_hint_tokens(w)
       rects = hint_rects(tokens, h - 2, w)
       tokens.each_with_index do |token, i|
         action = token.action

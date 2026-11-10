@@ -145,6 +145,7 @@ module Gori::Tui
       # Held as the base Backend: TermisuBackend is generic over the terminal type.
       @backend = TermisuBackend.new(@term).as(Backend)
       @step = Step::Bind
+      @opened_on = Step::Bind # the first step counted; `run` sets it, ⇧⇥ back lowers it
       # Bind step — staged values prefilled from the PERSISTED global, which is deliberately
       # NOT where a `gori tui -l/-p` override lives (that is `Settings.cli_bind_*`, a
       # process-only layer). Staging the flag here is what used to promote a documented
@@ -209,7 +210,7 @@ module Gori::Tui
       Theme.load_custom # pick up any user themes dropped under <GORI_HOME>/themes
       @theme_name = Theme.canonical(@theme_name)
       @theme_baseline = Theme.active_name
-      @step = SetupWizard.first_step(@first_run, @ip, @port)
+      @step = @opened_on = SetupWizard.first_step(@first_run, @ip, @port)
       warn_busy_default if @first_run && @step.bind?
       @running = true
       loop do
@@ -401,7 +402,7 @@ module Gori::Tui
     end
 
     private def back_to_bind : Nil
-      @step = Step::Bind
+      @step = @opened_on = Step::Bind
       @bind_field = :ip
       @cursor = @ip.size
     end
@@ -809,10 +810,17 @@ module Gori::Tui
       screen.text({w - prog.size - 2, 0}.max, 0, prog, Theme.muted, Theme.bg)
     end
 
-    # Four screens, counted as four: REVIEW used to be labelled "review" after "step 3 of 3",
-    # which read as a step past the end. Same shape as the tour's "n/7".
+    # Every screen is counted: REVIEW used to be labelled "review" after "step 3 of 3", which
+    # read as a step past the end. Same shape as the tour's "n/7".
     private def progress_label : String
-      "step #{@step.value + 1} of #{Step.values.size}"
+      SetupWizard.progress_label(@step, @opened_on)
+    end
+
+    # Counted from the step the wizard OPENED on. A first run that skips NETWORK opens on
+    # THEME, and "step 2 of 4" on the very first screen read as a step already missed. Going
+    # back to NETWORK (⇧⇥) brings it into the count from then on.
+    def self.progress_label(step : Step, opened_on : Step) : String
+      "step #{step.value - opened_on.value + 1} of #{Step.values.size - opened_on.value}"
     end
 
     private def card_title : String
@@ -1107,7 +1115,9 @@ module Gori::Tui
       if modifier == "alt"
         "⌥P ⌥N ⌥W ⌥1-9  (←/→ for Ctrl · needs Option-as-Meta)"
       else
-        "^P palette · ^N new · ^W close  (←/→ adds ⌥)"
+        # The first chord a new user reads, so it carries its own gloss: nothing before
+        # this row has said what the caret stands for, and every screen after it uses it.
+        "^P = Ctrl+P palette · ^N new · ^W close  (←/→ ⌥)"
       end
     end
 

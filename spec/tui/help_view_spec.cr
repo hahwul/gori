@@ -431,3 +431,13 @@ describe "HelpView chip legend (#1842)" do
     end
   end
 end
+
+# Nothing else in the app says what the caret stands for, and every footer uses it.
+describe "Help's notation legend" do
+  it "opens GLOBAL with how keys are written, on a placeholder that is no real chord" do
+    rows = HelpView.shortcut_rows(Gori::Verbs.registry)
+    legend = rows[1]
+    legend.a.should eq("^key · ⇧key · ⌥key")
+    legend.b.should contain("Ctrl+key")
+  end
+end
