@@ -1457,6 +1457,17 @@ module Gori::Tui
       position_count + grpc_field_specs.size
     end
 
+    # The first thing a run still lacks, in the order `Fuzz::Plan.build` refuses them; nil for
+    # a race, which draws from no position and no set. Read on every frame of an empty
+    # RESULTS pane, so it asks whether a gRPC field is named without building the list
+    # `grpc_field_specs` does.
+    def run_step : TrafficEmptyState::FuzzStep?
+      return nil if @config.race_count
+      grpc = @s_grpc_fields.each_char.any? { |c| c != ',' && !c.whitespace? }
+      return TrafficEmptyState::FuzzStep::Mark if position_count == 0 && !grpc
+      @sets.empty? ? TrafficEmptyState::FuzzStep::Payloads : TrafficEmptyState::FuzzStep::Run
+    end
+
     private def compute_run_count : Int64?
       return nil if @sets.empty? || run_position_count == 0
       sizes = @sets.map { |s| estimated_set_size(s) }
@@ -3407,7 +3418,7 @@ module Gori::Tui
         # it sat directly on the onboarding card's roof. The card takes the whole interior
         # instead. `results_row_at` already refuses every click here (it bounds-checks against
         # `sorted_results.size`), so dropping the row cannot desynchronise the hit-test.
-        TrafficEmptyState.render(screen, inner, variant: :fuzzer_results, running: @running)
+        TrafficEmptyState.render(screen, inner, variant: :fuzzer_results, running: @running, fuzz_step: run_step)
         return
       end
       # Grouped, the first column is the cluster's size (`▸×12`, `▾` when open) and a member's

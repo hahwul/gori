@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- TUI: an empty `^P` opens on Open browser, Copy CA certificate path and Guided tour, then the tab jumps, with one Settings row; type a section's name to reach it (#1843)
+- Fuzzer: the idle results card lists what a run still needs (a marked position, then a payload set) and marks the next step (#1843)
 - CLI: `gori run sitemap tag --list --format json` (or `--json`) prints the `[{host, path, tag}]` array MCP `list_sitemap_tags` returns (#1783)
 
 ## v0.9.3
