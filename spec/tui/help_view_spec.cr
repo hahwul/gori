@@ -394,3 +394,32 @@ describe Gori::Tui::HelpView do
     backend.contains?(bottom).should be_true
   end
 end
+
+describe "HelpView chip legend (#1842)" do
+  rows = HelpView.shortcut_rows(Gori::Verbs.registry).select(&.kind.== :item)
+  row = ->(key : String) { rows.find!(&.a.== key) }
+
+  it "names the header's standing chips and the three states of the capture dot" do
+    row.call("header").b.should contain("scope:")
+    row.call("header").b.should contain("probe:")
+    dot = row.call("● address").b
+    %w[green yellow red].each { |state| dot.should contain(state) }
+  end
+
+  it "names History's view chip by the key the chip itself shows" do
+    view = rows.find!(&.b.includes?(":name chip"))
+    view.b.should contain("#{view.a}:name chip")
+  end
+
+  it "names the Fuzzer's marker count, Mode formula and DIST chip" do
+    row.call("§N").b.should contain("markers")
+    row.call("Mode formula").b.should contain("P×N")
+    rows.find!(&.b.includes?("DIST chip")).a.should eq("v")
+  end
+
+  it "keeps every legend row inside the page at 100 columns" do
+    ["header", "● address", "§N", "Mode formula"].each do |key|
+      Screen.display_width(row.call(key).b).should be <= 100 - 2 - 4 - HelpView::KEY_W - HelpView::KEY_GAP
+    end
+  end
+end

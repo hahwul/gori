@@ -712,7 +712,7 @@ module Gori::Tui
         # The Project tab's DESCRIPTION sub-tab with nothing written yet. Sibling cards on that
         # tab all name their own emptiness ("no scope rules — press a to add"); this one used to
         # render as pure void, which is why it exists.
-        CardSpec.new("PROJECT", "Target, scope, credentials, rules.", "the first thing you read on re-entry",
+        CardSpec.new("PROJECT", "Notes: target, scope, credentials, rules.", "free text, read first on re-entry",
           [ChordLine.new(" i/↵ ", "start writing"), ChordLine.new(" ^E ", "open in $EDITOR")])
       when :project_scope
         # Titled TARGETS, not SCOPE — the outer card already says SCOPE on its border, and the
