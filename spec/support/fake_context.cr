@@ -75,6 +75,10 @@ class FakeExecContext < Gori::Verb::ExecContext
     @repeater_tab_count
   end
 
+  # A run, not none: most Discover verbs act on one, and a context without it would take
+  # them out of every sweep that reads `available?`.
+  property? discover_has_run : Bool = true
+
   property subtab_marks : Int32 = 0
 
   def subtab_marked_count : Int32

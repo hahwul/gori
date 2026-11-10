@@ -12,4 +12,5 @@ abstract class Gori::Verb::ExecContext
   abstract def discover_open_flow : Nil    # open the selected finding's captured request/response
   abstract def goto_discover : Nil         # focus the Target tab's Discover sub-tab
   abstract def discover_filter : Nil       # open the FINDINGS `/` filter bar
+  abstract def discover_has_run? : Bool    # the RUNS list is not empty (gates the verbs that act on a run)
 end

@@ -322,6 +322,9 @@ describe Gori::Tui::TrafficEmptyState do
     backend.contains?("DISCOVER").should be_true
     backend.contains?("crawl").should be_true
     backend.contains?("Discover here").should be_true
+    # Drawn only while there is no run, so it never offers the key that re-runs one.
+    backend.contains?("on a History flow").should be_true
+    backend.contains?("run the selected crawl").should be_false
   end
 
   # The menu-only chip is `Hotkeys.menu_chip`'s spelling, never the arrowless ` space > D `.
