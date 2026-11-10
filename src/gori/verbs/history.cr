@@ -290,10 +290,14 @@ module Gori
         "repeater.open-browser", "Open response in browser", "Write this tab's decoded response body to a file and open it in the desktop viewer",
         Verb::Scope::Repeater, available: in_repeater, intent: :to_browser) { |ctx| ctx.repeater_open_response_external; nil }
 
+      # Pinned, like Paste cURL below: on an empty tab New is the action that works, and folded
+      # behind Sub-tabs… it sat under Send and the other rows that only answer "no repeater open".
+      # Those rows are NOT gated on a request being open: their chords' refusals are the only
+      # thing an empty tab says back to `^R` or `^T`, and a gated verb is a silent key.
       r.register Verb::Definition.new(
         "repeater.new", "New repeater request", "Open a blank request in Repeater to author and send",
         Verb::Scope::Repeater, [Verb::Chord.new("n", ctrl: true)],
-        available: in_repeater, intent: :new, section: :subtab) { |ctx| ctx.repeater_new; nil }
+        available: in_repeater, intent: :new, section: :subtab, pinned: true) { |ctx| ctx.repeater_new; nil }
 
       # Burp's "Paste cURL to Repeater" (#1244): a paste box whose request(s) open as new
       # sub-tabs. Menu/palette only — no chord to collide with the editor's keys. `u` is

@@ -11,6 +11,7 @@
 - First run: the wizard asks for the listen address only when the default is taken, its tour offer lands on Skip, and the first project opens on its name's `Enter` (#1846)
 - Discover: with no run yet, `Space` lists only Run, which says where to start one, and the empty card names both places (#1847)
 - Comparer: the footer names the two picks until both sides are set (#1847)
+- Repeater: `Space` now opens the menu with no request open, and New repeater request is a first-level row there and in every pane (#1848)
 
 ## v0.9.3
 

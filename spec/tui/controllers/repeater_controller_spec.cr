@@ -533,3 +533,15 @@ describe "RepeaterController#restore_send (#1808)" do
     end
   end
 end
+
+describe "RepeaterController with no request open" do
+  it "defers space to the menu and swallows every other key" do
+    with_repeater_controller do |ctl|
+      ctl.current_view.should be_nil
+      ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Space)).should be_false
+      # A letter must not fall through to Global (`c` stops capture, `i` holds traffic).
+      ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerC, char: 'c')).should be_true
+      ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerI, char: 'i')).should be_true
+    end
+  end
+end

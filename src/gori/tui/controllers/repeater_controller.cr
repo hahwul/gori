@@ -565,7 +565,10 @@ module Gori::Tui
           if key.up? || key.lower_k?
             @host.request_focus(:menu)
           end
-          return true
+          # `space` is deferred so the empty tab has its menu (New, Paste cURL). Nothing else
+          # is: a deferred letter would reach Global (`c`, `i`). Ctrl and alt chords never get
+          # here; the arm above already deferred them.
+          return !key.space?
         end
         # A pane the last frame did not draw takes no TEXT (#1421): render moves focus off a
         # hidden column, but a key can arrive before that frame (a paste burst), and on a body
