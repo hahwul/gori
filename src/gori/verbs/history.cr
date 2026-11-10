@@ -818,6 +818,10 @@ module Gori
       # verb registered here, and it is batch-capable, so this local copy is the plural one.
       history_targets = ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_ids.empty? }
       in_fuzzer = ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer }
+      # A verb that acts on the session in front (`subtab_search_count` is the active tab's
+      # open sub-tabs). Without one it is a dead row on the empty tab's menu and a dead hit in
+      # the palette; only `fuzz.new` works there (#1840).
+      fuzz_session = ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.subtab_search_count >= 1 }
       in_repeater = ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater }
 
       r.register Verb::Definition.new(
@@ -833,10 +837,10 @@ module Gori
 
       r.register Verb::Definition.new(
         "fuzz.run", "Run fuzz", "Start the fuzz/intruder run", Verb::Scope::Fuzzer,
-        [Verb::Chord.new("r", ctrl: true)], available: in_fuzzer, intent: :run) { |ctx| ctx.fuzz_run; nil }
+        [Verb::Chord.new("r", ctrl: true)], available: fuzz_session, intent: :run) { |ctx| ctx.fuzz_run; nil }
       r.register Verb::Definition.new(
         "fuzz.stop", "Stop fuzz", "Stop the running fuzz", Verb::Scope::Fuzzer,
-        [Verb::Chord.new("x", ctrl: true)], available: in_fuzzer, intent: :stop) { |ctx| ctx.fuzz_stop; nil }
+        [Verb::Chord.new("x", ctrl: true)], available: fuzz_session, intent: :stop) { |ctx| ctx.fuzz_stop; nil }
       # The RESULTS pane's three lenses. They were raw `key.lower_o?` arms in the controller —
       # no palette row, no space-menu row, and the hotkey editor offered the letters as free.
       # MENU-ONLY since the key audit's F2. `o` is the `↵` alias — "open this row's own
@@ -845,28 +849,28 @@ module Gori
       # which is the L3 price tier the key budget names.
       r.register Verb::Definition.new(
         "fuzz.sort", "Cycle sort", "RESULTS: cycle the sort column (index → status → length → …)",
-        Verb::Scope::Fuzzer, available: in_fuzzer, mnemonic: 'o', section: :results) { |ctx| ctx.fuzz_cycle_sort; nil }
+        Verb::Scope::Fuzzer, available: fuzz_session, mnemonic: 'o', section: :results) { |ctx| ctx.fuzz_cycle_sort; nil }
       # Bare `m` and `v` only in RESULTS (`chord_sections`), the pane both lenses draw over: in
       # the template pane `v` is the menu's clear-selection, as in every other read pane, and a
       # results lens should not flip from a pane that cannot show it (#1274, #1295).
       r.register Verb::Definition.new(
         "fuzz.matched", "Matched only", "RESULTS: show only the rows the matchers hit",
-        Verb::Scope::Fuzzer, [Verb::Chord.new("m")], available: in_fuzzer, intent: :matched_only, section: :results,
+        Verb::Scope::Fuzzer, [Verb::Chord.new("m")], available: fuzz_session, intent: :matched_only, section: :results,
         chord_sections: [:results]) { |ctx| ctx.fuzz_toggle_matched; nil }
       r.register Verb::Definition.new(
         "fuzz.dist", "Distribution sidebar", "RESULTS: show/hide the status and length distribution",
-        Verb::Scope::Fuzzer, [Verb::Chord.new("v")], available: in_fuzzer, intent: :distribution, section: :results,
+        Verb::Scope::Fuzzer, [Verb::Chord.new("v")], available: fuzz_session, intent: :distribution, section: :results,
         chord_sections: [:results]) { |ctx| ctx.fuzz_toggle_dist; nil }
       # Response-shape clusters (#1351): one representative row per distinct answer, rare
       # first, folded with ←/→. A Display… member with no bare chord of its own.
       r.register Verb::Definition.new(
         "fuzz.group", "Group by shape", "RESULTS: one row per distinct response shape (←/→ fold; Cycle sort orders the clusters)",
-        Verb::Scope::Fuzzer, available: in_fuzzer, intent: :shape_groups, section: :results) { |ctx| ctx.fuzz_toggle_group; nil }
+        Verb::Scope::Fuzzer, available: fuzz_session, intent: :shape_groups, section: :results) { |ctx| ctx.fuzz_toggle_group; nil }
       # Named extractors (#1592): History's Columns… list and form over this tab's own list,
       # and the same Display… member, so one intent has one letter on both tabs.
       r.register Verb::Definition.new(
         "fuzz.extractors", "Extractors…", "RESULTS: add, reorder or remove the values pulled out of each response, one column each (a header, a JSON field, a regex capture)",
-        Verb::Scope::Fuzzer, available: in_fuzzer, intent: :columns, section: :results) { |ctx| ctx.fuzz_extractors_edit; nil }
+        Verb::Scope::Fuzzer, available: fuzz_session, intent: :columns, section: :results) { |ctx| ctx.fuzz_extractors_edit; nil }
       # Palette-only (#1282), on `⇧E`, the Export chord of Issues, Sitemap, Evidence and the
       # Sequencer; its menu letter was the export `E`, which freed `P` for Protocol… (#1274).
       # It was `⇧S`, which a typed menu `S` (Send selection to…, on every Fuzzer view) also
@@ -879,7 +883,7 @@ module Gori
         intent: :export, menu: :palette) { |ctx| ctx.fuzz_save_results; nil }
       r.register Verb::Definition.new(
         "fuzz.run-history", "Run history", "Open the permanent result sets saved for this fuzz session",
-        Verb::Scope::Fuzzer, available: in_fuzzer, menu: :palette) { |ctx| ctx.fuzz_run_history; nil }
+        Verb::Scope::Fuzzer, available: fuzz_session, menu: :palette) { |ctx| ctx.fuzz_run_history; nil }
       # Send the selected result row (the request that produced it) to Repeater — the
       # Miner's mine.repeater for a fuzz result; gated on a selected row so it hides
       # before the first run. COMMON like the Miner's, so it survives the detail
@@ -892,15 +896,13 @@ module Gori
         Verb::Scope::Fuzzer,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.fuzzer_result_selected? },
         mnemonic: 'R', intent: :to_repeater, pinned: true) { |ctx| ctx.fuzz_repeater_selected; nil }
-      # COMMON (Round 5), not :tab: New-session is a top action the user reaches for
-      # from anywhere in the Fuzzer tab, not just the tab bar — mirrors repeater.new
-      # (Repeater) and decoder.new (Decoder, Round 4a), both :common. Fuzzer's COMMON
-      # is now curated most-used-first: Run, Stop, Send-to-Repeater, New, Copy,
-      # Link-issue, Link-note.
+      # A strip verb, pinned: New session is reached for from anywhere in the Fuzzer tab, and
+      # on the empty tab it is the one action that works. Folded behind Sub-tabs… it left that
+      # tab's menu leading with Run and Stop (#1840).
       r.register Verb::Definition.new(
         "fuzz.new", "New fuzz session", "Open a blank fuzz template", Verb::Scope::Fuzzer,
         [Verb::Chord.new("n", ctrl: true)],
-        available: in_fuzzer, intent: :new, section: :subtab) { |ctx| ctx.fuzz_new; nil }
+        available: in_fuzzer, intent: :new, section: :subtab, pinned: true) { |ctx| ctx.fuzz_new; nil }
 
       # Search-and-jump across open fuzz sessions — the Repeater find-subtab picker,
       # generalised (section :tab so it shows in the tab-bar space menu, like repeater).
@@ -944,23 +946,23 @@ module Gori
       # letter — see `repeater.rename-subtab` for the full note.
       r.register Verb::Definition.new(
         "fuzz.rename-subtab", "Rename subtab", "Rename the active fuzz session's sub-tab chip",
-        Verb::Scope::Fuzzer, available: in_fuzzer, intent: :rename, section: :subtab) { |ctx| ctx.fuzzer_rename_subtab; nil }
+        Verb::Scope::Fuzzer, available: fuzz_session, intent: :rename, section: :subtab) { |ctx| ctx.fuzzer_rename_subtab; nil }
       r.register Verb::Definition.new(
         "fuzz.close-subtab", "Close subtab", "Close the active fuzz session",
         Verb::Scope::Fuzzer, [Verb::Chord.new("w", ctrl: true)],
-        available: in_fuzzer, intent: :close, section: :subtab) { |ctx| ctx.fuzzer_close_subtab; nil }
+        available: fuzz_session, intent: :close, section: :subtab) { |ctx| ctx.fuzzer_close_subtab; nil }
       # Content-only clone of the active fuzz session (no run results / flow / links).
       # 'd' is free in COMMON ∪ :subtab.
       r.register Verb::Definition.new(
         "fuzz.duplicate-subtab", "Duplicate subtab", "Open a new fuzz session with the same template and config",
-        Verb::Scope::Fuzzer, available: in_fuzzer, intent: :duplicate, section: :subtab) { |ctx| ctx.fuzzer_duplicate_subtab; nil }
+        Verb::Scope::Fuzzer, available: fuzz_session, intent: :duplicate, section: :subtab) { |ctx| ctx.fuzzer_duplicate_subtab; nil }
       # Space-menu letters follow the REPEATER's, which is where the muscle memory lives: this
       # section and `repeater.*`'s `:request` are the same five marker actions, and three of
       # them disagreed — auto-mark was 'a' there and 'm' here, and attach-chain / clear-marks
       # were 'c'/'e' there and 'e'/'c' here, i.e. SWAPPED, which is worse than merely different.
       r.register Verb::Definition.new(
         "fuzz.automark", "Auto-mark params", "Mark every request parameter value", Verb::Scope::Fuzzer,
-        [Verb::Chord.new("a", ctrl: true)], available: in_fuzzer, mnemonic: 'a', section: :template) { |ctx| ctx.fuzz_automark; nil }
+        [Verb::Chord.new("a", ctrl: true)], available: fuzz_session, mnemonic: 'a', section: :template) { |ctx| ctx.fuzz_automark; nil }
       # ^K / ^T, the Repeater's twins by name and by mnemonic. They used to live in
       # `FuzzerController#chord_action`, dispatched before the keymap ever saw them — which is
       # why the two marker actions an operator reaches for MOST were the two missing from the
@@ -968,30 +970,30 @@ module Gori
       r.register Verb::Definition.new(
         "fuzz.mark-word", "Mark word", "Toggle a §…§ marker around the token at the cursor",
         Verb::Scope::Fuzzer, [Verb::Chord.new("k", ctrl: true)],
-        available: in_fuzzer, intent: :mark_word, section: :template, menu: :palette) { |ctx| ctx.fuzz_mark_word; nil }
+        available: fuzz_session, intent: :mark_word, section: :template, menu: :palette) { |ctx| ctx.fuzz_mark_word; nil }
       r.register Verb::Definition.new(
         "fuzz.insert-marker", "Insert marker", "Drop a single § at the cursor to bracket a region by hand",
         Verb::Scope::Fuzzer, [Verb::Chord.new("t", ctrl: true)],
-        available: in_fuzzer, intent: :insert_marker, section: :template) { |ctx| ctx.fuzz_insert_marker; nil }
+        available: fuzz_session, intent: :insert_marker, section: :template) { |ctx| ctx.fuzz_insert_marker; nil }
       r.register Verb::Definition.new(
         "fuzz.attach-chain", "Edit decoder chain", "Focus the CHAIN pane to edit the encode/decode chain of the marker at the cursor (applied to each payload on send)",
         Verb::Scope::Fuzzer, [Verb::Chord.new("q", ctrl: true)], # ^Y → Copy; see repeater.attach-chain
-        available: in_fuzzer, intent: :decoder_chain, section: :template, menu: :palette) { |ctx| ctx.fuzz_attach_chain; nil }
+        available: fuzz_session, intent: :decoder_chain, section: :template, menu: :palette) { |ctx| ctx.fuzz_attach_chain; nil }
       r.register Verb::Definition.new(
         "fuzz.list-paste", "Add List payload set", "Open the payload-set editor pre-seeded to a List — a multi-line editor, one value per line (paste splits automatically)",
         Verb::Scope::Fuzzer, [Verb::Chord.new("l", ctrl: true)],
-        available: in_fuzzer, section: :template, menu: :palette) { |ctx| ctx.fuzz_list_paste; nil }
+        available: fuzz_session, section: :template, menu: :palette) { |ctx| ctx.fuzz_list_paste; nil }
       r.register Verb::Definition.new(
         "fuzz.pretty-template", "Pretty-print template", "Format the request template body in-place (JSON/XML/form-urlencoded)",
         Verb::Scope::Fuzzer, [Verb::Chord.new("u", ctrl: true)],
-        available: in_fuzzer, section: :template, menu: :palette) { |ctx| ctx.fuzz_pretty_template; nil }
+        available: fuzz_session, section: :template, menu: :palette) { |ctx| ctx.fuzz_pretty_template; nil }
       r.register Verb::Definition.new(
         "fuzz.toggle-http2", "Toggle HTTP/2 (h2)", "Run the fuzz over HTTP/2 or HTTP/1.1, overriding the seed flow's protocol",
         Verb::Scope::Fuzzer, [Verb::Chord.new("v", ctrl: true)],
-        available: in_fuzzer, intent: :http2, section: :template) { |ctx| ctx.fuzz_toggle_http2; nil }
+        available: fuzz_session, intent: :http2, section: :template) { |ctx| ctx.fuzz_toggle_http2; nil }
       r.register Verb::Definition.new(
         "fuzz.clear-marks", "Clear markers", "Strip every §…§ marker (and its attached chain) from the template",
-        Verb::Scope::Fuzzer, available: in_fuzzer, intent: :clear_marks, section: :template) { |ctx| ctx.fuzz_clear_marks; nil }
+        Verb::Scope::Fuzzer, available: fuzz_session, intent: :clear_marks, section: :template) { |ctx| ctx.fuzz_clear_marks; nil }
       # Target-pane toggle (SNI override), the twin of repeater.toggle-sni: same ^S, same
       # two-line editor, same focus rule. `FuzzerView` already carried @sni, persisted it
       # with the session and handed it to build_engine — a session seeded from History had
@@ -1000,7 +1002,7 @@ module Gori
       r.register Verb::Definition.new(
         "fuzz.toggle-sni", "Toggle SNI override", "Override the TLS SNI the whole sweep presents (dialed host unchanged)",
         Verb::Scope::Fuzzer, [Verb::Chord.new("s", ctrl: true)],
-        available: in_fuzzer, intent: :sni, section: :target) { |ctx| ctx.fuzz_toggle_sni; nil }
+        available: fuzz_session, intent: :sni, section: :target) { |ctx| ctx.fuzz_toggle_sni; nil }
       in_fuzzer_copy = ->(ctx : Verb::ExecContext) do
         ctx.current_tab == :fuzzer && (ctx.fuzzer_read_mode? || ctx.editor_focused?)
       end

@@ -361,6 +361,15 @@ describe "Gori::Verbs.register_history" do
       end
     end
 
+    it "leaves an empty Fuzzer tab New session, at level 1, and nothing that needs a session (#1840)" do
+      ctx = on(:fuzzer)
+      ctx.subtab_search_tab_count = 0
+      fuzzer = r.select { |v| v.scope == Gori::Verb::Scope::Fuzzer && !v.hidden? && v.available?(ctx) }.map(&.id)
+      fuzzer.should eq(["fuzz.new"])
+      # Pinned, so a pane view draws it beside Run rather than inside Sub-tabs….
+      r.menu_keys("fuzz.new").should eq(['n'])
+    end
+
     it "gates permanent result saving on a completed result set" do
       ctx = on(:fuzzer)
       r["fuzz.save-results"].available?(ctx).should be_false

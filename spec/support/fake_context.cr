@@ -81,7 +81,9 @@ class FakeExecContext < Gori::Verb::ExecContext
     @subtab_marks
   end
 
-  property subtab_search_tab_count : Int32 = 0
+  # One open, not none: the Fuzzer's verbs are gated on a session in front (#1840), and a
+  # context with no sub-tab would take them out of every sweep that reads `available?`.
+  property subtab_search_tab_count : Int32 = 1
 
   def subtab_search_count : Int32
     @subtab_search_tab_count
