@@ -240,6 +240,14 @@ module Gori::Tui
       # `esc sub-tabs` last, where every other tab's line ends it. `handle_body_key` has
       # always sent escape to the strip; the hint was the only tab-level line in the app that
       # never said so, and a line this long is exactly where a reader stops looking.
+      # Nothing to step through until both sides are picked: the change, fold, copy and
+      # scroll keys below would be dead under a card that says "pick flow A". Swap and the
+      # req|res switch work as soon as one side is set.
+      if view.blank?
+        return keys("{comparer.pick-a} pick flow A · {comparer.pick-b} pick flow B · space cmds · esc sub-tabs")
+      elsif !view.both_set?
+        return keys("{comparer.pick-a}/{comparer.pick-b} pick · {comparer.swap} swap · ←/→ req|res · space cmds · esc sub-tabs")
+      end
       keys("←/→ req|res · ↑/↓ row · {comparer.next-change}/{comparer.prev-change} change · {space:comparer.toggle-fold} fold · {comparer.copy} copy · ⇧←/→ h-scroll · {comparer.pick-a}/{comparer.pick-b} pick · {comparer.swap} swap · space cmds · esc sub-tabs")
     end
   end

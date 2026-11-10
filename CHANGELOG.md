@@ -6,9 +6,11 @@
 - Fuzzer: the idle results card lists what a run still needs (a marked position, then a payload set) and marks the next step, and with no session open `Space` offers New fuzz session instead of Run and Stop (#1843, #1844)
 - Probe: `gori run probe promote --format json` prints the new Issue id as MCP `probe_promote` does (#1784)
 - CLI: `gori run sitemap tag --list --format json` (or `--json`) prints the `[{host, path, tag}]` array MCP `list_sitemap_tags` returns (#1783)
-- Help: Shortcuts names the header chips, History's view chip and the Fuzzer's `§N`, MATCH and DIST chips and Mode formula (#1845)
+- Help: Shortcuts names the header chips, History's view chip, the Fuzzer's `§N`, MATCH and DIST chips and Mode formula, the Probe band's chips and Discover's suppression counters (#1845, #1847)
 - Project: the empty Description card says it holds free-text notes (#1845)
 - First run: the wizard asks for the listen address only when the default is taken, its tour offer lands on Skip, and the first project opens on its name's `Enter` (#1846)
+- Discover: with no run yet, `Space` lists only Run, which says where to start one, and the empty card names both places (#1847)
+- Comparer: the footer names the two picks until both sides are set (#1847)
 
 ## v0.9.3
 
