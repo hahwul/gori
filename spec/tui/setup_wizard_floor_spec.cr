@@ -26,7 +26,10 @@ describe Gori::Tui::SetupWizard do
   end
 
   it "names what each Ctrl chord does in the Shortcuts recap" do
-    SW.modifier_recap("ctrl").should eq("^P palette · ^N new · ^W close  (←/→ adds ⌥)")
+    SW.modifier_recap("ctrl").should eq("^P = Ctrl+P palette · ^N new · ^W close  (←/→ ⌥)")
+    # The gloss must not cost the row its fit: the value column of the 80-column card.
+    value_w = SW.card_w(80, 84) - 3 - 3 - ("Proxy default".size + 2)
+    {"ctrl", "alt"}.each { |m| Gori::Tui::Screen.draw_width(SW.modifier_recap(m)).should be <= value_w }
   end
 
   it "keeps local and other-device guidance readable at the minimum width" do
@@ -89,6 +92,19 @@ describe Gori::Tui::SetupWizard do
     value_w = SW.card_w(80, 84) - 3 - 3 - ("Proxy default".size + 2) # right margin, ix, label column
     Gori::Hotkeys::KEYSETS.each do |name|
       Gori::Tui::Screen.draw_width(SW.keys_recap(name, route)).should be <= value_w
+    end
+  end
+
+  # A first run opens on THEME, and the first screen a new user ever saw said "step 2 of 4".
+  describe ".progress_label" do
+    it "counts from the step the wizard opened on" do
+      SW.progress_label(SW::Step::Appearance, SW::Step::Appearance).should eq("step 1 of 3")
+      SW.progress_label(SW::Step::Review, SW::Step::Appearance).should eq("step 3 of 3")
+    end
+
+    it "counts NETWORK once it is where the wizard opened, or was gone back to" do
+      SW.progress_label(SW::Step::Bind, SW::Step::Bind).should eq("step 1 of 4")
+      SW.progress_label(SW::Step::Appearance, SW::Step::Bind).should eq("step 2 of 4")
     end
   end
 

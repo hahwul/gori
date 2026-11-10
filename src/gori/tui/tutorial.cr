@@ -2034,7 +2034,9 @@ module Gori::Tui
       moves = [
         "1.  tabs & panes     1-9  ·  ←/→  ·  ↓  ·  esc  ·  ⇥",
         "2.  action menu      space — main actions for where you are",
-        Hotkeys.retag("3.  command palette  ^P   — search all actions here + app-wide"),
+        # The gloss is the tour's one statement of what the caret means. Dropped under the ⌥
+        # alias, where `retag` turns the chord into ⌥P and "Ctrl+P" would contradict it.
+        Hotkeys.retag("3.  command palette  ^P#{Hotkeys.alias_active? ? "  " : " (Ctrl+P)"} — all actions, here + app-wide"),
         "4.  edit mode        READ / INS — browse, then type",
         "5.  traffic          proxy & CA · capture #{reach("capture.toggle")} · intercept #{reach("intercept.toggle")}",
       ]

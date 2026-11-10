@@ -28,8 +28,30 @@ describe Gori::Tui::TrafficEmptyState do
       backend.contains?("trust gori's CA — browse http://gori.proxy/").should be_true
       backend.contains?("^P → Copy CA certificate path").should be_true
       backend.contains?("^P   → Open browser: proxied, CA trusted").should be_true
+      backend.contains?("^P   → Import: HAR, Burp, OpenAPI, cURL").should be_true
       text.includes?('…').should be_false
     end
+  end
+
+  # The Import row costs a row the shortest full card does not have: there the card stays
+  # and the row goes, rather than the whole card dropping to its three-line form.
+  it "keeps the full history card on a pane with no row to spare for Import" do
+    backend = MemoryBackend.new(80, 11)
+    TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 80, 11),
+      variant: :history, listen: {"127.0.0.1", 18997}, capturing: true)
+    backend.contains?("FLOW LOG").should be_true
+    backend.contains?("Open browser").should be_true
+    backend.contains?("Import:").should be_false
+  end
+
+  # ...and never on the row the figure needs: at the one height where figure, gap and card
+  # fill the body exactly, Import would push the figure out.
+  it "gives the Import row only a row neither the card nor its figure wants" do
+    TrafficEmptyState.spare_row?(10, 10, 3).should be_false # the card only just fits
+    TrafficEmptyState.spare_row?(13, 10, 3).should be_true  # spare, and no room for the figure anyway
+    TrafficEmptyState.spare_row?(14, 10, 3).should be_false # figure + gap + card, exactly
+    TrafficEmptyState.spare_row?(15, 10, 3).should be_true
+    TrafficEmptyState.spare_row?(14, 10, nil).should be_true # a variant with no figure
   end
 
   it "renders the sitemap site-map card with tree hints" do

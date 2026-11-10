@@ -69,6 +69,8 @@ class FakeExecContext < Gori::Verb::ExecContext
     marks.size
   end
 
+  property? history_awaiting_traffic : Bool = false
+
   property repeater_tab_count : Int32 = 0
 
   def repeater_subtab_count : Int32

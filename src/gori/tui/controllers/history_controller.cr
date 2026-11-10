@@ -567,6 +567,14 @@ module Gori::Tui
         return "#{nav} · #{hex} hex · #{pretty} pretty#{uni} · #{repeater} repeater · #{step}space cmds · esc strip"
       end
       return "type query · ↹ complete · ↵ apply · esc clear" if @history.querying?
+      # The first-run card: `↵ open` and `^R repeater` name keys with nothing to act on, and
+      # the one action there is sits on the card. Say that one.
+      if @history.awaiting_first_flow?
+        # The card's own route (`Tutorial.reach`: a chord the operator bound, else `^P → title`).
+        open = Tutorial.reach(reg, "browser.open")
+        open = "#{open} open browser" unless open.includes?('→')
+        return "#{open} · space cmds · esc tabs"
+      end
       # #898 gave this list `d` and `⇧X` and named neither here. `⇧X` is the one that goes in:
       # it deletes the project's whole History, and a destructive chord whose only
       # advertisement is the space menu is precisely the arrangement 0edc3c5b called out in

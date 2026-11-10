@@ -13,6 +13,19 @@ describe Gori::Tui::HistoryController do
       hint.should_not contain("hold-mode")
     end
   end
+
+  # With no flow in the project the footer named `↵ open` and `^R repeater`, two keys with
+  # nothing to act on, and not the one action the card on screen offers.
+  it "names the card's action, not list keys, while the project is empty" do
+    TuiContract.with_session("history-footer-empty") do |session|
+      ctl = HistoryController.new(TuiContract::Host.new(session))
+      ctl.view.reload(session.store)
+      settle_history(ctl, session.store)
+      hint = ctl.body_hint(:body)
+      hint.should contain("^P → Open browser")
+      hint.should_not contain("repeater")
+    end
+  end
 end
 
 # A shell with the flow detail up, so `handle_detail_key` runs.

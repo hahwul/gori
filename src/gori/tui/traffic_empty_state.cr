@@ -368,12 +368,20 @@ module Gori::Tui
     private def render_history_full(screen : Screen, rect : Rect, headline : String,
                                     addr : String, capturing : Bool) : Nil
       inner_h = full_inner_h(:history, capturing: capturing)
+      # The other way in: a project can start from a file. Drawn only on a row nothing else
+      # wants, so `full_inner_h` (the tier gate) is untouched: counted there it would drop a
+      # short pane to the three-line form, and at the one height where the figure fits
+      # exactly it would take the figure's row.
+      import_row = TrafficEmptyState.spare_row?(rect.h - 1, inner_h + 2, EmptyArt.for(:history).try(&.h))
+      inner_h += 1 if import_row
       desc = "Requests stream in here as they pass through the proxy."
       steps = ["1 once: set your client's HTTP+HTTPS proxy to",
                "2 HTTPS: trust gori's CA — browse #{Proxy::SelfPage::MAGIC_URL}",
                Hotkeys.retag("  through the proxy, or #{palette_route("ca.export", "Copy CA certificate path")}")]
       browser = "→ #{verb_title("browser.open", "Open browser")}: proxied, CA trusted"
-      min_w = (steps + [desc, "    #{addr}", "▸  ^P   #{browser}"]).max_of { |l| Screen.display_width(l) }
+      # Eight kinds, so the row names the palette word that lists them, not a menu letter.
+      import = "→ Import: HAR, Burp, OpenAPI, cURL"
+      min_w = (steps + [desc, "    #{addr}", "▸  ^P   #{browser}", "▸  ^P   #{import}"]).max_of { |l| Screen.display_width(l) }
       inner, ix, iw = begin_card(screen, rect, :history, headline, "FLOW LOG", inner_h, min_w)
       y = inner.y
 
@@ -389,7 +397,16 @@ module Gori::Tui
         y += 1
       end
       Frame.inner_divider(screen, inner, y, bg: Theme.bg, border: Theme.border)
-      draw_palette_hint(screen, ix, y + 1, iw, bullet: "▸ ", label: browser)
+      y = draw_palette_hint(screen, ix, y + 1, iw, bullet: "▸ ", label: browser)
+      draw_palette_hint(screen, ix, y, iw, bullet: "▸ ", label: import) if import_row
+    end
+
+    # Is there a row below a `card_h` card in a `body_h` body that neither the card nor its
+    # figure needs? False when the card only just fits, and when figure + gap + card fill the
+    # body exactly.
+    def self.spare_row?(body_h : Int32, card_h : Int32, art_h : Int32?) : Bool
+      return false unless body_h > card_h
+      art_h.nil? || body_h != art_h + ART_GAP + card_h
     end
 
     private def render_sitemap_full(screen : Screen, rect : Rect, headline : String,

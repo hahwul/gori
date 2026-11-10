@@ -8,7 +8,7 @@
 - CLI: `gori run sitemap tag --list --format json` (or `--json`) prints the `[{host, path, tag}]` array MCP `list_sitemap_tags` returns (#1783)
 - Help: Shortcuts names the header chips, History's view chip, the Fuzzer's `§N`, MATCH and DIST chips and Mode formula, the Probe band's chips, Discover's suppression counters and the Params `R` column (#1845, #1847, #1850)
 - Project: the empty Description card says it holds free-text notes, the overview shows a short proxy or created value instead of clipping it, and Project settings name their units (#1845, #1850)
-- First run: the wizard asks for the listen address only when the default is taken, its tour offer lands on Skip, and the first project opens on its name's `Enter` (#1846)
+- First run: the wizard asks for the listen address only when the default is taken and counts its steps from the screen it opens on, its tour offer lands on Skip, and the first project opens on its name's `Enter` (#1846, #PRNUM)
 - Discover: with no run yet, `Space` lists only Run, which says where to start one, and the empty card names both places (#1847)
 - Comparer: the footer names the two picks until both sides are set (#1847)
 - Repeater: `Space` now opens the menu with no request open, and New repeater request is a first-level row there and in every pane (#1848)
@@ -18,6 +18,9 @@
 - Help: `?` opens the shortcuts as a popup over the pane you are in, starting at that tab's section, and `?` again inside it opens the Help tab (#1852)
 - TUI: `^P` and the `0` tab picker find a tab by what other tools call it, such as intruder, scanner, collaborator or param miner (#1852)
 - TUI: pressing `c` or `i` by accident now shows which key turns capture back on or intercept off, and the menus read Send to Repeater and Send request (#1852)
+- Intercept: on a narrow terminal the queue footer keeps forward, drop and edit ahead of mark and range (#PRNUM)
+- History: with no flows yet, `Space` offers Open browser instead of Mark all and Clear history, the footer names the way to it, and the card adds the Import route (#PRNUM)
+- TUI: the wizard, Help and the tour say that `^P` means Ctrl+P, and the project picker spells its keys the same way and keeps Settings and Quit on an 80-column footer (#PRNUM)
 
 ## v0.9.3
 

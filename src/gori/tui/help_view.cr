@@ -29,6 +29,10 @@ module Gori::Tui
     # {section title, items} — the source of the rendered rows.
     SECTIONS = [
       {"GLOBAL", [
+        # How the rest of this page is written. Nothing else in the app says what the caret
+        # stands for, and it is on every footer. `key`, not a letter: every other row in this
+        # column is a live key, and `⇧X` is the wipe chord. `retag` leaves `^key` alone.
+        Item.new("^key · ⇧key · ⌥key", "Ctrl+key · Shift+key · Alt/Option+key · ↵ Enter · ↹ Tab"),
         Item.new("^P", "command palette (or click ⌘)", "app.palette"),
         Item.new("space", "focus-area action menu"),
         # The family's bare key (`Verb::Family#chord`, #1295): no `space` needed on a tab that sends flows.

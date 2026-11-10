@@ -38,7 +38,7 @@ module Gori
       # The bands a family row may sit in: `Tui::SpaceMenu::GROUP_ORDER` plus the untagged
       # `:none`. `verb/` does not name `Tui`, so the list is spelled here and
       # `spec/tui/space_menu_spec.cr` pins the two together.
-      BANDS = {:none, :view, :send, :triage, :copy, :scope, :danger, :wipe}
+      BANDS = {:none, :start, :view, :send, :triage, :copy, :scope, :danger, :wipe}
 
       # Never a menu letter, at either level or as a family's key (#1274): inside the space
       # menu these four always move the selection, as on every list in the app, so a reflex

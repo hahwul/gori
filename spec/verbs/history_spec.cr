@@ -462,3 +462,21 @@ describe "Gori::Verbs.register_history" do
     end
   end
 end
+
+# `space` on a project with no flows answered "what can I do here" with Mark all and Clear
+# history, and with nothing that gets traffic in.
+describe "History verbs on an empty project" do
+  it "offers Open browser and stands the flow-less rows down" do
+    r = Gori::Verbs.registry
+    ctx = FakeExecContext.new
+    ctx.current_tab = :history
+    ctx.history_awaiting_traffic = true
+    r["history.proxied-browser"].available?(ctx).should be_true
+    r["history.mark-all"].available?(ctx).should be_false
+    r["history.clear"].available?(ctx).should be_false
+    ctx.history_awaiting_traffic = false
+    r["history.proxied-browser"].available?(ctx).should be_false
+    r["history.mark-all"].available?(ctx).should be_true
+    r["history.clear"].available?(ctx).should be_true
+  end
+end
