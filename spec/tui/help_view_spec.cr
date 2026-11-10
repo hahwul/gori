@@ -417,8 +417,15 @@ describe "HelpView chip legend (#1842)" do
     rows.find!(&.b.includes?("DIST chip")).a.should eq("v")
   end
 
+  it "names the Probe band's chips and Discover's suppression counters" do
+    row.call("Probe band").b.should contain("CLOSED")
+    row.call("fp-cut · dedup").b.should contain("soft-404")
+    row.call("tmpl · clust").b.should contain("Discover")
+    row.call("drift").b.should contain("stale")
+  end
+
   it "keeps every legend row inside the page at 100 columns" do
-    ["header", "● address", "§N", "Mode formula"].each do |key|
+    ["header", "● address", "§N", "Mode formula", "Probe band", "fp-cut · dedup", "tmpl · clust", "drift"].each do |key|
       Screen.display_width(row.call(key).b).should be <= 100 - 2 - 4 - HelpView::KEY_W - HelpView::KEY_GAP
     end
   end

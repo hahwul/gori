@@ -5,26 +5,31 @@ module Gori
     # Verbs for the Discover sub-tab (under Target). Runs are launched from the Sitemap/
     # History space menu ("Discover here") — these control the current run in the sub-tab.
     def self.register_discover(r : Verb::Registry) : Nil
+      # These act on a run or its findings, and a run can only be started from a host (Sitemap)
+      # or a flow (History). With the RUNS list empty they were dead rows on the tab's menu.
+      # `discover.run` is left ungated on purpose: with no run it answers with where to start
+      # one (`DiscoverController#discover_run`), which is the one thing that menu should say.
+      has_run = ->(ctx : Verb::ExecContext) { ctx.discover_has_run? }
       r.register Verb::Definition.new(
         "discover.run", "Run / re-run", "Start (or re-run) the selected discovery run",
         Verb::Scope::Discover, [Verb::Chord.new("r", ctrl: true)], intent: :run) { |ctx| ctx.discover_run; nil }
 
       r.register Verb::Definition.new(
         "discover.stop", "Stop", "Stop the selected discovery run (in-flight requests finish)",
-        Verb::Scope::Discover, [Verb::Chord.new("x", ctrl: true)], intent: :stop) { |ctx| ctx.discover_stop; nil }
+        Verb::Scope::Discover, [Verb::Chord.new("x", ctrl: true)], available: has_run, intent: :stop) { |ctx| ctx.discover_stop; nil }
 
       # No chord (the RUNS list's own ↑/↓ steps runs; ctrl-p is the command palette's), and
       # palette-only (#1282): stepping runs from the other pane is found by name.
       r.register Verb::Definition.new(
         "discover.prev-run", "Previous run", "Select the run above (the RUNS list's ↑, from either pane)",
-        Verb::Scope::Discover, [] of Verb::Chord, menu: :palette) { |ctx| ctx.discover_prev_run; nil }
+        Verb::Scope::Discover, [] of Verb::Chord, available: has_run, menu: :palette) { |ctx| ctx.discover_prev_run; nil }
       r.register Verb::Definition.new(
         "discover.next-run", "Next run", "Select the run below (the RUNS list's ↓, from either pane)",
-        Verb::Scope::Discover, [] of Verb::Chord, menu: :palette) { |ctx| ctx.discover_next_run; nil }
+        Verb::Scope::Discover, [] of Verb::Chord, available: has_run, menu: :palette) { |ctx| ctx.discover_next_run; nil }
 
       r.register Verb::Definition.new(
         "discover.pause", "Pause / resume", "Pause or resume the running discovery",
-        Verb::Scope::Discover, [Verb::Chord.new("p")], mnemonic: 'p') { |ctx| ctx.discover_toggle_pause; nil }
+        Verb::Scope::Discover, [Verb::Chord.new("p")], available: has_run, mnemonic: 'p') { |ctx| ctx.discover_toggle_pause; nil }
 
       # `o`/`↵` on a findings row opens the bytes that row was found with, in the same History
       # detail the Sitemap's `o` opens (the run persisted the exchange when it recorded the
@@ -33,21 +38,21 @@ module Gori
       r.register Verb::Definition.new(
         "discover.open-flow", "Open flow", "Open the selected finding's captured request/response in History",
         Verb::Scope::Discover, [Verb::Chord.new("o"), Verb::Chord.new("enter")],
-        intent: :open, group: :view) { |ctx| ctx.discover_open_flow; nil }
+        available: has_run, intent: :open, group: :view) { |ctx| ctx.discover_open_flow; nil }
 
       # `d` clears a finished row from the RUNS list, which is append-only for the session.
       # Never a running one — the controller refuses and says to stop it first.
       r.register Verb::Definition.new(
         "discover.dismiss", "Dismiss run", "Remove the selected finished run from the RUNS list",
-        Verb::Scope::Discover, [Verb::Chord.new("d")], mnemonic: 'd') { |ctx| ctx.discover_dismiss; nil }
+        Verb::Scope::Discover, [Verb::Chord.new("d")], available: has_run, mnemonic: 'd') { |ctx| ctx.discover_dismiss; nil }
 
       r.register Verb::Definition.new(
         "discover.filter", "Filter findings", "Filter the FINDINGS table by status / source / URL",
-        Verb::Scope::Discover, [Verb::Chord.new("/")], intent: :filter) { |ctx| ctx.discover_filter; nil }
+        Verb::Scope::Discover, [Verb::Chord.new("/")], available: has_run, intent: :filter) { |ctx| ctx.discover_filter; nil }
 
       r.register Verb::Definition.new(
         "discover.copy", "Copy", "Copy the selected finding's URL",
-        Verb::Scope::Discover, [Verb::Chord.new("y")], intent: :copy) { |ctx| ctx.read_copy; nil }
+        Verb::Scope::Discover, [Verb::Chord.new("y")], available: has_run, intent: :copy) { |ctx| ctx.read_copy; nil }
 
       r.register Verb::Definition.new(
         "discover.to-menu", "Back to sub-tabs", "Move focus up to the Sitemap/Discover strip", Verb::Scope::Discover,

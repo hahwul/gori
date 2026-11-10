@@ -216,7 +216,7 @@ module Gori::Tui
               when :issues
                 [headline, "flow ──► issue ──► triage", "#{key("⇧F", "issue.create")} from History · #{key("n", "issues.new")} create"]
               when :discover
-                [headline, "target ──► crawl ──► endpoints", "Discover here (#{menu("sitemap.discover")}) · #{key("^R", "discover.run")} run"]
+                [headline, "target ──► crawl ──► endpoints", "Discover here (#{menu("sitemap.discover")}) on a host"]
               when :comparer
                 [headline, "A ──► diff ◄── B", "#{key("a", "comparer.pick-a")} pick flow A · #{key("b", "comparer.pick-b")} pick flow B"]
               when :authorize
@@ -275,7 +275,7 @@ module Gori::Tui
              when :issues
                "#{key("⇧F", "issue.create")} from History · #{key("n", "issues.new")} create"
              when :discover
-               "Discover here (#{menu("sitemap.discover")}) · #{key("^R", "discover.run")} run"
+               "Discover here (#{menu("sitemap.discover")}) on a host"
              when :comparer
                "#{key("a", "comparer.pick-a")} pick A · #{key("b", "comparer.pick-b")} pick B"
              when :authorize
@@ -579,8 +579,10 @@ module Gori::Tui
       when :discover
         CardSpec.new("DISCOVER", "Crawl a target for endpoints nothing linked.",
           "target ──► crawl ──► endpoints",
-          [ChordLine.new(menu_chip("sitemap.discover"), "\"Discover here\" on a host"),
-           ChordLine.new(" ^R ", "run the selected crawl", "discover.run")])
+          # `^R` re-runs the SELECTED run, and this card is only drawn while there is none, so
+          # the second row names the other place the same menu row lives instead.
+          [ChordLine.new(menu_chip("sitemap.discover"), "\"Discover here\" on a Sitemap host"),
+           ChordLine.new(nil, "the same menu row, on a History flow")])
       when :comparer
         CardSpec.new("COMPARER", "Diff two flows side by side — req or res.",
           "A ──► diff ◄── B",

@@ -15,6 +15,17 @@ describe "Gori::Verbs.register_discover" do
     end
   end
 
+  # `discover.run` stays: with no run it answers with where to start one, and a gated ^R
+  # would be a silent key on the tab whose footer names it.
+  it "offers only Run and the strip escape while the RUNS list is empty" do
+    ctx = FakeExecContext.new
+    ctx.discover_has_run = false
+    live = r.select { |v| v.scope == Gori::Verb::Scope::Discover && v.available?(ctx) }.map(&.id)
+    live.sort.should eq(["discover.run", "discover.to-menu"])
+    ctx.discover_has_run = true
+    r["discover.stop"].available?(ctx).should be_true
+  end
+
   it "keeps pause off ctrl-p, which belongs to the command palette" do
     # Plain `p` is handled by the controller body; the verb exists for the space menu.
     # Plain `p` is the chord (it was a raw arm in the controller, invisible to the hotkey
