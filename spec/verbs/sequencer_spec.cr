@@ -53,6 +53,7 @@ describe "Gori::Verbs.register_sequencer" do
   it "shows the sub-tab search/filter only with two or more sessions open" do
     ctx = FakeExecContext.new
     ctx.current_tab = :sequencer
+    ctx.subtab_search_tab_count = 0
     %w[sequence.find-subtab sequence.filter-subtabs].each do |id|
       r[id].available?(ctx).should be_false
       r[id].section.should eq(:tab)
