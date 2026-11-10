@@ -184,8 +184,38 @@ describe Gori::Tui::TrafficEmptyState do
     # a card wearing its container's name reads as a rendering fault rather than as a hint.
     backend.contains?("FUZZ RUN").should be_true
     backend.contains?("^R").should be_true
-    # The card does not know whether the tab has sets, so it never orders "add sets, then".
+    # Without a step from the view the card does not know whether the tab has sets, so it
+    # never orders "add sets, then".
     backend.contains?("Add payload sets").should be_false
+  end
+
+  it "marks the first prerequisite a fuzz run still lacks" do
+    row = ->(step : TrafficEmptyState::FuzzStep, text : String) do
+      backend = MemoryBackend.new(70, 10)
+      TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 70, 10), variant: :fuzzer_results, running: false, fuzz_step: step)
+      (0...10).map { |y| backend.row(y) }.find!(&.includes?(text))
+    end
+    row.call(TrafficEmptyState::FuzzStep::Mark, "1 Mark a position").should contain("▸ 1")
+    row.call(TrafficEmptyState::FuzzStep::Mark, "2 Add payloads").should_not contain("▸")
+    row.call(TrafficEmptyState::FuzzStep::Payloads, "1 Mark a position").should contain("✓ 1")
+    row.call(TrafficEmptyState::FuzzStep::Payloads, "2 Add payloads").should contain("▸ 2")
+    row.call(TrafficEmptyState::FuzzStep::Run, "2 Add payloads").should contain("✓ 2")
+    row.call(TrafficEmptyState::FuzzStep::Run, "3 Run").should contain("▸ 3")
+  end
+
+  it "fits every checklist row in the narrowest full fuzzer card" do
+    w = TrafficEmptyState::FULL_MIN_W
+    backend = MemoryBackend.new(w, 10)
+    TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, w, 10), variant: :fuzzer_results, running: false, fuzz_step: TrafficEmptyState::FuzzStep::Mark)
+    backend.contains?("^K word").should be_true
+    backend.contains?("^L list").should be_true
+  end
+
+  it "names the missing prerequisite on a pane too short for the fuzzer card" do
+    backend = MemoryBackend.new(60, 3)
+    TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 60, 3), variant: :fuzzer_results, running: false, fuzz_step: TrafficEmptyState::FuzzStep::Mark)
+    backend.contains?("mark first · ^A auto · ^K word").should be_true
+    backend.contains?("^R").should be_false
   end
 
   it "resolves the idle fuzzer card's run key from the keymap" do

@@ -136,29 +136,32 @@ describe Gori::Tui::PaletteState do
     r["capture.toggle"].category.should eq(Gori::Verb::Category::Action) # the default kind
   end
 
-  it "orders the empty-query palette: Settings → Go to → rest → Back → Quit" do
+  it "orders the empty-query palette: start → Go to → Settings → rest → Back → Quit" do
     ctx = FakeExecContext.new
     palette = PaletteState.new(Gori::Verbs.registry)
     palette.reset(ctx)
     ids = palette.results.map(&.id)
-    cats = palette.results.map(&.category)
 
-    first_settings = cats.index(Gori::Verb::Category::Settings)
-    first_settings.should_not be_nil
-    first_non_settings = cats.index { |c| c != Gori::Verb::Category::Settings }
-    first_non_settings.should_not be_nil
-    first_settings.not_nil!.should be < first_non_settings.not_nil!
+    # What the empty-state cards send a new operator here for leads the list.
+    ids.first(3).should eq(%w[browser.open ca.export help.tour])
+    ids[3].should start_with("tab.")
 
-    # Go to … tab jumps right after the Settings block
-    first_tab = ids.index { |id| id.starts_with?("tab.") }
-    first_tab.should_not be_nil
-    last_settings = ids.rindex { |id| Gori::Verbs.registry[id].category == Gori::Verb::Category::Settings }
-    last_settings.should_not be_nil
-    first_tab.not_nil!.should eq(last_settings.not_nil! + 1)
+    # One Settings row, after the tab jumps; a section's row is not listed.
+    settings = ids.select { |id| Gori::Verbs.registry[id].category.settings? }
+    settings.should eq(["settings.open"])
+    ids.index("settings.open").not_nil!.should be > ids.rindex(&.starts_with?("tab.")).not_nil!
 
     # Exit paths always finish the list
     ids[-2].should eq("app.back")
     ids[-1].should eq("app.quit")
+  end
+
+  it "still finds a Settings section the browse folds away, by typing" do
+    ctx = FakeExecContext.new
+    palette = PaletteState.new(Gori::Verbs.registry)
+    palette.reset(ctx)
+    "theme".each_char { |c| palette.append(c, ctx) }
+    palette.results.map(&.id).should contain("settings.theme")
   end
 
   it "surfaces import commands when the palette is filtered by 'import:'" do

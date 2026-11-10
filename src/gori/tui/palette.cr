@@ -137,7 +137,7 @@ module Gori::Tui
       @results[@selected]?
     end
 
-    # Empty query: the curated Global browse, exactly as before #1282. Typed: the tab's
+    # Empty query: the curated Global browse (`Registry#browse_palette`). Typed: the tab's
     # matches first, then Global's, each group fuzzy-ranked on its own — a tab action is
     # what the operator is most likely looking for from inside the tab, and a score that
     # interleaved the two would move rows between groups on every keystroke.
