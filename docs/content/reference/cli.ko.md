@@ -1036,6 +1036,7 @@ gori run sitemap --in-scope --format paths
 gori run sitemap tag --host api.example.com --path /v1/users --tag "IDOR candidate"
 gori run sitemap tag --host api.example.com --path /v1/users --clear
 gori run sitemap tag --list
+gori run sitemap tag --list --json   # [{"host","path","tag"}], MCP list_sitemap_tags와 같은 배열
 ```
 
 **`sitemap params`**: TUI [Params 서브탭](/ko/guide/proxy/#params)과 같은 파라미터 목록입니다. 오리진(스킴, 호스트, 포트), 메서드, 경로, 위치, 이름마다 한 줄씩 나오며, 그 이름이 나온 플로우 수, 서로 다른 값 최대 `--samples`개(기본값 5), 그리고 4바이트 이상인 값이 디코딩된 응답 본문의 앞 256 KiB 안에 그대로 나타나면 `reflected`가 붙습니다(관찰일 뿐 취약점 판정은 아닙니다).

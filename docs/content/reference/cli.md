@@ -1045,6 +1045,7 @@ The tree has one root per origin (scheme, host and port), so `http://127.0.0.1:1
 gori run sitemap tag --host api.example.com --path /v1/users --tag "IDOR candidate"
 gori run sitemap tag --host api.example.com --path /v1/users --clear
 gori run sitemap tag --list
+gori run sitemap tag --list --json   # [{"host","path","tag"}], the same array as MCP list_sitemap_tags
 ```
 
 **`sitemap params`**: the parameter inventory, the same one the TUI's [Params sub-tab](/guide/proxy/#params) shows. One row per origin (scheme, host and port), method, path, location and name, with the number of flows that carried it, up to `--samples` distinct values (default 5), and `reflected` when a value of four or more bytes appears verbatim in the first 256 KiB of the decoded response body (an observation, not a finding).
