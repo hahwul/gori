@@ -60,7 +60,7 @@ describe CustomColorsView do
     view = CustomColorsView.new
     backend = MemoryBackend.new(40, 6)
     view.render(Screen.new(backend), Rect.new(0, 0, 40, 6), colors, 0, 0, true)
-    backend.contains?("CUSTOM COLORS").should be_true
+    backend.contains?("CUSTOM COLOURS").should be_true
     backend.contains?("coral").should be_true
     backend.contains?("#ff6b6b").should be_true
   end

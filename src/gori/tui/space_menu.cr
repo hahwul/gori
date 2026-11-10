@@ -63,6 +63,8 @@ module Gori::Tui
       :common => "COMMON", :request => "REQUEST", :response => "RESPONSE", :target => "TARGET",
       :template => "TEMPLATE", :config => "CONFIG", :results => "RESULTS", :detail => "DETAIL",
       :input => "INPUT", :chain => "CHAIN", :output => "OUTPUT", :tab => "SUB-TABS", :subtab => "SUB-TABS",
+      # The Colormarker's pane is CUSTOM COLOURS; the symbol upcased would spell it the other way.
+      :colors => "COLOURS",
     } of Symbol => String
 
     # The one label both strip sections render under. `:subtab` (new/close/duplicate/rename/
@@ -708,7 +710,10 @@ module Gori::Tui
       g = grid(body)
       cell = @title_w + 3
       # left border + columns (+ gaps) + scroll gutter + right border
-      w = {3 + g.ncols * cell + (g.ncols - 1) * COL_GAP, body.w - 2}.min
+      # …and never narrower than its own title: a one-row card under "SPACE · COLOURS" drew
+      # the title as "SPACE · CO…". `Frame.card` writes ` title ` into `w - 4` cells. The cells
+      # are sized from the box (`cell_w`), so a card the title widened has wider cells too.
+      w = { {3 + g.ncols * cell + (g.ncols - 1) * COL_GAP, Screen.draw_width(card_title) + 6}.max, body.w - 2 }.min
       h = {g.viewport + 2, body.h}.min
       return Rect.new(0, 0, 0, 0) if w < 10 || h < 3
       body.center(w, h)

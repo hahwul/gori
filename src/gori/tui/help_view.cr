@@ -289,6 +289,7 @@ module Gori::Tui
         Item.new("fp-cut · dedup", "Discover: soft-404 look-alikes dropped · URLs already seen"),
         Item.new("tmpl · clust", "Discover: skipped as one URL shape · as one repeated page"),
         Item.new("drift", "Discover: probes dropped once a directory's baseline went stale"),
+        Item.new("Params: R", "↩ there: the value came back in a response (reflected) — try injection"),
         # `⇧X clear` sits in the LIST half, where the chord fires — and it is on this row at all
         # for the reason the Probe and Authorize rows carry theirs: a wipe has to be named where
         # it can be read before it is pressed. Marks make that sharper here than anywhere else,
@@ -386,7 +387,7 @@ module Gori::Tui
         Item.new("style", "full = tint the whole row · strip = one colour cell ahead of TIME"),
         # Full History QL (`Colormarker`'s two tiers): `header:`/`size:`/`dur:`/`body:` work too.
         Item.new("when:", "History QL — host: path: status: header: size: dur: … · ↹ completes"),
-        Item.new("↹ · ↓ past list", "CUSTOM COLORS pane — a add · ↵/e edit · d delete (name + #hex)"),
+        Item.new("↹ · ↓ past list", "CUSTOM COLOURS pane — a add · ↵/e edit · d delete (name + #hex)"),
         Item.new("custom colour", "a global name the picker offers everywhere; its hex is absolute, not theme-relative"),
         Item.new("off the bar by default", "`0` opens it; settings:tabs gives it a slot, next to Rewriter"),
       ]},

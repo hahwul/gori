@@ -176,6 +176,23 @@ describe "ProjectView OVERVIEW row budget" do
 end
 
 describe "ProjectView OVERVIEW facts" do
+  # At 110 columns the two-column band gave these values about 20 cells, and they drew as
+  # `● ca…` and `(4…`. A value that does not fit takes its short form whole instead.
+  it "swaps in a value's short form rather than clipping it mid-word" do
+    with_project do |project, store|
+      add_flow(store)
+      view = fresh_view(store)
+      view.reload(project, store)
+      b = render_tab(view, 110, 32, capturing: true)
+      proxy = b.row(row_of(b, "Proxy:").not_nil!)
+      proxy.should contain("●")
+      proxy.should_not contain("…")
+      b.row(row_of(b, "Created:").not_nil!).should_not contain("(")
+      # With room, the long forms are back.
+      render_tab(view, 160, 40, capturing: true).contains?("● capturing").should be_true
+    end
+  end
+
   it "shows the proxy address with the live capture state" do
     with_project do |project, store|
       add_flow(store)

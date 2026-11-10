@@ -422,6 +422,7 @@ describe "HelpView chip legend (#1842)" do
     row.call("fp-cut · dedup").b.should contain("soft-404")
     row.call("tmpl · clust").b.should contain("Discover")
     row.call("drift").b.should contain("stale")
+    row.call("Params: R").b.should contain("reflected")
   end
 
   it "keeps every legend row inside the page at 100 columns" do
