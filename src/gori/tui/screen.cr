@@ -228,8 +228,13 @@ module Gori::Tui
     # A box something opaque will be painted over after the body is drawn — Miss Ring's plate
     # (#1376). A `text` run that starts left of it and would continue underneath is ellipsized
     # at its left edge, so a value she covers reads as cut (`1…`) rather than as a shorter real
-    # one (`160B` showing as `16`). Only runs that START left of the box are touched; anything
-    # drawn inside it is covered anyway. The Runner sets it around the body render only.
+    # one (`160B` showing as `16`). A `text` run that STARTS inside the box has the letters it
+    # would leave past the box's right edge blanked: a right-aligned tag that began under her
+    # showed its last letters alone (`· global` as `l`). Spaces and box-drawing glyphs in that
+    # tail are kept, so a selection band or a border baked into the run still reaches the
+    # edge, and the run keeps its width, so a caller chaining on the returned x is not moved.
+    # A separate run that starts past the box, and anything drawn per cell, is outside this
+    # rule. The Runner sets it around the body render only.
     property occlusion : Rect? = nil
 
     # Interned single-cell Strings for the 128 ASCII codepoints, so drawing a Char never
@@ -532,14 +537,36 @@ module Gori::Tui
       GLYPH_CELL_CACHE[o] = ch.to_s
     end
 
+    # `str` drawn at `x`, with every letter that lands at or past column `from` turned into
+    # spaces of the same width. Whitespace and box-drawing glyphs (U+2500..U+259F) pass. Only
+    # reached for a run that starts under the occlusion, so the allocation is three rows' worth.
+    def self.blank_tail(str : String, x : Int32, from : Int32) : String
+      col = x
+      String.build(str.bytesize) do |io|
+        str.each_char do |ch|
+          w = display_width(ch.to_s)
+          if col >= from && !ch.whitespace? && !(0x2500 <= ch.ord <= 0x259F)
+            w.times { io << ' ' }
+          else
+            io << ch
+          end
+          col += w
+        end
+      end
+    end
+
     # Draws `str` at (x, y), truncating with an ellipsis if its *display width*
     # (columns) exceeds `width` (default: to the right edge). Returns the x just
     # past the (possibly truncated) text. Properly advances for full-width chars.
     def text(x : Int32, y : Int32, str : String, fg : Color, bg : Color = Theme.bg,
              attr : Attribute = Attribute::None, width : Int32? = nil) : Int32
       limit = width || (@width - x)
-      if (occ = @occlusion) && x < occ.x && y >= occ.y && y < occ.bottom
-        limit = {limit, occ.x - x}.min
+      if (occ = @occlusion) && y >= occ.y && y < occ.bottom
+        if x < occ.x
+          limit = {limit, occ.x - x}.min
+        elsif x < occ.right
+          str = Screen.blank_tail(str, x, occ.right)
+        end
       end
       return x if limit <= 0
       # ASCII fast path — the common case (line numbers, method/host/path, headers):

@@ -1545,6 +1545,58 @@ describe "Screen#occlusion under Miss Ring" do
     b.row(plate.y - 1)[plate.x - 2, 4].should eq("160B")
   end
 
+  # A right-aligned tag that starts under her and runs past her right edge: the Project
+  # settings rows showed `· global` as a lone `l` in the gutter beside her.
+  it "leaves no tail from a run that starts under her and ends past her" do
+    body = Rect.new(0, 0, 60, 20)
+    plate = Companion.hit_rect(body).not_nil!
+    b = MemoryBackend.new(60, 20)
+    screen = Screen.new(b)
+    screen.occlusion = plate
+    y = plate.y + 1
+    screen.text(plate.right - 6, y, "· global", Theme.text)
+    screen.text(plate.right, y + 1, "ok", Theme.text)                 # starts past her: untouched
+    screen.text(plate.right - 6, plate.y - 1, "· global", Theme.text) # the row above her: untouched
+    b.row(y)[plate.right, 2].should eq("  ")
+    b.row(y + 1)[plate.right, 2].should eq("ok")
+    b.row(plate.y - 1)[plate.right - 6, 8].should eq("· global")
+  end
+
+  it "does the same on the ASCII fast path" do
+    body = Rect.new(0, 0, 60, 20)
+    plate = Companion.hit_rect(body).not_nil!
+    b = MemoryBackend.new(60, 20)
+    screen = Screen.new(b)
+    screen.occlusion = plate
+    screen.text(plate.right - 4, plate.y, "global", Theme.text)
+    b.row(plate.y)[plate.right, 2].should eq("  ")
+  end
+
+  # Callers chain on the returned x (`styled_run`). A run blanked under her must still say
+  # where it ended, or the run after it is drawn in the wrong column.
+  it "returns the x the run reached, so a chained run is not displaced" do
+    body = Rect.new(0, 0, 60, 20)
+    plate = Companion.hit_rect(body).not_nil!
+    b = MemoryBackend.new(60, 20)
+    screen = Screen.new(b)
+    screen.occlusion = plate
+    start = plate.right - 4
+    x = screen.text(start, plate.y, "abcdef", Theme.text)
+    x.should eq(start + 6)
+    plain = Screen.new(MemoryBackend.new(60, 20))
+    x.should eq(plain.text(start, plate.y, "abcdef", Theme.text))
+    # A width-limited run reports the limit, as it does when drawn.
+    screen.text(start, plate.y, "abcdef", Theme.text, width: 3).should eq(start + 3)
+  end
+
+  # A row drawn as one padded run carries its selection background, and sometimes a border,
+  # into the gutter beside her. Only the letters go.
+  it "keeps the spaces and the border of a run that reaches the edge" do
+    Screen.blank_tail("ab cd │", 10, 12).should eq("ab    │")
+    Screen.blank_tail("한글x", 0, 2).should eq("한   ")
+    Screen.blank_tail("abc", 0, 9).should eq("abc")
+  end
+
   it "changes nothing without an occlusion" do
     b = MemoryBackend.new(20, 1)
     Screen.new(b).text(0, 0, "160B", Theme.text)
