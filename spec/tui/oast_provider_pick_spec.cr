@@ -286,3 +286,19 @@ describe Gori::Tui::OastProviderPicker do
     end
   end
 end
+
+describe "OastController's payload row before a URL exists" do
+  it "offers g only once an enabled provider can hand out a payload" do
+    with_providers(0) do |ctl, _|
+      backend = MemoryBackend.new(100, 24)
+      ctl.render_body(Screen.new(backend), Rect.new(0, 0, 100, 24), :body)
+      backend.contains?("add or enable one on the Providers sub-tab").should be_true
+      backend.contains?("to get an OAST payload URL").should be_false
+    end
+    with_providers(1) do |ctl, _|
+      backend = MemoryBackend.new(100, 24)
+      ctl.render_body(Screen.new(backend), Rect.new(0, 0, 100, 24), :body)
+      backend.contains?("press g to get an OAST payload URL").should be_true
+    end
+  end
+end

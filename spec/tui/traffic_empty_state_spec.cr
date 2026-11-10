@@ -455,6 +455,42 @@ describe Gori::Tui::TrafficEmptyState do
     backend.contains?("SEQUENCER").should be_true
     backend.contains?("entropy").should be_true
     backend.contains?("Send to Sequencer").should be_true
+    # `^R` does nothing without a session, so the card does not name it.
+    backend.contains?("^R").should be_false
+    backend.contains?("History or Repeater").should be_true
+  end
+
+  it "names no run key on the short and narrow sequencer fallbacks either" do
+    [{60, 5}, {30, 2}].each do |(w, h)|
+      backend = MemoryBackend.new(w, h)
+      TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, w, h), variant: :sequencer)
+      backend.contains?("^R").should be_false
+    end
+  end
+
+  # With an empty queue `authorize.run` is unavailable, so the card says what ^R will do once
+  # there is something queued instead of offering it as a chip.
+  it "names Authorize's run as the step after queueing, not as a key to press now" do
+    backend = MemoryBackend.new(80, 14)
+    TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 80, 14), variant: :authorize)
+    backend.contains?("then ^R replays what has not run").should be_true
+  end
+
+  # These three are reached from another tab's Send flow to… card. A bare ` space ` chip named
+  # the leader and not the two letters after it.
+  it "spells the send-from-History chips with the full menu path" do
+    prev = TrafficEmptyState.registry
+    begin
+      TrafficEmptyState.registry = Gori::Verbs.registry
+      {:authorize => "history.authorize", :miner => "history.mine", :sequencer => "history.sequence"}.each do |variant, verb|
+        backend = MemoryBackend.new(80, 14)
+        TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 80, 14), variant: variant)
+        backend.contains?(" #{Gori::Hotkeys.menu_chip(Gori::Verbs.registry, verb)} ").should be_true
+        backend.contains?(" space ").should be_false
+      end
+    ensure
+      TrafficEmptyState.registry = prev
+    end
   end
 
   # OAST was the last workbench tab with no card at all — an empty CALLBACKS pane is the tallest
@@ -480,6 +516,8 @@ describe Gori::Tui::TrafficEmptyState do
     backend.contains?("Providers").should be_true
     backend.contains?("interactsh").should be_true
     backend.contains?("start listening").should be_false
+    # In words as well as by the Ctrl+digit jump, which not every terminal delivers.
+    backend.contains?("Providers sub-tab").should be_true
   end
 
   # The two results-pane variants. Both draw INSIDE a pane that is already a card, so they take

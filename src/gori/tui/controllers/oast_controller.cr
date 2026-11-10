@@ -947,6 +947,14 @@ module Gori::Tui
       end
     end
 
+    # The payload row before a URL has been made. `g` refuses without an ENABLED provider, so
+    # the row does not offer it then: it used to, one line above a card saying none exists.
+    # "or enable": a provider that is configured and toggled off is the same refusal.
+    private def payload_hint(has_provider : Bool) : String
+      return keys("press {oast.generate} to get an OAST payload URL (copies to clipboard)") if has_provider
+      "no enabled provider — add or enable one on the Providers sub-tab"
+    end
+
     private def render_payload_bar(screen : Screen, rect : Rect) : Nil
       screen.fill(Rect.new(rect.x, rect.y, rect.w, 1), Theme.panel)
       ep = enabled_providers
@@ -987,7 +995,7 @@ module Gori::Tui
       if url = @last_payload
         screen.text(rect.x + 1, rect.y + 1, url, Theme.text_bright, Theme.bg, width: rect.w - 2)
       else
-        screen.text(rect.x + 1, rect.y + 1, "press g to get an OAST payload URL (copies to clipboard)", Theme.muted, Theme.bg, width: rect.w - 2)
+        screen.text(rect.x + 1, rect.y + 1, payload_hint(!ep.empty?), Theme.muted, Theme.bg, width: rect.w - 2)
       end
     end
 
