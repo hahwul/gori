@@ -284,6 +284,11 @@ module Gori::Tui
       ]},
       {"OTHER TABS", [
         Item.new("Sitemap", "↑/↓ · {sitemap.query} filter · ↵/→ expand · {sitemap.mark-toggle} mark · {sitemap.mark-all} all · {sitemap.toggle-grouping} fold · {scope.toggle-lens} scope · {space:sitemap.tag} tag · {space:sitemap.js-scan} js"),
+        # A Discover run's suppression counters (`Discover::RunStats`), under the tab they
+        # are drawn on: abbreviations with no other legend.
+        Item.new("fp-cut · dedup", "Discover: soft-404 look-alikes dropped · URLs already seen"),
+        Item.new("tmpl · clust", "Discover: skipped as one URL shape · as one repeated page"),
+        Item.new("drift", "Discover: probes dropped once a directory's baseline went stale"),
         # `⇧X clear` sits in the LIST half, where the chord fires — and it is on this row at all
         # for the reason the Probe and Authorize rows carry theirs: a wipe has to be named where
         # it can be read before it is pressed. Marks make that sharper here than anywhere else,
@@ -309,6 +314,8 @@ module Gori::Tui
         # the menu entry `probe.scope-toggle` here. The token would have printed the Global
         # chord and been wrong on the one tab this row is about.
         Item.new("Probe", "↑/↓ ↵ open · {probe.open-evidence} source · {probe.mode} mode · {probe.dismiss-selected} dismiss · {probe.toggle-closed} all · {probe.filter} filter · {space:probe.scope-toggle} scope · {probe.clear} clear findings"),
+        # The Probe band's standing chips: on screen all session with no other legend.
+        Item.new("Probe band", "CLOSED lit: dismissed shown too ({probe.toggle-closed}) · C H M L I: per severity"),
         # Evidence is hidden until the project freezes its first snapshot, so this row is where
         # an operator who just enabled the tab learns its keys — and `{evidence.delete}` is the
         # only one that destroys bytes no source can hand back, which is why it is named here
