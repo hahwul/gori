@@ -6,13 +6,14 @@
 - Fuzzer: the idle results card lists what a run still needs (a marked position, then a payload set) and marks the next step, and with no session open `Space` offers New fuzz session instead of Run and Stop (#1843, #1844)
 - Probe: `gori run probe promote --format json` prints the new Issue id as MCP `probe_promote` does (#1784)
 - CLI: `gori run sitemap tag --list --format json` (or `--json`) prints the `[{host, path, tag}]` array MCP `list_sitemap_tags` returns (#1783)
-- Help: Shortcuts names the header chips, History's view chip, the Fuzzer's `§N`, MATCH and DIST chips and Mode formula, the Probe band's chips and Discover's suppression counters (#1845, #1847)
-- Project: the empty Description card says it holds free-text notes (#1845)
+- Help: Shortcuts names the header chips, History's view chip, the Fuzzer's `§N`, MATCH and DIST chips and Mode formula, the Probe band's chips, Discover's suppression counters and the Params `R` column (#1845, #1847, #1850)
+- Project: the empty Description card says it holds free-text notes, the overview shows a short proxy or created value instead of clipping it, and Project settings name their units (#1845, #1850)
 - First run: the wizard asks for the listen address only when the default is taken, its tour offer lands on Skip, and the first project opens on its name's `Enter` (#1846)
 - Discover: with no run yet, `Space` lists only Run, which says where to start one, and the empty card names both places (#1847)
 - Comparer: the footer names the two picks until both sides are set (#1847)
 - Repeater: `Space` now opens the menu with no request open, and New repeater request is a first-level row there and in every pane (#1848)
 - TUI: the empty Authorize, Miner and Sequencer cards spell the whole menu path to their Send row, none of them offers a run key before there is something to run, and an empty OAST says to add or enable a provider on the Providers sub-tab (#1849)
+- Colormarker: the custom colours pane and its `Space` menu spell colour as the rest of the tab does, and a short `Space` menu no longer clips its own title (#1850)
 - TUI: a right-aligned value Miss Ring covers no longer leaves its last letters standing beside her (#1851)
 
 ## v0.9.3

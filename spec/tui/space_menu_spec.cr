@@ -1522,4 +1522,21 @@ describe "Runner — a space card whose pane moved under it" do
     prompts = src[/private def render_prompts\(.*?^    end$/m]?.not_nil!
     prompts.index!("close_space_menu_moved_under").should be < prompts.index!("@space_menu.render")
   end
+
+  # A one-row card under a long section label drew its title as "SPACE · CO…".
+  it "is never narrower than its own title" do
+    ctx = FakeExecContext.new
+    ctx.current_tab = :colormarker
+    ctx.colormarker_rule_list_focused = false
+    ctx.colormarker_colors_focused = true # the CUSTOM COLOURS pane, whose empty menu is one row
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+    menu.open(Gori::Verb::Scope::Colormarker, :colors, ctx)
+    menu.entries.should_not be_empty
+    body = Rect.new(0, 0, 100, 30)
+    backend = MemoryBackend.new(100, 30)
+    menu.render(Screen.new(backend), body)
+    top = backend.row(menu.box(body).y)
+    top.should contain(" #{menu.card_title} ")
+    top.should_not contain("…")
+  end
 end
