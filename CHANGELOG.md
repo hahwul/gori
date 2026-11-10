@@ -4,6 +4,7 @@
 
 - TUI: an empty `^P` opens on Open browser, Copy CA certificate path and Guided tour, then the tab jumps, with one Settings row; type a section's name to reach it (#1843)
 - Fuzzer: the idle results card lists what a run still needs (a marked position, then a payload set) and marks the next step (#1843)
+- Probe: `gori run probe promote --format json` prints the new Issue id as MCP `probe_promote` does (#1784)
 
 ## v0.9.3
 

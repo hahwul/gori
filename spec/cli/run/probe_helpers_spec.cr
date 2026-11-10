@@ -15,6 +15,10 @@ module Gori::CLI::Run
     parse_rule_kind(v)
   end
 
+  def self.probe_promote_json_for_spec(finding_id : Int64, issue_id : Int64?) : String
+    probe_promote_json(finding_id, issue_id)
+  end
+
   def self.probe_custom_row_id_for_spec(id : String) : Int64?
     probe_custom_row_id(id)
   end
@@ -37,6 +41,20 @@ module Gori::CLI::Run
 
   def self.probe_progress_meter_for_spec(meter : Bool) : Proc(Int32, Int32, Nil)?
     probe_progress_meter(meter)
+  end
+end
+
+# `probe promote --format json` (#1784) prints MCP `probe_promote`'s object, so a script reads
+# the new Issue id instead of scraping "Promoted finding #N to Issue #M.".
+describe "gori run probe promote — JSON reply" do
+  it "carries the new Issue id for a promotion" do
+    json = JSON.parse(Gori::CLI::Run.probe_promote_json_for_spec(12_i64, 7_i64))
+    json.as_h.should eq({"id" => JSON::Any.new(12_i64), "promoted" => JSON::Any.new(true), "issue_id" => JSON::Any.new(7_i64)})
+  end
+
+  it "says why nothing was promoted for an already-promoted finding" do
+    json = JSON.parse(Gori::CLI::Run.probe_promote_json_for_spec(12_i64, nil))
+    json.as_h.should eq({"id" => JSON::Any.new(12_i64), "promoted" => JSON::Any.new(false), "reason" => JSON::Any.new("already promoted to an issue")})
   end
 end
 
