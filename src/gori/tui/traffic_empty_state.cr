@@ -39,6 +39,13 @@ module Gori::Tui
     # unbound verb. See #key.
     class_property registry : Verb::Registry? = nil
 
+    # The first thing an idle fuzz session still needs before `^R` can run it.
+    enum FuzzStep
+      Mark
+      Payloads
+      Run
+    end
+
     # `listen` is the live bind as (host, port), NOT a pre-joined string: the card renders
     # the address at full width but the medium/minimal fallbacks inline it into a longer
     # hint, so this has to pick the verbose or terse form per branch — which needs the
@@ -53,7 +60,8 @@ module Gori::Tui
                has_provider : Bool = true,
                body_focused : Bool = true,
                catch_direction : String = "REQ",
-               title : String? = nil) : Nil
+               title : String? = nil,
+               fuzz_step : FuzzStep? = nil) : Nil
       return if suppressed?
       return if rect.empty?
 
@@ -75,15 +83,15 @@ module Gori::Tui
       if rect.h >= full_h && rect.w >= FULL_MIN_W
         addr = BindAddress.display(host, port)
         render_full(screen, rect, variant, headline, addr, capturing, catch_on, running, scan_on,
-          has_provider, body_focused, catch_direction)
+          has_provider, body_focused, catch_direction, fuzz_step)
       elsif rect.h >= MED_MIN_H && rect.w >= MED_MIN_W
         addr = BindAddress.display(host, port, terse: true)
         render_medium(screen, rect, variant, headline, addr, capturing, catch_on, running, scan_on,
-          has_provider, body_focused)
+          has_provider, body_focused, fuzz_step)
       else
         addr = BindAddress.display(host, port, terse: true)
         render_minimal(screen, rect, variant, headline, addr, capturing, catch_on, running, scan_on,
-          has_provider, body_focused)
+          has_provider, body_focused, fuzz_step)
       end
     end
 
@@ -158,7 +166,7 @@ module Gori::Tui
     private def render_full(screen : Screen, rect : Rect, variant : Symbol, headline : String,
                             addr : String, capturing : Bool, catch_on : Bool, running : Bool,
                             scan_on : Bool, has_provider : Bool, body_focused : Bool,
-                            catch_direction : String) : Nil
+                            catch_direction : String, fuzz_step : FuzzStep?) : Nil
       if card = standard_card(variant)
         render_standard_full(screen, rect, variant, headline, card)
       elsif card = centered_card(variant)
@@ -168,7 +176,7 @@ module Gori::Tui
         when :history           then render_history_full(screen, rect, headline, addr, capturing)
         when :sitemap           then render_sitemap_full(screen, rect, headline, addr, capturing)
         when :intercept         then render_intercept_full(screen, rect, headline, addr, capturing, catch_on, body_focused, catch_direction)
-        when :fuzzer_results    then render_fuzzer_results_full(screen, rect, headline, running)
+        when :fuzzer_results    then render_fuzzer_results_full(screen, rect, headline, running, fuzz_step)
         when :probe             then render_probe_full(screen, rect, headline, addr, capturing, scan_on)
         when :miner_results     then render_miner_results_full(screen, rect, headline, running)
         when :sequencer_samples then render_sequencer_samples_full(screen, rect, headline, running)
@@ -179,7 +187,8 @@ module Gori::Tui
 
     private def render_medium(screen : Screen, rect : Rect, variant : Symbol, headline : String,
                               addr : String, capturing : Bool, catch_on : Bool, running : Bool,
-                              scan_on : Bool, has_provider : Bool, body_focused : Bool) : Nil
+                              scan_on : Bool, has_provider : Bool, body_focused : Bool,
+                              fuzz_step : FuzzStep?) : Nil
       lines = case variant
               when :history
                 [headline, "──► proxy #{addr} ──► flows",
@@ -197,7 +206,7 @@ module Gori::Tui
               when :fuzzer
                 [headline, "§ template ──► payloads ──► probe", "^N new session · #{key("⇧I", "history.fuzz")} from History"]
               when :fuzzer_results
-                running ? [headline, "sampling probes…"] : [headline, "^O payload sets · #{key("^R", "fuzz.run")} run"]
+                running ? [headline, "sampling probes…"] : [headline, fuzz_step_hint(fuzz_step) || "^O payload sets · #{key("^R", "fuzz.run")} run"]
               when :probe
                 if scan_on
                   [headline, "traffic ──► scan ──► issues", "#{key("m", "probe.mode")}:MODE · capture in-scope traffic"]
@@ -246,7 +255,8 @@ module Gori::Tui
 
     private def render_minimal(screen : Screen, rect : Rect, variant : Symbol, headline : String,
                                addr : String, capturing : Bool, catch_on : Bool, running : Bool,
-                               scan_on : Bool, has_provider : Bool, body_focused : Bool) : Nil
+                               scan_on : Bool, has_provider : Bool, body_focused : Bool,
+                               fuzz_step : FuzzStep?) : Nil
       hint = case variant
              when :history
                "──► #{addr} · #{palette_route("browser.open", "Open browser")}#{capturing ? "" : " · tabs: #{key("c", "capture.toggle")}"}"
@@ -259,7 +269,7 @@ module Gori::Tui
              when :fuzzer
                "^N new · #{key("⇧I", "history.fuzz")} from History"
              when :fuzzer_results
-               running ? "sampling…" : "#{key("^R", "fuzz.run")} run · ^O sets"
+               running ? "sampling…" : (fuzz_step_hint(fuzz_step) || "#{key("^R", "fuzz.run")} run · ^O sets")
              when :probe
                scan_on ? "traffic ──► scan · press #{key("m", "probe.mode")}" : "press #{key("m", "probe.mode")} to enable scanning"
              when :issues
@@ -455,18 +465,51 @@ module Gori::Tui
     # Every other card already avoided the collision by accident (FLOW LOG in an untitled list,
     # SITE MAP under a HOST / PATH header); the two results-pane variants below take the same
     # verb-shaped name for the same reason.
-    private def render_fuzzer_results_full(screen : Screen, rect : Rect, headline : String, running : Bool) : Nil
+    #
+    # Idle, the card is the run's three steps in the order `Fuzz::Plan.build` refuses the first
+    # two, with `step` (the view's `FuzzerView#run_step`) marking the first one still missing.
+    # A fixed "press ^R" taught the order through two refusals in a row. Without a step (a
+    # race, which needs neither) the card keeps that sentence. `^O` is the controller's own
+    # CONFIG chord (`FuzzerController#chord_action`), not a verb, so it has no binding to
+    # resolve.
+    private def render_fuzzer_results_full(screen : Screen, rect : Rect, headline : String,
+                                           running : Bool, step : FuzzStep?) : Nil
       inner_h = full_inner_h(:fuzzer_results, running: running)
-      # True whether or not the tab has sets yet: "Add payload sets, then" read as an
-      # instruction on a tab that already had them. `^O` is the controller's own CONFIG chord
-      # (`FuzzerController#chord_action`), not a verb, so it has no binding to resolve.
-      msg = running ? "Probes are in flight — hits and status codes land here." : "Press #{key("^R", "fuzz.run")} to start a fuzz run · payload sets live on CONFIG (^O)."
-      inner, ix, iw = begin_card(screen, rect, :fuzzer_results, headline, "FUZZ RUN", inner_h, Screen.display_width(msg))
-      y = inner.y
+      unless step && !running
+        msg = running ? "Probes are in flight — hits and status codes land here." : "Press #{key("^R", "fuzz.run")} to start a fuzz run · payload sets live on CONFIG (^O)."
+        inner, ix, iw = begin_card(screen, rect, :fuzzer_results, headline, "FUZZ RUN", inner_h, Screen.display_width(msg))
+        draw_wrapped_message(screen, ix, inner.y, iw, msg)
+        draw_chord_hint(screen, ix, inner.y + 2, iw, " ^R ", "run fuzzer", bullet: "▸ ", verb: "fuzz.run") unless running
+        return
+      end
+      rows = fuzz_steps
+      label_w = rows.max_of { |(label, _, _)| label.size }
+      min_w = rows.max_of { |(_, _, keys)| 4 + label_w + 2 + Screen.display_width(keys) }
+      inner, ix, iw = begin_card(screen, rect, :fuzzer_results, headline, "FUZZ RUN", inner_h, min_w)
+      rows.each_with_index do |(label, _, keys), i|
+        mark, fg = i < step.value ? {"✓", Theme.muted} : (i == step.value ? {"▸", Theme.text_bright} : {" ", Theme.muted})
+        line = "#{mark} #{i + 1} #{label.ljust(label_w)}  #{keys}"
+        screen.text(ix, inner.y + i, line, fg, Theme.bg, width: iw)
+      end
+    end
 
-      draw_wrapped_message(screen, ix, y, iw, msg)
-      y += 2
-      draw_chord_hint(screen, ix, y, iw, " ^R ", running ? "running…" : "run fuzzer", bullet: "▸ ", verb: "fuzz.run") unless running
+    # One row per FuzzStep, in its order: the card's label, the short form the medium and
+    # minimal tiers have room for, and the keys. Sized so the full card's rows fit its
+    # narrowest interior (FULL_MIN_W less the border and padding) under the default keys.
+    private def fuzz_steps : Array({String, String, String})
+      [
+        {"Mark a position", "mark first", "#{key("^A", "fuzz.automark")} auto · #{key("^K", "fuzz.mark-word")} word"},
+        {"Add payloads", "add a set", "^O sets · #{key("^L", "fuzz.list-paste")} list"},
+        {"Run", "run", key("^R", "fuzz.run")},
+      ]
+    end
+
+    # The medium/minimal tiers' one line for a run that is not ready yet; nil once it is (or
+    # without a step), where each tier keeps the wording it always had.
+    private def fuzz_step_hint(step : FuzzStep?) : String?
+      return nil if step.nil? || step.run?
+      _, short, keys = fuzz_steps[step.value]
+      "#{short} · #{keys}"
     end
 
     private def render_probe_full(screen : Screen, rect : Rect, headline : String,
