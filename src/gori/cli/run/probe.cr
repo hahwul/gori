@@ -354,8 +354,21 @@ module Gori
         end
       end
 
+      # The `--format json` reply of `probe promote`, the same object MCP `probe_promote`
+      # returns, so a script reads the new Issue id instead of scraping the sentence. A nil
+      # `issue_id` is the already-promoted reply (exit 0); a failed promote aborts non-zero
+      # before it gets here, in either format.
+      private def self.probe_promote_json(finding_id : Int64, issue_id : Int64?) : String
+        if issue_id
+          {"id" => finding_id, "promoted" => true, "issue_id" => issue_id}.to_json
+        else
+          {"id" => finding_id, "promoted" => false, "reason" => "already promoted to an issue"}.to_json
+        end
+      end
+
       private def self.cmd_probe_promote(args : Array(String)) : Nil
         proj = ProjectFlags.new
+        format = :text
 
         positional = one_positional_list(args, "gori run probe promote", "<id>") do |p|
           p.banner = "Usage: gori run probe promote <id>\n\n" \
@@ -363,6 +376,7 @@ module Gori
                      "carrying its severity/host/sample evidence over. Marks the source finding\n" \
                      "Confirmed so a repeat call cannot mint a duplicate."
           project_options(p, proj, "write")
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
 
         id = parse_probe_issue_id(positional.first?, "gori run probe promote")
@@ -373,9 +387,9 @@ module Gori
           res = Probe::Triage.promote(store, issue)
           case res.outcome
           in Probe::Triage::Outcome::Promoted
-            puts "Promoted finding ##{issue.id} to Issue ##{res.issue_id}."
+            puts(format == :json ? probe_promote_json(issue.id, res.issue_id) : "Promoted finding ##{issue.id} to Issue ##{res.issue_id}.")
           in Probe::Triage::Outcome::AlreadyPromoted
-            puts "Finding ##{issue.id} was already promoted to an issue."
+            puts(format == :json ? probe_promote_json(issue.id, nil) : "Finding ##{issue.id} was already promoted to an issue.")
           in Probe::Triage::Outcome::Failed
             # Nothing was written — exit non-zero so a script retries rather than moving on.
             abort "gori run probe promote: finding ##{issue.id} NOT promoted (store busy or unwritable); it is unchanged"

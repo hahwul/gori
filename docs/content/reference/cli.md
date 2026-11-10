@@ -929,7 +929,7 @@ gori run probe mode passive                      # off | passive | active | aggr
 | ------ | --------- |
 | `issues` | `-a`/`--all` (include dismissed / confirmed / resolved), `--severity`, `--category`, `--host` |
 | `dismiss <id>` | With an id, toggles that finding dismissed ⇄ open; `--code=CODE` / `--host=HOST` dismiss every open finding sharing it. The code is the finding's (the `probe issues` column, such as `missing_hsts`), not its rule id, and must match exactly. A dismiss the project could not write exits `1` and leaves the finding unchanged |
-| `promote <id>` | Promote a finding to a human-confirmed Issue |
+| `promote <id>` | Promote a finding to a human-confirmed Issue. `--format json` (`--json`) prints `{"id","promoted","issue_id"}`, or `{"id","promoted":false,"reason"}` when it was already promoted, the same object as MCP `probe_promote` |
 | `delete <id>` (`rm`) | Or `--all --yes` |
 | `rules [list\|enable\|disable\|add\|update\|delete]` | `list` takes `--kind=passive\|active\|custom`; `enable`/`disable`/`delete` take a `<rule-id>` from that list (the built-ins are in [Probe rules](/reference/probe-rules/)); `add` takes `-t`/`--title` (required), `-p`/`--pattern` (required), `--description`, `--side` (`request`\|`response`, default `response`), `--region` (`whole`\|`header`\|`body`, default `body`), `--regex`, `--exec` (run `--pattern` as a [process hook](/guide/scripting/#process-hooks): exit 0 raises the finding, stdout is the evidence), `-s`/`--severity` (default `info`); `update <custom-rule-id>` edits a project custom rule (`custom_p_N`) in place and takes `add`'s flags plus `--string` (match `--pattern` literally, the `add` default). A flag left out keeps the stored value, `--description ''` clears it, and `--string`/`--regex`/`--exec` are mutually exclusive |
 | `mode [off\|passive\|active\|aggressive]` | Print the project's scan mode, or set it |
@@ -1045,6 +1045,7 @@ The tree has one root per origin (scheme, host and port), so `http://127.0.0.1:1
 gori run sitemap tag --host api.example.com --path /v1/users --tag "IDOR candidate"
 gori run sitemap tag --host api.example.com --path /v1/users --clear
 gori run sitemap tag --list
+gori run sitemap tag --list --json   # [{"host","path","tag"}], the same array as MCP list_sitemap_tags
 ```
 
 **`sitemap params`**: the parameter inventory, the same one the TUI's [Params sub-tab](/guide/proxy/#params) shows. One row per origin (scheme, host and port), method, path, location and name, with the number of flows that carried it, up to `--samples` distinct values (default 5), and `reflected` when a value of four or more bytes appears verbatim in the first 256 KiB of the decoded response body (an observation, not a finding).

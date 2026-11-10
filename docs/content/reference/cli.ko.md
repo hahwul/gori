@@ -920,7 +920,7 @@ gori run probe mode passive                      # off | passive | active | aggr
 |------|---------|
 | `issues` | `-a`/`--all`(무시·확정·해결된 항목 포함), `--severity`, `--category`, `--host` |
 | `dismiss <id>` | id를 주면 그 발견 항목을 무시 ⇄ 열림으로 토글하고, `--code=CODE` / `--host=HOST`는 그 값을 공유하는 열린 항목을 모두 무시합니다. 코드는 룰 id가 아니라 발견의 코드(`probe issues`에 나오는 `missing_hsts` 같은 값)이며 정확히 일치해야 합니다. 프로젝트에 쓰지 못한 dismiss는 항목을 바꾸지 않고 `1`로 끝납니다 |
-| `promote <id>` | 발견 항목을 사람이 확인한 Issue로 승격 |
+| `promote <id>` | 발견 항목을 사람이 확인한 Issue로 승격. `--format json`(`--json`)은 MCP `probe_promote`와 같은 `{"id","promoted","issue_id"}`를, 이미 승격된 항목이면 `{"id","promoted":false,"reason"}`을 출력합니다 |
 | `delete <id>` (`rm`) | 또는 `--all --yes` |
 | `rules [list\|enable\|disable\|add\|update\|delete]` | `list`는 `--kind=passive\|active\|custom`. `enable`/`disable`/`delete`는 그 목록의 `<rule-id>`를 받습니다(내장 룰은 [Probe 룰](/ko/reference/probe-rules/)에 있습니다). `add`는 `-t`/`--title`(필수), `-p`/`--pattern`(필수), `--description`, `--side`(`request`\|`response`, 기본 `response`), `--region`(`whole`\|`header`\|`body`, 기본 `body`), `--regex`, `--exec`(`--pattern`을 [프로세스 훅](/ko/guide/scripting/#process-hooks)으로 실행: exit 0이면 발견, stdout이 근거), `-s`/`--severity`(기본 `info`). `update <custom-rule-id>`는 프로젝트 커스텀 룰(`custom_p_N`)을 제자리에서 고치며, `add`의 플래그에 `--string`(`--pattern`을 리터럴로 매칭, `add`의 기본값)을 더해 받습니다. 생략한 플래그는 저장된 값을 유지하고, `--description ''`은 설명을 지우며, `--string`/`--regex`/`--exec`는 함께 쓸 수 없습니다 |
 | `mode [off\|passive\|active\|aggressive]` | 프로젝트의 스캔 모드를 출력하거나 설정 |
@@ -1036,6 +1036,7 @@ gori run sitemap --in-scope --format paths
 gori run sitemap tag --host api.example.com --path /v1/users --tag "IDOR candidate"
 gori run sitemap tag --host api.example.com --path /v1/users --clear
 gori run sitemap tag --list
+gori run sitemap tag --list --json   # [{"host","path","tag"}], MCP list_sitemap_tags와 같은 배열
 ```
 
 **`sitemap params`**: TUI [Params 서브탭](/ko/guide/proxy/#params)과 같은 파라미터 목록입니다. 오리진(스킴, 호스트, 포트), 메서드, 경로, 위치, 이름마다 한 줄씩 나오며, 그 이름이 나온 플로우 수, 서로 다른 값 최대 `--samples`개(기본값 5), 그리고 4바이트 이상인 값이 디코딩된 응답 본문의 앞 256 KiB 안에 그대로 나타나면 `reflected`가 붙습니다(관찰일 뿐 취약점 판정은 아닙니다).

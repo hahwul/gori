@@ -28,6 +28,8 @@ module Gori
         tag : String? = nil
         clear = false
         list = false
+        format = :text
+        format_given = false
 
         # Both forms this parser serves, because a stray word is as likely on the read as on
         # the write: naming only the write flags told a `--list acme.test` operator to pass
@@ -36,7 +38,7 @@ module Gori
           "pass the node as --host H --path P and the memo as --tag TEXT (quote a memo with " \
           "spaces); --list narrows with --host H") do |p|
           p.banner = "Usage: gori run sitemap tag --host=H --path=P --tag=TEXT\n" \
-                     "       gori run sitemap tag --list [--host=H]\n\n" \
+                     "       gori run sitemap tag --list [--host=H] [--format=json]\n\n" \
                      "Pin a free-text memo onto one sitemap path (the same tags the TUI Sitemap\n" \
                      "tab shows). --path is the node path INCLUDING any query string —\n" \
                      "/search?q=1 is a different node from /search. The default tree FOLDS the\n" \
@@ -52,10 +54,17 @@ module Gori
           p.on("--tag=TEXT", "The memo to pin") { |v| tag = v.strip }
           p.on("--clear", "Remove the tag on --host/--path") { clear = true }
           p.on("--list", "List existing tags instead of setting one") { list = true }
+          format_flag(p, [:text, :json], "--list output: text (default, TSV) | json") do |f|
+            format = f
+            format_given = true
+          end
         end
 
         if list && (path || tag || clear)
           abort "gori run sitemap tag: --list only reads (narrow it with --host); --path, --tag and --clear write a tag"
+        end
+        if format_given && !list
+          abort "gori run sitemap tag: --format/--json only shape --list output; setting or clearing a tag prints nothing to format"
         end
 
         with_store(resolve_read_project(proj.name, proj.db), read_only: list) do |store|
@@ -63,6 +72,10 @@ module Gori
             rows = store.sitemap_tags.to_a.sort_by { |(k, _)| k }
             if want = host
               rows = rows.select { |(k, _)| k[0].compare(want, case_insensitive: true).zero? }
+            end
+            if format == :json
+              puts sitemap_tags_json(rows)
+              return
             end
             STDERR.puts "no tags" if rows.empty?
             rows.each { |(k, t)| puts sitemap_tag_row(k[0], k[1], t) }
@@ -75,10 +88,26 @@ module Gori
       # One tag as one TSV line. The memo's hidden characters get named through `term_safe`;
       # a tag is free text — typed here, or set from the TUI or MCP — and printed raw, a newline
       # in it split one tag across two physical lines while a tab invented a fourth column, either
-      # of which desyncs host+path from the memo for anything reading this output. There is no
-      # `--format json` on --list to fall back to.
+      # of which desyncs host+path from the memo for anything reading this output. A reader that
+      # needs the memo byte-for-byte uses `--format json` (sitemap_tags_json) instead.
       private def self.sitemap_tag_row(host : String, path : String, tag : String) : String
         "#{CLI::Output.term_safe(host)}#{CLI::Output.term_safe(path)}\t#{CLI::Output.term_safe(tag)}"
+      end
+
+      # `--list --format json`: the `[{host, path, tag}]` array MCP `list_sitemap_tags` returns.
+      # JSON escapes a tab or newline itself, so the memo round-trips intact (no term_safe badges).
+      private def self.sitemap_tags_json(rows : Enumerable({ {String, String}, String })) : String
+        JSON.build do |j|
+          j.array do
+            rows.each do |(k, t)|
+              {
+                host: MCP::Serialize.text(k[0]),
+                path: MCP::Serialize.text(k[1]),
+                tag:  MCP::Serialize.text(t),
+              }.to_json(j)
+            end
+          end
+        end
       end
 
       # Validate the write-side flags and set (or clear) the tag. Split out of cmd_sitemap_tag
