@@ -76,7 +76,8 @@ module Gori
       abstract def open_session_slots : Nil
       # Help's two reference pages as a popup over the current pane, rather than a jump to the
       # Help tab. The distinction is the whole point: `tab.help` costs the pane you were in,
-      # and the moment you want a key looked up is the moment you cannot afford that.
+      # and the moment you want a key looked up is the moment you cannot afford that — which
+      # is why bare `?` is the Shortcuts popup, not the tab.
       abstract def open_help_shortcuts : Nil
       # `surface` picks the field vocabulary: :ql (the palette entry), :sitemap, :intercept.
       abstract def open_help_query(surface : Symbol) : Nil

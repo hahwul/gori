@@ -42,6 +42,31 @@ describe Gori::Tui::PaletteState do
     end
   end
 
+  # Someone arriving from Burp, ZAP or Caido types THEIR tool's word for the job. Every one of
+  # these found nothing while the tab that does it sat one row away under another name.
+  it "finds a tab by what other tools call it" do
+    ctx = FakeExecContext.new
+    palette = PaletteState.new(Gori::Verbs.registry)
+    {"intruder" => "tab.fuzzer", "scanner" => "tab.probe", "collaborator" => "tab.oast",
+     "param miner" => "tab.miner", "autorize" => "tab.authorize", "site map" => "tab.target",
+     "match and replace" => "tab.rewriter", "crawler" => "tab.discover"}.each do |q, id|
+      palette.reset(ctx)
+      q.each_char { |c| palette.append(c, ctx) }
+      palette.selected_verb.try(&.id).should eq(id)
+    end
+  end
+
+  # A synonym begins like some gori name sooner or later ("intruder"/Intercept, "hidden"/
+  # History). What a row SAYS has to win: a title word the query starts outranks a keyword.
+  it "keeps a gori name ahead of another tab's synonym that starts the same way" do
+    registry = Gori::Verbs.registry
+    {"hi" => "tab.history", "int" => "tab.intercept", "inter" => "tab.intercept",
+     "au" => "tab.authorize", "col" => "tab.colormarker", "rep" => "tab.repeater"}.each do |q, id|
+      ranked = registry.rank(registry.select(&.id.starts_with?("tab.")), q)
+      ranked.first.id.should eq(id), "#{q} → #{ranked.first.id}"
+    end
+  end
+
   it "finds a keyword only from its start, never as a scattered subsequence" do
     ctx = FakeExecContext.new
     palette = PaletteState.new(Gori::Verbs.registry)

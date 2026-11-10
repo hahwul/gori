@@ -403,23 +403,25 @@ module Gori
         :probe => "Probe", :authorize => "Authorize", :issues => "Issues", :notes => "Notes",
         :rewriter => "Rewriter", :colormarker => "Colormarker",
       }.each do |tab, label|
+        # `keywords:` are the names OTHER tools gave this job (`Chrome::TAB_KEYWORDS`): the
+        # palette is where someone arriving from one of them types "intruder" or "scanner".
         r.register Verb::Definition.new(
           "tab.#{tab}", "Go to #{label}", "Focus the #{label} tab", Verb::Scope::Global,
-          category: Verb::Category::Navigation) { |ctx| ctx.focus_tab(tab); nil }
+          category: Verb::Category::Navigation, keywords: Tui::Chrome.tab_keywords(tab)) { |ctx| ctx.focus_tab(tab); nil }
       end
-      # Help is special: bare `?` (mitmproxy-style) jumps to the cheat-sheet from any
-      # navigable context. Palette still lists it as "Go to Help".
+      # The Help TAB has no chord of its own: bare `?` opens the same cheat-sheet as a popup
+      # (`help.hotkeys` below), and `?` again inside that popup lands here.
       r.register Verb::Definition.new(
         "tab.help", "Go to Help", "Focus the Help tab (keyboard cheat-sheet)", Verb::Scope::Global,
-        [Verb::Chord.new("?")], category: Verb::Category::Navigation) { |ctx| ctx.focus_tab(:help); nil }
+        category: Verb::Category::Navigation) { |ctx| ctx.focus_tab(:help); nil }
 
       # The same two pages WITHOUT leaving the pane — a popup over whatever is on screen, so
-      # looking a key up costs nothing to undo. Palette-only, and not for want of trying: every
+      # looking a key up costs nothing to undo. Bare `?` (mitmproxy-style) is the Shortcuts
+      # popup from any navigable context: it opens on the section for the tab the operator is
+      # standing in. The Query page stays palette-only (and `?` on an empty filter bar): every
       # Ctrl+letter a–z is spoken for between the verb chords declared here, the pre-keymap
       # guards in `Hotkeys::CLAIMED_CTRL_LETTERS` and the terminal-reserved set in
-      # `verb/reserved.cr`, so a chord could only be taken FROM something. A reference page is
-      # not what you spend that on, and the palette is where an operator already goes to ask
-      # "what can I do here".
+      # `verb/reserved.cr`, so a chord could only be taken FROM something.
       #
       # The ids carry the search terms the titles cannot. The palette fuzzy-scores
       # "#{title} #{id}", so `help.hotkeys` is what makes a query of "hotkey" land while the
@@ -427,7 +429,7 @@ module Gori
       # covered between them.
       r.register Verb::Definition.new(
         "help.hotkeys", "Keyboard shortcuts", "Show the keyboard cheat-sheet in a popup (Help's Shortcuts page)",
-        Verb::Scope::Global, category: Verb::Category::System) { |ctx| ctx.open_help_shortcuts; nil }
+        Verb::Scope::Global, [Verb::Chord.new("?")], category: Verb::Category::System) { |ctx| ctx.open_help_shortcuts; nil }
       r.register Verb::Definition.new(
         "help.query", "Query language reference", "Show the filter/query language reference in a popup (Help's Query page)",
         Verb::Scope::Global, category: Verb::Category::System) { |ctx| ctx.open_help_query(:ql); nil }
@@ -442,7 +444,7 @@ module Gori
       # lands on the last-active sub-tab).
       r.register Verb::Definition.new(
         "tab.discover", "Go to Discover", "Focus the Target tab's Discover sub-tab", Verb::Scope::Global,
-        category: Verb::Category::Navigation) { |ctx| ctx.goto_discover; nil }
+        category: Verb::Category::Navigation, keywords: Tui::Chrome.tab_keywords(:discover)) { |ctx| ctx.goto_discover; nil }
 
       # Close the command palette overlay.
       r.register Verb::Definition.new(

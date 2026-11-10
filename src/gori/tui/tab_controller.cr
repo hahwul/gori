@@ -1255,7 +1255,7 @@ module Gori::Tui
     # `?` on an EMPTY query bar opens the QL reference popup instead of typing a `?`.
     #
     # `?` and not a Ctrl chord, for three reasons. It is ALREADY the app's help key
-    # (`tab.help`), and every text sub-mode — these three bars included — swallowed it, so
+    # (`help.hotkeys`), and every text sub-mode — these three bars included — swallowed it, so
     # this makes an existing gesture stop being dead in the one place people go looking for
     # QL syntax. It costs no `Hotkeys::CLAIMED_CTRL_LETTERS` entry and cannot shadow a
     # rebind. And the alternatives lose: there is no free Ctrl+letter to take — every a–z is

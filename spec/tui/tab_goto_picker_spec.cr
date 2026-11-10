@@ -70,6 +70,26 @@ describe TabGotoPicker do
     picker.selected_sym.should eq(:decoder) # `hash` appears only in Decoder's line
   end
 
+  it "finds a tab by what other tools call it, from the start of that name only" do
+    picker = TabGotoPicker.new(rows)
+    "base64".each_char { |c| picker.query_char(c) }
+    picker.selected_sym.should eq(:decoder) # in Chrome::TAB_KEYWORDS, not in the name or line
+    TabGotoPicker.alias?(:fuzzer, "intru").should be_true
+    TabGotoPicker.alias?(:fuzzer, "mat").should be_false    # the middle of "automate"
+    TabGotoPicker.alias?(:target, "crawler").should be_true # Discover's name, on Target's row
+  end
+
+  it "ranks a row its own text matches ahead of one only a synonym found" do
+    pair = [
+      TabGotoPicker::Row.new(:repeater, "Repeater", 1, Chrome.tab_summary(:repeater)),
+      TabGotoPicker::Row.new(:rewriter, "Rewriter", nil, Chrome.tab_summary(:rewriter)),
+    ]
+    picker = TabGotoPicker.new(pair)
+    "repl".each_char { |c| picker.query_char(c) } # "replace" in Rewriter's line, "replay" a Repeater synonym
+    picker.selected_sym.should eq(:rewriter)
+    picker.entry_count.should eq(2)
+  end
+
   # A summary can carry another tab's name — Project's line is "targets, scope and project
   # settings" and Project is row 1 — so folding summaries into the haystack made `target`
   # select PROJECT, and ↵ went there. The query a reader is most likely to type for Target.

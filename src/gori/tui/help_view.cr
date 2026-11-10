@@ -51,12 +51,13 @@ module Gori::Tui
         Item.new("^B", "reveal whitespace (·→␍␊)", "view.reveal-ws"),
         Item.new("^D / ^C ×2", "quit gori"),
         Item.new("q", "back to projects (on the tab bar)"),
-        Item.new("?", "open this Help tab", "tab.help"),
-        # The same two pages as a popup over whatever you were doing, so looking a key up
-        # does not cost the pane you were in. Like the two `^P →` rows above, these have no
-        # chord, so the row spells `^P → <palette title>` across both columns (the titles do
-        # not fit KEY_W), and `binding_label` follows a chord if one is ever bound.
-        Item.new("^P →", "Keyboard shortcuts — this page as a popup", "help.hotkeys"),
+        # `?` is the popup, not this tab: looking a key up must not cost the pane you were in,
+        # and the popup opens on the section for the tab you asked from. `?` again inside it
+        # is the way here. Like the two `^P →` rows above, the rows below have no chord, so
+        # each spells `^P → <palette title>` across both columns (the titles do not fit
+        # KEY_W), and `binding_label` follows a chord if one is ever bound.
+        Item.new("?", "this page as a popup, opening on the tab you are in — ? again inside it opens this Help tab", "help.hotkeys"),
+        Item.new("^P →", "Go to Help — this tab, with its Query and About pages", "tab.help"),
         Item.new("^P →", "Query language reference — the Query page as a popup (also `?` on an empty filter bar)", "help.query"),
         Item.new("^P →", "Guided tour — a mock UI, then back here (also `gori tutorial`)", "help.tour"),
         Item.new("Settings: Hotkeys", "rebind any shortcut below (^P → Settings: Hotkeys)"),

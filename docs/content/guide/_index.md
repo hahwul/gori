@@ -34,7 +34,7 @@ gori is organized into tabs; move between them with `[` / `]` or jump with numbe
 | **Issues** | Triage results by severity and status |
 | **Evidence** | Frozen request/response snapshots, project-wide (appears once one exists) |
 | **Notes** | Per-project Markdown notes |
-| **Help** | Key bindings and links (behind `0`, or `?` from anywhere) |
+| **Help** | Key bindings and links (behind `0`; `?` from anywhere opens its key sheet as a popup) |
 
 The tab bar is **nine numbered slots**, and a fresh install fills them with the loop you
 actually work in:
@@ -46,7 +46,7 @@ actually work in:
 Press `1`-`9` to jump to a slot and **`0`** to reach any of the other twelve through a
 type-to-filter list of the whole catalog. The tabs behind `0` are the ones you reach *for* rather than live
 in (OAST, Decoder, JWT, Comparer, Rewriter) plus the specialised workbenches (Miner,
-Sequencer, Cookie, Colormarker, Authorize) and Help, which `?` opens from anywhere.
+Sequencer, Cookie, Colormarker, Authorize) and Help, whose key sheet `?` opens as a popup from anywhere.
 **Evidence** is behind `0` as well and is only offered once the project holds its first frozen
 snapshot, since there is nothing to archive before that.
 

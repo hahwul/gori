@@ -501,17 +501,22 @@ module Gori
       # subsequence, so "hi" does not find helix through a scattered match.
       #
       # A keyword hit always lands at index 0, the best score a query can earn, so it is held
-      # one point under a title that starts the same way (a title is what the row says), and a
-      # one-letter query never reaches keywords at all: `a` must not lift Settings: Keys over
-      # every title that merely contains an a.
+      # under what the row itself SAYS, and a one-letter query never reaches keywords at all:
+      # `a` must not lift Settings: Keys over every title that merely contains an a.
+      #
+      # Three rungs, one point apart: a title that starts with the query, a title WORD that
+      # does, then a keyword. The middle rung is what lets a tab carry other tools' names for
+      # it: `hi` is the start of History before it is the start of Miner's "hidden", and `int`
+      # is Intercept before it is Fuzzer's "intruder". Without it every short prefix of a
+      # gori name went to whichever verb had a synonym beginning the same way.
       def self.score(verb : Definition, query : String) : Int32?
-        best = Gori::Fuzzy.score(query, "#{verb.title} #{verb.id}".downcase)
+        title = verb.title.downcase
+        best = Gori::Fuzzy.score(query, "#{title} #{verb.id}".downcase)
         return best if query.size < KEYWORD_MIN_QUERY
-        verb.keywords.each do |kw|
-          next unless kw.starts_with?(query)
-          next unless s = Gori::Fuzzy.score(query, kw)
-          s -= 1
-          best = s if best.nil? || s > best
+        top = Gori::Fuzzy.score(query, query) || return best
+        best = top - 1 if title.split(/[^a-z0-9]+/).any?(&.starts_with?(query)) && (best.nil? || best < top - 1)
+        if (best.nil? || best < top - 2) && verb.keywords.any?(&.starts_with?(query))
+          best = top - 2
         end
         best
       end

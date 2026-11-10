@@ -533,7 +533,7 @@ An absent action uses the profile default. Unknown ids and unparseable chords ar
 - Space-menu **mnemonic** letters are stable action identities (Helix-like); rebinding changes the *direct* chord, not the space-menu letter.
 - Where the **sub-tab strip** binds a letter for an action, the menu spells that action with the same letter: `t` marks the sub-tab, `f` lists and searches the sub-tabs, `⇧T` marks the whole strip, and `e` renames. Rename used to be `r` on the strip, but `r` is `Run`/`Send` (the menu echo of `Ctrl-R`) in the Repeater, Fuzzer, Miner and Sequencer, so the strip moved to the menu's `e` rather than the other way round; `r` on the strip now does nothing. See [the space menu](#space-menu) for the whole table.
 - The editor actions are rebindable individually, and as a set via [Editor keysets](#editor-keysets). What the rebind editor will not move is the handful whose chord a hardcoded guard answers first: `Esc` (back to READ), `Ctrl-Z`, `Ctrl-F` and `Ctrl-G`. They are listed in the Help sheet so you can read them, and a keyset can give them a second, bare spelling, which is how `vim-ish` reaches `u` and `/`.
-- Press **`?`** from a navigable context to jump to the **Help** tab (mitmproxy-style cheat-sheet).
+- Press **`?`** from a navigable context to open the key cheat-sheet as a popup over the pane you are in, starting at that tab's section. Press **`?`** again inside it for the full **Help** tab.
 
 ## Next Steps
 

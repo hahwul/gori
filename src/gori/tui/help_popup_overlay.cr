@@ -8,8 +8,8 @@ require "../verb"
 
 module Gori::Tui
   # Help's two reference pages — the keyboard cheat-sheet and the QL reference — as a popup
-  # over whatever you were already doing, opened from the command palette (or, for the Query
-  # page, by `?` on an empty filter bar).
+  # over whatever you were already doing: bare `?` opens the cheat-sheet, and the Query page
+  # comes from the command palette or `?` on an empty filter bar.
   #
   # It exists because the answer lived a tab switch away. Wondering "what key sends this?"
   # mid-Repeater meant leaving the Repeater: the pane, the selection and the place you were
@@ -28,6 +28,11 @@ module Gori::Tui
     # ^P leaves for the command palette, like every other list overlay. Injected because
     # raising another modal is the shell's job (see Runner#open_help_shortcuts).
     property on_palette : Proc(Nil)?
+
+    # `?` again, in browse mode, leaves for the full Help tab — the popup is what bare `?`
+    # opens, so the second press is the way through to the pages it does not carry. Unset
+    # (the Query reference, which `?` on a filter bar opens) the key does nothing.
+    property on_full : Proc(Nil)?
 
     # Wider than the 72 the rule forms share and the 60 the palette uses, and NOT a round
     # number picked by eye: these rows are a key gutter plus a description written for the full
@@ -101,6 +106,7 @@ module Gori::Tui
 
     def hint : String
       return "type to search · ↑/↓ scroll · ⇞/⇟ page · esc clear" if @searching
+      return "/ search · ↑/↓ scroll · ⇞/⇟ page · ? Help tab · esc close" if on_full
       "/ search · ↑/↓ scroll · ⇞/⇟ page · esc close"
     end
 
@@ -134,6 +140,12 @@ module Gori::Tui
       :stay
     end
 
+    # A paste is text for the search box and nothing else: while browsing, a pasted `/` would
+    # open the search and a pasted `?` would leave for the Help tab, taking the pane with it.
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      @searching && super
+    end
+
     private def handle_navigation_key(key) : Bool
       case
       when key.up?        then move(-1)
@@ -151,7 +163,8 @@ module Gori::Tui
     private def handle_printable_key(ev : Termisu::Event::Key) : Nil
       return unless c = bare_char(ev)
       return query_char(c) if @searching
-      begin_search if c == '/'
+      return begin_search if c == '/'
+      on_full.try(&.call) if c == '?'
     end
 
     private def bare_char(ev : Termisu::Event::Key) : Char?
