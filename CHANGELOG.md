@@ -12,6 +12,7 @@
 - Discover: with no run yet, `Space` lists only Run, which says where to start one, and the empty card names both places (#1847)
 - Comparer: the footer names the two picks until both sides are set (#1847)
 - Repeater: `Space` now opens the menu with no request open, and New repeater request is a first-level row there and in every pane (#1848)
+- TUI: the empty Authorize, Miner and Sequencer cards spell the whole menu path to their Send row, none of them offers a run key before there is something to run, and an empty OAST says to add or enable a provider on the Providers sub-tab (#1849)
 
 ## v0.9.3
 

@@ -226,7 +226,7 @@ module Gori::Tui
               when :miner_results
                 running ? [headline, "probing the wordlist…"] : [headline, "#{key("^R", "mine.run")} mines this request"]
               when :sequencer
-                [headline, "collect ──► samples ──► entropy", "Send to Sequencer (#{menu("history.sequence")}) · #{key("^R", "sequence.run")}"]
+                [headline, "collect ──► samples ──► entropy", "Send to Sequencer (#{menu("history.sequence")}) on a flow"]
               when :sequencer_samples
                 running ? [headline, "collecting tokens…"] : [headline, "#{key("c", "sequence.configure")} token location · #{key("^R", "sequence.run")} collect"]
               when :oast
@@ -285,7 +285,7 @@ module Gori::Tui
              when :miner_results
                running ? "mining…" : "#{key("^R", "mine.run")} mine this request"
              when :sequencer
-               "Send to Sequencer (#{menu("history.sequence")}) · #{key("^R", "sequence.run")}"
+               "Send to Sequencer (#{menu("history.sequence")})"
              when :sequencer_samples
                running ? "collecting…" : "#{key("c", "sequence.configure")} configure · #{key("^R", "sequence.run")} collect"
              when :oast
@@ -595,19 +595,23 @@ module Gori::Tui
         # built-in identities with no sign there was a third thing to press.
         CardSpec.new("AUTHORIZE", "Replay one request as several identities and diff the answers.",
           "one request ──► many identities",
-          [ChordLine.new(" space ", "\"Send to Authorize\" on a flow"),
+          [ChordLine.new(menu_chip("history.authorize"), "\"Send to Authorize\" on a flow"),
            ChordLine.new(" i ", "who to replay as", "authorize.identities"),
-           ChordLine.new(" ^R ", "replay what has not run", "authorize.run")])
+           # A plain line: with an empty queue `authorize.run` is unavailable, so a `^R` chip
+           # here named a key that does nothing on the screen the card is drawn on.
+           ChordLine.new(nil, "then #{key("^R", "authorize.run")} replays what has not run")])
       when :miner
         CardSpec.new("MINER", "Find undocumented parameters a target takes.",
           "wordlist ──► probe ──► params",
-          [ChordLine.new(" space ", "\"Mine parameters\" on a flow"),
+          [ChordLine.new(menu_chip("history.mine"), "\"Mine parameters\" on a flow"),
            ChordLine.new(nil, "start from History or Repeater")])
       when :sequencer
         CardSpec.new("SEQUENCER", "Collect tokens and measure their randomness.",
           "collect ──► samples ──► entropy",
-          [ChordLine.new(" space ", "\"Send to Sequencer\" on a flow"),
-           ChordLine.new(" ^R ", "collect samples", "sequence.run")])
+          # No `^R` row: with no session `sequence_run` returns without a word, so the card
+          # was naming a key that does nothing on the screen it is drawn on.
+          [ChordLine.new(menu_chip("history.sequence"), "\"Send to Sequencer\" on a flow"),
+           ChordLine.new(nil, "start from History or Repeater")])
       end
     end
 
@@ -697,7 +701,10 @@ module Gori::Tui
         y = draw_chord_hint(screen, ix, y, iw, " g ", "get a payload URL (copied)", bullet: "▸ ", verb: "oast.generate")
         draw_chord_hint(screen, ix, y, iw, " ^R ", "start listening", bullet: "▸ ", verb: "oast.listen")
       else
-        y = draw_chord_hint(screen, ix, y, iw, " ^2 ", "Providers — interactsh is prefilled", bullet: "▸ ")
+        # "sub-tab" in words, beside the chip: a Ctrl+digit does not arrive on every terminal,
+        # and the strip above the pane is where the reader then looks. No ←/→ route is spelled:
+        # which keys reach the strip depends on where focus is, and this card is drawn at all three.
+        y = draw_chord_hint(screen, ix, y, iw, " ^2 ", "Providers sub-tab — interactsh prefilled", bullet: "▸ ")
         draw_chord_hint(screen, ix, y, iw, " g ", "get a payload URL, once one is on", bullet: "▸ ", verb: "oast.generate")
       end
     end
