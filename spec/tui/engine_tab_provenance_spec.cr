@@ -560,20 +560,20 @@ describe "Fuzzer tab — the requests it actually put on the wire (T3)" do
 
     # sent == requests: one number, not the same number twice.
     view.apply_progress(Gori::Fuzz::Progress.new(3_i64, 3_i64, 0_i64, 0_i64, requests: 3_i64))
-    view.results_count_label.should eq("3 sent · 0 hit")
+    view.results_count_label.should eq("3 sent · no match rule")
 
     # …and the case the tab used to hide entirely: 3 payloads, 18 requests at the origin.
     view.apply_progress(Gori::Fuzz::Progress.new(3_i64, 3_i64, 0_i64, 0_i64, requests: 18_i64))
-    view.results_count_label.should eq("3 sent · 18 requests · 0 hit")
+    view.results_count_label.should eq("3 sent · 18 requests · no match rule")
   end
 
   it "renders the wire count while the run is still streaming" do
     view = drafted_fuzzer("http://t.test", "GET /?x=§1§ HTTP/1.1\r\nHost: t.test\r\n\r\n")
     view.begin_run(3_i64)
     view.apply_progress(Gori::Fuzz::Progress.new(1_i64, 3_i64, 0_i64, 0_i64, requests: 6_i64))
-    view.results_count_label.should eq("running 1/3 · 6 req · 0 hit")
+    view.results_count_label.should eq("running 1/3 · 6 req · no match rule")
     view.apply_progress(Gori::Fuzz::Progress.new(1_i64, 3_i64, 0_i64, 0_i64, requests: 1_i64))
-    view.results_count_label.should eq("running 1/3 · 0 hit")
+    view.results_count_label.should eq("running 1/3 · no match rule")
   end
 end
 

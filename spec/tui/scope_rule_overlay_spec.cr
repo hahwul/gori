@@ -219,3 +219,33 @@ describe "ProjectView#ov_commit" do
     end
   end
 end
+
+# The form opened on an empty `pattern:` and said nothing about what goes in it: `host` also
+# takes subdomains, and `string` is a substring of the whole URL.
+describe "Gori::Tui::ScopeRuleOverlay pattern example" do
+  it "shows an example for the selected type while the pattern is empty" do
+    ov = ScopeRuleOverlay.adding
+    backend = MemoryBackend.new(100, 24)
+    ov.render(Screen.new(backend), Rect.new(0, 0, 100, 24))
+    text = (0...24).map { |y| backend.row(y) }.join("\n")
+    text.should contain("e.g. acme.test — its subdomains match too")
+
+    ov.handle_key(skey(Termisu::Input::Key::Down))
+    ov.handle_key(skey(Termisu::Input::Key::Right)) # host → string
+    ov.pattern_example.should contain("any part of the URL")
+    ov.handle_key(skey(Termisu::Input::Key::Right)) # string → regex
+    ov.pattern_example.should contain("over the whole URL")
+  end
+
+  it "drops the example once anything is typed" do
+    ov = ScopeRuleOverlay.adding
+    stype(ov, "a")
+    backend = MemoryBackend.new(100, 24)
+    ov.render(Screen.new(backend), Rect.new(0, 0, 100, 24))
+    (0...24).map { |y| backend.row(y) }.join("\n").should_not contain("e.g.")
+  end
+
+  it "has an example for every match type" do
+    ScopeRuleOverlay::PATTERN_EXAMPLES.keys.should eq(Gori::Scope::TYPES)
+  end
+end

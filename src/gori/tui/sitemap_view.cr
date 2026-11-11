@@ -1569,6 +1569,10 @@ module Gori::Tui
       row.node.leaf?
     end
 
+    def selected_leaf? : Bool
+      leaf_at?(@selected)
+    end
+
     def marker_hit?(rect : Rect, mx : Int32, ri : Int32) : Bool
       row = visible_rows[ri]?
       return false unless row

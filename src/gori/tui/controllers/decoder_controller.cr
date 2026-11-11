@@ -153,9 +153,25 @@ module Gori::Tui
       end
     end
 
-    # The chip label's fallback: a compact preview of the chain spec, or "empty" when blank.
+    # The chip label's fallback: the chain spec, else the input's first line (a conversion
+    # holding text and no chain yet read `empty`, twice over once a second one was sent in),
+    # else "empty".
     private def session_summary(s : DecoderSession) : String
-      s.chain.strip.empty? ? "empty" : s.chain.strip
+      chain = s.chain.strip
+      return chain unless chain.empty?
+      return "empty" unless line = s.input.first_nonblank_line
+      # Read off the front only: a pasted blob is one line of megabytes, and this runs for
+      # every chip on every frame. Control bytes from a captured line draw as spaces.
+      head = line.each_char.skip_while(&.whitespace?).first(INPUT_LABEL_MAX + 1)
+        .map { |c| c.control? ? ' ' : c }.join.rstrip
+      head.size > INPUT_LABEL_MAX ? head[0, INPUT_LABEL_MAX - 1] + "…" : head
+    end
+
+    # A pasted blob is one long line; the chip shows enough of it to tell two apart.
+    INPUT_LABEL_MAX = 20
+
+    private def blank_session?(s : DecoderSession) : Bool
+      s.view.name.nil? && s.chain.empty? && s.input.text.empty? && !s.input.undoable?
     end
 
     # `MemorySessionStrip#switch_to`, plus dropping the CURRENT session's popup and preedit.
@@ -186,8 +202,16 @@ module Gori::Tui
     # make_session already runs the chain, so the output lands populated.
     def decoder_from_text(text : String, name : String? = nil) : Nil
       clear_subtab_filter # see decoder_new
-      @sessions << make_session(text, "", name)
-      @idx = @sessions.size - 1
+      s = make_session(text, "", name)
+      # A blank conversion under the cursor takes the text, instead of staying behind as an
+      # `empty` chip beside it. Input, chain and name are all a conversion holds; one with an
+      # edit still to undo is not blank.
+      if blank_session?(cur)
+        @sessions[@idx] = s
+      else
+        @sessions << s
+        @idx = @sessions.size - 1
+      end
       after_change
       @host.goto_tab(:decoder)
       @host.status("sent selection to Decoder (#{text.bytesize}b)")
