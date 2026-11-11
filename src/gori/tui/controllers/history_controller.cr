@@ -554,7 +554,10 @@ module Gori::Tui
         hex = Hotkeys.binding_label(reg, "detail.toggle-hex", "^X")
         pretty = Hotkeys.binding_label(reg, "detail.toggle-pretty", "p")
         if @history.detail_strip_focus?
-          return "←/→ panes · ↓/↵ enter · #{step}#{hex} hex · #{pretty} pretty · #{repeater} repeater · esc back"
+          # `space cmds` here as on the body's line: the menu opens from the strip too, and it
+          # is what `Chrome.fit_hints` anchors the tail on. Without it an 80-column row cut
+          # this line from its end, `esc back` first, and kept `^X hex · p pretty`.
+          return "←/→ panes · ↓/↵ enter · #{step}#{hex} hex · #{pretty} pretty · #{repeater} repeater · space cmds · esc back"
         end
         nav = @history.detail_navigable? ? "↑/↓ move" : "↑/↓ scroll"
         # `u decode` / `u wire` only while the pane has escapes to decode, as the strip's chip

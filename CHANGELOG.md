@@ -21,7 +21,7 @@
 - Help: `?` opens the shortcuts as a popup over the pane you are in, starting at that tab's section, and `?` again inside it opens the Help tab (#1852)
 - TUI: `^P` and the `0` tab picker find a tab by what other tools call it, such as intruder, scanner, collaborator or param miner (#1852)
 - TUI: pressing `c` or `i` by accident now shows which key turns capture back on or intercept off, and the menus read Send to Repeater and Send request and spell sub-tab one way (#1852, #1855)
-- Intercept: on a narrow terminal the queue footer keeps forward, drop and edit ahead of mark and range (#1853)
+- TUI: on a narrow terminal the Intercept queue footer keeps forward, drop and edit ahead of mark and range, and the flow detail, Params and empty Discover footers keep the menu and the key that leaves the pane (#1853, #1857)
 - History: with no flows yet, `Space` offers Open browser instead of Mark all and Clear history, the footer names the way to it, and the card adds the Import route (#1853)
 - TUI: the wizard, Help and the tour say that `^P` means Ctrl+P, and the project picker spells its keys the same way and keeps Settings and Quit on an 80-column footer (#1853)
 

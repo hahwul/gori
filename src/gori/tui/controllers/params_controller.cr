@@ -135,9 +135,11 @@ module Gori::Tui
       return "" unless focus == :body
       base = keys("{params.run} scan · {params.all-headers} headers")
       base = "#{base} · esc all endpoints" if @params.target
-      return "#{base} · ↑/esc sub-tabs" unless @params.selected_row
+      # `space cmds` before the way out: it is the tail `Chrome.fit_hints` keeps, and without
+      # it an 80-column row cut `↑/esc sub-tabs` first.
+      return "#{base} · space cmds · ↑/esc sub-tabs" unless @params.selected_row
       "#{base} · #{keys("↵ open · {params.copy} copy · {params.copy-names} all names · " \
-                        "{params.export} wordlist · {params.mine} mine")} · ↑/esc sub-tabs"
+                        "{params.export} wordlist · {params.mine} mine")} · space cmds · ↑/esc sub-tabs"
     end
 
     # --- verbs ---------------------------------------------------------------

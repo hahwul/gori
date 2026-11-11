@@ -54,7 +54,9 @@ module Gori::Tui
       # The empty line ends in `esc sub-tabs` like the two below it. `discover.to-menu` has
       # always bound escape here; the one state where the tab has nothing else to say was the
       # one that did not say it.
-      return "#{@view.start_hint} · esc sub-tabs" if @view.empty?
+      # The route is a segment of its own, ahead of the tail: as one 55-column phrase it
+      # filled an 80-column row and pushed `esc sub-tabs` off it. The card spells it either way.
+      return "#{DiscoverView::START_FROM} · #{@view.start_route} · space cmds · esc sub-tabs" if @view.empty?
       return @view.filter.hint if querying?
       if @view.focus == :runs
         keys("↑/↓ runs · ↵/tab findings · {discover.run} run · {discover.stop} stop · {discover.pause} pause · {discover.dismiss} dismiss · space cmds · esc sub-tabs")
