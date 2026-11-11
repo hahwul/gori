@@ -874,7 +874,7 @@ module Gori
           p.on("--request-stdin", "Read the raw HTTP request from stdin, byte-for-byte, as --request-file reads a file (`generator | gori run repeater create --target … --request-stdin`). Keeps a large or binary-derived request out of the argument vector, so it is not in the process listing and cannot hit the command-line length limit. Needs a pipe or a redirect (`< req.http`): a terminal is refused, because it would echo the request back") { request_stdin = true }
           p.on("--curl=PATH", "Build the request from the curl command in PATH (- reads stdin: `pbpaste | gori run repeater create --curl -`). It also supplies --target (the URL's origin) and --http2 (curl's --http2) unless those are given; curl's transport flags (-k, -x, -L…) are ignored and named") { |v| curl_path = v }
           p.on("--name=NAME", "Custom repeater tab name") { |v| name = v }
-          p.on("--tags=TAGS", "Free-text tags for grouping tabs (the TUI subtab label)") { |v| tags = v }
+          p.on("--tags=TAGS", "Free-text tags for grouping tabs (the TUI sub-tab label)") { |v| tags = v }
           p.on("--http2", "Use HTTP/2 (default: false, how --flow was captured, or what --curl says)") { http2 = agree(http2_given ? http2 : nil, true, "--http1/--http2"); http2_given = true }
           # The other half of the toggle: without it a session cloned from an h2 flow
           # (`--flow=N`) inherited h2 and `repeater send` had no way to override it, so an

@@ -73,7 +73,7 @@ module Gori
       # letter — see `repeater.rename-subtab` for the full note.
       in_seq = ->(ctx : Verb::ExecContext) { ctx.current_tab == :sequencer }
       r.register Verb::Definition.new(
-        "sequence.rename-subtab", "Rename subtab", "Rename the active sequencing session's sub-tab chip",
+        "sequence.rename-subtab", "Rename sub-tab", "Rename the active sequencing session's sub-tab chip",
         Verb::Scope::Sequencer, available: in_seq, intent: :rename, section: :subtab) { |ctx| ctx.sequencer_rename_subtab; nil }
       # `:subtab`, with the rest of the chip family. Until #1055 this had to be `:common` —
       # the menu rendered COMMON ∪ the FOCUSED PANE's section, so a `:subtab` close was
@@ -84,7 +84,7 @@ module Gori
       # own 'w' in their `:request` / `:template` sections, so a COMMON 'w' would collide there
       # and `Registry#validate_menu_keys!` would raise at boot. Their close stays in :subtab.
       r.register Verb::Definition.new(
-        "sequence.close-subtab", "Close subtab", "Close the active sequencing session",
+        "sequence.close-subtab", "Close sub-tab", "Close the active sequencing session",
         Verb::Scope::Sequencer, [Verb::Chord.new("w", ctrl: true)],
         available: in_seq, intent: :close, section: :subtab) { |ctx| ctx.sequencer_close_subtab; nil }
       r.register Verb::Definition.new(
