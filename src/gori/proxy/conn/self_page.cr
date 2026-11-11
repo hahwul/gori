@@ -62,10 +62,10 @@ module Gori::Proxy
       case path
       when "", "/"                   then :index
       when "/ca.pem", "/gori-ca.pem" then :pem
-      when "/ca.der", "/ca.crt",
-           "/gori-ca.der" then :der
-      when "/favicon.ico" then :favicon
-      else                     :not_found
+      when "/ca.der", "/gori-ca.der" then :der
+      when "/ca.crt", "/gori-ca.crt" then :crt
+      when "/favicon.ico"            then :favicon
+      else                                :not_found
       end
     end
 
@@ -84,10 +84,12 @@ module Gori::Proxy
         else
           unavailable(head_only)
         end
-      when :der
+      when :der, :crt
         if der
+          # The same DER under two names: Android's certificate installer offers a `.crt` and
+          # greys out a `.der` (`gori run android setup` pushes `gori-ca.crt` for that reason).
           build(200, "OK", "application/x-x509-ca-cert", der, head_only,
-            disposition: %(attachment; filename="gori-ca.der"))
+            disposition: %(attachment; filename="gori-ca.#{route(target) == :crt ? "crt" : "der"}"))
         else
           unavailable(head_only)
         end
@@ -192,7 +194,9 @@ module Gori::Proxy
         end
 
       fingerprint = String.build do |io|
-        io << %(<div><span class="k">SHA-256</span><code>) << HTML.escape(sha256) << "</code></div>" if sha256
+        # `<wbr>` after each colon, and no break-all on this one value: a phone wraps it
+        # between pairs, where it can still be read against a certificate viewer.
+        io << %(<div><span class="k">SHA-256</span><code class="fp">) << HTML.escape(sha256).gsub(":", ":<wbr>") << "</code></div>" if sha256
         io << %(<div><span class="k">SPKI pin</span><code>) << HTML.escape(spki) << "</code></div>" if spki
       end
 
@@ -215,9 +219,9 @@ module Gori::Proxy
               <div><dt>Firefox</dt><dd>Settings → Certificates → Authorities → Import the <code>.pem</code>, then trust it for websites.</dd></div>
               <div><dt>macOS</dt><dd>Open the <code>.der</code> in Keychain Access, then set it to Always Trust.</dd></div>
               <div><dt>Windows</dt><dd>Open the <code>.der</code>, then install to Trusted Root Certification Authorities.</dd></div>
-              <div><dt>Linux</dt><dd>Debian and Ubuntu: copy the <code>.pem</code> to <code>/usr/local/share/ca-certificates/gori-ca.crt</code>, then run <code>sudo update-ca-certificates</code>. Fedora and Arch: <code>sudo trust anchor gori-ca.pem</code>. Browsers keep their own store there, so import it in the browser too.</dd></div>
-              <div><dt>iOS</dt><dd>Install the downloaded profile in Settings, then turn it on under Settings → General → About → Certificate Trust Settings.</dd></div>
-              <div><dt>Android</dt><dd>Settings → Security → Encryption &amp; credentials → Install a certificate → CA certificate. An app targeting Android 7 or later trusts it only if its network security config opts in.</dd></div>
+              <div><dt>Linux</dt><dd>Debian and Ubuntu: copy the <code>.pem</code> to <code>/usr/local/share/ca-certificates/gori-ca.crt</code>, then run <code>sudo update-ca-certificates</code>. Fedora and Arch: <code>sudo trust anchor --store gori-ca.pem</code>. Browsers keep their own store there, so import it in the browser too.</dd></div>
+              <div><dt>iOS</dt><dd>Tap Download CA (DER) and allow the profile, install it in Settings, then turn it on under Settings → General → About → Certificate Trust Settings.</dd></div>
+              <div><dt>Android</dt><dd>Download <a href="/ca.crt" download>gori-ca.crt</a>, then pick it under Settings → Security → Encryption &amp; credentials → Install a certificate → CA certificate. An app targeting Android 7 or later trusts it only if its network security config opts in.</dd></div>
             </dl>
 
             <div class="meta">
@@ -294,6 +298,7 @@ module Gori::Proxy
       .meta{border-top:1px solid var(--hair);padding-top:1.2rem;display:grid;gap:.42rem;font-size:.85rem}
       .meta .k{color:var(--quiet);display:inline-block;min-width:8.5rem}
       .meta code{color:var(--text)}
+      .meta code.fp{word-break:normal}
       .warn{margin-top:1.35rem;color:var(--quiet);font-size:.82rem;max-width:54ch}
       @media (prefers-reduced-motion:no-preference){
         .hero>.mark,.hero>h1,.hero>.lead,.hero>.cta,.hero>.hint{animation:rise .7s cubic-bezier(.16,1,.3,1) both}
