@@ -1035,7 +1035,7 @@ module Gori::Tui
         @host.jobs.progress(v.job_id,
           ev.progress.sent.clamp(0_i64, Int32::MAX.to_i64).to_i32,
           ev.progress.total.try(&.clamp(0_i64, Int32::MAX.to_i64).to_i32),
-          "#{ev.progress.matched} hit")
+          v.hit_label)
       when Fuzz::ResultEvent
         v.append_result(ev.result)
         probe_scan_fuzz_result(ev.result, v)
@@ -1091,14 +1091,12 @@ module Gori::Tui
     private def finish_job(v : FuzzerView, ev : Fuzz::DoneEvent, terminal : String) : Nil
       return if @host.jobs.errored?(v.job_id) # an ErrorEvent already finalized this run — the
       #                                         engine's trailing DoneEvent must not log/notify success
-      n = v.matched_count
       summary = case terminal
-                when "budget_exhausted" then "#{n} hit · budget exhausted"
-                when "condition_met"    then "#{n} hit · condition met"
-                else                         "#{n} hit"
+                when "budget_exhausted" then "#{v.hit_label} · budget exhausted"
+                when "condition_met"    then "#{v.hit_label} · condition met"
+                else                         v.hit_label
                 end
       @host.jobs.finish(v.job_id, :done, summary)
-      level = n > 0 ? :success : :info
       # `requests` only when it DIFFERS from the payload count — retries and redirect hops
       # are the two things that make them diverge, and a run with neither should not grow a
       # second number saying the same thing twice. This is what the CLI's done line does,
@@ -1114,10 +1112,21 @@ module Gori::Tui
         when "condition_met" then ev.stop_reason ? " (#{ev.stop_reason})" : " (condition met)"
         else                      ""
         end
-      msg = "Fuzzer: #{Gori.plural(n, "hit")} / #{v.result_count} sent#{wire} on #{v.summary}#{ending}#{macro_failure_note(p)}"
+      level, msg = FuzzerController.done_line(v, "#{wire} on #{v.summary}#{ending}", macro_failure_note(p))
       log_event(v, level, msg)
       @host.notifications.push(level, msg, goto_for(v), source: "fuzzer")
       @host.status(msg, :done) if Settings.notify_toast?
+    end
+
+    # The completion line and its level. `where` is everything after the sent count (the wire
+    # count, the request, how the run ended). With no match rule every response "hits", so
+    # the line names the missing rule instead of a hit count, and it is news rather than a
+    # find: `9 hits / 9 sent` under a success toast read as nine findings.
+    def self.done_line(v : FuzzerView, where : String, note : String) : {Symbol, String}
+      sent = "#{v.result_count} sent#{where}"
+      return {:info, "Fuzzer: #{sent} — no match rule#{note}"} unless v.run_selective?
+      n = v.matched_count
+      {n > 0 ? :success : :info, "Fuzzer: #{Gori.plural(n, "hit")} / #{sent}#{note}"}
     end
 
     # A macro that FAILED is the reason some rows are errors rather than answers, and the

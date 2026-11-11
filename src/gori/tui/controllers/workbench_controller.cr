@@ -172,8 +172,14 @@ module Gori::Tui
     # and jump into it. Mirrors DecoderController#decoder_from_text.
     def session_from_text(text : String, name : String? = nil) : Nil
       s = make_session(text.strip, name)
-      @sessions << s
-      @idx = @sessions.size - 1
+      # A blank session under the cursor takes the text, instead of staying behind as
+      # `1:empty` beside the token.
+      if blank?(cur)
+        @sessions[@idx] = s
+      else
+        @sessions << s
+        @idx = @sessions.size - 1
+      end
       after_change
       @host.goto_tab(tab)
       @host.status("sent selection to #{tool_label} (#{text.bytesize}b)")
@@ -186,6 +192,19 @@ module Gori::Tui
     def close_session : Nil
       close_sessions("CLOSE #{tool_label.upcase} SESSIONS", "Each #{item_noun} and its edits are discarded.",
         "session closed", "session closed")
+    end
+
+    # Holds no text of the operator's: no name, and every editor and field empty with nothing
+    # to undo back to. A session is more than its INPUT (the second lens's editors, the
+    # secret), so "the input is empty" is not this test. The lens, alg and format are not
+    # part of it: each is one keypress to set again, and text is not.
+    private def blank?(s : S) : Bool
+      s.view.name.nil? && s.secret.empty? && session_editors(s).all? { |ed| ed.text.empty? && !ed.undoable? }
+    end
+
+    # Every multi-line editor a session owns, whichever lens is showing.
+    private def session_editors(s : S) : Array(TextArea)
+      [s.input, s.payload]
     end
 
     # The replacement also retires the old view object, which is what drops its mark.

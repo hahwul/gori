@@ -3,14 +3,16 @@
 ## Unreleased
 
 - TUI: an empty `^P` opens on Open browser, Copy CA certificate path and Guided tour, then the tab jumps, with one Settings row; type a section's name to reach it (#1843)
-- Fuzzer: the idle results card lists what a run still needs (a marked position, then a payload set) and marks the next step, and with no session open `Space` offers New fuzz session instead of Run and Stop (#1843, #1844)
+- Fuzzer: the idle results card lists what a run still needs (a marked position, then a payload set) and marks the next step, with no session open `Space` offers New fuzz session instead of Run and Stop, and a run with no match rule says so instead of counting every response as a hit (#1843, #1844, #1856)
 - Probe: `gori run probe promote --format json` prints the new Issue id as MCP `probe_promote` does (#1784)
 - CLI: `gori run sitemap tag --list --format json` (or `--json`) prints the `[{host, path, tag}]` array MCP `list_sitemap_tags` returns (#1783)
 - Help: Shortcuts names the header chips, History's view chip, the Fuzzer's `§N`, MATCH and DIST chips and Mode formula, the Probe band's chips, Discover's suppression counters, the Params `R` column, the `:` a filter bar puts before an applied filter and the Intercept editor's `CL` chip (#1845, #1847, #1850, #1855)
-- Project: the empty Description card says it holds free-text notes, the overview shows a short proxy or created value instead of clipping it, and Project settings name their units (#1845, #1850)
+- Project: the empty Description card says it holds free-text notes, the overview shows a short proxy or created value instead of clipping it, Project settings name their units, and the scope rule form shows an example pattern for each match type (#1845, #1850, #1856)
 - First run: the wizard asks for the listen address only when the default is taken and counts its steps from the screen it opens on, its tour offer lands on Skip, and the first project opens on its name's `Enter` (#1846, #1853)
 - Discover: with no run yet, `Space` lists only Run, which says where to start one, and the empty card names both places (#1847)
 - Comparer: the footer names the two picks until both sides are set (#1847)
+- Sitemap: `Enter` on a path opens its flow, as it does on a History or Params row (#1856)
+- Decoder, JWT, Cookie: the first selection sent to the tab fills its blank sub-tab instead of leaving `empty` beside it, and a Decoder sub-tab with no chain is named by its input (#1856)
 - Repeater: `Space` now opens the menu with no request open, and New repeater request is a first-level row there and in every pane (#1848)
 - TUI: the empty Authorize, Miner and Sequencer cards spell the whole menu path to their Send row, none of them offers a run key before there is something to run, and an empty OAST says to add or enable a provider on the Providers sub-tab (#1849)
 - Colormarker: the custom colours pane and its `Space` menu spell colour as the rest of the tab does, and a short `Space` menu no longer clips its own title (#1850)

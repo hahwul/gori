@@ -292,7 +292,7 @@ module Gori::Tui
         Item.new("^B", "reveal whitespace"),
       ]},
       {"OTHER TABS", [
-        Item.new("Sitemap", "↑/↓ · {sitemap.query} filter · ↵/→ expand · {sitemap.mark-toggle} mark · {sitemap.mark-all} all · {sitemap.toggle-grouping} fold · {scope.toggle-lens} scope · {space:sitemap.tag} tag · {space:sitemap.js-scan} js"),
+        Item.new("Sitemap", "↑/↓ · {sitemap.query} filter · ↵ open/fold · {sitemap.mark-toggle} mark · {sitemap.mark-all} all · {sitemap.toggle-grouping} fold · {scope.toggle-lens} scope · {space:sitemap.tag} tag · {space:sitemap.js-scan} js"),
         # A Discover run's suppression counters (`Discover::RunStats`), under the tab they
         # are drawn on: abbreviations with no other legend.
         Item.new("fp-cut · dedup", "Discover: soft-404 look-alikes dropped · URLs already seen"),

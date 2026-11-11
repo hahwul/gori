@@ -76,6 +76,10 @@ module Gori::Tui
       @sessions.map { |s| search_extra("#{s.decoded} #{s.payload.text}") }
     end
 
+    private def blank?(s : CookieSession) : Bool
+      super && s.salt.empty?
+    end
+
     # The chip label's fallback: the cookie's format (or "empty").
     private def session_summary(s : CookieSession) : String
       return "empty" if s.input.text.strip.empty?

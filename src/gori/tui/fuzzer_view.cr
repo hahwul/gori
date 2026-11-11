@@ -1002,6 +1002,7 @@ module Gori::Tui
       @scroll = 0
       @running = true
       @stop_requested = false
+      @run_selective = @matcher.constrained? || @matcher.auto_calibrate?
       @run_total = total
       @run_started_at = Time.utc.to_unix_ms * 1000_i64
       @run_status = "running"
@@ -1095,6 +1096,18 @@ module Gori::Tui
 
     def matched_count : Int64
       {@run_matched_count, @progress.try(&.matched) || 0_i64}.max
+    end
+
+    # Did this run carry a match/filter rule or calibration? Without one every response
+    # passes, so `9 hit` beside `9 sent` reads as nine findings and means none. Fixed at
+    # `begin_run`, as the rest of the run's frozen settings are: editing a rule afterwards
+    # does not re-judge rows already drawn. A restored run keeps `hit` (its rules are not
+    # stored with it).
+    getter? run_selective : Bool = true
+
+    # The tally beside `N sent`: the hits, or the reason there are none to count.
+    def hit_label : String
+      @run_selective ? "#{matched_count} hit" : "no match rule"
     end
 
     def result_count : Int64
@@ -1231,6 +1244,7 @@ module Gori::Tui
     end
 
     private def apply_saved_run(run : Store::FuzzRunRecord) : Nil
+      @run_selective = true
       @run_result_count = run.sent
       @run_matched_count = run.matched
       @run_error_count = run.errors
@@ -3377,7 +3391,7 @@ module Gori::Tui
       req = p ? p.requests : 0_i64
       if @running
         extra = req > (p ? p.sent : 0_i64) ? " · #{req} req" : ""
-        "running #{p ? p.sent : 0}/#{@run_total || "?"}#{extra} · #{matched_count} hit"
+        "running #{p ? p.sent : 0}/#{@run_total || "?"}#{extra} · #{hit_label}"
       else
         extra = req > result_count ? " · #{req} requests" : ""
         window = results_windowed? ? " · showing #{retained_result_count}" : ""
@@ -3392,7 +3406,7 @@ module Gori::Tui
         # The row the run ended on (issue #1270), standing — the row itself can be scrolled
         # away, windowed out, or hidden by the matched-only lens.
         stop = FuzzerView.stop_chip(@run_stop_idx)
-        "#{result_count} sent#{extra} · #{matched_count} hit#{stop}#{window}#{archive}#{saved}#{shapes_chip}"
+        "#{result_count} sent#{extra} · #{hit_label}#{stop}#{window}#{archive}#{saved}#{shapes_chip}"
       end
     end
 
@@ -3453,7 +3467,7 @@ module Gori::Tui
     private def overflow_chip : String
       return "" unless @clusters.truncated?
       hits = @clusters.overflow_matched
-      " · #{@clusters.overflow_rows} ungrouped#{hits > 0 ? " (#{Gori.plural(hits, "hit")})" : ""}"
+      " · #{@clusters.overflow_rows} ungrouped#{@run_selective && hits > 0 ? " (#{Gori.plural(hits, "hit")})" : ""}"
     end
 
     STOP_ROW_MARK = "stop row"
@@ -3476,7 +3490,7 @@ module Gori::Tui
       bg = selected ? Theme.accent_bg : Theme.bg
       screen.fill(Rect.new(inner.x, y, inner.w, 1), bg) if selected
       # A cluster header is ✓ when ANY member matched, not only its representative.
-      hit = group && group.header ? group.cluster.matched > 0 : r.matched?
+      hit = @run_selective && (group && group.header ? group.cluster.matched > 0 : r.matched?)
       # The cursor and the hit mark own separate cells: one cell shared by both hid the
       # selected row's ✓, so the border's `3 hit` showed two.
       screen.cell(inner.x, y, '▎', Theme.accent, bg) if selected

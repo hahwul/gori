@@ -14,7 +14,7 @@ module Gori
       # `enter` toggles; `space` is intentionally free so it opens the Sitemap action
       # menu (the helix leader) — the redundant expand binding was dropped.
       r.register Verb::Definition.new(
-        "sitemap.toggle", "Expand/collapse", "Toggle the selected node", Verb::Scope::Sitemap,
+        "sitemap.toggle", "Expand, collapse or open", "Toggle the selected folder, or open the selected endpoint's flow", Verb::Scope::Sitemap,
         [Verb::Chord.new("enter")], hidden: true) { |ctx| ctx.sitemap_toggle; nil }
 
       r.register Verb::Definition.new(

@@ -138,6 +138,17 @@ module Gori::Tui
       match_type == "regex" ? "[ fix the regex ]" : "[ fix the host pattern ]"
     end
 
+    # What each match type matches — see the dialect notes at the top of `Gori::Scope`.
+    PATTERN_EXAMPLES = {
+      "host"   => "e.g. acme.test — its subdomains match too",
+      "string" => "e.g. /api/ — any part of the URL",
+      "regex"  => "e.g. ^https://[^/]+/admin — over the whole URL",
+    }
+
+    def pattern_example : String
+      PATTERN_EXAMPLES[match_type]
+    end
+
     def card_title : String
       editing? ? "EDIT SCOPE RULE" : "ADD SCOPE RULE"
     end
@@ -167,6 +178,13 @@ module Gori::Tui
         # `click_text_field` call included. It also buys the horizontal window `input_line`
         # carries, which a long regex pattern needs and the clipped `text` call did not have.
         @pattern.render(screen, vx, py, {box.right - 2 - vx, 3}.max, sel, fg, bg)
+        # An empty field says what goes in it, per type: `host` reads as an exact name and
+        # also takes subdomains, and nothing on the form said what `string` is a string OF.
+        # One cell right of the block caret while the row is focused.
+        if @pattern.value.empty? && @pattern.preedit.empty?
+          ex = sel ? vx + 1 : vx
+          screen.text(ex, py, pattern_example, Theme.muted, bg, width: {box.right - 2 - ex, 0}.max)
+        end
       else
         ok = !pattern.empty? && Scope.valid?(match_type, pattern)
         screen.text(x, py, save_label, ok ? Theme.accent : Theme.muted, bg, Attribute::Bold, width: {box.right - 2 - x, 0}.max)
