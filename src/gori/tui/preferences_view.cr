@@ -4,6 +4,7 @@ require "./frame"
 require "./chrome"
 require "./overlay"
 require "./viewport"
+require "./note_detail_overlay"
 
 module Gori::Tui
   # The unified Preferences modal — ONE grouped settings surface reachable everywhere:
@@ -33,9 +34,10 @@ module Gori::Tui
     GROUP_LABELS = SettingsCatalog::GROUPS.map { |g| g[1] }
 
     @group : Int32 = 0
-    @focus : Int32 = 0       # index into the active group's flat target list
-    @scroll : Int32 = 0      # first visible virtual row (derived — follows @focus)
-    @on_strip : Bool = false # true = the group strip holds focus (←/→ switch groups)
+    @focus : Int32 = 0                        # index into the active group's flat target list
+    @scroll : Int32 = 0                       # first visible virtual row (derived — follows @focus)
+    @longest_hint_rows = {} of Int32 => Int32 # card width → rows (see #longest_hint_rows)
+    @on_strip : Bool = false                  # true = the group strip holds focus (←/→ switch groups)
     @strip_start : Int32 = 0
     @status : String? = nil
     # Whether @status reports a FAILURE (rejected save, blocked opener, unsaved-edit
@@ -237,7 +239,7 @@ module Gori::Tui
         end
         return NONE
       end
-      content = content_rect(box)
+      content = content_rect(box, note_lines(box).size)
       if content.contains?(mx, my)
         if idx = target_at_row((my - content.y) + @scroll)
           @on_strip = false
@@ -348,8 +350,11 @@ module Gori::Tui
       # helper. Same focus tint as before.
       Frame.tee_divider(screen, box, box.y + 3, Theme.panel,
         @on_strip ? Theme.focus_gold : Theme.border)
-      render_group(screen, content_rect(box), !@on_strip)
-      render_footer(screen, box)
+      # Wrapped once and handed to both: the form is sized by the note's row count, so the two
+      # must read the same lines.
+      note = note_lines(box)
+      render_group(screen, content_rect(box, note.size), !@on_strip)
+      render_footer(screen, box, note)
     end
 
     private def render_too_small(screen : Screen, area : Rect) : Nil
@@ -361,21 +366,53 @@ module Gori::Tui
     end
 
     # The centred modal card. Height fits the tallest group's content (so switching groups
-    # doesn't resize the card), capped to the terminal; content scrolls when it overflows.
+    # doesn't resize the card) plus the rows the longest description wraps to (so moving
+    # between fields doesn't resize the form), capped to the terminal; on a card too short for
+    # both, the note takes its rows from the form and the form scrolls.
     # Public because PreferencesOverlay exposes it as the shell's click-away hit-test.
     def overlay_box(area : Rect) : Rect
-      tallest = SettingsCatalog::GROUPS.max_of { |g| height_of(g[0]) }
       w = {area.w - 4, 82}.min
-      # Fit the tallest group's content but never exceed the area — on a short terminal h
-      # drops below the render guard (box.h < 10) and the modal simply doesn't draw, rather
-      # than spilling the card over the tab bar / status rows.
-      h = {tallest + 7, area.h - 2}.min
+      # Never exceed the area — on a short terminal h drops below the render guard
+      # (box.h < 10) and the modal simply doesn't draw, rather than spilling the card over
+      # the tab bar / status rows.
+      h = {tallest_group + 6 + longest_hint_rows({w - 4, 1}.max), area.h - 2}.min
       area.center(w, h)
     end
 
-    # Interior content rows (between the strip divider and the two footer rows).
-    private def content_rect(box : Rect) : Rect
-      Rect.new(box.x + 2, box.y + 4, box.w - 4, {box.h - 7, 1}.max)
+    private def tallest_group : Int32
+      SettingsCatalog::GROUPS.max_of { |g| height_of(g[0]) }
+    end
+
+    # Rows the longest field description wraps to at `width`. The descriptions are constants,
+    # so one wrap pass per card width is kept.
+    private def longest_hint_rows(width : Int32) : Int32
+      @longest_hint_rows[width] ||= SettingsView::SECTIONS.each_value.max_of do |fields|
+        fields.max_of { |f| NoteDetailOverlay.wrap_text(Hotkeys.retag(f.hint), width).size }
+      end
+    end
+
+    # Interior content rows (between the strip divider and the footer: the note, then the keys).
+    private def content_rect(box : Rect, note_size : Int32) : Rect
+      # The note's rows, or the rows the card has beyond its tallest group, whichever is more:
+      # on a card with room the form keeps one height whatever is focused.
+      note_rows = {note_size, box.h - 6 - tallest_group}.max
+      Rect.new(box.x + 2, box.y + 4, box.w - 4, {box.h - 6 - note_rows, 1}.max)
+    end
+
+    # The note above the key row: the save status, or the focused row's description, wrapped
+    # to the card. A description is the only place a setting says what it does, and most are
+    # wider than the card (the modal is 82 columns at most), so one row cut them mid-sentence
+    # on every terminal. `overlay_box` reserves the rows for it where the terminal has them.
+    # Where it does not, the note takes them from the form above, which scrolls to keep the
+    # focused row in view and always keeps `MIN_FORM_ROWS`; a note cut there ends in `…`.
+    MIN_FORM_ROWS = 3
+
+    private def note_lines(box : Rect) : Array(String)
+      lines = NoteDetailOverlay.wrap_text(Hotkeys.retag(@status || focused_hint), {box.w - 4, 1}.max)
+      max = {box.h - 6 - MIN_FORM_ROWS, 1}.max
+      return [""] if lines.empty?
+      return lines if lines.size <= max
+      lines[0, max - 1] << "#{lines[max - 1]} …"
     end
 
     private def render_group(screen : Screen, content : Rect, body_focused : Bool) : Nil
@@ -456,17 +493,18 @@ module Gori::Tui
       screen.text(cx, y, cue, focused ? Theme.accent : Theme.muted, bg, width: {content.right - cx, 1}.max)
     end
 
-    private def render_footer(screen : Screen, box : Rect) : Nil
-      note_y = box.bottom - 3
+    private def render_footer(screen : Screen, box : Rect, note : Array(String)) : Nil
       hint_y = box.bottom - 2
       iw = {box.w - 4, 0}.max
-      # Retagged: field hints name claimed chords (the external editor's ^E, the command
-      # modifier's own ^P/^N/^W/^1-9), which must read as whichever modifier is configured.
-      note = Hotkeys.retag(@status || focused_hint)
+      # Retagged (in `note_lines`): field hints name claimed chords (the external editor's ^E,
+      # the command modifier's own ^P/^N/^W/^1-9), which must read as whichever modifier is
+      # configured.
       # Same green/yellow split SettingsView uses — a rejected save must not read as a
       # successful one just because it came through the modal.
       note_fg = @status ? (@status_warn ? Theme.yellow : Theme.green) : Theme.muted
-      screen.text(box.x + 2, note_y, note, note_fg, Theme.panel, width: iw)
+      note.each_with_index do |line, i|
+        screen.text(box.x + 2, hint_y - note.size + i, line, note_fg, Theme.panel, width: iw)
+      end
       hint = nav_hint
       hx = {box.right - hint.size - 2, box.x + 2}.max
       screen.text(hx, hint_y, hint, Theme.muted, Theme.panel, width: {box.right - hx - 1, 0}.max)
