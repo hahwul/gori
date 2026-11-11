@@ -4,6 +4,7 @@
 
 - TUI: an empty `^P` opens on Open browser, Copy CA certificate path and Guided tour, then the tab jumps, with one Settings row; type a section's name to reach it (#1843)
 - Fuzzer: the idle results card lists what a run still needs (a marked position, then a payload set) and marks the next step, with no session open `Space` offers New fuzz session instead of Run and Stop, and a run with no match rule says so instead of counting every response as a hit (#1843, #1844, #1856)
+- Proxy: the CA page at `http://gori.proxy/` shows the certificate's SHA-256 fingerprint in the hex form certificate viewers print, and adds the trust steps for Linux, iOS and Android (#1862)
 - Probe: `gori run probe promote --format json` prints the new Issue id as MCP `probe_promote` does (#1784)
 - CLI: `gori run sitemap tag --list --format json` (or `--json`) prints the `[{host, path, tag}]` array MCP `list_sitemap_tags` returns (#1783)
 - Help: Shortcuts names the header chips, History's view chip, the Fuzzer's `§N`, MATCH and DIST chips and Mode formula, the Probe band's chips, Discover's suppression counters, the Params `R` column, the `:` a filter bar puts before an applied filter and the Intercept editor's `CL` chip (#1845, #1847, #1850, #1855)

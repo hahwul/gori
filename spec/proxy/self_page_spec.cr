@@ -76,7 +76,7 @@ describe Gori::Proxy::SelfPage do
       Gori::Proxy::SelfPage.route("/ca.pem").should eq(:pem)
       Gori::Proxy::SelfPage.route("/ca.pem?x=1").should eq(:pem)
       Gori::Proxy::SelfPage.route("/ca.der").should eq(:der)
-      Gori::Proxy::SelfPage.route("/ca.crt").should eq(:der)
+      Gori::Proxy::SelfPage.route("/ca.crt").should eq(:crt)
       Gori::Proxy::SelfPage.route("/favicon.ico").should eq(:favicon)
       Gori::Proxy::SelfPage.route("/nope").should eq(:not_found)
     end
@@ -88,7 +88,7 @@ describe Gori::Proxy::SelfPage do
       Gori::Proxy::SelfPage.route("http://gori.proxy").should eq(:index) # no path at all
       Gori::Proxy::SelfPage.route("http://gori.proxy/ca.pem").should eq(:pem)
       Gori::Proxy::SelfPage.route("http://gori.proxy/ca.der?x=1").should eq(:der)
-      Gori::Proxy::SelfPage.route("https://gori.proxy/ca.crt").should eq(:der)
+      Gori::Proxy::SelfPage.route("https://gori.proxy/ca.crt").should eq(:crt)
       Gori::Proxy::SelfPage.route("http://127.0.0.1:8070/ca.pem").should eq(:pem)
       Gori::Proxy::SelfPage.route("http://gori.proxy/nope").should eq(:not_found)
     end
@@ -99,7 +99,7 @@ describe Gori::Proxy::SelfPage do
     # miss `Url.absolute_form?`'s own header names three other copies of.
     it "routes an absolute-form target whose scheme is not lowercase" do
       Gori::Proxy::SelfPage.route("HTTP://gori.proxy/ca.pem").should eq(:pem)
-      Gori::Proxy::SelfPage.route("Https://gori.proxy/ca.crt").should eq(:der)
+      Gori::Proxy::SelfPage.route("Https://gori.proxy/ca.crt").should eq(:crt)
       Gori::Proxy::SelfPage.route("HTTP://gori.proxy/").should eq(:index)
       Gori::Proxy::SelfPage.route("HTTP://gori.proxy").should eq(:index)
     end
@@ -191,6 +191,51 @@ describe Gori::Proxy::SelfPage do
         ca_path: nil, listen: listen, version: "1", head_only: false)).should contain("204 No Content")
       String.new(Gori::Proxy::SelfPage.respond("/nope", pem: pem, der: der, spki: nil,
         ca_path: nil, listen: listen, version: "1", head_only: false)).should contain("404 Not Found")
+    end
+
+    # The page called the SPKI pin "Fingerprint". A certificate viewer shows the digest of the
+    # certificate in hex, so there was nothing on the page to compare an install against.
+    it "prints the certificate's SHA-256 as hex pairs, and names the SPKI pin for what it is" do
+      resp = Gori::Proxy::SelfPage.respond("/", pem: pem, der: der, spki: "SPKI==",
+        ca_path: nil, listen: listen, version: "1", head_only: false)
+      text = String.new(split_response(resp)[1])
+      # `printf '\x30\x82\x01\x02' | shasum -a 256`
+      text.gsub("<wbr>", "").should contain(%(<span class="k">SHA-256</span><code class="fp">CA:B0:73:FA:36:0D:E7:DD:F0:BA:6D:C5:76:FB:3B:74:36:56:0A:A6:A8:FF:C2:99:5C:FD:9B:E4:74:FD:15:42</code>))
+      text.should contain("CA:<wbr>B0:<wbr>73") # wraps between pairs on a phone, never inside one
+      text.should contain(%(<span class="k">SPKI pin</span><code>SPKI==</code>))
+      text.should_not contain("Fingerprint")
+    end
+
+    it "prints neither digest when there is no CA to hand out" do
+      resp = Gori::Proxy::SelfPage.respond("/", pem: nil, der: nil, spki: nil,
+        ca_path: nil, listen: listen, version: "1", head_only: false)
+      text = String.new(split_response(resp)[1])
+      text.should_not contain("SHA-256")
+      text.should_not contain("SPKI pin")
+    end
+
+    it "says how to trust the CA on Linux, iOS and Android" do
+      resp = Gori::Proxy::SelfPage.respond("/", pem: pem, der: der, spki: nil,
+        ca_path: nil, listen: listen, version: "1", head_only: false)
+      text = String.new(split_response(resp)[1])
+      text.should contain("<dt>Linux</dt>")
+      text.should contain("update-ca-certificates")
+      text.should contain("trust anchor")
+      text.should contain("<dt>iOS</dt>")
+      text.should contain("Certificate Trust Settings")
+      text.should contain("<dt>Android</dt>")
+      text.should contain("Install a certificate")
+      text.should contain(%(href="/ca.crt"))
+    end
+
+    # Android's installer offers a `.crt` and greys out a `.der`; both names carry the same bytes.
+    it "serves the DER as gori-ca.crt on the .crt route" do
+      resp = Gori::Proxy::SelfPage.respond("/ca.crt", pem: pem, der: der, spki: nil,
+        ca_path: nil, listen: listen, version: "1", head_only: false)
+      head, body = split_response(resp)
+      head.should contain(%(filename="gori-ca.crt"))
+      head.should contain("application/x-x509-ca-cert")
+      body.should eq(der)
     end
 
     it "omits the body for a HEAD request but keeps the headers" do
