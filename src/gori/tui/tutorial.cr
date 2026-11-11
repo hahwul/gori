@@ -309,11 +309,11 @@ module Gori::Tui
       end
       first = case handoff
               when Handoff::Picker
-                "At the picker: New project → name → ↵ (↵ ×3 once you have projects)"
+                "At the picker: New project → name → ↵ (later: ↵ through 3 fields)"
               when Handoff::Direct
                 "Open your --db project; if picker appears, choose a project"
               when Handoff::Shell
-                "Run gori → New project → name → ↵ (↵ ×3 once you have projects)"
+                "Run gori → New project → name → ↵ (later: ↵ through 3 fields)"
               when Handoff::Session
                 "Back in your session: open the command palette with ^P"
               else
@@ -1882,6 +1882,9 @@ module Gori::Tui
     # Contextual mock hint; tour nav (n/b · Prev/Next · rail click) is separate.
     private def footer_hint : String
       tour = "n next · b back"
+      # An untried lesson says `n` passes it. "n next · b back to skip" read as "b goes back
+      # to skip", and a bare "n next" beside "try" read as the step after trying.
+      skip = "n skips · b back"
       # The armed esc outranks every lesson's hint: it is the only state in the tour where
       # the next keystroke can end it, and it lasts exactly until the next key or click.
       # The three hints that name the exit spell it "esc esc" for the same reason — a footer
@@ -1938,7 +1941,7 @@ module Gori::Tui
         elsif @tried_space
           "✓ #{tour}"
         else
-          "try space, then #{Verbs::SEND_FLOW.key} · #{tour} to skip"
+          "try space, then #{Verbs::SEND_FLOW.key} · #{skip}"
         end
       when Step::Palette
         if @overlay == :palette
@@ -1946,7 +1949,7 @@ module Gori::Tui
         elsif @tried_palette
           "✓ #{tour}"
         else
-          Hotkeys.retag("try ^P, then type #{PALETTE_DEMO_QUERY} · #{tour} to skip")
+          Hotkeys.retag("try ^P, then type #{PALETTE_DEMO_QUERY} · #{skip}")
         end
       when Step::Edit
         if @edit_insert
@@ -1954,7 +1957,7 @@ module Gori::Tui
         elsif @tried_edit
           "✓ #{tour}"
         else
-          "try i · #{tour} to skip"
+          "try i · #{skip}"
         end
       when Step::Capture
         cap = reach("capture.toggle")
@@ -1963,14 +1966,14 @@ module Gori::Tui
         elsif @m_cap_off
           "capture is off — #{cap} again turns it back on"
         else
-          "try #{cap} twice · #{tour} to skip"
+          "try #{cap} twice · #{skip}"
         end
       when Step::Intercept
         icpt = reach("intercept.toggle")
         if @tried_intercept
           "✓ #{tour}"
         elsif !@m_intercept && !@m_released
-          "try #{icpt} · #{tour} to skip"
+          "try #{icpt} · #{skip}"
         elsif !@m_released
           "#{reach("intercept.forward")} forward · #{reach("intercept.drop")} drop the held request"
         else

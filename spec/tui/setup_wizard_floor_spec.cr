@@ -26,7 +26,7 @@ describe Gori::Tui::SetupWizard do
   end
 
   it "names what each Ctrl chord does in the Shortcuts recap" do
-    SW.modifier_recap("ctrl").should eq("^P = Ctrl+P palette · ^N new · ^W close  (←/→ ⌥)")
+    SW.modifier_recap("ctrl").should eq("^P = Ctrl+P palette · ^N new · ^W close  (←/→ for Alt)")
     # The gloss must not cost the row its fit: the value column of the 80-column card.
     value_w = SW.card_w(80, 84) - 3 - 3 - ("Proxy default".size + 2)
     {"ctrl", "alt"}.each { |m| Gori::Tui::Screen.draw_width(SW.modifier_recap(m)).should be <= value_w }

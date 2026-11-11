@@ -13,14 +13,17 @@ describe "Gori::Tui::Tutorial.first_session_steps" do
 
   # A first project opens on the name's ↵ (`ProjectPicker.name_creates?`, #1841); a later one
   # is name → description → tags, one ↵ each. The card cannot know which reader it has, so it
-  # names both counts wherever the line has room. The narrow Shell line does not (33 columns,
-  # and it also has to say `gori`), and keeps the first project's count.
-  it "names one ↵ for the first project and three for a later one" do
+  # names both. Where the line has room it says so in words: "↵ ×3" read as a key to press
+  # three times. The narrow Picker line keeps the short form, and the narrow Shell line (33
+  # columns, and it also has to say `gori`) keeps the first project's count.
+  it "names one ↵ for the first project and three fields for a later one" do
     Gori::Tui::ProjectPicker::NEW_FIELDS.size.should eq(3)
     [Tour::Handoff::Picker, Tour::Handoff::Shell].each do |handoff|
       line = Tour.first_session_steps(handoff, 71)[0]
-      line.should contain("name → ↵ (")
-      line.should contain("×3")
+      line.should contain("name → ↵ (later: ↵ through 3 fields)")
+      # 66 is the narrowest width that gets this form, so it is the line's whole budget.
+      Tour.first_session_steps(handoff, 66)[0].should eq(line)
+      Gori::Tui::Screen.draw_width(line).should be <= 66
     end
     Tour.first_session_steps(Tour::Handoff::Picker, 40)[0].should contain("×3")
     Tour.first_session_steps(Tour::Handoff::Shell, 40)[0].should contain("name → ↵")
