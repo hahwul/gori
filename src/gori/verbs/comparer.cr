@@ -1,4 +1,5 @@
 require "../verb"
+require "./history"
 
 module Gori
   module Verbs
@@ -155,7 +156,7 @@ module Gori
         "repeater.compare", "Send to Comparer",
         "Send this tab's last send (request + response) to the Comparer's next slot",
         Verb::Scope::Repeater,
-        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater },
+        available: REPEATER_SESSION,
         intent: :to_comparer, group: :send) { |ctx| ctx.comparer_add_repeater; nil }
 
       r.register Verb::Definition.new(

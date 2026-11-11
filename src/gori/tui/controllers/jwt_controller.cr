@@ -448,26 +448,27 @@ module Gori::Tui
           # and typing it over the band REPLACES it — so `^Y` is the copy this mode has.
           keys("type a JWT · ⇧arrows select · ^Y copy · esc read · ↓ decoded · #{lens} encode · {jwt.clear} clear · ^N new · ↑ sub-tabs")
         else
-          keys("{editor.insert}/↵ edit · ⇧arrows select · #{y} copy · space cmds · ↓ decoded · #{lens} encode · ^N new · esc sub-tabs")
+          keys("{editor.insert}/↵ edit · ⇧arrows select · #{y} copy · ↓ decoded · #{lens} encode · ^N new · space cmds · esc sub-tabs")
         end
       when :decoded
-        "↑/↓ scroll · #{y} copy · space cmds · ↑-top input · ↓ attacks · #{lens} encode · esc sub-tabs"
+        "↑/↓ scroll · #{y} copy · ↑-top input · ↓ attacks · #{lens} encode · space cmds · esc sub-tabs"
       when :attacks
-        "↑/↓ pick · ↵/#{y} copy token · space cmds · ↑-top decoded · #{lens} encode · esc sub-tabs"
+        "↑/↓ pick · ↵/#{y} copy token · ↑-top decoded · #{lens} encode · space cmds · esc sub-tabs"
       when :header, :payload
         # The ENCODE lens has no READ mode at all — its three panes always capture keys — so
         # `^Y` is the ONLY copy here, and `space cmds` was a lie the moment it was written:
         # `edit_lens_editor`/`edit_secret` insert a literal space (`handle_body_key` only defers
         # ctrl/alt chords). Naming a menu that types a space instead of opening cost these
-        # strips the one token that had room to say which key copies.
-        keys("type JSON · ⇧arrows select · ^Y copy · ↑/↓ move+cross · {jwt.cycle-alg} alg · #{lens} decode · esc sub-tabs")
+        # strips the one token that had room to say which key copies. `^P cmds` is the menu
+        # that does open here, and it anchors the way out on a narrow row (`Chrome.fit_hints`).
+        keys("type JSON · ⇧arrows select · ^Y copy · ↑/↓ move+cross · {jwt.cycle-alg} alg · #{lens} decode · ^P cmds · esc sub-tabs")
       when :secret
         # Same trade as HEADER/PAYLOAD above, minus `⇧arrows select`: SECRET is a plain String
         # + caret index (WorkbenchSession#secret_cx), not a TextArea, so it has no band to grow.
         # `^Y` still copies the whole field.
-        keys("type #{Jwt::Asym.alg?(s.alg) ? "PEM key path" : "secret"} · ^Y copy · {jwt.cycle-alg} alg (#{s.alg}) · ↑/↓ cross · #{lens} decode · esc sub-tabs")
+        keys("type #{Jwt::Asym.alg?(s.alg) ? "PEM key path" : "secret"} · ^Y copy · {jwt.cycle-alg} alg (#{s.alg}) · ↑/↓ cross · #{lens} decode · ^P cmds · esc sub-tabs")
       when :output
-        keys("↑/↓ scroll · #{y} copy token · space cmds · {jwt.cycle-alg} alg · #{lens} decode · esc sub-tabs")
+        keys("↑/↓ scroll · #{y} copy token · {jwt.cycle-alg} alg · #{lens} decode · space cmds · esc sub-tabs")
       else
         ""
       end

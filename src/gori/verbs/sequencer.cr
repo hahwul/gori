@@ -1,4 +1,5 @@
 require "../verb"
+require "./history"
 
 module Gori
   module Verbs
@@ -11,7 +12,6 @@ module Gori
     def self.register_sequencer(r : Verb::Registry) : Nil
       history_selected = ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_id.nil? }
       in_sequencer = ->(ctx : Verb::ExecContext) { ctx.current_tab == :sequencer }
-      in_repeater = ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater }
 
       r.register Verb::Definition.new(
         "history.sequence", "Send to Sequencer", "Collect this flow's token and analyze its randomness",
@@ -21,7 +21,7 @@ module Gori
         Verb::Scope::HistoryDetail, intent: :to_sequencer, group: :send) { |ctx| ctx.close_detail; ctx.sequence_selected; nil }
       r.register Verb::Definition.new(
         "repeater.sequence", "Send to Sequencer", "Collect this request's token repeatedly and analyze randomness",
-        Verb::Scope::Repeater, available: in_repeater, intent: :to_sequencer) { |ctx| ctx.sequence_from_repeater; nil }
+        Verb::Scope::Repeater, available: REPEATER_SESSION, intent: :to_sequencer) { |ctx| ctx.sequence_from_repeater; nil }
       # Scope::Sitemap already gates this to the Target/Sitemap sub-tab (command_scope
       # returns Sitemap only then) — no current_tab predicate, which would check the
       # retired :sitemap top-level symbol and never fire (Sitemap is now a Target sub-tab).

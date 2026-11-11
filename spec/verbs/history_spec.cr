@@ -331,6 +331,13 @@ describe "Gori::Verbs.register_history" do
       r["link.repeater.attach"].available?(ctx).should be_true
       verb_intents(r, "link.repeater.attach").should eq([:link_attach])
     end
+
+    it "leaves an empty Repeater tab the two ways to open a request, and nothing that needs one" do
+      ctx = on(:repeater)
+      ctx.subtab_search_tab_count = 0
+      repeater = r.select { |v| v.scope == Gori::Verb::Scope::Repeater && !v.hidden? && v.available?(ctx) }.map(&.id)
+      repeater.should eq(["repeater.new", "repeater.paste-curl"])
+    end
   end
 
   describe "Fuzzer (register_fuzz)" do

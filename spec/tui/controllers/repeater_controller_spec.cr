@@ -545,3 +545,22 @@ describe "RepeaterController with no request open" do
     end
   end
 end
+
+# "auto-marked 2 positions" said what happened and not what a marker is for in the Repeater.
+describe "RepeaterController auto-mark" do
+  it "names the key that puts a chain on a marker" do
+    with_repeater_controller do |ctl, host|
+      ctl.repeater_from_request("https://h.test", "GET /?a=1&b=2 HTTP/1.1\r\nHost: h.test\r\n\r\n", false, nil)
+      ctl.repeater_auto_mark
+      host.statuses.last.should eq("auto-marked 2 positions · ^Q encodes one on send")
+    end
+  end
+
+  it "names no key when nothing was marked" do
+    with_repeater_controller do |ctl, host|
+      ctl.repeater_from_request("https://h.test", HTTP_REQ, false, nil)
+      ctl.repeater_auto_mark
+      host.statuses.last.should_not contain("encodes")
+    end
+  end
+end
