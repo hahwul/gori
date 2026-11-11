@@ -75,15 +75,25 @@ module Gori::Tui
         all = Hotkeys.binding_label(reg, "intercept.mark-all", "⇧T")
         return "#{n} marked · #{f} fwd all · #{d} drop all · #{mark} mark · #{all} mark all · esc clear · space cmds"
       end
-      fa = Hotkeys.binding_label(reg, "intercept.forward-all", "⇧F")
       filt = Hotkeys.binding_label(reg, "intercept.filter", "/")
       catch = Hotkeys.binding_label(reg, "intercept.direction", "c")
+      # Nothing held: forward, drop and edit have no row to act on. Name the three keys that
+      # set up a catch instead — the same three the empty card lists.
+      if @intercept.empty?
+        toggle = Hotkeys.binding_label(reg, "intercept.toggle", "i")
+        return InterceptController.idle_keys(toggle, catch, filt)
+      end
+      fa = Hotkeys.binding_label(reg, "intercept.forward-all", "⇧F")
       y = Hotkeys.binding_label(reg, "intercept.copy", "y")
       InterceptController.queue_keys(f, d, mark, fa, y, filt, catch)
     end
 
     def self.queue_keys(f : String, d : String, mark : String, fa : String, y : String, filt : String, catch : String) : String
       "↑/↓ move · #{f} fwd · #{d} drop · ↵/e edit · #{mark} mark · ⇧↑/↓ range · #{fa} all · #{y} copy · #{filt} filter · #{catch} catch · space cmds · esc tabs"
+    end
+
+    def self.idle_keys(toggle : String, direction : String, filt : String) : String
+      "#{toggle} catch on/off · #{direction} direction · #{filt} condition · space cmds · esc tabs"
     end
 
     def goto_symbol : Symbol? # the held-message editor is ^G/^F-searchable

@@ -3174,10 +3174,12 @@ module Gori::Tui
       return if inner.h < 1
       mx = inner.right
 
-      screen.text(inner.x, inner.y, "PAYLOAD SETS", Theme.muted, Theme.bg)
+      # Text sits one column in from the border (headers at +1, rows at +2), like the
+      # TEMPLATE card's gutter beside it; selection bands still span the whole interior.
+      screen.text(inner.x + 1, inner.y, "PAYLOAD SETS", Theme.muted, Theme.bg)
       mcount = marker_spans.size
       if @config.mode.per_position? && !@sets.empty? && @sets.size != mcount
-        hx = inner.x + 13
+        hx = inner.x + 14
         screen.text(hx, inner.y, sets_hint(mcount, @sets.size), Theme.muted, Theme.bg, width: {mx - hx, 1}.max)
       end
 
@@ -3207,7 +3209,7 @@ module Gori::Tui
       # not have and put the first set (or the Add row) on top of the tail.
       avail = limit - y0
       if @sets.empty?
-        screen.text(inner.x + 1, y0, "(no sets yet)", Theme.muted, Theme.bg)
+        screen.text(inner.x + 2, y0, "(no sets yet)", Theme.muted, Theme.bg)
         draw_add_row(screen, inner, y0 + 1, focused, limit)
         return
       end
@@ -3239,7 +3241,7 @@ module Gori::Tui
         end
         above, below = @cfg_scroll, @sets.size - stop
         hint = above > 0 && below > 0 ? "… #{above} above · #{below} below" : (above > 0 ? "… #{above} above" : "… +#{below} more")
-        screen.text(inner.x + 1, y, hint, Theme.muted, Theme.bg) if y < limit
+        screen.text(inner.x + 2, y, hint, Theme.muted, Theme.bg) if y < limit
         draw_add_row(screen, inner, y + 1, focused, limit)
       end
     end
@@ -3259,7 +3261,7 @@ module Gori::Tui
       foc = focused && config_row == :add
       bg = foc ? Theme.accent_bg : Theme.bg
       screen.fill(Rect.new(inner.x, y, inner.w, 1), bg) if foc
-      screen.text(inner.x + 1, y, "+ Add payload set…", foc ? Theme.text_bright : Theme.accent, bg, width: {inner.w - 1, 1}.max)
+      screen.text(inner.x + 2, y, "+ Add payload set…", foc ? Theme.text_bright : Theme.accent, bg, width: {inner.w - 2, 1}.max)
     end
 
     private def render_mode_row(screen, inner : Rect, y : Int32, focused : Bool) : Nil
@@ -3267,8 +3269,8 @@ module Gori::Tui
       foc = focused && config_row == :mode
       bg = foc ? Theme.accent_bg : Theme.bg
       screen.fill(Rect.new(inner.x, y, inner.w, 1), bg) if foc
-      screen.text(inner.x, y, "Mode", Theme.muted, bg)
-      x = screen.text(inner.x + 7, y, "‹ #{@config.mode.label} ›", foc ? Theme.text_bright : Theme.text, bg)
+      screen.text(inner.x + 1, y, "Mode", Theme.muted, bg)
+      x = screen.text(inner.x + 8, y, "‹ #{@config.mode.label} ›", foc ? Theme.text_bright : Theme.text, bg)
       screen.text(x + 1, y, mode_formula, Theme.muted, bg) if x + 1 + mode_formula.size <= inner.right
     end
 
@@ -3277,8 +3279,8 @@ module Gori::Tui
       foc = focused && config_row == :advanced
       bg = foc ? Theme.accent_bg : Theme.bg
       screen.fill(Rect.new(inner.x, y, inner.w, 1), bg) if foc
-      screen.text(inner.x, y, "Advanced", foc ? Theme.text_bright : Theme.muted, bg)
-      dx = inner.x + 9
+      screen.text(inner.x + 1, y, "Advanced", foc ? Theme.text_bright : Theme.muted, bg)
+      dx = inner.x + 10
       screen.text(dx, y, "Engine · Match · Filter  ⏎", Theme.muted, bg, width: {inner.right - dx, 1}.max) if dx < inner.right
     end
 
@@ -3309,7 +3311,7 @@ module Gori::Tui
       end
       text = run_summary_framing(text)
       return if text.empty?
-      screen.text(inner.x, y, text, run_summary_tint, Theme.bg, width: {inner.w, 1}.max)
+      screen.text(inner.x + 1, y, text, run_summary_tint, Theme.bg, width: {inner.w - 1, 1}.max)
     end
 
     # `text` plus whatever this run's FRAMING is about to do to the body — appended here rather
@@ -3347,13 +3349,13 @@ module Gori::Tui
       fg = sel ? Theme.text_bright : Theme.text
       label = "#{i + 1} #{s.kind} #{s.display}"
       unless pp
-        screen.text(inner.x + 1, y, label, fg, bg, width: {inner.w - 2, 1}.max)
+        screen.text(inner.x + 2, y, label, fg, bg, width: {inner.w - 3, 1}.max)
         return
       end
       chip = "→#{i + 1}"
       cwid = 2 + chip.size + 1 # '▎' + ' ' + token + ' '
       cx = {inner.right - cwid, inner.x + 1}.max
-      screen.text(inner.x + 1, y, label, fg, bg, width: {cx - inner.x - 2, 1}.max)
+      screen.text(inner.x + 2, y, label, fg, bg, width: {cx - inner.x - 3, 1}.max)
       screen.cell(cx, y, '▎', Theme.marker_hue(i), bg)
       screen.text(cx + 1, y, " #{chip} ", Theme.marker_fg, Theme.marker_bg(i))
     end

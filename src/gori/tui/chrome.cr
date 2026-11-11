@@ -439,7 +439,10 @@ module Gori::Tui
       # no min_x, so the chips slid left and collided with the project name).
       chips_left = {rect.right - chips_width(chips) - 1, name_x}.max
       name_end = screen.text(name_x, rect.y, "· #{project}", Theme.muted, Theme.bg,
-        width: {chips_left - name_x - 1, 0}.max)
+        width: {chips_left - name_x - TOP_NAME_GAP, 0}.max)
+      # Chips flush against the name get the bar's own separator: with one space between
+      # them `demo scope:off` read as a single chip.
+      screen.text(name_end + 1, rect.y, "·", Theme.muted, Theme.bg) if chips_left - name_end == TOP_NAME_GAP
       render_chips(screen, rect, chips, bg: Theme.bg, min_x: name_end + 1)
     end
 
@@ -447,6 +450,8 @@ module Gori::Tui
     # before the chips may squeeze it. Which project the next request lands in is the one fact
     # on this row an operator cannot afford to lose, and the chips used to win every column.
     TOP_NAME_RESERVE = 24
+    # Columns kept between the name and the first chip: room for ` · `.
+    TOP_NAME_GAP = 3
 
     # The chips that step aside for the name, in order: two that repeat a chord (`^P`, `^,`),
     # then two readouts. Probe yields only while it is not sending — an orange `probe:active`
@@ -455,7 +460,7 @@ module Gori::Tui
 
     private def self.fit_top_chips(chips : Array(Chip), rect : Rect, name_x : Int32, project : String) : Array(Chip)
       want = {Screen.display_width("· #{project}"), TOP_NAME_RESERVE}.min
-      room = rect.right - name_x - want - 2
+      room = rect.right - name_x - want - TOP_NAME_GAP - 1
       TOP_YIELDING.each do |tag|
         break if chips_width(chips) <= room
         chips = chips.reject { |c| c.tag == tag && !(tag == :probe && c.label.ends_with?(":active")) }

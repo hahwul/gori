@@ -32,13 +32,19 @@ module Gori::Tui
       view_at(idx)
     end
 
+    # Cards on the canvas, no outer frame (`BodyChrome.framed`). The empty state keeps the
+    # frame: with no session open there are no cards, and it is what takes the focus gold.
+    def body_shell? : Bool
+      current_view.nil?
+    end
+
     # --- rendering ---
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       body_focused = focus == :body
       labels = subtab_strip_shown? ? subtab_labels : nil
-      shell = BodyChrome.shell_focused(focus, multi_pane: !current_view.nil?)
+      shell = body_shell? && focus == :body # only the empty state has a frame to gild
       subtabs_focused = focus == :subtabs
-      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @current_idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?, find: subtab_find_shown?, find_lit: @host.subtab_find_focused?, marked: marked_chip_set) do |content|
+      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @current_idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?, find: subtab_find_shown?, find_lit: @host.subtab_find_focused?, marked: marked_chip_set, shell: body_shell?) do |content|
         render_with_filter(screen, content, subtabs_focused) do |body|
           if v = current_view
             v.render(screen, body, body_focused)

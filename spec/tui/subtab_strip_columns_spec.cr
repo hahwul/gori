@@ -206,6 +206,14 @@ describe "Chrome top bar — the project name outlasts the chips" do
     row.should contain("⚙")
   end
 
+  # One space was all that stood between them at 80 columns: `demo scope:off(7)` read as a
+  # single chip. The name now keeps room for the bar's own ` · `.
+  it "separates the name from the first chip at every width" do
+    (60..120).each { |w| top_bar_row(w, "demo").should_not match(/demo {1,2}[^ ·]/) }
+    (60..120).any? { |w| top_bar_row(w, "demo").includes?("· demo · scope:off(7)") }.should be_true
+    top_bar_row(76, "a-project-name-long-enough-to-be-cut").should match(/… · scope:off\(7\)/)
+  end
+
   it "never drops an active probe chip for the name" do
     top_bar_row(60, "a-long-project-name", "probe:active").should contain("probe:active")
   end

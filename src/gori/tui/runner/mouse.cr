@@ -233,7 +233,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       return
     end
     return unless renameable_subtabs? && @overlay.none? && !@space_menu_open && !copy_as_shown? && !@rename_open && !@tag_edit_open && subtabs_shown?
-    sub_rect = BodyChrome.strip_rect(layout.body, strip: true, strip_divider: subtab_strip_divider?)
+    sub_rect = BodyChrome.strip_rect(layout.body, strip: true, strip_divider: subtab_strip_divider?, shell: body_shell?)
     return unless sub_rect && sub_rect.contains?(mx, my)
     icon, chips = subtab_strip_split(sub_rect)
     # A right-click on the ⌕ pill renames nothing. Stated rather than left to fall out of
@@ -298,6 +298,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return false unless Settings.companion?
     return false unless frame = @companion.frame # not drawn yet, or dropped while disabled
     if @companion.in_bar?
+      return false unless companion_in_bar_shown? # yielded to the row, and hidden as `body` would be
       return false unless Chrome.status_bar_chip_at(layout.status, mx, my, focus: focus_label,
                             hints: Hotkeys.retag(status_line || key_hints),
                             activity: activity_chip, resource: @resource.label,
@@ -357,7 +358,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # when the click landed on the strip row (handled), false to fall through to body.
   # strip_divider must match framed_body (Repeater carves chips only; filter owns hairline).
   private def click_subtab_strip(body : Rect, mx : Int32, my : Int32) : Bool
-    sub_rect = BodyChrome.strip_rect(body, strip: subtabs_shown?, strip_divider: subtab_strip_divider?)
+    sub_rect = BodyChrome.strip_rect(body, strip: subtabs_shown?, strip_divider: subtab_strip_divider?, shell: body_shell?)
     return false unless sub_rect && sub_rect.contains?(mx, my)
     # The strip owns its CHIP row; the hairline under it is the body's top boundary, and
     # `BodyChrome.tab_row`'s own comment already says hit-tests ignore the divider. Swallowing
@@ -391,7 +392,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # `click_subtab_strip`, which owns the strip row outright.
   private def subtab_find_pill_hit?(body : Rect, mx : Int32, my : Int32) : Bool
     return false unless subtabs_shown? && !subtab_strip_self_drawn?
-    sub_rect = BodyChrome.strip_rect(body, strip: true, strip_divider: subtab_strip_divider?)
+    sub_rect = BodyChrome.strip_rect(body, strip: true, strip_divider: subtab_strip_divider?, shell: body_shell?)
     return false unless sub_rect
     subtab_strip_split(sub_rect)[0].try(&.contains?(mx, my)) || false
   end

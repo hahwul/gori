@@ -1091,20 +1091,31 @@ module Gori::Tui
     end
 
     # Row 0: a filled MODE chip (with its `m` cycle chord) + detected-tech summary + the
-    # `a:CLOSED` lens toggle + right-aligned severity tallies.
+    # right-aligned severity tallies + the `+CLOSED` lens toggle.
     private def render_mode_band(screen : Screen, rect : Rect) : Nil
       x = Frame.tag_chip(screen, rect.x + 1, rect.y, mode_chip_label, mode_color(@mode)) + 1
-      tallies_x = render_tallies(screen, rect, x + 1) # right-aligned, but never left of the mode chip
-      # The CLOSED lens toggle chains left of the tallies; lit when showing closed/dismissed
-      # issues, muted (its default open-only) otherwise — so the `a` chord stays in view.
-      cx = Frame.toggle_badge(screen, tallies_x, rect.y, x + 1, "CLOSED", @show_closed)
+      # The closed lens toggle ends the row, AFTER the tallies and spelled `+CLOSED`: ahead of
+      # them a bare `CLOSED H:6 M:40` read as a heading for the counts. Lit when closed and
+      # dismissed issues are shown too, muted (open-only, the default) otherwise. The tallies
+      # keep their priority on a narrow band: the badge is drawn only where both fit.
+      edge = Frame.toggle_badge(screen, rect.right, rect.y, closed_badge_floor(x + 1), CLOSED_BADGE, @show_closed)
+      tallies_x = render_tallies(screen, Rect.new(rect.x, rect.y, edge - rect.x, rect.h), x + 1)
       unless @tech.empty?
-        screen.text(x, rect.y, @tech.join(" "), Theme.green, width: {cx - x - 1, 0}.max)
+        screen.text(x, rect.y, @tech.join(" "), Theme.green, width: {tallies_x - x - 1, 0}.max)
       end
     end
 
+    CLOSED_BADGE = "+CLOSED"
+
+    # The leftmost x the `+CLOSED` badge may start at: past the mode chip AND the whole run
+    # of tallies. Shared by the draw and `mode_band_hit`.
+    private def closed_badge_floor(floor : Int32) : Int32
+      parts = tally_parts
+      parts.empty? ? floor : floor + parts.sum { |(s, _)| s.size + 1 }
+    end
+
     # The severity tallies, as `{label, colour}` in draw order. Shared by the draw and by the
-    # geometry the CLOSED badge's hit-test chains off, so the two cannot drift.
+    # geometry `tech` is clipped against, so the two cannot drift.
     private def tally_parts : Array({String, Color})
       labels = {4 => "C", 3 => "H", 2 => "M", 1 => "L", 0 => "I"}
       parts = [] of {String, Color}
@@ -1115,8 +1126,7 @@ module Gori::Tui
       parts
     end
 
-    # Leftmost x the tallies occupy (or rect.right-1 when there are none) — the right_edge the
-    # CLOSED lens badge chains from. Right-aligned, but never left of `floor` (the mode chip):
+    # Leftmost x the tallies occupy (or rect.right-1 when there are none). Right-aligned, but never left of `floor` (the mode chip):
     # on a band too narrow to hold everything the tallies truncate at the right edge instead of
     # overpainting the mode indicator. On a normal-width band nothing truncates.
     private def tallies_left(rect : Rect, floor : Int32) : Int32
@@ -1154,8 +1164,8 @@ module Gori::Tui
       # `x + 1` in render_mode_band, where `x` is one past the chip — the same floor it hands
       # `render_tallies` and the same `min_x` it hands the badge.
       floor = cx + chip_w + 2
-      Frame.right_badge_hit(mx, my, rect.y, tallies_left(rect, floor), floor,
-        [{:closed, "CLOSED"}] of {Symbol, String})
+      Frame.right_badge_hit(mx, my, rect.y, rect.right, closed_badge_floor(floor),
+        [{:closed, CLOSED_BADGE}] of {Symbol, String})
     end
 
     # The MODE chip's text, in one place: the draw positions everything after it from this

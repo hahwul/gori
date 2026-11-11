@@ -213,7 +213,12 @@ module Gori::Tui
     end
 
     # --- render ---
-    # The framed body + sub-tab strip around the session's lens. Each tool's `render_body` is a
+    # Cards on the canvas, no outer frame (`BodyChrome.framed`).
+    def body_shell? : Bool
+      false
+    end
+
+    # The body + sub-tab strip around the session's lens. Each tool's `render_body` is a
     # one-line call to this rather than the base implementing it: `TabController#render_body`
     # is ABSTRACT, and Crystal does not dispatch an abstract method of a non-generic ancestor to
     # a definition in a generic one — the Runner's `@tabs[...].render_body` (typed
@@ -222,9 +227,8 @@ module Gori::Tui
       body_focused = focus == :body
       labels = subtab_labels
       s = cur
-      shell = BodyChrome.shell_focused(focus, multi_pane: true)
       subtabs_focused = focus == :subtabs
-      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?, find: subtab_find_shown?, find_lit: @host.subtab_find_focused?, marked: marked_chip_set) do |content|
+      @subtab_start = BodyChrome.framed_body(screen, rect, false, subtabs_focused, labels, @idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?, find: subtab_find_shown?, find_lit: @host.subtab_find_focused?, marked: marked_chip_set, shell: body_shell?) do |content|
         render_with_filter(screen, content, subtabs_focused) do |body|
           render_lens(screen, body, s, body_focused)
         end

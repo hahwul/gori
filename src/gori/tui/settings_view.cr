@@ -234,10 +234,10 @@ module Gori::Tui
     COMPANION_REPLIES_CHOICES   = ["hold", "timed"]
     COMPANION_FIELDS            = [
       Field.new("Companion (Miss Ring)",
-        "show the mascot in the body's bottom-right corner — she covers three rows and repaints about once a second while you're at the keyboard — ←/→/space toggles",
+        "show the mascot in the body's bottom-right corner while it is empty — she repaints about once a second while you're at the keyboard — ←/→/space toggles",
         bool: true),
       Field.new("Placement",
-        "body = an 8x3 sprite in the tab body's bottom-right corner; bar = a one-row chip in the status row beside CPU/MEM, which covers nothing and drops the speech bubble — ←/→ cycles",
+        "body = an 8x3 sprite in the tab body's bottom-right corner, moving to the status row wherever the tab draws there; bar = always a one-row chip in the status row beside CPU/MEM, without the speech bubble — ←/→ cycles",
         choices: COMPANION_PLACEMENT_CHOICES),
       Field.new("Motion",
         "lively = blinks, winks, a glint sweep and one of seven idle gestures every 25s or so; calm halves the blink rate and drops the rest (SSH/battery); still drops the blink too, so she never repaints on her own (recordings, screen readers, shared panes) — reactions still play in all three — ←/→ cycles",

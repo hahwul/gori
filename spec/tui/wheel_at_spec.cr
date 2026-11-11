@@ -122,10 +122,10 @@ describe "TabController#handle_wheel_at" do
         view.load_request("https://h", "GET /?x=1 HTTP/1.1\r\nHost: h\r\n\r\n" + (1..60).map { |i| "X-#{i}: v\r\n" }.join + "\r\n", false, "")
         view.focus_pane(:target)
         TuiContract.render(controller)
-        # One session: the strip is hidden below two chips and no filter bar is up, so the
-        # body the click and the wheel hit-test with is the framed area under the strip row.
+        # The body the click and the wheel hit-test with: below the strip, with no outer
+        # frame around the Fuzzer's cards and no filter bar while the filter is idle.
         body = BodyChrome.content_rect(TuiContract::AREA, strip: controller.subtab_strip_shown?,
-          strip_divider: controller.subtab_strip_divider?)
+          strip_divider: controller.subtab_strip_divider?, shell: controller.body_shell?)
         mx, my = cell_where(TuiContract::AREA) { |x, y| view.pane_at(body, x, y) == :template }
         controller.handle_wheel_at(4, mx, my, TuiContract::AREA).should be_true
         view.focus.should eq(:target)

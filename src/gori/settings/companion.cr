@@ -5,7 +5,7 @@ require "json"
 # and tui/companion.cr for what these actually drive.
 module Gori::Settings
   # ON by default: she is part of what gori looks like, not an extra someone has to find.
-  # She covers three rows of the body's bottom-right corner and — unique among gori's
+  # She stands in the body's bottom-right corner while it is empty and — unique among gori's
   # chrome — costs periodic repaints while someone is at the keyboard (~1/s on "lively",
   # ~0.3/s on "calm"; zero once she dozes off after 90s of inactivity). Everyone who does
   # not want that says so ONCE: turning her off no longer matches the factory default, so
@@ -31,7 +31,9 @@ module Gori::Settings
   # her a column, so it is suppressed while the face change it accompanies is not.
   DEFAULT_COMPANION_MOTION  = "lively" # "lively" | "calm" | "still"
   DEFAULT_COMPANION_NOTICES = true
-  # Where she sits. "body" is the 8x3 sprite in the tab body's bottom-right corner; "bar"
+  # Where she sits. "body" is the 8x3 sprite in the tab body's bottom-right corner, for as
+  # long as the tab draws nothing there: over rows she would hide she steps down to the bar
+  # form for that frame (Companion#covering?). "bar"
   # is an 8-cell one-row chip in the status row, alongside CPU/MEM and the clock — her
   # middle row plus the mood badge, so the face and the one glyph that says "something is
   # wrong" both survive, and only the crown and floor are dropped. The bar form occludes

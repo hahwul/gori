@@ -26,6 +26,8 @@ module Gori::Tui
     SUBS       = [:rules, :extract, :bindings]
     SUB_LABELS = ["Rules", "Extract", "Bindings"]
     SUB_H      = 1
+    # Below this the three chips want the row to themselves and the `↹ switch` hint is dropped.
+    SUB_HINT_MIN_W = 56
 
     # The strip row and what is left for the sub-tab's own body.
     def sub_layout(rect : Rect) : {Rect, Rect}
@@ -75,7 +77,7 @@ module Gori::Tui
                target : Store::RuleTarget = Store::RuleTarget::Request, host : String = "",
                empty_hint : String = "no rules — a add · p preset") : Nil
       return if rect.w < 6 || rect.h < 2
-      render_sub_strip(screen, rect, :rules, body_focused)
+      render_sub_strip(screen, rect, :rules)
       list_r, pin_r, pout_r = layout(rect)
       render_list(screen, list_r, rules, sel, scroll, enabled_count,
         body_focused && focus == :list, empty_hint)
@@ -92,7 +94,7 @@ module Gori::Tui
                        bound : Set(String), sel : Int32, scroll : Int32, body_focused : Bool,
                        empty_hint : String = "no extract rules — press a to add one, then log in from a Repeater tab") : Nil
       return if rect.w < 6 || rect.h < 2
-      render_sub_strip(screen, rect, :extract, body_focused)
+      render_sub_strip(screen, rect, :extract)
       _, body = sub_layout(rect)
       # No border TITLE: the sub-strip immediately above reads `Extract`. The `Rules` pane keeps
       # its `MATCH & REPLACE` title because that names what the rules DO — it is not the chip
@@ -119,7 +121,7 @@ module Gori::Tui
     def render_bindings(screen : Screen, rect : Rect, rows : Array(Bindings::Row),
                         sel : Int32, scroll : Int32, body_focused : Bool, now : Time) : Nil
       return if rect.w < 6 || rect.h < 2
-      render_sub_strip(screen, rect, :bindings, body_focused)
+      render_sub_strip(screen, rect, :bindings)
       _, body = sub_layout(rect)
       # No border TITLE — the sub-strip above already reads `Bindings`. See render_extract.
       Frame.card(screen, body, bg: Theme.bg, border: Frame.pane_border(body_focused))
@@ -138,25 +140,17 @@ module Gori::Tui
       Frame.scroll_gauge(screen, inner, rows.size, scroll, body_focused)
     end
 
-    private def render_sub_strip(screen : Screen, rect : Rect, active : Symbol, focused : Bool) : Nil
+    # The same strip Project and Probe draw (`Chrome.render_tab_strip`), so the chips have one
+    # look and one hit-test. Never the focused dress: this strip is not a focus stop, the
+    # sub-tab ring rides the shell's focus-ring hook (`RewriterController#pane_advance`), which
+    # is what the `↹ switch` at the row's far end says.
+    private def render_sub_strip(screen : Screen, rect : Rect, active : Symbol) : Nil
       strip, _ = sub_layout(rect)
       return if strip.empty?
       screen.fill(strip, Theme.bg)
-      x = strip.x + 1
-      SUBS.each_with_index do |s, i|
-        label = SUB_LABELS[i]
-        on = s == active
-        x = screen.text(x, strip.y, " #{label} ",
-          on ? (focused ? Theme.text_bright : Theme.accent) : Theme.muted, Theme.bg,
-          on ? Attribute::Bold : Attribute::None)
-        break if x >= strip.right
-      end
-      # `↹`, not the `[`/`]` this used to name: the sub-tab ring moved onto the shell's
-      # focus-ring hook (`RewriterController#pane_advance`) and the bracket keys were never
-      # rebound, so the strip was advertising two dead keys — while the footer one row down
-      # said `↹ section`. The strip is the closer of the two to the thing it switches.
-      screen.text(x + 1, strip.y, "↹ switch", Theme.muted, Theme.bg,
-        width: {strip.right - x - 1, 0}.max) if x + 1 < strip.right
+      Chrome.render_tab_strip(screen, strip, SUB_LABELS, SUBS.index(active) || 0, false)
+      hint = "↹ switch"
+      screen.text(strip.right - hint.size - 1, strip.y, hint, Theme.muted, Theme.bg) if strip.w >= SUB_HINT_MIN_W
     end
 
     private def render_extract_row(screen : Screen, rect : Rect, rule : Store::ExtractRule,
@@ -256,16 +250,11 @@ module Gori::Tui
     end
 
     # The sub-tab whose strip label contains (mx,my), or nil.
-    def sub_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
+    # `active` is the sub-tab the strip was drawn for: the chips are laid out around it.
+    def sub_at(rect : Rect, mx : Int32, my : Int32, active : Symbol) : Symbol?
       strip, _ = sub_layout(rect)
-      return nil if strip.empty? || my != strip.y
-      x = strip.x + 1
-      SUBS.each_with_index do |s, i|
-        w = SUB_LABELS[i].size + 2
-        return s if mx >= x && mx < x + w
-        x += w
-      end
-      nil
+      return nil if strip.empty?
+      Chrome.strip_segments(strip, SUB_LABELS, SUBS.index(active) || 0).find { |(_, r)| r.contains?(mx, my) }.try { |(i, _)| SUBS[i] }
     end
 
     private def render_list(screen : Screen, rect : Rect, rules : Array(Store::MatchRule),

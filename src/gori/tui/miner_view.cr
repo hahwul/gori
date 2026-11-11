@@ -463,7 +463,9 @@ module Gori::Tui
     # was handed, which nothing repaints. The floor is now capped at what the container
     # granted and a zero-row pane is declined instead of being given a row it doesn't have.
     private def pane_rects(rect : Rect) : {Rect, Rect}
-      sum_h = {rect.h // 3, 8}.min
+      # Before the first run the card has no progress to show (see #render_summary) and,
+      # with no baseline notice either, holds three lines: FINDINGS takes the rest.
+      sum_h = {rect.h // 3, never_run? && !@baseline_warning && !@baseline_note ? 5 : 8}.min
       sum_h = rect.h - 3 if sum_h > rect.h - 3
       sum_h = { {sum_h, 1}.max, rect.h }.min
       {Rect.new(rect.x, rect.y, rect.w, sum_h),
@@ -497,15 +499,16 @@ module Gori::Tui
       y += 1
       locs = @config.locations.map(&.label).join(", ")
       screen.text(x, y, "scope: #{locs}", Theme.text, Theme.bg, width: rect.w - 4) if y < rect.bottom - 1
-      y += 1
-      if y < rect.bottom - 1
-        bar = progress_bar(rect.w - 4)
-        screen.text(x, y, bar, Theme.accent, Theme.bg)
-      end
-      y += 1
-      if y < rect.bottom - 1
-        line = "found #{@progress.found} · #{@progress.names_done}/#{@progress.names_total} names · #{@progress.sent} sent · #{@progress.errors} err"
-        screen.text(x, y, line, Theme.muted, Theme.bg, width: rect.w - 4)
+      # A mine that never ran has no bar and no tally: a lone `—` over `found 0 · 0/0 names`
+      # read as a result. FINDINGS below says "no run yet".
+      unless never_run?
+        y += 1
+        screen.text(x, y, progress_bar(rect.w - 4), Theme.accent, Theme.bg) if y < rect.bottom - 1
+        y += 1
+        if y < rect.bottom - 1
+          line = "found #{@progress.found} · #{@progress.names_done}/#{@progress.names_total} names · #{@progress.sent} sent · #{@progress.errors} err"
+          screen.text(x, y, line, Theme.muted, Theme.bg, width: rect.w - 4)
+        end
       end
       render_notices(screen, rect, x, y + 1)
     end
@@ -527,6 +530,10 @@ module Gori::Tui
       if (n = @baseline_note) && y < rect.bottom - 1
         screen.text(x, y, n, Theme.muted, Theme.bg, width: rect.w - 4)
       end
+    end
+
+    private def never_run? : Bool
+      !@running && @progress.names_total <= 0
     end
 
     private def progress_bar(w : Int32) : String

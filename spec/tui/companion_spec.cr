@@ -248,15 +248,21 @@ describe Gori::Tui::Companion do
   end
 
   # Every Runner branch on the placement goes through Companion#in_bar?, and the render
-  # sizes her before any of them — otherwise the sprite, the occlusion, the chip, the notice
+  # sizes her before any of them — otherwise the sprite, the watched corner, the chip, the notice
   # slot and the hit test could disagree about where she is.
   it "routes every Runner placement branch through the one effective predicate" do
     runner = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner.cr"))
     mouse = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner", "mouse.cr"))
     {runner, mouse}.each(&.includes?("Settings.companion_in_bar?").should(be_false))
     resize = runner.index!("@companion.resize(w, h)")
-    resize.should be < runner.index!("screen.occlusion = companion_occlusion(layout.body)")
+    resize.should be < runner.index!("screen.watch = @companion.body_spots(layout.body)")
+    # …and the verdict on her corner lands before the first branch that asks.
+    runner.index!("@companion.covering = screen.inked?").should be < runner.index!("render_companion(screen, layout.body)")
     resize.should be < runner.index!("companion: companion_bar_frame")
+    # A chip she only yielded to keeps the body sprite's gate (hidden under a modal and
+    # while typing): the chip, the notice slot, the dirty gate and the click all ask it.
+    runner.scan("companion_in_bar_shown?").size.should be >= 4
+    mouse.should contain("companion_in_bar_shown?")
   end
 
   # --- background work ------------------------------------------------------
@@ -1526,80 +1532,84 @@ describe Gori::Tui::Companion do
   end
 end
 
-# #1376: she covers the SIZE/DUR end of a full list row, so a value she cut read as a shorter
-# real one (`160B` as `16`). With her plate as the Screen's occlusion, a run that continues
-# under her is ellipsized at her edge; a run that ends before her is untouched.
-describe "Screen#occlusion under Miss Ring" do
-  it "ellipsizes a run she cuts, and leaves the rest of the row alone" do
-    body = Rect.new(0, 0, 60, 20)
-    plate = Companion.hit_rect(body).not_nil!
-    b = MemoryBackend.new(60, 20)
-    screen = Screen.new(b)
-    screen.occlusion = plate
-    y = plate.y + 1
-    screen.text(plate.x - 2, y, "160B", Theme.text)
-    screen.text(plate.x - 10, y, "GET", Theme.text)
-    screen.text(plate.x - 2, plate.y - 1, "160B", Theme.text) # the row above her: no cut
-    b.row(y)[plate.x - 2, 2].should eq("1…")
-    b.row(y)[plate.x - 10, 3].should eq("GET")
-    b.row(plate.y - 1)[plate.x - 2, 4].should eq("160B")
+# She used to stand on the SIZE/DUR end of a full list row (#1376, then an ellipsis at her
+# edge in #1851). Now the Runner watches her corner while the body draws, and anything inked
+# there seats her in the status row for that frame.
+describe "Miss Ring yields a corner the tab drew on" do
+  it "reports ink only for a glyph inside the watched box" do
+    body = Rect.new(0, 0, 120, 30)
+    spot = Companion.hit_rect(body).not_nil!
+    screen = Screen.new(MemoryBackend.new(120, 30))
+    screen.watch = [spot]
+    screen.fill(body, Theme.accent_bg)                  # a selection band is not content
+    screen.text(spot.x, spot.y, "   ", Theme.text)      # nor are spaces
+    screen.text(0, spot.y, "GET /v1/users", Theme.text) # nor a run that ends before her
+    screen.inked?.should be_false
+    screen.text(spot.x - 2, spot.y, "160B", Theme.text)
+    screen.inked?.should be_true
   end
 
-  # A right-aligned tag that starts under her and runs past her right edge: the Project
-  # settings rows showed `· global` as a lone `l` in the gutter beside her.
-  it "leaves no tail from a run that starts under her and ends past her" do
-    body = Rect.new(0, 0, 60, 20)
-    plate = Companion.hit_rect(body).not_nil!
-    b = MemoryBackend.new(60, 20)
-    screen = Screen.new(b)
-    screen.occlusion = plate
-    y = plate.y + 1
-    screen.text(plate.right - 6, y, "· global", Theme.text)
-    screen.text(plate.right, y + 1, "ok", Theme.text)                 # starts past her: untouched
-    screen.text(plate.right - 6, plate.y - 1, "· global", Theme.text) # the row above her: untouched
-    b.row(y)[plate.right, 2].should eq("  ")
-    b.row(y + 1)[plate.right, 2].should eq("ok")
-    b.row(plate.y - 1)[plate.right - 6, 8].should eq("· global")
+  # Her bubble opens ABOVE the plate, over rows the plate never touches.
+  it "watches the speech bubble's box too while she has something to say" do
+    with_companion(true) do
+      prev = Gori::Settings.companion_placement
+      Gori::Settings.companion_placement = "body"
+      begin
+        body = Rect.new(0, 0, 120, 30)
+        companion = Companion.new(Notifications.new, honors_placement: true)
+        companion.resize(120, 34)
+        companion.tick(Time.instant)
+        companion.frame.not_nil!.bubble.should eq(Companion::GREETING)
+        spots = companion.body_spots(body).not_nil!
+        spots.size.should eq(2)
+        spots[1].should eq(Companion.bubble_box(body, Companion.place(body).not_nil!, Companion::GREETING))
+        spots[1].bottom.should be <= spots[0].y
+      ensure
+        Gori::Settings.companion_placement = prev
+      end
+    end
   end
 
-  it "does the same on the ASCII fast path" do
-    body = Rect.new(0, 0, 60, 20)
-    plate = Companion.hit_rect(body).not_nil!
-    b = MemoryBackend.new(60, 20)
-    screen = Screen.new(b)
-    screen.occlusion = plate
-    screen.text(plate.right - 4, plate.y, "global", Theme.text)
-    b.row(plate.y)[plate.right, 2].should eq("  ")
+  it "watches nothing unless asked" do
+    screen = Screen.new(MemoryBackend.new(20, 1))
+    screen.text(0, 0, "160B", Theme.text)
+    screen.inked?.should be_false
   end
 
-  # Callers chain on the returned x (`styled_run`). A run blanked under her must still say
-  # where it ended, or the run after it is drawn in the wrong column.
-  it "returns the x the run reached, so a chained run is not displaced" do
-    body = Rect.new(0, 0, 60, 20)
-    plate = Companion.hit_rect(body).not_nil!
-    b = MemoryBackend.new(60, 20)
-    screen = Screen.new(b)
-    screen.occlusion = plate
-    start = plate.right - 4
-    x = screen.text(start, plate.y, "abcdef", Theme.text)
-    x.should eq(start + 6)
-    plain = Screen.new(MemoryBackend.new(60, 20))
-    x.should eq(plain.text(start, plate.y, "abcdef", Theme.text))
-    # A width-limited run reports the limit, as it does when drawn.
-    screen.text(start, plate.y, "abcdef", Theme.text, width: 3).should eq(start + 3)
-  end
-
-  # A row drawn as one padded run carries its selection background, and sometimes a border,
-  # into the gutter beside her. Only the letters go.
-  it "keeps the spaces and the border of a run that reaches the edge" do
-    Screen.blank_tail("ab cd │", 10, 12).should eq("ab    │")
-    Screen.blank_tail("한글x", 0, 2).should eq("한   ")
-    Screen.blank_tail("abc", 0, 9).should eq("abc")
-  end
-
-  it "changes nothing without an occlusion" do
-    b = MemoryBackend.new(20, 1)
-    Screen.new(b).text(0, 0, "160B", Theme.text)
-    b.row(0)[0, 4].should eq("160B")
+  it "sits in the bar while covering, and returns when the corner clears" do
+    prev = Gori::Settings.companion_placement
+    Gori::Settings.companion_placement = "body"
+    begin
+      body = Rect.new(0, 0, 120, 30)
+      companion = Companion.new(Notifications.new, honors_placement: true)
+      companion.resize(120, 34)
+      plate = Companion.hit_rect(body).not_nil!
+      # Her plate, one column wider on the left for the shake and a wide glyph's second cell.
+      companion.body_spots(body).should eq([Rect.new(plate.x - 1, plate.y, plate.w + 1, plate.h)])
+      companion.in_bar?.should be_false
+      companion.covering = true
+      companion.in_bar?.should be_true
+      companion.yielded?.should be_true # in the row for the tab's sake, placement still `body`
+      companion.covering = false
+      companion.in_bar?.should be_false
+      companion.yielded?.should be_false
+      Gori::Settings.companion_placement.should eq("body")
+      # Already in the bar for another reason: there is no corner to watch.
+      companion.resize(80, 24)
+      companion.body_spots(body).should be_nil
+      companion.covering = true
+      companion.yielded?.should be_false # cramped: the chip is hers outright, never gated
+      companion.covering = false
+      Gori::Settings.companion_placement = "bar"
+      companion.resize(120, 34)
+      companion.body_spots(body).should be_nil
+      # A host with no status row keeps the body sprite whatever is under her.
+      host = Companion.new(Notifications.new)
+      host.body_spots(body).should be_nil
+      host.covering = true
+      host.in_bar?.should be_false
+    ensure
+      Gori::Settings.companion_placement = prev
+    end
   end
 end

@@ -173,12 +173,12 @@ describe Gori::Tui::RewriterView do
   it "hit-tests each strip label back to its sub-tab" do
     v = RewriterView.new
     rect = Rect.new(0, 0, 80, 24)
-    # " rules " starts at x+1 and is label.size + 2 wide, then " extract ", then " bindings ".
-    v.sub_at(rect, 2, 0).should eq(:rules)
-    v.sub_at(rect, 10, 0).should eq(:extract)
-    v.sub_at(rect, 20, 0).should eq(:bindings)
-    v.sub_at(rect, 70, 0).should be_nil # past the last label
-    v.sub_at(rect, 2, 5).should be_nil  # not on the strip row
+    # The shared strip's chips (`Chrome.strip_segments`): `  Rules    Extract    Bindings`.
+    v.sub_at(rect, 3, 0, :rules).should eq(:rules)
+    v.sub_at(rect, 13, 0, :rules).should eq(:extract)
+    v.sub_at(rect, 24, 0, :rules).should eq(:bindings)
+    v.sub_at(rect, 70, 0, :rules).should be_nil # past the last label
+    v.sub_at(rect, 2, 5, :rules).should be_nil  # not on the strip row
   end
 
   it "keeps the rule list and preview pair below the strip" do

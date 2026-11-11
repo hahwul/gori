@@ -48,6 +48,20 @@ describe Gori::Tui::MinerView do
     view.label(18).should_not eq(auto) # the custom name overrides the derived summary
   end
 
+  # A lone `—` over `found 0 · 0/0 names · 0 sent · 0 err` read as a result of a run that
+  # never happened; the card is three lines until there is progress to show.
+  it "shows no progress bar or tally before the first run" do
+    view = Gori::Tui::MinerView.new
+    view.load("http://h.test", "GET /a HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, false, nil,
+      Gori::Miner::Config.new)
+    backend = MemoryBackend.new(80, 30)
+    view.render(Gori::Tui::Screen.new(backend), Gori::Tui::Rect.new(0, 0, 80, 30), true)
+    backend.contains?("found 0").should be_false
+    backend.contains?("—").should be_false
+    backend.row(4).should contain("╰") # request, origin, scope, then the card closes
+    backend.row(5).should contain("FINDINGS")
+  end
+
   it "verifies at_top? and results_at_top? behavior for vertical navigation" do
     view = Gori::Tui::MinerView.new
     view.focus_pane(:summary)

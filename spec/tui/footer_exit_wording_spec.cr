@@ -60,8 +60,8 @@ describe "footer hints name the destination the key actually reaches" do
       TuiContract.render(ctl)
       ctl.body_hint(:body).should contain("↹ colours")
 
-      short = MemoryBackend.new(60, 6)
-      ctl.render_body(Screen.new(short), Rect.new(0, 0, 60, 6), :body)
+      short = MemoryBackend.new(60, 5)
+      ctl.render_body(Screen.new(short), Rect.new(0, 0, 60, 5), :body)
       ctl.pane_advance(1).should be_false # the ring has one pane, so ⇥ does nothing
       ctl.body_hint(:body).should_not contain("↹ colours")
     end

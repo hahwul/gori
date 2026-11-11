@@ -225,17 +225,19 @@ module Gori::Tui
   class Screen
     getter width : Int32
     getter height : Int32
-    # A box something opaque will be painted over after the body is drawn — Miss Ring's plate
-    # (#1376). A `text` run that starts left of it and would continue underneath is ellipsized
-    # at its left edge, so a value she covers reads as cut (`1…`) rather than as a shorter real
-    # one (`160B` showing as `16`). A `text` run that STARTS inside the box has the letters it
-    # would leave past the box's right edge blanked: a right-aligned tag that began under her
-    # showed its last letters alone (`· global` as `l`). Spaces and box-drawing glyphs in that
-    # tail are kept, so a selection band or a border baked into the run still reaches the
-    # edge, and the run keeps its width, so a caller chaining on the returned x is not moved.
-    # A separate run that starts past the box, and anything drawn per cell, is outside this
-    # rule. The Runner sets it around the body render only.
-    property occlusion : Rect? = nil
+    # Boxes the host wants to know are EMPTY. While set, `inked?` turns true the first time a
+    # non-blank glyph is drawn inside one. Miss Ring stands in the body's corner only when the
+    # tab drew nothing there (Runner#render). Fills and spaces do not count: a selection band
+    # or a panel colour under her is not something she hides.
+    # ponytail: a glyph later painted over with a space still counts — she yields a frame she
+    # need not have. Track per cell if a view ever draws and then clears that corner.
+    property watch : Array(Rect)? = nil
+    getter? inked : Bool = false
+
+    private def note_ink(x : Int32, y : Int32, g : String) : Nil
+      return unless w = @watch
+      @inked = true if g != " " && w.any?(&.contains?(x, y))
+    end
 
     # Interned single-cell Strings for the 128 ASCII codepoints, so drawing a Char never
     # allocates a fresh 1-char String — `cell` is the universal draw primitive (a full-screen
@@ -508,6 +510,7 @@ module Gori::Tui
         end
         g = grapheme
       end
+      note_ink(x, y, g)
       @backend.put(x, y, g, fg, bg, attr)
     end
 
@@ -522,6 +525,7 @@ module Gori::Tui
         width = Termisu::UnicodeWidth.grapheme_width(cluster).to_i32
         width = 1 if width <= 0
         break if col + width > @width
+        note_ink(col, y, cluster)
         @backend.put(col, y, cluster, fg, bg, attr)
         col += width
       end
@@ -537,37 +541,12 @@ module Gori::Tui
       GLYPH_CELL_CACHE[o] = ch.to_s
     end
 
-    # `str` drawn at `x`, with every letter that lands at or past column `from` turned into
-    # spaces of the same width. Whitespace and box-drawing glyphs (U+2500..U+259F) pass. Only
-    # reached for a run that starts under the occlusion, so the allocation is three rows' worth.
-    def self.blank_tail(str : String, x : Int32, from : Int32) : String
-      col = x
-      String.build(str.bytesize) do |io|
-        str.each_char do |ch|
-          w = display_width(ch.to_s)
-          if col >= from && !ch.whitespace? && !(0x2500 <= ch.ord <= 0x259F)
-            w.times { io << ' ' }
-          else
-            io << ch
-          end
-          col += w
-        end
-      end
-    end
-
     # Draws `str` at (x, y), truncating with an ellipsis if its *display width*
     # (columns) exceeds `width` (default: to the right edge). Returns the x just
     # past the (possibly truncated) text. Properly advances for full-width chars.
     def text(x : Int32, y : Int32, str : String, fg : Color, bg : Color = Theme.bg,
              attr : Attribute = Attribute::None, width : Int32? = nil) : Int32
       limit = width || (@width - x)
-      if (occ = @occlusion) && y >= occ.y && y < occ.bottom
-        if x < occ.x
-          limit = {limit, occ.x - x}.min
-        elsif x < occ.right
-          str = Screen.blank_tail(str, x, occ.right)
-        end
-      end
       return x if limit <= 0
       # ASCII fast path — the common case (line numbers, method/host/path, headers):
       # display width == char count, so skip fit()'s full-width pre-scan, the second
