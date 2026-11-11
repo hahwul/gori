@@ -263,6 +263,15 @@ module Gori::Tui
       "╰──────┴──────╯",
     ])
 
+    # Two endpoint lists, the newer one with a row that moved: the retest's answer is that
+    # row. Free-standing rows rather than a frame, so it does not read as COMPARER's one box
+    # split in two.
+    DIFF = Block.new([
+      "▓▓▓▓▓      ▓▓▓▓▓",
+      "▓▓▓   ──>  ████",
+      "▓▓▓▓       ▓▓▓▓",
+    ])
+
     # ONE request leaving under three identities, with the bottom one lit. The lit slot is
     # not "the last identity" — it is the FINDING: the low-privilege session that came back
     # with what the baseline saw. The tab's subject is that row, so it takes the SOLID tier
@@ -338,6 +347,7 @@ module Gori::Tui
       :project_activity  => PROJECT_ACTIVITY,
       :discover          => DISCOVER,
       :comparer          => COMPARER,
+      :diff              => DIFF,
       :authorize         => AUTHORIZE,
       :miner             => MINER,
       :miner_results     => MINER_RESULTS,

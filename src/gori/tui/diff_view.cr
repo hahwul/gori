@@ -3,6 +3,7 @@ require "./theme"
 require "./frame"
 require "./fmt"
 require "./viewport"
+require "./traffic_empty_state"
 require "../diff"
 require "../project"
 require "../plural"
@@ -181,26 +182,22 @@ module Gori::Tui
        Rect.new(rect.x, rect.bottom - DETAIL_H, rect.w, DETAIL_H)}
     end
 
+    # The shared empty card, like every other tab with nothing to show. Side B is the open
+    # project by default (`DiffController#on_enter`), so the headline names it and the card
+    # is left with the one step that remains.
     private def render_unset(screen : Screen, rect : Rect) : Nil
-      lines = if b = @b
-                ["Retest diff — what changed since the last engagement.",
-                 "",
-                 "B is #{b.name} (this project). Press a to pick the BASELINE project.",
-                 "Endpoints are keyed by the Sitemap's folded template, so captured ids",
-                 "don't turn every row into an added/removed pair. Nothing is sent."]
-              else
-                ["Retest diff — pick two projects with a and b."]
+      title = if b = @b
+                "no baseline picked — B is #{b.name}"
+              elsif @a
+                "no newer side picked"
               end
-      lines.each_with_index do |line, i|
-        break if i >= rect.h
-        screen.text(rect.x, rect.y + i, line, i == 0 ? Theme.text_bright : Theme.muted, Theme.bg, width: rect.w)
-      end
+      TrafficEmptyState.render(screen, rect, variant: :diff, title: title)
     end
 
     private def render_pending(screen : Screen, rect : Rect) : Nil
       render_header(screen, rect)
       if y = row(rect, HEADER_H)
-        screen.text(rect.x, y, "press r to run the comparison", Theme.muted, Theme.bg, width: rect.w)
+        screen.text(rect.x, y, "press ^R to run the comparison", Theme.muted, Theme.bg, width: rect.w)
       end
     end
 

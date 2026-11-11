@@ -63,12 +63,30 @@ describe "the core-loop hints" do
   describe "F7 — the Issues list strip names the key the triage loop ends on" do
     it "says `⇧E export`, and leaves `⇧X clear` to the space menu" do
       TuiContract.with_session("hint-f7") do |session|
+        store = session.store
+        store.insert_issue("one", Gori::Store::Severity::High, "h.test", nil)
+        store.flush
+        host = TuiContract::Host.new(session)
+        host.tab = :issues
+        ctl = IssuesController.new(host)
+        ctl.view.reload(store)
+        hint = ctl.body_hint(:body)
+        hint.should contain("⇧E export")
+        hint.should_not contain("clear")
+      end
+    end
+
+    # With nothing in the list `↵ open` and `⇧E export` have nothing to act on; the card's
+    # one action is what the strip names.
+    it "names only New while the list is empty" do
+      TuiContract.with_session("hint-f7-empty") do |session|
         host = TuiContract::Host.new(session)
         host.tab = :issues
         ctl = IssuesController.new(host)
         hint = ctl.body_hint(:body)
-        hint.should contain("⇧E export")
-        hint.should_not contain("clear")
+        hint.should contain("n new")
+        hint.should_not contain("open")
+        hint.should_not contain("export")
       end
     end
 

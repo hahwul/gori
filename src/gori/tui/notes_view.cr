@@ -634,7 +634,7 @@ module Gori::Tui
       # (and that Notes used before): only the strip/band above the editor moved —
       # the editor body renders exactly where it did, now filling the freed height.
       area = Rect.new(rect.x + 1, rect.y, {rect.w - 2, 0}.max, rect.h)
-      TrafficEmptyState.render(screen, area, variant: :notes) if current_blank?
+      TrafficEmptyState.render(screen, area, variant: :notes, body_focused: focused) if current_blank?
       ins = focused && insert_mode?
       # The REAL mode, and drawn unconditionally — `Frame.mode_badge`'s own contract, which
       # this call broke twice over. `notes_controller` hit-tests the bare `insert_mode?` in

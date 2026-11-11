@@ -312,6 +312,10 @@ module Gori::Tui
         end
       elsif @issues.querying?
         "type to filter · ↹ complete · ↓ list · ? reference · ↵ apply · esc clear"
+      elsif @issues.empty? && !@issues.filtering?
+        # The empty card: `↵ open` and `⇧E export` name keys with nothing to act on, and the
+        # one action there is sits on the card. Say that one (History does the same).
+        "#{nnew} new · space cmds · esc tabs"
       elsif @issues.preview_enabled? && @issues.preview_focus == :preview
         "↑/↓ scroll preview · ↹ list · ↵ open full · #{export} export · space cmds · esc tabs"
       elsif @issues.mark_count > 0

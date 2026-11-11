@@ -296,6 +296,68 @@ describe Gori::Tui::TrafficEmptyState do
     backend.contains?("^N").should be_true
   end
 
+  # An empty note opens in READ, so the first thing the card has to say is how to write. `^W`
+  # (close the note you have not written yet) used to hold that row.
+  it "leads the notes card with the keys that start writing" do
+    backend = MemoryBackend.new(80, 12)
+    TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 80, 12), variant: :notes)
+    backend.contains?("i/↵").should be_true
+    backend.contains?("start writing").should be_true
+    backend.contains?("^W").should be_false
+  end
+
+  # From the tab bar or the strip a bare `i` is the Global intercept toggle, so the card names
+  # the way into the note instead of a key that would hold all traffic.
+  it "routes the notes card through ↵ while the note is not focused" do
+    {% for size in [{80, 12}, {34, 6}, {34, 3}] %}
+      backend = MemoryBackend.new({{ size[0] }}, {{ size[1] }})
+      TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, {{ size[0] }}, {{ size[1] }}),
+        variant: :notes, body_focused: false)
+      backend.contains?("↵").should be_true
+      backend.contains?("into the note").should be_true
+      backend.contains?("start writing").should be_false
+    {% end %}
+  end
+
+  it "follows a rebound insert key on the notes card" do
+    prev = Gori::Settings.keymap_overrides
+    begin
+      Gori::Settings.keymap_overrides = {"editor.insert" => ["a"]}
+      TrafficEmptyState.registry = Gori::Verbs.registry
+      backend = MemoryBackend.new(80, 12)
+      TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 80, 12), variant: :notes)
+      backend.contains?("a/↵").should be_true
+    ensure
+      TrafficEmptyState.registry = nil
+      Gori::Settings.keymap_overrides = prev
+    end
+  end
+
+  # Chips differ in width (` ⇧F ` beside ` n `), and a label that started where its own chip
+  # ended put a card's two rows a cell apart.
+  {% for variant, labels in {issues: {"issue from History flow", "create an issue here"}, project_scope: {"add an include or exclude rule", "rule actions"}, oast: {"get a payload URL (copied)", "start listening"}, sequencer_samples: {"where the token lives", "collect samples"}} %}
+    it "starts both {{ variant.id }} labels in one column" do
+      backend = MemoryBackend.new(80, 14)
+      TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 80, 14), variant: {{ variant.symbolize }})
+      cols = { {{ labels[0] }}, {{ labels[1] }} }.map do |label|
+        row = (0...14).map { |y| backend.row(y) }.find!(&.includes?(label))
+        row.index!(label)
+      end
+      cols[0].should eq(cols[1])
+    end
+  {% end %}
+
+  # Target's Diff sub-tab before a baseline is picked: the shared card, not four lines of
+  # prose flush against the frame.
+  it "renders the retest diff card" do
+    backend = MemoryBackend.new(80, 14)
+    TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 80, 14), variant: :diff)
+    backend.contains?("no baseline picked").should be_true
+    backend.contains?("RETEST DIFF").should be_true
+    backend.contains?("pick the baseline project").should be_true
+    backend.contains?("Nothing is sent").should be_true
+  end
+
   # The three Project list sub-tabs. Each renders inside a card the pane already titled, so the
   # inner card takes a DIFFERENT name (TARGETS / DNS MAP / VARIABLES) rather than echoing the
   # border, and — being CENTERED — draws no headline.
@@ -578,7 +640,7 @@ describe Gori::Tui::TrafficEmptyState do
   # Each new variant must degrade like the older ones. A variant added to `render_full` but not
   # to the medium/minimal dispatches falls through to `else`, which prints the headline and
   # nothing else — passing any test that only checks the full card.
-  {% for variant in [:discover, :comparer, :miner, :sequencer, :oast, :project_scope, :project_overrides, :project_env] %}
+  {% for variant in [:discover, :comparer, :miner, :sequencer, :oast, :project_scope, :project_overrides, :project_env, :diff] %}
     it "degrades {{ variant.id }} to compact lines on a narrow pane" do
       backend = MemoryBackend.new(34, 6)
       TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 34, 6), variant: {{ variant }})

@@ -335,7 +335,7 @@ describe "Gori::Tui::RewriterController (tab review)" do
     it "on the rules list" do
       with_rebind({"rewriter.add" => ["n"]}) do
         with_rewriter_controller do |ctl, _, _|
-          render(ctl).contains?("no rules — press n to add").should be_true
+          render(ctl).contains?("no rules — press n to add, or p for a preset").should be_true
         end
       end
     end

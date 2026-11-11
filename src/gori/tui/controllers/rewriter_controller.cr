@@ -276,7 +276,7 @@ module Gori::Tui
       sync_preview_out(target)
       @view.render(screen, inner, list, @sel, @scroll, rules_engine.enabled_count,
         @focus, body_focused, @preview_input, @out, target, @preview_host,
-        empty_hint: keys("no rules — press {rewriter.add} to add"))
+        empty_hint: keys("no rules — press {rewriter.add} to add, or {rewriter.preset} for a preset"))
     end
 
     private def render_extract(screen : Screen, inner : Rect, body_focused : Bool) : Nil

@@ -122,7 +122,22 @@ describe DiffView do
     v = DiffView.new
     v.set_slot(:b, Gori::Project.new("q3", "/tmp/q3.db"))
     v.ready?.should be_false
-    render_rows(v).join("\n").should contain("pick the BASELINE project")
+    out = render_rows(v).join("\n")
+    out.should contain("pick the baseline project")
+    out.should contain("B is q3") # side B is already the open project, and the headline says so
+    out.should contain("RETEST DIFF")
+  end
+
+  it "keeps that guidance inside a pane too short for the card" do
+    v = DiffView.new
+    v.set_slot(:b, Gori::Project.new("q3", "/tmp/q3.db"))
+    backend = MemoryBackend.new(100, 10)
+    v.render(Screen.new(backend), Rect.new(0, 2, 100, 3), focused: true)
+    backend.contains?("pick the baseline").should be_true
+    (0...10).each do |y|
+      next if (2..4).includes?(y)
+      backend.row(y).strip.should eq("")
+    end
   end
 
   it "drops the report when either slot changes — half a new pair is not a report" do
