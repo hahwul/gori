@@ -61,6 +61,17 @@ describe "History list covering index (schema V37)" do
     end
   end
 
+  # The Project tab's status chart reads `status` and `state` for every flow. Left to itself
+  # the planner takes `idx_flows_status`, which orders the GROUP BY but lacks `state`, and so
+  # fetches every row past its body BLOBs.
+  it "answers the status chart's counts from the index" do
+    with_store do |store|
+      plan = query_plan(store, Gori::Store::STATUS_COUNTS_SQL)
+      plan.should contain("COVERING INDEX idx_flows_list")
+      plan.should_not contain("idx_flows_status")
+    end
+  end
+
   it "answers the projection filters from the index without a sort" do
     with_store do |store|
       ["host:api", "path:/admin", "url:example.com/api", "method:DELETE", "scheme:https",

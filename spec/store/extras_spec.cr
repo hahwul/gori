@@ -161,20 +161,29 @@ private def respond(store, id : Int64, status : Int32)
 end
 
 describe "Gori::Store project-tab aggregates (AT A GLANCE viz)" do
-  it "groups flow counts by status, with nil for still-pending flows" do
+  it "groups flow counts by status and state" do
     with_store do |store|
       respond(store, store.insert_flow(req_for("/a")), 200)
       respond(store, store.insert_flow(req_for("/b")), 200)
       respond(store, store.insert_flow(req_for("/c")), 404)
       respond(store, store.insert_flow(req_for("/d")), 503)
       store.insert_flow(req_for("/pending")) # no response → status stays nil
+      # A dropped request and a failed one have no status either; a response cut mid-body has.
+      [{0, Gori::Store::FlowState::Aborted}, {0, Gori::Store::FlowState::Error}, {200, Gori::Store::FlowState::Aborted}].each do |(status, state)|
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: store.insert_flow(req_for("/#{state}/#{status}")), status: status, head: Bytes.empty, body: nil, state: state))
+      end
       store.flush
 
-      counts = store.flow_status_counts.to_h
-      counts[200].should eq(2)
-      counts[404].should eq(1)
-      counts[503].should eq(1)
-      counts[nil].should eq(1) # pending
+      counts = store.flow_status_counts.to_h { |(status, state, n)| { {status, state}, n } }
+      counts[{200, Gori::Store::FlowState::Complete}].should eq(2)
+      counts[{404, Gori::Store::FlowState::Complete}].should eq(1)
+      counts[{503, Gori::Store::FlowState::Complete}].should eq(1)
+      counts[{nil, Gori::Store::FlowState::Pending}].should eq(1)
+      counts[{0, Gori::Store::FlowState::Aborted}].should eq(1)
+      counts[{0, Gori::Store::FlowState::Error}].should eq(1)
+      counts[{200, Gori::Store::FlowState::Aborted}].should eq(1)
+      counts.size.should eq(7)
     end
   end
 

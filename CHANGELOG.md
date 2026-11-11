@@ -7,7 +7,7 @@
 - Probe: `gori run probe promote --format json` prints the new Issue id as MCP `probe_promote` does (#1784)
 - CLI: `gori run sitemap tag --list --format json` (or `--json`) prints the `[{host, path, tag}]` array MCP `list_sitemap_tags` returns (#1783)
 - Help: Shortcuts names the header chips, History's view chip, the Fuzzer's `§N`, MATCH and DIST chips and Mode formula, the Probe band's chips, Discover's suppression counters, the Params `R` column, the `:` a filter bar puts before an applied filter and the Intercept editor's `CL` chip (#1845, #1847, #1850, #1855)
-- Project: the empty Description card says it holds free-text notes, the overview shows a short proxy or created value instead of clipping it, Project settings name their units, and the scope rule form shows an example pattern for each match type (#1845, #1850, #1856)
+- Project: the empty Description card says it holds free-text notes, the overview shows a short proxy or created value instead of clipping it, Project settings name their units, the scope rule form shows an example pattern for each match type, and AT A GLANCE counts a dropped or failed flow as `ABT` or `ERR`, as History does, instead of `PEND` (#1845, #1850, #1856, #1859)
 - First run: the wizard asks for the listen address only when the default is taken and counts its steps from the screen it opens on, its tour offer lands on Skip, and the first project opens on its name's `Enter` (#1846, #1853)
 - Discover: with no run yet, `Space` lists only Run, which says where to start one, and the empty card names both places (#1847)
 - Comparer: the footer names the two picks until both sides are set (#1847)
