@@ -555,4 +555,12 @@ describe "RepeaterController auto-mark" do
       host.statuses.last.should eq("auto-marked 2 positions · ^Q encodes one on send")
     end
   end
+
+  it "names no key when nothing was marked" do
+    with_repeater_controller do |ctl, host|
+      ctl.repeater_from_request("https://h.test", HTTP_REQ, false, nil)
+      ctl.repeater_auto_mark
+      host.statuses.last.should_not contain("encodes")
+    end
+  end
 end

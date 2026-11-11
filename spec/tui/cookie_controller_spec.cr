@@ -384,7 +384,8 @@ describe "Gori::Tui::CookieController" do
     it "keeps a command menu and the way out on every pane of both lenses" do
       with_cookie_controller do |ctl|
         ctl.session_from_text(FLASK)
-        2.times do
+        4.times do |round|
+          3.times { ctl.cycle_format } if round == 2 # pin django: its OPTIONS strip is the longest
           ctl.focus_first
           loop do
             hint = ctl.body_hint(:body)

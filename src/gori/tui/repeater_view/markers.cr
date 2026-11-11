@@ -50,8 +50,9 @@ class Gori::Tui::RepeaterView
     @dirty = true
     n = Fuzz::Template.parse(@editor.text).position_count
     # A marker does nothing on its own here: it is where a Decoder chain attaches, so the
-    # toast names that key. A `{verb.id}` token; the controller expands it.
-    "auto-marked #{Gori.plural(n, "position")} · {repeater.attach-chain} encodes one on send"
+    # toast names the way to that. A `{space:verb.id}` token; the controller expands it.
+    marked = "auto-marked #{Gori.plural(n, "position")}"
+    n.zero? ? marked : "#{marked} · {space:repeater.attach-chain} encodes one on send"
   end
 
   def mark_word : String

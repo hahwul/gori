@@ -13,7 +13,7 @@
 - Comparer: the footer names the two picks until both sides are set (#1847)
 - Sitemap: `Enter` on a path opens its flow, as it does on a History or Params row (#1856)
 - Decoder, JWT, Cookie: the first selection sent to the tab fills its blank sub-tab instead of leaving `empty` beside it, and a Decoder sub-tab with no chain is named by its input (#1856)
-- Repeater: `Space` now opens the menu with no request open and lists only what works there, New repeater request is a first-level row there and in every pane, and Auto-mark's notice names the key that sets how a marked value is encoded (#1848, #1860)
+- Repeater: `Space` now opens the menu with no request open, without Send request, Past sends or Run active scan, and New repeater request is a first-level row there and in every pane. Auto-mark's notice names the key that sets how a marked value is encoded (#1848, #1860)
 - TUI: the empty Authorize, Miner and Sequencer cards spell the whole menu path to their Send row, none of them offers a run key before there is something to run, and an empty OAST says to add or enable a provider on the Providers sub-tab (#1849)
 - Colormarker: the custom colours pane and its `Space` menu spell colour as the rest of the tab does, and a short `Space` menu no longer clips its own title (#1850)
 - TUI: a right-aligned value Miss Ring covers no longer leaves its last letters standing beside her (#1851)

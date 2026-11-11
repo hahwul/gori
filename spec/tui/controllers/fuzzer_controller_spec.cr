@@ -197,6 +197,7 @@ describe "FuzzerController — CONFIG footer on an 80-column row" do
     with_fuzzer_controller do |ctl, _session|
       ctl.fuzz_new
       v = ctl.current_view.not_nil!
+      v.apply_set(nil, SetSpec.new(:list, "aa")) # so the :set row exists
       v.focus_pane(:config)
       rows = [] of Symbol
       6.times do
@@ -205,8 +206,8 @@ describe "FuzzerController — CONFIG footer on an 80-column row" do
         Chrome.fit_hints(hint, 57).should end_with("space cmds · esc sub-tabs"), hint
         v.form_move(1)
       end
-      rows.should contain(:add)
-      rows.should contain(:mode)
+      rows.uniq.first(3).should eq([:set, :add, :mode])
+      rows.uniq.size.should eq(4) # …and an Advanced row
     end
   end
 end
