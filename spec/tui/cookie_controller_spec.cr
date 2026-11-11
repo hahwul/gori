@@ -378,6 +378,26 @@ describe "Gori::Tui::CookieController" do
     end
   end
 
+  # An 80-column status row leaves the hint about 57 cells beside the companion chip. These
+  # strips named `space cmds` mid-line or not at all, so `Chrome.fit_hints` cut `esc sub-tabs`.
+  describe "footer on an 80-column row" do
+    it "keeps a command menu and the way out on every pane of both lenses" do
+      with_cookie_controller do |ctl|
+        ctl.session_from_text(FLASK)
+        4.times do |round|
+          3.times { ctl.cycle_format } if round == 2 # pin django: its OPTIONS strip is the longest
+          ctl.focus_first
+          loop do
+            hint = ctl.body_hint(:body)
+            Chrome.fit_hints(hint, 57).should end_with("cmds · esc sub-tabs"), hint
+            break unless ctl.pane_advance(1)
+          end
+          ctl.toggle_mode
+        end
+      end
+    end
+  end
+
   describe "session lifecycle" do
     it "opens and closes sub-tab sessions, keeping at least one" do
       with_cookie_controller do |ctl|

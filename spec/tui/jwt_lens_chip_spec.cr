@@ -238,3 +238,31 @@ describe "JWT lens chip" do
     (0...24).any? { |x| view.lens_chip_hit(card, x, card.y, :decode) }.should be_false
   end
 end
+
+# An 80-column status row leaves the hint about 57 cells beside the companion chip. These
+# strips named `space cmds` mid-line or not at all, so `Chrome.fit_hints` cut `esc sub-tabs`.
+describe "JWT footer on an 80-column row" do
+  it "keeps a command menu and the way out on every pane of both lenses" do
+    with_jwt_controller do |ctl, _|
+      2.times do
+        ctl.focus_first
+        loop do
+          hint = ctl.body_hint(:body)
+          Chrome.fit_hints(hint, 57).should end_with("cmds · esc sub-tabs"), hint
+          break unless ctl.pane_advance(1)
+        end
+        ctl.toggle_mode
+      end
+    end
+  end
+
+  it "names the palette, not the space menu, where a space is typed" do
+    with_jwt_controller do |ctl, _|
+      ctl.toggle_mode # ENCODE: HEADER captures every key
+      ctl.focus_first
+      hint = ctl.body_hint(:body)
+      hint.should contain("^P cmds")
+      hint.should_not contain("space cmds")
+    end
+  end
+end

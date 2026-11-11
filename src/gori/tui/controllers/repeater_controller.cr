@@ -975,7 +975,7 @@ module Gori::Tui
 
     def repeater_auto_mark : Nil
       return unless view = current_view
-      @host.status(view.auto_mark)
+      @host.status(keys(view.auto_mark))
     end
 
     def repeater_mark_word : Nil

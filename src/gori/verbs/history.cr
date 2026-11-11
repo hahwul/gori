@@ -13,6 +13,12 @@ module Gori
       ctx.current_tab == :history && ctx.history_awaiting_traffic? == awaiting
     end
 
+    # On the Repeater with a sub-tab open: what a verb that acts on the request in front needs.
+    # Without one it is a dead row on the empty tab's menu and a dead hit in the palette; New
+    # and Paste cURL are what work there. A constant, so the Sequencer's and Comparer's sends
+    # share it and its `&&` stays out of `register_history`'s complexity count.
+    REPEATER_SESSION = ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater && ctx.subtab_search_count >= 1 }
+
     def self.register_history(r : Verb::Registry) : Nil
       in_history = ->(ctx : Verb::ExecContext) { ctx.current_tab == :history }
       history_selected = ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_id.nil? }
@@ -269,7 +275,7 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.send", "Send request", "Resend the request byte-exact and diff the response",
         Verb::Scope::Repeater, [Verb::Chord.new("r", ctrl: true)],
-        available: in_repeater, intent: :run) { |ctx| ctx.repeater_send; nil }
+        available: REPEATER_SESSION, intent: :run) { |ctx| ctx.repeater_send; nil }
       # Send's other half (#1631): an event stream reads until the origin ends it, so the TUI
       # sends one unbounded and this is the bound. No chord: every other tool's Stop is `^X`,
       # which the Repeater spends on the hex lenses.
@@ -300,12 +306,12 @@ module Gori
         "repeater.copy-as", "Copy as…", "Pick a copy format for the focused pane (url/headers/body/cookies/curl/wscat/raw)",
         Verb::Scope::Repeater, available: in_repeater_read, intent: :copy_as) { |ctx| ctx.copy_as_open; nil }
 
-      # History's open-in-browser for the response IN HAND. `in_repeater` rather than a
-      # has-a-response gate: the refusal names what is missing ("send the request first"),
+      # History's open-in-browser for the response IN HAND. Gated on a sub-tab, not on a
+      # response: the refusal names what is missing ("send the request first"),
       # which teaches more than a verb that quietly is not there.
       r.register Verb::Definition.new(
         "repeater.open-browser", "Open response in browser", "Write this tab's decoded response body to a file and open it in the desktop viewer",
-        Verb::Scope::Repeater, available: in_repeater, intent: :to_browser) { |ctx| ctx.repeater_open_response_external; nil }
+        Verb::Scope::Repeater, available: REPEATER_SESSION, intent: :to_browser) { |ctx| ctx.repeater_open_response_external; nil }
 
       # Pinned, like Paste cURL below: on an empty tab New is the action that works, and folded
       # behind Sub-tabs… it sat under Send and the other rows that only answer "no repeater open".
@@ -332,7 +338,7 @@ module Gori
       # the palette's search finds by name.
       r.register Verb::Definition.new(
         "repeater.minimize", "Minimize request", "Strip cosmetic headers, cookies and unused params while keeping the response unchanged (runs in the background)",
-        Verb::Scope::Repeater, available: in_repeater, menu: :palette) { |ctx| ctx.repeater_minimize; nil }
+        Verb::Scope::Repeater, available: REPEATER_SESSION, menu: :palette) { |ctx| ctx.repeater_minimize; nil }
 
       # Search the open repeater sub-tabs and jump to the chosen one — menu-only
       # (no chord), shown from the FIRST session: the strip's ⌕ affordance opens this same
@@ -358,7 +364,7 @@ module Gori
       # expanded wire bytes, not the `$KEY` text the editor sent). Menu-only, no chord.
       r.register Verb::Definition.new(
         "repeater.past-sends", "Past sends…", "Pick one of this tab's past sends and restore its request and response",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'H') { |ctx| ctx.repeater_past_sends; nil }
+        Verb::Scope::Repeater, available: REPEATER_SESSION, mnemonic: 'H') { |ctx| ctx.repeater_past_sends; nil }
 
       # Sub-tab rename/close — today's raw key-dispatch on the strip (`e` rename, ^W
       # close) promoted to verbs so the :subtab space-menu group (reachable from the
@@ -371,14 +377,14 @@ module Gori
       # strips, and the strip's own raw key followed it from `r` to `e` (#1295).
       r.register Verb::Definition.new(
         "repeater.rename-subtab", "Rename sub-tab", "Rename the active repeater sub-tab's chip",
-        Verb::Scope::Repeater, available: in_repeater, intent: :rename, section: :subtab) { |ctx| ctx.repeater_rename_subtab; nil }
+        Verb::Scope::Repeater, available: REPEATER_SESSION, intent: :rename, section: :subtab) { |ctx| ctx.repeater_rename_subtab; nil }
       # Tag / filter the sub-tab strip (issue #121). '/' opens the tag-filter bar. Tag is 'g':
       # the strip's LIVE `t` marks a chip, and the menu's `t` is now that same mark (#1274
       # Decision 3), so tag takes a letter no strip key answers. Repeater is the only strip
       # with a tag verb.
       r.register Verb::Definition.new(
         "repeater.tag-subtab", "Tag sub-tab", "Add/edit flat tags on the active repeater sub-tab",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'g', section: :subtab) { |ctx| ctx.repeater_tag_subtab; nil }
+        Verb::Scope::Repeater, available: REPEATER_SESSION, mnemonic: 'g', section: :subtab) { |ctx| ctx.repeater_tag_subtab; nil }
       # The Repeater is where a login request is authored and tested, so this is where it joins
       # a session slot's refresh steps (#1233): a slot picker, then the sub-tab is appended to
       # that slot's list. A once-a-session configuration action, so palette-only (#1282); the
@@ -386,7 +392,7 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.use-as-refresh", "Use as refresh for slot…",
         "Append this sub-tab to a session slot's refresh steps — the Repeater sessions that re-authenticate the slot",
-        Verb::Scope::Repeater, available: in_repeater, section: :subtab, menu: :palette) { |ctx| ctx.repeater_use_as_refresh; nil }
+        Verb::Scope::Repeater, available: REPEATER_SESSION, section: :subtab, menu: :palette) { |ctx| ctx.repeater_use_as_refresh; nil }
       r.register Verb::Definition.new(
         "repeater.filter-subtabs", "Filter sub-tabs", "Filter the sub-tab strip by tag / name / host / method",
         Verb::Scope::Repeater,
@@ -410,7 +416,7 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.close-subtab", "Close sub-tab", "Close the active repeater sub-tab",
         Verb::Scope::Repeater, [Verb::Chord.new("w", ctrl: true)],
-        available: in_repeater, intent: :close, section: :subtab) { |ctx| ctx.repeater_close_subtab; nil }
+        available: REPEATER_SESSION, intent: :close, section: :subtab) { |ctx| ctx.repeater_close_subtab; nil }
       # Duplicate the active session into a new sibling (content only — no flow/links).
       # 'd' is free in COMMON ∪ :subtab (COMMON: r/y/n/f/m/k/u; :subtab already has e/w).
       r.register Verb::Definition.new(
@@ -425,21 +431,21 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.insert-marker", "Insert marker", "Drop a single § at the cursor to bracket a region by hand",
         # `I`, not `i`: in this editor pane `i` enters INSERT before the menu is ever asked.
-        Verb::Scope::Repeater, available: in_repeater, intent: :insert_marker, section: :request) { |ctx| ctx.repeater_insert_marker; nil }
+        Verb::Scope::Repeater, available: REPEATER_SESSION, intent: :insert_marker, section: :request) { |ctx| ctx.repeater_insert_marker; nil }
       # ^K, matching the Fuzzer's. The two panes are the same editor over the same template
       # grammar, and this was the one marker action reachable in one and not the other —
       # the Repeater had it on the space menu alone while the Fuzzer had it on a chord.
       r.register Verb::Definition.new(
         "repeater.mark-word", "Mark word", "Toggle a §…§ marker around the token at the cursor",
         Verb::Scope::Repeater, [Verb::Chord.new("k", ctrl: true)],
-        available: in_repeater, intent: :mark_word, section: :request, menu: :palette) { |ctx| ctx.repeater_mark_word; nil }
+        available: REPEATER_SESSION, intent: :mark_word, section: :request, menu: :palette) { |ctx| ctx.repeater_mark_word; nil }
       r.register Verb::Definition.new(
         "repeater.auto-mark", "Auto-mark params", "Wrap every request parameter value in a §…§ marker",
         Verb::Scope::Repeater, [Verb::Chord.new("a", ctrl: true)],
-        available: in_repeater, mnemonic: 'a', section: :request) { |ctx| ctx.repeater_auto_mark; nil }
+        available: REPEATER_SESSION, mnemonic: 'a', section: :request) { |ctx| ctx.repeater_auto_mark; nil }
       r.register Verb::Definition.new(
         "repeater.clear-marks", "Clear markers", "Strip every §…§ marker (and its attached chain)",
-        Verb::Scope::Repeater, available: in_repeater, intent: :clear_marks, section: :request) { |ctx| ctx.repeater_clear_marks; nil }
+        Verb::Scope::Repeater, available: REPEATER_SESSION, intent: :clear_marks, section: :request) { |ctx| ctx.repeater_clear_marks; nil }
       # ^Q, not ^Y: `^Y` is now Copy in every text box (see `in_repeater_copy`), and Copy is
       # the far more frequent action of the two, so it takes the chord whose letter means
       # something. attach-chain keeps a CTRL chord rather than falling back to its space-menu
@@ -449,7 +455,7 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.attach-chain", "Edit decoder chain", "Focus the CHAIN pane to edit the encode/decode chain of the marker at the cursor (applied on send)",
         Verb::Scope::Repeater, [Verb::Chord.new("q", ctrl: true)],
-        available: in_repeater, intent: :decoder_chain, section: :request, menu: :palette) { |ctx| ctx.repeater_attach_chain; nil }
+        available: REPEATER_SESSION, intent: :decoder_chain, section: :request, menu: :palette) { |ctx| ctx.repeater_attach_chain; nil }
 
       # Request-pane VIEW toggles — keymap-driven (Repeater scope) so they're rebindable.
       # The Runner delegators carry the pane-gating + status messages. Hex-edit the
@@ -460,14 +466,14 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.toggle-hex", "Toggle hex edit", "Edit the request as raw bytes — sends exactly what you type",
         Verb::Scope::Repeater, [Verb::Chord.new("x", ctrl: true)],
-        available: in_repeater, intent: :hex, section: :request) { |ctx| ctx.repeater_toggle_hex; nil }
+        available: REPEATER_SESSION, intent: :hex, section: :request) { |ctx| ctx.repeater_toggle_hex; nil }
       # ^T only: on a tab with no envelope/decoded split it drops a § marker, a WRITE, so it is
       # no Display… row. `repeater.toggle-envelope` below is that row, and exists only where
       # there is a split to flip (#1274).
       r.register Verb::Definition.new(
         "repeater.toggle-decoded", "Switch envelope/decoded", "SAML/GraphQL/WS flow: switch envelope/decoded · otherwise: insert a § marker at the cursor",
         Verb::Scope::Repeater, [Verb::Chord.new("t", ctrl: true)],
-        available: in_repeater, section: :request) { |ctx| ctx.repeater_toggle_decoded; nil }
+        available: REPEATER_SESSION, section: :request) { |ctx| ctx.repeater_toggle_decoded; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-envelope", "Envelope / decoded", "SAML/GraphQL/WS flow: switch the request pane between the envelope and the decoded payload",
         Verb::Scope::Repeater, [] of Verb::Chord,
@@ -476,31 +482,31 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.pretty-request", "Pretty-print request", "Format the request body in-place (JSON/XML/form-urlencoded)",
         Verb::Scope::Repeater, [Verb::Chord.new("u", ctrl: true)],
-        available: in_repeater, section: :request, menu: :palette) { |ctx| ctx.repeater_pretty_request; nil }
+        available: REPEATER_SESSION, section: :request, menu: :palette) { |ctx| ctx.repeater_pretty_request; nil }
       # Once-a-target actions with no chord: the palette finds them by typing "graphql".
       r.register Verb::Definition.new(
         "repeater.graphql-introspection", "GraphQL: insert introspection query", "Rewrite the request as a POST of the standard introspection query to the same endpoint, keeping the other headers",
         Verb::Scope::Repeater, [] of Verb::Chord,
-        available: in_repeater, section: :request, menu: :palette) { |ctx| ctx.repeater_graphql_introspection(legacy: false); nil }
+        available: REPEATER_SESSION, section: :request, menu: :palette) { |ctx| ctx.repeater_graphql_introspection(legacy: false); nil }
       r.register Verb::Definition.new(
         "repeater.graphql-introspection-legacy", "GraphQL: insert legacy introspection query", "The introspection query without subscriptionType and directives, for a server that rejects the standard one",
         Verb::Scope::Repeater, [] of Verb::Chord,
-        available: in_repeater, section: :request, menu: :palette) { |ctx| ctx.repeater_graphql_introspection(legacy: true); nil }
+        available: REPEATER_SESSION, section: :request, menu: :palette) { |ctx| ctx.repeater_graphql_introspection(legacy: true); nil }
       r.register Verb::Definition.new(
         "repeater.graphql-multiply-batch", "GraphQL: multiply operation (batched array)", "Pack copies of this operation into one batched JSON array request, to test per-request rate-limit bypass",
         Verb::Scope::Repeater, [] of Verb::Chord,
-        available: in_repeater, section: :request, menu: :palette) { |ctx| ctx.repeater_graphql_multiply(alias_form: false); nil }
+        available: REPEATER_SESSION, section: :request, menu: :palette) { |ctx| ctx.repeater_graphql_multiply(alias_form: false); nil }
       r.register Verb::Definition.new(
         "repeater.graphql-multiply-alias", "GraphQL: multiply operation (aliased)", "Repeat this operation's top-level field under N aliases in one document, to test per-request rate-limit bypass",
         Verb::Scope::Repeater, [] of Verb::Chord,
-        available: in_repeater, section: :request, menu: :palette) { |ctx| ctx.repeater_graphql_multiply(alias_form: true); nil }
+        available: REPEATER_SESSION, section: :request, menu: :palette) { |ctx| ctx.repeater_graphql_multiply(alias_form: true); nil }
 
       # Target-pane toggle (SNI override) — tagged :target so it fronts the space menu
       # when the TARGET field has focus (previously ctrl-only ⇒ invisible there).
       r.register Verb::Definition.new(
         "repeater.toggle-sni", "Toggle SNI override", "Override the TLS SNI on the target pane (dialed host unchanged)",
         Verb::Scope::Repeater, [Verb::Chord.new("s", ctrl: true)],
-        available: in_repeater, intent: :sni, section: :target) { |ctx| ctx.repeater_toggle_sni; nil }
+        available: REPEATER_SESSION, intent: :sni, section: :target) { |ctx| ctx.repeater_toggle_sni; nil }
       # Target-pane cycle, no chord. Same reasoning `␣Pw` and `␣Pr` give: the ctrl- space in
       # Repeater is dense, a fingerprint is a per-tab decision an operator makes once rather
       # than a key they reach for mid-edit, and the TARGET band carries a `␣Pt:…` chip either
@@ -508,15 +514,15 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.cycle-tls-preset", "Cycle TLS fingerprint",
         "Shape THIS TAB's ClientHello like a named browser (chrome / firefox / safari / curl) instead of gori's own, for this tab only — the way to ask whether an origin answers differently by handshake, with a second tab on the same host set to a different preset. The destination's outbound_tls client certificate, protocol range and permissive flag still apply, and settings.json is not touched. An APPROXIMATION of that client's hello, not a byte-exact JA3 match: `gori settings tls-fingerprint HOST --preset NAME` prints what actually goes out. https targets only",
-        Verb::Scope::Repeater, available: in_repeater, intent: :tls_fingerprint, section: :target) { |ctx| ctx.repeater_cycle_tls_preset; nil }
+        Verb::Scope::Repeater, available: REPEATER_SESSION, intent: :tls_fingerprint, section: :target) { |ctx| ctx.repeater_cycle_tls_preset; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-auto-content-length", "Toggle auto Content-Length", "Recompute Content-Length from the body on send",
         Verb::Scope::Repeater, [Verb::Chord.new("l", ctrl: true)],
-        available: in_repeater, intent: :auto_content_length, section: :request) { |ctx| ctx.repeater_toggle_auto_content_length; nil }
+        available: REPEATER_SESSION, intent: :auto_content_length, section: :request) { |ctx| ctx.repeater_toggle_auto_content_length; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-http2", "Toggle HTTP/2 (h2)", "Send this request over HTTP/2 or HTTP/1.1, overriding the captured protocol",
         Verb::Scope::Repeater, [Verb::Chord.new("v", ctrl: true)],
-        available: in_repeater, intent: :http2, section: :request) { |ctx| ctx.repeater_toggle_http2; nil }
+        available: REPEATER_SESSION, intent: :http2, section: :request) { |ctx| ctx.repeater_toggle_http2; nil }
       # WebSocket handshake only. No chord: `Sec-WebSocket-Key` regeneration is a per-session
       # decision an operator makes once and then forgets, not a key they reach for mid-edit,
       # and the ctrl- space in Repeater is already dense. The HANDSHAKE REQUEST pane carries a
@@ -568,23 +574,23 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.grpc-json-edit", "Edit gRPC message as JSON",
         "gRPC: open the request message as proto3 JSON in $EDITOR and re-encode it through the loaded .proto. A key the capture lacks ADDS that field (a proto3 field at its default, like is_admin, is never on the wire otherwise), a deleted key removes it, and every field left as it was keeps its captured bytes. An unknown key or a value its type cannot hold is refused, never dropped. A compressed message is re-compressed. Unary calls with a descriptor set",
-        Verb::Scope::Repeater, available: in_repeater, section: :request, menu: :palette) { |ctx| ctx.repeater_grpc_json_edit; nil }
+        Verb::Scope::Repeater, available: REPEATER_SESSION, section: :request, menu: :palette) { |ctx| ctx.repeater_grpc_json_edit; nil }
       r.register Verb::Definition.new(
         "repeater.grpc-add-field", "Add gRPC field",
         "gRPC: set or ADD one field on the request message from path=value — declared names with a loaded .proto (is_admin=true, profile.role=ADMIN), field numbers with or without one (7:varint=1; types varint, i32, i64, string, bytes, or a .proto scalar). The spec `gori run repeater send --grpc-field` and MCP grpc_fields take. Unary calls",
-        Verb::Scope::Repeater, available: in_repeater, section: :request, menu: :palette) { |ctx| ctx.repeater_grpc_add_field; nil }
+        Verb::Scope::Repeater, available: REPEATER_SESSION, section: :request, menu: :palette) { |ctx| ctx.repeater_grpc_add_field; nil }
       r.register Verb::Definition.new(
         "repeater.send-group", "Send group (one connection)",
         "Pipeline every request (split on a lone %%% line) over ONE keep-alive connection — active request-smuggling / keep-alive reuse — and show each response",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'g', section: :request) { |ctx| ctx.repeater_send_group; nil }
+        Verb::Scope::Repeater, available: REPEATER_SESSION, mnemonic: 'g', section: :request) { |ctx| ctx.repeater_send_group; nil }
       r.register Verb::Definition.new(
         "repeater.send-race", "Race marked sub-tabs",
         "Fire the MARKED sub-tabs (mark with t) as one synchronized race — N DISTINCT requests on the wire together to hit a multi-endpoint TOCTOU window (h1 last-byte-sync, h2 single-packet). One origin, one transport; shows each response with its timing",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'G', section: :request) { |ctx| ctx.repeater_send_race; nil }
+        Verb::Scope::Repeater, available: REPEATER_SESSION, mnemonic: 'G', section: :request) { |ctx| ctx.repeater_send_race; nil }
       r.register Verb::Definition.new(
         "repeater.timing-analysis", "Timing analysis (A vs B)",
         "Differential TIMING analysis of EXACTLY two marked sub-tabs (mark with t): send the A/B pair many times and decide which is CONSISTENTLY slower by response ORDER and quartiles, not eyeballed latency (PortSwigger \"Listen to the whispers\"). Each pair is released together (h2 single-packet / h1 last-byte-sync) so common network/load noise cancels. One origin, one transport; the result is a verdict + per-variant quartiles + distribution, never a single number",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'B', section: :request) { |ctx| ctx.repeater_timing_analysis; nil }
+        Verb::Scope::Repeater, available: REPEATER_SESSION, mnemonic: 'B', section: :request) { |ctx| ctx.repeater_timing_analysis; nil }
 
       # --- RESPONSE pane (diff / pretty via keymap so rebind works; hex stays
       # controller-owned on the response pane because plain `x` is also select-line
@@ -604,19 +610,19 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.toggle-diff", "Toggle diff", "Switch the response pane between the raw response and a diff against the previous one",
         Verb::Scope::Repeater, [Verb::Chord.new("d", shift: true)],
-        available: in_repeater, intent: :diff, section: :response,
+        available: REPEATER_SESSION, intent: :diff, section: :response,
         chord_sections: [:response]) { |ctx| ctx.repeater_toggle_resp_diff; nil }
       # No chord of its own: `^X` is `repeater.toggle-hex`'s, which toggles the hex of the pane
       # that has focus, so it reaches this one in the response pane — and the row says so
       # (`chord_of:`, #1295). A scope binds a chord to one verb, so the pair shares it this way.
       r.register Verb::Definition.new(
         "repeater.toggle-resp-hex", "Hex dump", "Toggle a raw hex dump of the response bytes",
-        Verb::Scope::Repeater, available: in_repeater, intent: :hex, section: :response,
+        Verb::Scope::Repeater, available: REPEATER_SESSION, intent: :hex, section: :response,
         chord_of: "repeater.toggle-hex") { |ctx| ctx.repeater_toggle_resp_hex; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-pretty", "Pretty bodies", "Pretty-print JSON/XML/form/… response bodies (display only)",
         Verb::Scope::Repeater, [Verb::Chord.new("p")],
-        available: in_repeater, intent: :pretty, section: :response,
+        available: REPEATER_SESSION, intent: :pretty, section: :response,
         chord_sections: [:response]) { |ctx| ctx.toggle_pretty; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-unicode", "Decode Unicode escapes", "Display JSON \\u escapes as characters (display only)",
@@ -843,7 +849,6 @@ module Gori
       # open sub-tabs). Without one it is a dead row on the empty tab's menu and a dead hit in
       # the palette; only `fuzz.new` works there (#1840).
       fuzz_session = ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.subtab_search_count >= 1 }
-      in_repeater = ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater }
 
       r.register Verb::Definition.new(
         "history.fuzz", "Send to Fuzzer", "Open the selected flow in the Fuzzer tab",
@@ -854,7 +859,7 @@ module Gori
         # until the key audit gave that to `repeater.find-subtab`, then 'F' — while History
         # spelled the same act 'z'; the family table is what ended that drift.
         "repeater.fuzz", "Send to Fuzzer", "Turn this repeater request into a fuzz template",
-        Verb::Scope::Repeater, available: in_repeater, intent: :to_fuzzer) { |ctx| ctx.fuzz_from_repeater; nil }
+        Verb::Scope::Repeater, available: REPEATER_SESSION, intent: :to_fuzzer) { |ctx| ctx.fuzz_from_repeater; nil }
 
       r.register Verb::Definition.new(
         "fuzz.run", "Run fuzz", "Start the fuzz/intruder run", Verb::Scope::Fuzzer,
@@ -1042,7 +1047,6 @@ module Gori
       # The batch gate (#442) — see register_history above. history.mine is batch-capable.
       history_targets = ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_ids.empty? }
       in_miner = ->(ctx : Verb::ExecContext) { ctx.current_tab == :miner }
-      in_repeater = ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater }
 
       r.register Verb::Definition.new(
         "history.mine", "Mine parameters", "Discover hidden parameters for the selected flow",
@@ -1052,13 +1056,13 @@ module Gori
         Verb::Scope::HistoryDetail, intent: :to_miner, group: :send) { |ctx| ctx.close_detail; ctx.mine_selected; nil }
       r.register Verb::Definition.new(
         "repeater.mine", "Mine parameters", "Discover hidden parameters for this repeater request",
-        Verb::Scope::Repeater, available: in_repeater, intent: :to_miner) { |ctx| ctx.mine_from_repeater; nil }
+        Verb::Scope::Repeater, available: REPEATER_SESSION, intent: :to_miner) { |ctx| ctx.mine_from_repeater; nil }
 
       # Run the Probe active checks against the current Repeater request's last send (COMMON, so
       # it's reachable from any Repeater pane) — opens a confirm with the expected request count.
       r.register Verb::Definition.new(
         "repeater.probe-active", "Run active scan", "Run the Probe active checks against this Repeater request (needs a prior send)",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'A') { |ctx| ctx.probe_active_from_repeater; nil }
+        Verb::Scope::Repeater, available: REPEATER_SESSION, mnemonic: 'A') { |ctx| ctx.probe_active_from_repeater; nil }
 
       r.register Verb::Definition.new(
         "mine.run", "Run mining", "Re-run parameter mining for this session", Verb::Scope::Miner,
