@@ -22,7 +22,7 @@ module Gori
       # Content-only clone (new note id; entity_links are not copied). Tagged :subtab so
       # it fronts the strip's Space menu; 'd' is free in COMMON ∪ :subtab.
       r.register Verb::Definition.new(
-        "notes.duplicate-subtab", "Duplicate subtab", "Open a new note sub-tab with the same text",
+        "notes.duplicate-subtab", "Duplicate sub-tab", "Open a new note sub-tab with the same text",
         Verb::Scope::Notes, available: in_notes, intent: :duplicate, section: :subtab) { |ctx| ctx.notes_duplicate_subtab; nil }
 
       # Search-and-jump across note sub-tabs (section :tab, tab-bar space menu — like

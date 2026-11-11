@@ -29,12 +29,12 @@ module Gori
       # way to rename. 'e' — the letter rename carries on all nine strips and on the strip
       # itself (see `repeater.rename-subtab`).
       r.register Verb::Definition.new(
-        "decoder.rename-subtab", "Rename subtab", "Rename the active conversion's sub-tab chip",
+        "decoder.rename-subtab", "Rename sub-tab", "Rename the active conversion's sub-tab chip",
         Verb::Scope::Decoder, available: in_decoder, intent: :rename, section: :subtab) { |ctx| ctx.decoder_rename_subtab; nil }
       # Content-only clone (input + chain + chip name). 'd' is the bucket's Duplicate letter
       # on all nine, and free in COMMON ∪ :subtab here (COMMON keys: y/o/s).
       r.register Verb::Definition.new(
-        "decoder.duplicate-subtab", "Duplicate subtab", "Open a new conversion with the same input and chain",
+        "decoder.duplicate-subtab", "Duplicate sub-tab", "Open a new conversion with the same input and chain",
         Verb::Scope::Decoder, available: in_decoder, intent: :duplicate, section: :subtab) { |ctx| ctx.decoder_duplicate_subtab; nil }
 
       # Clears the INPUT text (and its chain spec) — the INPUT pane's own action.

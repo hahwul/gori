@@ -370,14 +370,14 @@ module Gori
       # Same trade in Fuzzer, Miner and Sequencer (`*.run`), so rename is 'e' on all nine
       # strips, and the strip's own raw key followed it from `r` to `e` (#1295).
       r.register Verb::Definition.new(
-        "repeater.rename-subtab", "Rename subtab", "Rename the active repeater sub-tab's chip",
+        "repeater.rename-subtab", "Rename sub-tab", "Rename the active repeater sub-tab's chip",
         Verb::Scope::Repeater, available: in_repeater, intent: :rename, section: :subtab) { |ctx| ctx.repeater_rename_subtab; nil }
       # Tag / filter the sub-tab strip (issue #121). '/' opens the tag-filter bar. Tag is 'g':
       # the strip's LIVE `t` marks a chip, and the menu's `t` is now that same mark (#1274
       # Decision 3), so tag takes a letter no strip key answers. Repeater is the only strip
       # with a tag verb.
       r.register Verb::Definition.new(
-        "repeater.tag-subtab", "Tag subtab", "Add/edit flat tags on the active repeater sub-tab",
+        "repeater.tag-subtab", "Tag sub-tab", "Add/edit flat tags on the active repeater sub-tab",
         Verb::Scope::Repeater, available: in_repeater, mnemonic: 'g', section: :subtab) { |ctx| ctx.repeater_tag_subtab; nil }
       # The Repeater is where a login request is authored and tested, so this is where it joins
       # a session slot's refresh steps (#1233): a slot picker, then the sub-tab is appended to
@@ -408,13 +408,13 @@ module Gori
         "repeater.subtab-mark-clear", "Clear marks", "Drop every sub-tab mark (esc on the strip does the same)",
         Verb::Scope::Repeater, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater && ctx.subtab_marked_count > 0 }, intent: :mark_clear, section: :subtab) { |ctx| ctx.subtab_mark_clear; nil }
       r.register Verb::Definition.new(
-        "repeater.close-subtab", "Close subtab", "Close the active repeater sub-tab",
+        "repeater.close-subtab", "Close sub-tab", "Close the active repeater sub-tab",
         Verb::Scope::Repeater, [Verb::Chord.new("w", ctrl: true)],
         available: in_repeater, intent: :close, section: :subtab) { |ctx| ctx.repeater_close_subtab; nil }
       # Duplicate the active session into a new sibling (content only — no flow/links).
       # 'd' is free in COMMON ∪ :subtab (COMMON: r/y/n/f/m/k/u; :subtab already has e/w).
       r.register Verb::Definition.new(
-        "repeater.duplicate-subtab", "Duplicate subtab", "Open a new sub-tab with the same request content",
+        "repeater.duplicate-subtab", "Duplicate sub-tab", "Open a new sub-tab with the same request content",
         Verb::Scope::Repeater,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater && ctx.repeater_subtab_count >= 1 },
         intent: :duplicate, section: :subtab) { |ctx| ctx.repeater_duplicate_subtab; nil }
@@ -966,16 +966,16 @@ module Gori
       # `^R`, and COMMON renders inside the :subtab view. A rename does not take the Run
       # letter — see `repeater.rename-subtab` for the full note.
       r.register Verb::Definition.new(
-        "fuzz.rename-subtab", "Rename subtab", "Rename the active fuzz session's sub-tab chip",
+        "fuzz.rename-subtab", "Rename sub-tab", "Rename the active fuzz session's sub-tab chip",
         Verb::Scope::Fuzzer, available: fuzz_session, intent: :rename, section: :subtab) { |ctx| ctx.fuzzer_rename_subtab; nil }
       r.register Verb::Definition.new(
-        "fuzz.close-subtab", "Close subtab", "Close the active fuzz session",
+        "fuzz.close-subtab", "Close sub-tab", "Close the active fuzz session",
         Verb::Scope::Fuzzer, [Verb::Chord.new("w", ctrl: true)],
         available: fuzz_session, intent: :close, section: :subtab) { |ctx| ctx.fuzzer_close_subtab; nil }
       # Content-only clone of the active fuzz session (no run results / flow / links).
       # 'd' is free in COMMON ∪ :subtab.
       r.register Verb::Definition.new(
-        "fuzz.duplicate-subtab", "Duplicate subtab", "Open a new fuzz session with the same template and config",
+        "fuzz.duplicate-subtab", "Duplicate sub-tab", "Open a new fuzz session with the same template and config",
         Verb::Scope::Fuzzer, available: fuzz_session, intent: :duplicate, section: :subtab) { |ctx| ctx.fuzzer_duplicate_subtab; nil }
       # Space-menu letters follow the REPEATER's, which is where the muscle memory lives: this
       # section and `repeater.*`'s `:request` are the same five marker actions, and three of
@@ -1092,7 +1092,7 @@ module Gori
       # Content-only clone of the active miner session (request + config; no findings).
       # 'd' is free in COMMON ∪ :subtab (COMMON: r/s/k/u/p).
       r.register Verb::Definition.new(
-        "mine.duplicate-subtab", "Duplicate subtab", "Open a new miner session with the same request and config",
+        "mine.duplicate-subtab", "Duplicate sub-tab", "Open a new miner session with the same request and config",
         Verb::Scope::Miner, available: in_miner, intent: :duplicate, section: :subtab) { |ctx| ctx.miner_duplicate_subtab; nil }
       # The strip's `e` rename / ^W close, which `Runner#renameable_subtabs?` and
       # `#subtab_close` have supported for :miner all along with no verbs to show for it —
@@ -1104,7 +1104,7 @@ module Gori
       # `^R`, and COMMON renders inside the :subtab view. A rename does not take the Run
       # letter — see `repeater.rename-subtab` for the full note.
       r.register Verb::Definition.new(
-        "mine.rename-subtab", "Rename subtab", "Rename the active miner session's sub-tab chip",
+        "mine.rename-subtab", "Rename sub-tab", "Rename the active miner session's sub-tab chip",
         Verb::Scope::Miner, available: in_miner, intent: :rename, section: :subtab) { |ctx| ctx.miner_rename_subtab; nil }
       # `:subtab`, with the rest of the chip family. Until #1055 this had to be `:common` —
       # the menu rendered COMMON ∪ the FOCUSED PANE's section, so a `:subtab` close was
@@ -1115,7 +1115,7 @@ module Gori
       # own 'w' in their `:request` / `:template` sections, so a COMMON 'w' would collide there
       # and `Registry#validate_menu_keys!` would raise at boot. Their close stays in :subtab.
       r.register Verb::Definition.new(
-        "mine.close-subtab", "Close subtab", "Close the active miner session",
+        "mine.close-subtab", "Close sub-tab", "Close the active miner session",
         Verb::Scope::Miner, [Verb::Chord.new("w", ctrl: true)],
         available: in_miner, intent: :close, section: :subtab) { |ctx| ctx.miner_close_subtab; nil }
 

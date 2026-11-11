@@ -54,6 +54,15 @@ end
 # hardcoded `a / ↵,e / d / x / ⇧X / s / ⇧J / ⇧K` and registered every verb with `[] of Chord`,
 # so those two lists alone could not be rebound and their keys never met the `available?` gate
 # the space menu uses.
+# One spelling on every row the operator reads: the strip's section is SUB-TABS and its fold
+# `Sub-tabs…`, while nineteen titles beside them said "subtab". Titles and descriptions both,
+# since the palette shows the description under the title.
+describe "verb wording" do
+  it "spells sub-tab with its hyphen" do
+    Gori::Verbs.registry.select { |v| "#{v.title} #{v.description}".matches?(/\bsubtabs?\b/i) }.map(&.id).should be_empty
+  end
+end
+
 describe "rule-list keys" do
   it "are real chords on the verbs, for every rule list" do
     r = Gori::Verbs.registry

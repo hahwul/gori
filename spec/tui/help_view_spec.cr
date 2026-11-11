@@ -425,8 +425,17 @@ describe "HelpView chip legend (#1842)" do
     row.call("Params: R").b.should contain("reflected")
   end
 
+  # Two marks with no legend anywhere: the colon a filter bar leads an applied filter with,
+  # and the Intercept editor's CL chip (the Repeater row names AUTO-LEN, a different word).
+  it "names the applied-filter colon and the Intercept editor's CL chip" do
+    row.call(": query").b.should contain("filter in force")
+    cl = row.call("  editing").b
+    cl.should contain("^L")
+    cl.should contain("Content-Length")
+  end
+
   it "keeps every legend row inside the page at 100 columns" do
-    ["header", "● address", "§N", "Mode formula", "Probe band", "fp-cut · dedup", "tmpl · clust", "drift"].each do |key|
+    ["header", "● address", ": query", "  editing", "§N", "Mode formula", "Probe band", "fp-cut · dedup", "tmpl · clust", "drift"].each do |key|
       Screen.display_width(row.call(key).b).should be <= 100 - 2 - 4 - HelpView::KEY_W - HelpView::KEY_GAP
     end
   end

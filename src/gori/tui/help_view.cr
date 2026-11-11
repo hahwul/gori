@@ -49,6 +49,10 @@ module Gori::Tui
         # is unread; `listen_chip` owns the three states of the dot.
         Item.new("header", "scope: the lens · probe: scan mode · notify:N unread, when any"),
         Item.new("● address", "green capturing · yellow OFF · red (N) failed writes · click toggles"),
+        # Every filter bar leads an applied filter with `: ` in place of its idle prompt, and
+        # nothing said what the colon was. History's key stands for the family: each bar has
+        # its own filter verb, and they share a default.
+        Item.new(": query", "on a filter bar: the filter in force · {history.query} edits it"),
         Item.new("^P →", "Match & Replace — open the Rewriter tab", "rules.edit"),
         Item.new("^P →", "Notifications — the notification center (or click the notify badge)", "app.notifications"),
         Item.new("^, / ⚙", "preferences — every setting (also ^P → Settings)", "settings.open"),
@@ -353,6 +357,10 @@ module Gori::Tui
         # this tab that must be named somewhere the operator can read before pressing it.
         Item.new("  activity", "{activity.filter-source} source · {activity.filter-level} level · {activity.filter-actor} actor · {activity.find} filter · ↵ open · {activity.copy} copy · {activity.clear} clear the feed"),
         Item.new("Intercept", "↵/e edit · {intercept.forward} fwd · {intercept.drop} drop · {intercept.forward-all} all · {intercept.copy} copy · {intercept.direction} catch · {intercept.filter} condition · {intercept.toggle} on/off"),
+        # The editor's `CL` chip had no legend: the Repeater's `^L` row above explains AUTO-LEN,
+        # and this is the same toggle under a different name on a different tab. `^L` is the
+        # controller's own key (`InterceptController#handle_read_key`), not a verb.
+        Item.new("  editing", "^L the CL chip — lit recomputes Content-Length · off sends it as typed"),
       ]},
       {"DECODER", [
         Item.new("i / ↵", "enter INS on INPUT · esc back to READ"),

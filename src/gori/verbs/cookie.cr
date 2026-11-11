@@ -67,10 +67,10 @@ module Gori
 
       # Sub-tab chip rename + content clone — tagged :subtab (mirrors JWT/Decoder).
       r.register Verb::Definition.new(
-        "cookie.rename-subtab", "Rename subtab", "Rename the active session's sub-tab chip",
+        "cookie.rename-subtab", "Rename sub-tab", "Rename the active session's sub-tab chip",
         Verb::Scope::Cookie, available: in_cookie, intent: :rename, section: :subtab) { |ctx| ctx.cookie_rename_subtab; nil }
       r.register Verb::Definition.new(
-        "cookie.duplicate-subtab", "Duplicate subtab", "Open a new session with the same cookie + payload",
+        "cookie.duplicate-subtab", "Duplicate sub-tab", "Open a new session with the same cookie + payload",
         Verb::Scope::Cookie, available: in_cookie, intent: :duplicate, section: :subtab) { |ctx| ctx.cookie_duplicate_subtab; nil }
 
       # Search + filter across sessions — tagged :tab (like jwt.find-subtab), so jumping never

@@ -546,7 +546,7 @@ backtrace, as the flag doors already did.
 | `--request-stdin` | Read the raw HTTP request from stdin, byte-for-byte as `--request-file` reads a file, keeping it out of the argument vector. Needs a pipe or a redirect; a terminal is refused (mutually exclusive with `--request-file` / `--request-raw`) |
 | `--curl=PATH` | Build the request from the curl command in PATH (`-` reads stdin). Supplies the target and HTTP/2 unless given; ignored transport flags are named on stderr |
 | `--flow=ID` | Clone request / target / HTTP/2 from a captured flow |
-| `--name=NAME`, `--tags=TAGS` | Custom tab name, and free-text tags that become the TUI subtab label |
+| `--name=NAME`, `--tags=TAGS` | Custom tab name, and free-text tags that become the TUI sub-tab label |
 | `--http2` / `--http1` (`--no-http2`) | Pick a protocol; `--http1` overrides an h2-captured `--flow` |
 | `--no-auto-cl`, `--sni=HOST` | Skip auto `Content-Length`, SNI override |
 | `--keep-request-line` | With `--flow`: store the request line as captured, absolute-form included |
