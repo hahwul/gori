@@ -5322,3 +5322,31 @@ tab is empty (History's Open browser, `history.proxied-browser`, gated on
 stretch. The menu follows `HistoryView#project_empty?` (no flow at all, whatever is typed in
 the bar); the card and the footer follow `awaiting_first_flow?`, which also wants an empty bar.
 
+
+### 2026-11-11: a tab made of cards has no frame around them, and an idle filter has no row
+
+**Problem.** On an 80×24 terminal the Repeater showed 7 rows of request and response out of 24.
+The rest was chrome: the outer body frame, the chips, a hairline, a standing `/ filter` row
+with a rule of its own, and the cards' borders. The outer frame never took the focus gold on
+these tabs (`BodyChrome.shell_focused`, `multi_pane:`), so it was a box around boxes.
+
+**Decision.** A tab whose body is several cards answers `TabController#body_shell?` with false
+and draws them on the canvas, as Project always has: Repeater, Fuzzer, Miner, Sequencer,
+Decoder, JWT, Cookie, OAST, Rewriter and Colormarker. A single-pane tab keeps its frame,
+because there the frame IS the focus mark, and so does a workbench tab with no session open.
+The idle sub-tab filter takes no rows: `/ filter · f find` and the chip count ride the strip's
+hairline, the way a card's title rides its border, and `/` opens the bar in the same place as
+before. Dropping the row outright was rejected: with nothing on screen saying so, `/` is not
+discoverable, and the `⌕` pill alone never said `f` either.
+
+Render, the click hit-tests (`body_rect_below_filter`) and the Runner's strip geometry read the
+one flag, so they cannot disagree about where the body starts.
+
+### 2026-11-11: Miss Ring stands only where the tab drew nothing
+
+In `body` placement she covered three rows of whatever the tab put in its bottom-right corner
+(History's SIZE and DUR, a Fuzzer chart), and #1851 only made the cut legible. The Runner now
+watches her corner while the body draws (`Screen#watch`) and, if any glyph landed there, seats
+her in the status row for that frame, exactly as a terminal under 100×30 already did. The
+saved placement is never written, and an empty corner brings the body sprite back. The price
+is the one `bar` placement always had: while she is in the row, her line uses its text slot.

@@ -23,6 +23,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     (t = @tabs[@active_tab]?) ? t.subtab_strip_divider? : true
   end
 
+  # Whether the active tab draws the outer body frame (`TabController#body_shell?`): the strip
+  # sits one cell further out when it does not.
+  private def body_shell? : Bool
+    (t = @tabs[@active_tab]?) ? t.body_shell? : true
+  end
+
   # The focusable sub-tab strip for Repeater/Fuzzer/Notes/Decoder (@focus == :subtabs). Mirrors the
   # tab bar's idiom one level down: ←/→ switch sub-tabs, ↓/↵/Tab enter the editor,
   # ↑/esc pop to the tab bar. ^1-9 jumps and stays on the strip; ^N/^W create/close.

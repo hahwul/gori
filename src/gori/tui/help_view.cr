@@ -325,7 +325,7 @@ module Gori::Tui
         # chord and been wrong on the one tab this row is about.
         Item.new("Probe", "↑/↓ ↵ open · {probe.open-evidence} source · {probe.mode} mode · {probe.dismiss-selected} dismiss · {probe.toggle-closed} all · {probe.filter} filter · {space:probe.scope-toggle} scope · {probe.clear} clear findings"),
         # The Probe band's standing chips: on screen all session with no other legend.
-        Item.new("Probe band", "CLOSED lit: dismissed shown too ({probe.toggle-closed}) · C H M L I: per severity"),
+        Item.new("Probe band", "+CLOSED lit: dismissed shown too ({probe.toggle-closed}) · C H M L I: per severity"),
         # Evidence is hidden until the project freezes its first snapshot, so this row is where
         # an operator who just enabled the tab learns its keys — and `{evidence.delete}` is the
         # only one that destroys bytes no source can hand back, which is why it is named here

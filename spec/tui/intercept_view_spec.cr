@@ -1512,3 +1512,14 @@ describe "Intercept queue hint on a narrow row" do
     fitted.should contain("space cmds")
   end
 end
+
+# With nothing held the queue footer named forward, drop and edit — keys with no row to act
+# on — while the three that set up a catch were only on the card.
+describe "Intercept footer with an empty queue" do
+  it "names the catch keys and keeps the menu on a narrow row" do
+    idle = InterceptController.idle_keys("i", "c", "/")
+    idle.should start_with("i catch on/off · c direction · / condition")
+    idle.should_not contain("fwd")
+    Chrome.fit_hints(idle, 59).should contain("space cmds")
+  end
+end

@@ -177,10 +177,15 @@ module Gori::Tui
     end
 
     # --- render ---
+    # Cards on the canvas, no outer frame (`BodyChrome.framed`).
+    def body_shell? : Bool
+      false
+    end
+
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       body_focused = focus == :body
-      # multi_pane: true — each pane gilds its own border, the outer shell stays a hairline.
-      BodyChrome.framed(screen, rect, BodyChrome.shell_focused(focus, multi_pane: true)) do |inner|
+      # No outer frame (#body_shell?): each pane gilds its own border.
+      BodyChrome.framed(screen, rect, false, shell: body_shell?) do |inner|
         @last_body = inner
         rules_r, colors_r = @view.pane_rects(inner)
         @colors_shown = !colors_r.empty?
@@ -374,7 +379,7 @@ module Gori::Tui
     # --- mouse ---
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       @host.focus_body
-      inner = BodyChrome.frame_inner(rect)
+      inner = BodyChrome.frame_inner(rect, shell: body_shell?)
       @last_body = inner
       rules_r, colors_r = @view.pane_rects(inner)
       rules_r = rules_list_rect(rules_r)
@@ -404,7 +409,7 @@ module Gori::Tui
     # double-click in a card's empty space or on its scroll gauge does not edit whatever was
     # highlighted. False hands the second press back to the shell as a click.
     def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
-      rules_r, colors_r = @view.pane_rects(BodyChrome.frame_inner(rect))
+      rules_r, colors_r = @view.pane_rects(BodyChrome.frame_inner(rect, shell: body_shell?))
       if !colors_r.empty? && colors_r.contains?(mx, my)
         n = custom_colors.size
         return false if @colors_view.gauge_row_at(colors_r, mx, my, n) || !@colors_view.row_at(colors_r, my, @color_scroll, n)
@@ -428,7 +433,7 @@ module Gori::Tui
     # RULES and COLOURS sit side by side, so the notch goes to the pane under the pointer,
     # not the focused one (#956); off both panes it falls back to the focused pane.
     def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
-      inner = BodyChrome.frame_inner(rect)
+      inner = BodyChrome.frame_inner(rect, shell: body_shell?)
       rules_r, colors_r = @view.pane_rects(inner)
       if !colors_r.empty? && colors_r.contains?(mx, my)
         move_color_sel(step)

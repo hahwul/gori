@@ -104,12 +104,12 @@ end
 
 # The cell of the rules list's row `i`, in the same geometry the controller hit-tests with.
 private def rule_row_cell(ctl : RewriterController, i : Int32) : {Int32, Int32}
-  list_r, _, _ = ctl.@view.layout(BodyChrome.frame_inner(BODY))
+  list_r, _, _ = ctl.@view.layout(BodyChrome.frame_inner(BODY, shell: ctl.body_shell?))
   {list_r.x + 3, list_r.y + 1 + i}
 end
 
 private def sub_row_cell(ctl : RewriterController, i : Int32) : {Int32, Int32}
-  _, body = ctl.@view.sub_layout(BodyChrome.frame_inner(BODY))
+  _, body = ctl.@view.sub_layout(BodyChrome.frame_inner(BODY, shell: ctl.body_shell?))
   {body.x + 3, body.y + 1 + i}
 end
 

@@ -148,10 +148,9 @@ module Gori::Tui
     #
     # The vertical side needs no such term because the plate strips are left/right only.
     GUTTER = 3
-    # …and TWO rows at the bottom, for the same reason. She occludes body content by
-    # design (a text run she cuts is ellipsized at her plate — Screen#occlusion — so a
-    # covered `160B` never reads as `16`), but a chewed BORDER reads as a rendering bug rather than as a mascot, and
-    # tab bodies stack up to two rules there: the pane's own at body.bottom - 1, plus a
+    # …and TWO rows at the bottom, for the same reason. A chewed BORDER reads as a
+    # rendering bug rather than as a mascot, and it would also count as something drawn
+    # under her (Screen#watch), sending her to the status row on every tab. Tab bodies stack up to two rules there: the pane's own at body.bottom - 1, plus a
     # nested Frame.card's at body.bottom - 2 on the sub-tabbed tabs (Discover, Sitemap,
     # Repeater…). Clearing both is the difference between "───  ▝▄▄▄▄▄▘  ╯" and a mascot
     # sitting inside the pane.
@@ -402,11 +401,40 @@ module Gori::Tui
       @cramped = w < AUTO_BAR_W || h < AUTO_BAR_H
     end
 
+    # The boxes the host watches while it draws the body, or nil when she is in the bar for
+    # another reason and the answer would change nothing. Her plate, one column wider on the
+    # left (the `:error` shake travels there, and a wide glyph whose second cell is under her
+    # starts there), plus the speech bubble while she has something to say.
+    def body_spots(body : Rect) : Array(Rect)?
+      return nil if !@honors_placement || Settings.companion_in_bar? || @cramped
+      return nil unless rect = Companion.place(body)
+      plate = Companion.plate_rect(body, rect)
+      x = {plate.x - 1, body.x}.max
+      spots = [Rect.new(x, plate.y, plate.right - x, plate.h)]
+      if (msg = @frame.try(&.bubble)) && (box = Companion.bubble_box(body, rect, msg))
+        spots << box
+      end
+      spots
+    end
+
+    # Did the tab draw anything where she would stand or speak this frame? Then she steps
+    # down to the status row for it, exactly as she does on a cramped terminal — the saved
+    # placement is never touched, and an empty corner brings the body sprite back.
+    property? covering : Bool = false
+
+    # In the bar ONLY because of what the tab drew, with the placement still `body`. The host
+    # keeps the body sprite's own visibility rules for that case (hidden under a modal and
+    # while typing in an editor), so yielding never shows her where `body` would have hidden
+    # her, and never buys the repaints that gate exists to save.
+    def yielded? : Bool
+      @honors_placement && @covering && !Settings.companion_in_bar? && !@cramped
+    end
+
     # THE effective placement: is she drawn as the status-row chip rather than the body
-    # sprite? Every host branch (render, occlusion, chip, notice slot, hit test, the
+    # sprite? Every host branch (render, chip, notice slot, hit test, the
     # #compose fold) asks this one predicate, so they cannot disagree.
     def in_bar? : Bool
-      @honors_placement && (Settings.companion_in_bar? || @cramped)
+      @honors_placement && (Settings.companion_in_bar? || @cramped || @covering)
     end
 
     # The frame to draw. A pure function of @beat and the mood/bubble state — never of the

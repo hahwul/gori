@@ -892,13 +892,17 @@ module Gori::Tui
     # Rendering
     # =========================================================================
 
+    # Cards on the canvas, no outer frame (`BodyChrome.framed`).
+    def body_shell? : Bool
+      false
+    end
+
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
-      shell = BodyChrome.shell_focused(focus, multi_pane: true)
       subtabs_focused = focus == :subtabs
       body_focused = focus == :body
-      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused,
+      @subtab_start = BodyChrome.framed_body(screen, rect, false, subtabs_focused,
         subtab_labels, @active_sub, @subtab_start,
-        find: subtab_find_shown?, find_lit: @host.subtab_find_focused?, marked: marked_chip_set) do |content|
+        find: subtab_find_shown?, find_lit: @host.subtab_find_focused?, marked: marked_chip_set, shell: body_shell?) do |content|
         if callbacks_sub?
           render_callbacks(screen, content, body_focused)
         else
@@ -919,7 +923,9 @@ module Gori::Tui
         # filter bar row above the table
         render_filter_bar(screen, Rect.new(body.x, body.y, body.w, 1))
         render_callback_table(screen, Rect.new(body.x, body.y + 1, body.w, body.h - 1), focused)
-      else
+      elsif body.h > 0
+        # Not on a body the payload bar used up entirely: the table's border meta would
+        # still print its count, on the row past the rect.
         render_callback_table(screen, body, focused)
       end
     end
@@ -1438,7 +1444,7 @@ module Gori::Tui
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       @host.focus_body
-      content = BodyChrome.content_rect(rect, strip: true)
+      content = BodyChrome.content_rect(rect, strip: true, shell: body_shell?)
       if callbacks_sub?
         click_callbacks(content, mx, my)
       else
@@ -1485,7 +1491,7 @@ module Gori::Tui
     # detail in one gesture, where the click's select-then-open needs two.
     def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
       return false unless callbacks_sub? && !@cb_detail
-      content = BodyChrome.content_rect(rect, strip: true)
+      content = BodyChrome.content_rect(rect, strip: true, shell: body_shell?)
       return false unless (table = callbacks_table(content)) && (idx = callback_row_at(table, mx, my))
       @host.focus_body
       @filter_editing = false

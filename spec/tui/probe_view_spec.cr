@@ -432,6 +432,42 @@ describe Gori::Tui::ProbeView do
     end
   end
 
+  # The closed toggle ends the band, after the tallies: ahead of them `CLOSED L:1` read as a
+  # heading for the counts. The click target moves with it.
+  it "draws +CLOSED after the severity tallies and hit-tests it there" do
+    view_store do |store|
+      seed(store, "x.one", "a.test")
+      view = Gori::Tui::ProbeView.new
+      view.set_registry(Gori::Verbs.registry)
+      view.reload(store)
+      rect = Gori::Tui::Rect.new(0, 0, 100, 16)
+      backend = MemoryBackend.new(100, 16)
+      view.render(Gori::Tui::Screen.new(backend), rect)
+      row = backend.row(0)
+      tally = row.index!("L:1")
+      badge = row.index!("+CLOSED")
+      tally.should be < badge
+      view.mode_band_hit(rect, badge, 0).should eq(:closed)
+      view.mode_band_hit(rect, tally, 0).should be_nil
+    end
+  end
+
+  it "gives a narrow band to the tallies before the +CLOSED badge" do
+    view_store do |store|
+      seed(store, "x.one", "a.test")
+      view = Gori::Tui::ProbeView.new
+      view.set_registry(Gori::Verbs.registry)
+      view.reload(store)
+      # ` PASSIVE ` + gap + `L:1` fits in 16 columns; the nine-column badge does not.
+      rect = Gori::Tui::Rect.new(0, 0, 16, 16)
+      backend = MemoryBackend.new(16, 16)
+      view.render(Gori::Tui::Screen.new(backend), rect)
+      backend.row(0).should contain("L:1")
+      backend.row(0).should_not contain("CLOSED")
+      (0...16).none? { |x| view.mode_band_hit(rect, x, 0) == :closed }.should be_true
+    end
+  end
+
   it "uses live keys for the mode and closed-issues chips" do
     previous = Gori::Settings.keymap_overrides
     begin
@@ -443,7 +479,7 @@ describe Gori::Tui::ProbeView do
         backend = MemoryBackend.new(100, 16)
         view.render(Gori::Tui::Screen.new(backend), Gori::Tui::Rect.new(0, 0, 100, 16))
         backend.row(0).should contain(" PASSIVE ")
-        backend.row(0).should contain(" CLOSED ")
+        backend.row(0).should contain(" +CLOSED ")
         backend.row(0).should_not contain("⇧M") # the border states the mode; the footer names the key
         backend.contains?("␣s scope:off").should be_true
       end

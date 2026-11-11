@@ -3096,11 +3096,14 @@ module Gori::Tui
         return
       end
       render_chrome(screen, layout)
-      # Text the companion will cover is ellipsized at her edge, not left as a stump that reads
-      # like a real value (see Screen#occlusion). Body only: nothing else shares her rows.
-      screen.occlusion = companion_occlusion(layout.body)
+      # She stands in the body's corner only when the tab drew nothing there; over rows she
+      # used to hide (History's SIZE and DUR, a Fuzzer chart) she rides the status row for
+      # that frame instead. Decided HERE, between the body and everything that asks
+      # `in_bar?` below, so her sprite, the status chip and the notice slot agree.
+      screen.watch = @companion.body_spots(layout.body)
       render_body(screen, layout.body)
-      screen.occlusion = nil
+      screen.watch = nil
+      @companion.covering = screen.inked?
       render_companion(screen, layout.body)
       # One retag for the whole status row: key_hints already funnels the Runner's own
       # hint literals, every overlay/prompt hint AND every controller body_hint, and the
@@ -3487,23 +3490,21 @@ module Gori::Tui
       Companion.draw(screen, body, frame)
     end
 
-    # Where she will be painted over the body this frame — the same gates as
-    # #render_companion — or nil when she will not be.
-    private def companion_occlusion(body : Rect) : Rect?
-      return nil if @companion.in_bar?
-      return nil unless @companion.frame
-      return nil unless companion_visible?
-      Companion.hit_rect(body)
-    end
-
     # The status-bar placement. Nil unless she is both enabled and in the bar (set to `bar`,
-    # or a terminal under Companion::AUTO_BAR_W x AUTO_BAR_H), which is
+    # a terminal under Companion::AUTO_BAR_W x AUTO_BAR_H, or a corner the tab drew on), which is
     # what keeps the chip out of the run entirely rather than reserving an empty slot.
     # Unlike the body form this needs no visibility gate: the status row is drawn after the
     # body and nothing but the ^F/^G prompts is ever laid over it.
     private def companion_bar_frame : Mascot::Frame?
-      return nil unless @companion.in_bar?
+      return nil unless companion_in_bar_shown?
       @companion.frame
+    end
+
+    # Is the status-row chip (and her notice in the row's text slot) drawn this frame? `bar`
+    # placement and a cramped terminal draw it unconditionally. A chip she took only because
+    # the tab drew on her corner keeps the body sprite's gate (`Companion#yielded?`).
+    private def companion_in_bar_shown? : Bool
+      @companion.in_bar? && (!@companion.yielded? || companion_visible?)
     end
 
     # In BAR placement she has no bubble to speak in, so her line goes through the status
@@ -3531,7 +3532,7 @@ module Gori::Tui
       # where it is read with the question.
       return nil if @overlay.confirm?
       toast = @toast
-      notice = @companion.in_bar? ? @companion.frame.try(&.bubble) : nil
+      notice = companion_in_bar_shown? ? @companion.frame.try(&.bubble) : nil
       return format_status_message(toast) unless notice
       return notice unless toast && (at = @toast_at)
       # A HELD reply keeps the slot against a newer toast, as it keeps her bubble against a
@@ -3544,13 +3545,14 @@ module Gori::Tui
     # Will she paint anything at all this frame? This is the gate the run loop puts in front
     # of her `dirty` — see the #tick call site for why her verdict alone is not enough.
     #
-    # Mirrors #render_companion: the bar chip is drawn unconditionally, so it is always on screen;
+    # Mirrors #render_companion: the bar chip is drawn unconditionally (bar a chip she only
+    # yielded to: #companion_in_bar_shown?), so it is always on screen;
     # the body sprite needs the visibility gate below AND a body tall enough for Companion.place to
     # seat her. Height is the only Companion.place term that can fail from a real Layout — the
     # narrowest body it produces is 36, comfortably over Companion::MIN_W — and @body_h being one
     # frame stale is harmless, since the resize that changed it is itself an event.
     private def companion_on_screen? : Bool
-      return true if @companion.in_bar?
+      return companion_in_bar_shown? if @companion.in_bar?
       companion_visible? && @body_h >= Companion::MIN_H
     end
 
@@ -4068,7 +4070,7 @@ module Gori::Tui
       return nil unless subtabs_shown? && !subtab_strip_self_drawn?
       w, h = @backend.size
       body = Layout.compute(w, h, statusline_active?).body
-      strip = BodyChrome.strip_rect(body, strip: true, strip_divider: subtab_strip_divider?)
+      strip = BodyChrome.strip_rect(body, strip: true, strip_divider: subtab_strip_divider?, shell: body_shell?)
       return nil unless strip
       BodyChrome.find_icon_split(BodyChrome.tab_row(strip), subtab_labels,
         current_subtab_hidden, show: true)[0]

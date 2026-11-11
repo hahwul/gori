@@ -223,14 +223,20 @@ module Gori::Tui
     # Frame a single body pane and yield the inset interior. Gold outline when the
     # body holds focus, hairline at rest. Outline-only on the canvas (bg = BG),
     # distinct from the lifted PANEL-filled modal overlays.
-    def framed(screen : Screen, rect : Rect, focused : Bool, & : Rect ->) : Nil
-      Frame.card(screen, rect, bg: Theme.bg, border: focused ? Theme.focus_gold : Theme.border)
-      yield frame_inner(rect)
+    #
+    # `shell: false` draws no frame and yields `rect` itself: a tab whose body is several
+    # cards (Repeater, Fuzzer, …) puts them straight on the canvas, as Project does. Its
+    # shell never took the gold (see #shell_focused), so it was a box around boxes that cost
+    # two rows and two columns. Every geometry helper below takes the same flag, and a
+    # controller answers it once in `TabController#body_shell?`.
+    def framed(screen : Screen, rect : Rect, focused : Bool, *, shell : Bool = true, & : Rect ->) : Nil
+      Frame.card(screen, rect, bg: Theme.bg, border: focused ? Theme.focus_gold : Theme.border) if shell
+      yield frame_inner(rect, shell: shell)
     end
 
     # One cell inside a body frame — shared by render and click hit-tests.
-    def frame_inner(rect : Rect) : Rect
-      rect.inset(1, 1)
+    def frame_inner(rect : Rect, *, shell : Bool = true) : Rect
+      shell ? rect.inset(1, 1) : rect
     end
 
     # True when the outer body shell should gild its border — single-pane tabs only.
@@ -248,9 +254,10 @@ module Gori::Tui
                     subtabs_focused : Bool, labels : Array(String)?, active : Int32,
                     prev_start : Int32 = 0, hidden : Set(Int32)? = nil, *,
                     strip_divider : Bool = true, find : Bool = false,
-                    find_lit : Bool = false, marked : Set(Int32)? = nil, & : Rect ->) : Int32
+                    find_lit : Bool = false, marked : Set(Int32)? = nil,
+                    shell : Bool = true, & : Rect ->) : Int32
       new_start = prev_start
-      framed(screen, rect, shell_focused) do |inner|
+      framed(screen, rect, shell_focused, shell: shell) do |inner|
         if labels
           sub_rect, content = carve_subtab_row(inner, divider: strip_divider)
           new_start = render_subtab_strip(screen, sub_rect, labels, active, subtabs_focused,
@@ -265,15 +272,15 @@ module Gori::Tui
 
     # Content rect inside a framed body after optional sub-tab carving — keeps
     # render and click geometry aligned.
-    def content_rect(rect : Rect, *, strip : Bool, strip_divider : Bool = true) : Rect
-      inner = frame_inner(rect)
+    def content_rect(rect : Rect, *, strip : Bool, strip_divider : Bool = true, shell : Bool = true) : Rect
+      inner = frame_inner(rect, shell: shell)
       strip ? carve_subtab_row(inner, divider: strip_divider)[1] : inner
     end
 
     # The sub-tab strip inside a framed body (nil when hidden).
-    def strip_rect(rect : Rect, *, strip : Bool, strip_divider : Bool = true) : Rect?
+    def strip_rect(rect : Rect, *, strip : Bool, strip_divider : Bool = true, shell : Bool = true) : Rect?
       return nil unless strip
-      carve_subtab_row(frame_inner(rect), divider: strip_divider)[0]
+      carve_subtab_row(frame_inner(rect, shell: shell), divider: strip_divider)[0]
     end
 
     # Height of the sub-tab chrome carved off a body rect: chips only, or chips + the
@@ -303,7 +310,7 @@ module Gori::Tui
     # STRUCTURALLY instead of by a flag those two would have to keep passing as false.
 
     # `▎ ⌕` — the glyph alone, no session count beside it. The strip's own chips already
-    # say how many there are, and the filter bar one row below prints `visible/total`; a
+    # say how many there are, and the hairline one row below prints the count; a
     # number on the pill was a third telling of the same fact, in the one spot on the row
     # that has to stay quiet.
     #
@@ -1114,6 +1121,13 @@ module Gori::Tui
       true
     end
 
+    # Does this tab draw the outer body frame? False for a tab whose body is several cards:
+    # see `BodyChrome.framed`. Render, the click hit-tests (`body_rect_below_filter`) and the
+    # Runner's strip geometry all read this one answer.
+    def body_shell? : Bool
+      true
+    end
+
     # ===== sub-tab filter subsystem (issue #121) =============================
     # Opt-in switch: this tab supports the `/` sub-tab filter bar. Default off — History,
     # Help, … never show it. The five workbench tabs + Repeater override to true.
@@ -1133,9 +1147,9 @@ module Gori::Tui
       %w[name]
     end
 
-    # The filter bar occupies a body row whenever there are ≥2 sub-tabs to filter (below
-    # that there is nothing to narrow). Repeater overrides to show it from the first
-    # session (its own History-style discoverability row).
+    # The filter is offered (its key on the strip's hairline, its bar once `/` opens it)
+    # whenever there are ≥2 sub-tabs to filter: below that there is nothing to narrow.
+    # Repeater overrides to offer it from the first session.
     def subtab_filter_shown? : Bool
       subtab_filter_enabled? && subtab_count >= 2
     end
@@ -1348,8 +1362,9 @@ module Gori::Tui
     end
 
     # --- filter bar rendering (shared by every opt-in tab's render_body) ---
-    # Base height: guidance/input row + hairline (the bar owns the strip divider). While
-    # editing, an optional suggestion row sits between the input and the hairline.
+    # Base height: input row + hairline (the bar owns the strip divider), drawn only while a
+    # filter is being typed or applied. While editing, an optional suggestion row sits
+    # between the input and the hairline.
     FILTER_BAR_H = 2
 
     # Cold-start hint (nothing typed) — spells out the tab's advertised fields + that bare
@@ -1362,14 +1377,34 @@ module Gori::Tui
     # content top, draw it, and yield the body rect below (unchanged content when no bar).
     protected def render_with_filter(screen : Screen, content : Rect, subtabs_focused : Bool, & : Rect ->) : Nil
       bar, body = carve_filter_bar(content)
-      render_subtab_filter_bar(screen, bar, subtabs_focused: subtabs_focused) if bar
+      if bar
+        render_subtab_filter_bar(screen, bar, subtabs_focused: subtabs_focused)
+      else
+        render_filter_rule_label(screen, content)
+      end
       yield body
+    end
+
+    # The idle filter takes no rows of its own: its key rides the strip's hairline, the way a
+    # card's title rides its border, with the sub-tab finder's beside it and the chip count at
+    # the far end. A standing `/ filter` row plus its rule cost every workbench tab two rows
+    # to say one key; `/` opens the bar in the same place it always did.
+    private def render_filter_rule_label(screen : Screen, content : Rect) : Nil
+      # Too short to be sure a strip was carved above it at all (see #carve_filter_bar).
+      return if content.h <= FILTER_BAR_H || !subtab_strip_divider?
+      return unless subtab_filter_shown? && subtab_strip_shown?
+      y = content.y - 1 # the strip's hairline, directly above the content
+      label = subtabs_fixed? || subtab_strip_self_drawn? ? " / filter " : " / filter · f find "
+      count = " #{subtab_count} "
+      return if content.w < label.size + count.size + 6
+      screen.text(content.x + 2, y, label, Theme.muted, Theme.bg)
+      screen.text(content.right - 2 - count.size, y, count, Theme.muted, Theme.bg)
     end
 
     # The body rect below the sub-tab strip AND the filter bar — shared by render + click
     # hit-tests so body clicks land where the body is actually drawn.
     protected def body_rect_below_filter(rect : Rect) : Rect
-      content = BodyChrome.content_rect(rect, strip: subtab_strip_shown?, strip_divider: subtab_strip_divider?)
+      content = BodyChrome.content_rect(rect, strip: subtab_strip_shown?, strip_divider: subtab_strip_divider?, shell: body_shell?)
       carve_filter_bar(content)[1]
     end
 
@@ -1377,11 +1412,23 @@ module Gori::Tui
     # FILTER_BAR_H idle/active, +1 while editing when there are Tab suggestions/a hint.
     private def carve_filter_bar(content : Rect) : {Rect?, Rect}
       return {nil, content} unless subtab_filter_shown? && content.h > 0
+      if filter_bar_idle?
+        # A content rect this short used to be all bar, and it is also what a strip carve
+        # with no room hands back (the strip's OWN rows: `carve_subtab_row`). Nothing below
+        # the filter may draw on it, so it stays empty exactly as it was.
+        return {nil, Rect.new(content.x, content.bottom, content.w, 0)} if content.h <= FILTER_BAR_H
+        return {nil, content}
+      end
       h = filter_bar_height
       h = {h, content.h}.min
       bar = Rect.new(content.x, content.y, content.w, h)
       body = content.h > h ? Rect.new(content.x, content.y + h, content.w, content.h - h) : Rect.new(content.x, content.y + h, content.w, 0)
       {bar, body}
+    end
+
+    # Nothing typed and not typing: no bar (see #render_filter_rule_label).
+    private def filter_bar_idle? : Bool
+      !@subtab_filter_editing && @subtab_filter.blank?
     end
 
     private def filter_bar_height : Int32
@@ -1397,7 +1444,7 @@ module Gori::Tui
     # own hairline drawn BELOW it (chips ─── filter ─── body, matching Target/Sitemap):
     #   editing  → `filter › <input>` [+ `↹ name:…` suggestions]
     #   active   → `: <query>`
-    #   idle     → `/ filter` (the fields are named once `/` opens: `filter_edit_hint`)
+    #   (idle has no bar: #render_filter_rule_label)
     # Right side always shows visible/total chip counts.
     private def render_subtab_filter_bar(screen : Screen, rect : Rect, *, subtabs_focused : Bool) : Nil
       return if rect.w < 8 || rect.h < 1
@@ -1413,14 +1460,11 @@ module Gori::Tui
         screen.input_line(px, row_y, @subtab_filter, @filter_cx, @filter_preedit,
           Theme.text_bright, Theme.panel, width: field_w,
           colors: Highlight.filter_query(@subtab_filter, Theme.text_bright, FilterAst::SEPS_FIELD))
-      elsif !@subtab_filter.blank?
+      else
         px = screen.text(rect.x, row_y, ": ", Theme.muted, Theme.panel, width: left_w)
         screen.styled_text(px, row_y, @subtab_filter,
           Highlight.filter_query(@subtab_filter, Theme.text, FilterAst::SEPS_FIELD),
           Theme.text, Theme.panel, width: {count_x - 1 - px, 0}.max)
-      else
-        # The fields are named once `/` opens (`filter_edit_hint`), not on every idle frame.
-        screen.text(rect.x, row_y, "/ filter", Theme.muted, Theme.panel, width: left_w)
       end
       screen.text(count_x, row_y, count, vis == 0 ? Theme.red : Theme.muted, Theme.panel)
 

@@ -1,5 +1,6 @@
 require "../spec_helper"
 require "../support/fake_host"
+require "../support/memory_backend"
 require "file_utils"
 require "base64"
 
@@ -213,5 +214,76 @@ describe "TabController#subtab_search_pick" do
       rc.reconcile
       pick.call(0).should be_nil
     end
+  end
+end
+
+# The workbench tabs spent four rows above their cards: an outer frame, the chips, a hairline,
+# a standing `/ filter` row and its own rule. The idle filter now rides the strip's hairline
+# and a tab made of cards draws no frame around them.
+describe "workbench body chrome" do
+  it "puts the idle filter on the strip's hairline and the cards right under it" do
+    with_session do |host|
+      rc = RepeaterController.new(host)
+      rc.repeater_new
+      rc.subtab_count.should eq 2
+      rect = Rect.new(0, 0, 100, 30)
+      idle = MemoryBackend.new(100, 30)
+      rc.render_body(Screen.new(idle), rect, :body)
+      idle.row(0).should contain("1:") # no outer frame: the chips are the body's first row
+      idle.row(1).should start_with("── / filter · f find ─")
+      idle.row(1).should end_with("─ 2 ──")
+      idle.row(2).should start_with("╭─ TARGET")
+      rc.body_shell?.should be_false
+      BodyChrome.frame_inner(rect, shell: rc.body_shell?).should eq(rect)
+
+      # `/` opens the bar where it always was, and the hairline goes back to a plain rule.
+      rc.start_subtab_filter
+      editing = MemoryBackend.new(100, 30)
+      rc.render_body(Screen.new(editing), rect, :body)
+      editing.row(1).should_not contain("/ filter")
+      editing.row(2).should start_with("filter ›")
+      editing.row(2).should end_with("2/2")
+    end
+  end
+
+  it "keeps the frame on an empty Fuzzer, where there are no cards to take the focus gold" do
+    with_session do |host|
+      fc = FuzzerController.new(host)
+      fc.subtab_count.should eq 0
+      fc.body_shell?.should be_true
+      b = MemoryBackend.new(100, 30)
+      fc.render_body(Screen.new(b), Rect.new(0, 0, 100, 30), :body)
+      b.row(0).should start_with("╭")
+    end
+  end
+
+  # `shell:` defaults to true, so a frameless tab that forgets it compiles and hit-tests one
+  # cell off. Every body-geometry call in a file that answers `body_shell?`, and the Runner's
+  # strip geometry, has to pass it.
+  it "passes shell: at every body-geometry call of a tab that can drop its frame" do
+    root = File.join(__DIR__, "..", "..", "src", "gori", "tui")
+    # `Dir.children`, not `Dir.glob`: a glob pattern built with `File.join` carries
+    # backslashes on Windows and matches nothing there.
+    dir = File.join(root, "controllers")
+    files = Dir.children(dir).select(&.ends_with?(".cr")).map { |f| File.join(dir, f) }
+    files.select! { |f| File.read(f).includes?("def body_shell?") }
+    files.size.should be >= 7
+    files << File.join(root, "runner.cr") << File.join(root, "runner", "mouse.cr")
+    misses = [] of String
+    files.each do |file|
+      src = File.read(file)
+      src.scan(/BodyChrome\.(?:framed_body|framed|frame_inner|content_rect|strip_rect)\(/) do |m|
+        depth = 1
+        i = m.end
+        while depth > 0 && i < src.size
+          depth += 1 if src[i] == '('
+          depth -= 1 if src[i] == ')'
+          i += 1
+        end
+        call = src[m.begin...i]
+        misses << "#{File.basename(file)}: #{call.lines.first}" unless call.includes?("shell:")
+      end
+    end
+    misses.should be_empty
   end
 end

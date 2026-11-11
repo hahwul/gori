@@ -245,11 +245,15 @@ module Gori::Tui
       @sub == :rules && @focus == :list
     end
 
+    # Cards on the canvas, no outer frame (`BodyChrome.framed`).
+    def body_shell? : Bool
+      false
+    end
+
     # --- render ---
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       body_focused = focus == :body
-      shell = BodyChrome.shell_focused(focus, multi_pane: true)
-      BodyChrome.framed(screen, rect, shell) do |inner|
+      BodyChrome.framed(screen, rect, false, shell: body_shell?) do |inner|
         @last_body = inner
         case @sub
         when :extract  then render_extract(screen, inner, body_focused)
@@ -674,10 +678,10 @@ module Gori::Tui
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       @host.focus_body
-      inner = BodyChrome.frame_inner(rect)
+      inner = BodyChrome.frame_inner(rect, shell: body_shell?)
       @last_body = inner
       # The strip rides the RULES card, which the `/` bar pushes down a row: test where it is drawn.
-      if s = @view.sub_at(rules_list_rect(inner), mx, my)
+      if s = @view.sub_at(rules_list_rect(inner), mx, my, @sub)
         unless s == @sub
           @sub = s
           @sub_sel = 0
@@ -728,7 +732,7 @@ module Gori::Tui
     end
 
     def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
-      inner = BodyChrome.frame_inner(rect)
+      inner = BodyChrome.frame_inner(rect, shell: body_shell?)
       case @focus
       when :preview_in
         body = @view.preview_input_body(inner)
@@ -742,7 +746,7 @@ module Gori::Tui
     end
 
     def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
-      inner = BodyChrome.frame_inner(rect)
+      inner = BodyChrome.frame_inner(rect, shell: body_shell?)
       case @focus
       when :preview_in
         body = @view.preview_input_body(inner)
@@ -879,7 +883,7 @@ module Gori::Tui
     # wheel.
     def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
       return handle_wheel(step) unless @sub == :rules
-      inner = BodyChrome.frame_inner(rect)
+      inner = BodyChrome.frame_inner(rect, shell: body_shell?)
       pin = @view.preview_input_body(inner)
       pout = @view.preview_output_body(inner)
       if !pin.empty? && pin.contains?(mx, my)
