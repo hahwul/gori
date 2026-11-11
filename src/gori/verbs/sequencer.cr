@@ -11,7 +11,7 @@ module Gori
     def self.register_sequencer(r : Verb::Registry) : Nil
       history_selected = ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_id.nil? }
       in_sequencer = ->(ctx : Verb::ExecContext) { ctx.current_tab == :sequencer }
-      in_repeater = ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater }
+      in_repeater = ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater && ctx.subtab_search_count >= 1 }
 
       r.register Verb::Definition.new(
         "history.sequence", "Send to Sequencer", "Collect this flow's token and analyze its randomness",
