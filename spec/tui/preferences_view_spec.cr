@@ -261,7 +261,64 @@ describe Gori::Tui::PreferencesView do
     # …and the card's right border survives on every row it draws.
     box = v.overlay_box(Rect.new(0, 0, 50, 30))
     ((box.y + 1)...(box.bottom - 1)).each do |y|
-      "│┤".includes?(backend.row(y)[box.right - 1]).should be_true # side border or the strip's tee
+      # side border, the strip's tee, or the scroll gauge: the row's two-row description
+      # takes one row of a form that fitted exactly
+      "│┤┃".includes?(backend.row(y)[box.right - 1]).should be_true
+    end
+  end
+
+  # A description is the only place a setting says what it does, and the note was one row
+  # of an 82-column card: `Command modifier` (274 columns) read as far as "^F ^B …".
+  describe "the focused field's description" do
+    area = Rect.new(2, 3, 76, 19) # the tab body of an 80x24 terminal
+    hint = Gori::Hotkeys.retag(SettingsView::SECTIONS[:keys][0].hint)
+    flat = ->(b : MemoryBackend, box : Rect) do
+      ((box.y + 4)...(box.bottom - 2)).join(' ') { |y| b.row(y)[(box.x + 2)...(box.right - 2)].strip }
+    end
+
+    it "wraps onto the rows it needs and keeps the focused row in view" do
+      v = PreferencesView.new
+      v.open(:keys)
+      backend = MemoryBackend.new(80, 24)
+      v.render(Screen.new(backend), area)
+      box = v.overlay_box(area)
+      flat.call(backend, box).should contain(hint)
+      backend.contains?("▎ Command modifier").should be_true
+      backend.row(box.bottom - 2).should contain("esc close")
+    end
+
+    it "takes no row of the form for a note that fits" do
+      v = PreferencesView.new
+      v.open_default # on the strip: a one-row note
+      backend = MemoryBackend.new(80, 24)
+      v.render(Screen.new(backend), area)
+      box = v.overlay_box(area)
+      backend.row(box.bottom - 3).should contain("pick a settings group")
+      backend.row(box.bottom - 4).should contain("›") # a field row: the form keeps its last row
+    end
+
+    it "leaves the form three rows on a short card and ends a cut note with …" do
+      short = Rect.new(2, 3, 76, 12)
+      v = PreferencesView.new
+      v.open(:keys)
+      backend = MemoryBackend.new(80, 24)
+      v.render(Screen.new(backend), short)
+      box = v.overlay_box(short)
+      box.h.should eq(10)
+      backend.contains?("▎ Command modifier").should be_true
+      backend.row(box.bottom - 3).should contain("…")
+      backend.row(box.bottom - 4).should_not contain("which modifier") # still a form row
+    end
+
+    it "does not focus a field on a click inside the note" do
+      v = PreferencesView.new
+      v.open(:keys)
+      backend = MemoryBackend.new(80, 24)
+      v.render(Screen.new(backend), area)
+      box = v.overlay_box(area)
+      v.click(area, box.x + 6, box.bottom - 4) # a note row; the form's last row before this change
+      v.render(Screen.new(backend), area)
+      backend.contains?("▎ Command modifier").should be_true
     end
   end
 

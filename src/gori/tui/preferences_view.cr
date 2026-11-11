@@ -4,6 +4,7 @@ require "./frame"
 require "./chrome"
 require "./overlay"
 require "./viewport"
+require "./note_detail_overlay"
 
 module Gori::Tui
   # The unified Preferences modal — ONE grouped settings surface reachable everywhere:
@@ -373,9 +374,25 @@ module Gori::Tui
       area.center(w, h)
     end
 
-    # Interior content rows (between the strip divider and the two footer rows).
+    # Interior content rows (between the strip divider and the footer: the note, then the keys).
     private def content_rect(box : Rect) : Rect
-      Rect.new(box.x + 2, box.y + 4, box.w - 4, {box.h - 7, 1}.max)
+      Rect.new(box.x + 2, box.y + 4, box.w - 4, {box.h - 6 - note_lines(box).size, 1}.max)
+    end
+
+    # The note above the key row: the save status, or the focused row's description, wrapped
+    # to the card. A description is the only place a setting says what it does, and most are
+    # wider than the card (the modal is 82 columns at most), so one row cut them mid-sentence
+    # on every terminal. The note takes the rows it needs from the form above, which scrolls
+    # to keep the focused row in view, and always leaves the form `MIN_FORM_ROWS`. What still
+    # does not fit is folded into the last row, where the draw ends it with `…`.
+    MIN_FORM_ROWS = 3
+
+    private def note_lines(box : Rect) : Array(String)
+      lines = NoteDetailOverlay.wrap_text(Hotkeys.retag(@status || focused_hint), {box.w - 4, 1}.max)
+      max = {box.h - 6 - MIN_FORM_ROWS, 1}.max
+      return [""] if lines.empty?
+      return lines if lines.size <= max
+      lines[0, max - 1] << lines[max - 1..].join(' ')
     end
 
     private def render_group(screen : Screen, content : Rect, body_focused : Bool) : Nil
@@ -457,16 +474,18 @@ module Gori::Tui
     end
 
     private def render_footer(screen : Screen, box : Rect) : Nil
-      note_y = box.bottom - 3
       hint_y = box.bottom - 2
       iw = {box.w - 4, 0}.max
-      # Retagged: field hints name claimed chords (the external editor's ^E, the command
-      # modifier's own ^P/^N/^W/^1-9), which must read as whichever modifier is configured.
-      note = Hotkeys.retag(@status || focused_hint)
+      # Retagged (in `note_lines`): field hints name claimed chords (the external editor's ^E,
+      # the command modifier's own ^P/^N/^W/^1-9), which must read as whichever modifier is
+      # configured.
+      note = note_lines(box)
       # Same green/yellow split SettingsView uses — a rejected save must not read as a
       # successful one just because it came through the modal.
       note_fg = @status ? (@status_warn ? Theme.yellow : Theme.green) : Theme.muted
-      screen.text(box.x + 2, note_y, note, note_fg, Theme.panel, width: iw)
+      note.each_with_index do |line, i|
+        screen.text(box.x + 2, hint_y - note.size + i, line, note_fg, Theme.panel, width: iw)
+      end
       hint = nav_hint
       hx = {box.right - hint.size - 2, box.x + 2}.max
       screen.text(hx, hint_y, hint, Theme.muted, Theme.panel, width: {box.right - hx - 1, 0}.max)

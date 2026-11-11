@@ -24,6 +24,7 @@
 - TUI: on a narrow terminal the Intercept queue footer keeps forward, drop and edit ahead of mark and range, and the flow detail, Params and empty Discover footers keep the menu and the key that leaves the pane (#1853, #1857)
 - History: with no flows yet, `Space` offers Open browser instead of Mark all and Clear history, the footer names the way to it, and the card adds the Import route (#1853)
 - TUI: the wizard, Help and the tour say that `^P` means Ctrl+P, and the project picker spells its keys the same way, keeps Settings and Quit on an 80-column footer, and opens Settings on a plain `,` where the terminal cannot send `Ctrl+,` (#1853, #1858)
+- Settings: a setting's description wraps onto as many rows as it needs instead of stopping at the edge of the card (#1861)
 
 ## v0.9.3
 
