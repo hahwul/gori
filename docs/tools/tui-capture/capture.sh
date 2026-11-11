@@ -57,8 +57,8 @@ trap 'tmux kill-session -t goricap 2>/dev/null || true; rm -rf "$WORK"' EXIT
 # rewritten before each palette pass; the seed run below doesn't care which.
 # write_settings <theme> [companion] — pass "companion" to wake Miss Ring in the body's
 # bottom-right corner. She ships ON now, so the doc scenes write an explicit
-# `"enabled":false` to keep her out of them: she occludes three rows of exactly the corner
-# most scenes are photographing. Only the hero shot asks for her.
+# `"enabled":false` to keep her out of them: a scene is a picture of its tab, and she would
+# sit in its corner or its status row. Only the hero shot asks for her.
 write_settings() {
   local companion='"companion":{"enabled":false},'
   if [ "${2:-}" = companion ]; then
@@ -190,10 +190,15 @@ for attempt in 1 2 3; do
   seed_all
   sleep 1; kill "$CAP" 2>/dev/null || true; sleep 1
   bad="$(sqlite3 "$DB" 'SELECT COUNT(*) FROM flows WHERE status >= 500;' 2>/dev/null || echo 99)"
-  [ "${bad:-99}" -le 2 ] && break
-  echo "▸ seeding hit $bad 5xx responses (flaky upstream); retrying…"
+  # Count what landed too. On a busy machine the capture proxy is not listening yet when the
+  # first seed goes out, every curl fails quietly, and an EMPTY project has no 5xx rows: it
+  # passed, and every scene was shot as the first-run card.
+  got="$(sqlite3 "$DB" 'SELECT COUNT(*) FROM flows;' 2>/dev/null || echo 0)"
+  [ "${bad:-99}" -le 2 ] && [ "${got:-0}" -ge 8 ] && break
+  echo "▸ seeding landed $got flows, $bad of them 5xx; retrying…"
   rm -f "$DB" "$DB-wal" "$DB-shm"
 done
+[ "${got:-0}" -ge 8 ] || { echo "seeding never landed (got ${got:-0} flows): is the network up and port $PORT free?"; exit 1; }
 
 # A provider, an idle listener session, and four callbacks, written straight
 # into the throwaway DB for the OAST scene. The tab hydrates its Callbacks table
