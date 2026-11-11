@@ -262,7 +262,11 @@ describe "workbench body chrome" do
   # strip geometry, has to pass it.
   it "passes shell: at every body-geometry call of a tab that can drop its frame" do
     root = File.join(__DIR__, "..", "..", "src", "gori", "tui")
-    files = Dir.glob(File.join(root, "controllers", "*.cr")).select { |f| File.read(f).includes?("def body_shell?") }
+    # `Dir.children`, not `Dir.glob`: a glob pattern built with `File.join` carries
+    # backslashes on Windows and matches nothing there.
+    dir = File.join(root, "controllers")
+    files = Dir.children(dir).select(&.ends_with?(".cr")).map { |f| File.join(dir, f) }
+    files.select! { |f| File.read(f).includes?("def body_shell?") }
     files.size.should be >= 7
     files << File.join(root, "runner.cr") << File.join(root, "runner", "mouse.cr")
     misses = [] of String
