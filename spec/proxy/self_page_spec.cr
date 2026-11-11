@@ -193,6 +193,39 @@ describe Gori::Proxy::SelfPage do
         ca_path: nil, listen: listen, version: "1", head_only: false)).should contain("404 Not Found")
     end
 
+    # The page called the SPKI pin "Fingerprint". A certificate viewer shows the digest of the
+    # certificate in hex, so there was nothing on the page to compare an install against.
+    it "prints the certificate's SHA-256 as hex pairs, and names the SPKI pin for what it is" do
+      resp = Gori::Proxy::SelfPage.respond("/", pem: pem, der: der, spki: "SPKI==",
+        ca_path: nil, listen: listen, version: "1", head_only: false)
+      text = String.new(split_response(resp)[1])
+      # `printf '\x30\x82\x01\x02' | shasum -a 256`
+      text.should contain(%(<span class="k">SHA-256</span><code>CA:B0:73:FA:36:0D:E7:DD:F0:BA:6D:C5:76:FB:3B:74:36:56:0A:A6:A8:FF:C2:99:5C:FD:9B:E4:74:FD:15:42</code>))
+      text.should contain(%(<span class="k">SPKI pin</span><code>SPKI==</code>))
+      text.should_not contain("Fingerprint")
+    end
+
+    it "prints neither digest when there is no CA to hand out" do
+      resp = Gori::Proxy::SelfPage.respond("/", pem: nil, der: nil, spki: nil,
+        ca_path: nil, listen: listen, version: "1", head_only: false)
+      text = String.new(split_response(resp)[1])
+      text.should_not contain("SHA-256")
+      text.should_not contain("SPKI pin")
+    end
+
+    it "says how to trust the CA on Linux, iOS and Android" do
+      resp = Gori::Proxy::SelfPage.respond("/", pem: pem, der: der, spki: nil,
+        ca_path: nil, listen: listen, version: "1", head_only: false)
+      text = String.new(split_response(resp)[1])
+      text.should contain("<dt>Linux</dt>")
+      text.should contain("update-ca-certificates")
+      text.should contain("trust anchor")
+      text.should contain("<dt>iOS</dt>")
+      text.should contain("Certificate Trust Settings")
+      text.should contain("<dt>Android</dt>")
+      text.should contain("CA certificate")
+    end
+
     it "omits the body for a HEAD request but keeps the headers" do
       resp = Gori::Proxy::SelfPage.respond("/", pem: pem, der: der, spki: nil,
         ca_path: nil, listen: listen, version: "1", head_only: true)

@@ -1,4 +1,5 @@
 require "html"
+require "digest/sha256"
 require "../../bind_address"
 require "../../url"
 
@@ -98,7 +99,8 @@ module Gori::Proxy
           head_only)
       else # :index
         build(200, "OK", "text/html; charset=utf-8",
-          index_html(ca_available: !pem.nil?, spki: spki, ca_path: ca_path, listen: listen, version: version).to_slice,
+          index_html(ca_available: !pem.nil?, sha256: der.try { |d| cert_sha256(d) }, spki: spki,
+            ca_path: ca_path, listen: listen, version: version).to_slice,
           head_only)
       end
     end
@@ -156,7 +158,15 @@ module Gori::Proxy
         HTML
     end
 
-    private def self.index_html(*, ca_available : Bool, spki : String?, ca_path : String?,
+    # The certificate's SHA-256 fingerprint as `openssl x509 -fingerprint -sha256`, Firefox and
+    # the OS certificate viewers print it: the digest of the DER, upper-case hex in colon
+    # pairs. This is the value to compare after an install. The SPKI pin below it is a
+    # different digest (of the public key, base64) that only Chromium's flag takes.
+    def self.cert_sha256(der : Bytes) : String
+      Digest::SHA256.digest(der).join(':') { |b| "%02X" % b }
+    end
+
+    private def self.index_html(*, ca_available : Bool, sha256 : String?, spki : String?, ca_path : String?,
                                 listen : {String, Int32}, version : String) : String
       # `listen[0]` is normally the CONCRETE address this device reached us on (ClientConn
       # threads the accepted socket's local address in), which under a `::` bind is a bare
@@ -166,7 +176,6 @@ module Gori::Proxy
       listen_s = HTML.escape(Gori::BindAddress.display(listen[0], listen[1]))
       ver = HTML.escape(version)
       path = HTML.escape(ca_path || "unknown")
-      fp = spki ? HTML.escape(spki) : nil
 
       cta =
         if ca_available
@@ -182,7 +191,10 @@ module Gori::Proxy
           %(<p class="hint">HTTPS interception is off right now, so there's no CA certificate to download.</p>)
         end
 
-      fingerprint = fp ? %(<div><span class="k">Fingerprint</span><code>#{fp}</code></div>) : ""
+      fingerprint = String.build do |io|
+        io << %(<div><span class="k">SHA-256</span><code>) << HTML.escape(sha256) << "</code></div>" if sha256
+        io << %(<div><span class="k">SPKI pin</span><code>) << HTML.escape(spki) << "</code></div>" if spki
+      end
 
       <<-HTML
         <!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -203,6 +215,9 @@ module Gori::Proxy
               <div><dt>Firefox</dt><dd>Settings → Certificates → Authorities → Import the <code>.pem</code>, then trust it for websites.</dd></div>
               <div><dt>macOS</dt><dd>Open the <code>.der</code> in Keychain Access, then set it to Always Trust.</dd></div>
               <div><dt>Windows</dt><dd>Open the <code>.der</code>, then install to Trusted Root Certification Authorities.</dd></div>
+              <div><dt>Linux</dt><dd>Debian and Ubuntu: copy the <code>.pem</code> to <code>/usr/local/share/ca-certificates/gori-ca.crt</code>, then run <code>sudo update-ca-certificates</code>. Fedora and Arch: <code>sudo trust anchor gori-ca.pem</code>. Browsers keep their own store there, so import it in the browser too.</dd></div>
+              <div><dt>iOS</dt><dd>Install the downloaded profile in Settings, then turn it on under Settings → General → About → Certificate Trust Settings.</dd></div>
+              <div><dt>Android</dt><dd>Settings → Security → Encryption &amp; credentials → Install a certificate → CA certificate. An app targeting Android 7 or later trusts it only if its network security config opts in.</dd></div>
             </dl>
 
             <div class="meta">
