@@ -309,3 +309,21 @@ describe ParamsController do
     end
   end
 end
+
+# At 80 columns the footer read `… y copy · ⇧Y all names …`: with no `cmds` segment for
+# `Chrome.fit_hints` to anchor on, the line was cut from its end and `↑/esc sub-tabs` went first.
+describe "ParamsController footer on a narrow row" do
+  it "keeps the menu and the way out, with and without a row" do
+    with_params_controller do |ctl, _, session|
+      Chrome.fit_hints(ctl.body_hint(:body), 59).should end_with("space cmds · ↑/esc sub-tabs")
+      seed_params_flow(session.store, "https://acme.test/search?q=shoes")
+      ctl.run
+      drain_until_landed(ctl)
+      ctl.view.selected_row.should_not be_nil
+      fitted = Chrome.fit_hints(ctl.body_hint(:body), 59) # 80x24 beside the companion chip
+      fitted.should end_with("space cmds · ↑/esc sub-tabs")
+      fitted.should_not contain("…")
+      ctl.body_hint(:body).should contain("mine · space cmds")
+    end
+  end
+end

@@ -153,19 +153,26 @@ module Gori::Tui
 
     getter focus : Symbol
 
-    # The empty card's pointer to where a run starts: Sitemap/History's space menu, read from
-    # the registry so the two keys (`space → > D`) follow the menu (`#set_registry`).
-    @start_hint = DiscoverView.start_hint(nil)
+    # The pointer to where a run starts: Sitemap/History's space menu, read from the registry
+    # so the two keys (`space → > D`) follow the menu (`#set_registry`).
+    START_FROM = "start from Sitemap/History"
+    @start_route = DiscoverView.start_route(nil)
 
     # "Discover here" from Sitemap/History — the one place the tab spells the menu path.
-    def self.start_hint(registry : Verb::Registry?) : String
-      Hotkeys.expand_menu_paths(registry, "start from Sitemap/History ({space:sitemap.discover} Discover here)")
+    def self.start_route(registry : Verb::Registry?) : String
+      Hotkeys.expand_menu_paths(registry, "{space:sitemap.discover} Discover here")
     end
 
-    getter start_hint : String
+    # The route on its own, for a footer that lists it as a segment a narrow row can drop.
+    getter start_route : String
+
+    # One phrase, for a toast.
+    def start_hint : String
+      "#{START_FROM} (#{@start_route})"
+    end
 
     def set_registry(registry : Verb::Registry) : Nil
-      @start_hint = DiscoverView.start_hint(registry)
+      @start_route = DiscoverView.start_route(registry)
     end
 
     def initialize
@@ -455,7 +462,7 @@ module Gori::Tui
       r = current
       unless r
         screen.text(inner.x + 1, inner.y,
-          "no runs — #{@start_hint}", Theme.muted, Theme.bg, width: inner.w - 1)
+          "no runs — #{start_hint}", Theme.muted, Theme.bg, width: inner.w - 1)
         return
       end
       # The badge tracks the SELECTED row, which is what ^R/^X act on — so a stopped run

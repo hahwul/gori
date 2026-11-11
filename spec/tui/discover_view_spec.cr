@@ -82,3 +82,13 @@ describe "DiscoverRun#persist_base" do
     run.persist_base.should be >= before
   end
 end
+
+describe "Gori::Tui::DiscoverView start pointer" do
+  it "offers the route on its own and inside the one-phrase toast form" do
+    view = DiscoverView.new
+    view.set_registry(Gori::Verbs.registry)
+    view.start_route.should end_with("Discover here")
+    view.start_route.should_not contain("{")
+    view.start_hint.should eq("#{DiscoverView::START_FROM} (#{view.start_route})")
+  end
+end

@@ -64,4 +64,28 @@ describe "HistoryController detail esc" do
       ctl.body_hint(:body).should contain("esc back")
     end
   end
+
+  # At 80x24 the strip's footer read `… ^X hex · p pretty …`: the two view toggles had the
+  # room, and the way out was cut.
+  it "keeps the menu and the way out on an 80-column strip footer" do
+    TuiContract.with_session("history-detail-narrow") do |session|
+      id = session.store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "GET", target: "/x", http_version: "HTTP/1.1",
+        head: "GET /x HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil,
+        source: Gori::FlowSource::Kind::Proxy))
+      session.store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
+      session.store.flush
+      ctl = HistoryController.new(DetailUpHost.new(session))
+      ctl.view.reload(session.store)
+      settle_history(ctl)
+      ctl.view.open_detail(session.store).should be_true
+      ctl.view.detail_strip_focus?.should be_true
+
+      fitted = Chrome.fit_hints(ctl.body_hint(:body), 57) # 80x24 beside the companion chip
+      fitted.should eq("←/→ panes · ↓/↵ enter · ^X hex · space cmds · esc back")
+      ctl.body_hint(:body).should contain("^R repeater · space cmds · esc back")
+    end
+  end
 end
