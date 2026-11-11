@@ -919,37 +919,29 @@ module Gori::Tui
       body = Rect.new(rect.x, rect.y + 2, rect.w, rect.h - 2)
       if @cb_detail && (row = selected_callback)
         render_callback_detail(screen, body, row, focused)
-      elsif body.h >= 2
-        # filter bar row above the table
-        render_filter_bar(screen, Rect.new(body.x, body.y, body.w, 1))
-        render_callback_table(screen, Rect.new(body.x, body.y + 1, body.w, body.h - 1), focused)
-      elsif body.h > 0
-        # Not on a body the payload bar used up entirely: the table's border meta would
-        # still print its count, on the row past the rect.
-        render_callback_table(screen, body, focused)
+      elsif table = callbacks_table(rect)
+        # Nil on a body the payload bar used up entirely: the table's border meta would
+        # still print its count, on the row past the rect. The filter has a row above the
+        # table only while it is being typed in; at rest it rides the table's border.
+        render_filter_bar(screen, Rect.new(body.x, body.y, body.w, 1)) if table.y > body.y
+        render_callback_table(screen, table, focused)
       end
     end
 
-    # Three-state filter bar (mirrors the History/Intercept bar): editing → `filter › <input>`,
-    # naming the fields until the first keystroke; committed non-blank → `: <query>`; idle →
-    # `/ filter`. One row, so the fields ride the empty input rather than a hint row of their own.
+    # The filter bar while it is being typed in: `filter › <input>`, naming the fields until
+    # the first keystroke. One row, so the fields ride the empty input rather than a hint row
+    # of their own. At rest there is no bar (`Frame.filter_label` on the table's border).
     private def render_filter_bar(screen : Screen, rect : Rect) : Nil
       return if rect.empty?
       screen.fill(Rect.new(rect.x, rect.y, rect.w, 1), Theme.bg)
-      if @filter_editing
-        prefix = "filter › "
-        screen.text(rect.x + 1, rect.y, prefix, Theme.accent, Theme.bg)
-        base = rect.x + 1 + prefix.size
-        screen.input_line(base, rect.y, @filter.value, @filter.caret, @filter.preedit,
-          Theme.text_bright, Theme.bg, width: {rect.w - prefix.size - 2, 0}.max)
-        if @filter.value.empty? && @filter.preedit.empty?
-          screen.text(base + 2, rect.y, "fields: proto  method  source  dest  provider", Theme.muted, Theme.bg,
-            width: {rect.right - 1 - (base + 2), 0}.max)
-        end
-      elsif !@filter.value.blank?
-        screen.text(rect.x + 1, rect.y, ": #{@filter.value}", Theme.text, Theme.bg, width: rect.w - 2)
-      else
-        screen.text(rect.x + 1, rect.y, "/ filter", Theme.muted, Theme.bg, width: rect.w - 2)
+      prefix = "filter › "
+      screen.text(rect.x + 1, rect.y, prefix, Theme.accent, Theme.bg)
+      base = rect.x + 1 + prefix.size
+      screen.input_line(base, rect.y, @filter.value, @filter.caret, @filter.preedit,
+        Theme.text_bright, Theme.bg, width: {rect.w - prefix.size - 2, 0}.max)
+      if @filter.value.empty? && @filter.preedit.empty?
+        screen.text(base + 2, rect.y, "fields: proto  method  source  dest  provider", Theme.muted, Theme.bg,
+          width: {rect.right - 1 - (base + 2), 0}.max)
       end
     end
 
@@ -1010,8 +1002,18 @@ module Gori::Tui
     # fit — where the retired card TITLE was merely clipped — so a narrow pane falls back to the
     # bare count. Losing the caveat to width is survivable; losing the number with it would be
     # the silent cap this pane exists to make visible.
-    private def draw_callback_meta(screen : Screen, rect : Rect, count : String, capped : String) : Nil
-      Frame.border_meta(screen, rect, "", count) if Frame.border_meta(screen, rect, "", capped).nil?
+    # Returns the x the meta was drawn at, or nil when neither form fit.
+    private def draw_callback_meta(screen : Screen, rect : Rect, count : String, capped : String) : Int32?
+      Frame.border_meta(screen, rect, "", capped) || Frame.border_meta(screen, rect, "", count)
+    end
+
+    # The resting filter on the table's top border, clipped short of the count the meta just
+    # drew: the count is what says the pane is a window, so a long query yields to it. No key
+    # to name while typing (the bar is up) or with nothing caught to narrow.
+    private def draw_callback_filter_label(screen : Screen, rect : Rect, meta_x : Int32?) : Nil
+      query = @filter.value.strip
+      return if @filter_editing || (@callbacks.empty? && query.empty?)
+      Frame.filter_label(screen, Frame.after_title(rect, nil), rect.y, RowFilter.label_limit(rect, meta_x), query)
     end
 
     private def render_callback_table(screen : Screen, rect : Rect, focused : Bool) : Nil
@@ -1028,7 +1030,7 @@ module Gori::Tui
       count = filtering ? "#{ordered.size}/#{held}" : held
       capped = @evicted > 0 ? "#{count} · #{@evicted} older kept in the project DB" : count
       Frame.card(screen, rect, border: focused ? Theme.focus_gold : Theme.border, bg: Theme.bg)
-      draw_callback_meta(screen, rect, count, capped)
+      draw_callback_filter_label(screen, rect, draw_callback_meta(screen, rect, count, capped))
       inner = rect.inset(1, 1)
       if ordered.empty?
         # A FILTERED miss keeps its line. The card explains how the tab works, and an operator
@@ -1459,14 +1461,15 @@ module Gori::Tui
     private def click_callbacks(content : Rect, mx : Int32, my : Int32) : Nil
       return if @cb_detail
       return if content.h < 2
-      # payload bar (2 rows) — no row action; body is the filter + table card below
-      body = Rect.new(content.x, content.y + 2, content.w, content.h - 2)
-      return if body.h < 1
-      if body.h >= 2 && my == body.y
+      # payload bar (2 rows) — no row action; under it the table card, with the filter's row
+      # above it only while that is being typed in.
+      return unless table = callbacks_table(content)
+      # The card's top border, where the resting filter rides: a click there opens it.
+      if my == table.y
         start_cb_filter unless @filter_editing
         return
       end
-      return unless (table = callbacks_table(content)) && (idx = callback_row_at(table, mx, my))
+      return unless idx = callback_row_at(table, mx, my)
       @filter_editing = false # a row click commits the filter, like History's list click
       if idx == @cb_sel
         @cb_detail = true
@@ -1477,14 +1480,14 @@ module Gori::Tui
       end
     end
 
-    # The CALLBACKS table card's rect inside `content` — under the two-row payload bar and
-    # the filter row — or nil when the pane is too short for one. The single derivation the
-    # click, the double-click and the filter-row test share.
+    # The CALLBACKS table card's rect inside `content` — under the two-row payload bar, and
+    # under the filter's row while that is being typed in — or nil when the pane is too short
+    # for one. The single derivation the render, the click and the double-click share.
     private def callbacks_table(content : Rect) : Rect?
       return nil if content.h < 2
       body = Rect.new(content.x, content.y + 2, content.w, content.h - 2)
       return nil if body.h < 1
-      body.h >= 2 ? Rect.new(body.x, body.y + 1, body.w, body.h - 1) : body
+      @filter_editing && body.h >= 2 ? Rect.new(body.x, body.y + 1, body.w, body.h - 1) : body
     end
 
     # A double-click on a callback row runs ↵ on it (#969's contract): select and open the

@@ -1587,13 +1587,14 @@ module Gori::Tui
     # (`env_row_offset?`) is exactly this bug: two sub-modes shared a line, only the draw knew,
     # and every click landed one row off. ---
 
-    # Whether the filter bar occupies the first interior row — THE predicate, read by the draw
-    # and by both hit-tests, so the three cannot disagree (the `env_row_offset?` discipline).
+    # Whether the pane shows its FEED rather than the onboarding card: anything recorded, a
+    # filter set, or the bar being typed into. That last clause is not defensive: `/` on an
+    # empty feed used to open an edit mode that was never drawn, swallowing every keystroke —
+    # including `s`/`l`/`c` — with the typed text visible nowhere on screen.
     #
-    # It is hidden only on a pane with nothing to filter, no filter set, AND no bar being typed
-    # into. That last clause is not defensive: `/` on an empty feed used to open an edit mode
-    # that was never drawn, swallowing every keystroke — including `s`/`l`/`c` — with the typed
-    # text visible nowhere on screen.
+    # Not the bar's ROW: that exists only while it is typed in (`@act_querying`, read by
+    # `act_list_inner`, so the draw and both hit-tests cannot disagree). At rest the filter
+    # rides the card's border (`Frame.filter_label`).
     private def act_bar_shown? : Bool
       !@act_feed_empty || activity_filtered? || @act_querying
     end
@@ -1605,8 +1606,8 @@ module Gori::Tui
     end
 
     private def act_list_inner(inner : Rect) : Rect
-      top = inner.y + (act_bar_shown? ? 1 : 0)
-      h = inner.h - (act_bar_shown? ? 1 : 0) - act_detail_h(inner)
+      top = inner.y + (@act_querying ? 1 : 0)
+      h = inner.h - (@act_querying ? 1 : 0) - act_detail_h(inner)
       Rect.new(inner.x, top, inner.w, {h, 0}.max)
     end
 
@@ -2541,7 +2542,7 @@ module Gori::Tui
       end
       # Always-visible format example so the "IP HOSTNAME" entry shape is clear at a glance
       # (IP first so it survives truncation in a narrow pane).
-      screen.text(inner.x, inner.y, "IP HOSTNAME · e.g. 10.0.0.1 example.com", Theme.muted, width: inner.w)
+      screen.text(inner.x + 1, inner.y, "IP HOSTNAME · e.g. 10.0.0.1 example.com", Theme.muted, width: inner.w - 1) # one column in, like the rows
       list = ov_list_inner(inner)
       return if list.h <= 0
 
@@ -2648,7 +2649,7 @@ module Gori::Tui
         TrafficEmptyState.render(screen, inner, variant: :project_env)
         return
       end
-      screen.text(inner.x, inner.y, "KEY VALUE · e.g. HOST api.example.com", Theme.muted, width: inner.w)
+      screen.text(inner.x + 1, inner.y, "KEY VALUE · e.g. HOST api.example.com", Theme.muted, width: inner.w - 1) # one column in, like the rows
       list = env_list_inner(inner)
       return if list.h <= 0
       y = list.y
@@ -2943,10 +2944,14 @@ module Gori::Tui
     private def render_activity_card(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
       Frame.card(screen, rect, bg: Theme.bg, border: Frame.pane_border(focused))
-      Frame.border_meta(screen, rect, "", activity_meta,
+      @act_meta_x = Frame.border_meta(screen, rect, "", activity_meta,
         fg: @act_rows.empty? ? Theme.muted : Theme.text_bright)
       render_activity_body(screen, rect, rect.inset(1, 1), focused)
     end
+
+    # Where the card's border summary starts this frame (nil: none drawn). The resting filter
+    # label stops short of it: the summary names the chips that are ON, and grows with them.
+    @act_meta_x : Int32? = nil
 
     # The card's border summary. Names the narrowings that are ON, because a chip filter is the
     # kind of state that turns an empty list into a lie about the project — the operator has to
@@ -2986,7 +2991,7 @@ module Gori::Tui
         TrafficEmptyState.render(screen, inner, variant: :project_activity)
         return
       end
-      render_activity_filter_bar(screen, Rect.new(inner.x, inner.y, inner.w, 1))
+      render_activity_filter(screen, card, inner)
       list = act_list_inner(inner)
       # A filter is in force (or being typed) over a feed that holds nothing at all. The card
       # still explains the pane, but it draws BELOW the bar — the bar is what says a narrowing
@@ -3135,23 +3140,23 @@ module Gori::Tui
       "#{at} · #{row.level} · #{row.source} · #{act_actor_text(row)} · #{act_one_line(row.message)}"
     end
 
-    # The three-state filter bar, the grammar the OAST callbacks list already uses: the input
-    # while editing, the committed query, and the field names when idle.
+    # The filter: its bar on the first interior row while it is being typed in, else its
+    # label on the card's top border, short of the border summary. The keys the idle row used
+    # to list (`s source`, `l level`, `a actor`, `↵ open`) are the footer's, which already
+    # named every one of them.
+    private def render_activity_filter(screen : Screen, card : Rect, inner : Rect) : Nil
+      return render_activity_filter_bar(screen, Rect.new(inner.x, inner.y, inner.w, 1)) if @act_querying
+      Frame.filter_label(screen, card.x + 2, card.y, RowFilter.label_limit(card, @act_meta_x), @act_filter.value.strip)
+    end
+
     private def render_activity_filter_bar(screen : Screen, rect : Rect) : Nil
-      return if rect.empty? || !act_bar_shown?
+      return if rect.empty?
       screen.fill(rect, Theme.bg)
-      if @act_querying
-        prefix = "filter › "
-        screen.text(rect.x + 1, rect.y, prefix, Theme.accent, Theme.bg)
-        base = rect.x + 1 + prefix.size
-        screen.input_line(base, rect.y, @act_filter.value, @act_filter.caret, @act_filter.preedit,
-          Theme.text_bright, Theme.bg, width: {rect.w - prefix.size - 2, 0}.max)
-      elsif !@act_filter.value.blank?
-        screen.text(rect.x + 1, rect.y, ": #{@act_filter.value}", Theme.text, Theme.bg, width: rect.w - 2)
-      else
-        screen.text(rect.x + 1, rect.y, "/ filter  ·  s source  ·  l level  ·  a actor  ·  ↵ open",
-          Theme.muted, Theme.bg, width: rect.w - 2)
-      end
+      prefix = "filter › "
+      screen.text(rect.x + 1, rect.y, prefix, Theme.accent, Theme.bg)
+      base = rect.x + 1 + prefix.size
+      screen.input_line(base, rect.y, @act_filter.value, @act_filter.caret, @act_filter.preedit,
+        Theme.text_bright, Theme.bg, width: {rect.w - prefix.size - 2, 0}.max)
     end
 
     # The selected event's message in full, wrapped, under a tee divider. Drawn only when

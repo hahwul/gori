@@ -55,14 +55,16 @@ describe "HistoryController — a click on the detail footer strip" do
       rect = Rect.new(0, 0, 100, 20)
       inner = rect.inset(1, 1)
       ctl.view.render_detail(Screen.new(MemoryBackend.new(100, 20)), inner)
-      # inner rows 1..18; text from row 3; strip = divider + stats + provenance = 3 rows, so
-      # the text rect ends at row 15 and the strip occupies 16, 17, 18.
+      # inner rows 1..18; text from row 3; strip = divider + provenance = 2 rows, so the text
+      # rect ends at row 16 and the strip occupies 17, 18. The stats ride the border, row 19.
       body = ctl.view.detail_text_rect(inner).not_nil!
-      body.bottom.should eq(16)
+      body.bottom.should eq(17)
       ctl.view.detail_at_top?.should be_true
-      ctl.handle_click(rect, 10, 17).should be_true # the stats row
+      ctl.handle_click(rect, 10, 17).should be_true # the strip's divider
       ctl.view.detail_at_top?.should be_true
       ctl.handle_click(rect, 10, 18).should be_true # the provenance row
+      ctl.view.detail_at_top?.should be_true
+      ctl.handle_click(rect, 10, 19).should be_true # the stats, on the pane's border
       ctl.view.detail_at_top?.should be_true
       ctl.handle_click(rect, 10, body.bottom - 1).should be_true # the last TEXT row
       ctl.view.detail_at_top?.should be_false

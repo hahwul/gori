@@ -546,6 +546,7 @@ module Gori::Tui
     private def render_results(screen : Screen, rect : Rect, focused : Bool) : Nil
       vis = visible
       Frame.card(screen, rect, "FINDINGS", border: Frame.pane_border(focused), bg: Theme.bg)
+      @filter.render_label(screen, Frame.after_title(rect, "FINDINGS"), rect.y, RowFilter.label_limit(rect), @results.size)
       Frame.border_meta(screen, rect, "FINDINGS", @filter.active? ? "#{vis.size}/#{@results.size}" : @results.size.to_s)
       bar, inner = results_bands(rect)
       @filter.render_bar(screen, bar) if bar

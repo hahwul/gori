@@ -1148,8 +1148,9 @@ module Gori::Tui
     end
 
     # The filter is offered (its key on the strip's hairline, its bar once `/` opens it)
-    # whenever there are ≥2 sub-tabs to filter: below that there is nothing to narrow.
-    # Repeater overrides to offer it from the first session.
+    # whenever there are ≥2 sub-tabs to filter: below that there is nothing to narrow, which
+    # is also the gate every `*.filter-subtabs` verb carries. The hairline still names the
+    # finder from the first sub-tab (#render_filter_rule_label), as `⌕` does.
     def subtab_filter_shown? : Bool
       subtab_filter_enabled? && subtab_count >= 2
     end
@@ -1363,8 +1364,8 @@ module Gori::Tui
 
     # --- filter bar rendering (shared by every opt-in tab's render_body) ---
     # Base height: input row + hairline (the bar owns the strip divider), drawn only while a
-    # filter is being typed or applied. While editing, an optional suggestion row sits
-    # between the input and the hairline.
+    # filter is being typed in. An optional suggestion row sits between the input and the
+    # hairline.
     FILTER_BAR_H = 2
 
     # Cold-start hint (nothing typed) — spells out the tab's advertised fields + that bare
@@ -1385,20 +1386,40 @@ module Gori::Tui
       yield body
     end
 
-    # The idle filter takes no rows of its own: its key rides the strip's hairline, the way a
-    # card's title rides its border, with the sub-tab finder's beside it and the chip count at
-    # the far end. A standing `/ filter` row plus its rule cost every workbench tab two rows
-    # to say one key; `/` opens the bar in the same place it always did.
+    # A filter that is not being typed takes no rows of its own: it rides the strip's
+    # hairline, the way a card's title rides its border (`Frame.filter_label`). Idle that is
+    # its key, with the sub-tab finder's beside it; holding a query it is `: query`. The far
+    # end counts the chips — all of them, or `shown/all` while a query narrows them. A
+    # standing row plus its rule cost every workbench tab two rows to say one key, and cost
+    # them again for as long as a filter was applied; `/` opens the bar where it always did.
     private def render_filter_rule_label(screen : Screen, content : Rect) : Nil
       # Too short to be sure a strip was carved above it at all (see #carve_filter_bar).
       return if content.h <= FILTER_BAR_H || !subtab_strip_divider?
-      return unless subtab_filter_shown? && subtab_strip_shown?
+      return unless subtab_filter_enabled? && subtab_strip_shown?
       y = content.y - 1 # the strip's hairline, directly above the content
-      label = subtabs_fixed? || subtab_strip_self_drawn? ? " / filter " : " / filter · f find "
-      count = " #{subtab_count} "
-      return if content.w < label.size + count.size + 6
-      screen.text(content.x + 2, y, label, Theme.muted, Theme.bg)
-      screen.text(content.right - 2 - count.size, y, count, Theme.muted, Theme.bg)
+      total = subtab_count
+      find = subtab_find_shown?
+      filter = total >= 2 # `subtab_filter_shown?`, without building the labels a second time
+      return unless find || filter
+      held = filter && !@subtab_filter.blank?
+      shown = held ? visible_indices.size : total
+      count = held ? " #{shown}/#{total} " : " #{total} "
+      count_x = content.right - 2 - count.size
+      return if count_x - (content.x + 2) < 14
+      draw_filter_rule_keys(screen, content.x + 2, y, count_x - 1, filter, find, held)
+      screen.text(count_x, y, count, shown == 0 ? Theme.red : Theme.muted, Theme.bg)
+    end
+
+    # Only the keys that do something: one chip has nothing to narrow, so it names the
+    # finder alone, and the filter's key joins it from the second sub-tab.
+    private def draw_filter_rule_keys(screen : Screen, x : Int32, y : Int32, max_x : Int32,
+                                      filter : Bool, find : Bool, held : Bool) : Nil
+      if filter
+        colors = held ? Highlight.filter_query(@subtab_filter, Theme.text, FilterAst::SEPS_FIELD) : nil
+        Frame.filter_label(screen, x, y, max_x, @subtab_filter, tail: find ? " · f find" : "", colors: colors)
+      else
+        Frame.filter_label(screen, x, y, max_x, "", key: "f find")
+      end
     end
 
     # The body rect below the sub-tab strip AND the filter bar — shared by render + click
@@ -1408,8 +1429,8 @@ module Gori::Tui
       carve_filter_bar(content)[1]
     end
 
-    # Filter (+ optional suggestion row) + hairline carved off the body top. Height is
-    # FILTER_BAR_H idle/active, +1 while editing when there are Tab suggestions/a hint.
+    # Filter (+ optional suggestion row) + hairline carved off the body top, only while it
+    # is being typed in. Height is FILTER_BAR_H, +1 when there are Tab suggestions/a hint.
     private def carve_filter_bar(content : Rect) : {Rect?, Rect}
       return {nil, content} unless subtab_filter_shown? && content.h > 0
       if filter_bar_idle?
@@ -1426,26 +1447,22 @@ module Gori::Tui
       {bar, body}
     end
 
-    # Nothing typed and not typing: no bar (see #render_filter_rule_label).
+    # Not typing: no bar, whether or not a query is held (see #render_filter_rule_label).
     private def filter_bar_idle? : Bool
-      !@subtab_filter_editing && @subtab_filter.blank?
+      !@subtab_filter_editing
     end
 
     private def filter_bar_height : Int32
       base = FILTER_BAR_H
-      return base unless @subtab_filter_editing
       # Reserve the extra row for the suggestion/hint line: live ↹ completions, OR the
       # cold-start field hint shown while the token is empty. A non-empty token with no
       # completions keeps the compact height (nothing to show there).
       (!filter_suggestions.empty? || filter_token_empty?) ? base + 1 : base
     end
 
-    # History-style 3-state bar, sitting under the chips + their own hairline, with its
-    # own hairline drawn BELOW it (chips ─── filter ─── body, matching Target/Sitemap):
-    #   editing  → `filter › <input>` [+ `↹ name:…` suggestions]
-    #   active   → `: <query>`
-    #   (idle has no bar: #render_filter_rule_label)
-    # Right side always shows visible/total chip counts.
+    # The bar while it is being TYPED in, under the chips and their hairline, with its own
+    # hairline drawn below it: `filter › <input>` [+ `↹ name:…` suggestions], and the
+    # visible/total chip count at the right. At rest there is no bar: #render_filter_rule_label.
     private def render_subtab_filter_bar(screen : Screen, rect : Rect, *, subtabs_focused : Bool) : Nil
       return if rect.w < 8 || rect.h < 1
       row_y = rect.y
@@ -1453,23 +1470,14 @@ module Gori::Tui
       vis = visible_indices.size
       count = "#{vis}/#{subtab_count}"
       count_x = rect.right - count.size
-      left_w = {count_x - 1 - rect.x, 1}.max
-      if @subtab_filter_editing
-        px = screen.text(rect.x, row_y, "filter › ", Theme.accent, Theme.panel)
-        field_w = {count_x - 1 - px, 1}.max
-        screen.input_line(px, row_y, @subtab_filter, @filter_cx, @filter_preedit,
-          Theme.text_bright, Theme.panel, width: field_w,
-          colors: Highlight.filter_query(@subtab_filter, Theme.text_bright, FilterAst::SEPS_FIELD))
-      else
-        px = screen.text(rect.x, row_y, ": ", Theme.muted, Theme.panel, width: left_w)
-        screen.styled_text(px, row_y, @subtab_filter,
-          Highlight.filter_query(@subtab_filter, Theme.text, FilterAst::SEPS_FIELD),
-          Theme.text, Theme.panel, width: {count_x - 1 - px, 0}.max)
-      end
+      px = screen.text(rect.x, row_y, "filter › ", Theme.accent, Theme.panel)
+      screen.input_line(px, row_y, @subtab_filter, @filter_cx, @filter_preedit,
+        Theme.text_bright, Theme.panel, width: {count_x - 1 - px, 1}.max,
+        colors: Highlight.filter_query(@subtab_filter, Theme.text_bright, FilterAst::SEPS_FIELD))
       screen.text(count_x, row_y, count, vis == 0 ? Theme.red : Theme.muted, Theme.panel)
 
       div_y = row_y + 1
-      if @subtab_filter_editing && rect.h >= 3
+      if rect.h >= 3
         sugg = filter_suggestions
         # Live completions to Tab through, else (at a cold start) the standing hint so the
         # row isn't blank the instant `/` opens; a non-empty no-match token stays quiet.

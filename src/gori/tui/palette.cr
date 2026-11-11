@@ -264,7 +264,7 @@ module Gori::Tui
       in Verb::Category::Navigation then {'»', Theme.accent}
       in Verb::Category::Action     then {'▸', Theme.green}
       in Verb::Category::Settings   then {'≡', Theme.orange}
-      in Verb::Category::System     then {'×', Theme.red}
+      in Verb::Category::System     then {'·', Theme.muted} # neutral: a red `×` read as close or danger on `Guided tour`
       end
     end
 

@@ -249,20 +249,14 @@ module Gori::Tui
     end
 
     # --- sub-tab tag filter (issue #121; machinery lifted to TabController) ---
-    # Repeater opts in with the full field language (incl. tags) and, unlike the ≥2
-    # default, shows the bar from the FIRST session (documented on subtab_filter_shown? below).
+    # Repeater opts in with the full field language (incl. tags). Like every other strip it
+    # offers the filter from the second session, which is also `repeater.filter-subtabs`' gate.
     def subtab_filter_enabled? : Bool
       true
     end
 
     def filter_fields : Array(String)
       %w[tag name host method status]
-    end
-
-    # The filter is offered whenever the strip is up (from the first session), so `/ filter`
-    # is on screen, on the strip's hairline, without having to discover `/` first.
-    def subtab_filter_shown? : Bool
-      subtab_filter_enabled? && subtab_strip_shown?
     end
 
     # The searchable projection of a session for the in-memory matcher (TUI-free).

@@ -38,6 +38,32 @@ describe Gori::Tui::EvidenceView do
     end
   end
 
+  # The archive's filter follows the other lists: at rest it rides the pane's border (the row
+  # above the view's rect) with the count and size, and has a row only while it is typed in.
+  it "rests its filter on the pane border and gives the row to the list" do
+    with_store do |store|
+      issue = store.insert_issue("auth", Gori::Store::Severity::High, "acme.test", nil)
+      store.freeze_evidence(issue, archive_snapshot("/before", 500))
+      view = EvidenceView.new
+      view.reload(store)
+      rect = Rect.new(1, 1, 118, 10)
+      rest = MemoryBackend.new(120, 12)
+      view.render(Screen.new(rest), rect, focused: true)
+      rest.row(0).should start_with("   / filter ") # `╭─` then the label
+      rest.row(0).should contain(" 1/1 · ")
+      rest.row(1).should contain("CONFIRM") # the column header is the pane's first row
+      view.row_at(rect, 5, 3).should eq(0)
+
+      view.start_query
+      typing = MemoryBackend.new(120, 12)
+      view.render(Screen.new(typing), rect, focused: true)
+      typing.row(0).strip.should be_empty
+      typing.row(1).should contain("filter › ")
+      typing.row(1).should contain("fields: issue:")
+      view.row_at(rect, 5, 4).should eq(0) # one row lower while the bar is open
+    end
+  end
+
   it "filters live and pins a two-row before/after comparison" do
     with_store do |store|
       issue = store.insert_issue("auth", Gori::Store::Severity::High, "acme.test", nil)

@@ -37,7 +37,7 @@ describe "HistoryView's frozen-evidence marker" do
 end
 
 private def stats_row(view) : String
-  backend = MemoryBackend.new(120, 16)
+  backend = MemoryBackend.new(120, 17) # the stats ride the pane's bottom border, row 16
   view.render_detail(Screen.new(backend), Rect.new(0, 0, 120, 16))
-  (0...16).map { |y| backend.row(y) }.find!(&.includes?("req "))
+  (0...17).map { |y| backend.row(y) }.find!(&.includes?("req "))
 end

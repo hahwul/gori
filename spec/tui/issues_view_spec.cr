@@ -32,8 +32,9 @@ describe Gori::Tui::IssuesView do
       backend.contains?("SQL injection").should be_true
       backend.contains?("LOW").should be_true
       backend.contains?("open").should be_true # freshly created → Open status tag
-      # critical sorts first; rows start at y+3 (filter bar, header, divider above)
-      backend.row(3).should contain("CRIT")
+      # critical sorts first; rows start at y+2 (header and divider above; the filter at rest
+      # rides the pane's border, the row above this rect)
+      backend.row(2).should contain("CRIT")
     end
   end
 
@@ -55,7 +56,7 @@ describe Gori::Tui::IssuesView do
 
       view.stop_query
       applied = MemoryBackend.new(80, 10)
-      view.render(Screen.new(applied), Rect.new(0, 0, 80, 10))
+      view.render(Screen.new(applied), Rect.new(1, 1, 78, 9)) # row 0 is the pane's border
       at2 = applied.row(0).index("hsot:acme").not_nil!
       applied.fg_at(at2, 0).should eq(Theme.muted)
       # …and `acme` is not a VALUE either: the backend free-texts the whole token, so the
@@ -93,7 +94,7 @@ describe Gori::Tui::IssuesView do
 
       view.stop_query
       backend = MemoryBackend.new(80, 10)
-      view.render(Screen.new(backend), Rect.new(0, 0, 80, 10))
+      view.render(Screen.new(backend), Rect.new(1, 1, 78, 9)) # row 0 is the pane's border
       at = backend.row(0).index("sev:>=high").not_nil!
       backend.fg_at(at, 0).should eq(Theme.syn_header)
       backend.fg_at(at + 4, 0).should eq(Theme.text_bright) # `>=high` IS a value here
@@ -681,11 +682,11 @@ describe Gori::Tui::IssuesView do
       marks_view(store) do |view, _|
         view.toggle_mark
         view.toggle_mark
-        backend = MemoryBackend.new(80, 10)
-        view.render(Screen.new(backend), Rect.new(0, 0, 80, 10))
-        backend.contains?("2 marked").should be_true
-        backend.row(3).starts_with?("▌").should be_true # marked row (CRIT)
-        backend.row(5).starts_with?("▎").should be_true # cursor row, unmarked (LOW)
+        backend = MemoryBackend.new(80, 11)
+        view.render(Screen.new(backend), Rect.new(0, 1, 80, 10)) # row 0 is the pane's border
+        backend.row(0).should contain(" 2 marked ")              # the chip rides it
+        backend.row(3).starts_with?("▌").should be_true          # marked row (CRIT)
+        backend.row(5).starts_with?("▎").should be_true          # cursor row, unmarked (LOW)
       end
     end
   end

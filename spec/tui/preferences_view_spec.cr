@@ -287,13 +287,16 @@ describe Gori::Tui::PreferencesView do
       backend.row(box.bottom - 2).should contain("esc close")
     end
 
-    it "takes no row of the form for a note that fits" do
+    # On the strip the card used to say `←/→ pick a settings group, ↓ to edit` directly above
+    # the key row that says `←/→ group · ↓/↵ enter`: one hint, twice, in one card.
+    it "says the strip's keys once, on the key row" do
       v = PreferencesView.new
-      v.open_default # on the strip: a one-row note
+      v.open_default # on the strip
       backend = MemoryBackend.new(80, 24)
       v.render(Screen.new(backend), area)
       box = v.overlay_box(area)
-      backend.row(box.bottom - 3).should contain("pick a settings group")
+      backend.row(box.bottom - 2).should contain("←/→ group · ↓/↵ enter")
+      backend.contains?("pick a settings group").should be_false
       backend.row(box.bottom - 4).should contain("›") # a field row: the form keeps its last row
     end
 

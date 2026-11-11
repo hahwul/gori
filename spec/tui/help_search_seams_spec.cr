@@ -149,3 +149,22 @@ describe "Help search and the surfaces around it" do
     end
   end
 end
+
+# Help's search follows the list filters: at rest its key rides the page strip's hairline and
+# takes no row, and typing opens the row (`Frame.filter_label`).
+describe "Help search at rest" do
+  it "names `/ search` on the strip's hairline and gives the row to the list" do
+    with_help_controller do |controller, _|
+      rest = MemoryBackend.new(100, 20)
+      controller.render_body(Gori::Tui::Screen.new(rest), Gori::Tui::Rect.new(0, 0, 100, 20), :body)
+      rest.row(2).should start_with("│── / search ─")
+      rest.row(3).should contain("GLOBAL") # the list starts right under the hairline
+
+      controller.handle_body_key(help_key('/'))
+      open = MemoryBackend.new(100, 20)
+      controller.render_body(Gori::Tui::Screen.new(open), Gori::Tui::Rect.new(0, 0, 100, 20), :body)
+      open.row(2).should_not contain("/ search")
+      open.row(3).should contain("search › ")
+    end
+  end
+end

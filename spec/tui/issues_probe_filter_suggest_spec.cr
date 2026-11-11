@@ -34,7 +34,7 @@ private def row_of(backend, text : String, h = 16) : Int32
 end
 
 describe "the Issues filter bar's completion" do
-  it "shifts the header and the rows down by one while the bar is open, render and hit-test together" do
+  it "shifts the header and the rows down by two while the bar is open, render and hit-test together" do
     with_store do |store|
       store.insert_issue("SQLi in /login", Gori::Store::Severity::Critical, "api.demo.test", nil)
       view = IssuesView.new
@@ -43,7 +43,7 @@ describe "the Issues filter bar's completion" do
 
       closed = render(view)
       row_closed = row_of(closed, "SQLi in /login")
-      row_closed.should eq(3) # bar, header, divider
+      row_closed.should eq(2) # header, divider: at rest the filter rides the border above
       view.list_row_at(rect, 10, row_closed).should eq(0)
 
       view.start_query
@@ -53,8 +53,8 @@ describe "the Issues filter bar's completion" do
       "severity:".each_char { |c| view.query_insert(c) }
       open = render(view)
       row_open = row_of(open, "SQLi in /login")
-      # One row lower, because the suggestion row now sits between the bar and the header.
-      row_open.should eq(row_closed + 1)
+      # Two rows lower: the bar and its suggestion row exist only while it is typed in.
+      row_open.should eq(row_closed + 2)
       # …and the click hit-test moved WITH it. This is the assertion the hand-written
       # `rect.y + 3` could not satisfy: it answered for the closed layout in both states.
       view.list_row_at(rect, 10, row_open).should eq(0)
@@ -99,9 +99,12 @@ describe "the Issues filter bar's completion" do
       view = IssuesView.new
       view.reload(store)
 
-      # The idle bar names the key and nothing else; the grammar waits for `/`.
-      idle = render(view).row(0)
-      idle.should contain("/ filter")
+      # At rest the pane's border (the row above the view's rect) names the key and nothing
+      # else; the grammar waits for `/`.
+      resting = MemoryBackend.new(100, 17)
+      view.render(Screen.new(resting), Rect.new(1, 1, 98, 16))
+      idle = resting.row(0)
+      idle.should contain(" / filter ")
       idle.should_not contain("-term excludes")
 
       view.start_query

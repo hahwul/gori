@@ -370,3 +370,35 @@ describe "Gori::Tui::OastController — a listener that stops answering" do
     end
   end
 end
+
+# The callbacks filter follows the other list filters: at rest it rides the table card's
+# border and takes no row; with nothing caught there is nothing to narrow and no key to name.
+describe "OAST callbacks filter at rest" do
+  it "names `/ filter` on the table's border only once there are callbacks" do
+    with_oast_controller do |controller, _, _, sid|
+      callbacks_pane(controller).should_not contain("/ filter")
+      flood(controller, sid, 3)
+      rows = callbacks_pane_at(controller, 120, 40)
+      border = rows.find!(&.starts_with?("╭─ / filter ─"))
+      border.should end_with("─ 3 ─╮")
+      rows.count(&.includes?("/ filter")).should eq(1) # the border only: no row under the payload bar
+    end
+  end
+
+  # The count on the border is what says the pane is a window; a long held query must be
+  # clipped short of it rather than run into it (the label used to be drawn first and then
+  # half-overwritten, fusing the query and the count into one run).
+  it "clips a long held query short of the count and the eviction caveat" do
+    with_oast_controller do |controller, _, _, sid|
+      flood(controller, sid, OastController::CALLBACK_CAP + 50)
+      controller.start_cb_filter
+      "a-long-query-that-matches-no-callback-at-all".each_char do |ch|
+        controller.handle_cb_filter_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: ch))
+      end
+      controller.handle_cb_filter_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter))
+      cap = OastController::CALLBACK_CAP
+      border = callbacks_pane_at(controller, 100, 30).find!(&.includes?(" : a-long"))
+      border.should match(/ : a-long\S*… +0\/#{cap} of #{cap + 50} · 50 older kept in the project DB /)
+    end
+  end
+end

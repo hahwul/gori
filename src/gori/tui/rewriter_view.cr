@@ -26,6 +26,9 @@ module Gori::Tui
     SUBS       = [:rules, :extract, :bindings]
     SUB_LABELS = ["Rules", "Extract", "Bindings"]
     SUB_H      = 1
+    # The rules card's border title. Named because the controller hangs the resting filter
+    # label off its end (`Frame.after_title`).
+    RULES_TITLE = "MATCH & REPLACE"
     # Below this the three chips want the row to themselves and the `↹ switch` hint is dropped.
     SUB_HINT_MIN_W = 56
 
@@ -76,6 +79,7 @@ module Gori::Tui
                preview_input : TextArea, preview_out : ReadPane,
                target : Store::RuleTarget = Store::RuleTarget::Request, host : String = "",
                empty_hint : String = "no rules — a add · p preset") : Nil
+      @meta_x = nil
       return if rect.w < 6 || rect.h < 2
       render_sub_strip(screen, rect, :rules)
       list_r, pin_r, pout_r = layout(rect)
@@ -257,11 +261,16 @@ module Gori::Tui
       Chrome.strip_segments(strip, SUB_LABELS, SUBS.index(active) || 0).find { |(_, r)| r.contains?(mx, my) }.try { |(i, _)| SUBS[i] }
     end
 
+    # Where the last frame drew the rules card's border count, or nil when it drew no card (or
+    # no count). The controller hangs the resting filter label on the same border and keeps it
+    # short of this.
+    getter meta_x : Int32? = nil
+
     private def render_list(screen : Screen, rect : Rect, rules : Array(Store::MatchRule),
                             sel : Int32, scroll : Int32, enabled_count : Int32,
                             focused : Bool, empty_hint : String) : Nil
       return if rect.w < 6 || rect.h < 2
-      Frame.card(screen, rect, "MATCH & REPLACE", bg: Theme.bg, border: Frame.pane_border(focused))
+      Frame.card(screen, rect, RULES_TITLE, bg: Theme.bg, border: Frame.pane_border(focused))
       meta = "#{enabled_count}/#{rules.size} enabled"
       # How many of them come from the global library, so the split is legible even when the
       # list is scrolled past the `G` rows. Only when there ARE any — a project with none
@@ -269,7 +278,7 @@ module Gori::Tui
       globals = rules.count(&.global?)
       meta = "#{globals} global · #{meta}" if globals > 0
       # Count rides the top border (right of the title), not a list row.
-      Frame.border_meta(screen, rect, "MATCH & REPLACE", meta)
+      @meta_x = Frame.border_meta(screen, rect, RULES_TITLE, meta)
       inner = rect.inset(1, 1)
       return if inner.empty?
 

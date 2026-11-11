@@ -34,10 +34,10 @@ describe "TUI audit remainder — IssuesView scroll clamp" do
         view = IssuesView.new
         view.reload(store)
 
-        rect = Rect.new(0, 0, 100, 13) # rows start at rect.y + 3 ⇒ list_h = 10
+        rect = Rect.new(0, 0, 100, 13) # rows start at rect.y + 2 ⇒ list_h = 11
         view.move(50)
         view.render(Screen.new(MemoryBackend.new(100, 13)), rect)
-        view.@scroll.should eq(41) # ensure_visible pulled the window down to the cursor
+        view.@scroll.should eq(40) # ensure_visible pulled the window down to the cursor
 
         ids = view.@issues.map(&.id)
         view.delete_ids(store, ids[44..]).should be_true # 16 gone, INCLUDING the cursor row
@@ -45,7 +45,7 @@ describe "TUI audit remainder — IssuesView scroll clamp" do
 
         backend = MemoryBackend.new(100, 13)
         view.render(Screen.new(backend), rect)
-        view.@scroll.should eq(34) # 44 issues − 10 visible rows
+        view.@scroll.should eq(33) # 44 issues − 11 visible rows
         (3...13).count { |y| backend.row(y).blank? }.should eq(0)
       end
     ensure
@@ -231,9 +231,9 @@ describe "TUI audit remainder — missing width clamps" do
       backend = MemoryBackend.new(80, 10)            # backend wider than the pane, so an overrun shows
       view.render(Screen.new(backend), Rect.new(0, 0, 40, 10))
 
-      backend.cluster_grid[3][28].should eq("日") # rect.right − 11 − 1
-      backend.row(3)[27].should eq(' ')          # title budget stops short of the host
-      backend.row(3)[39, 4].should eq("    ")    # nothing at or past the pane's edge
+      backend.cluster_grid[2][28].should eq("日") # rect.right − 11 − 1
+      backend.row(2)[27].should eq(' ')          # title budget stops short of the host
+      backend.row(2)[39, 4].should eq("    ")    # nothing at or past the pane's edge
     end
   end
 end

@@ -517,7 +517,9 @@ module Gori::Tui
     end
 
     private def focused_hint : String
-      return "←/→ pick a settings group, ↓ to edit" if @on_strip
+      # On the strip the key row directly below (`nav_hint`) already says `←/→ group · ↓/↵
+      # enter`; a sentence restating it one row up was the same hint twice in one card.
+      return "" if @on_strip
       return "" unless ft = focused_target
       sec, field = ft
       if sec.kind == :form && field >= 0

@@ -581,7 +581,7 @@ module Gori::Tui
         screen.desired_cursor = nil # the card is browsing, even if the pane underneath edits
         return
       end
-      px = screen.text(box.x + 2, box.y + 1, "search: ", Theme.muted, Theme.panel)
+      px = screen.text(box.x + 2, box.y + 1, "search › ", Theme.accent, Theme.panel)
       screen.input_line(px, box.y + 1, @search_query, @search_qcx, @search_preedit,
         Theme.text_bright, Theme.panel, width: {box.right - 2 - px, 1}.max)
     end

@@ -348,7 +348,7 @@ module Gori::Tui
     # otherwise the popup is a navigable read-only card, not an editor.
     private def render_filter(screen : Screen, box : Rect) : Nil
       if @searching
-        px = screen.text(box.x + 2, box.y + 1, "search: ", Theme.muted, Theme.panel)
+        px = screen.text(box.x + 2, box.y + 1, "search › ", Theme.accent, Theme.panel)
         screen.input_line(px, box.y + 1, @query, @qcx, @preedit, Theme.text_bright,
           Theme.panel, width: {box.right - 2 - px, 1}.max)
       else

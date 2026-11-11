@@ -1365,7 +1365,7 @@ module Gori::Tui
       d = @detail || return nil
       row = d.row
       pos = detail_row_index.try { |i| "#{i + 1}/#{@rows.size}" }
-      Frame::Crumb.new("HISTORY", "#{row.method} #{host_cell(row)}#{origin_path_memo(row)}", pos)
+      Frame::Crumb.new("HISTORY", crumb_subject("#{row.method} #{host_cell(row)}#{origin_path_memo(row)}"), pos)
     end
 
     def selected_id : Int64?
@@ -2999,6 +2999,7 @@ module Gori::Tui
 
     # The footer under the cards: the same lines as the unsplit strip, across the full width.
     private def render_split_footer(screen : Screen, rect : Rect) : Nil
+      render_detail_stats(screen, rect)
       return if detail_footer_height(rect) == 0
       y = split_cards(rect)[0].bottom
       detail_footer_lines.each_with_index do |line, i|
@@ -3945,14 +3946,15 @@ module Gori::Tui
       avail - (n + 1) >= DETAIL_FOOTER_MIN_BODY ? n + 1 : 0
     end
 
-    # The footer strip: a divider, the exchange's facts, then gori's own sentences about
-    # the flow (provenance, advisories) one per row. Drawn under the text of EVERY pane —
+    # The footer strip: a divider, then gori's own sentences about the flow (provenance,
+    # advisories) one per row, when there are any; the exchange's facts are on the border. Drawn under the text of EVERY pane —
     # request, response, hex, frames, messages — because none of it is a property of the
     # pane: status, sizes and latency describe the exchange, and the provenance note says
     # where the request came from. It used to ride the REQUEST pane's trailer, spliced
     # after the wire bytes as if it were part of the message (P7: the panes are the wire's
     # bytes, and a reader copying the pane got gori's sentence with them).
     private def render_detail_footer(screen : Screen, inner : Rect, body : Rect, focused : Bool) : Nil
+      render_detail_stats(screen, inner)
       lines = detail_footer_lines
       return if lines.empty? || detail_footer_height(inner) == 0
       y = body.bottom
@@ -3962,13 +3964,26 @@ module Gori::Tui
       end
     end
 
+    # Status, protocol, sizes, latency, type and time, on the pane's BOTTOM border (the row
+    # under `inner`, the shell's frame), padded like every other border label. They used to
+    # take a divider and a row at the foot of every detail for facts that describe the
+    # exchange, not the pane; the border was carrying nothing.
+    private def render_detail_stats(screen : Screen, inner : Rect) : Nil
+      detail = @detail || return
+      return if inner.w < 12
+      pad = Highlight::Span.new(" ", Theme.muted)
+      Highlight.draw(screen, inner.x + 1, inner.bottom, [pad] + detail_stats_line(detail) + [pad], width: inner.w - 2)
+    end
+
     # The footer's rows, top to bottom. Built per call rather than memoised: a handful of
     # short strings, and a live flow's facts change under the pane (pending → complete) via
     # `refresh_detail`, which does not go through the view cache.
     private def detail_footer_lines : Array(Highlight::Line)
       detail = @detail
       return EMPTY_LINES unless detail
-      lines = [detail_stats_line(detail)]
+      # The exchange's own facts are not here: they ride the pane's bottom border
+      # (`render_detail_stats`), so the common flow with nothing else to say has no strip.
+      lines = [] of Highlight::Line
       # Down here rather than on the MESSAGES chip: a label that ticks would move every chip
       # to its right (see `detail_pane_label`).
       if @ws_open.call(detail.row.id)

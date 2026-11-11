@@ -5350,3 +5350,52 @@ watches her corner while the body draws (`Screen#watch`) and, if any glyph lande
 her in the status row for that frame, exactly as a terminal under 100×30 already did. The
 saved placement is never written, and an empty corner brings the body sprite back. The price
 is the one `bar` placement always had: while she is in the row, her line uses its text slot.
+
+### 2026-11-12: a filter nobody is typing in has no row
+
+**Problem.** #1863 moved the idle sub-tab filter onto the strip's hairline, and the rest of
+the app then showed three other dresses for the same thing. An applied sub-tab filter still
+took a row and a rule. Issues, OAST Callbacks, Evidence, Project's Activity and Help kept a standing row that said
+`/ filter` (or `/ search`), two of them with a list of keys or fields the footer already named. Six panes on `RowFilter` (Discover, Miner, Authorize, Probe Rules,
+Rewriter, Colormarker) said nothing while idle and took a row while a query was held. And the
+Repeater alone offered the sub-tab filter from its first session.
+
+**Decision.** One rule and one helper, `Frame.filter_label`. A filter at rest rides the
+border or hairline directly above the rows it narrows: ` / filter ` idle, ` : query ` while one
+is held, with the count the row used to carry at the border's far end. Only typing opens a
+row. `RowFilter#shown?` is therefore `editing?`, and each pane draws `render_label` on its own
+border. With nothing to narrow and no query held, there is no label.
+
+- **Kept as rows:** History, Target and Probe Findings. Their bar also carries lens chips
+  (`v:…`, `⌁follow`, `s scope:…`, the count), so the row is earning its place.
+- **Kept as rows:** the `/ search` field of the Shortcuts popup and the hotkeys card. In a
+  modal card the field is the card's main control, as it is in Go to tab.
+- **The sub-tab filter still starts at two sub-tabs.** Offering it from the first, as the
+  Repeater's strip did, was considered and rejected: every `*.filter-subtabs` verb carries
+  the ≥2 gate because one chip has nothing to narrow, the Repeater's own verb included. The
+  hairline names exactly the keys that do something instead: `f find` from the first sub-tab
+  (as `⌕` is), and `/ filter · f find` from the second. The Repeater's override is gone.
+
+### 2026-11-12: say it once (the detail crumb, the History stats, a card's first line)
+
+Four places that said one thing more than once, or said it off the grid the rest of the pane
+keeps. Each follows a rule already in force.
+
+- **The detail crumb names the subject only when no rail does.** With the rail up, the open
+  row is lit directly above the crumb and the detail's own header repeats the title under it:
+  three printings in four rows. `DrillIn::Host#crumb_subject` drops it then, so the crumb
+  reads ` ‹ ISSUES · 1/20 `. With no rail (a short pane) the crumb is still the only thing
+  saying what is open, and keeps it.
+- **The History detail's stats ride the pane's bottom border.** Status, protocol, sizes,
+  latency, type and time took a divider and a row under every pane. They are facts about the
+  exchange, and the border was carrying nothing (`render_detail_stats`). The strip remains
+  for gori's own sentences (provenance, advisories), when there are any.
+- **Preferences says the strip's keys once.** The sentence above the card's key row repeated
+  it. The key row itself stays: the project picker draws this card with no status row.
+- **A card's first line starts one column in, like its rows** (Params' summary, the Host
+  overrides and Env format lines), and a typed bar's prompt is `<word> › ` everywhere
+  (`filter › `, `search › `).
+
+The palette's System sigil is a muted `·`. A red `×` read as close, or as danger, beside
+Guided tour.
+

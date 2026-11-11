@@ -246,6 +246,49 @@ describe "workbench body chrome" do
     end
   end
 
+  # A held query used to bring the row and its rule back for as long as it was applied.
+  it "keeps an applied filter on the hairline, with shown/all at the far end" do
+    with_session do |host|
+      rc = RepeaterController.new(host)
+      rc.repeater_new
+      rc.start_subtab_filter
+      "example".each_char { |c| rc.handle_subtab_filter_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+      rc.handle_subtab_filter_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter))
+      rc.subtab_filter_editing?.should be_false
+      b = MemoryBackend.new(100, 30)
+      rc.render_body(Screen.new(b), Rect.new(0, 0, 100, 30), :body)
+      b.row(1).should start_with("── : example · f find ─")
+      b.row(1).should match(/─ \d\/2 ──$/)
+      b.row(2).should start_with("╭─ TARGET") # no row of its own
+    end
+  end
+
+  # `⌕` is drawn from the first sub-tab and `f` works from the first; `/` narrows nothing
+  # until there are two (the gate every `*.filter-subtabs` verb carries). The hairline names
+  # exactly the keys that do something, on every strip alike.
+  it "names the finder alone on a one-sub-tab strip, and the filter from the second" do
+    with_session do |host|
+      rc = RepeaterController.new(host)
+      rc.subtab_count.should eq 1
+      one = MemoryBackend.new(100, 30)
+      rc.render_body(Screen.new(one), Rect.new(0, 0, 100, 30), :body)
+      one.row(1).should start_with("── f find ─")
+      one.row(1).should_not contain("/ filter")
+      one.row(1).should end_with("─ 1 ──")
+      rc.subtab_filter_shown?.should be_false
+
+      jc = JwtController.new(host)
+      jc.subtab_count.should eq 1
+      jwt = MemoryBackend.new(100, 30)
+      jc.render_body(Screen.new(jwt), Rect.new(0, 0, 100, 30), :body)
+      jwt.row(1).should start_with("── f find ─")
+      jc.new_session
+      two = MemoryBackend.new(100, 30)
+      jc.render_body(Screen.new(two), Rect.new(0, 0, 100, 30), :body)
+      two.row(1).should start_with("── / filter · f find ─")
+    end
+  end
+
   it "keeps the frame on an empty Fuzzer, where there are no cards to take the focus gold" do
     with_session do |host|
       fc = FuzzerController.new(host)

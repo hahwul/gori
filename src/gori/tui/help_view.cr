@@ -52,7 +52,8 @@ module Gori::Tui
         # Every filter bar leads an applied filter with `: ` in place of its idle prompt, and
         # nothing said what the colon was. History's key stands for the family: each bar has
         # its own filter verb, and they share a default.
-        Item.new(": query", "on a filter bar: the filter in force · {history.query} edits it"),
+        Item.new(": query", "on a filter bar or a border: the filter in force · {history.query} edits it"),
+        Item.new("/ filter", "on a border or the line under sub-tabs: the key that opens that list's filter"),
         Item.new("^P →", "Match & Replace — open the Rewriter tab", "rules.edit"),
         Item.new("^P →", "Notifications — the notification center (or click the notify badge)", "app.notifications"),
         Item.new("^, / ⚙", "preferences — every setting (also ^P → Settings)", "settings.open"),
@@ -733,17 +734,17 @@ module Gori::Tui
     end
 
     # The full Help pane keeps the search affordance visible on both reference pages. Unlike
-    # the popup it is already inside a framed body, so one compact row is enough; the list
-    # begins immediately below it.
+    # the popup it is already inside a framed body, so the field takes one compact row while
+    # it is open, the list beginning immediately below it, and none at rest.
     #
     # Only a FOCUSED search field claims the hardware caret. Tab is the shell's focus-ring key
     # and is consumed by the runner before `handle_body_key`, so an active search survives a
     # step out to the strip or tab bar; without this gate the pane would keep stamping
     # `desired_cursor` (and anchoring the terminal's IME composition) inside an unfocused body.
     private def render_search_bar(screen : Screen, rect : Rect, page : Symbol, focused : Bool) : Rect
-      screen.fill(Rect.new(rect.x, rect.y, rect.w, 1), Theme.bg)
       if @search_page == page
-        px = screen.text(rect.x + 1, rect.y, "search: ", Theme.accent, Theme.bg)
+        screen.fill(Rect.new(rect.x, rect.y, rect.w, 1), Theme.bg)
+        px = screen.text(rect.x + 1, rect.y, "search › ", Theme.accent, Theme.bg)
         w = {rect.right - px - 1, 1}.max
         if focused
           screen.input_line(px, rect.y, @search_query, @search_query.size, @search_preedit,
@@ -751,10 +752,13 @@ module Gori::Tui
         else
           screen.text(px, rect.y, @search_query, Theme.text_bright, Theme.bg, width: w)
         end
-      else
-        screen.text(rect.x + 1, rect.y, "/ search", Theme.muted, Theme.bg, width: {rect.w - 2, 1}.max)
+        return rect.h > 1 ? Rect.new(rect.x, rect.y + 1, rect.w, rect.h - 1) : Rect.new(rect.x, rect.y, rect.w, 0)
       end
-      rect.h > 1 ? Rect.new(rect.x, rect.y + 1, rect.w, rect.h - 1) : Rect.new(rect.x, rect.y, rect.w, 0)
+      # At rest the search has no row: its key rides the page strip's hairline, the row above
+      # this pane, as every list filter does (`Frame.filter_label`). Not on a pane too short
+      # to be sure that row IS the hairline.
+      Frame.filter_label(screen, rect.x + 2, rect.y - 1, rect.x + rect.w * 3 // 5, "", key: "/ search") if rect.h > 2
+      rect
     end
 
     # Memoised per instance: the tables are constants, so this is the same list every time, and

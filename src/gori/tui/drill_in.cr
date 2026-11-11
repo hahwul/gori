@@ -247,6 +247,16 @@ module Gori::Tui
         DrillIn.rail_split(inner, rail_count)[1]
       end
 
+      # Whether the last frame drew the rail. Its lit row, directly above the crumb, already
+      # names what is open, so the crumb then keeps to WHERE (` ‹ ISSUES · 1/20 `): with the
+      # subject too the title stood three times in four rows (rail, crumb, the detail's own
+      # header). Without a rail the crumb is the only thing saying it, and keeps the subject.
+      @rail_up = false
+
+      def crumb_subject(subject : String) : String
+        @rail_up ? "" : subject
+      end
+
       # Draw the rail and its divider; answer {detail rect, crumb meta}.
       #
       # `focused` is the frame's own state (it colours the divider, so the line matches the
@@ -256,6 +266,7 @@ module Gori::Tui
       def render_rail_chrome(screen : Screen, inner : Rect, focused : Bool,
                              active : Bool = focused) : {Rect, String?}
         rail, body = DrillIn.rail_split(inner, rail_count) # one call: rail_count walks the list
+        @rail_up = !rail.nil?
         unless rail
           # No rail to hang the step keys off, so they ride the crumb's row instead — the
           # affordance must not depend on the terminal being tall enough. Nothing to step

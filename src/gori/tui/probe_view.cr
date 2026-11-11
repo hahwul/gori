@@ -442,7 +442,7 @@ module Gori::Tui
     def detail_crumb : Frame::Crumb?
       issue = @detail || return nil
       pos = detail_row_index.try { |i| "#{i + 1}/#{@findings.size}" }
-      Frame::Crumb.new("PROBE", issue.title, pos)
+      Frame::Crumb.new("PROBE", crumb_subject(issue.title), pos)
     end
 
     # No issues at all (the raw list) — gates "clear all".

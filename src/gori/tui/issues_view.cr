@@ -151,16 +151,17 @@ module Gori::Tui
     end
 
     # The first ISSUE-row screen-y — ONE derivation, so `render_list` and both hit-tests
-    # cannot drift. The filter bar owns `rect.y`; while the bar is being EDITED the suggestion
-    # row takes the next one; then the column header and its divider.
+    # cannot drift. While the bar is being TYPED in it owns `rect.y` and its suggestion row
+    # the next one; at rest it has no row (`render_filter_rest`). Then the column header and
+    # its divider.
     #
     # Extracted before the suggestion row existed: `rect.y + 3` was written out at three
     # sites, and a row added without this puts every click one row off — but only while the
     # bar is open, which is a state a render assertion never reaches. Mirrors
     # `HistoryView#list_top`.
     private def list_top(list_rect : Rect) : Int32
-      hdr_y = list_rect.y + 1
-      hdr_y += 1 if @querying
+      hdr_y = list_rect.y
+      hdr_y += 2 if @querying
       hdr_y + 2 # past the column header and its divider
     end
 
@@ -262,7 +263,7 @@ module Gori::Tui
     def detail_crumb : Frame::Crumb?
       issue = @detail || return nil
       pos = detail_row_index.try { |i| "#{i + 1}/#{@issues.size}" }
-      Frame::Crumb.new("ISSUES", issue.title, pos)
+      Frame::Crumb.new("ISSUES", crumb_subject(issue.title), pos)
     end
 
     getter notes_mode : InputMode
@@ -1127,18 +1128,21 @@ module Gori::Tui
     end
 
     private def render_list(screen : Screen, rect : Rect, focused : Bool) : Nil
-      render_filter_bar(screen, rect)
-      # The suggestion row exists only while the bar is being edited, so the column header
-      # and everything under it shift down by one for exactly that state. `list_top` is the
-      # inverse and the hit-tests read it.
-      hdr_y = rect.y + 1
+      # The bar and its suggestion row exist only while it is being typed in, so the column
+      # header and everything under it shift down by two for exactly that state. `list_top`
+      # is the inverse and the hit-tests read it.
+      hdr_y = rect.y
       if @querying
+        render_filter_bar(screen, rect)
+        hdr_y += 1
         # The suggestion row owes its own vertical bound, like the column header below it:
         # `Screen#text` clips to the SCREEN, not to this pane, and a 40x9 terminal
         # (`Layout.usable?`'s floor plus a row) leaves this list a one-row interior — the `↹ …`
         # row landed on the shell's key-hint line. Contract: `spec/tui/contract_render_bounds_spec.cr`.
         render_query_suggestions(screen, rect, hdr_y, QUERY_HINT, Issues::Filter::FIELD_HELP_PROC) if hdr_y < rect.bottom
         hdr_y += 1
+      else
+        render_filter_rest(screen, rect)
       end
       # Bounds-guarded like Probe's twin: `Screen#text` clips to the SCREEN, not to this pane,
       # so on a one-row interior the header used to paint over the shell's key hints. The
@@ -1299,33 +1303,28 @@ module Gori::Tui
       lines
     end
 
-    # The `/` filter bar on the list's top row: while editing, `filter › <input>`;
-    # otherwise the applied query (+ a match count) or a usage hint.
+    # The `/` filter bar on the list's top row, while it is being typed in.
     private def render_filter_bar(screen : Screen, rect : Rect) : Nil
-      if @querying
-        screen.text(rect.x + 1, rect.y, QUERY_PREFIX, Theme.accent)
-        base = rect.x + 1 + QUERY_PREFIX.size
-        screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright, width: {rect.w - QUERY_PREFIX.size - 2, 0}.max,
-          colors: Highlight.filter_query(@query, Theme.text_bright, FilterAst::SEPS_FIELD,
-            known: QUERY_KNOWN, shaped: Issues::Filter::FIELD_SHAPED))
-        return
-      end
-      # One right-anchored chain — see HistoryView#render_ql_bar.
+      screen.text(rect.x + 1, rect.y, QUERY_PREFIX, Theme.accent)
+      base = rect.x + 1 + QUERY_PREFIX.size
+      screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright, width: {rect.w - QUERY_PREFIX.size - 2, 0}.max,
+        colors: Highlight.filter_query(@query, Theme.text_bright, FilterAst::SEPS_FIELD,
+          known: QUERY_KNOWN, shaped: Issues::Filter::FIELD_SHAPED))
+    end
+
+    # The filter at rest, on the pane's top border (the row above `rect`, which is the shell's
+    # frame): ` / filter ` idle, ` : query ` applied — still highlighted, because that readout
+    # is what you scan to check how the filter is being read — and at the far end the match
+    # count and the mark chip the bar's row used to carry (`Frame.filter_label`).
+    private def render_filter_rest(screen : Screen, rect : Rect) : Nil
+      return if @issues.empty? && !filtering? && @marks.empty? # nothing to narrow, nothing to say
+      y = rect.y - 1
       chips = [] of {String, Color}
-      chips << {@issues.size.to_s, Theme.muted} if filtering?
-      chips << {mark_chip_text.not_nil!, Theme.accent} if mark_chip_text
-      rx = Frame.right_text_chain(screen, rect.right - 1, rect.y, rect.x + 2, chips)
-      left_w = {rx - (rect.x + 1), 0}.max
-      if filtering?
-        # The committed query stays highlighted — this readout is what you scan to
-        # check how the active filter is actually being read.
-        qx = screen.text(rect.x + 1, rect.y, ": ", Theme.muted, width: left_w)
-        screen.styled_text(qx, rect.y, @query,
-          Highlight.filter_query(@query, Theme.text, FilterAst::SEPS_FIELD, known: QUERY_KNOWN, shaped: Issues::Filter::FIELD_SHAPED),
-          Theme.text, width: {rect.x + 1 + left_w - qx, 0}.max)
-      else
-        screen.text(rect.x + 1, rect.y, "/ filter", Theme.muted, width: left_w)
-      end
+      chips << {" #{@issues.size} ", Theme.muted} if filtering?
+      mark_chip_text.try { |t| chips << {" #{t} ", Theme.accent} }
+      rx = Frame.right_text_chain(screen, rect.right - 1, y, rect.x + 14, chips)
+      colors = filtering? ? Highlight.filter_query(@query, Theme.text, FilterAst::SEPS_FIELD, known: QUERY_KNOWN, shaped: Issues::Filter::FIELD_SHAPED) : nil
+      Frame.filter_label(screen, rect.x + 1, y, rx - 1, filtering? ? @query : "", colors: colors)
     end
 
     # Mark count, drawn right-to-left ending just left of `right_x`; returns the new left

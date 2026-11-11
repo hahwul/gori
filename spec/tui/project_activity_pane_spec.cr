@@ -388,6 +388,22 @@ describe "ProjectView ACTIVITY pane" do
 
   # A chip set over an empty feed must SAY so. The card alone reads as "nothing has happened",
   # which is a different claim from "nothing matches what you asked for".
+  # The border summary names the chips in force, so it grows with them; a held query is
+  # clipped short of it instead of painting over it.
+  it "clips a held query short of the border summary" do
+    tmp_store do |store, project|
+      seed(store)
+      view = activity_view(store, project)
+      cycle_source_to(view, "agent")
+      cycle_level_to(view, "warn")
+      view.activity_filter_field.set("a-long-query-that-matches-no-event-at-all")
+      view.reload_activity(store)
+      rows = screen_rows(view, Rect.new(0, 0, 50, 30))
+      border = rows.find!(&.includes?(" : a-long"))
+      border.should match(/ : a-long\S*… +0 events · agent · warn /)
+    end
+  end
+
   it "keeps the bar when a chip narrows an empty feed, and the geometry agrees" do
     tmp_store do |store, project|
       view = activity_view(store, project)
@@ -398,14 +414,14 @@ describe "ProjectView ACTIVITY pane" do
       view.activity_feed_empty?.should be_true
       view.activity_filtered?.should be_true
       rows = screen_rows(view, rect)
-      # The bar rides the FIRST interior row — the row `act_list_inner` reserves for it. Located
-      # from the card's own border rather than from a hardcoded offset, so the assertion cannot
-      # drift with the OVERVIEW band above it. If the draw skipped the bar while the geometry
-      # reserved it, the two would be one row apart.
-      # The sub-tab cards lost their border titles (the chip strip one row above names the
-      # pane), so the anchor is that chip: the card's top border is the row under the strip.
+      # At rest the filter rides the card's BORDER, which also names the chip doing the
+      # narrowing; the bar has a row only while it is typed in. Located from the pane's chip
+      # (the card's top border is the row under the strip) rather than from a hardcoded
+      # offset, so the assertion cannot drift with the OVERVIEW band above it.
       card = rows.index(&.includes?("Activity")).not_nil! + 1
-      rows[card + 1].should contain("/ filter")
+      rows[card].should contain("╭─ / filter ─")
+      rows[card].should contain("agent")
+      rows[card + 1].should_not contain("/ filter")
       rows.join("\n").should contain("What agents and background jobs did")
     end
   end
