@@ -312,10 +312,6 @@ module Gori::Tui
         end
       elsif @issues.querying?
         "type to filter · ↹ complete · ↓ list · ? reference · ↵ apply · esc clear"
-      elsif @issues.empty? && !@issues.filtering?
-        # The empty card: `↵ open` and `⇧E export` name keys with nothing to act on, and the
-        # one action there is sits on the card. Say that one (History does the same).
-        "#{nnew} new · space cmds · esc tabs"
       elsif @issues.preview_enabled? && @issues.preview_focus == :preview
         "↑/↓ scroll preview · ↹ list · ↵ open full · #{export} export · space cmds · esc tabs"
       elsif @issues.mark_count > 0
@@ -327,6 +323,10 @@ module Gori::Tui
         # not — it wipes the project. A bare "clear" here would read as "clear the marked ones".
         mark = Hotkeys.binding_label(reg, "issues.mark-toggle", "t")
         "#{@issues.mark_count} marked · #{mark} mark · ⇧↑/⇧↓ range · space acts on marks · #{clear} clear ALL · esc drops marks"
+      elsif @issues.empty? && !@issues.filtering?
+        # The empty card, below the marks branch because marks can outlive their rows: `↵ open` and `⇧E export` name keys with nothing to act on, and the
+        # one action there is sits on the card. Say that one (History does the same).
+        "#{nnew} new · space cmds · esc tabs"
       elsif @issues.preview_enabled?
         "↑/↓ move · ↵ open · ↹ preview · #{filt} filter · #{nnew} new · #{export} export · space cmds · esc tabs"
       else

@@ -54,7 +54,7 @@ module Gori::Tui
     end
 
     def render_content(screen : Screen, content : Rect, focus : Symbol) : Nil
-      @diff.render(screen, content, focused: focus == :body)
+      @diff.render(screen, content, focused: focus == :body, run_key: keys("{diff.run}"))
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
@@ -119,7 +119,12 @@ module Gori::Tui
       # `esc sub-tabs` on BOTH branches. The empty-state line names one key, and for as long
       # as it named only that one the tab read as a dead end — `diff.to-menu` did not exist,
       # and the hint that would have shown it missing said nothing either.
-      return keys("{diff.pick-a} pick the baseline project · ↑/esc sub-tabs") unless @diff.ready?
+      # …and the key is the one for the side still missing: a swap can leave A as the side
+      # that is set, where "pick the baseline" names the pick already made.
+      unless @diff.ready?
+        pick = @diff.slot(:a) ? "{diff.pick-b} pick the newer project" : "{diff.pick-a} pick the baseline project"
+        return keys("#{pick} · ↑/esc sub-tabs")
+      end
       base = keys("{diff.pick-a}/{diff.pick-b} pick · {diff.swap} swap · {diff.run} run · {diff.lens} lens · {diff.copy} copy")
       # The three ROW verbs are gated on a row under the cursor (`diff_rows_shown?`), and a
       # lens can empty the list. Naming a key that would do nothing is the hint lying about

@@ -335,8 +335,22 @@ describe "Gori::Tui::RewriterController (tab review)" do
     it "on the rules list" do
       with_rebind({"rewriter.add" => ["n"]}) do
         with_rewriter_controller do |ctl, _, _|
-          render(ctl).contains?("no rules — press n to add, or p for a preset").should be_true
+          render(ctl).contains?("no rules — n add · p preset").should be_true
         end
+      end
+    end
+
+    # A filter that hides every rule is not a project with none: "add one" there would
+    # answer a question nobody asked, and the way out is the filter.
+    it "tells a filter with no match apart from an empty list" do
+      with_rewriter_controller do |ctl, _, session|
+        add_project(session.rules, "one")
+        ctl.rewriter_filter
+        ctl.handle_list_filter_key(key(Termisu::Input::Key::LowerZ, char: 'z'))
+        ctl.handle_list_filter_key(key(Termisu::Input::Key::Enter))
+        backend = render(ctl)
+        backend.contains?("no rule matches — / edits the filter").should be_true
+        backend.contains?("preset").should be_false
       end
     end
 

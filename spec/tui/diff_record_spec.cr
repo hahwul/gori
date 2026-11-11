@@ -173,6 +173,19 @@ describe "Gori::Tui::DiffController record exit" do
       hint.should contain("v lens") # the scope-gated half stays
     end
   end
+
+  # B is the open project on entry, so the baseline is the pick that is missing; a swap
+  # moves it to A, and the strip then has to name the other key.
+  it "names the pick for whichever side is still missing" do
+    with_diff_controller do |ctrl, _host, _session, _before|
+      ctrl.on_enter
+      ctrl.body_hint(:body).should contain("a pick the baseline project")
+      ctrl.swap
+      hint = ctrl.body_hint(:body)
+      hint.should contain("b pick the newer project")
+      hint.should_not contain("baseline")
+    end
+  end
 end
 
 describe "Gori::Tui::DiffController#comparer_slots" do

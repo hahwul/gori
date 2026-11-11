@@ -319,14 +319,19 @@ describe Gori::Tui::TrafficEmptyState do
     {% end %}
   end
 
-  it "follows a rebound insert key on the notes card" do
+  it "follows a rebound insert key on the notes and Project description cards" do
     prev = Gori::Settings.keymap_overrides
     begin
       Gori::Settings.keymap_overrides = {"editor.insert" => ["a"]}
       TrafficEmptyState.registry = Gori::Verbs.registry
-      backend = MemoryBackend.new(80, 12)
-      TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 80, 12), variant: :notes)
-      backend.contains?("a/↵").should be_true
+      {% for variant in [:notes, :project_desc] %}
+        {% for size in [{80, 12}, {34, 6}, {34, 3}] %}
+          backend = MemoryBackend.new({{ size[0] }}, {{ size[1] }})
+          TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, {{ size[0] }}, {{ size[1] }}), variant: {{ variant }})
+          backend.contains?("a/↵").should be_true
+          backend.contains?("i/↵").should be_false
+        {% end %}
+      {% end %}
     ensure
       TrafficEmptyState.registry = nil
       Gori::Settings.keymap_overrides = prev
@@ -346,6 +351,16 @@ describe Gori::Tui::TrafficEmptyState do
       cols[0].should eq(cols[1])
     end
   {% end %}
+
+  # Either side can be the one still missing, so the short tiers name both picks — and fit
+  # the narrowest pane the medium tier is admitted at.
+  it "names both Diff picks on the short tiers without clipping" do
+    {% for size in [{30, 6}, {30, 3}] %}
+      backend = MemoryBackend.new({{ size[0] }}, {{ size[1] }})
+      TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, {{ size[0] }}, {{ size[1] }}), variant: :diff)
+      backend.contains?("a baseline · b newer side").should be_true
+    {% end %}
+  end
 
   # Target's Diff sub-tab before a baseline is picked: the shared card, not four lines of
   # prose flush against the frame.

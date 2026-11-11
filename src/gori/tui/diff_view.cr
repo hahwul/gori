@@ -152,7 +152,9 @@ module Gori::Tui
 
     # ── render ──────────────────────────────────────────────────────────────────
 
-    def render(screen : Screen, rect : Rect, focused : Bool) : Nil
+    # `run_key` is `diff.run`'s chord as the keymap has it; the controller resolves it, since
+    # this view has no registry.
+    def render(screen : Screen, rect : Rect, focused : Bool, run_key : String = "^R") : Nil
       return if rect.empty?
       screen.fill(rect, Theme.bg)
       return render_unset(screen, rect) unless ready?
@@ -164,7 +166,7 @@ module Gori::Tui
         return
       end
       r = @report
-      return render_pending(screen, rect) unless r
+      return render_pending(screen, rect, run_key) unless r
       render_header(screen, rect)
       list, detail = split_body(rect)
       render_list(screen, list, focused)
@@ -183,21 +185,21 @@ module Gori::Tui
     end
 
     # The shared empty card, like every other tab with nothing to show. Side B is the open
-    # project by default (`DiffController#on_enter`), so the headline names it and the card
-    # is left with the one step that remains.
+    # project by default (`DiffController#on_enter`), so the headline names the side that is
+    # set and the card names both picks (a swap can leave A as the one that is).
     private def render_unset(screen : Screen, rect : Rect) : Nil
       title = if b = @b
                 "no baseline picked — B is #{b.name}"
-              elsif @a
-                "no newer side picked"
+              elsif a = @a
+                "no newer side picked — A is #{a.name}"
               end
       TrafficEmptyState.render(screen, rect, variant: :diff, title: title)
     end
 
-    private def render_pending(screen : Screen, rect : Rect) : Nil
+    private def render_pending(screen : Screen, rect : Rect, run_key : String) : Nil
       render_header(screen, rect)
       if y = row(rect, HEADER_H)
-        screen.text(rect.x, y, "press ^R to run the comparison", Theme.muted, Theme.bg, width: rect.w)
+        screen.text(rect.x, y, "press #{run_key} to run the comparison", Theme.muted, Theme.bg, width: rect.w)
       end
     end
 

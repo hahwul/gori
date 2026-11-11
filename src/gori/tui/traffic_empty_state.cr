@@ -239,9 +239,9 @@ module Gori::Tui
               when :notes
                 [headline, "scratchpad for this project", notes_hint(body_focused)]
               when :diff
-                [headline, "baseline (A) ──► newer (B)", "#{key("a", "diff.pick-a")} pick the baseline · #{key("b", "diff.pick-b")} the newer side"]
+                [headline, "baseline (A) ──► newer (B)", diff_hint]
               when :project_desc
-                [headline, "target · scope · credentials · rules", "i/↵ edit · ^E $EDITOR"]
+                [headline, "target · scope · credentials · rules", "#{insert_keys} edit · ^E $EDITOR"]
               when :project_scope
                 [headline, "incl / excl ──► scope lens", "#{key("a", "scope.add-rule")} add rule · space menu"]
               when :project_overrides
@@ -296,9 +296,9 @@ module Gori::Tui
              when :notes
                notes_hint(body_focused)
              when :diff
-               "#{key("a", "diff.pick-a")} pick the baseline project"
+               diff_hint
              when :project_desc
-               "i/↵ describe this engagement · ^E $EDITOR"
+               "#{insert_keys} describe this engagement · ^E $EDITOR"
              when :project_scope
                "#{key("a", "scope.add-rule")} add rule · space menu"
              when :project_overrides
@@ -635,13 +635,13 @@ module Gori::Tui
           [ChordLine.new(menu_chip("history.sequence"), "\"Send to Sequencer\" on a flow"),
            ChordLine.new(nil, "start from History or Repeater")])
       when :diff
-        # Target's Diff sub-tab before a baseline is picked. The headline carries which
-        # project side B already is (`DiffView#render_unset`), so the card only has to name
-        # the one step left and say that taking it sends nothing.
+        # Target's Diff sub-tab until both sides are picked. The headline says which side is
+        # already set (`DiffView#render_unset`), so the card names both picks and says that
+        # taking them sends nothing.
         CardSpec.new("RETEST DIFF", "What changed since the last engagement. Nothing is sent.",
           "baseline (A) ──► newer (B), by Sitemap path",
           [ChordLine.new(" a ", "pick the baseline project", "diff.pick-a"),
-           ChordLine.new(" b ", "change the newer side", "diff.pick-b")])
+           ChordLine.new(" b ", "pick the newer side", "diff.pick-b")])
       end
     end
 
@@ -760,7 +760,7 @@ module Gori::Tui
         # tab all name their own emptiness ("no scope rules — press a to add"); this one used to
         # render as pure void, which is why it exists.
         CardSpec.new("PROJECT", "Notes: target, scope, credentials, rules.", "free text, read first on re-entry",
-          [ChordLine.new(" i/↵ ", "start writing"), ChordLine.new(" ^E ", "open in $EDITOR")])
+          [ChordLine.new(" #{insert_keys} ", "start writing"), ChordLine.new(" ^E ", "open in $EDITOR")])
       when :project_scope
         # Titled TARGETS, not SCOPE — the outer card already says SCOPE on its border, and the
         # rules are the list of targets.
@@ -827,6 +827,12 @@ module Gori::Tui
     # row names (see `centered_card`).
     private def notes_hint(body_focused : Bool) : String
       "#{body_focused ? "#{insert_keys} write" : "↵ into the note"} · ^N new note"
+    end
+
+    # The medium/minimal tiers' one line for the Diff card. Both picks, because either side
+    # can be the one still missing, and short enough for the narrowest medium pane.
+    private def diff_hint : String
+      "#{key("a", "diff.pick-a")} baseline · #{key("b", "diff.pick-b")} newer side"
     end
 
     # `i/↵`, as the keymap has them: READ → INS in a text pane (`EditorPane::INSERT_KEYS`).
