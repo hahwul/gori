@@ -642,6 +642,10 @@ module Gori::Tui
         end
       elsif ev.ctrl_c?
         return :quit
+      elsif ProjectPicker.settings_key?(ev, @query)
+        # BEFORE the printable arm below, which would type the bare comma into the search.
+        @preferences.open_default
+        @mode = :settings
       elsif c = LineEdit.typed_char(ev)
         # Any printable key filters: enter the Search row (if not already) and append.
         @selected = 2
@@ -663,11 +667,24 @@ module Gori::Tui
         mark_all
       elsif ProjectPicker.global_search_chord?(ev)
         open_global_search
-      elsif ev.ctrl? && key.comma?
-        @preferences.open_default
-        @mode = :settings
       end
       nil
+    end
+
+    # ctrl-, as in a session. tmux with extended-keys off (its default) cannot encode
+    # Ctrl+comma and delivers a bare `,`, which typed into the search and left the footer's
+    # chord with no keyboard path: the picker has no palette to fall back on. So a bare comma
+    # on an EMPTY query opens Settings too. No name, slug, id, path or #tag search starts with
+    # one; a comma later in a query is still text, so there the chord needs a terminal that
+    # can send it. Bare means the character itself with no modifier: a terminal that reports
+    # modifiers on text keys sends Shift+comma as this key with `<`. Class-level so a spec can
+    # pin it — the picker holds a live Termisu and cannot be built in one.
+    def self.settings_key?(ev : Termisu::Event::Key, query : String) : Bool
+      return false unless ev.key.comma?
+      return true if ev.ctrl?
+      # `== None`, not `none?`: on this flags enum the member predicate is `includes?(None)`,
+      # which every value satisfies.
+      ev.modifiers == Termisu::Input::Modifier::None && ev.char == ',' && query.empty?
     end
 
     # The unified Preferences modal (Ctrl+,). The view handles editing/navigation itself;

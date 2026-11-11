@@ -23,7 +23,7 @@
 - TUI: pressing `c` or `i` by accident now shows which key turns capture back on or intercept off, and the menus read Send to Repeater and Send request and spell sub-tab one way (#1852, #1855)
 - TUI: on a narrow terminal the Intercept queue footer keeps forward, drop and edit ahead of mark and range, and the flow detail, Params and empty Discover footers keep the menu and the key that leaves the pane (#1853, #1857)
 - History: with no flows yet, `Space` offers Open browser instead of Mark all and Clear history, the footer names the way to it, and the card adds the Import route (#1853)
-- TUI: the wizard, Help and the tour say that `^P` means Ctrl+P, and the project picker spells its keys the same way and keeps Settings and Quit on an 80-column footer (#1853)
+- TUI: the wizard, Help and the tour say that `^P` means Ctrl+P, and the project picker spells its keys the same way, keeps Settings and Quit on an 80-column footer, and opens Settings on a plain `,` where the terminal cannot send `Ctrl+,` (#1853, #1858)
 
 ## v0.9.3
 

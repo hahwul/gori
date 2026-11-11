@@ -1117,7 +1117,7 @@ module Gori::Tui
       else
         # The first chord a new user reads, so it carries its own gloss: nothing before
         # this row has said what the caret stands for, and every screen after it uses it.
-        "^P = Ctrl+P palette · ^N new · ^W close  (←/→ ⌥)"
+        "^P = Ctrl+P palette · ^N new · ^W close  (←/→ for Alt)"
       end
     end
 
