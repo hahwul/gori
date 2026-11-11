@@ -310,7 +310,7 @@ describe Gori::Tui::PreferencesView do
       backend.row(box.bottom - 4).should_not contain("which modifier") # still a form row
     end
 
-    # Before the wrap these rows were the form's, and a click on one moved focus to the
+    # Before the wrap these five rows were the form's, and a click on one moved focus to the
     # field drawn there (Editor keyset, Keyset playground).
     it "does not focus a field on a click inside the note" do
       v = PreferencesView.new
@@ -318,32 +318,29 @@ describe Gori::Tui::PreferencesView do
       backend = MemoryBackend.new(80, 24)
       v.render(Screen.new(backend), area)
       box = v.overlay_box(area)
-      note_top = (box.y...box.bottom).find! { |y| backend.row(y).includes?("which modifier") }
-      (note_top...(box.bottom - 2)).each do |y|
+      backend.row(box.bottom - 7).should contain("which modifier") # the note's first row
+      ((box.bottom - 7)...(box.bottom - 2)).each do |y|
         v.click(area, box.x + 6, y)
         v.render(Screen.new(backend), area)
         backend.contains?("▎ Command modifier").should be_true
       end
     end
 
-    # With room for it the card reserves the longest description's rows, so the form keeps one
-    # height whatever is focused: no reflow and no scroll gauge as focus moves.
-    it "keeps the form still on a terminal with room" do
+    # With room for it the card reserves the longest description's rows. Without that, a
+    # two-row description took a row from the tallest group, which fitted exactly, and the
+    # form scrolled and showed its gauge as focus moved.
+    it "keeps the tallest group whole on a terminal with room" do
       tall = Rect.new(0, 0, 100, 60)
       v = PreferencesView.new
-      v.open(:keys)
+      v.open(:general) # Clipboard (OSC 52): two rows of description
       backend = MemoryBackend.new(100, 60)
-      v.render(Screen.new(backend), tall)
       box = v.overlay_box(tall)
-      long_top = (box.y...box.bottom).find! { |y| backend.row(y).includes?("▎ Command modifier") }
-      ((box.y + 1)...(box.bottom - 1)).each { |y| backend.row(y)[box.right - 1].should_not eq('┃') }
-
-      v.handle_key(pkey(Termisu::Input::Key::Up)) # Pretty-print bodies: a one-row description
-      v.handle_key(pkey(DOWN))
-      v.handle_key(pkey(DOWN)) # Editor keyset: the longest in this group
-      v.render(Screen.new(backend), tall)
-      backend.row(long_top + 1).should contain("▎ Editor keyset")
-      ((box.y + 1)...(box.bottom - 1)).each { |y| backend.row(y)[box.right - 1].should_not eq('┃') }
+      3.times do
+        v.render(Screen.new(backend), tall)
+        ((box.y + 1)...(box.bottom - 1)).each { |y| backend.row(y)[box.right - 1].should_not eq('┃') }
+        backend.contains?("RESET").should be_true # the group's last section is on screen
+        v.handle_key(pkey(DOWN))
+      end
     end
   end
 
