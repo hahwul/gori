@@ -327,19 +327,20 @@ describe Gori::Tui::PreferencesView do
     end
 
     # With room for it the card reserves the longest description's rows. Without that, a
-    # two-row description took a row from the tallest group, which fitted exactly, and the
-    # form scrolled and showed its gauge as focus moved.
-    it "keeps the tallest group whole on a terminal with room" do
-      tall = Rect.new(0, 0, 100, 60)
-      v = PreferencesView.new
-      v.open(:general) # Clipboard (OSC 52): two rows of description
-      backend = MemoryBackend.new(100, 60)
-      box = v.overlay_box(tall)
-      3.times do
-        v.render(Screen.new(backend), tall)
-        ((box.y + 1)...(box.bottom - 1)).each { |y| backend.row(y)[box.right - 1].should_not eq('┃') }
-        backend.contains?("RESET").should be_true # the group's last section is on screen
-        v.handle_key(pkey(DOWN))
+    # long description took rows from the tallest group, which fitted exactly, and the form
+    # scrolled and showed its gauge as focus moved.
+    it "never scrolls the form on a terminal with room, whatever is focused" do
+      tall = Rect.new(0, 0, 100, 70)
+      backend = MemoryBackend.new(100, 70)
+      SettingsView::SECTIONS.each_key do |sym|
+        v = PreferencesView.new
+        v.open(sym)
+        box = v.overlay_box(tall)
+        12.times do
+          v.render(Screen.new(backend), tall)
+          ((box.y + 1)...(box.bottom - 1)).each { |y| backend.row(y)[box.right - 1].should_not eq('┃'), sym.to_s }
+          v.handle_key(pkey(DOWN))
+        end
       end
     end
   end
