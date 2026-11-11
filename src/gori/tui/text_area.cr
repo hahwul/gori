@@ -2384,6 +2384,11 @@ module Gori::Tui
     # the caret and the scroll — and it keeps the STACK with them. A stack left over from the
     # previous document then undoes edits that were never made to this one: undo on issue B
     # hands back issue A's text, now dirty against B and one save away from overwriting it.
+    # Is there an edit to step back to? A buffer that reads empty may still hold one.
+    def undoable? : Bool
+      !@undo_stack.empty?
+    end
+
     def clear_undo : Nil
       @undo_stack.clear
       break_run # whatever run was open belonged to the document being handed over

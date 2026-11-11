@@ -2487,3 +2487,61 @@ describe "FuzzerView edits made while a run is going" do
     view.take_next_run_notice.should be_true
   end
 end
+
+# With no match/filter rule every response passes, so `9 sent · 9 hit` and a ✓ on every row
+# read as nine findings on a sweep that judged nothing.
+describe "Gori::Tui::FuzzerView run without a match rule" do
+  it "names the missing rule instead of counting every row as a hit" do
+    view = loaded_fuzzer
+    view.begin_run(2_i64)
+    2.times { |i| view.append_result(fuzz_result(i, 302, 0, matched: true)) }
+    view.results_count_label.should contain("no match rule")
+    view.finish_run("done")
+    view.results_count_label.should start_with("2 sent · no match rule")
+    view.results_count_label.should_not contain("hit")
+    view.hit_label.should eq("no match rule")
+  end
+
+  it "counts hits once a match rule or calibration is set" do
+    view = loaded_fuzzer
+    view.matcher.match_status = "200"
+    view.begin_run(2_i64)
+    view.append_result(fuzz_result(0, 200, 10, matched: true))
+    view.append_result(fuzz_result(1, 404, 10))
+    view.finish_run("done")
+    view.results_count_label.should start_with("2 sent · 1 hit")
+
+    calibrated = loaded_fuzzer
+    calibrated.matcher.auto_calibrate = true
+    calibrated.begin_run(1_i64)
+    calibrated.run_selective?.should be_true
+  end
+
+  it "ticks a row only when a rule judged it" do
+    tick = ->(view : FuzzerView) do
+      view.focus_pane(:results)
+      view.begin_run(1_i64)
+      view.append_result(fuzz_result(0, 200, 10, matched: true))
+      view.finish_run("done")
+      backend = MemoryBackend.new(160, 30)
+      view.render(Screen.new(backend), Rect.new(0, 0, 160, 30))
+      (0...30).any? { |y| backend.row(y).includes?("✓") && backend.row(y).includes?("p0") }
+    end
+    tick.call(loaded_fuzzer).should be_false
+    ruled = loaded_fuzzer
+    ruled.matcher.match_status = "200"
+    tick.call(ruled).should be_true
+  end
+
+  it "keeps the hit count on a restored run, whose rules are not stored with it" do
+    view = loaded_fuzzer
+    view.begin_run(1_i64)
+    view.finish_run("done")
+    view.run_selective?.should be_false
+    run = Gori::Store::FuzzRunRecord.new(9_i64, 2_i64, 3_i64, 4_i64,
+      "https://h", "sniper", 1_i64, 1_i64, 1_i64, 0_i64, "done",
+      false, nil, nil, false, "tui", "run", 1)
+    view.load_saved_run(run, [fuzz_result(0, 200, 10, matched: true)])
+    view.results_count_label.should contain("1 hit")
+  end
+end

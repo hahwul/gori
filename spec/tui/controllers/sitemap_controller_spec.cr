@@ -115,3 +115,30 @@ describe SitemapController do
     end
   end
 end
+
+# ↵ on an endpoint row did nothing and said nothing, while ↵ opens the flow on a History or
+# Params row and a double-click on this very row opened it.
+describe "SitemapController ↵" do
+  it "opens an endpoint's flow, and still folds a folder" do
+    with_sitemap_controller do |ctl, host, session, _root|
+      seed(session.store, "http://a.test/dir/leaf")
+      ctl.on_enter
+      view = ctl.view
+      leaf = (0..3).find! { |i| view.leaf_at?(i) }
+
+      view.select_index(0) # the host row: a folder
+      ctl.body_hint(:body).should contain("↵/→ expand")
+      ctl.sitemap_toggle
+      host.sitemap_opens.should eq(0)
+      view.leaf_at?(leaf).should be_false # folded away
+      ctl.sitemap_toggle
+      view.leaf_at?(leaf).should be_true
+
+      view.select_index(leaf)
+      ctl.body_hint(:body).should contain("↵ open")
+      ctl.body_hint(:body).should_not contain("expand")
+      ctl.sitemap_toggle
+      host.sitemap_opens.should eq(1)
+    end
+  end
+end

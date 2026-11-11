@@ -127,10 +127,13 @@ describe "the JWT and Cookie workbench controllers" do
 
     it "seeds a new session from sent text, stripped, and jumps to it" do
       each_tool do |ctl, host, t|
+        ctl.new_session
+        ctl.editor_enter_insert
+        wtype(ctl, "kept")
         sent = "  #{t.seed}\n"
         ctl.session_from_text(sent)
         host.statuses.last.should eq("sent selection to #{t.name} (#{sent.bytesize}b)")
-        ctl.subtab_index.should eq(1)
+        ctl.subtab_index.should eq(2)
         cur_of(ctl).input.text.should eq(t.seed)
         cur_of(ctl).decoded.should_not be_empty
         ctl.subtab_labels[0].should eq("1:empty")
@@ -386,6 +389,56 @@ describe "the JWT and Cookie workbench controllers" do
           ctl.editor_exit_insert.should be_false
           ctl.body_takes_text?.should be_true
         end
+      end
+    end
+  end
+
+  # `Send selection to…` always appended, so the first send left `1:empty` standing beside
+  # the token it had just delivered.
+  describe "a selection sent in" do
+    it "fills a blank session instead of leaving it behind" do
+      each_tool do |ctl, _host, t|
+        ctl.on_enter # having looked at the tab does not make its blank session the operator's
+        ctl.session_from_text(t.seed)
+        ctl.subtab_labels.size.should eq(1)
+        ctl.subtab_labels.first.should_not contain("empty")
+        cur_of(ctl).input.text.should eq(t.seed)
+        ctl.session_from_text(t.seed) # the second is a sub-tab of its own
+        ctl.subtab_labels.size.should eq(2)
+      end
+    end
+
+    it "leaves a session alone that holds anything typed, pasted or named" do
+      each_tool do |ctl, _host, t|
+        ctl.toggle_mode # the second lens: text lands in an editor while INPUT stays empty
+        focus_pane(ctl, t.editors.first)
+        wtype(ctl, "x")
+        cur_of(ctl).input.text.should be_empty
+        ctl.session_from_text(t.seed)
+        ctl.subtab_labels.size.should eq(2)
+      end
+      each_tool do |ctl, _host, t|
+        ctl.toggle_mode
+        focus_pane(ctl, :secret)
+        wtype(ctl, "k")
+        ctl.session_from_text(t.seed)
+        ctl.subtab_labels.size.should eq(2)
+      end
+      each_tool do |ctl, _host, t|
+        ctl.apply_rename(cur_of(ctl).view, "mine")
+        ctl.session_from_text(t.seed)
+        ctl.subtab_labels.size.should eq(2)
+      end
+    end
+
+    it "keeps a session whose emptied input can still be undone" do
+      each_tool do |ctl, _host, t|
+        ctl.editor_enter_insert
+        wtype(ctl, "x")
+        ctl.handle_body_key(wkey(Termisu::Input::Key::Backspace))
+        cur_of(ctl).input.text.should be_empty
+        ctl.session_from_text(t.seed)
+        ctl.subtab_labels.size.should eq(2)
       end
     end
   end

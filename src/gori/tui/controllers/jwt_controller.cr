@@ -67,6 +67,10 @@ module Gori::Tui
       @sessions.map { |s| search_extra("#{s.decoded} #{s.header.text} #{s.payload.text}") }
     end
 
+    private def session_editors(s : JwtSession) : Array(TextArea)
+      [s.input, s.payload, s.header]
+    end
+
     # The chip label's fallback: the token's alg (or "empty").
     private def session_summary(s : JwtSession) : String
       return "empty" if s.input.text.strip.empty?

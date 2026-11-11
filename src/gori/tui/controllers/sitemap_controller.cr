@@ -319,7 +319,8 @@ module Gori::Tui
       return keys("↑/↓ move · {sitemap.query} filter · {sitemap.mark-toggle} mark · {sitemap.mark-all} all · {sitemap.copy} copy · space cmds (tag) · esc clears marks") if @sitemap.mark_count > 0
       # `space cmds` on BOTH branches. The mark-set branch above named it and this one did not,
       # so the same tab advertised the space menu only while marks happened to be set.
-      keys("↑/↓ move · {sitemap.query} filter · {sitemap.mark-toggle} mark · {sitemap.mark-all} all · {sitemap.toggle-grouping} fold · ↵/→ expand · {sitemap.copy} copy · space cmds · esc sub-tabs")
+      enter = @sitemap.selected_leaf? ? "↵ open" : "↵/→ expand"
+      keys("↑/↓ move · #{enter} · {sitemap.query} filter · {sitemap.mark-toggle} mark · {sitemap.mark-all} all · {sitemap.toggle-grouping} fold · {sitemap.copy} copy · space cmds · esc sub-tabs")
     end
 
     # Live IME composition flows to whichever text field is open (the QL filter bar or
@@ -685,7 +686,11 @@ module Gori::Tui
       end
     end
 
+    # ↵ on the cursor row: a folder folds or unfolds, an endpoint opens its flow — what a
+    # double-click on the row does, and what ↵ does on a History or Params row. On a leaf it
+    # used to do nothing at all, and say nothing.
     def sitemap_toggle : Nil
+      return @host.sitemap_open_flow if @sitemap.selected_leaf?
       @sitemap.toggle
     end
 

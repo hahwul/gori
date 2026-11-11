@@ -212,3 +212,29 @@ describe "FuzzerController — an edit made while a run is going" do
     end
   end
 end
+
+# `9 hits / 9 sent` under a success toast, on a run with no match rule: every response passes
+# then, so the line reported nine findings for a sweep that judged nothing.
+describe "FuzzerController.done_line" do
+  run = ->(rule : String?) do
+    view = FuzzerView.new
+    view.load_request("https://h", "GET /?x=1 HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+    view.matcher.match_status = rule
+    view.begin_run(2_i64)
+    2.times do |i|
+      view.append_result(Gori::Fuzz::Result.new(i.to_i64, ["p#{i}"], nil, 200, 1_i64, 1, 1, 1_i64, nil, true, false, nil))
+    end
+    view.finish_run("done")
+    view
+  end
+
+  it "names the missing rule, at info level" do
+    FuzzerController.done_line(run.call(nil), " on GET /", "")
+      .should eq({:info, "Fuzzer: 2 sent on GET / — no match rule"})
+  end
+
+  it "counts hits under a rule, as a success when there are any" do
+    FuzzerController.done_line(run.call("200"), " on GET / (stopped)", " · macro: 1 failed")
+      .should eq({:success, "Fuzzer: 2 hits / 2 sent on GET / (stopped) · macro: 1 failed"})
+  end
+end
