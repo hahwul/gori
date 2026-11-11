@@ -15,12 +15,14 @@
 <text x="45.00" y="83.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" font-weight="700" xml:space="preserve">𝓰𝓸𝓻𝓲</text>
 <text x="90.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
 <text x="108.00" y="83.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">default</text>
-<text x="711.00" y="83.68" textLength="81.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">scope:off</text>
-<text x="801.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
-<text x="819.00" y="83.68" textLength="117.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" xml:space="preserve">probe:passive</text>
-<text x="945.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
-<text x="963.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#52c77a" xml:space="preserve">●</text>
-<text x="981.00" y="83.68" textLength="126.00" lengthAdjust="spacingAndGlyphs" fill="#52c77a" xml:space="preserve">localhost:8070</text>
+<text x="657.00" y="83.68" textLength="81.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">scope:off</text>
+<text x="747.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
+<text x="765.00" y="83.68" textLength="117.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" xml:space="preserve">probe:passive</text>
+<text x="891.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
+<text x="909.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d6a13a" xml:space="preserve">●</text>
+<text x="927.00" y="83.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#d6a13a" xml:space="preserve">OFF</text>
+<text x="963.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d6a13a" xml:space="preserve">·</text>
+<text x="981.00" y="83.68" textLength="126.00" lengthAdjust="spacingAndGlyphs" fill="#d6a13a" xml:space="preserve">localhost:8070</text>
 <text x="1116.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
 <text x="1134.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">⌘</text>
 <text x="1152.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
@@ -50,7 +52,12 @@
 <text x="45.00" y="137.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">⌕</text>
 <text x="81.00" y="137.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">1:jwt</text>
 <text x="135.00" y="137.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">HS256</text>
-<text x="36.00" y="155.68" textLength="1152.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="36.00" y="155.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">──</text>
+<text x="63.00" y="155.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">f</text>
+<text x="81.00" y="155.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">find</text>
+<text x="126.00" y="155.68" textLength="1017.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">─────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="1152.00" y="155.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">1</text>
+<text x="1170.00" y="155.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">──</text>
 <text x="36.00" y="173.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">╭─</text>
 <text x="63.00" y="173.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">INPUT</text>
 <text x="117.00" y="173.68" textLength="927.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">───────────────────────────────────────────────────────────────────────────────────────────────────────</text>
@@ -188,6 +195,6 @@
 <text x="828.00" y="497.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
 <text x="846.00" y="497.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">esc</text>
 <text x="882.00" y="497.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">sub-tabs</text>
-<text x="1107.00" y="497.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">10:14</text>
+<text x="1107.00" y="497.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">11:45</text>
 <text x="1161.00" y="497.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">PM</text>
 </svg>
