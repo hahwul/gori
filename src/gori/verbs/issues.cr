@@ -24,9 +24,13 @@ module Gori
       # (and the palette's typed search from this tab, #1282). open carries the
       # :open intent ('o') — its primary chord is enter/l, which would otherwise
       # front the menu with the unintuitive 'l'.
+      # Gated on a row like the other row verbs below (copy, delete, mark): on an empty list
+      # it was the menu's first row and did nothing. The list-level rows (mark all, export,
+      # clear) stay ungated, because each answers an empty list by saying so.
       r.register Verb::Definition.new(
         "issues.open", "Open issue", "View/edit the selected issue", Verb::Scope::Issues,
-        [Verb::Chord.new("enter"), Verb::Chord.new("l"), Verb::Chord.new("right")], intent: :open) { |ctx| ctx.issues_open; nil }
+        [Verb::Chord.new("enter"), Verb::Chord.new("l"), Verb::Chord.new("right")],
+        available: ->(ctx : Verb::ExecContext) { !ctx.selected_issue_id.nil? }, intent: :open) { |ctx| ctx.issues_open; nil }
 
       r.register Verb::Definition.new(
         "issues.filter", "Filter issues", "Filter the list (severity:/status:/host:/free text)",

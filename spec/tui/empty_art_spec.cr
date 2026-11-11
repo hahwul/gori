@@ -23,7 +23,7 @@ EXPECTED_ART = [
   :notes, :project_desc, :project_scope, :project_overrides, :project_env, :project_activity,
   :discover,
   :comparer, :miner, :miner_results, :sequencer, :sequencer_samples, :oast,
-  :authorize,
+  :authorize, :diff,
 ]
 
 describe Gori::Tui::EmptyArt do

@@ -44,6 +44,18 @@ describe "Gori::Verbs.register_issues" do
       verb_intents(r, "issues.filter").should eq([:issues_query])
     end
 
+    # On an empty list Open was the space menu's first row and did nothing. The list-level
+    # rows stay: each answers an empty list in words, and a gate would take that answer away.
+    it "offers Open only with a row under the cursor, and leaves the list-level rows ungated" do
+      ctx = FakeExecContext.new
+      r["issues.open"].available?(ctx).should be_false
+      ctx.selected_issue = 7_i64
+      r["issues.open"].available?(ctx).should be_true
+      %w[issues.new issues.filter issues.mark-all issues.export-key issues.clear].each do |id|
+        r[id].available?(FakeExecContext.new).should be_true
+      end
+    end
+
     it "gates delete + the list pickers on the effective target set, not the cursor alone" do
       # The BATCH gate: marks if any, else the cursor row. Equivalent to "a row is selected"
       # with nothing marked; the case it adds is a mark that the filter scrolled out of view.

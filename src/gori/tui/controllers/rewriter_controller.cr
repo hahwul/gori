@@ -276,7 +276,15 @@ module Gori::Tui
       sync_preview_out(target)
       @view.render(screen, inner, list, @sel, @scroll, rules_engine.enabled_count,
         @focus, body_focused, @preview_input, @out, target, @preview_host,
-        empty_hint: keys("no rules — press {rewriter.add} to add"))
+        empty_hint: keys(rules_empty_hint))
+    end
+
+    # The empty list's one line. Short, so a 40-column pane still shows the preset half; and
+    # a filter that matches nothing is told apart from a project with no rules, where
+    # "add one" would be the wrong advice.
+    private def rules_empty_hint : String
+      return "no rule matches — {rewriter.filter} edits the filter" if @filter.active? && !rules_engine.rules.empty?
+      "no rules — {rewriter.add} add · {rewriter.preset} preset"
     end
 
     private def render_extract(screen : Screen, inner : Rect, body_focused : Bool) : Nil

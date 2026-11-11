@@ -101,8 +101,8 @@ module Gori::Tui
     private def full_inner_h(variant : Symbol, *, capturing : Bool = true,
                              running : Bool = false, scan_on : Bool = true) : Int32
       case variant
-      when :history, :sitemap, :intercept                                        then 5 + (capturing ? 0 : 1) + 3
-      when :repeater, :fuzzer, :issues, :discover, :comparer, :miner, :sequencer then 5 + 2
+      when :history, :sitemap, :intercept                                               then 5 + (capturing ? 0 : 1) + 3
+      when :repeater, :fuzzer, :issues, :discover, :comparer, :miner, :sequencer, :diff then 5 + 2
         # The three results-pane variants share one budget: the rows they draw, plus one blank so
         # the card is not flush against its own bottom border. In flight that is a single sentence
         # and the chord line is gone, so the card shrinks with it — at the old 3 an in-flight card
@@ -154,6 +154,7 @@ module Gori::Tui
       when :sequencer_samples then running ? "collecting…" : "no samples yet"
       when :oast              then "no callbacks yet"
       when :notes             then "empty note"
+      when :diff              then "no baseline picked"
       when :project_desc      then "no description yet"
       when :project_scope     then "no scope rules yet"
       when :project_overrides then "no host overrides yet"
@@ -169,7 +170,7 @@ module Gori::Tui
                             catch_direction : String, fuzz_step : FuzzStep?) : Nil
       if card = standard_card(variant)
         render_standard_full(screen, rect, variant, headline, card)
-      elsif card = centered_card(variant)
+      elsif card = centered_card(variant, body_focused)
         render_centered_full(screen, rect, variant, card)
       else
         case variant
@@ -236,9 +237,11 @@ module Gori::Tui
                   [headline, "no provider yet — ^2 Providers", "then #{key("g", "oast.generate")} for a payload URL"]
                 end
               when :notes
-                [headline, "scratchpad for this project", "^N new note · ^W close"]
+                [headline, "scratchpad for this project", notes_hint(body_focused)]
+              when :diff
+                [headline, "baseline (A) ──► newer (B)", diff_hint]
               when :project_desc
-                [headline, "target · scope · credentials · rules", "i/↵ edit · ^E $EDITOR"]
+                [headline, "target · scope · credentials · rules", "#{insert_keys} edit · ^E $EDITOR"]
               when :project_scope
                 [headline, "incl / excl ──► scope lens", "#{key("a", "scope.add-rule")} add rule · space menu"]
               when :project_overrides
@@ -291,9 +294,11 @@ module Gori::Tui
              when :oast
                has_provider ? "#{key("g", "oast.generate")} payload · #{key("^R", "oast.listen")} listen" : "^2 Providers — add one first"
              when :notes
-               "^N new note · start typing"
+               notes_hint(body_focused)
+             when :diff
+               diff_hint
              when :project_desc
-               "i/↵ describe this engagement · ^E $EDITOR"
+               "#{insert_keys} describe this engagement · ^E $EDITOR"
              when :project_scope
                "#{key("a", "scope.add-rule")} add rule · space menu"
              when :project_overrides
@@ -629,6 +634,14 @@ module Gori::Tui
           # was naming a key that does nothing on the screen it is drawn on.
           [ChordLine.new(menu_chip("history.sequence"), "\"Send to Sequencer\" on a flow"),
            ChordLine.new(nil, "start from History or Repeater")])
+      when :diff
+        # Target's Diff sub-tab until both sides are picked. The headline says which side is
+        # already set (`DiffView#render_unset`), so the card names both picks and says that
+        # taking them sends nothing.
+        CardSpec.new("RETEST DIFF", "What changed since the last engagement. Nothing is sent.",
+          "baseline (A) ──► newer (B), by Sitemap path",
+          [ChordLine.new(" a ", "pick the baseline project", "diff.pick-a"),
+           ChordLine.new(" b ", "pick the newer side", "diff.pick-b")])
       end
     end
 
@@ -646,10 +659,13 @@ module Gori::Tui
       draw_chord_lines(screen, ix, y, iw, card.chords)
     end
 
+    # Labels share ONE column: the chips differ in width (` ⇧F ` beside ` n `), and a label
+    # that starts where its own chip ends put the two rows of a card a cell apart.
     private def draw_chord_lines(screen : Screen, ix : Int32, y : Int32, iw : Int32, chords : Array(ChordLine)) : Nil
+      pad = chords.max_of { |c| (chord = c.chord) ? Screen.display_width(Hotkeys.retag(chip_text(chord, c.verb))) : 0 }
       chords.each do |c|
         if chord = c.chord
-          y = draw_chord_hint(screen, ix, y, iw, chord, c.label, bullet: c.bullet, verb: c.verb)
+          y = draw_chord_hint(screen, ix, y, iw, chord, c.label, bullet: c.bullet, verb: c.verb, pad: pad)
         else
           screen.text(ix + 2, y, c.label, Theme.muted, Theme.bg, width: iw)
         end
@@ -682,8 +698,8 @@ module Gori::Tui
       draw_wrapped_message(screen, ix, y, iw, msg)
       return if running
       y += 2
-      y = draw_chord_hint(screen, ix, y, iw, " c ", "where the token lives", bullet: "▸ ", verb: "sequence.configure")
-      draw_chord_hint(screen, ix, y, iw, " ^R ", "collect samples", bullet: "▸ ", verb: "sequence.run")
+      draw_chord_lines(screen, ix, y, iw, [ChordLine.new(" c ", "where the token lives", "sequence.configure"),
+                                           ChordLine.new(" ^R ", "collect samples", "sequence.run")])
     end
 
     # OAST is the one workbench tab that had no card at all: an empty CALLBACKS pane is the
@@ -715,31 +731,36 @@ module Gori::Tui
       end
       y += 1
       if has_provider
-        y = draw_chord_hint(screen, ix, y, iw, " g ", "get a payload URL (copied)", bullet: "▸ ", verb: "oast.generate")
-        draw_chord_hint(screen, ix, y, iw, " ^R ", "start listening", bullet: "▸ ", verb: "oast.listen")
+        draw_chord_lines(screen, ix, y, iw, [ChordLine.new(" g ", "get a payload URL (copied)", "oast.generate"),
+                                             ChordLine.new(" ^R ", "start listening", "oast.listen")])
       else
         # "sub-tab" in words, beside the chip: a Ctrl+digit does not arrive on every terminal,
         # and the strip above the pane is where the reader then looks. No ←/→ route is spelled:
         # which keys reach the strip depends on where focus is, and this card is drawn at all three.
-        y = draw_chord_hint(screen, ix, y, iw, " ^2 ", "Providers sub-tab — interactsh prefilled", bullet: "▸ ")
-        draw_chord_hint(screen, ix, y, iw, " g ", "get a payload URL, once one is on", bullet: "▸ ", verb: "oast.generate")
+        draw_chord_lines(screen, ix, y, iw, [ChordLine.new(" ^2 ", "Providers sub-tab — interactsh prefilled"),
+                                             ChordLine.new(" g ", "get a payload URL, once one is on", "oast.generate")])
       end
     end
 
     # The CENTERED variants: the whole rect goes to `place_art_and_card` — there is no headline
     # row to carve off first (see CENTERED) — and the muted line is a hint, not a diagram.
-    private def centered_card(variant : Symbol) : CardSpec?
+    private def centered_card(variant : Symbol, body_focused : Bool = true) : CardSpec?
       case variant
       when :notes
+        # The first row is how to WRITE, which is the one thing an empty note is for and the
+        # one thing the pane does not do on its own: it opens in READ. From the tab bar or the
+        # strip the row names `↵` alone, because a bare `i` up there is the Global intercept
+        # toggle. Closing an empty note is not a first step, so `^W` left for the footer.
+        write = body_focused ? ChordLine.new(" #{insert_keys} ", "start writing") : ChordLine.new(" ↵ ", "into the note, then #{insert_keys} writes")
         CardSpec.new("NOTES", "Your project scratchpad — observations, hypotheses, write-ups.",
           "notes stack as sub-tabs · first line becomes the title",
-          [ChordLine.new(" ^N ", "new note tab"), ChordLine.new(" ^W ", "close current note")])
+          [write, ChordLine.new(" ^N ", "new note tab")])
       when :project_desc
         # The Project tab's DESCRIPTION sub-tab with nothing written yet. Sibling cards on that
         # tab all name their own emptiness ("no scope rules — press a to add"); this one used to
         # render as pure void, which is why it exists.
         CardSpec.new("PROJECT", "Notes: target, scope, credentials, rules.", "free text, read first on re-entry",
-          [ChordLine.new(" i/↵ ", "start writing"), ChordLine.new(" ^E ", "open in $EDITOR")])
+          [ChordLine.new(" #{insert_keys} ", "start writing"), ChordLine.new(" ^E ", "open in $EDITOR")])
       when :project_scope
         # Titled TARGETS, not SCOPE — the outer card already says SCOPE on its border, and the
         # rules are the list of targets.
@@ -800,6 +821,23 @@ module Gori::Tui
       Frame.card(screen, card, card_title, bg: Theme.bg, border: Theme.border)
       inner = card.inset(1, 1)
       {inner, inner.x + 1, {inner.w - 2, 1}.max}
+    end
+
+    # The medium/minimal tiers' one line for an empty note: the same route the card's first
+    # row names (see `centered_card`).
+    private def notes_hint(body_focused : Bool) : String
+      "#{body_focused ? "#{insert_keys} write" : "↵ into the note"} · ^N new note"
+    end
+
+    # The medium/minimal tiers' one line for the Diff card. Both picks, because either side
+    # can be the one still missing, and short enough for the narrowest medium pane.
+    private def diff_hint : String
+      "#{key("a", "diff.pick-a")} baseline · #{key("b", "diff.pick-b")} newer side"
+    end
+
+    # `i/↵`, as the keymap has them: READ → INS in a text pane (`EditorPane::INSERT_KEYS`).
+    private def insert_keys : String
+      "#{key("i", "editor.insert")}/#{key("↵", "editor.insert-enter")}"
     end
 
     # The queue's keys (f/d/c//) answer only inside the Intercept body. From the tab bar a hint

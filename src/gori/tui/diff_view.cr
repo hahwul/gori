@@ -3,6 +3,7 @@ require "./theme"
 require "./frame"
 require "./fmt"
 require "./viewport"
+require "./traffic_empty_state"
 require "../diff"
 require "../project"
 require "../plural"
@@ -151,7 +152,9 @@ module Gori::Tui
 
     # ── render ──────────────────────────────────────────────────────────────────
 
-    def render(screen : Screen, rect : Rect, focused : Bool) : Nil
+    # `run_key` is `diff.run`'s chord as the keymap has it; the controller resolves it, since
+    # this view has no registry.
+    def render(screen : Screen, rect : Rect, focused : Bool, run_key : String = "^R") : Nil
       return if rect.empty?
       screen.fill(rect, Theme.bg)
       return render_unset(screen, rect) unless ready?
@@ -163,7 +166,7 @@ module Gori::Tui
         return
       end
       r = @report
-      return render_pending(screen, rect) unless r
+      return render_pending(screen, rect, run_key) unless r
       render_header(screen, rect)
       list, detail = split_body(rect)
       render_list(screen, list, focused)
@@ -181,26 +184,22 @@ module Gori::Tui
        Rect.new(rect.x, rect.bottom - DETAIL_H, rect.w, DETAIL_H)}
     end
 
+    # The shared empty card, like every other tab with nothing to show. Side B is the open
+    # project by default (`DiffController#on_enter`), so the headline names the side that is
+    # set and the card names both picks (a swap can leave A as the one that is).
     private def render_unset(screen : Screen, rect : Rect) : Nil
-      lines = if b = @b
-                ["Retest diff — what changed since the last engagement.",
-                 "",
-                 "B is #{b.name} (this project). Press a to pick the BASELINE project.",
-                 "Endpoints are keyed by the Sitemap's folded template, so captured ids",
-                 "don't turn every row into an added/removed pair. Nothing is sent."]
-              else
-                ["Retest diff — pick two projects with a and b."]
+      title = if b = @b
+                "no baseline picked — B is #{b.name}"
+              elsif a = @a
+                "no newer side picked — A is #{a.name}"
               end
-      lines.each_with_index do |line, i|
-        break if i >= rect.h
-        screen.text(rect.x, rect.y + i, line, i == 0 ? Theme.text_bright : Theme.muted, Theme.bg, width: rect.w)
-      end
+      TrafficEmptyState.render(screen, rect, variant: :diff, title: title)
     end
 
-    private def render_pending(screen : Screen, rect : Rect) : Nil
+    private def render_pending(screen : Screen, rect : Rect, run_key : String) : Nil
       render_header(screen, rect)
       if y = row(rect, HEADER_H)
-        screen.text(rect.x, y, "press r to run the comparison", Theme.muted, Theme.bg, width: rect.w)
+        screen.text(rect.x, y, "press #{run_key} to run the comparison", Theme.muted, Theme.bg, width: rect.w)
       end
     end
 

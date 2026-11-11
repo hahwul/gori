@@ -73,7 +73,7 @@ module Gori::Tui
                scroll : Int32, enabled_count : Int32, focus : Symbol, body_focused : Bool,
                preview_input : TextArea, preview_out : ReadPane,
                target : Store::RuleTarget = Store::RuleTarget::Request, host : String = "",
-               empty_hint : String = "no rules — press a to add") : Nil
+               empty_hint : String = "no rules — a add · p preset") : Nil
       return if rect.w < 6 || rect.h < 2
       render_sub_strip(screen, rect, :rules, body_focused)
       list_r, pin_r, pout_r = layout(rect)

@@ -15,6 +15,7 @@
 - TUI: the empty Authorize, Miner and Sequencer cards spell the whole menu path to their Send row, none of them offers a run key before there is something to run, and an empty OAST says to add or enable a provider on the Providers sub-tab (#1849)
 - Colormarker: the custom colours pane and its `Space` menu spell colour as the rest of the tab does, and a short `Space` menu no longer clips its own title (#1850)
 - TUI: a right-aligned value Miss Ring covers no longer leaves its last letters standing beside her (#1851)
+- TUI: an empty note's card says how to start writing, Target's Diff shows a card like the other tabs until a baseline is picked, an empty Rewriter names its presets, an empty Issues list no longer offers Open, and the two labels on an empty card line up (#1854)
 - Help: `?` opens the shortcuts as a popup over the pane you are in, starting at that tab's section, and `?` again inside it opens the Help tab (#1852)
 - TUI: `^P` and the `0` tab picker find a tab by what other tools call it, such as intruder, scanner, collaborator or param miner (#1852)
 - TUI: pressing `c` or `i` by accident now shows which key turns capture back on or intercept off, and the menus read Send to Repeater and Send request (#1852)

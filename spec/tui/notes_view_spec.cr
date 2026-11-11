@@ -32,6 +32,19 @@ describe Gori::Tui::NotesView do
     end
   end
 
+  # The card's first row is how to start writing; in INS that has happened, and a card
+  # under the caret still reading "i/↵ start writing" named a key that now types a letter.
+  it "steps the guide aside while a blank note is being typed into" do
+    with_store do |store|
+      view = NotesView.new
+      view.reload(store)
+      view.enter_insert!
+      backend = render_text(view, 80, 14)
+      backend.contains?("NOTES").should be_false
+      backend.contains?("start writing").should be_false
+    end
+  end
+
   it "loads, edits inline, and persists the note set as JSON" do
     with_store do |store|
       view = NotesView.new
