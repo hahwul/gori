@@ -987,18 +987,29 @@ module Gori
       [] of String
     end
 
-    # Per-status flow counts (e.g. {200 => n, 404 => n, nil => pending}) for the Project
-    # tab's status-distribution chart. Backed by idx_flows_status (V8) so it stays cheap
-    # on a full history. A nil status is a still-pending flow (no response yet). Never
-    # crashes a poll (returns [] on error).
-    def flow_status_counts : Array({Int32?, Int64})
-      rows = [] of {Int32?, Int64}
-      @db.query("SELECT status, COUNT(*) FROM flows GROUP BY status") do |rs|
-        rs.each { rows << {rs.read(Int32?), rs.read(Int64)} }
+    # Flow counts by status and state, for the Project tab's status-distribution chart. The
+    # state is here because a status alone cannot say how a flow ended: a dropped or failed
+    # flow has status nil or 0, like one still pending, and History's status cell
+    # (`Tui::FlowStatus`) tells them apart by state. A state this build has no member for
+    # reads as nil.
+    #
+    # The unary `+` keeps the planner off `idx_flows_status`: that index orders the GROUP BY
+    # but lacks `state`, so it fetched every row, and `state` is stored after the body BLOBs
+    # (an overflow-chain walk per row, see V37). Without it the scan is `idx_flows_list`,
+    # which covers both columns; `spec/store/list_index_spec.cr` pins the plan. That scan is
+    # wider than the status-only one it replaced (12 ms against 1.5 ms at 100k flows,
+    # `bench/store_bench.cr`), and the Project tab runs it on entry, not on a poll. Returns []
+    # on error.
+    STATUS_COUNTS_SQL = "SELECT status, state, COUNT(*) FROM flows GROUP BY +status, +state"
+
+    def flow_status_counts : Array({Int32?, FlowState?, Int64})
+      rows = [] of {Int32?, FlowState?, Int64}
+      @db.query(STATUS_COUNTS_SQL) do |rs|
+        rs.each { rows << {rs.read(Int32?), FlowState.from_value?(rs.read(Int32)), rs.read(Int64)} }
       end
       rows
     rescue
-      [] of {Int32?, Int64}
+      [] of {Int32?, FlowState?, Int64}
     end
 
     # SQLite's per-connection change counter (PRAGMA data_version): it bumps when

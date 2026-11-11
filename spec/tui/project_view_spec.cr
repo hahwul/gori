@@ -325,6 +325,60 @@ describe "ProjectView AT A GLANCE severity" do
   end
 end
 
+describe "ProjectView.status_class_groups" do
+  aborted, errored = Gori::Store::FlowState::Aborted, Gori::Store::FlowState::Error
+  pending, complete = Gori::Store::FlowState::Pending, Gori::Store::FlowState::Complete
+
+  # History's status cell calls a dropped request ABT and a failed one ERR. The chart counted
+  # both as PEND, so a project with one dropped request read as one still waiting.
+  it "counts a flow the way History's status cell names it" do
+    counts = [
+      {200, complete, 3_i64}, {404, complete, 1_i64}, {nil, pending, 4_i64},
+      {0, aborted, 1_i64}, {0, errored, 2_i64},
+      # A response cut mid-body: it has a status, and History still says ABT.
+      {200, aborted, 1_i64},
+    ] of {Int32?, Gori::Store::FlowState?, Int64}
+    rows = ProjectView.status_class_groups(counts)
+    rows.map { |(label, count, _)| {label, count} }.should eq([{"2xx", 3}, {"4xx", 1}, {"ERR", 2}, {"ABT", 2}, {"PEND", 4}])
+    counts.each do |(status, state, _)|
+      label, color = FlowStatus.cell(status, state)
+      next unless label.in?("ERR", "ABT")
+      rows.find!(&.[0].==(label))[2].should eq(color)
+    end
+  end
+
+  it "draws no PEND row when every flow with no status has ended" do
+    counts = [{0, aborted, 2_i64}] of {Int32?, Gori::Store::FlowState?, Int64}
+    ProjectView.status_class_groups(counts).map(&.[0]).should eq(["ABT"])
+  end
+
+  it "keeps a status-less flow of an unknown state under PEND" do
+    counts = [{nil, nil, 5_i64}, {0, complete, 1_i64}] of {Int32?, Gori::Store::FlowState?, Int64}
+    ProjectView.status_class_groups(counts).map { |(label, count, _)| {label, count} }.should eq([{"PEND", 6}])
+  end
+
+  it "reads the states on reload and draws them" do
+    with_store do |store|
+      req = Gori::Store::CapturedRequest.new(
+        created_at: 1_000_i64, scheme: "http", host: "acme.test", port: 80, method: "GET", target: "/",
+        http_version: "HTTP/1.1", head: "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil,
+        source: Gori::FlowSource::Kind::Proxy)
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: store.insert_flow(req), status: 0, head: Bytes.empty, body: nil, state: aborted))
+      store.flush
+
+      project = Gori::Project.new("t", File.tempname("gori-projview-abt"))
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      view.reload(project, store)
+      b = MemoryBackend.new(120, 30)
+      view.render(Screen.new(b), Rect.new(0, 0, 120, 30), focused: false)
+
+      b.contains?("ABT").should be_true
+      b.contains?("PEND").should be_false
+    end
+  end
+end
+
 describe "ProjectView#pane_at" do
   # The body is now ONE card under a chip strip, not five tiles. The pane the strip selects is
   # the pane the body belongs to — that mapping is what these pin.

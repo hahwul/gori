@@ -8,6 +8,7 @@ require "./input_mode"
 require "./text_read_state"
 require "./gutter"
 require "./traffic_empty_state"
+require "./flow_status"
 require "../project"
 require "../project_registry"
 require "../paths"
@@ -40,7 +41,7 @@ module Gori::Tui
     @created : Time?
     # AT A GLANCE viz snapshot (color-free: raw counts only, colours resolve live at
     # draw so a theme switch needs no rebuild — the Fuzzer DistData convention).
-    @status_counts : Array({Int32?, Int64})
+    @status_counts : Array({Int32?, Store::FlowState?, Int64})
     @sev_tally : StaticArray(Int64, 5)
     @desc_area : TextArea
     # {field index, first visible char} of the text field the last frame drew windowed, so a
@@ -69,7 +70,7 @@ module Gori::Tui
       @db_size = 0
       @total_captured = 0
       @created = nil
-      @status_counts = [] of {Int32?, Int64}
+      @status_counts = [] of {Int32?, Store::FlowState?, Int64}
       @sev_tally = StaticArray(Int64, 5).new(0_i64)
       @proj_id = nil
       @workspace = nil
@@ -2338,7 +2339,7 @@ module Gori::Tui
       inner = rect.inset(1, 1)
       return if inner.empty?
 
-      groups = status_class_groups
+      groups = ProjectView.status_class_groups(@status_counts)
       sevs = severity_rows
       if groups.empty? && sevs.empty?
         screen.text(inner.x, inner.y, "no data yet", Theme.muted, width: inner.w)
@@ -2351,24 +2352,35 @@ module Gori::Tui
       render_severity(screen, inner, y, sevs)
     end
 
-    # Collapse @status_counts into ordered {label, count, sample_status} rows: 1xx..5xx
-    # classes plus a PEND row for still-pending (nil-status) flows. sample_status feeds
-    # Theme.status_color (PEND → nil → muted). Only nonzero classes are kept.
-    private def status_class_groups : Array({String, Int64, Int32?})
+    # Collapse the status counts into ordered {label, count, colour} rows: the 1xx..5xx
+    # classes, then ERR and ABT, then PEND. Only nonzero rows are kept.
+    #
+    # ERR and ABT are whatever History's status cell calls so (`FlowStatus.cell`, which reads
+    # the state before the status), in its colours. Grouping by status alone counted a dropped
+    # request, which has no status, as PEND: one still waiting.
+    def self.status_class_groups(counts : Array({Int32?, Store::FlowState?, Int64})) : Array({String, Int64, Color})
       cls = StaticArray(Int64, 6).new(0_i64) # 0 = pending, 1..5 = 1xx..5xx
-      @status_counts.each do |(st, cnt)|
-        if st.nil? || st == 0
+      ended = [Store::FlowState::Error, Store::FlowState::Aborted]
+      ended_counts = ended.map { 0_i64 }
+      counts.each do |(st, state, cnt)|
+        if i = state.try { |s| ended.index(s) }
+          ended_counts[i] += cnt
+        elsif st.nil? || st == 0
           cls[0] += cnt
         else
           k = st // 100
           cls[k] += cnt if 1 <= k < 6
         end
       end
-      out = [] of {String, Int64, Int32?}
+      out = [] of {String, Int64, Color}
       (1..5).each do |k|
-        out << {"#{k}xx", cls[k], (k * 100).as(Int32?)} if cls[k] > 0
+        out << {"#{k}xx", cls[k], Theme.status_color(k * 100)} if cls[k] > 0
       end
-      out << {"PEND", cls[0], nil.as(Int32?)} if cls[0] > 0
+      ended.each_with_index do |state, i|
+        label, color = FlowStatus.cell(nil, state)
+        out << {label, ended_counts[i], color} if ended_counts[i] > 0
+      end
+      out << {"PEND", cls[0], Theme.status_color(nil)} if cls[0] > 0
       out
     end
 
@@ -2386,13 +2398,13 @@ module Gori::Tui
 
     # Draw status-class bars top-down, each colored by its class. Returns the next free y.
     private def render_bar_section(screen : Screen, inner : Rect, y0 : Int32,
-                                   groups : Array({String, Int64, Int32?})) : Int32
+                                   groups : Array({String, Int64, Color})) : Int32
       return y0 if groups.empty?
       maxc = groups.max_of { |(_, c, _)| c }
       y = y0
-      groups.each do |(label, count, code)|
+      groups.each do |(label, count, color)|
         break if y >= inner.bottom
-        render_bar_row(screen, inner, y, label, count, maxc, Theme.status_color(code))
+        render_bar_row(screen, inner, y, label, count, maxc, color)
         y += 1
       end
       y
@@ -2417,7 +2429,7 @@ module Gori::Tui
     # One "LABEL ███░  42" row: label, a Spark.bar scaled to `maxc`, right-aligned count.
     private def render_bar_row(screen : Screen, inner : Rect, y : Int32, label : String,
                                count : Int64, maxc : Int64, color : Color) : Nil
-      label_w = 5 # "CRIT " / "PEND " / "2xx  "
+      label_w = 5 # "CRIT " / "PEND " / "ABT  " / "2xx  "
       num = Fmt.count(count)
       num_w = num.size
       bar_w = {inner.w - label_w - num_w - 1, 1}.max
