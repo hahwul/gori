@@ -212,7 +212,8 @@ module Gori
       # Build a ready-to-run mining engine + its origin + name count. Raises FuzzArgError
       # (clean message) on malformed input. Reuses the fuzz timeout helper.
       private def build_mine_job(h, ob : Outbound) : Miner::Plan
-        text, default_target, src_h2, evidence, src_sni = mine_template_source(h)
+        bytes, default_target, src_h2, evidence, src_sni = seed_request_source(h, "mined")
+        text = String.new(bytes)
         config = Miner::Config.new
         config.concurrency = clamp(optional_int_arg(h, "concurrency"), 10, MINE_MAX_CONCURRENCY)
         config.rps = optional_float_arg(h, "rate")
@@ -309,39 +310,6 @@ module Gori
       # one goes with the capture's origin, never onto a caller's `url` (as `fuzz_start` has it).
       private def seeded_sni(h, seed : String?) : String?
         str(h, "sni").presence || (seed unless str(h, "url").presence)
-      end
-
-      # {raw request text (BEFORE Env expansion — Miner::Plan owns that), default target,
-      # http2}. The target is handed over raw too: expanding it here as well as in the plan
-      # builder was a double pass, so a var whose value contained a token resolved one level
-      # deeper on MCP than on the CLI.
-      # The 4th element is PROVENANCE (`Miner::PlanOptions#evidence?`): a `flow_id` template is
-      # a CAPTURE, a `template` string is a draft. `gori run mine --flow` has carried it since
-      # #556 and MCP did not, so an agent mining a captured OData request had the run refused
-      # for a `$filter` nobody typed, and a bare-LF captured head was promoted to CRLF.
-      #
-      # ONE seed only, the refusal `fuzz_template_source` already carries and `gori run mine`
-      # aborts on. Returning on the FIRST of template → flow_id mined the template and never
-      # said the flow seed was dropped — on a tool that makes real outbound requests, and
-      # against a CLI sibling that refuses the identical pair (#906).
-      # The 5th is the capture's SNI when it is not just the host (`FlowRequest.seed_sni`).
-      private def mine_template_source(h) : {String, String?, Bool, Bool, String?}
-        given = [] of String
-        given << "template" if str(h, "template").try(&.presence)
-        given << "flow_id" if optional_int_arg(h, "flow_id")
-        if given.size > 1
-          raise FuzzArgError.new("pass ONE template source, got #{given.join(" + ")} — they describe different requests and only one can be mined")
-        end
-        if t = str(h, "template")
-          return {t, nil, false, false, nil} unless t.strip.empty?
-        end
-        if id = optional_int_arg(h, "flow_id")
-          detail = store.get_flow(id)
-          raise FuzzArgError.new("no flow with id #{id}") unless detail
-          built = Repeater::FlowRequest.build(detail)
-          return {String.new(built.bytes), built.target, built.http2, true, Repeater::FlowRequest.seed_sni(detail)}
-        end
-        raise FuzzArgError.new("provide a 'template' (raw request) or a 'flow_id'")
       end
 
       # The explicitly requested locations, or nil to let the builder auto-detect the ones

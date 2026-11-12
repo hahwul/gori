@@ -213,7 +213,7 @@ module Gori
       # Normalize the tool args into `Sequencer::PlanOptions` and let the shared builder
       # assemble the run. Raises FuzzArgError (clean message) on any malformed input.
       private def build_sequence_plan(h, ob : Outbound) : Sequencer::Plan
-        bytes, default_target, src_h2, evidence, src_sni = sequence_request_source(h)
+        bytes, default_target, src_h2, evidence, src_sni = seed_request_source(h, "swept")
         config = Sequencer::Config.new(mode: Sequencer::Mode::LiveReplay,
           token_loc: sequence_token_loc(h), goal: clamp(optional_int_arg(h, "count"), 500, SEQUENCE_MAX_GOAL),
           concurrency: clamp(optional_int_arg(h, "concurrency"), 1, SEQUENCE_MAX_CONCURRENCY))
@@ -273,24 +273,27 @@ module Gori
         end
       end
 
-      # {raw request bytes, the seeding flow's target, http2} for a collection. Deliberately
-      # UNEXPANDED — `Sequencer::Plan.build` owns `Env.expand`, and expanding here as well
-      # would resolve a var whose value itself contains a `$TOKEN` twice.
-      # The 4th element is PROVENANCE (`Sequencer::PlanOptions#evidence?`): a `flow_id` request
-      # is a CAPTURE, a `template` string is a draft. `gori run sequence --flow` has carried it
+      # {raw request bytes, the seeding flow's target, http2} for a sequence collection or a
+      # mine run (`verb`: "swept" / "mined", the word the refusal uses). Deliberately
+      # UNEXPANDED — `Sequencer::Plan.build` / `Miner::Plan` own `Env.expand`, and expanding
+      # here as well would resolve a var whose value itself contains a `$TOKEN` twice (the
+      # target included: a double pass resolved it one level deeper on MCP than on the CLI).
+      # The 4th element is PROVENANCE (`PlanOptions#evidence?`): a `flow_id` request is a
+      # CAPTURE, a `template` string is a draft. `gori run sequence|mine --flow` has carried it
       # since #556 and MCP did not, so a token-randomness sweep seeded from a captured login
-      # was refused for a `$` in the capture, or ran against a head silently re-terminated.
+      # was refused for a `$` in the capture, or ran against a head silently re-terminated —
+      # and an agent mining a captured OData request was refused for a `$filter` nobody typed.
       #
-      # ONE seed only, for the reason `mine_template_source` and `fuzz_template_source` state:
-      # returning on the FIRST of template → flow_id swept the template and never said the flow
-      # seed was dropped, where `gori run sequence` aborts on the same pair (#906).
+      # ONE seed only, the refusal `fuzz_template_source` carries too: returning on the FIRST
+      # of template → flow_id ran the template and never said the flow seed was dropped, where
+      # `gori run sequence` / `gori run mine` abort on the same pair (#906).
       # The 5th is the capture's SNI when it is not just the host (`FlowRequest.seed_sni`).
-      private def sequence_request_source(h) : {Bytes, String?, Bool, Bool, String?}
+      private def seed_request_source(h, verb : String) : {Bytes, String?, Bool, Bool, String?}
         given = [] of String
         given << "template" if str(h, "template").try(&.presence)
         given << "flow_id" if optional_int_arg(h, "flow_id")
         if given.size > 1
-          raise FuzzArgError.new("pass ONE template source, got #{given.join(" + ")} — they describe different requests and only one can be swept")
+          raise FuzzArgError.new("pass ONE template source, got #{given.join(" + ")} — they describe different requests and only one can be #{verb}")
         end
         if t = str(h, "template")
           return {t.to_slice, nil, false, false, nil} unless t.strip.empty?
