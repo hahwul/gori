@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- CLI: `gori ca info` prints the root's subject, validity, SHA-256 fingerprint, SPKI pin and Android file name (`--json` too), `gori ca --der` writes the certificate in DER, `gori update --check` compares with the latest release and exits 10 when an update is available, and `gori settings --edit` offers to reopen a file that will not load (#1866)
+- CLI: `gori ca info` prints the root's subject, validity, SHA-256 fingerprint, SPKI pin and Android file name (`--json` too), `gori ca --der` writes the certificate in DER (`-o FILE` writes either form to a file), `gori update --check` compares with the latest release and exits 10 when an update is available, and `gori settings --edit` offers to reopen a file that will not load (#1866)
 - TUI: an empty `^P` opens on Open browser, Copy CA certificate path and Guided tour, then the tab jumps, with one Settings row; type a section's name to reach it (#1843)
 - Fuzzer: the idle results card lists what a run still needs (a marked position, then a payload set) and marks the next step, with no session open `Space` offers New fuzz session instead of Run and Stop, and a run with no match rule says so instead of counting every response as a hit (#1843, #1844, #1856)
 - Proxy: the CA page at `http://gori.proxy/` shows the certificate's SHA-256 fingerprint in the hex form certificate viewers print, and adds the trust steps for Linux, iOS and Android (#1862)

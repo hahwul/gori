@@ -62,10 +62,10 @@ module Gori::CLI
       next if answer.empty? || answer.starts_with?('y')
       abort "gori settings: left as is — gori runs on its defaults until the file is fixed"
     end
-    # Valid JSON can still carry a section gori cannot read (a string where a number goes);
-    # `load` names that on stderr, so let it speak even if the pre-edit load already did.
-    Settings.reset_load_warning_guard
-    Settings.load
+    # No `Settings.load` after the edit. A second load in this process applies only the keys
+    # the file still has, so a section the operator just deleted survives in memory from the
+    # first load — and the env-syntax adoption then SAVES it back over their edit (a removed
+    # `env` section returned, with its secrets, re-spelled). The next real start reads it.
   end
 
   private def self.run_settings_editor(cmd : Array(String), path : String) : Nil
@@ -88,7 +88,7 @@ module Gori::CLI
 
   # Why the edited file will not load as settings, or nil when it will. Only the shape gori
   # needs to start reading (a JSON object); what a section holds is `Settings.load`'s to judge.
-  # A deleted file is fine: gori starts from defaults and writes a fresh one.
+  # A deleted file is fine: the next start begins from defaults, as on a first run.
   def self.settings_edit_problem(path : String) : String?
     return nil unless File.exists?(path)
     JSON.parse(File.read(path)).as_h? ? nil : "the top level must be a JSON object ({ … })"

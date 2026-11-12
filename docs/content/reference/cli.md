@@ -2003,7 +2003,7 @@ Several `--install-*` flags may be given in one run; each named client is config
 ```bash
 gori ca
 gori ca --pem
-gori ca --der > gori-ca.crt
+gori ca --der -o gori-ca.crt
 gori ca --ca-dir=DIR
 gori ca info [--json]
 gori ca regenerate
@@ -2017,7 +2017,8 @@ Prints the path to gori's root CA certificate (creates it on first use). Use thi
 |--------|-------------|
 | `--ca-dir=DIR` | CA directory (default `~/.gori/ca`, or `$GORI_HOME/ca`) |
 | `--pem` | Print the certificate PEM to stdout instead of the path |
-| `--der` | Write the certificate DER to stdout instead (Android, Windows and MDM installers take the `.crt`/`.cer` form). Refuses a terminal: redirect it to a file. In Windows PowerShell 5.1, whose `>` re-encodes bytes as text, use `cmd /c "gori ca --der > gori-ca.crt"` |
+| `--der` | Write the certificate DER instead (Android, Windows and MDM installers take the `.crt`/`.cer` form). Refuses a terminal: use `-o` or a redirect |
+| `-o FILE`, `--out=FILE` | With `--pem` or `--der`, write the certificate to FILE instead of stdout. Prefer it to `>` on Windows: PowerShell before 7.4 re-encodes a redirected native command's bytes as text, which corrupts a DER file |
 
 A verb comes first and its flags after it: `gori ca regenerate --ca-dir=DIR`, not `gori ca --ca-dir=DIR regenerate`. The reverse order is a usage error, because the verb would otherwise be dropped and the command would print the CA path as if it had done the work. None of the forms takes a positional argument.
 
@@ -2025,7 +2026,7 @@ A verb comes first and its flags after it: `gori ca regenerate --ca-dir=DIR`, no
 
 ### gori ca info
 
-Prints what a trust store or device shows about the root, so you can confirm it is the one gori signs with: the path, the subject, the validity window with the days left (or `EXPIRED`), the SHA-256 fingerprint in the colon-hex form `openssl x509 -fingerprint -sha256` and the OS certificate viewers print, the SPKI pin Chromium's `--ignore-certificate-errors-spki-list` takes, and the `<subject_hash_old>.0` file name Android's system store expects. `--json` emits the same fields (`path`, `subject`, `not_before`, `not_after`, `expired`, `days_left`, `sha256`, `spki_sha256`, `android_file`).
+Prints what a trust store or device shows about the root (it never creates one: an empty CA directory is an error), so you can confirm it is the one gori signs with: the path, the subject, the validity window with the days left (or `EXPIRED` / `NOT YET VALID`), the SHA-256 fingerprint in the colon-hex form `openssl x509 -fingerprint -sha256` and the OS certificate viewers print, the SPKI pin Chromium's `--ignore-certificate-errors-spki-list` takes, and the `<subject_hash_old>.0` file name Android's system store expects. `--json` emits the same fields (`path`, `subject`, `not_before`, `not_after`, `expired`, `not_yet_valid`, `days_left`, `sha256`, `spki_sha256`, `android_file`).
 
 ### gori ca regenerate
 

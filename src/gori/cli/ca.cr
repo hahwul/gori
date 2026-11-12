@@ -42,7 +42,8 @@ module Gori::CLI
     io.puts "Options:"
     io.puts "  --ca-dir=DIR   CA directory (default ~/.gori/ca or $GORI_HOME/ca)"
     io.puts "  --pem          Print the certificate PEM to stdout instead of the path"
-    io.puts "  --der          Write the certificate DER to stdout (redirect it: > gori-ca.crt)"
+    io.puts "  --der          Write the certificate DER instead (Android, Windows, MDM installers)"
+    io.puts "  -o, --out=FILE With --pem or --der: write to FILE (gori ca --der -o gori-ca.crt)"
     io.puts "  -h, --help     Show this help"
     io.puts ""
     io.puts "Info options:"
@@ -102,27 +103,45 @@ module Gori::CLI
     ca_dir = Paths.default_ca_dir
     pem = false
     der = false
+    out_path = nil.as(String?)
     parser = OptionParser.new do |p|
       p.banner = "Usage: gori ca [options]\n       gori ca info [--json] [--ca-dir=DIR]\n       gori ca regenerate [--yes] [--ca-dir=DIR]\n       gori ca import --cert FILE --key FILE [--yes] [--ca-dir=DIR]"
       p.on("--ca-dir=DIR", "Directory for the root CA") { |v| ca_dir = v }
       p.on("--pem", "Print the certificate PEM to stdout instead of the path") { pem = true }
-      p.on("--der", "Write the certificate DER to stdout (redirect it to a .crt file)") { der = true }
+      p.on("--der", "Write the certificate DER instead of the path (with -o FILE, or to a redirected stdout)") { der = true }
+      p.on("-o FILE", "--out=FILE", "With --pem or --der: write the certificate to FILE instead of stdout") { |v| out_path = v }
       p.on("-h", "--help", "Show this help") { print_ca_usage(STDOUT); exit 0 }
       p.invalid_option { |flag| abort CLI.unknown_option_message("gori ca", flag, p) }
       p.missing_option { |flag| abort "missing value for #{flag}" }
       reject_ca_leftovers("ca", p)
     end
     parser.parse(args)
-    abort "gori ca: --pem and --der are two encodings of one certificate; pick one" if pem && der
-    # Binary on a terminal is noise at best and an escape sequence at worst. Before the load,
-    # so a first `gori ca --der` does not create a CA only to refuse to print it.
-    abort "gori ca --der: stdout is a terminal; redirect it to a file (gori ca --der > gori-ca.crt)" if der && STDOUT.tty?
+    # Before the load, so a first `gori ca --der` does not create a CA only to refuse to print it.
+    ca_show_flag_error(pem, der, out_path, STDOUT.tty?).try { |msg| abort msg }
+    emit_ca_cert(load_ca_with_diagnosis(ca_dir), pem, der, out_path)
+  end
 
-    ca = load_ca_with_diagnosis(ca_dir)
-    # Outside the diagnosis's rescue: a closed stdout is not a CA that could not be read.
-    if pem
-      print ca.ca_cert_pem
+  # Why `gori ca`'s output flags cannot run together, or nil. Binary on a terminal is noise at
+  # best and an escape sequence at worst; `-o`, not `>`, is the advice because PowerShell before
+  # 7.4 re-encodes a native command's redirected bytes as text, which corrupts a DER file.
+  def self.ca_show_flag_error(pem : Bool, der : Bool, out_path : String?, stdout_tty : Bool) : String?
+    return "gori ca: --pem and --der are two encodings of one certificate; pick one" if pem && der
+    return "gori ca: -o needs --pem or --der to say which encoding to write" if out_path && !pem && !der
+    "gori ca --der: stdout is a terminal; write it to a file (gori ca --der -o gori-ca.crt)" if der && !out_path && stdout_tty
+  end
+
+  # Outside the diagnosis's rescue: a closed stdout is not a CA that could not be read.
+  private def self.emit_ca_cert(ca : Proxy::Tls::CertAuthority, pem : Bool, der : Bool, out_path : String?) : Nil
+    if path = out_path
+      begin
+        File.write(path, der ? ca.ca_cert_der : ca.ca_cert_pem.to_slice)
+      rescue ex : IO::Error
+        abort "gori ca: could not write #{path}: #{ex.message}"
+      end
+      STDERR.puts "gori ca: wrote #{der ? "DER" : "PEM"} certificate to #{path}"
+    elsif pem
       # PEM files usually already end with a newline; don't double them.
+      print ca.ca_cert_pem
       STDOUT.flush
     elsif der
       STDOUT.write(ca.ca_cert_der)
@@ -146,6 +165,12 @@ module Gori::CLI
     end
     parser.parse(args)
 
+    # Never minted here: `info` is how an operator confirms which root they trusted, and a fresh
+    # one in a mistyped --ca-dir would answer with a fingerprint nobody has ever trusted.
+    unless File.exists?(File.join(ca_dir, Proxy::Tls::CertAuthority::CA_CERT_FILE)) ||
+           File.exists?(File.join(ca_dir, Proxy::Tls::CertAuthority::CA_KEY_FILE))
+      abort "gori ca info: no root CA in #{ca_dir} — `gori ca` creates one there"
+    end
     ca = load_ca_with_diagnosis(ca_dir)
     cert = ca.cert
     info = ca_info(ca.ca_cert_path, cert.subject, cert.not_before, cert.not_after,
@@ -154,20 +179,31 @@ module Gori::CLI
   end
 
   # The fields `gori ca info` reports, split from the cert so the shape is testable on plain
-  # values. `days_left` counts whole days and goes negative once the root has expired.
+  # values. `days_left` counts whole days toward zero (2.5 left and 2.5 ago are both 2), going
+  # negative once the root has expired; a root whose notBefore is still ahead (clock skew, or
+  # an imported root dated forward) is `not_yet_valid`, which clients reject just the same.
   def self.ca_info(path : String, subject : String, not_before : Time, not_after : Time,
                    sha256 : String, spki : String, android : String, now : Time = Time.utc)
     {path: path, subject: subject,
      not_before: not_before.to_rfc3339, not_after: not_after.to_rfc3339,
-     expired: not_after <= now, days_left: (not_after - now).total_days.floor.to_i,
+     expired: not_after <= now, not_yet_valid: not_before > now,
+     days_left: (not_after - now).total_days.to_i,
      sha256: sha256, spki_sha256: spki, android_file: android}
   end
 
   def self.print_ca_info(io : IO, info) : Nil
     left = info[:days_left]
-    validity = info[:expired] ? "EXPIRED #{-left} day(s) ago — run `gori ca regenerate`" : "#{left} day(s) left"
+    validity = if info[:expired]
+                 "EXPIRED #{left.zero? ? "less than a day" : "#{-left} day(s)"} ago — `gori ca regenerate` or `gori ca import` a new root"
+               elsif info[:not_yet_valid]
+                 "NOT YET VALID — clients reject it until then; check this machine's clock"
+               else
+                 "#{left} day(s) left"
+               end
     io.puts "path         #{info[:path]}"
-    io.puts "subject      #{info[:subject]}"
+    # term_safe: OpenSSL escapes C0 controls but passes C1 (U+009B is a one-character CSI) and
+    # the bidi overrides, and an imported root's subject is someone else's text.
+    io.puts "subject      #{Output.term_safe(info[:subject])}"
     io.puts "valid        #{info[:not_before]} → #{info[:not_after]} (#{validity})"
     io.puts "sha256       #{info[:sha256]}"
     io.puts "spki-sha256  #{info[:spki_sha256]}"
