@@ -17,8 +17,6 @@ module Gori::Tui
   # opened as a child of LinksOverlay) with no mode flag here. `target` survives only
   # as the card's heading.
   class FlowPicker < FilterPickerOverlay
-    IDLE_HINT = "type to filter · ↑/↓ select · ↵ choose · esc cancel"
-
     getter target : Symbol
     @indexed : Array({Store::FlowRow, String}) # each row paired with its precomputed filter haystack
 
@@ -51,7 +49,7 @@ module Gori::Tui
     end
 
     def hint : String
-      IDLE_HINT
+      "type to filter · ↑/↓ select · ↵ choose · esc cancel"
     end
 
     # Recompute the visible rows from the precomputed haystacks: every whitespace-
@@ -68,7 +66,7 @@ module Gori::Tui
     end
 
     def render(screen : Screen, area : Rect) : Nil
-      box, list_top, list_h = render_card(screen, area, "PICK FLOW #{@target.to_s.upcase}", IDLE_HINT, "flow picker needs a larger window") || return
+      box, list_top, list_h = render_card(screen, area, "PICK FLOW #{@target.to_s.upcase}", "flow picker needs a larger window") || return
 
       if @filtered.empty?
         # Same three-way split the Sitemap draws (sitemap_view.cr): a live filter, the lens,

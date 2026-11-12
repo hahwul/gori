@@ -169,7 +169,7 @@ module Gori::Tui
     end
 
     def render(screen : Screen, area : Rect) : Nil
-      box, list_top, list_h = render_card(screen, area, title, hint, "the link picker needs a larger window") || return
+      box, list_top, list_h = render_card(screen, area, title, "the link picker needs a larger window") || return
       each_visible_row(list_top, list_h, entry_count) do |ry, ri|
         if ri < create_rows
           draw_create(screen, box, ry, ri, ri == @selected)

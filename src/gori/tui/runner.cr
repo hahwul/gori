@@ -4892,7 +4892,7 @@ module Gori::Tui
       # to the one-row find bar rather than drawing off-screen.
       return render_replace_prompt(screen, rect) if @search_replace && rect.y > 0
       screen.fill(rect, Theme.panel)
-      prefix = "find: "
+      prefix = "find › "
       screen.text(rect.x, rect.y, prefix, Theme.accent, Theme.panel)
       x = rect.x + prefix.size
       # match count (or "no matches") right-aligned; dim "esc done · ↑↓ next" hint after
@@ -4911,9 +4911,9 @@ module Gori::Tui
       top = Rect.new(rect.x, rect.y - 1, rect.w, 1)
       screen.fill(top, Theme.panel)
       screen.fill(rect, Theme.panel)
-      screen.text(rect.x, top.y, "find:    ", Theme.muted, Theme.panel)
-      screen.text(rect.x, rect.y, "replace: ", Theme.accent, Theme.panel)
-      x = rect.x + 9 # both labels padded to the same width so the two fields line up
+      screen.text(rect.x, top.y, "find    › ", Theme.muted, Theme.panel)
+      screen.text(rect.x, rect.y, "replace › ", Theme.accent, Theme.panel)
+      x = rect.x + 10 # both labels padded to the same width so the two fields line up
 
       # Top row: the query plus the live match count, dimmed — it isn't focused.
       qsuffix = hint_with_count("↑↓ step · tab edit find")

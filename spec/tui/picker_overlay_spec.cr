@@ -206,6 +206,19 @@ describe Gori::Tui::FilterPickerOverlay do
     ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape)).should eq(:cancel)
   end
 
+  it "leaves the keys to the status row instead of repeating them in the card" do
+    # The empty filter bar used to print the picker's whole `hint`, which the shell draws in
+    # the status row for the open modal: one sentence, twice on one screen.
+    filter_pickers = every_picker.select(FilterPickerOverlay)
+    filter_pickers.size.should be >= 3
+    filter_pickers.each do |ov|
+      ov.hint.should contain("↑/↓ select"), "#{ov.class} no longer names its keys in the status row"
+      h = OverlayHarness.new(ov)
+      h.rendered?("↑/↓ select").should be_false, "#{ov.class} draws its key hint inside the card"
+      h.rendered?("filter › ").should be_true, "#{ov.class} has no typed-bar prompt"
+    end
+  end
+
   it "drops control characters from the filter instead of typing them in" do
     # handle_key's `else` arm forwards whatever ev.char it is given, so the control guard
     # has to live in query_char — otherwise a stray tab or escape byte lands in the query
@@ -214,10 +227,10 @@ describe Gori::Tui::FilterPickerOverlay do
     ov.query_char('\t')
     ov.query_char('\e')
     ov.entry_count.should eq(3)
-    OverlayHarness.new(ov).rendered?("filter:").should be_false # the query is still empty
+    OverlayHarness.new(ov).rendered?("filter › h").should be_false # the query is still empty
 
     ov.query_char('h') # ...but a printable one does go in
-    OverlayHarness.new(ov).rendered?("filter:").should be_true
+    OverlayHarness.new(ov).rendered?("filter › h").should be_true
   end
 
   it "does not type a Ctrl chord's letter into the filter query" do
@@ -227,7 +240,7 @@ describe Gori::Tui::FilterPickerOverlay do
     ov = FlowPicker.new(flow_rows, :a)
     ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerP,
       Termisu::Input::Modifier::Ctrl)).should eq(:stay)
-    OverlayHarness.new(ov).rendered?("filter:").should be_false
+    OverlayHarness.new(ov).rendered?("filter › p").should be_false
   end
 
   it "does not type a Ctrl chord's letter under the CSI-u / Kitty parse either" do
@@ -235,7 +248,7 @@ describe Gori::Tui::FilterPickerOverlay do
     kitty = FlowPicker.new(flow_rows, :a)
     kitty.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerP,
       Termisu::Input::Modifier::Ctrl, 'p')).should eq(:stay)
-    OverlayHarness.new(kitty).rendered?("filter:").should be_false
+    OverlayHarness.new(kitty).rendered?("filter › p").should be_false
   end
 
   it "does not filter the list away when the operator presses the quit chord" do
@@ -251,7 +264,7 @@ describe Gori::Tui::FilterPickerOverlay do
     ov = FlowPicker.new(flow_rows, :a)
     ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerC, char: 'c'))
     ov.entry_count.should eq(0) # a real keystroke still filters
-    OverlayHarness.new(ov).rendered?("filter:").should be_true
+    OverlayHarness.new(ov).rendered?("filter › c").should be_true
 
     alt = FlowPicker.new(flow_rows, :a)
     alt.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerC,
