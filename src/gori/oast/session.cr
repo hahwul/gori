@@ -17,14 +17,14 @@ module Gori::Oast
     property? registered : Bool
     # AES mode for interactsh decrypt: CFB (server default) vs CTR fallback. Sticky per
     # session once a poll proves which one yields valid JSON; not persisted (re-derivable).
-    property? aes_mode_cfb : Bool
+    property? aes_mode_cfb : Bool = true
 
     @rsa : RsaKeyPair?
 
     def initialize(@id : Int64, @kind : ProviderKind, @server_url : String,
                    @correlation_id : String, @secret : String, *,
                    @private_key_pem : String? = nil, @token : String? = nil,
-                   @registered : Bool = false, @aes_mode_cfb : Bool = true,
+                   @registered : Bool = false,
                    rsa : RsaKeyPair? = nil)
       @rsa = rsa
     end

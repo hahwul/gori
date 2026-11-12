@@ -99,31 +99,23 @@ module Gori::Oast
     # The SubjectPublicKeyInfo PEM ("-----BEGIN PUBLIC KEY-----"). interactsh's /register
     # wants this base64-encoded (the caller does the outer Base64).
     def public_spki_pem : String
-      bio = LibCrypto.BIO_new(LibCrypto.bio_s_mem)
-      raise Gori::Error.new("BIO_new(mem) failed") if bio.null?
-      begin
-        raise Gori::Error.new("PEM_write_bio_PUBKEY failed") if LibCrypto.pem_write_bio_pubkey(bio, @handle) != 1
-        io = IO::Memory.new
-        buf = Bytes.new(4096)
-        loop do
-          n = LibCrypto.bio_read(bio, buf.to_unsafe, buf.size)
-          break if n <= 0
-          io.write(buf[0, n])
-        end
-        io.to_s
-      ensure
-        LibCrypto.BIO_free(bio)
-      end
+      mem_pem("PEM_write_bio_PUBKEY failed") { |bio| LibCrypto.pem_write_bio_pubkey(bio, @handle) }
     end
 
     # Also export the PRIVATE key PEM (persisted so a session can be manually resumed).
     def private_pem : String
+      mem_pem("PEM_write_bio_PrivateKey failed") do |bio|
+        LibCrypto.pem_write_bio_privatekey(bio, @handle, Pointer(Void).null,
+          Pointer(UInt8).null, 0, Pointer(Void).null, Pointer(Void).null)
+      end
+    end
+
+    # The PEM the block writes into a fresh memory BIO (OpenSSL's 1 for success), read back.
+    private def mem_pem(failure : String, &) : String
       bio = LibCrypto.BIO_new(LibCrypto.bio_s_mem)
       raise Gori::Error.new("BIO_new(mem) failed") if bio.null?
       begin
-        ok = LibCrypto.pem_write_bio_privatekey(bio, @handle, Pointer(Void).null,
-          Pointer(UInt8).null, 0, Pointer(Void).null, Pointer(Void).null)
-        raise Gori::Error.new("PEM_write_bio_PrivateKey failed") if ok != 1
+        raise Gori::Error.new(failure) if yield(bio) != 1
         io = IO::Memory.new
         buf = Bytes.new(4096)
         loop do
