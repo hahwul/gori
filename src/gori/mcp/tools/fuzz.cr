@@ -1312,35 +1312,8 @@ module Gori
         # keep_bodies drives whether each Result retains its rendered request +
         # response bytes — needed only when record_history asks us to persist them.
         m = Fuzz::Matcher.new(keep_bodies: fuzz_record_policy(h))
-        if c = fuzz_conditions(h["match"]?, "match")
-          m.match_status = c[:status]
-          # `status` is 200 for every gRPC response; `grpc` is the dimension that can separate
-          # a granted call from a denied one. Numeric spec (7, >0, 1-16) — see Matcher.
-          m.match_grpc = c[:grpc]
-          m.match_size = c[:size]
-          m.match_words = c[:words]
-          m.match_lines = c[:lines]
-          # Round-trip time in MILLISECONDS. The one dimension a time-based blind injection
-          # moves — status, size, words and body are identical whether the sleep fired or not
-          # — and until this was wired an agent had no way to name it. See Fuzz::Matcher.
-          m.match_time = c[:time]
-          # A case-insensitive substring of the response HEAD. `regex` only ever sees the
-          # BODY, so until this was wired an agent had no way to name `Set-Cookie`,
-          # `X-Powered-By: PHP` or the `Location:` an open-redirect probe produces — the one
-          # place a target that answers 200 to everything actually differs.
-          m.match_header = c[:header]
-          m.match_regex = fuzz_regex(c[:regex], "match")
-        end
-        if c = fuzz_conditions(h["filter"]?, "filter")
-          m.filter_status = c[:status]
-          m.filter_grpc = c[:grpc]
-          m.filter_size = c[:size]
-          m.filter_words = c[:words]
-          m.filter_lines = c[:lines]
-          m.filter_time = c[:time]
-          m.filter_header = c[:header]
-          m.filter_regex = fuzz_regex(c[:regex], "filter")
-        end
+        fuzz_conditions(h["match"]?, "match").try { |c| apply_match_conds(m, c, "match") }
+        fuzz_conditions(h["filter"]?, "filter").try { |c| apply_filter_conds(m, c, "filter") }
         extractors = fuzz_extractors_arg(h)
         raise FuzzArgError.new(extractors) if extractors.is_a?(String)
         m.extractors = extractors
@@ -1391,25 +1364,11 @@ module Gori
         m = Fuzz::Matcher.new
         any = false
         if c = fuzz_conditions(match_raw, "stop_on.match")
-          m.match_status = c[:status]
-          m.match_grpc = c[:grpc]
-          m.match_size = c[:size]
-          m.match_words = c[:words]
-          m.match_lines = c[:lines]
-          m.match_time = c[:time]
-          m.match_header = c[:header]
-          m.match_regex = fuzz_regex(c[:regex], "stop_on.match")
+          apply_match_conds(m, c, "stop_on.match")
           any = true
         end
         if c = fuzz_conditions(filter_raw, "stop_on.filter")
-          m.filter_status = c[:status]
-          m.filter_grpc = c[:grpc]
-          m.filter_size = c[:size]
-          m.filter_words = c[:words]
-          m.filter_lines = c[:lines]
-          m.filter_time = c[:time]
-          m.filter_header = c[:header]
-          m.filter_regex = fuzz_regex(c[:regex], "stop_on.filter")
+          apply_filter_conds(m, c, "stop_on.filter")
           any = true
         end
         any ? m : nil
@@ -1441,6 +1400,40 @@ module Gori
         obj.each do |k, v|
           raise FuzzArgError.new("#{which} '#{k}' cannot be empty") if v.raw.nil? || v.as_s?.try(&.blank?)
         end
+      end
+
+      # One `fuzz_conditions` object onto the matcher's `match_*` side (`fuzz_matcher` and
+      # `stop_on.match` share it), the compiled regex last.
+      private def apply_match_conds(m : Fuzz::Matcher, c : FuzzConds, which : String) : Nil
+        m.match_status = c[:status]
+        # `status` is 200 for every gRPC response; `grpc` is the dimension that can separate
+        # a granted call from a denied one. Numeric spec (7, >0, 1-16) — see Matcher.
+        m.match_grpc = c[:grpc]
+        m.match_size = c[:size]
+        m.match_words = c[:words]
+        m.match_lines = c[:lines]
+        # Round-trip time in MILLISECONDS. The one dimension a time-based blind injection
+        # moves — status, size, words and body are identical whether the sleep fired or not
+        # — and until this was wired an agent had no way to name it. See Fuzz::Matcher.
+        m.match_time = c[:time]
+        # A case-insensitive substring of the response HEAD. `regex` only ever sees the
+        # BODY, so until this was wired an agent had no way to name `Set-Cookie`,
+        # `X-Powered-By: PHP` or the `Location:` an open-redirect probe produces — the one
+        # place a target that answers 200 to everything actually differs.
+        m.match_header = c[:header]
+        m.match_regex = fuzz_regex(c[:regex], which)
+      end
+
+      # The `filter_*` twin of `apply_match_conds`.
+      private def apply_filter_conds(m : Fuzz::Matcher, c : FuzzConds, which : String) : Nil
+        m.filter_status = c[:status]
+        m.filter_grpc = c[:grpc]
+        m.filter_size = c[:size]
+        m.filter_words = c[:words]
+        m.filter_lines = c[:lines]
+        m.filter_time = c[:time]
+        m.filter_header = c[:header]
+        m.filter_regex = fuzz_regex(c[:regex], which)
       end
 
       private def fuzz_conditions(raw : JSON::Any?, which : String) : FuzzConds?
