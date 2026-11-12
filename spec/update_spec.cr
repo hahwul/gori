@@ -502,6 +502,25 @@ describe Gori::Update do
     end
   end
 
+  describe ".check" do
+    it "reports a newer release without downloading anything" do
+      io = IO::Memory.new
+      Gori::Update.check(io, release_json: %({"tag_name": "v999.0.0", "assets": []})).should be_true
+      io.to_s.should contain("update available")
+      io.to_s.should contain("999.0.0")
+    end
+
+    it "says up to date at or behind the local version" do
+      io = IO::Memory.new
+      Gori::Update.check(io, release_json: %({"tag_name": "v0.0.1", "assets": []})).should be_false
+      io.to_s.should contain("up to date")
+    end
+
+    it "raises when the release cannot be read, so the CLI exits 1 rather than 0" do
+      expect_raises(Gori::Error) { Gori::Update.check(IO::Memory.new, release_json: "<html>") }
+    end
+  end
+
   describe ".package_action" do
     it "returns brew upgrade guidance for Homebrew" do
       action = Gori::Update.package_action(Gori::Update::Channel::Homebrew)

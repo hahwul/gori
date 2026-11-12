@@ -144,6 +144,43 @@ module Gori::Proxy::Tls
       "%08x" % LibCrypto.x509_subject_name_hash_old(@handle)
     end
 
+    # The certificate's SHA-256 fingerprint as `openssl x509 -fingerprint -sha256`, Firefox and
+    # the OS certificate viewers print it: the digest of the DER, upper-case hex in colon
+    # pairs. This is the value to compare after an install. The SPKI pin is a different
+    # digest (of the public key, base64) that only Chromium's flag takes.
+    def self.sha256_fingerprint(der : Bytes) : String
+      Digest::SHA256.digest(der).join(':') { |b| "%02X" % b }
+    end
+
+    def sha256_fingerprint : String
+      Cert.sha256_fingerprint(to_der)
+    end
+
+    # The subject as `CN=gori Root CA, O=…`, in the certificate's own order.
+    def subject : String
+      name = LibCrypto.x509_get_subject_name(@handle)
+      raise Gori::Error.new("X509_get_subject_name failed") if name.null?
+      # rstrip: stdlib's to_a returns an OID with no short name padded to its 512-byte buffer.
+      OpenSSL::X509::Name.new(name).to_a.join(", ") { |(k, v)| "#{k.rstrip('\0')}=#{v}" }
+    end
+
+    def not_before : Time
+      asn1_time(LibCrypto.x509_getm_not_before(@handle))
+    end
+
+    def not_after : Time
+      asn1_time(LibCrypto.x509_getm_not_after(@handle))
+    end
+
+    # ASN1_TIME_diff from now, not ASN1_TIME_to_tm: no `struct tm` to bind per platform, and
+    # second precision is all a validity line prints.
+    private def asn1_time(t : LibCrypto::ASN1_TIME) : Time
+      days = 0
+      secs = 0
+      raise Gori::Error.new("ASN1_TIME_diff failed") if LibCrypto.asn1_time_diff(pointerof(days), pointerof(secs), Pointer(Void).null.as(LibCrypto::ASN1_TIME), t) != 1
+      Time.utc.at_beginning_of_second + days.days + secs.seconds
+    end
+
     # DER (binary ASN.1) encoding of the certificate — the form OS/browser trust
     # stores accept for a double-click install (the self-serve CA download page's
     # .der/.crt route). A null `pp` first sizes the buffer, then i2d writes into it

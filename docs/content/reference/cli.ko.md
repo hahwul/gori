@@ -1994,7 +1994,9 @@ MCP stdio 서버입니다. 도구 세부사항은 [MCP 가이드](/ko/guide/mcp/
 ```bash
 gori ca
 gori ca --pem
+gori ca --der > gori-ca.crt
 gori ca --ca-dir=DIR
+gori ca info [--json]
 gori ca regenerate
 gori ca regenerate --yes
 gori ca import --cert root.crt.pem --key root.key.pem --yes
@@ -2006,10 +2008,15 @@ gori 루트 CA 인증서의 경로를 출력합니다(최초 사용 시 생성).
 |--------|-------------|
 | `--ca-dir=DIR` | CA 디렉터리 (기본값 `~/.gori/ca`, 또는 `$GORI_HOME/ca`) |
 | `--pem` | 경로 대신 인증서 PEM을 stdout으로 출력 |
+| `--der` | 경로 대신 인증서 DER을 stdout으로 출력(Android, Windows, MDM 설치기는 `.crt`/`.cer` 형식을 받음). 터미널에는 쓰지 않으므로 파일로 리다이렉트하세요. `>`가 바이트를 텍스트로 다시 인코딩하는 Windows PowerShell 5.1에서는 `cmd /c "gori ca --der > gori-ca.crt"`를 쓰세요 |
 
-동사(verb)를 먼저 쓰고 플래그를 그 뒤에 씁니다. `gori ca --ca-dir=DIR regenerate`가 아니라 `gori ca regenerate --ca-dir=DIR`입니다. 반대 순서는 사용법 오류로 처리합니다. 그러지 않으면 동사가 버려진 채 CA 경로만 출력되어 작업이 수행된 것처럼 보이기 때문입니다. 세 가지 형태 모두 위치 인자를 받지 않습니다.
+동사(verb)를 먼저 쓰고 플래그를 그 뒤에 씁니다. `gori ca --ca-dir=DIR regenerate`가 아니라 `gori ca regenerate --ca-dir=DIR`입니다. 반대 순서는 사용법 오류로 처리합니다. 그러지 않으면 동사가 버려진 채 CA 경로만 출력되어 작업이 수행된 것처럼 보이기 때문입니다. 어느 형태도 위치 인자를 받지 않습니다.
 
 `gori ca`는 로드는 되지만 사용할 수 없는 루트 CA(인증서와 일치하지 않는 개인 키, 또는 gori가 서명에 사용할 수 없는 키)도 stderr로 보고합니다. 그렇지 않으면 이 증상은 클라이언트 쪽에서 "unknown CA"나 "bad signature" 핸드셰이크 실패로만 드러나기 때문입니다. 해결책은 `regenerate`와 `import`이며, 두 명령은 쌍 중 한 파일만 남은 경우를 포함해 어떤 상태의 CA 디렉터리에서도 동작합니다.
+
+### gori ca info {#gori-ca-info}
+
+신뢰 저장소나 기기에 보이는 루트 정보를 출력해, gori가 서명에 쓰는 바로 그 CA인지 확인할 수 있게 합니다. 경로, subject, 남은 일수(또는 `EXPIRED`)가 붙은 유효 기간, `openssl x509 -fingerprint -sha256`과 OS 인증서 뷰어가 보여 주는 콜론 hex 형식의 SHA-256 지문, Chromium `--ignore-certificate-errors-spki-list`가 받는 SPKI 핀, Android 시스템 저장소가 요구하는 `<subject_hash_old>.0` 파일 이름입니다. `--json`은 같은 필드(`path`, `subject`, `not_before`, `not_after`, `expired`, `days_left`, `sha256`, `spki_sha256`, `android_file`)를 출력합니다.
 
 ### gori ca regenerate {#gori-ca-regenerate}
 
@@ -2049,7 +2056,7 @@ gori ca import --cert root.crt.pem --key root.key.pem --yes
 
 ```bash
 gori settings                      # settings.json 경로 출력
-gori settings --edit               # $EDITOR로 열기
+gori settings --edit               # $EDITOR로 열고, 닫은 뒤 로드되는지 확인
 gori settings sections             # 최상위 섹션 목록
 gori settings export [-o FILE]     # 공유 가능한 프로필 출력(기본 stdout)
 gori settings import FILE          # 프로필의 섹션들을 적용
@@ -2280,7 +2287,10 @@ gori tutorial
 ```bash
 gori update
 gori update --exec   # Homebrew/Snap: 패키지 매니저 명령 실행
+gori update --check  # 최신 릴리스와 비교만
 ```
+
+`--check`는 아무것도 내려받거나 바꾸지 않습니다. 새 릴리스가 있는지 출력하고, 최신이면 `0`, 업데이트가 있으면 `10`, 확인에 실패하면(오프라인, 또는 릴리스를 찾지 못함. rate limit에 걸린 API는 릴리스 redirect로 대신 확인하고 그 사실을 알림) `1`로 종료합니다. 그래서 스크립트가 "업데이트 없음"과 "확인 못 함"을 구분할 수 있습니다. `--exec`와 함께 쓸 수 없습니다.
 
 이 `gori` 바이너리가 어떻게 설치되었는지 감지하여 그에 맞게 업데이트합니다:
 

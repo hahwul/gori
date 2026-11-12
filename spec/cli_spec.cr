@@ -319,13 +319,14 @@ describe "gori ca — leftover positionals" do
     msg.not_nil!.should contain("must come FIRST")
     msg.not_nil!.should contain("nothing was regenerated")
     Gori::CLI.ca_leftover_error("ca", ["import"]).not_nil!.should contain("nothing was imported")
+    Gori::CLI.ca_leftover_error("ca", ["info"]).not_nil!.should contain("`gori ca info [flags]`")
   end
 
   it "rejects a stray word on every ca command" do
     # `gori ca regenerate --yes bogusword` regenerated and ignored the word; `gori ca --pem
     # strayword` printed the PEM and ignored it. Neither is a typo worth guessing at.
     Gori::CLI.ca_leftover_error("ca", ["strayword"]).not_nil!.should contain("unexpected argument")
-    Gori::CLI.ca_leftover_error("ca", ["strayword"]).not_nil!.should contain("verbs: regenerate, import")
+    Gori::CLI.ca_leftover_error("ca", ["strayword"]).not_nil!.should contain("verbs: regenerate, import, info")
     Gori::CLI.ca_leftover_error("ca regenerate", ["bogusword"]).not_nil!
       .should contain("`gori ca regenerate` takes no positional arguments")
     Gori::CLI.ca_leftover_error("ca import", ["STRAY"]).not_nil!.should contain("unexpected argument")
@@ -539,5 +540,42 @@ describe "gori settings import — a hostile name or argv cannot rewrite the lis
       cmd_rule("rewriter", "pipe", "n\e[2Kame", "./r.sh\e[2K"),
     ], dry: false)
     lines[1].should_not contain('\e')
+  end
+end
+
+describe "gori ca info" do
+  base = Time.utc(2030, 1, 1)
+
+  it "counts whole days left and flags expiry" do
+    info = Gori::CLI.ca_info("/ca.pem", "CN=x", base - 1.day, base + 10.days + 3.hours, "AA", "pin", "abcd1234.0", now: base)
+    info[:days_left].should eq(10)
+    info[:expired].should be_false
+    info[:not_after].should eq("2030-01-11T03:00:00Z")
+
+    gone = Gori::CLI.ca_info("/ca.pem", "CN=x", base - 9.days, base - 2.days, "AA", "pin", "abcd1234.0", now: base)
+    gone[:expired].should be_true
+    io = IO::Memory.new
+    Gori::CLI.print_ca_info(io, gone)
+    io.to_s.should contain("EXPIRED 2 day(s) ago")
+    io.to_s.should contain("android      abcd1234.0")
+  end
+end
+
+describe "gori settings --edit validation" do
+  it "names what keeps the edited file from loading" do
+    path = File.tempname("gori-settings-edit", ".json")
+    begin
+      File.write(path, %({"network": {"bind_port": 8070,}}))
+      Gori::CLI.settings_edit_problem(path).not_nil!.should contain("not valid JSON")
+      File.write(path, "[]")
+      Gori::CLI.settings_edit_problem(path).not_nil!.should contain("JSON object")
+      File.write(path, %({"network": {"bind_port": 8070}}))
+      Gori::CLI.settings_edit_problem(path).should be_nil
+      File.delete(path)
+      # Deleted is not broken: gori starts from defaults and writes a fresh file.
+      Gori::CLI.settings_edit_problem(path).should be_nil
+    ensure
+      File.delete?(path)
+    end
   end
 end

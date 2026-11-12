@@ -503,11 +503,15 @@ module Gori
       puts "next: run `gori` to open a project" if finished
     end
 
+    UPDATE_AVAILABLE_EXIT = 10
+
     private def self.run_update(args : Array(String)) : Nil
       exec_pkg = false
+      check = false
       parser = OptionParser.new do |p|
-        p.banner = "Usage: gori update [--exec]"
+        p.banner = "Usage: gori update [--exec | --check]"
         p.on("--exec", "For Homebrew/Snap: run the upgrade command (default: print only)") { exec_pkg = true }
+        p.on("--check", "Only compare with the latest release: exit 0 up to date, 10 update available, 1 check failed") { check = true }
         p.on("-h", "--help", "Show this help") do
           puts p
           puts ""
@@ -534,8 +538,14 @@ module Gori
         refuse_leftovers(p) { |rest| extra_args_error("update", rest, p) }
       end
       parser.parse(args)
+      abort "gori update: --check only reports; it cannot be combined with --exec" if check && exec_pkg
       begin
+        # Before either path: the release fetch dials through the configured upstream proxy and
+        # host overrides, which only a load puts in place.
         Settings.load
+        # 10, not diff(1)'s 1: every gori failure — a typo'd flag, an offline check — already
+        # exits 1, and `gori update --check || notify` must not read one as an update.
+        exit(Update.check ? UPDATE_AVAILABLE_EXIT : 0) if check
         Update.run(exec_package_commands: exec_pkg)
       rescue ex : Error
         abort "gori update: #{ex.message}"

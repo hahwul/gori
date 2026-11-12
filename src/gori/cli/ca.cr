@@ -17,6 +17,8 @@ module Gori::CLI
         run_ca_regenerate(args[1..])
       when "import"
         run_ca_import(args[1..])
+      when "info"
+        run_ca_info(args[1..])
       else
         STDERR.puts "unknown ca subcommand: #{first}"
         print_ca_usage(STDERR)
@@ -29,6 +31,7 @@ module Gori::CLI
 
   private def self.print_ca_usage(io : IO) : Nil
     io.puts "Usage: gori ca [options]"
+    io.puts "       gori ca info [--json] [--ca-dir=DIR]"
     io.puts "       gori ca regenerate [--yes] [--ca-dir=DIR]"
     io.puts "       gori ca import --cert FILE --key FILE [--yes] [--ca-dir=DIR]"
     io.puts ""
@@ -39,7 +42,11 @@ module Gori::CLI
     io.puts "Options:"
     io.puts "  --ca-dir=DIR   CA directory (default ~/.gori/ca or $GORI_HOME/ca)"
     io.puts "  --pem          Print the certificate PEM to stdout instead of the path"
+    io.puts "  --der          Write the certificate DER to stdout (redirect it: > gori-ca.crt)"
     io.puts "  -h, --help     Show this help"
+    io.puts ""
+    io.puts "Info options:"
+    io.puts "  --json         Emit subject, validity, SHA-256, SPKI pin and Android hash as JSON"
     io.puts ""
     io.puts "Regenerate options:"
     io.puts "  --yes, -y      Skip the interactive confirm (required when stdin is not a tty)"
@@ -54,7 +61,8 @@ module Gori::CLI
 
   # Every `gori ca` verb. Named here because the leftover check below has to tell a DROPPED
   # verb from ordinary junk, and because the usage error lists them.
-  private CA_VERBS = {"regenerate", "import"}
+  # Each verb and the past tense of what it did, for "nothing was …" below.
+  private CA_VERBS = {"regenerate" => "regenerated", "import" => "imported", "info" => "printed"}
 
   # The usage error a leftover positional earns, or nil to proceed. None of the three `gori
   # ca` parsers takes a positional, and all three silently DISCARDED one — the same failure
@@ -75,13 +83,13 @@ module Gori::CLI
   # a leftover here is unambiguously a positional the operator meant as a word.
   def self.ca_leftover_error(cmd : String, leftover : Array(String)) : String?
     return nil if (first = leftover.first?).nil?
-    if cmd == "ca" && CA_VERBS.includes?(first)
+    if cmd == "ca" && CA_VERBS.has_key?(first)
       return "gori ca: '#{first}' must come FIRST, before the flags — " \
              "`gori ca #{first} [flags]`, not `gori ca [flags] #{first}` " \
-             "(nothing was #{first == "import" ? "imported" : "regenerated"})"
+             "(nothing was #{CA_VERBS[first]})"
     end
     "gori #{cmd}: unexpected argument #{first.inspect} — `gori #{cmd}` takes no positional " \
-    "arguments#{cmd == "ca" ? " (verbs: #{CA_VERBS.join(", ")})" : ""}"
+    "arguments#{cmd == "ca" ? " (verbs: #{CA_VERBS.keys.join(", ")})" : ""}"
   end
 
   # Wire the leftover check into a `gori ca` parser, both halves (see `refuse_leftovers`).
@@ -89,31 +97,95 @@ module Gori::CLI
     refuse_leftovers(p) { |rest| ca_leftover_error(cmd, rest).try { |msg| "#{msg}\n#{p}" } }
   end
 
-  # Path / PEM print path (the default `gori ca` action).
+  # Path / PEM / DER print path (the default `gori ca` action).
   private def self.run_ca_show(args : Array(String)) : Nil
     ca_dir = Paths.default_ca_dir
     pem = false
+    der = false
     parser = OptionParser.new do |p|
-      p.banner = "Usage: gori ca [options]\n       gori ca regenerate [--yes] [--ca-dir=DIR]\n       gori ca import --cert FILE --key FILE [--yes] [--ca-dir=DIR]"
+      p.banner = "Usage: gori ca [options]\n       gori ca info [--json] [--ca-dir=DIR]\n       gori ca regenerate [--yes] [--ca-dir=DIR]\n       gori ca import --cert FILE --key FILE [--yes] [--ca-dir=DIR]"
       p.on("--ca-dir=DIR", "Directory for the root CA") { |v| ca_dir = v }
       p.on("--pem", "Print the certificate PEM to stdout instead of the path") { pem = true }
+      p.on("--der", "Write the certificate DER to stdout (redirect it to a .crt file)") { der = true }
       p.on("-h", "--help", "Show this help") { print_ca_usage(STDOUT); exit 0 }
       p.invalid_option { |flag| abort CLI.unknown_option_message("gori ca", flag, p) }
       p.missing_option { |flag| abort "missing value for #{flag}" }
       reject_ca_leftovers("ca", p)
     end
     parser.parse(args)
+    abort "gori ca: --pem and --der are two encodings of one certificate; pick one" if pem && der
+    # Binary on a terminal is noise at best and an escape sequence at worst. Before the load,
+    # so a first `gori ca --der` does not create a CA only to refuse to print it.
+    abort "gori ca --der: stdout is a terminal; redirect it to a file (gori ca --der > gori-ca.crt)" if der && STDOUT.tty?
 
+    ca = load_ca_with_diagnosis(ca_dir)
+    # Outside the diagnosis's rescue: a closed stdout is not a CA that could not be read.
+    if pem
+      print ca.ca_cert_pem
+      # PEM files usually already end with a newline; don't double them.
+      STDOUT.flush
+    elsif der
+      STDOUT.write(ca.ca_cert_der)
+      STDOUT.flush
+    else
+      puts ca.ca_cert_path
+    end
+  end
+
+  # What a trust store or a device shows about the root, so the operator can tell it is the
+  # one gori signs with: subject, validity, the SHA-256 the OS viewers print, Chromium's SPKI
+  # pin, and the hash-named file Android's system store wants.
+  private def self.run_ca_info(args : Array(String)) : Nil
+    ca_dir = Paths.default_ca_dir
+    json = false
+    parser = option_parser("gori ca info") do |p|
+      p.banner = "Usage: gori ca info [--json] [--ca-dir=DIR]"
+      p.on("--ca-dir=DIR", "Directory for the root CA") { |v| ca_dir = v }
+      p.on("--json", "Emit the details as JSON") { json = true }
+      reject_ca_leftovers("ca info", p)
+    end
+    parser.parse(args)
+
+    ca = load_ca_with_diagnosis(ca_dir)
+    cert = ca.cert
+    info = ca_info(ca.ca_cert_path, cert.subject, cert.not_before, cert.not_after,
+      cert.sha256_fingerprint, ca.spki_sha256_base64, "#{cert.subject_hash_old}.0")
+    json ? puts(info.to_json) : print_ca_info(STDOUT, info)
+  end
+
+  # The fields `gori ca info` reports, split from the cert so the shape is testable on plain
+  # values. `days_left` counts whole days and goes negative once the root has expired.
+  def self.ca_info(path : String, subject : String, not_before : Time, not_after : Time,
+                   sha256 : String, spki : String, android : String, now : Time = Time.utc)
+    {path: path, subject: subject,
+     not_before: not_before.to_rfc3339, not_after: not_after.to_rfc3339,
+     expired: not_after <= now, days_left: (not_after - now).total_days.floor.to_i,
+     sha256: sha256, spki_sha256: spki, android_file: android}
+  end
+
+  def self.print_ca_info(io : IO, info) : Nil
+    left = info[:days_left]
+    validity = info[:expired] ? "EXPIRED #{-left} day(s) ago — run `gori ca regenerate`" : "#{left} day(s) left"
+    io.puts "path         #{info[:path]}"
+    io.puts "subject      #{info[:subject]}"
+    io.puts "valid        #{info[:not_before]} → #{info[:not_after]} (#{validity})"
+    io.puts "sha256       #{info[:sha256]}"
+    io.puts "spki-sha256  #{info[:spki_sha256]}"
+    io.puts "android      #{info[:android_file]} (system store file name)"
+  end
+
+  # Load (creating on first use) the CA, then name a pair that LOADS but cannot serve. `gori
+  # ca` is the CA's diagnostic command, so it is where that gets said — nothing else ever says
+  # it, and the symptom shows up only at the client (see CertAuthority#usability_error). On
+  # stderr, non-fatally, and BEFORE the answer: a closed stdout ends the process at the print,
+  # and must not swallow it.
+  private def self.load_ca_with_diagnosis(ca_dir : String) : Proxy::Tls::CertAuthority
     begin
       Paths.ensure_dirs
       ca = Proxy::Tls::CertAuthority.load_or_create(ca_dir)
     rescue ex
       abort "gori ca: could not create/read the CA in #{ca_dir}: #{ex.message}"
     end
-    # `gori ca` is the CA's diagnostic command, so it is where a pair that LOADS but cannot
-    # serve gets named — nothing else ever says it, and the symptom shows up only at the
-    # client (see CertAuthority#usability_error). On stderr, non-fatally, and BEFORE the
-    # answer: a closed stdout ends the process at the print, and must not swallow it.
     begin
       if problem = ca.usability_error
         STDERR.puts "gori ca: WARNING — the root CA in #{ca_dir} is unusable: #{problem}. " \
@@ -128,14 +200,7 @@ module Gori::CLI
       # A diagnostic that cannot run is not a reason to fail the command the operator
       # actually asked for.
     end
-    # Outside the rescue: a closed stdout is not a CA that could not be read.
-    if pem
-      print ca.ca_cert_pem
-      # PEM files usually already end with a newline; don't double them.
-      STDOUT.flush
-    else
-      puts ca.ca_cert_path
-    end
+    ca
   end
 
   # Replace the on-disk root CA. Destructive: voids every prior client trust entry.

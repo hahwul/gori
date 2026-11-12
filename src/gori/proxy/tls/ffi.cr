@@ -46,6 +46,8 @@ lib LibCrypto
   # >0 if in the future, 0 on parse error. Used to warn (not block) on an imported
   # CA that is expired or not-yet-valid.
   fun x509_cmp_time = X509_cmp_time(s : ASN1_TIME, t : Void*) : Int
+  # Whole days and leftover seconds from `from` to `to` (NULL = now): `gori ca info`'s validity.
+  fun asn1_time_diff = ASN1_TIME_diff(pday : Int*, psec : Int*, from : ASN1_TIME, to : ASN1_TIME) : Int
 
   # Key identifiers (#1168). X509_pubkey_digest hashes the subjectPublicKey BIT STRING
   # contents, i.e. RFC 5280 §4.2.1.2 method (1) when given SHA-1 — the same value

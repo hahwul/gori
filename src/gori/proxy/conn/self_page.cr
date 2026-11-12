@@ -1,5 +1,5 @@
 require "html"
-require "digest/sha256"
+require "../tls/key_pair"
 require "../../bind_address"
 require "../../url"
 
@@ -101,7 +101,7 @@ module Gori::Proxy
           head_only)
       else # :index
         build(200, "OK", "text/html; charset=utf-8",
-          index_html(ca_available: !pem.nil?, sha256: der.try { |d| cert_sha256(d) }, spki: spki,
+          index_html(ca_available: !pem.nil?, sha256: der.try { |d| Tls::Cert.sha256_fingerprint(d) }, spki: spki,
             ca_path: ca_path, listen: listen, version: version).to_slice,
           head_only)
       end
@@ -158,14 +158,6 @@ module Gori::Proxy
           <p class="lead">#{body}</p>
         </section></main></body></html>
         HTML
-    end
-
-    # The certificate's SHA-256 fingerprint as `openssl x509 -fingerprint -sha256`, Firefox and
-    # the OS certificate viewers print it: the digest of the DER, upper-case hex in colon
-    # pairs. This is the value to compare after an install. The SPKI pin below it is a
-    # different digest (of the public key, base64) that only Chromium's flag takes.
-    def self.cert_sha256(der : Bytes) : String
-      Digest::SHA256.digest(der).join(':') { |b| "%02X" % b }
     end
 
     private def self.index_html(*, ca_available : Bool, sha256 : String?, spki : String?, ca_path : String?,
