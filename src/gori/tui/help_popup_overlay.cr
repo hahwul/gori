@@ -312,6 +312,10 @@ module Gori::Tui
         Overlay.too_small(screen, area, "#{@title.downcase} needs a larger window")
         return
       end
+      # At its widest the card stops two columns short of the body, and what shows in that
+      # sliver is the frame, scrollbar and cursor bar of the pane underneath: a second box
+      # drawn around this one. Wider terminals leave real context there, and keep it.
+      screen.fill(area, Theme.bg) if box.w + 4 >= area.w
       Frame.card(screen, box, @title, border: Theme.border_focus)
       Frame.border_meta(screen, box, @title, meta_label, bg: Theme.panel)
       render_filter(screen, box)
