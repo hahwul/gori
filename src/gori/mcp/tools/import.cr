@@ -36,7 +36,7 @@ module Gori
           return err("invalid 'kind' #{kind_s.inspect} (expected #{KINDS.keys.join("|")})",
             "INVALID_ARGUMENT", field: "kind")
         end
-        result = import_source(h, kind, kind_s)
+        result = import_source(h, kind)
         return result if result.is_a?(Result)
         # import_file RAISES when the parse yields zero flows, so it only returns here with
         # ≥1 flow to insert. A count of 0 therefore means the batch write was rolled back
@@ -68,7 +68,7 @@ module Gori
       # it fetched or a URL list it built as a string, and writing it to a file first only to
       # name that file would be a detour (`Import.import_text`). A refused combination comes
       # back as the error `Result`.
-      private def import_source(h, kind : Symbol, kind_s : String) : Import::Result | Result
+      private def import_source(h, kind : Symbol) : Import::Result | Result
         path = path_str(h, "path").try(&.strip).presence
         # Blank is absent, as `path` above: a client filling every property sends `text: ""`.
         text = str(h, "text").presence

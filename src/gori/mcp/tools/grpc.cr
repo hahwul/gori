@@ -99,7 +99,7 @@ module Gori
       # Read-only: what schema this project has loaded and where each piece came from.
       # No network, no gate — a file path and a cache row.
       @[Tool("grpc_schema")]
-      private def grpc_schema(h) : Result
+      private def grpc_schema : Result
         reflections = Gori::Protobuf::Schemas.reflections(store)
         Result.new(JSON.build do |j|
           j.object do

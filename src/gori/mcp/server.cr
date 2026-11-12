@@ -256,7 +256,7 @@ module Gori
         # `resultType` a modern client parses is owed here too. `ping` itself was REMOVED in
         # 2026-07-28 — we go on answering it, because a server that does is breaking nothing
         # and a dual-era client's legacy half still sends it.
-        gate = era_of(id, method, obj["params"]?)
+        gate = era_of(id, obj["params"]?)
         return true if gate.refused
         # No `note_modern_client` here, deliberately: that writes the presence marker and
         # starts the courier, and the whole point of this path is that a liveness probe is
@@ -286,7 +286,7 @@ module Gori
       #     the client can retry instead of guess. That error is also the signal a dual-era
       #     client probing us needs: a recognised modern error means "modern server, pick
       #     another version" and explicitly NOT "fall back to initialize".
-      private def era_of(id : JSON::Any, method : String, params : JSON::Any?) : EraGate
+      private def era_of(id : JSON::Any, params : JSON::Any?) : EraGate
         meta = obj_field(params, "_meta")
         # ABSENT is the legacy era. PRESENT is a client speaking the modern one, whatever it
         # managed to put in the slot — so a non-string there is a malformed MODERN request,
@@ -515,7 +515,7 @@ module Gori
         # The era gate runs BEFORE the method is looked at: a request naming a revision we
         # do not speak is refused whatever it was asking for, and the one naming a revision
         # we do decides the envelope every branch below writes.
-        gate = era_of(id, method, params)
+        gate = era_of(id, params)
         return if gate.refused
         era = gate.version
         note_modern_client(obj_field(params, "_meta")) if era

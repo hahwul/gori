@@ -70,7 +70,7 @@ module Gori::MCP
     # `REPLY_HINT`, naming the message to answer when the carrier knows which one it is. The
     # constant stays the id-less form: the channel push carries `message_id` in its own `meta`,
     # so it has no sentence to spend on one.
-    def self.reply_hint(id : Int64? = nil) : String
+    def self.reply_hint(id : Int64?) : String
       return REPLY_HINT unless id
       " — answer with the gori tool reply_to_operator (summary + optional detail, " \
       "in_reply_to #{id}); the operator is in gori, not in this terminal."

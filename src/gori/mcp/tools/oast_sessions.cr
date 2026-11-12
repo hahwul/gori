@@ -18,7 +18,7 @@ module Gori
       # Nothing here resumes on its own. Binding a project starts no listener (P4) — an agent
       # asks for a session back explicitly, exactly as the operator presses `r`.
       @[Tool("list_oast_sessions")]
-      private def list_oast_sessions(h) : Result
+      private def list_oast_sessions : Result
         sessions = Oast::Sessions.list(store)
         # Which of them THIS process is polling, and under which ephemeral handle — the
         # oast_poll/oast_payload id, so an agent that resumed earlier in the conversation can

@@ -241,14 +241,13 @@ module Gori
       private def maybe_record_fuzz_flow(fjob : FuzzJob, r : Fuzz::Result) : {Int64?, String?}
         return {nil, nil} if fjob.record_history == :none
         return {nil, nil} unless fjob.record_history == :all || r.matched?
-        req = r.request
-        return {nil, nil} unless req
+        return {nil, nil} unless r.request
         if fjob.recorded_flows >= FUZZ_HISTORY_MAX
           fjob.history_truncated = true
           return {nil, nil}
         end
         flow_ref = fjob.next_history_source_ref
-        fid = record_fuzz_flow(fjob, req, fjob.origin, fjob.http2?, r, flow_ref)
+        fid = record_fuzz_flow(fjob, r, flow_ref)
         fjob.recorded_flows += 1 if fid
         {fid, fid ? flow_ref : nil}
       end
@@ -261,10 +260,10 @@ module Gori
       # is how the two would have drifted on the next fix. What stays MCP's is the REPORTING:
       # recording runs per result, so a store that fails every insert must not log once per
       # request — the failure is counted against this job's drain budget instead.
-      private def record_fuzz_flow(fjob : FuzzJob, request : Bytes, origin : Fuzz::Origin,
-                                   http2 : Bool, r : Fuzz::Result, flow_ref : String) : Int64?
+      private def record_fuzz_flow(fjob : FuzzJob, r : Fuzz::Result, flow_ref : String) : Int64?
+        origin = fjob.origin
         Fuzz::HistoryRecord.record(store, r,
-          scheme: origin.scheme, host: origin.host, port: origin.port, http2: http2,
+          scheme: origin.scheme, host: origin.host, port: origin.port, http2: fjob.http2?,
           source: Gori::FlowSource::Kind::Fuzzer, surface: Gori::FlowSource::Surface::Mcp,
           source_ref: flow_ref, websocket: fjob.websocket?) do |ex|
           fjob.drain_errors += 1
