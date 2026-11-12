@@ -885,6 +885,24 @@ module Gori
       end
     end
 
+    # `gori update --check`: compare against the latest release without downloading anything.
+    # True when a newer release exists. Raises `Gori::Error` when the check itself fails, so a
+    # script can tell "no update" from "could not ask" (the CLI maps the three to exit codes).
+    def self.check(io : IO = STDOUT, *, release_json : String? = nil, api_url : String? = nil) : Bool
+      release, fallback_reason = release_json ? {parse_release(release_json), nil} : fetch_latest_release_with_fallback(api_url)
+      # Said, as update_binary says it: a rejected token or a TLS problem is worth knowing about
+      # even when the redirect endpoint still named the release.
+      io.puts "Note: the GitHub release API was unavailable (#{fallback_reason}); asked #{RELEASES_LATEST_URL} instead." if fallback_reason
+      latest = release.version
+      if version_cmp(normalize_version(VERSION), latest) < 0
+        io.puts "update available: #{display_version(VERSION)} → #{display_version(latest)} (run `gori update`)"
+        true
+      else
+        io.puts "up to date: #{display_version(VERSION)} (latest release #{display_version(latest)})"
+        false
+      end
+    end
+
     # Entry used by `gori update`. Raises `Gori::Error` on failure (CLI aborts).
     # Package-manager commands are print-only unless `exec_package_commands` is true
     # (CLI: `gori update --exec`).

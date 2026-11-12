@@ -50,6 +50,25 @@ module Gori::CLI
     end
 
     cmd = Settings.editor_command
+    # Checked here rather than left to the next launch: a dropped comma otherwise surfaces as
+    # "using defaults" on the picker, after the bind and pass-through list already reverted.
+    loop do
+      run_settings_editor(cmd, path)
+      problem = settings_edit_problem(path) || break
+      STDERR.puts "gori settings: #{path} will not load: #{problem}"
+      STDERR.print "Reopen the editor? [Y/n] "
+      STDERR.flush
+      answer = (STDIN.gets || "n").strip.downcase
+      next if answer.empty? || answer.starts_with?('y')
+      abort "gori settings: left as is — gori runs on its defaults until the file is fixed"
+    end
+    # Valid JSON can still carry a section gori cannot read (a string where a number goes);
+    # `load` names that on stderr, so let it speak even if the pre-edit load already did.
+    Settings.reset_load_warning_guard
+    Settings.load
+  end
+
+  private def self.run_settings_editor(cmd : Array(String), path : String) : Nil
     status =
       begin
         Process.run(cmd[0], cmd[1..] + [path],
@@ -65,6 +84,18 @@ module Gori::CLI
         abort "gori settings --edit: could not run the editor (#{cmd.join(' ')}): #{ex.message}"
       end
     abort "gori settings: editor (#{cmd.join(' ')}) failed (#{Gori::Update.exit_reason(status)})" unless status.success?
+  end
+
+  # Why the edited file will not load as settings, or nil when it will. Only the shape gori
+  # needs to start reading (a JSON object); what a section holds is `Settings.load`'s to judge.
+  # A deleted file is fine: gori starts from defaults and writes a fresh one.
+  def self.settings_edit_problem(path : String) : String?
+    return nil unless File.exists?(path)
+    JSON.parse(File.read(path)).as_h? ? nil : "the top level must be a JSON object ({ … })"
+  rescue ex : JSON::ParseException
+    "not valid JSON (#{ex.message})"
+  rescue ex : IO::Error | File::Error
+    "could not read it back (#{ex.message})"
   end
 
   # Run the named sub-verb, if `args` opens with one. Split out of `run_settings` so that

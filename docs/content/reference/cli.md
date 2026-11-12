@@ -2003,7 +2003,9 @@ Several `--install-*` flags may be given in one run; each named client is config
 ```bash
 gori ca
 gori ca --pem
+gori ca --der > gori-ca.crt
 gori ca --ca-dir=DIR
+gori ca info [--json]
 gori ca regenerate
 gori ca regenerate --yes
 gori ca import --cert root.crt.pem --key root.key.pem --yes
@@ -2015,10 +2017,15 @@ Prints the path to gori's root CA certificate (creates it on first use). Use thi
 |--------|-------------|
 | `--ca-dir=DIR` | CA directory (default `~/.gori/ca`, or `$GORI_HOME/ca`) |
 | `--pem` | Print the certificate PEM to stdout instead of the path |
+| `--der` | Write the certificate DER to stdout instead (Android, Windows and MDM installers take the `.crt`/`.cer` form). Refuses a terminal: redirect it to a file. In Windows PowerShell 5.1, whose `>` re-encodes bytes as text, use `cmd /c "gori ca --der > gori-ca.crt"` |
 
-A verb comes first and its flags after it: `gori ca regenerate --ca-dir=DIR`, not `gori ca --ca-dir=DIR regenerate`. The reverse order is a usage error, because the verb would otherwise be dropped and the command would print the CA path as if it had done the work. None of the three forms takes a positional argument.
+A verb comes first and its flags after it: `gori ca regenerate --ca-dir=DIR`, not `gori ca --ca-dir=DIR regenerate`. The reverse order is a usage error, because the verb would otherwise be dropped and the command would print the CA path as if it had done the work. None of the forms takes a positional argument.
 
 `gori ca` also reports a root CA that loads but cannot serve (a private key that does not match the certificate, or a key gori cannot sign with) on stderr, since the symptom otherwise appears only at the client as an "unknown CA" or "bad signature" handshake failure. `regenerate` and `import` are the fix, and both work on a CA directory in any state, including one where only one file of the pair survives.
+
+### gori ca info
+
+Prints what a trust store or device shows about the root, so you can confirm it is the one gori signs with: the path, the subject, the validity window with the days left (or `EXPIRED`), the SHA-256 fingerprint in the colon-hex form `openssl x509 -fingerprint -sha256` and the OS certificate viewers print, the SPKI pin Chromium's `--ignore-certificate-errors-spki-list` takes, and the `<subject_hash_old>.0` file name Android's system store expects. `--json` emits the same fields (`path`, `subject`, `not_before`, `not_after`, `expired`, `days_left`, `sha256`, `spki_sha256`, `android_file`).
 
 ### gori ca regenerate
 
@@ -2058,7 +2065,7 @@ Trust only `root.crt.pem` in your clients. Never distribute the private key.
 
 ```bash
 gori settings                      # print the settings.json path
-gori settings --edit               # open it in $EDITOR
+gori settings --edit               # open it in $EDITOR, then check it still loads
 gori settings sections             # list the top-level sections
 gori settings export [-o FILE]     # write a shareable profile (stdout by default)
 gori settings import FILE          # apply a profile's sections
@@ -2289,7 +2296,10 @@ Interactive tour of the TUI on a mock UI: tab/pane navigation (including a sub-t
 ```bash
 gori update
 gori update --exec   # Homebrew/Snap: run the package-manager command
+gori update --check  # compare with the latest release only
 ```
+
+`--check` downloads nothing and changes nothing: it prints whether a newer release exists and exits `0` when up to date, `10` when an update is available, and `1` when the check failed (offline, or no release could be resolved; a rate-limited API falls back to the release redirect and says so), so a script can tell "no update" from "could not ask". It cannot be combined with `--exec`.
 
 Detects how this `gori` binary was installed and updates accordingly:
 

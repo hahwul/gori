@@ -24,6 +24,8 @@ module Gori::Proxy::Tls
     MAX_LEAVES = 1024
 
     getter ca_cert_path : String
+    # The live root, for `gori ca info`. It tracks regenerate!/import! like ca_cert_pem does.
+    getter cert : Cert
 
     # Holds the per-host leaf alive (cert + key) alongside its context so GC
     # doesn't collect FFI objects still referenced by the cached context.
