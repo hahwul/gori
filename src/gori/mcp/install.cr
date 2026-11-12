@@ -169,14 +169,6 @@ module Gori
         end
       end
 
-      def self.toml_target?(target : String) : Bool
-        target == "codex" || target == "grok"
-      end
-
-      def self.yaml_target?(target : String) : Bool
-        target == "hermes"
-      end
-
       # Build the argv passed to the gori binary after the executable path.
       #
       # EVERY flag `gori mcp` accepts alongside an `--install-*` has to be reproduced here:
@@ -241,12 +233,10 @@ module Gori
         config_path = config_path(target)
         Dir.mkdir_p(File.dirname(config_path)) unless Dir.exists?(File.dirname(config_path))
 
-        if toml_target?(target)
-          install_toml(config_path, exe_path, args)
-        elsif yaml_target?(target)
-          install_yaml(config_path, exe_path, args)
-        else
-          install_json(config_path, exe_path, args)
+        case target
+        when "codex", "grok" then install_toml(config_path, exe_path, args)
+        when "hermes"        then install_yaml(config_path, exe_path, args)
+        else                      install_json(config_path, exe_path, args)
         end
         config_path
       end
