@@ -281,6 +281,12 @@ module Gori::Tui
       @view.render(screen, inner, list, @sel, @scroll, rules_engine.enabled_count,
         @focus, body_focused, @preview_input, @out, target, @preview_host,
         empty_hint: keys(rules_empty_hint))
+      # At rest the filter rides the rules card's border, after its title and short of its
+      # count. No count means no card was drawn, and then there is no border to ride.
+      @view.meta_x.try do |mx|
+        card, _, _ = @view.layout(inner)
+        @filter.render_label(screen, Frame.after_title(card, RewriterView::RULES_TITLE), card.y, RowFilter.label_limit(card, mx), rules_engine.rules.size)
+      end
     end
 
     # The empty list's one line. Short, so a 40-column pane still shows the preset half; and

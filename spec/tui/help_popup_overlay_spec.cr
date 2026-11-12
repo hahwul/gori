@@ -215,7 +215,7 @@ describe Gori::Tui::HelpPopupOverlay do
       screen.cursor(0, 0)
       ov.render(screen, area)
       box = ov.overlay_box(area).not_nil!
-      screen.desired_cursor.should eq({box.x + 2 + "search: ".size + Screen.draw_width("한"), box.y + 1})
+      screen.desired_cursor.should eq({box.x + 2 + "search › ".size + Screen.draw_width("한"), box.y + 1})
     end
 
     it "says so when nothing matches, instead of drawing an empty card" do

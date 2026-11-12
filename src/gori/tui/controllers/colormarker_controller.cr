@@ -199,6 +199,11 @@ module Gori::Tui
         ensure_visible(rules_r, rlist.size)
         @view.render(screen, rules_r, rlist, @sel, @scroll, engine.enabled_count,
           body_focused && @focus == :rules)
+        # At rest the filter rides the rules card's (untitled) border, short of its tally. No
+        # tally means no card was drawn, and then there is no border to ride.
+        @view.meta_x.try do |mx|
+          @filter.render_label(screen, Frame.after_title(rules_r, nil), rules_r.y, RowFilter.label_limit(rules_r, mx), engine.rules.size)
+        end
 
         if @colors_shown
           clist = custom_colors

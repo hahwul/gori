@@ -526,6 +526,8 @@ module Gori::Tui
       return render_empty(screen, rect) if @entries.empty?
       clamp_trial
       y = render_header(screen, rect, rect.y)
+      # At rest the filter rides the pane's own top border, one row above and one column out.
+      @filter.render_label(screen, rect.x + 1, rect.y - 1, RowFilter.label_limit(rect), @entries.size)
       if @filter.shown? && y < rect.bottom
         @filter.render_bar(screen, Rect.new(rect.x, y, rect.w, 1))
         y += 1

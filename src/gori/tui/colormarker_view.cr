@@ -71,8 +71,14 @@ module Gori::Tui
         count, mx, my)
     end
 
+    # Where the last frame drew the card's border tally, or nil when it drew no card (or no
+    # tally). The controller hangs the resting filter label on the same border and keeps it
+    # short of this.
+    getter meta_x : Int32? = nil
+
     def render(screen : Screen, rect : Rect, rules : Array(Store::ColorRule),
                sel : Int32, scroll : Int32, enabled_count : Int32, focused : Bool) : Nil
+      @meta_x = nil
       return if rect.w < 6 || rect.h < LIST_MIN_H
       # No border TITLE: this card IS the tab, and the tab bar two rows above already names it —
       # `COLORMARKER` inside the body frame printed the word a second time. The enabled/global
@@ -84,7 +90,7 @@ module Gori::Tui
       # pay border width to be told "0 global".
       globals = rules.count(&.global?)
       meta = "#{globals} global · #{meta}" if globals > 0
-      Frame.border_meta(screen, rect, "", meta)
+      @meta_x = Frame.border_meta(screen, rect, "", meta)
       inner = rect.inset(1, 1)
       return if inner.empty?
 

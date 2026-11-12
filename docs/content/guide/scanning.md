@@ -138,7 +138,7 @@ In the TUI, `⇧E` asks for the format and then the destination path. See [Expor
 
 ### Marking issues (multi-select)
 
-The list marks the same way History does. Press `t` to **mark** the issue under the cursor and step down, so a run of `t` marks consecutive rows. `Shift-↑` / `Shift-↓` extend a contiguous range from where you started, `Shift-T` marks everything the current filter shows, and `Esc` clears the marks. Marked rows get a full bar in the gutter and the filter row shows a live `3 marked` count.
+The list marks the same way History does. Press `t` to **mark** the issue under the cursor and step down, so a run of `t` marks consecutive rows. `Shift-↑` / `Shift-↓` extend a contiguous range from where you started, `Shift-T` marks everything the current filter shows, and `Esc` clears the marks. Marked rows get a full bar in the gutter and the list's top border shows a live `3 marked` count.
 
 Letting go of `Shift` ends the range: a plain `↑` / `↓` (or `PgUp` / `PgDn`, or a click on another row) hands the range back and moves on, the way a GUI list collapses its highlight. Marks you placed deliberately with `t` or `Shift-T` stay, which is what makes a discontiguous set possible. The mouse wheel only scrolls, so it never drops a mark.
 

@@ -505,7 +505,8 @@ module Gori::Tui
         @issues.select_index(row)
         return true
       end
-      if my == list_rect.y && !@issues.querying?
+      # The resting filter rides the pane's top border, the row above the list.
+      if my == list_rect.y - 1 && !@issues.querying?
         @issues.start_query
         return true
       end

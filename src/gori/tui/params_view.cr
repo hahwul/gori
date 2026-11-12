@@ -142,7 +142,7 @@ module Gori::Tui
       render_header(screen, rect)
       if err = @error
         if y = row(rect, HEADER_H)
-          screen.text(rect.x, y, "! #{err}", Theme.red, Theme.bg, width: rect.w)
+          screen.text(rect.x + 1, y, "! #{err}", Theme.red, Theme.bg, width: rect.w - 1)
         end
         return
       end
@@ -158,7 +158,9 @@ module Gori::Tui
 
     private def render_header(screen : Screen, rect : Rect) : Nil
       if y = row(rect, 0)
-        x = screen.text(rect.x, y, summary, Theme.text_bright, Theme.bg, width: rect.w)
+        # One column in, like the column header and every row under it: at `rect.x` the
+        # summary stood against the frame while everything below it was indented.
+        x = screen.text(rect.x + 1, y, summary, Theme.text_bright, Theme.bg, width: rect.w - 1)
         chips = [] of String
         chips << "scanning…" if scanning?
         chips << "all headers" if all_headers?
@@ -207,7 +209,7 @@ module Gori::Tui
       return if rect.h <= 0
       @list_last_h = rect.h
       if @rows.empty?
-        screen.text(rect.x, rect.y, empty_note, Theme.muted, Theme.bg, width: rect.w)
+        screen.text(rect.x + 1, rect.y, empty_note, Theme.muted, Theme.bg, width: rect.w - 1)
         return
       end
       name_w, ep_w = widths(rect.w)

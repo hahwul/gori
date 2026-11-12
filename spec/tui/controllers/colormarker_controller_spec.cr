@@ -61,3 +61,21 @@ describe "ColormarkerController under a peer's reorder" do
     end
   end
 end
+
+# The resting filter label rides the rules card's top border, so it is drawn only when that
+# card is: on a body too short for the card (the 40x8 floor leaves two rows) it used to stand
+# alone on the first row with nothing under it.
+describe "ColormarkerController filter label" do
+  it "rides the rules card's border, and is absent when no card is drawn" do
+    TuiContract.with_session("colormarker-filter-label") do |session|
+      session.colormarker.add("host:a.test", "red", name: "one").should be_true
+      host = ColorEditorRecordingHost.new(session)
+      host.tab = :colormarker
+      ctl = ColormarkerController.new(host)
+      TuiContract.render(ctl).row(0).should start_with("╭─ / filter ─")
+      short = MemoryBackend.new(100, 2)
+      ctl.render_body(Screen.new(short), Rect.new(0, 0, 100, 2), :body)
+      (0...2).each { |y| short.row(y).should_not contain("/ filter") }
+    end
+  end
+end

@@ -1002,16 +1002,17 @@ describe Gori::Tui::HistoryView do
         view.reload(store)
         view.open_detail(store).should be_true
 
-        backend = MemoryBackend.new(100, 16)
+        backend = MemoryBackend.new(100, 17) # row 16 is the pane's bottom border
         view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 16))
         backend.contains?("sent by gori — repeater (tui) #7").should be_true
         # In the FOOTER strip under the text, not spliced after the request bytes: the pane
         # is the wire's bytes, and a copy of the pane must not carry gori's sentence with them.
         view.detail_copy_all.should_not contain("sent by gori")
-        rows = (0...16).map { |y| backend.row(y) }
+        rows = (0...17).map { |y| backend.row(y) }
         note_y = rows.index!(&.includes?("sent by gori"))
-        rows[note_y - 2].should start_with("───") # the divider, above the stats row
-        rows[note_y - 1].should contain("req ")
+        note_y.should eq(15)                      # the strip's one row, the pane's last
+        rows[note_y - 1].should start_with("───") # its divider
+        rows[16].should contain("req ")           # the stats ride the border under it
       end
     end
 
@@ -1065,11 +1066,12 @@ describe Gori::Tui::HistoryView do
   end
 
   describe "detail footer strip" do
-    # The strip under the text: `200 · HTTP/1.1 · req 37B · res 22B · 1.2ms · text/plain · <time>`,
-    # then gori's own sentences (provenance, advisories) one per row. Burp's message editor
-    # keeps the same facts in a status bar under the pane; before this they were either five
-    # abbreviated cells up in the list or absent from the drill-in altogether.
-    it "spells the exchange's facts under the text of every pane" do
+    # `200 · HTTP/1.1 · req 37B · res 22B · 1.2ms · text/plain · <time>` on the pane's bottom
+    # border, and gori's own sentences (provenance, advisories) in a strip above it, one per
+    # row, when there are any. Burp's message editor keeps the same facts in a status bar
+    # under the pane; before this they were either five abbreviated cells up in the list or
+    # absent from the drill-in altogether.
+    it "spells the exchange's facts on the border under every pane" do
       with_store do |store|
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
@@ -1083,9 +1085,9 @@ describe Gori::Tui::HistoryView do
         view.reload(store)
         view.open_detail(store).should be_true
 
-        backend = MemoryBackend.new(100, 16)
+        backend = MemoryBackend.new(100, 17) # row 16 is the pane's bottom border
         view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 16))
-        rows = (0...16).map { |y| backend.row(y) }
+        rows = (0...17).map { |y| backend.row(y) }
         stats_y = rows.index!(&.includes?("req "))
         stats = rows[stats_y]
         stats.should contain("200 · HTTP/1.1")
@@ -1093,13 +1095,13 @@ describe Gori::Tui::HistoryView do
         stats.should contain("1.2ms")
         stats.should contain("text/plain") # the essence, without the charset parameter
         stats.should_not contain("charset")
-        rows[stats_y - 1].should start_with("───") # divider between the text and the strip
-        # A proxy capture has no provenance sentence: the stats row is the whole strip, and
-        # the strip sits on the pane's last row.
-        stats_y.should eq(15)
-        # Same strip under the RESPONSE pane.
+        # On the border, not in the pane: a proxy capture has no provenance sentence, so there
+        # is no strip at all and the text keeps every row down to the pane's last.
+        stats_y.should eq(16)
+        rows[15].should_not start_with("───")
+        # Same border under the RESPONSE pane.
         view.detail_pane_advance(1)
-        backend2 = MemoryBackend.new(100, 16)
+        backend2 = MemoryBackend.new(100, 17)
         view.render_detail(Screen.new(backend2), Rect.new(0, 0, 100, 16))
         backend2.row(stats_y).should contain("200 · HTTP/1.1")
         # …and none of it is in the pane's text (a copy is the bytes, not the readout).
@@ -1113,9 +1115,9 @@ describe Gori::Tui::HistoryView do
         view = HistoryView.new
         view.reload(store)
         view.open_detail(store).should be_true
-        backend = MemoryBackend.new(100, 16)
+        backend = MemoryBackend.new(100, 17)
         view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 16))
-        rows = (0...16).map { |y| backend.row(y) }
+        rows = (0...17).map { |y| backend.row(y) }
         stats = rows.find!(&.includes?("req "))
         stats.should contain("··· · HTTP/1.1")
         stats.should contain("res — · —")
@@ -1130,17 +1132,17 @@ describe Gori::Tui::HistoryView do
         view.reload(store)
         view.open_detail(store).should be_true
         inner = Rect.new(0, 0, 100, 16)
-        # 16 rows − strip − mode row = 14; the strip is divider + stats + provenance = 3.
+        # 16 rows − strip − mode row = 14; the strip is divider + provenance = 2 (the stats
+        # are on the border and take none).
         body = view.detail_text_rect(inner).not_nil!
         body.y.should eq(2)
-        body.h.should eq(11)
+        body.h.should eq(12)
         # Too short to keep three text rows under the strip → the strip is dropped whole,
         # and the hit-test rect grows back to match what is drawn.
-        short = Rect.new(0, 0, 100, 7)
-        view.detail_text_rect(short).not_nil!.h.should eq(5)
-        backend = MemoryBackend.new(100, 7)
+        short = Rect.new(0, 0, 100, 6)
+        view.detail_text_rect(short).not_nil!.h.should eq(4)
+        backend = MemoryBackend.new(100, 6)
         view.render_detail(Screen.new(backend), short)
-        backend.contains?("req ").should be_false
         backend.contains?("sent by gori").should be_false
       end
     end
@@ -1648,6 +1650,10 @@ describe Gori::Tui::HistoryView do
       # derivations (render + hit-test) cannot drift apart.
       backend.row(rail.bottom).includes?("‹ HISTORY").should be_true
       backend.row(0).includes?("‹ HISTORY").should be_false
+      # The rail's lit row, directly above, already names the open flow: the crumb keeps to
+      # where you are and how to step, and does not print the request a second time.
+      backend.row(rail.bottom).should match(/‹ HISTORY · \d+\/\d+ ─/)
+      view.detail_crumb.not_nil!.subject.should be_empty
       # The hit-test rect is the one the detail was drawn into.
       view.detail_body_rect(inner).y.should eq(rail.bottom + 1)
     end
@@ -1739,8 +1745,10 @@ describe Gori::Tui::HistoryView do
       end
       view.rail_rect(inner).should be_nil
       view.detail_body_rect(inner).should eq(inner)
-      # With no rail the crumb is the ONLY thing naming where you are, so it must still be up.
+      # With no rail the crumb is the ONLY thing naming where you are, so it must still be up,
+      # subject and all.
       backend.row(0).includes?("‹ HISTORY").should be_true
+      view.detail_crumb.not_nil!.subject.should_not be_empty
     end
   end
 

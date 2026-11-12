@@ -165,6 +165,40 @@ module Gori::Tui
       x
     end
 
+    # A list filter at REST, riding the border or hairline above the rows it narrows: idle it
+    # is ` / filter ` (the key that opens it), holding a query it is ` : query ` — the same
+    # two faces the History bar has, without a row of their own. Only TYPING opens a row.
+    # One helper so the sub-tab strips, the list cards and the Issues, OAST and Help filters
+    # cannot each grow a different dress for it (DESIGN.md §7, 2026-11-12).
+    #
+    # Drawn from `x`, never reaching `max_x` (exclusive). `tail` is a second hint kept beside
+    # it (the strip's ` · f find`). `key` is the bar's own word: `/ filter`, or Help's
+    # `/ search`. Returns the x past the label, or `x` when even the idle form does not fit.
+    def self.filter_label(screen : Screen, x : Int32, y : Int32, max_x : Int32, query : String, *,
+                          key : String = "/ filter", tail : String = "",
+                          colors : Array(Color)? = nil, bg : Color = Theme.bg) : Int32
+      room = max_x - x
+      if query.blank?
+        text = " #{key}#{tail} "
+        text = " #{key} " if Screen.draw_width(text) > room
+        return x if Screen.draw_width(text) > room
+        return screen.text(x, y, text, Theme.muted, bg)
+      end
+      # ` : ` + at least three columns of query + the closing space.
+      return x if room < 7
+      keep = Screen.draw_width(tail) + 1 <= room - 7 ? tail : ""
+      cx = screen.text(x, y, " : ", Theme.muted, bg)
+      cx = screen.styled_text(cx, y, query, colors, Theme.text, bg, width: max_x - cx - Screen.draw_width(keep) - 1)
+      screen.text(cx, y, "#{keep} ", Theme.muted, bg)
+    end
+
+    # The x a label may start at on a card's top border: past the title `Frame.card` drew,
+    # with one cell of hairline between them, or where the title would have started.
+    def self.after_title(rect : Rect, title : String?) : Int32
+      t = title || ""
+      rect.x + 2 + (t.empty? ? 0 : Screen.draw_width(t) + 3)
+    end
+
     # Where `border_meta` puts that run's left edge — padding included, and the x it returns.
     # Exposed so a caller whose own chrome must stop clear of the meta reads the number off
     # the same derivation instead of rebuilding it (the gRPC transcript's ` p: ` chip limit

@@ -597,6 +597,7 @@ module Gori::Tui
       n = r ? r.findings.size : 0
       vis = r ? visible(r) : [] of Int32
       Frame.card(screen, rect, "FINDINGS", border: Frame.pane_border(focused), bg: Theme.bg)
+      @filter.render_label(screen, Frame.after_title(rect, "FINDINGS"), rect.y, RowFilter.label_limit(rect), n)
       Frame.border_meta(screen, rect, "FINDINGS", @filter.active? ? "#{vis.size}/#{n}" : n.to_s)
       bar, inner = findings_bands(rect)
       # A card under 3 rows has no interior — `inset` floors the height at 0 but keeps

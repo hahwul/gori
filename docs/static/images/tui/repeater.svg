@@ -51,12 +51,9 @@
 <text x="81.00" y="137.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">1:GET</text>
 <text x="135.00" y="137.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">/</text>
 <text x="36.00" y="155.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">──</text>
-<text x="63.00" y="155.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">/</text>
-<text x="81.00" y="155.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">filter</text>
-<text x="144.00" y="155.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
-<text x="162.00" y="155.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">f</text>
-<text x="180.00" y="155.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">find</text>
-<text x="225.00" y="155.68" textLength="918.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">──────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="63.00" y="155.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">f</text>
+<text x="81.00" y="155.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">find</text>
+<text x="126.00" y="155.68" textLength="1017.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">─────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
 <text x="1152.00" y="155.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">1</text>
 <text x="1170.00" y="155.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">──</text>
 <text x="36.00" y="173.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">╭─</text>
@@ -82,7 +79,7 @@
 <text x="612.00" y="227.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">╭─</text>
 <text x="639.00" y="227.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">RESPONSE</text>
 <text x="720.00" y="227.68" textLength="243.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">───────────────────────────</text>
-<text x="972.00" y="227.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">118ms</text>
+<text x="972.00" y="227.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">122ms</text>
 <text x="1026.00" y="227.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
 <text x="1044.00" y="227.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">867B</text>
 <text x="1089.00" y="227.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
@@ -114,7 +111,7 @@
 <text x="747.00" y="263.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">11</text>
 <text x="774.00" y="263.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Nov</text>
 <text x="810.00" y="263.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">2026</text>
-<text x="855.00" y="263.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">13:13:39</text>
+<text x="855.00" y="263.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">14:44:47</text>
 <text x="936.00" y="263.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">GMT</text>
 <text x="1179.00" y="263.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">┃</text>
 <text x="36.00" y="281.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
@@ -183,7 +180,7 @@
 <text x="630.00" y="371.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">8</text>
 <text x="648.00" y="371.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#82a8c4" xml:space="preserve">age</text>
 <text x="675.00" y="371.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">:</text>
-<text x="693.00" y="371.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">4216</text>
+<text x="693.00" y="371.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">9683</text>
 <text x="1179.00" y="371.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#1a1a1e" xml:space="preserve">│</text>
 <text x="36.00" y="389.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
 <text x="594.00" y="389.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
@@ -199,7 +196,7 @@
 <text x="621.00" y="407.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">10</text>
 <text x="648.00" y="407.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#82a8c4" xml:space="preserve">cf-ray</text>
 <text x="702.00" y="407.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">:</text>
-<text x="720.00" y="407.68" textLength="180.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">a58d8e380b56b54e-KIX</text>
+<text x="720.00" y="407.68" textLength="180.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">a58e13b3de8cd842-KIX</text>
 <text x="1179.00" y="407.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#1a1a1e" xml:space="preserve">│</text>
 <text x="36.00" y="425.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
 <text x="594.00" y="425.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" xml:space="preserve">│</text>
@@ -239,7 +236,7 @@
 <text x="252.00" y="497.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">→</text>
 <text x="270.00" y="497.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">200</text>
 <text x="306.00" y="497.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">in</text>
-<text x="333.00" y="497.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">118ms</text>
+<text x="333.00" y="497.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">122ms</text>
 <text x="387.00" y="497.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
 <text x="405.00" y="497.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">History</text>
 <text x="477.00" y="497.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">#12</text>
@@ -248,6 +245,6 @@
 <text x="1017.00" y="497.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">MEM</text>
 <text x="1053.00" y="497.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">48M</text>
 <text x="1089.00" y="497.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
-<text x="1107.00" y="497.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">10:13</text>
+<text x="1107.00" y="497.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">11:44</text>
 <text x="1161.00" y="497.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">PM</text>
 </svg>

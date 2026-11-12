@@ -127,7 +127,7 @@ module Gori::Tui
     def render(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.empty?
       render_filter(screen, rect)
-      header_y = rect.y + 1
+      header_y = rect.y + filter_rows
       if header_y < rect.bottom
         screen.text(rect.x + 1, header_y, "ID", Theme.muted)
         screen.text(rect.x + CONFIRM_X, header_y, "CONFIRM", Theme.muted)
@@ -153,7 +153,7 @@ module Gori::Tui
 
     def row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
       return nil unless mx >= rect.x && mx < rect.right
-      top = rect.y + 3
+      top = rect.y + filter_rows + 2
       offset = my - top
       return nil unless 0 <= offset < rect.bottom - top # render draws rows above rect.bottom only
       idx = @scroll + offset
@@ -164,21 +164,34 @@ module Gori::Tui
       @selected = idx if 0 <= idx < @rows.size
     end
 
+    # The bar owns a row only while it is being typed in; one derivation for render and
+    # `row_at`.
+    private def filter_rows : Int32
+      @querying ? 1 : 0
+    end
+
+    # Typing: `filter › <input>` on the pane's first row, naming the fields until the first
+    # keystroke. At rest the filter rides the pane's top border (the row above `rect`, the
+    # shell's frame) as ` / filter ` or ` : query `, with the shown/all count and the stored
+    # size at the border's far end (`Frame.filter_label`).
     private def render_filter(screen : Screen, rect : Rect) : Nil
       right = "#{@rows.size}/#{@all.size} · #{Fmt.size(@all.sum(&.bytes))}"
-      right_x = {rect.right - right.size - 1, rect.x + 1}.max
-      screen.text(right_x, rect.y, right, Theme.muted, width: {rect.right - right_x, 0}.max)
-      width = {right_x - (rect.x + 1), 0}.max
       if @querying
-        screen.text(rect.x + 1, rect.y, "filter › ", Theme.accent, width: width)
+        right_x = {rect.right - right.size - 1, rect.x + 1}.max
+        screen.text(right_x, rect.y, right, Theme.muted, width: {rect.right - right_x, 0}.max)
+        screen.text(rect.x + 1, rect.y, "filter › ", Theme.accent, width: {right_x - (rect.x + 1), 0}.max)
         screen.input_line(rect.x + 10, rect.y, @query, @qcx, @preedit, Theme.text_bright,
           width: {right_x - (rect.x + 10), 0}.max)
-      elsif @query.empty?
-        screen.text(rect.x + 1, rect.y,
-          "/ filter · issue: host: method: status: confirmation: source: date:", Theme.muted, width: width)
-      else
-        screen.text(rect.x + 1, rect.y, ": #{@query}", Theme.text, width: width)
+        if @query.empty? && @preedit.empty?
+          screen.text(rect.x + 12, rect.y, "fields: issue: host: method: status: confirmation: source: date:",
+            Theme.muted, width: {right_x - (rect.x + 13), 0}.max)
+        end
+        return
       end
+      return if @all.empty? && @query.empty? # nothing frozen: nothing to narrow, nothing to count
+      y = rect.y - 1
+      rx = Frame.right_text_chain(screen, rect.right - 1, y, rect.x + 14, [{" #{right} ", Theme.muted}])
+      Frame.filter_label(screen, rect.x + 1, y, rx - 1, @query)
     end
 
     private def render_row(screen : Screen, rect : Rect, y : Int32,

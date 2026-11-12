@@ -435,3 +435,15 @@ describe "Gori::Tui::RewriterController (tab review)" do
     end
   end
 end
+
+# The resting filter label rides the MATCH & REPLACE card's border, so it is drawn only when
+# that card is: a one-row body has no card, and the label used to stand there alone.
+describe "RewriterController filter label" do
+  it "rides the rules card's border, and is absent when no card is drawn" do
+    with_rewriter_controller do |ctl, _host, session|
+      add_project(session.rules, "one")
+      render(ctl).row(1).should contain("╭─ MATCH & REPLACE ─ / filter ─")
+      render(ctl, Rect.new(0, 0, 100, 1)).row(0).should_not contain("/ filter")
+    end
+  end
+end

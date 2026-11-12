@@ -271,6 +271,9 @@ module Gori::Tui
       # place the Rules tab explains what a rule DOES, so an operator toggling it isn't guessing
       # from the name. Falls away on a very short pane (the list keeps every line it can).
       @filter.render_bar(screen, Rect.new(rect.x, rect.y, rect.w, 1)) if @filter.shown? && rect.h > 1
+      # At rest the filter rides the sub-tab strip's hairline, the row above this pane. Not on
+      # a pane too short to be sure that row IS the hairline.
+      @filter.render_label(screen, rect.x + 2, rect.y - 1, RowFilter.label_limit(rect), 1) if rect.h > 2 # the built-in rules are always listed
       list = list_rect(rect)
       footer = footer_text
       list_h = list_h(rect)
