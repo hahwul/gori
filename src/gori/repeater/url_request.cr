@@ -66,7 +66,7 @@ module Gori::Repeater
       # auto-generated Host header and inject. Rejected for BOTH shapes (raw too — `host`
       # becomes the dialed target and, on the structured shape, the Host line).
       reject_token_breakers(host, "url host")
-      port = uri.port || default_port(scheme)
+      port = uri.port || FlowRequest.default_port(scheme)
       # URI.parse accepts any digit run as a port (it doesn't range-check), so an out-of-range
       # ":99999" would otherwise reach the dialer as a doomed connect. A valid TCP port is
       # 1..65535.
@@ -144,7 +144,7 @@ module Gori::Repeater
     # authority, and Basic `Authorization` from a `user:pass@` (`basic_auth`).
     private def self.add_url_headers(lines : Array({String, String}), target : Target) : Nil
       unless header?(lines, "host")
-        hostline = target.port == default_port(target.scheme) ? target.host : "#{target.host}:#{target.port}"
+        hostline = target.port == FlowRequest.default_port(target.scheme) ? target.host : "#{target.host}:#{target.port}"
         lines << {"Host", hostline}
       end
       if !header?(lines, "authorization") && (auth = basic_auth(target.uri))
@@ -202,10 +202,6 @@ module Gori::Repeater
 
     private def self.header?(lines : Array({String, String}), name : String) : Bool
       lines.any? { |(k, _)| k.compare(name, case_insensitive: true) == 0 }
-    end
-
-    private def self.default_port(scheme : String) : Int32
-      scheme == "https" ? 443 : 80
     end
 
     # The structured shape frames the request itself, so a header name/value (or the

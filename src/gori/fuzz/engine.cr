@@ -1897,15 +1897,12 @@ module Gori::Fuzz
     # `uri`'s host and port against `host`/`port`. `parse_target`'s bracket rule for an IPv6
     # literal, in reverse, on both sides.
     private def same_authority?(uri : URI, sc : String, host : String, port : Int32) : Bool
-      unbracket(uri.host || "").downcase == unbracket(host).downcase && (uri.port || default_port(sc)) == port
+      unbracket(uri.host || "").downcase == unbracket(host).downcase &&
+        (uri.port || Repeater::FlowRequest.default_port(sc)) == port
     end
 
     private def unbracket(h : String) : String
       h.starts_with?('[') && h.ends_with?(']') ? h[1..-2] : h
-    end
-
-    private def default_port(sc : String) : Int32
-      sc == "https" ? 443 : 80
     end
 
     # The absolute URI the last request went to, for `URI#resolve`. An origin-form target
