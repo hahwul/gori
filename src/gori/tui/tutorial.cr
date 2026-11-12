@@ -596,9 +596,9 @@ module Gori::Tui
     # ends up spelled two ways and a later edit has to prove they agree. Loop-internal:
     # companion_watch_goals owns the Settings.companion? gate. Companion#say is gated on `companion_notices?` for
     # the rest, which is deliberate (see the note on @companion above).
-    private def companion_react(goal : Symbol, line : String, level : Symbol = :success) : Bool
+    private def companion_react(goal : Symbol, line : String) : Bool
       return false unless @companion_said.add?(goal)
-      @companion.say(line, Time.instant, level)
+      @companion.say(line, Time.instant, :success)
       true
     end
 
@@ -1391,7 +1391,7 @@ module Gori::Tui
       unless @overlay == :none
         rect = @overlay == :palette ? @palette_rect : @space_rect
         if rect.contains?(mx, my)
-          handle_overlay_click(mx, my)
+          handle_overlay_click(my)
         else
           close_overlay
         end
@@ -1407,7 +1407,7 @@ module Gori::Tui
       @step.practice? || @step.navigate? || @step.palette? || @step.space_menu? || @step.edit?
     end
 
-    private def handle_overlay_click(mx : Int32, my : Int32) : Nil
+    private def handle_overlay_click(my : Int32) : Nil
       case @overlay
       when :palette
         # Click a row → select + run (same as ↵). Bounded by the rows actually PAINTED and

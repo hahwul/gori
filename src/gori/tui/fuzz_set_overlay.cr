@@ -698,7 +698,7 @@ module Gori::Tui
         bg = foc ? Theme.accent_bg : Theme.bg
         screen.fill(Rect.new(box.x + 1, y, box.w - 2, 1), bg) if foc
         screen.text(box.x + 2, y, field_label(f), foc ? Theme.text_bright : Theme.muted, bg)
-        render_project_value(screen, box, f, y, vx, vw, foc, bg)
+        render_project_value(screen, f, y, vx, vw, foc, bg)
       end
       meta = "reads captured data · sends nothing · the run reports what it read"
       screen.text(box.x + 2, box.bottom - 4, meta, Theme.muted, Theme.bg, width: box.w - 4)
@@ -713,7 +713,7 @@ module Gori::Tui
     }
 
     # One Project row's value column: the QL field, the projection chips, or the opt-in's state.
-    private def render_project_value(screen : Screen, box : Rect, f : Symbol, y : Int32, vx : Int32,
+    private def render_project_value(screen : Screen, f : Symbol, y : Int32, vx : Int32,
                                      vw : Int32, foc : Bool, bg : Color) : Nil
       case f
       when :project_query

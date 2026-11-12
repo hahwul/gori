@@ -2143,7 +2143,7 @@ module Gori::Tui
       when :archive_export_path, :archive_import_path, :archive_import_name
         render_archive_overlay(screen, w, h)
       else
-        render_list(screen, cx, cw, w, h)
+        render_list(screen, cw, w, h)
         @confirm.try(&.render(screen, Rect.new(0, 0, w, h))) if @mode == :confirm
         @preferences.render(screen, Rect.new(0, 0, w, h)) if @mode == :settings
         @theme_card.render(screen, Rect.new(0, 0, w, h)) if @mode == :theme
@@ -2209,7 +2209,7 @@ module Gori::Tui
       {Rect.new(cx, top + bh, cw, card_h), res_rows}
     end
 
-    private def render_list(screen : Screen, cx : Int32, cw : Int32, w : Int32, h : Int32) : Nil
+    private def render_list(screen : Screen, cw : Int32, w : Int32, h : Int32) : Nil
       fp = filtered_projects
 
       # One rounded card holds the actions (New / Temp / Search), a tee divider,
@@ -2734,8 +2734,8 @@ module Gori::Tui
     # of unbounded length (a db path in an open error), which would otherwise clamp to
     # x=0 and run off the right edge into the hint row.
     private def centered(screen : Screen, y : Int32, text : String, fg : Color, w : Int32,
-                         attr : Attribute = Attribute::None, width : Int32? = nil) : Nil
-      screen.text({(w - Screen.draw_width(text)) // 2, 0}.max, y, text, fg, Theme.bg, attr: attr, width: width)
+                         width : Int32? = nil) : Nil
+      screen.text({(w - Screen.draw_width(text)) // 2, 0}.max, y, text, fg, Theme.bg, width: width)
     end
 
     # Draw BRAND_ART as one centered block: every line starts at the same left

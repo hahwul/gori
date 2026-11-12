@@ -176,7 +176,7 @@ module Gori::Tui
         case variant
         when :history           then render_history_full(screen, rect, headline, addr, capturing)
         when :sitemap           then render_sitemap_full(screen, rect, headline, addr, capturing)
-        when :intercept         then render_intercept_full(screen, rect, headline, addr, capturing, catch_on, body_focused, catch_direction)
+        when :intercept         then render_intercept_full(screen, rect, headline, capturing, catch_on, body_focused, catch_direction)
         when :fuzzer_results    then render_fuzzer_results_full(screen, rect, headline, running, fuzz_step)
         when :probe             then render_probe_full(screen, rect, headline, addr, capturing, scan_on)
         when :miner_results     then render_miner_results_full(screen, rect, headline, running)
@@ -448,7 +448,7 @@ module Gori::Tui
     end
 
     private def render_intercept_full(screen : Screen, rect : Rect, headline : String,
-                                      addr : String, capturing : Bool, catch_on : Bool,
+                                      capturing : Bool, catch_on : Bool,
                                       body_focused : Bool, catch_direction : String) : Nil
       inner_h = full_inner_h(:intercept, capturing: capturing)
       go = queue_route(body_focused)
