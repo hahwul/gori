@@ -110,16 +110,14 @@ end
 describe "SubtabPicker — Overlay contract" do
   it "carries the chrome, with a ↵ verb that varies by open-site" do
     # The Runner interpolated `@subtab_picker.action` into its hint arm; the overlay owns
-    # that now, and the card's own hint row must read the same string as the bottom row.
+    # that now. The shell's bottom row is the one place it is drawn.
     search = sample_picker
     OverlayHarness.new(search).assert_chrome(OverlayKind::RepeaterSubtab, "FIND SUB-TAB")
     search.hint.should eq("type to filter · ↑/↓ select · ↵ jump · esc cancel")
-    OverlayHarness.new(search).rendered?("↵ jump").should be_true
 
     link = SubtabPicker.new("PICK REPEATER", [SubtabPicker::Row.new(0, "a", "b")], action: "link")
     link.title.should eq("PICK REPEATER")
     link.hint.should eq("type to filter · ↑/↓ select · ↵ link · esc cancel")
-    OverlayHarness.new(link).rendered?("↵ link").should be_true
   end
 
   it "hands back the ABSOLUTE sub-tab index, not the filtered position" do
@@ -171,7 +169,7 @@ describe "SubtabPicker — Overlay contract" do
     h = OverlayHarness.new(sample_picker)
     h.preedit("preedithere")
     h.rendered?("preedithere").should be_true
-    h.rendered?("filter:").should be_true
+    h.rendered?("filter › preedithere").should be_true
   end
 
   it "clicking a row commits it; clicking outside dismisses" do

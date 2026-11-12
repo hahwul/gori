@@ -142,12 +142,12 @@ describe "FlowPicker — Overlay contract" do
     h.rendered?("preedithere").should be_true
   end
 
-  it "shows the idle hint until something is typed, then the live filter" do
+  it "opens on an empty typed bar, then shows the live filter" do
     h = OverlayHarness.new(sample_picker)
-    h.rendered?("type to filter").should be_true
-    h.rendered?("filter:").should be_false
+    h.rendered?("filter › ").should be_true
+    h.rendered?("type to filter").should be_false # the status row's sentence, not the card's
     h.type("ap")
-    h.rendered?("filter:").should be_true
+    h.rendered?("filter › ap").should be_true
   end
 
   it "clicking a row commits it; clicking outside dismisses; the wheel scrolls" do

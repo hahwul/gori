@@ -197,32 +197,29 @@ module Gori::Tui
       :stay
     end
 
-    # Draw the filter bar + divider and return the list's first row. `idle_hint` shows
-    # while nothing has been typed, so the card explains itself before it filters.
-    private def render_filter(screen : Screen, box : Rect, idle_hint : String) : Int32
-      if @field.value.empty? && @field.preedit.empty?
-        screen.text(box.x + 2, box.y + 1, idle_hint, Theme.muted, Theme.panel, width: box.w - 4)
-      else
-        # input_line shows committed text + IME preedit (underline) + a caret, and syncs
-        # the terminal cursor so Hangul/CJK composition renders where the user is typing.
-        px = screen.text(box.x + 2, box.y + 1, "filter: ", Theme.muted, Theme.panel)
-        screen.input_line(px, box.y + 1, @field.value, @field.caret, @field.preedit, Theme.text_bright,
-          Theme.panel, width: {box.right - 1 - px, 1}.max)
-      end
+    # Draw the filter bar + divider and return the list's first row. The bar carries no key
+    # hint: the status row already draws `hint` for the open picker, and the copy that sat
+    # here while the bar was empty was the same sentence twice on one screen.
+    private def render_filter(screen : Screen, box : Rect) : Int32
+      # input_line shows committed text + IME preedit (underline) + a caret, and syncs
+      # the terminal cursor so Hangul/CJK composition renders where the user is typing.
+      px = screen.text(box.x + 2, box.y + 1, "filter › ", Theme.accent, Theme.panel)
+      screen.input_line(px, box.y + 1, @field.value, @field.caret, @field.preedit, Theme.text_bright,
+        Theme.panel, width: {box.right - 1 - px, 1}.max)
       Frame.tee_divider(screen, box, box.y + 2)
       box.y + LIST_OFFSET
     end
 
     # The card, its filter bar and the list window, as every filter picker opens its render:
     # `{box, list_top, list_h}`, or nil — after the too-small line — when there is no room.
-    private def render_card(screen : Screen, area : Rect, title : String, idle_hint : String,
+    private def render_card(screen : Screen, area : Rect, title : String,
                             too_small : String = "picker needs a larger window") : {Rect, Int32, Int32}?
       unless box = overlay_box(area)
         Overlay.too_small(screen, area, too_small)
         return
       end
       Frame.card(screen, box, title, border: Theme.border_focus)
-      list_top = render_filter(screen, box, idle_hint)
+      list_top = render_filter(screen, box)
       list_h = list_height(box)
       ensure_visible(list_h)
       {box, list_top, list_h}

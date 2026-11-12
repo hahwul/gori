@@ -41,6 +41,29 @@ describe "HTTP status colour" do
     Theme.status_color(503).should eq(Theme.red)
     Theme.status_color(nil).should eq(Theme.muted)
   end
+
+  it "does not draw an informational 1xx as a server error" do
+    # The ladder's `else` was red, so a 101 Switching Protocols (every WebSocket that opens)
+    # and the 1xx bar on Project's AT A GLANCE wore the 5xx colour.
+    Theme.apply("goridark")
+    Theme.status_color(101).should eq(Theme.accent)
+    Theme.status_color(100).should_not eq(Theme.red)
+  end
+
+  it "has no second ladder beside Theme's" do
+    # The Fuzzer and Discover each kept a private `case status` copy. Discover's matched; the
+    # Fuzzer's drew a 3xx muted in its results list and accent in the DIST panel beside it.
+    root = File.join(__DIR__, "..", "..", "src", "gori", "tui")
+    offenders = [] of String
+    glob_files(root, "**", "*.cr").sort.each do |path|
+      next if File.basename(path) == "theme.cr"
+      File.read(path).lines.each_with_index do |line, i|
+        next unless line.matches?(/when\s+[2-5]00\.\.[2-5]99\s+then\s+Theme\./)
+        offenders << "#{File.basename(path)}:#{i + 1} — #{line.strip}"
+      end
+    end
+    offenders.should be_empty
+  end
 end
 
 # A state an operator acts on must be readable WITHOUT colour. gori ships HIGH_CONTRAST (where

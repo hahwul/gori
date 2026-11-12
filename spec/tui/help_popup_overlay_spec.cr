@@ -368,6 +368,26 @@ describe Gori::Tui::HelpPopupOverlay do
     end
   end
 
+  it "does not leave a sliver of the pane underneath around a card at its widest" do
+    # At 80 columns the card stops two short of the body on each side. The pane's own frame,
+    # scrollbar and cursor bar showed through that margin as a second box around this one.
+    area = Rect.new(0, 0, 80, 24)
+    mb = MemoryBackend.new(80, 24)
+    screen = Screen.new(mb)
+    24.times { |y| screen.text(0, y, "#" * 80, Theme.text, Theme.bg) }
+    shortcuts.render(screen, area)
+    (0...24).each { |y| mb.row(y).should_not contain("#"), "row #{y} still shows the pane underneath" }
+  end
+
+  it "keeps the pane in view beside a card that has room to spare" do
+    area = Rect.new(0, 0, 200, 24)
+    mb = MemoryBackend.new(200, 24)
+    screen = Screen.new(mb)
+    24.times { |y| screen.text(0, y, "#" * 200, Theme.text, Theme.bg) }
+    shortcuts.render(screen, area)
+    mb.row(12).should start_with("#")
+  end
+
   it "degrades to a one-line notice rather than a broken card on a short terminal" do
     # Height-constrained, which is the case an operator actually hits (a wide, short pane).
     # The line names its own escape because it is the only thing on screen — the one

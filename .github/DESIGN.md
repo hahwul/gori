@@ -5399,3 +5399,24 @@ keeps. Each follows a rule already in force.
 The palette's System sigil is a muted `·`. A red `×` read as close, or as danger, beside
 Guided tour.
 
+### 2026-11-13: a filter picker's keys are the status row's, and 1xx is not an error
+
+Refines the 2026-11-12 *say it once* entry. Found by walking the demo project and reading
+what each screen printed twice.
+
+- **A filter picker's bar is a typed bar from the start.** While empty it printed the
+  picker's whole `hint`, which the shell already draws in the status row for the open modal:
+  one sentence, twice on one screen (Go to tab, Find sub-tab, Link to, Pick flow, the
+  libraries). #1038 had made the two one string so they could not drift, but they were still
+  two printings. The bar opens on `filter › ` and the caret, as `RowFilter` and Help's search
+  do, and the status row is the one place the keys are named. Preferences keeps its key row
+  for the reason given on 2026-11-12: the project picker draws that card with no status row.
+  The find and replace bars take the same prompt (`find › `, `replace › `).
+- **A 1xx status draws in `accent`, the 3xx rung.** `Theme.status_color` ended in
+  `else red`, so a WebSocket's 101 and the 1xx bar on Project's AT A GLANCE wore the 5xx
+  colour. The Fuzzer and Discover each kept a private copy of the ladder, and the Fuzzer's
+  drew a 3xx muted beside a DIST panel that drew it accent. Both call `Theme.status_color`
+  now, and `color_semantics_spec` fails on a second ladder.
+- **The Shortcuts popup clears its margin when it is at its widest.** A card that stops two
+  columns short of the body showed the frame, scrollbar and cursor bar of the pane underneath
+  as a second box around itself. On a wider terminal the margin is real context and stays.

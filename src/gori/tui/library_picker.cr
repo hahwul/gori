@@ -82,10 +82,6 @@ module Gori::Tui
     end
 
     def hint : String
-      idle_hint
-    end
-
-    private def idle_hint : String
       edit = @on_edit ? " · ^E edit" : ""
       del = @on_delete ? " · ^X delete" : ""
       refresh = @on_refresh ? " · ^R refresh" : ""
@@ -144,7 +140,7 @@ module Gori::Tui
     end
 
     def render(screen : Screen, area : Rect) : Nil
-      box, list_top, list_h = render_card(screen, area, @title, idle_hint) || return
+      box, list_top, list_h = render_card(screen, area, @title) || return
 
       if @filtered.empty?
         # An empty LIBRARY and an empty FILTER are different dead ends, and the way out of

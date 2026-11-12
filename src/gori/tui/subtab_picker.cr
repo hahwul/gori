@@ -51,13 +51,8 @@ module Gori::Tui
       OverlayKind::RepeaterSubtab
     end
 
+    # The ↵ verb varies with the open-site ("jump" vs "link").
     def hint : String
-      idle_hint
-    end
-
-    # The ↵ verb varies with the open-site ("jump" vs "link"), so the card's own hint row
-    # and the shell's bottom row read the same string.
-    private def idle_hint : String
       "type to filter · ↑/↓ select · ↵ #{@action} · esc cancel"
     end
 
@@ -76,7 +71,7 @@ module Gori::Tui
     end
 
     def render(screen : Screen, area : Rect) : Nil
-      box, list_top, list_h = render_card(screen, area, @title, idle_hint) || return
+      box, list_top, list_h = render_card(screen, area, @title) || return
 
       if @filtered.empty?
         msg = @rows.empty? ? "no sub-tabs open" : "no sub-tabs match"

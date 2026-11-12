@@ -3604,14 +3604,7 @@ module Gori::Tui
 
     private def status_color(r : Fuzz::Result) : Color
       return Theme.red if r.error
-      s = r.status
-      return Theme.muted unless s
-      case s
-      when 200..299 then Theme.green
-      when 300..399 then Theme.muted
-      when 400..499 then Theme.yellow
-      else               Theme.red
-      end
+      Theme.status_color(r.status)
     end
 
     # ── DIST sidebar — result distribution at a glance ───────────────────────────

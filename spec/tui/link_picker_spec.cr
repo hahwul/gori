@@ -143,10 +143,9 @@ end
 describe "LinkPicker — Overlay contract" do
   it "carries the chrome the Runner's ladder arms used to hard-code" do
     OverlayHarness.new(sample_picker).assert_chrome(OverlayKind::LinkPick, "LINK TO")
-    # ONE hint, on the card and on the shell's bottom row: once it names the row under the
-    # cursor there is nothing a separate "link / create" phrasing could add (#1038).
+    # ONE hint, on the shell's bottom row: once it names the row under the cursor there is
+    # nothing a separate "link / create" phrasing could add (#1038).
     sample_picker.hint.should eq("type to filter · ↑/↓ select · ↵ link · esc cancel")
-    OverlayHarness.new(sample_picker).rendered?("↵ link · esc cancel").should be_true
   end
 
   it "keeps the two pinned create rows out of the filtered count (the off-by-two)" do
@@ -241,7 +240,6 @@ describe "LinkPicker — Overlay contract" do
     h = OverlayHarness.new(p)
     h.rendered?("+ New issue…").should be_true
     h.rendered?("+ New note…").should be_true
-    h.rendered?("↵ link").should be_true
   end
 
   it "never promises a freeze when no ref has an exchange to copy" do

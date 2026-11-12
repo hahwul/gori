@@ -657,22 +657,12 @@ module Gori::Tui
       bg = sel ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
       screen.fill(Rect.new(inner.x, py, inner.w, 1), bg)
       screen.cell(inner.x, py, sel ? '▎' : ' ', Theme.accent, bg)
-      screen.text(inner.x + 2, py, f.status.try(&.to_s) || "—", status_color(f.status), bg, width: 4)
+      screen.text(inner.x + 2, py, f.status.try(&.to_s) || "—", Theme.status_color(f.status), bg, width: 4)
       screen.text(inner.x + 7, py, f.source.label, Theme.accent, bg, width: 12)
       urlw = {inner.w - 20 - 6, 4}.max
       screen.text(inner.x + 20, py, f.url, sel ? Theme.text_bright : Theme.text, bg, width: urlw)
       conf = (f.confidence * 100).to_i
       screen.text(inner.right - 6, py, "#{conf}%", conf >= 90 ? Theme.green : Theme.yellow, bg)
-    end
-
-    private def status_color(s : Int32?) : Color
-      return Theme.muted unless s
-      case s
-      when 200..299 then Theme.green
-      when 300..399 then Theme.accent
-      when 400..499 then Theme.yellow
-      else               Theme.red
-      end
     end
 
     # `cap` is the rows region — `inner.h - 1`, the column header above it is not scrolled.

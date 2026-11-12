@@ -73,10 +73,6 @@ module Gori::Tui
     end
 
     def hint : String
-      idle_hint
-    end
-
-    private def idle_hint : String
       "type to filter · ↑/↓ select · ↵ open · esc cancel"
     end
 
@@ -139,7 +135,7 @@ module Gori::Tui
     end
 
     def render(screen : Screen, area : Rect) : Nil
-      box, list_top, list_h = render_card(screen, area, title, idle_hint) || return
+      box, list_top, list_h = render_card(screen, area, title) || return
 
       if @filtered.empty?
         screen.text(box.x + 3, list_top, "no tabs match", Theme.muted, Theme.panel)
