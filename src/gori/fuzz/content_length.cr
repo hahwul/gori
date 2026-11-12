@@ -130,7 +130,7 @@ module Gori::Fuzz
       end
 
       # CL present: a chunked request keeps its (unused) header verbatim (out of scope).
-      return {bytes, 0, 0} if chunked?(bytes, sep, eol)
+      return {bytes, 0, 0} if chunked?(bytes, sep)
       ls, le = cl
       return {bytes, 0, 0} if keep_cl_line?(bytes, payloads, ls, le)
       # Skip the rebuild when the line is already exactly the canonical form we'd emit —
@@ -280,21 +280,11 @@ module Gori::Fuzz
     # LF-lenient backend reads those as distinct lines — so chunked detection must split
     # them the same way, even though the byte-exact rewrite above splits on `eol` to
     # preserve the wire form. Scans the head bytes `[0, sep)` directly (no head String).
-    private def self.chunked?(bytes : Bytes, sep : Int32, eol : String) : Bool
-      a = 0
-      while a < sep
-        nl = a
-        while nl < sep && bytes[nl] != 0x0a_u8
-          nl += 1
-        end
-        # Line content is [a, e) with any trailing CR chomped (each_line + chomp).
-        e = nl
-        e -= 1 if e > a && bytes[e - 1] == 0x0d_u8
-        break if e == a # blank line ends the head
+    private def self.chunked?(bytes : Bytes, sep : Int32) : Bool
+      each_head_line(bytes, sep) do |a, e|
         if te = transfer_encoding_last(bytes, a, e)
           return te == "chunked"
         end
-        a = nl + 1
       end
       false
     end
@@ -307,6 +297,19 @@ module Gori::Fuzz
     # already claims the framing. Same LF tokenization as `chunked?` (see there for why a
     # bare-LF-separated header must count as its own line here too).
     private def self.transfer_encoding?(bytes : Bytes, sep : Int32) : Bool
+      each_head_line(bytes, sep) do |a, e|
+        colon = colon_of(bytes, a, e)
+        if colon > a
+          ns, ne = trim_range(bytes, a, colon)
+          return true if AsciiBytes.range_eq_ci?(bytes, ns, ne, "transfer-encoding".to_slice)
+        end
+      end
+      false
+    end
+
+    # Each LF-tokenized line of the head `[0, sep)`, as its content `[a, e)` with any trailing
+    # CR chomped (each_line + chomp), up to the blank line that ends the head.
+    private def self.each_head_line(bytes : Bytes, sep : Int32, &) : Nil
       a = 0
       while a < sep
         nl = a
@@ -316,14 +319,9 @@ module Gori::Fuzz
         e = nl
         e -= 1 if e > a && bytes[e - 1] == 0x0d_u8
         break if e == a # blank line ends the head
-        colon = colon_of(bytes, a, e)
-        if colon > a
-          ns, ne = trim_range(bytes, a, colon)
-          return true if AsciiBytes.range_eq_ci?(bytes, ns, ne, "transfer-encoding".to_slice)
-        end
+        yield a, e
         a = nl + 1
       end
-      false
     end
 
     # For the header line `[a, e)`, when it is `Transfer-Encoding`, return the last
