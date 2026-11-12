@@ -1311,6 +1311,7 @@ module Gori::Tui
     def self.status_color(status : Int32?) : Color
       return muted if status.nil? || status == 0
       case status
+      when 100..199 then accent # informational (a 101 upgrade is how every WebSocket opens)
       when 200..299 then green
       when 300..399 then accent
       when 400..499 then yellow
