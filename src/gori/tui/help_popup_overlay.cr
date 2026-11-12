@@ -161,15 +161,10 @@ module Gori::Tui
     end
 
     private def handle_printable_key(ev : Termisu::Event::Key) : Nil
-      return unless c = bare_char(ev)
+      return unless c = Tutorial.bare_char(ev)
       return query_char(c) if @searching
       return begin_search if c == '/'
       on_full.try(&.call) if c == '?'
-    end
-
-    private def bare_char(ev : Termisu::Event::Key) : Char?
-      return nil if ev.ctrl? || ev.alt?
-      ev.char
     end
 
     private def begin_search : Nil

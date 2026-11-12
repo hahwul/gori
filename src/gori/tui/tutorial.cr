@@ -1841,10 +1841,6 @@ module Gori::Tui
       end
     end
 
-    private def prev_btn_label : String
-      " Prev "
-    end
-
     private def render_footer(screen : Screen, w : Int32, h : Int32) : Nil
       hint = footer_hint
       hint = Tutorial.compact_footer_hint(@step, @overlay, @edit_insert, @esc_armed, @registry) if Screen.draw_width(hint) > w
@@ -1852,11 +1848,9 @@ module Gori::Tui
       screen.text({(w - Screen.draw_width(hint)) // 2, 0}.max, hy, hint, Theme.muted, Theme.bg)
 
       by = h - 1
-      prev_l = prev_btn_label
-      next_l = next_btn_label
       # " ← Prev " / " Next → " with arrow affordances
-      prev_text = " ←#{prev_l}"
-      next_text = "#{next_l}→ "
+      prev_text = " ← Prev "
+      next_text = "#{next_btn_label}→ "
       pad = 2
       @prev_btn = Rect.new(pad, by, prev_text.size, 1)
       @next_btn = Rect.new({w - pad - next_text.size, 0}.max, by, next_text.size, 1)

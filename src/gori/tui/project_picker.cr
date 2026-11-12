@@ -1209,7 +1209,7 @@ module Gori::Tui
       @discriminators = ProjectPicker.row_discriminators(@entries)
       @tags_by_dir = ProjectPicker.tags_by_dir(@entries)
       @marks.retain(@projects.map(&.dir))
-      invalidate_running_cache
+      @running_cache.clear
     end
 
     # --- space menu (project row actions) ------------------------------------
@@ -2837,10 +2837,6 @@ module Gori::Tui
       # against `filtered_projects` — the same array render_list windows from `@results_scroll`.
       @results_scroll = Viewport.scroll_to_show(@selected - 3, @results_scroll, list_h,
         filtered_projects.size)
-    end
-
-    private def invalidate_running_cache : Nil
-      @running_cache.clear
     end
 
     private def project_meta(proj : Project) : Array({String, Color})
