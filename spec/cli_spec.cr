@@ -543,6 +543,21 @@ describe "gori settings import — a hostile name or argv cannot rewrite the lis
   end
 end
 
+describe "gori ca output flags" do
+  it "refuses combinations that cannot run, before any CA is touched" do
+    Gori::CLI.ca_show_flag_error(true, true, nil, false).not_nil!.should contain("pick one")
+    Gori::CLI.ca_show_flag_error(false, false, "x.crt", false).not_nil!.should contain("-o needs --pem or --der")
+    Gori::CLI.ca_show_flag_error(false, true, nil, true).not_nil!.should contain("--der -o")
+  end
+
+  it "lets DER through to a file or a redirected stdout" do
+    Gori::CLI.ca_show_flag_error(false, true, "x.crt", true).should be_nil
+    Gori::CLI.ca_show_flag_error(false, true, nil, false).should be_nil
+    Gori::CLI.ca_show_flag_error(true, false, "x.pem", false).should be_nil
+    Gori::CLI.ca_show_flag_error(false, false, nil, true).should be_nil
+  end
+end
+
 describe "gori ca info" do
   base = Time.utc(2030, 1, 1)
 
@@ -558,6 +573,33 @@ describe "gori ca info" do
     Gori::CLI.print_ca_info(io, gone)
     io.to_s.should contain("EXPIRED 2 day(s) ago")
     io.to_s.should contain("android      abcd1234.0")
+  end
+
+  it "counts days toward zero on both sides of expiry" do
+    Gori::CLI.ca_info("/p", "CN=x", base - 9.days, base + 2.5.days, "AA", "pin", "a.0", now: base)[:days_left].should eq(2)
+    half = Gori::CLI.ca_info("/p", "CN=x", base - 9.days, base - 2.5.days, "AA", "pin", "a.0", now: base)
+    half[:days_left].should eq(-2)
+    fresh = Gori::CLI.ca_info("/p", "CN=x", base - 9.days, base - 3.hours, "AA", "pin", "a.0", now: base)
+    io = IO::Memory.new
+    Gori::CLI.print_ca_info(io, fresh)
+    io.to_s.should contain("EXPIRED less than a day ago")
+  end
+
+  it "badges C1 and bidi controls OpenSSL leaves in an imported subject" do
+    info = Gori::CLI.ca_info("/p", "CN=\u009B2J \u202Egori", base - 1.day, base + 9.days, "AA", "pin", "a.0", now: base)
+    io = IO::Memory.new
+    Gori::CLI.print_ca_info(io, info)
+    io.to_s.should_not contain('\u009B')
+    io.to_s.should_not contain('\u202E')
+  end
+
+  it "flags a root that is not valid yet" do
+    early = Gori::CLI.ca_info("/p", "CN=x", base + 1.day, base + 30.days, "AA", "pin", "a.0", now: base)
+    early[:not_yet_valid].should be_true
+    early[:expired].should be_false
+    io = IO::Memory.new
+    Gori::CLI.print_ca_info(io, early)
+    io.to_s.should contain("NOT YET VALID")
   end
 end
 

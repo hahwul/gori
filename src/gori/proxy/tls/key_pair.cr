@@ -156,12 +156,33 @@ module Gori::Proxy::Tls
       Cert.sha256_fingerprint(to_der)
     end
 
-    # The subject as `CN=gori Root CA, O=…`, in the certificate's own order.
+    # RFC 2253 string escaping minus ESC_MSB (so UTF-8 stays readable) — UTF8_CONVERT turns a
+    # BMPString into UTF-8 instead of its raw UTF-16, ESC_CTRL writes a control byte as `\1B` —
+    # with `, ` between attributes, short field names, and an unknown attribute as its dotted OID.
+    # Forward order, as `openssl x509 -subject` prints it.
+    # LibC::ULong, not UInt64: it is 32 bits on Windows, and the value fits either way.
+    SUBJECT_PRINT_FLAGS = LibC::ULong.new((0x317 & ~0x4) | (2 << 16) | (1 << 24))
+
+    # The subject as `C=KR, O=…, CN=gori Root CA`. Not stdlib's `X509::Name#to_a`: it copies a
+    # value's bytes whatever the string type, so a BMPString CN (common on enterprise roots)
+    # came out as UTF-16 garbage — invalid UTF-8 in `gori ca info --json` — and an ESC in an
+    # imported root's CN reached the terminal raw.
     def subject : String
       name = LibCrypto.x509_get_subject_name(@handle)
       raise Gori::Error.new("X509_get_subject_name failed") if name.null?
-      # rstrip: stdlib's to_a returns an OID with no short name padded to its 512-byte buffer.
-      OpenSSL::X509::Name.new(name).to_a.join(", ") { |(k, v)| "#{k.rstrip('\0')}=#{v}" }
+      bio = LibCrypto.BIO_new(LibCrypto.bio_s_mem)
+      raise Gori::Error.new("BIO_new(mem) failed") if bio.null?
+      begin
+        raise Gori::Error.new("X509_NAME_print_ex failed") if LibCrypto.x509_name_print_ex(bio, name, 0, SUBJECT_PRINT_FLAGS) < 0
+        io = IO::Memory.new
+        buf = Bytes.new(1024)
+        while (n = LibCrypto.bio_read(bio, buf.to_unsafe, buf.size)) > 0
+          io.write(buf[0, n])
+        end
+        io.to_s.scrub
+      ensure
+        LibCrypto.BIO_free(bio)
+      end
     end
 
     def not_before : Time

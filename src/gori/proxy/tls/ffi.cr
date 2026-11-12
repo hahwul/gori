@@ -78,6 +78,8 @@ lib LibCrypto
   # operator's signing/verification key in. `BIO_new` / `BIO_free` come from stdlib.
   fun bio_s_mem = BIO_s_mem : BioMethod*
   fun bio_read = BIO_read(b : Bio*, data : UInt8*, dlen : Int) : Int
+  # `Cert#subject`: OpenSSL's own name printer, which converts every string type to UTF-8.
+  fun x509_name_print_ex = X509_NAME_print_ex(out : Bio*, nm : X509_NAME, indent : Int, flags : LibC::ULong) : Int
   fun bio_new_mem_buf = BIO_new_mem_buf(buf : UInt8*, len : Int) : Bio*
 
   # EVP_PKEY operation contexts. `EVP_PKEY_CTX_ctrl` is the version-independent way to

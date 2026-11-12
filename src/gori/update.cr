@@ -888,12 +888,27 @@ module Gori
     # `gori update --check`: compare against the latest release without downloading anything.
     # True when a newer release exists. Raises `Gori::Error` when the check itself fails, so a
     # script can tell "no update" from "could not ask" (the CLI maps the three to exit codes).
-    def self.check(io : IO = STDOUT, *, release_json : String? = nil, api_url : String? = nil) : Bool
-      release, fallback_reason = release_json ? {parse_release(release_json), nil} : fetch_latest_release_with_fallback(api_url)
-      # Said, as update_binary says it: a rejected token or a TLS problem is worth knowing about
-      # even when the redirect endpoint still named the release.
-      io.puts "Note: the GitHub release API was unavailable (#{fallback_reason}); asked #{RELEASES_LATEST_URL} instead." if fallback_reason
-      latest = release.version
+    #
+    # Only a version is needed, so the fallback is `latest_version`'s, not
+    # `fetch_latest_release_with_fallback`'s: that one also downloads SHA256SUMS and names this
+    # platform's asset, which raised "unsupported OS" on a source build for a BSD that has no
+    # release asset to name. The note goes to `err`: stdout is the line a script reads.
+    def self.check(io : IO = STDOUT, err : IO = STDERR, *, release_json : String? = nil,
+                   api_url : String? = nil) : Bool
+      latest = if provided = release_json
+                 parse_release(provided).version
+               else
+                 begin
+                   parse_release(fetch_latest_release_json(api_url)).version
+                 rescue ex
+                   raise ex unless default_api?(api_url)
+                   tag = resolve_tag_via_redirect(HTTP_TIMEOUT)
+                   raise ex unless tag
+                   err.puts "Note: the GitHub release API was unavailable (#{ex.message.presence || ex.class}); " \
+                            "asked #{RELEASES_LATEST_URL} instead."
+                   normalize_version(tag)
+                 end
+               end
       if version_cmp(normalize_version(VERSION), latest) < 0
         io.puts "update available: #{display_version(VERSION)} → #{display_version(latest)} (run `gori update`)"
         true

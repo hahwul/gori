@@ -1994,7 +1994,7 @@ MCP stdio 서버입니다. 도구 세부사항은 [MCP 가이드](/ko/guide/mcp/
 ```bash
 gori ca
 gori ca --pem
-gori ca --der > gori-ca.crt
+gori ca --der -o gori-ca.crt
 gori ca --ca-dir=DIR
 gori ca info [--json]
 gori ca regenerate
@@ -2008,7 +2008,8 @@ gori 루트 CA 인증서의 경로를 출력합니다(최초 사용 시 생성).
 |--------|-------------|
 | `--ca-dir=DIR` | CA 디렉터리 (기본값 `~/.gori/ca`, 또는 `$GORI_HOME/ca`) |
 | `--pem` | 경로 대신 인증서 PEM을 stdout으로 출력 |
-| `--der` | 경로 대신 인증서 DER을 stdout으로 출력(Android, Windows, MDM 설치기는 `.crt`/`.cer` 형식을 받음). 터미널에는 쓰지 않으므로 파일로 리다이렉트하세요. `>`가 바이트를 텍스트로 다시 인코딩하는 Windows PowerShell 5.1에서는 `cmd /c "gori ca --der > gori-ca.crt"`를 쓰세요 |
+| `--der` | 경로 대신 인증서 DER을 출력(Android, Windows, MDM 설치기는 `.crt`/`.cer` 형식을 받음). 터미널에는 쓰지 않으므로 `-o`나 리다이렉트를 쓰세요 |
+| `-o FILE`, `--out=FILE` | `--pem`이나 `--der`와 함께, 인증서를 stdout 대신 FILE에 씀. Windows에서는 `>`보다 이쪽을 쓰세요: PowerShell 7.4 이전은 리다이렉트된 네이티브 명령의 바이트를 텍스트로 다시 인코딩해 DER 파일을 깨뜨립니다 |
 
 동사(verb)를 먼저 쓰고 플래그를 그 뒤에 씁니다. `gori ca --ca-dir=DIR regenerate`가 아니라 `gori ca regenerate --ca-dir=DIR`입니다. 반대 순서는 사용법 오류로 처리합니다. 그러지 않으면 동사가 버려진 채 CA 경로만 출력되어 작업이 수행된 것처럼 보이기 때문입니다. 어느 형태도 위치 인자를 받지 않습니다.
 
@@ -2016,7 +2017,7 @@ gori 루트 CA 인증서의 경로를 출력합니다(최초 사용 시 생성).
 
 ### gori ca info {#gori-ca-info}
 
-신뢰 저장소나 기기에 보이는 루트 정보를 출력해, gori가 서명에 쓰는 바로 그 CA인지 확인할 수 있게 합니다. 경로, subject, 남은 일수(또는 `EXPIRED`)가 붙은 유효 기간, `openssl x509 -fingerprint -sha256`과 OS 인증서 뷰어가 보여 주는 콜론 hex 형식의 SHA-256 지문, Chromium `--ignore-certificate-errors-spki-list`가 받는 SPKI 핀, Android 시스템 저장소가 요구하는 `<subject_hash_old>.0` 파일 이름입니다. `--json`은 같은 필드(`path`, `subject`, `not_before`, `not_after`, `expired`, `days_left`, `sha256`, `spki_sha256`, `android_file`)를 출력합니다.
+신뢰 저장소나 기기에 보이는 루트 정보를 출력해(루트를 새로 만들지 않으며, CA 디렉터리가 비어 있으면 오류), gori가 서명에 쓰는 바로 그 CA인지 확인할 수 있게 합니다. 경로, subject, 남은 일수(또는 `EXPIRED` / `NOT YET VALID`)가 붙은 유효 기간, `openssl x509 -fingerprint -sha256`과 OS 인증서 뷰어가 보여 주는 콜론 hex 형식의 SHA-256 지문, Chromium `--ignore-certificate-errors-spki-list`가 받는 SPKI 핀, Android 시스템 저장소가 요구하는 `<subject_hash_old>.0` 파일 이름입니다. `--json`은 같은 필드(`path`, `subject`, `not_before`, `not_after`, `expired`, `not_yet_valid`, `days_left`, `sha256`, `spki_sha256`, `android_file`)를 출력합니다.
 
 ### gori ca regenerate {#gori-ca-regenerate}
 
