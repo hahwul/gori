@@ -64,7 +64,7 @@ module Gori::Tui
       selection_dim: Color.from_hex("#19191c"), # selection band (unfocused pane)
       text: Color.from_hex("#c8c8cc"),          # body text
       text_bright: Color.from_hex("#fafafa"),   # emphasis / active
-      muted: Color.from_hex("#6e6e76"),         # secondary
+      muted: Color.from_hex("#6f6f77"),         # secondary
       green: Color.from_hex("#52c77a"),         # 2xx
       yellow: Color.from_hex("#d6a13a"),        # 4xx
       red: Color.from_hex("#e5534b"),           # 5xx / error
@@ -181,7 +181,7 @@ module Gori::Tui
       selection_dim: Color.from_hex("#232a45"), # selection band (unfocused pane)
       text: Color.from_hex("#a9b1d6"),          # body text
       text_bright: Color.from_hex("#c0caf5"),   # emphasis / active
-      muted: Color.from_hex("#7a84ad"),         # secondary (lifted comment tone, 4.7:1 on canvas)
+      muted: Color.from_hex("#7c86af"),         # secondary (lifted comment tone, 4.8:1 on canvas)
       green: Color.from_hex("#9ece6a"),         # 2xx
       yellow: Color.from_hex("#e0af68"),        # 4xx
       red: Color.from_hex("#f7768e"),           # 5xx / error
@@ -381,7 +381,7 @@ module Gori::Tui
       selection_dim: Color.from_hex("#333428"), # selection band (unfocused pane)
       text: Color.from_hex("#f8f8f2"),          # body text (monokai foreground)
       text_bright: Color.from_hex("#ffffff"),   # emphasis / active
-      muted: Color.from_hex("#948d81"),         # secondary (lifted comment tone, 4.5:1)
+      muted: Color.from_hex("#9f998d"),         # secondary (lifted comment tone, 5.3:1)
       green: Color.from_hex("#a6e22e"),         # 2xx (monokai lime)
       yellow: Color.from_hex("#e6db74"),        # 4xx
       red: Color.from_hex("#fa518e"),           # 5xx / error (lifted pink, 4.7:1)
@@ -410,7 +410,7 @@ module Gori::Tui
       selection_dim: Color.from_hex("#343f3d"), # selection band (unfocused pane)
       text: Color.from_hex("#d3c6aa"),          # body text (everforest fg)
       text_bright: Color.from_hex("#e8e4cf"),   # emphasis / active
-      muted: Color.from_hex("#859289"),         # secondary (everforest grey1, 3.8:1)
+      muted: Color.from_hex("#8b968c"),         # secondary (everforest grey1, lifted; 4.1:1)
       green: Color.from_hex("#a7c080"),         # 2xx
       yellow: Color.from_hex("#dbbc7f"),        # 4xx
       red: Color.from_hex("#e78486"),           # 5xx / error (lifted, 4.8:1)
@@ -439,7 +439,7 @@ module Gori::Tui
       selection_dim: Color.from_hex("#31353f"), # selection band (unfocused pane)
       text: Color.from_hex("#abb2bf"),          # body text (one dark foreground)
       text_bright: Color.from_hex("#dcdfe4"),   # emphasis / active
-      muted: Color.from_hex("#7f8897"),         # secondary (lifted comment grey, 3.9:1)
+      muted: Color.from_hex("#87909e"),         # secondary (lifted comment grey, 4.3:1)
       green: Color.from_hex("#98c379"),         # 2xx
       yellow: Color.from_hex("#e5c07b"),        # 4xx
       red: Color.from_hex("#e2757e"),           # 5xx / error (lifted, 4.7:1)
@@ -467,7 +467,7 @@ module Gori::Tui
       selection_dim: Color.from_hex("#252535"), # selection band (unfocused pane)
       text: Color.from_hex("#dcd7ba"),          # body text (fuji white)
       text_bright: Color.from_hex("#f2ecdc"),   # emphasis / active
-      muted: Color.from_hex("#8a8980"),         # secondary (lifted fuji grey, 4.7:1)
+      muted: Color.from_hex("#9a998c"),         # secondary (lifted fuji grey, 5.7:1)
       green: Color.from_hex("#98bb6c"),         # 2xx (spring green)
       yellow: Color.from_hex("#e6c384"),        # 4xx (carp yellow)
       red: Color.from_hex("#ff5d62"),           # 5xx / error (peach red)
@@ -523,7 +523,7 @@ module Gori::Tui
       selection_dim: Color.from_hex("#494942"), # selection band (unfocused pane)
       text: Color.from_hex("#dcdccc"),          # body text (zenburn foreground)
       text_bright: Color.from_hex("#ffffef"),   # emphasis / active
-      muted: Color.from_hex("#9c9c8c"),         # secondary (3.8:1)
+      muted: Color.from_hex("#a5a595"),         # secondary (4.2:1)
       green: Color.from_hex("#9fc59f"),         # 2xx (green+2 — the base green sits below AA)
       yellow: Color.from_hex("#f0dfaf"),        # 4xx
       red: Color.from_hex("#dca3a3"),           # 5xx / error (red+1, 4.9:1 — the base rose is 4.1)
@@ -723,7 +723,7 @@ module Gori::Tui
       selection_dim: Color.from_hex("#f0e4bb"), # selection band (unfocused pane)
       text: Color.from_hex("#3c3836"),          # body text (fg1, 10.2:1)
       text_bright: Color.from_hex("#282828"),   # emphasis / active (fg0)
-      muted: Color.from_hex("#7c6f64"),         # secondary (fg4, 4.3:1)
+      muted: Color.from_hex("#776b60"),         # secondary (fg4, darkened; 4.6:1)
       green: Color.from_hex("#6d680c"),         # 2xx (darkened faded green, 5.1:1)
       yellow: Color.from_hex("#8a5c0a"),        # 4xx (darkened faded yellow, 5.1:1)
       red: Color.from_hex("#9d0006"),           # 5xx / error (faded red, 7.6:1)
@@ -779,7 +779,7 @@ module Gori::Tui
       selection_dim: Color.from_hex("#eef1f3"), # selection band (unfocused pane)
       text: Color.from_hex("#5c6166"),          # body text (ayu foreground, 6.1:1)
       text_bright: Color.from_hex("#33383d"),   # emphasis / active (darker ink)
-      muted: Color.from_hex("#787f86"),         # secondary (darkened line grey, 4.0:1)
+      muted: Color.from_hex("#767d84"),         # secondary (darkened line grey, 4.1:1)
       green: Color.from_hex("#547a00"),         # 2xx (darkened ayu lime, 4.9:1)
       yellow: Color.from_hex("#97690c"),        # 4xx (darkened func gold, 4.7:1)
       red: Color.from_hex("#cc4040"),           # 5xx / error (darkened, 4.7:1)

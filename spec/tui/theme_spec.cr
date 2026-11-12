@@ -148,6 +148,22 @@ describe Gori::Tui::Theme do
       fail "#{name}/accent_bg contrast #{band.round(2)}:1 < 1.30:1 on bg" if band < 1.30
     end
   end
+
+  # The canvas is not where `muted` is hardest to read. Every list draws its secondary columns
+  # (time, protocol, type, size) in `muted` on the row under the cursor too, and that row sits
+  # on `accent_bg`. The canvas floor above says nothing about that pair: nine palettes cleared
+  # 3.5:1 on the canvas and sat at 2.46-2.98:1 on the band, on the one row being read.
+  #
+  # The floor is 3.0, not the canvas tier's 3.5: reaching 3.5 by moving `muted` leaves it
+  # within 1.1:1 of `text` in three palettes (tokyonight_day, solarized_dark,
+  # everforest_light), which trades a dim secondary tier for none at all.
+  Theme.available.each do |name|
+    it "keeps muted legible on the focused selection band (#{name} theme)" do
+      Theme.apply(name)
+      ratio = wcag_contrast(Theme.muted, Theme.accent_bg)
+      fail "#{name}/muted contrast #{ratio.round(2)}:1 < 3.0:1 on accent_bg" if ratio < 3.0
+    end
+  end
 end
 
 describe Gori::Tui::SettingsView do

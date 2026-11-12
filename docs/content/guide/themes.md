@@ -90,7 +90,7 @@ Every field, all inheriting from `base` when omitted:
   "selection_dim": "#19191c",
   "text":          "#c8c8cc",
   "text_bright":   "#fafafa",
-  "muted":         "#6e6e76",
+  "muted":         "#6f6f77",
   "green":         "#52c77a",
   "yellow":        "#d6a13a",
   "red":           "#e5534b",
