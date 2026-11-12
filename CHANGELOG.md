@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- TUI: a 1xx status no longer wears the 5xx red (a WebSocket's 101, the 1xx bar on Project's At a glance), and the Fuzzer's results colour a 3xx as the DIST panel beside them does
+- TUI: a filter picker (Go to tab, Find sub-tab, Link to, Pick flow, the libraries) names its keys in the status row only, its bar and the find and replace bars read `filter ›`, `find ›` and `replace ›`, and the Shortcuts popup at its widest no longer shows a sliver of the pane underneath
 - CLI: `gori ca info` prints the root's subject, validity, SHA-256 fingerprint, SPKI pin and Android file name (`--json` too), `gori ca --der` writes the certificate in DER (`-o FILE` writes either form to a file), `gori update --check` compares with the latest release and exits 10 when an update is available, and `gori settings --edit` offers to reopen a file that will not load (#1866, #1867)
 - TUI: an empty `^P` opens on Open browser, Copy CA certificate path and Guided tour, then the tab jumps, with one Settings row; type a section's name to reach it (#1843)
 - Fuzzer: the idle results card lists what a run still needs (a marked position, then a payload set) and marks the next step, with no session open `Space` offers New fuzz session instead of Run and Stop, and a run with no match rule says so instead of counting every response as a hit (#1843, #1844, #1856)
