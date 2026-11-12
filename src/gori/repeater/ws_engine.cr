@@ -201,13 +201,10 @@ module Gori
       # handshake.
       private def self.send_over_h1(upgrade_request : Bytes, out_messages : Array(OutMsg), *,
                                     scheme : String, host : String, port : Int32,
-                                    verify_upstream : Bool, sni : String? = nil,
-                                    idle : Time::Span = DEFAULT_IDLE,
-                                    overrides : Gori::HostOverrides? = nil,
-                                    keep_key : Bool = false,
-                                    deadline : Time::Span = DRAIN_DEADLINE,
-                                    tls_preset : String? = nil,
-                                    cancel : Proc(Bool)? = nil) : Result
+                                    verify_upstream : Bool, sni : String?, idle : Time::Span,
+                                    overrides : Gori::HostOverrides?, keep_key : Bool,
+                                    deadline : Time::Span, tls_preset : String?,
+                                    cancel : Proc(Bool)?) : Result
         started = Time.instant
         opened = open_h1(upgrade_request, scheme: scheme, host: host, port: port,
           verify_upstream: verify_upstream, sni: sni, overrides: overrides, keep_key: keep_key,
@@ -389,13 +386,10 @@ module Gori
       # looks like a clean run with an empty transcript.
       private def self.send_over_h2(request : Bytes, out_messages : Array(OutMsg), *,
                                     scheme : String, host : String, port : Int32,
-                                    verify_upstream : Bool, sni : String? = nil,
-                                    idle : Time::Span = DEFAULT_IDLE,
-                                    overrides : Gori::HostOverrides? = nil,
-                                    keep_key : Bool = false,
-                                    deadline : Time::Span = DRAIN_DEADLINE,
-                                    tls_preset : String? = nil,
-                                    cancel : Proc(Bool)? = nil) : Result
+                                    verify_upstream : Bool, sni : String?, idle : Time::Span,
+                                    overrides : Gori::HostOverrides?, keep_key : Bool,
+                                    deadline : Time::Span, tls_preset : String?,
+                                    cancel : Proc(Bool)?) : Result
         started = Time.instant
         # `ws`/`wss` fold to the scheme the dial and the `:scheme` pseudo-header both need.
         # `Fuzz::Origin` folds at construction and `Repeater::Plan` on its tuple path; a WS
