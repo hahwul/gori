@@ -53,9 +53,9 @@ module Gori
         # match but a page merely named "/blogin" does not. Header-only, so it never scans body prose.
         LOGIN_PATH = /(?:^|[\/=?&.])(?:log-?in|sign-?in|auth|sso|oauth)(?:[\/?&#=]|$)/i
 
-        # The dedup key WITHOUT rebuilding the probe — same gates as `plan`, same key; nil in
-        # exactly the same cases. Parses the full request head (both paths need the Next-Action /
-        # Cookie / Authorization headers), so there is no fast-path that could drift from `plan`.
+        # The dedup key WITHOUT rebuilding the probe — `plan`'s gates and key, since `plan` calls it.
+        # Parses the full request head (the Next-Action / Cookie / Authorization headers are
+        # needed), so there is no fast-path.
         def dedup_key(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : String?
           req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
           return nil if req.malformed?
@@ -68,15 +68,9 @@ module Gori
         end
 
         def plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
-          req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
-          return nil if req.malformed?
-          return nil unless method_allowed?(req.method.upcase, opts)
-          aid = action_id(req)
-          return nil if aid.nil?
-          return nil unless has_credentials?(req)
-          return nil unless success_status?(detail.row.status)
+          key = dedup_key(detail, opts) || return nil
           request = rebuild_without_credentials(detail.request_head, detail.request_body)
-          Plan.new(request, [] of Param, key_string(detail, req.method.upcase, req.target, aid))
+          Plan.new(request, [] of Param, key)
         end
 
         def detections(plan : Plan, result : Repeater::Result, detail : Store::FlowDetail) : Array(Detection)
