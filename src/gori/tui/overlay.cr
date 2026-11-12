@@ -453,10 +453,6 @@ module Gori::Tui
       screen.text(area.x + 1, area.y, "#{what} · #{closing}", Theme.muted, Theme.bg, width: {area.w - 1, 0}.max)
     end
 
-    def render_too_small(screen : Screen, area : Rect, what : String, closing : String = "esc to close") : Nil
-      Overlay.too_small(screen, area, what, closing)
-    end
-
     # A scroll-wheel notch over the modal (already ±3-scaled). Defaults to a field move, so
     # form overlays get wheel scrolling for free by overriding `move`.
     def handle_wheel(step : Int32) : Nil

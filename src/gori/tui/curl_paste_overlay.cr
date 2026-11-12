@@ -147,7 +147,7 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       unless box
-        render_too_small(screen, area, "curl paste box needs a larger window")
+        Overlay.too_small(screen, area, "curl paste box needs a larger window")
         return
       end
       Frame.card(screen, box, title, bg: Theme.bg, border: Theme.border_focus)

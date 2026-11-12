@@ -273,7 +273,7 @@ module Gori::Tui
 
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
-      return render_too_small(screen, area, "the issue form needs a larger window") unless box
+      return Overlay.too_small(screen, area, "the issue form needs a larger window") unless box
       w = box.w
       on_title = @sel == ROW_TITLE
       on_cvss = @sel == ROW_CVSS

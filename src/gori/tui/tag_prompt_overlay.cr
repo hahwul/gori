@@ -49,7 +49,7 @@ module Gori::Tui
 
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
-      return render_too_small(screen, area, "tag editor") unless box
+      return Overlay.too_small(screen, area, "tag editor") unless box
       Frame.card(screen, box, title, bg: Theme.bg, border: Theme.border_focus)
       iw = {box.w - 4, 1}.max
       y = box.y + 2
