@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-- Settings: the upstream protocol row is `Upstream proxy`, so it no longer reads as gori's own listen port, `Capture body limit (MiB)` and `Host overrides` are spelled the same in Project settings, Preferences and the palette, and Project settings shows the port or address this run listens on beside the stored Bind Port or Bind IP when `-p` or `--listen` moved it
-- TUI: turning capture off says `proxy stopped`, a lens that is on reads `scope:on(N)` as `intercept:on(N)` does, dismissing a Probe finding says how to get it back, and a new scope rule says what the lens does, with the Scope pane explaining lens and sandbox under its rules
-- TUI: footers name the command palette `^P palette`, apart from a tab's `space cmds` menu, and Probe and Evidence title their Repeater send `Send to Repeater` as every other tab does
+- Settings: the upstream protocol row is `Upstream proxy`, so it no longer reads as gori's own listen port, `Capture body limit (MiB)` and `Host overrides` are spelled the same in Project settings, Preferences and the palette, and Project settings shows the port or address this run listens on beside the stored Bind Port or Bind IP when `-p` or `--listen` moved it (#1877)
+- TUI: turning capture off says `proxy stopped`, a lens that is on reads `scope:on(N)` as `intercept:on(N)` does, dismissing a Probe finding says how to get it back, and a new scope rule says what the lens does, with the Scope pane explaining lens and sandbox under its rules (#1877)
+- TUI: footers name the command palette `^P palette`, apart from a tab's `space cmds` menu, and Probe and Evidence title their Repeater send `Send to Repeater` as every other tab does (#1877)
 - Issues: `esc` in the notes editor of an issue you just filed saves the note instead of jumping back to the tab it was filed from and discarding it; the way back waits for the `esc` that leaves the issue (#1876)
 - MCP: every offset-paged list returns `next_offset`, the `offset` that continues it (null at the end), and a tool that only touches the project's own store says `openWorldHint:false`, a purely additive one `destructiveHint:false` and an on/off setter `idempotentHint:true` (#1876)
 - CLI: `gori run` answers an MCP tool name with the command it means (`gori run list_history` names `gori run history`), and under `--json` a reader given an id that does not exist (`show`, `issues show`, `repeater show`, `evidence show`, `fuzz show`, …) prints `{"ok":false,"error_code":"NOT_FOUND",…}` on stdout as `send` does, still exiting 1 (#1876)
