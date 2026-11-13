@@ -152,9 +152,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # Same call the CLI/MCP promote paths make. A store-busy Failed must NOT read as
     # "already promoted" — that would tell the user to stop retrying the one thing that
     # would fix it.
-    case Probe::Triage.promote(@session.store, i).outcome
+    res = Probe::Triage.promote(@session.store, i)
+    case res.outcome
     in Probe::Triage::Outcome::AlreadyPromoted
-      @toast = "already promoted to an issue"
+      @toast = res.issue_id.try { |n| "already promoted to issue ##{n}" } || "already promoted to an issue"
     in Probe::Triage::Outcome::Failed
       @toast = "promotion failed (store busy) — nothing was written, try again"
     in Probe::Triage::Outcome::Promoted

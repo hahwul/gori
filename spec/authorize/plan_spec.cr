@@ -101,6 +101,28 @@ describe Gori::Authorize::Plan do
       end
     end
 
+    it "does not count an identity that changes nothing, which is never sent" do
+      with_store do |store|
+        a = seed(store, target: "/admin")
+        idents = %([{"name": "anonymous", "remove": ["Cookie"]}, {"name": "noop", "remove": ["X-Absent"]}])
+        opts = PlanOptions.new(store, flow_ids: [a], identities_json: idents)
+        plan = Plan.build(opts, ungated_outbound)
+        plan.identities.size.should eq(3) # the as-captured baseline is prepended
+        plan.total_sends.should eq(2)     # baseline + anonymous; `noop` is NoEffect
+        # The cap is judged on the strict bound, not the prediction the engine re-decides per send.
+        plan.send_bound.should eq(3)
+
+        # …and the prediction is what the run puts on the wire, and what `sent_count` reports.
+        backend = FakeBackend.new(Gori::Fuzz::Origin.new("https", "acme.test", 443))
+        run = Plan.new(engine: fake_engine(backend), identities: plan.identities,
+          targets: plan.targets, skipped: plan.skipped)
+        wire = 0
+        run.run { |_detail, target| wire += target.sent_count }
+        backend.sent.size.should eq(2)
+        wire.should eq(2)
+      end
+    end
+
     it "resolves a QL query over history" do
       with_store do |store|
         seed(store, host: "acme.test", target: "/admin")

@@ -126,10 +126,10 @@ module Gori::Sequencer
     # one is recording that the token WAS tested, which is worth having in the report.
     def self.issue_severity_label(rep : Stats::Report) : String
       case rep.rating
-      in Stats::Rating::Critical then "critical"
-      in Stats::Rating::Weak     then "high"
-      in Stats::Rating::Moderate then "medium"
-      in Stats::Rating::Secure   then "info"
+      in Stats::Rating::Critical                            then "critical"
+      in Stats::Rating::Weak                                then "high"
+      in Stats::Rating::Moderate                            then "medium"
+      in Stats::Rating::Secure, Stats::Rating::Inconclusive then "info"
       end
     end
 

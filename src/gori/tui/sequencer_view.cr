@@ -792,10 +792,11 @@ module Gori::Tui
 
     private def rating_color(label : String) : Color
       case label
-      when "SECURE"   then Theme.green
-      when "MODERATE" then Theme.yellow
-      when "WEAK"     then Theme.orange
-      else                 Theme.red
+      when "SECURE"       then Theme.green
+      when "MODERATE"     then Theme.yellow
+      when "WEAK"         then Theme.orange
+      when "INCONCLUSIVE" then Theme.muted
+      else                     Theme.red
       end
     end
 

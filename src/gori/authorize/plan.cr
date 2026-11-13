@@ -199,9 +199,22 @@ module Gori::Authorize
     # cap never applied to the ids they typed.
     getter query_rows : Int32
 
+    # How many requests this run will put on the wire if nothing stops it: each target's
+    # baseline plus every identity that changes it. One that does not is recorded `NoEffect`
+    # and never sent, so `targets × identities` over-counted. Once, here: MCP reads it per poll.
+    getter total_sends : Int32
+
+    # `targets × identities`: what the run could send if every identity changed every request.
+    # A safety cap is judged on this, not on `total_sends`, which is a plan-time prediction the
+    # engine re-decides per send (a slot refreshed before the send can change what it carries).
+    def send_bound : Int32
+      @targets.size * @identities.size
+    end
+
     def initialize(@engine : Engine, @identities : Array(Identity),
                    @targets : Array(Store::FlowDetail), @skipped : Array(Skipped),
                    @query_rows : Int32 = 0, @limit : Int32 = 0)
+      @total_sends = @targets.sum { |d| 1 + Passive.changing_identity_count(d, @identities) }
     end
 
     # Did `--limit` cut the query's contribution short? True only when a query ran and filled
@@ -213,11 +226,6 @@ module Gori::Authorize
 
     def self.query_capped?(limit : Int32, query_rows : Int32) : Bool
       limit > 0 && query_rows >= limit
-    end
-
-    # How many requests this run will put on the wire if nothing stops it.
-    def total_sends : Int32
-      @targets.size * @identities.size
     end
 
     # Replay every target under every identity, yielding each finished `Target` as it lands.

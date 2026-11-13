@@ -65,7 +65,7 @@ module Gori
         filter = sitemap_export_filter(store, query, filter, in_scope, hide_static)
         choice = examples ? Redact::Policy.resolve(store, redact_profile, on: true) : nil
         if err = choice.try(&.error)
-          abort_closing(store, "gori run sitemap export: #{err}")
+          abort_closing(store, "gori run sitemap export: #{err}#{redact_profile ? "" : redact_dangling_hint(store)}")
         end
         opts = Export::OpenApi::Options.new(filter: filter, host: host, scheme: scheme, port: port, path_prefix: path_prefix,
           max_flows: max_flows, max_samples: max_samples, max_endpoints: max_endpoints,

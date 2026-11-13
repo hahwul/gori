@@ -22,6 +22,12 @@ module Gori::CLI::Run
   def self.authorize_skip_text_for_spec(s : Gori::Authorize::Skipped) : String
     authorize_skip_text(s)
   end
+
+  def self.authorize_done_for_spec(sent : Int32, total : Int32, wire : Int32) : String
+    io = IO::Memory.new
+    authorize_done(sent, total, wire, 0, 0, 0, 0, io)
+    io.to_s
+  end
 end
 
 private alias A = Gori::Authorize
@@ -351,5 +357,13 @@ describe "gori run authorize — the --limit warning" do
     src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "authorize.cr"))
     src.should contain("plan.query_capped?(limit)")
     src.should_not contain("plan.targets.size + plan.skipped.size")
+  end
+end
+
+# The summary multiplied replayed flows by identities, so an identity that changed nothing —
+# recorded `NoEffect` and never sent — was counted as a send.
+describe "gori run authorize — done line" do
+  it "counts the requests that reached the wire" do
+    Gori::CLI::Run.authorize_done_for_spec(1, 1, 2).should contain("1 request replayed · 2 sends")
   end
 end

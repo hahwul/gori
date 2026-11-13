@@ -36,6 +36,10 @@ module Gori::CLI::Run
   def self.issue_delete_confirmation_error_for_spec(ids : Array(Int64), yes : Bool) : String?
     issue_delete_confirmation_error(ids, yes)
   end
+
+  def self.write_issues_report_for_spec(content : String, path : String?, stdout : IO, stderr : IO) : Nil
+    write_issues_report(content, 2, path, stdout, stderr)
+  end
 end
 
 private def captured_flow(store : Gori::Store) : Int64
@@ -424,5 +428,25 @@ describe "gori run issues — query, count and several ids" do
   it "names every id in a batch delete refusal" do
     Gori::CLI::Run.issue_delete_confirmation_error_for_spec([1_i64, 5_i64], false).not_nil!
       .should contain("2 issues (#1, #5) without --yes")
+  end
+end
+
+# `--export -` wrote a file literally named `-`. It is STDOUT, with the count on STDERR so
+# STDOUT is only the document.
+describe "gori run issues --export -" do
+  it "writes the document to STDOUT and creates no file" do
+    dir = File.tempname("issues-export")
+    Dir.mkdir(dir)
+    begin
+      Dir.cd(dir) do
+        stdout, stderr = IO::Memory.new, IO::Memory.new
+        Gori::CLI::Run.write_issues_report_for_spec("# report", "-", stdout, stderr)
+        stdout.to_s.should eq("# report\n")
+        stderr.to_s.should contain("exported 2 issues → stdout")
+        File.exists?("-").should be_false
+      end
+    ensure
+      FileUtils.rm_rf(dir)
+    end
   end
 end

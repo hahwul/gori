@@ -80,7 +80,7 @@ module Gori
       # A collection that got NOTHING because every replay failed is not a clean "0 collected".
       #
       # This tool's output is a VERDICT: with no token to analyze, `sequence_results` renders
-      # `rating: "CRITICAL", rationale: "no usable tokens"` — and with `error: null` beside it,
+      # `rating: "INCONCLUSIVE", rationale: "no usable tokens"` — and with `error: null` beside it,
       # an agent reads a sentence about the ORIGIN'S entropy over traffic that never reached
       # the origin, and files it. Nothing else on the MCP side could tell the two apart: the
       # samples carry the per-send reason and are never returned (they are secrets), so the
@@ -192,7 +192,7 @@ module Gori
             j.field "status", sjob.status.to_s
             j.field "tokens_analyzed", sjob.tokens.size
             # The report is a VERDICT and these two decide how much it is worth: a run whose
-            # every replay failed grades "CRITICAL · no usable tokens" over nothing, and a
+            # every replay failed rates "INCONCLUSIVE · no usable tokens" over nothing, and a
             # :budget_exhausted one grades a sample that stopped short of `goal`. Both were
             # only readable by also calling sequence_status, so the results payload alone
             # could not be told apart from a finished, fully-sampled run.
@@ -329,7 +329,8 @@ module Gori
       private def list_sequence_tools(j : JSON::Builder) : Nil
         tool j, "sequence_analyze",
           "Analyze the randomness of tokens you already have (session IDs, CSRF/reset tokens, " \
-          "API keys). Pure compute. Returns a rating (SECURE/MODERATE/WEAK/CRITICAL), " \
+          "API keys). Pure compute. Returns a rating (SECURE/MODERATE/WEAK/CRITICAL, or " \
+          "INCONCLUSIVE below #{Sequencer::Stats::SMALL_SAMPLE} tokens), " \
           "effective + Shannon entropy, character set, uniqueness/sequential detection, " \
           "FIPS-style bit tests." do |s|
           s.field "tokens", strarrprop("tokens, one per element (>=20 recommended)"), required: true
@@ -379,8 +380,8 @@ module Gori
         tool j, "sequence_results",
           "The randomness REPORT over a sequence job's tokens (rating, entropy, character set, " \
           "uniqueness/sequential, per-test verdicts). Raw tokens are never returned. Read " \
-          "`error` and `status` before the rating: a run whose every replay failed still grades " \
-          "CRITICAL / 'no usable tokens', a verdict about nothing." do |s|
+          "`error` and `status` before the rating: a run whose every replay failed rates " \
+          "INCONCLUSIVE / 'no usable tokens', which says nothing about the target." do |s|
           s.field "job_id", strprop("id from sequence_start"), required: true
         end
 

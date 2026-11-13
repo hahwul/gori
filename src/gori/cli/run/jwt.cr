@@ -150,12 +150,13 @@ module Gori
         "--verify needs --secret (HMAC) or --key (PEM) — pass --secret '' to check the empty secret"
       end
 
+      # A value pasted straight from an `Authorization` / `Cookie` header gives up its token.
       private def self.jwt_token_input(positional : Array(String)) : String
         if s = positional.first?
           abort "gori run jwt: too many arguments (one token)" if positional.size > 1
-          s.strip
+          Jwt.locate(s)
         elsif !STDIN.tty?
-          read_stdin_fallback(STDIN, "gori run jwt", "token").strip
+          Jwt.locate(read_stdin_fallback(STDIN, "gori run jwt", "token"))
         else
           ""
         end

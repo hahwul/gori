@@ -131,7 +131,8 @@ module Gori
         total = plan.targets.size
         ids = plan.identities.size
         STDERR.puts "authorizing #{Gori.plural(total, "request")} × #{ids} identities " \
-                    "(#{CLI::Output.term_safe(plan.identities.map(&.name).join(", "))}) = #{plan.total_sends} requests"
+                    "(#{CLI::Output.term_safe(plan.identities.map(&.name).join(", "))}) — #{Gori.plural(plan.total_sends, "send")}, " \
+                    "an identity that changes nothing about a request is not sent"
         report_authorize_skips(plan.skipped)
 
         buffered = [] of Authorize::Target
@@ -161,12 +162,14 @@ module Gori
         # on STDERR, as it happens — the alternative was the raise escaping `plan.run`, which
         # took every remaining flow AND the whole buffered `--format json` array with it.
         failed = 0
+        wire = 0 # `Target#sent_count`: a `NoEffect` identity or a gate refusal never reached the wire
         on_error = ->(detail : Store::FlowDetail, ex : Exception) {
           failed += 1
           report_authorize_failure(detail, ex)
         }
         sent = plan.run(-> { stopping }, on_error) do |_detail, target|
           bypasses += 1 if CLI::Output.authorize_verdict(target) == :bypass
+          wire += target.sent_count
           if target.fully_blocked?
             blocked_runs += 1
             blocked_reason ||= target.blocked_reason
@@ -182,7 +185,7 @@ module Gori
           authorize_progress(done, total, bypasses, format)
         end
         puts CLI::Output.authorize_array_json(buffered) if format == :json
-        authorize_done(sent, total, ids, bypasses, failed, unanswered, baseline_denied)
+        authorize_done(sent, total, wire, bypasses, failed, unanswered, baseline_denied)
         # …and, on the same summary, any identity whose `$NAME` went out LITERALLY. This is the
         # surface the drain exists for: a slot overlay that resolved to nothing sends the
         # identity UNAUTHENTICATED, the resource answers 401 exactly as it does for anonymous,
@@ -293,10 +296,10 @@ module Gori
         STDERR.flush
       end
 
-      private def self.authorize_done(sent : Int32, total : Int32, ids : Int32, bypasses : Int32,
+      private def self.authorize_done(sent : Int32, total : Int32, wire : Int32, bypasses : Int32,
                                       failed : Int32, unanswered : Int32,
-                                      baseline_denied : Int32) : Nil
-        STDERR.print "\r\e[K" if STDERR.tty? # clear the in-place meter before the summary
+                                      baseline_denied : Int32, io : IO = STDERR) : Nil
+        io.print "\r\e[K" if io.tty? # clear the in-place meter before the summary
         # "1 of 3 requests" — the noun agrees with the SELECTION, not with how much of it ran, so
         # an interrupted run does not read as "1 of 3 request".
         of = sent == total ? "" : " of #{total}"
@@ -311,8 +314,8 @@ module Gori
         # the bypass count speaks for them too, and "0 possible bypasses" over a stale
         # credential is a clean bill of health nothing earned. See `Target#baseline_denied?`.
         anchored = baseline_denied > 0 ? " · #{baseline_denied} had a denied baseline" : ""
-        STDERR.puts "done · #{sent}#{of} request#{total == 1 ? "" : "s"} replayed · #{sent * ids} sends · " \
-                    "#{bypasses} possible bypass#{bypasses == 1 ? "" : "es"}#{unreached}#{anchored}#{unreplayable}"
+        io.puts "done · #{sent}#{of} request#{total == 1 ? "" : "s"} replayed · #{Gori.plural(wire, "send")} · " \
+                "#{bypasses} possible bypass#{bypasses == 1 ? "" : "es"}#{unreached}#{anchored}#{unreplayable}"
       end
 
       # Refuse a selection that cannot become a run, listing what it reached first: `skipped` is

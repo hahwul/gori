@@ -117,7 +117,8 @@ module Gori
             ""
           end
         abort "gori run cookie: no cookie — pass it as an argument or pipe it on STDIN" if s.empty?
-        s
+        # A value pasted straight from a `Cookie` / `Set-Cookie` header gives up its cookie.
+        Cookie.locate(s) || s
       end
 
       private def self.emit_cookie_decode(cookie : String, type : String?, format : Symbol) : Nil
@@ -129,6 +130,8 @@ module Gori
           # terminal sees them (--format json stays escaped/byte-exact).
           puts CLI::Output.term_safe_multiline(Cookie.decode(cookie, type))
         end
+        # Shown as far as it parses, but a payload that did not decode is no decoded cookie.
+        exit 1 unless Cookie.decodes?(cookie, type)
       end
 
       private def self.emit_cookie_verify(cookie : String, type : String?, secret : String?,

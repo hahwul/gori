@@ -51,6 +51,10 @@ module Gori::CLI::Run
   def self.redact_rule_counts_for_spec(p : Redact::Profile) : String
     redact_rule_counts(p)
   end
+
+  def self.redact_choice_for_spec(store : Store, flags : RedactFlags) : Redact::Policy::Choice
+    redact_choice(store, flags)
+  end
 end
 
 private def report_for(profile = Gori::Redact::DEFAULT_PROFILE,
@@ -208,5 +212,51 @@ describe "the profile listing's rule counts" do
   it "says so for a profile that would sanitize nothing" do
     Gori::CLI::Run.redact_rule_counts_for_spec(Gori::Redact::Profile.new("p"))
       .should eq "no rules"
+  end
+end
+
+# `redact rm` of the profile in use left a name nothing defines, and every later `--redact`
+# refused with no way out named. `rm` now refuses it; a name already dangling says how to leave.
+describe "gori run redact rm — the profile in use" do
+  it "refuses the project's active profile and names the project-scope way out" do
+    msg = Gori::CLI::Run.redact_rm_refusal("bp", "bp", "").not_nil!
+    msg.should contain("gori run redact use <name>")
+    msg.should contain("gori run redact use --none")
+  end
+
+  it "names --global for a global rm, and a project `use` for a project rm the global choice blocks" do
+    Gori::CLI::Run.redact_rm_refusal("bp", nil, "bp").not_nil!.should contain("redact use --global --none")
+    project = Gori::CLI::Run.redact_rm_refusal("bp", "", "bp").not_nil!
+    project.should contain("gori run redact use <name>")
+    project.should_not contain("--global")
+  end
+
+  it "lets a profile nothing uses go" do
+    Gori::CLI::Run.redact_rm_refusal("bp", "other", "bp").should be_nil
+    Gori::CLI::Run.redact_rm_refusal("bp", nil, "").should be_nil
+  end
+
+  it "lets the profile in use go when a global or built-in of its name takes over" do
+    Gori::CLI::Run.redact_rm_refusal("bp", "bp", "", still_resolves: true).should be_nil
+  end
+
+  it "names the way out when the configured profile is already gone" do
+    with_store do |store|
+      Gori::Redact::Policy.write_project_scope(store, Gori::Redact::Policy::ProjectScope.new(active: "bp"))
+      flags = Gori::CLI::Run::RedactFlags.new
+      flags.mode = true
+      err = Gori::CLI::Run.redact_choice_for_spec(store, flags).error.not_nil!
+      err.should contain(%(no redaction profile named "bp"))
+      err.should contain("gori run redact use --none")
+    end
+  end
+
+  it "adds no hint to a --redact=NAME typo, which names its own profile" do
+    with_store do |store|
+      flags = Gori::CLI::Run::RedactFlags.new
+      flags.mode = true
+      flags.profile = "typo"
+      Gori::CLI::Run.redact_choice_for_spec(store, flags).error.not_nil!.should_not contain("redact use")
+    end
   end
 end

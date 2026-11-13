@@ -237,8 +237,9 @@ module Gori
         in Probe::Triage::Outcome::AlreadyPromoted
           # The desired end state already holds, so not an error — but say so rather than
           # reporting a promotion that did not happen.
-          Result.new({"id" => issue.id, "promoted" => false,
-                      "reason" => "already promoted to an issue"}.to_json)
+          reply = {"id" => issue.id, "promoted" => false, "reason" => "already promoted to an issue"} of String => String | Int64 | Bool
+          res.issue_id.try { |i| reply["issue_id"] = i }
+          Result.new(reply.to_json)
         in Probe::Triage::Outcome::Failed
           # Nothing was written. This IS an error: unlike AlreadyPromoted, retrying is correct.
           busy("probe finding #{issue.id} NOT promoted (store busy or unwritable); it is unchanged")
@@ -403,8 +404,12 @@ module Gori
       private def delete_probe_rule(h) : Result
         id = required_str(h, "id", "(see list_probe_rules)")
         row_id = custom_rule_row_id(id)
-        return err("'#{id}' is not a project custom rule — a built-in can only be DISABLED (set_probe_rule_enabled), never deleted",
-          "INVALID_ARGUMENT", field: "id") unless row_id
+        unless row_id
+          # Only a real built-in is pointed at the toggle: an unknown id would just fail there too.
+          return not_found("no project custom rule with id '#{id}' (see list_probe_rules)") unless Probe::RuleCatalog.builtin?(id)
+          return err("'#{id}' is a built-in rule — it can only be DISABLED (set_probe_rule_enabled), never deleted",
+            "INVALID_ARGUMENT", field: "id")
+        end
         return not_found("no custom rule with id '#{id}'") unless store.probe_custom_rules.any? { |r| r.id == row_id }
         # Checked, like every other single-item delete on this surface (delete_color_rule,
         # delete_extract_rule, probe_delete) and like the CLI twin (cli/run/probe.cr): a

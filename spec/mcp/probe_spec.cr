@@ -320,6 +320,7 @@ describe "MCP probe triage tools" do
       # A second call must NOT mint a duplicate Issue.
       again = call_json(tools, "probe_promote", %({"id":#{issue.id}}))
       again["promoted"].as_bool.should be_false
+      again["issue_id"].as_i64.should eq(issue_id) # a retry still learns which Issue it is
       store.issues.size.should eq(1)
     end
   end
@@ -474,8 +475,19 @@ describe "MCP probe rules + mode tools" do
   it "refuses to delete a built-in (disable is the only option)" do
     with_store do |store|
       tools = tools_for(store)
-      tools.call("delete_probe_rule", JSON.parse(%({"id":"secret_in_url"}))).is_error.should be_true
+      r = tools.call("delete_probe_rule", JSON.parse(%({"id":"secret_in_url"})))
+      r.is_error.should be_true
+      r.text.should contain("set_probe_rule_enabled")
       tools.call("set_probe_rule_enabled", JSON.parse(%({"id":"no_such_rule","enabled":false}))).is_error.should be_true
+    end
+  end
+
+  it "says an unknown id is no rule, instead of pointing it at the toggle" do
+    with_store do |store|
+      r = tools_for(store).call("delete_probe_rule", JSON.parse(%({"id":"totally_made_up"})))
+      r.is_error.should be_true
+      r.text.should contain("no project custom rule")
+      r.text.should_not contain("set_probe_rule_enabled")
     end
   end
 

@@ -69,3 +69,13 @@ describe "MCP cookie_crack — Django algorithm auto-detection" do
     end
   end
 end
+
+describe "MCP cookie_decode — a value pasted from a header" do
+  it "decodes the cookie in a `name=value; attr` value, as gori run cookie does" do
+    with_store do |store|
+      r = tools_for(store).call("cookie_decode", JSON.parse(%({"cookie":#{"sessionid=#{DJANGO}; Path=/".to_json}})))
+      r.is_error.should be_false
+      JSON.parse(r.text)["payload"]["user_id"].as_i.should eq(42)
+    end
+  end
+end

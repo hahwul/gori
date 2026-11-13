@@ -9,9 +9,15 @@ module Gori
       # `decode` shape from Cookie.decode_json; verify/crack/forge drive the same engine
       # as `gori run cookie`. No network, no store — a target's secret is cracked offline.
 
+      # Every cookie tool's `cookie`, with a value pasted from a `Cookie`/`Set-Cookie` header
+      # narrowed to the cookie, as `gori run cookie` reads its argument.
+      private def cookie_input(h) : String?
+        str(h, "cookie").try { |c| Cookie.locate(c) || c }
+      end
+
       @[Tool("cookie_decode", unbound: true)]
       private def cookie_decode_tool(h) : Result
-        cookie = str(h, "cookie")
+        cookie = cookie_input(h)
         return Result.new("missing required 'cookie'", is_error: true) if cookie.nil? || cookie.strip.empty?
         Result.new(Cookie.decode_json(cookie.strip, cookie_format(h)))
       rescue ex : Cookie::CookieError
@@ -20,7 +26,7 @@ module Gori
 
       @[Tool("cookie_verify", unbound: true)]
       private def cookie_verify_tool(h) : Result
-        cookie = str(h, "cookie")
+        cookie = cookie_input(h)
         return Result.new("missing required 'cookie'", is_error: true) if cookie.nil? || cookie.strip.empty?
         secret = required_str(h, "secret", blank: true)
         ok = cookie_verify(cookie.strip, secret, h)
@@ -31,7 +37,7 @@ module Gori
 
       @[Tool("cookie_crack", unbound: true)]
       private def cookie_crack_tool(h) : Result
-        cookie = str(h, "cookie")
+        cookie = cookie_input(h)
         return Result.new("missing required 'cookie'", is_error: true) if cookie.nil? || cookie.strip.empty?
         c = cookie.strip
         inline = str_list(h, "secrets")

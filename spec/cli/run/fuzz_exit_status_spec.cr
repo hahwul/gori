@@ -20,3 +20,15 @@ describe "Gori::CLI::Run.fuzz_every_send_errored?" do
     Gori::CLI::Run.fuzz_every_send_errored?(0, 1, nil, condition_met: false).should be_false
   end
 end
+
+describe "Gori::CLI::Run.fuzz_exit_code" do
+  it "reports a dead target as a failure even under --fail-if-no-matches" do
+    Gori::CLI::Run.fuzz_exit_code(0, 3, 3_i64, false, fail_if_no_matches: true).should eq(1)
+  end
+
+  it "keeps exit 3 for a run that answered and matched nothing" do
+    Gori::CLI::Run.fuzz_exit_code(0, 1, 3_i64, false, fail_if_no_matches: true).should eq(3)
+    Gori::CLI::Run.fuzz_exit_code(0, 0, 3_i64, false, fail_if_no_matches: false).should be_nil
+    Gori::CLI::Run.fuzz_exit_code(0, 0, 3_i64, true, fail_if_no_matches: true).should be_nil
+  end
+end

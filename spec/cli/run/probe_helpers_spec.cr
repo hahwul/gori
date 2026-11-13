@@ -15,8 +15,9 @@ module Gori::CLI::Run
     parse_rule_kind(v)
   end
 
-  def self.probe_promote_json_for_spec(finding_id : Int64, issue_id : Int64?) : String
-    probe_promote_json(finding_id, issue_id)
+  def self.probe_promote_json_for_spec(finding_id : Int64, issue_id : Int64?, promoted = true) : String
+    outcome = promoted ? Probe::Triage::Outcome::Promoted : Probe::Triage::Outcome::AlreadyPromoted
+    probe_promote_json(finding_id, Probe::Triage::Result.new(outcome, issue_id))
   end
 
   def self.probe_custom_row_id_for_spec(id : String) : Int64?
@@ -53,8 +54,14 @@ describe "gori run probe promote — JSON reply" do
   end
 
   it "says why nothing was promoted for an already-promoted finding" do
-    json = JSON.parse(Gori::CLI::Run.probe_promote_json_for_spec(12_i64, nil))
+    json = JSON.parse(Gori::CLI::Run.probe_promote_json_for_spec(12_i64, nil, promoted: false))
     json.as_h.should eq({"id" => JSON::Any.new(12_i64), "promoted" => JSON::Any.new(false), "reason" => JSON::Any.new("already promoted to an issue")})
+  end
+
+  it "names the existing Issue on a retry" do
+    json = JSON.parse(Gori::CLI::Run.probe_promote_json_for_spec(12_i64, 7_i64, promoted: false))
+    json["promoted"].as_bool.should be_false
+    json["issue_id"].as_i64.should eq(7_i64)
   end
 end
 
@@ -177,5 +184,19 @@ describe "gori run probe --fail-on" do
     Gori::CLI::Run.probe_fail_count(groups, Gori::Store::Severity::Info).should eq(2)
     Gori::CLI::Run.probe_fail_count(groups, Gori::Store::Severity::Medium).should eq(1)
     Gori::CLI::Run.probe_fail_count(groups, Gori::Store::Severity::Critical).should eq(0)
+  end
+end
+
+# `rules delete` on an id it cannot delete: only a real built-in is told to disable instead —
+# an unknown id sent to `disable` just fails a second time.
+describe "gori run probe rules delete — refusal" do
+  it "points a built-in at disable" do
+    Gori::CLI::Run.probe_rule_delete_refusal("secret_in_url").should contain("probe rules disable secret_in_url")
+  end
+
+  it "says an unknown id is no rule" do
+    msg = Gori::CLI::Run.probe_rule_delete_refusal("totally_made_up")
+    msg.should contain("no project custom rule")
+    msg.should_not contain("disable")
   end
 end

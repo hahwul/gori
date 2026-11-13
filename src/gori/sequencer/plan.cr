@@ -169,8 +169,8 @@ module Gori::Sequencer
       # `ContentLength.resync_expanded` re-frames the head when expansion moved the BODY's
       # byte length — see its comment. This is the worst place in gori to skip it, because the
       # Sequencer's whole output is a VERDICT about a token: a strict origin 400s the truncated
-      # body, no `Set-Cookie` comes back, and the report reads `rating: CRITICAL (no usable
-      # tokens)` — a sentence about the target's entropy over a request it rejected. It and the
+      # body, no `Set-Cookie` comes back, and the report reads `no usable tokens` — a run spent
+      # on a request the origin rejected, reported as if it were about the token. It and the
       # dropped refusal are orthogonal edits to this one statement; the union is what both
       # intended.
       request = if options.evidence?
@@ -225,8 +225,8 @@ module Gori::Sequencer
     # `position: "40:8"` both parse two integers, ask nothing about their order, and start a
     # real collection in which `TokenExtract.position` — whose rule is `nil if hi <= lo` —
     # misses every sample. The run then spends its whole `max_sends` budget and reports
-    # `rating: CRITICAL · 0 usable / N total · no usable tokens`: a verdict about the ORIGIN'S
-    # entropy, produced by a descriptor that never read a byte of it. Only the TUI overlay
+    # `0 usable / N total · no usable tokens`: a report about the ORIGIN'S tokens, produced by a
+    # descriptor that never read a byte of them. Only the TUI overlay
     # refused it, and only because it does its own pre-parse.
     #
     # Here rather than in each surface's argument parser, for the reason the builder exists:

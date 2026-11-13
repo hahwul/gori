@@ -32,7 +32,7 @@ module Gori
       # Issues report). Promotion marks the source Confirmed precisely so a second call cannot
       # mint a duplicate Issue for the same finding.
       def promote(store : Store, issue : Store::ProbeIssue) : Result
-        return Result.new(Outcome::AlreadyPromoted) if issue.status.confirmed?
+        return Result.new(Outcome::AlreadyPromoted, promoted_issue_id(store, issue)) if issue.status.confirmed?
         issue_id = store.insert_issue(issue.title, issue.severity, issue.host, issue.sample_flow_id,
           notes: report_notes(issue, description_for(store, issue.code)))
         # insert_issue returns 0 — NOT nil — when the write never committed (busy/locked/closing
@@ -56,6 +56,15 @@ module Gori
         # open-only lens instead of lingering as unreviewed noise; still reachable via "show all".
         store.update_probe_issue_status(issue.id, Store::Status::Confirmed)
         Result.new(Outcome::Promoted, issue_id)
+      end
+
+      # The Issue a Confirmed finding was promoted to, so a retried promote can name it. The
+      # finding row keeps no pointer, so this reads the line `report_notes` opens with — nil once
+      # the operator rewrites that line, or for a finding confirmed some other way. Newest first:
+      # a deleted finding's id can be reused.
+      private def promoted_issue_id(store : Store, issue : Store::ProbeIssue) : Int64?
+        marker = "Promoted from Probe finding ##{issue.id} ("
+        store.issues.select(&.notes.starts_with?(marker)).max_of?(&.id)
       end
 
       # The promoted issue's NOTES body: everything the finding knew that the Issue's own
