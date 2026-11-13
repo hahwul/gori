@@ -5558,3 +5558,33 @@ two of them cut to fit. No key, menu letter or verb id moved.
   Sitemap, Issues, Fuzzer and Miner do; a setting has one label in Project settings,
   Preferences and the palette (`Capture body limit (MiB)`, `Host overrides`).
 
+### 2026-11-14: the leftovers that needed no decision
+
+The rest of the usability round, each in its no-regret form: no key, menu letter, default, exit
+code or layout changed. An item whose only fix needed one of those was left open.
+
+- **`?` lands on the tab's own row.** A tab without a Shortcuts section opened at the top of
+  OTHER TABS, ten rows above its own (`HelpView::TAB_ROW`, matched exactly, guarded like
+  `TAB_SECTION`). The Sequencer's body declines `?` by name, as it does `E`: it still swallows
+  the other bare Global letters, which is a key change and stays open.
+- **The capture toasts pair: `proxy stopped` / `proxy listening`.**
+- **One rule for the bind note,** `Settings.bind_run_note`, read by Project settings and
+  Preferences. Preferences takes the live address as a Proc, since saving Network re-binds the
+  listener while the modal is open.
+- **A form's `↵` hint is read off the predicate its key uses** (`FormOverlay#enter_commits?`,
+  passed to `text_row_key`): `↵ next` on a row where Enter moves on, `↵ save` where it saves,
+  so the two cannot drift. What Enter does did not change.
+- **A hint is never drawn over the operator's bytes.** The Fuzzer's chain-less marker hint sat
+  on the row beside the caret and covered the next template line; it is on the pane's bottom
+  border now. A real chain keeps its tooltip, which exists to show concealed bytes.
+- **The first hold is announced once.** With another tab up, a held request looked like a hung
+  client. One toast, then none until Intercept is opened or turned off: an agent or the reaper
+  can empty and refill the queue many times a second. It is raised after the tick's other
+  notices so none of them takes the row from it.
+- **`NOT_FOUND` under `--json` is for any NAMED id that does not exist,** a parent id or a
+  resend's flow or session included. `cache-deception` stays out: a missing id there is a
+  skipped row of the one array it prints.
+- **A refusal that an argument's shape invites says why.** `fuzz_start`, `mine_start` and
+  `sequence_start` without a `url` name the template's `Host` (scrubbed to one printable line)
+  and say it carries no scheme; `send --format raw` names the `--record-history` route.
+
