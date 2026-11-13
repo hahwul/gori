@@ -451,6 +451,7 @@ module Gori::Tui
     end
 
     @report_samples = 0
+    @body_focused = true # whether the tab's body holds focus, for the empty card's key routes
 
     # How many samples the report on screen was computed over, while a run has collected
     # more since. The mid-run recompute is throttled (above), so the card can show a verdict
@@ -583,6 +584,7 @@ module Gori::Tui
       # and never by `pane_at` — a hit-test must not move focus state as a side effect.
       @side_by_side = rect.w >= 84
       render_config(screen, cfg_rect, focused && @focus == :config)
+      @body_focused = focused
       render_samples(screen, s_rect, focused && @focus == :samples) unless s_rect.empty?
       render_analysis(screen, a_rect, focused && @focus == :analysis) unless a_rect.empty?
     end
@@ -647,7 +649,7 @@ module Gori::Tui
             Theme.muted, Theme.bg, width: inner.w - 1)
           return
         end
-        TrafficEmptyState.render(screen, inner, variant: :sequencer_samples, running: @running)
+        TrafficEmptyState.render(screen, inner, variant: :sequencer_samples, running: @running, body_focused: @body_focused)
         return
       end
       screen.text(inner.x + 2, inner.y, "#", Theme.muted, Theme.bg)

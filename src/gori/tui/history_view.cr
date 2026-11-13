@@ -2863,6 +2863,12 @@ module Gori::Tui
     # the other is a read-only view of the last pane its side showed, from where it was left.
     DETAIL_SPLIT_MIN_W = 122
 
+    # Whether the pane last drawn was wide enough to split, for a caller that reports on the
+    # toggle (`Runner#toggle_detail_split`).
+    def split_room? : Bool
+      @split_room
+    end
+
     # The panes that draw in the left half: a request, as sent or as the client wrote it.
     SPLIT_LEFT_PANES = {:request, :original}
 

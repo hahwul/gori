@@ -91,8 +91,15 @@ module Gori::Tui
         "←/→/space protocol · SOCKS5 local DNS · SOCKS5H proxy DNS · ↑/↓ move · esc sub-tabs"
       elsif @project_view.settings_sandbox_row?
         "space/↵ sandbox — ON blocks ALL out-of-scope traffic · ↑/↓ move · esc sub-tabs"
-      else
+      elsif @project_view.settings_auth_row?
+        "←/→/space proxy auth · ↑/↓ move · esc sub-tabs"
+      elsif @project_view.settings_toggle_row?
         "space/↵ toggle lens · ↑/↓ move · esc sub-tabs"
+      else
+        # A proxy host/port with the protocol at None, a credential with auth at None: the row
+        # takes no key. It used to fall through to the lens hint, which named an action the
+        # row does not have.
+        "unused while the proxy protocol or auth above is None · ↑/↓ move · esc sub-tabs"
       end
     end
 

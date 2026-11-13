@@ -75,6 +75,14 @@ module Gori::Tui
       @search_origin = @selected
       @feedback = nil
       @feedback_kind = :hint
+      @discard_armed = false
+    end
+
+    @discard_armed = false
+
+    # Whether the working copy differs from what Settings holds, i.e. esc would lose something.
+    def unsaved? : Bool
+      @overrides != load_overrides || @profile != Hotkeys.os_profile
     end
 
     private def build_rows : Array(Row)
@@ -160,9 +168,21 @@ module Gori::Tui
     # :browse — navigate/edit the list. ↵ saves+applies, esc discards the working copy.
     private def handle_browse_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
+      armed = @discard_armed
+      @discard_armed = false
       if ev.ctrl? && key.lower_p?
         on_palette.try(&.call)
       elsif key.escape?
+        # ↵ saves; esc discards the working copy. A rebind answers "✓ bound to z", which read
+        # as done, and the one key that leaves threw it away without a word (the hint that says
+        # "esc cancel" is cut off under 160 columns). So esc over unsaved changes asks once,
+        # as Preferences does.
+        if unsaved? && !armed
+          @discard_armed = true
+          @feedback_kind = :hint
+          @feedback = "not saved yet — ↵ saves · esc again discards"
+          return :stay
+        end
         return :cancel # discard the working copy
       elsif key.enter?
         return :commit
@@ -466,7 +486,7 @@ module Gori::Tui
       end
       @overrides[selected_id] = chord
       @feedback_kind = :ok
-      @feedback = "bound to #{chord.label}"
+      @feedback = "bound to #{chord.label} — ↵ saves"
       @mode = :browse
     end
 

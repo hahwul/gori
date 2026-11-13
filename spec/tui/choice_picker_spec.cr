@@ -210,3 +210,12 @@ describe "ChoicePicker — Overlay contract" do
     wide.overlay_box(area).not_nil!.w.should eq(narrow.overlay_box(area).not_nil!.w + 20)
   end
 end
+
+describe "the Evidence issue picker's hint" do
+  it "does not call opening a linked issue a write" do
+    # Its title names the act (OPEN LINKED ISSUE); ↵ picks which issue. The hint said "↵ set".
+    p = ChoicePicker.new("OPEN LINKED ISSUE", [ChoicePicker::Choice.new("#1 [open] x", 'a', Theme.text, 0)], -1, :evidence_issue)
+    p.hint.should contain("↵ pick")
+    p.hint.should_not contain("↵ set")
+  end
+end

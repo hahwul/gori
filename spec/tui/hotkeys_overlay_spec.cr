@@ -121,6 +121,10 @@ describe HotkeysOverlay do
       o.hint.should contain("esc cancel")
       o.unbind_selected
       o.to_working[0].keys.first.should eq(expected)
+      # Unsaved now, so esc asks once before it discards (a rebind's "✓ bound" read as saved).
+      o.unsaved?.should be_true
+      h.press(Termisu::Input::Key::Escape).should eq(:open)
+      h.rendered?("esc again discards").should be_true
       h.press(Termisu::Input::Key::Escape).should eq(:closed)
     end
 

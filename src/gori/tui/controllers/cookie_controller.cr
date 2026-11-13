@@ -111,7 +111,7 @@ module Gori::Tui
       if s.mode == :decode
         s.view.render_decode(screen, body,
           input: s.input, input_mode: s.input_mode, input_read: s.input_read,
-          decoded: s.decoded, format: display_format(s), resolved_format: effective_format(s),
+          decoded: shown_decoded(s), format: display_format(s), resolved_format: effective_format(s),
           algorithm: effective_algorithm(s), salt: s.salt, salt_cx: s.salt_cx, salt_pre: s.salt_pre,
           salt_preset: salt_preset_label(s),
           verify_state: s.verify_state, crack_note: s.crack_note,
@@ -620,6 +620,13 @@ module Gori::Tui
       s.decoded = decode_text(token, decode_format(s))
       recompute_verify(s)
       s.view.reset_decoded_scroll
+    end
+
+    # The engine's decode text ends "signature (not verified)": decoding takes no key. Once the
+    # SECRET field verifies (typed, or found by the cracker) the pane kept saying so, beside a
+    # border reading `✓ verified` or `cracked: …`.
+    private def shown_decoded(s : CookieSession) : String
+      s.verify_state == :ok ? s.decoded.sub("not verified)", "verified with the secret below)") : s.decoded
     end
 
     private def decode_text(token : String, format : String?) : String

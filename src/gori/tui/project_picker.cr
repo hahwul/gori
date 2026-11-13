@@ -2307,6 +2307,11 @@ module Gori::Tui
                  @archive_import_overlay.try(&.hint) || ""
                when @mode == :archive_import_name
                  @archive_name_overlay.try(&.hint) || ""
+               when @mode == :confirm
+                 # The dialog's own keys. It fell through to the :space arm below and sat
+                 # under the action menu's mnemonics (`o open   e rename …`), none of which
+                 # a confirmation answers.
+                 @confirm.try(&.hint) || ""
                when label = BUSY_LABELS[@mode]?
                  # Every blocking mode, off the one table — :measuring used to fall through
                  # to the :space arm below and label its busy card with the action menu's

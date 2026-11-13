@@ -180,7 +180,7 @@ module Gori::Tui
         when :fuzzer_results    then render_fuzzer_results_full(screen, rect, headline, running, fuzz_step)
         when :probe             then render_probe_full(screen, rect, headline, addr, capturing, scan_on)
         when :miner_results     then render_miner_results_full(screen, rect, headline, running)
-        when :sequencer_samples then render_sequencer_samples_full(screen, rect, headline, running)
+        when :sequencer_samples then render_sequencer_samples_full(screen, rect, headline, running, body_focused)
         when :oast              then render_oast_full(screen, rect, headline, has_provider)
         end
       end
@@ -689,7 +689,8 @@ module Gori::Tui
       draw_chord_hint(screen, ix, y, iw, " ^R ", "start mining", bullet: "▸ ", verb: "mine.run") unless running
     end
 
-    private def render_sequencer_samples_full(screen : Screen, rect : Rect, headline : String, running : Bool) : Nil
+    private def render_sequencer_samples_full(screen : Screen, rect : Rect, headline : String, running : Bool,
+                                              body_focused : Bool) : Nil
       inner_h = full_inner_h(:sequencer_samples, running: running)
       msg = running ? "Collecting — one token per send lands here." : "A run re-sends this request and keeps one token from each response."
       inner, ix, iw = begin_card(screen, rect, :sequencer_samples, headline, "TOKEN RUN", inner_h, Screen.display_width(msg))
@@ -698,7 +699,12 @@ module Gori::Tui
       draw_wrapped_message(screen, ix, y, iw, msg)
       return if running
       y += 2
-      draw_chord_lines(screen, ix, y, iw, [ChordLine.new(" c ", "where the token lives", "sequence.configure"),
+      # `c` is the tab's only from inside the body: on the tab bar or the sub-tab strip the
+      # same letter is Global and stops capture. So off the body it wears its `↓` route, as
+      # Intercept's queue keys do.
+      # The chip is spelled here, rebind included, so the line passes no verb of its own.
+      config = " #{queue_chip(body_focused, key("c", "sequence.configure"))} "
+      draw_chord_lines(screen, ix, y, iw, [ChordLine.new(config, "where the token lives"),
                                            ChordLine.new(" ^R ", "collect samples", "sequence.run")])
     end
 

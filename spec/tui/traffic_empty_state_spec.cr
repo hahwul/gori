@@ -641,6 +641,20 @@ describe Gori::Tui::TrafficEmptyState do
     backend.contains?("SAMPLES").should be_false
   end
 
+  it "routes the sequencer card's c through the body when focus is not in it" do
+    # The card is on screen from the tab bar and the sub-tab strip, where a bare `c` is the
+    # Global key that stops capture. It spelled `c` either way.
+    off = MemoryBackend.new(60, 10)
+    TrafficEmptyState.render(Screen.new(off), Rect.new(0, 0, 60, 10),
+      variant: :sequencer_samples, running: false, body_focused: false)
+    off.contains?("↓ c").should be_true
+    inside = MemoryBackend.new(60, 10)
+    TrafficEmptyState.render(Screen.new(inside), Rect.new(0, 0, 60, 10),
+      variant: :sequencer_samples, running: false, body_focused: true)
+    inside.contains?("↓ c").should be_false
+    inside.contains?(" c ").should be_true
+  end
+
   # Running is a different sentence and drops the chord — the run is already going, so "^R start
   # mining" would be an instruction to do what is happening.
   {% for variant, chord in {miner_results: "start mining", sequencer_samples: "collect samples"} %}
