@@ -320,7 +320,8 @@ module Gori::Tui
       # `space cmds` on BOTH branches. The mark-set branch above named it and this one did not,
       # so the same tab advertised the space menu only while marks happened to be set.
       # ↵ on a folder is a toggle (it folds an open one); only → always expands.
-      enter = @sitemap.selected_leaf? ? "↵ open" : "↵ expand/fold"
+      # (Not "fold": that word is `sitemap.toggle-grouping`'s, two tokens along.)
+      enter = @sitemap.selected_leaf? ? "↵ open" : "↵ toggle · → expand"
       keys("↑/↓ move · #{enter} · {sitemap.query} filter · {sitemap.mark-toggle} mark · {sitemap.mark-all} all · {sitemap.toggle-grouping} fold · {sitemap.copy} copy · space cmds · esc sub-tabs")
     end
 

@@ -306,3 +306,15 @@ private def reset_settings
   Gori::Settings.keymap_os = "auto"
   Gori::Settings.keymap_overrides = {} of String => Array(String)
 end
+
+describe "HotkeysOverlay — leaving with unsaved rebinds" do
+  it "asks once on a click outside the card, as it does on esc" do
+    o = fresh_overlay
+    o.move(1)
+    o.unbind_selected
+    o.unsaved?.should be_true
+    area = Rect.new(0, 0, 120, 40)
+    o.handle_click(area, 0, 0).should eq(:stay)   # outside: warns instead of discarding
+    o.handle_click(area, 0, 0).should eq(:cancel) # again: discards
+  end
+end

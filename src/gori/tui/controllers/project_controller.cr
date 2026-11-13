@@ -16,6 +16,7 @@ module Gori::Tui
       super(host)
       s = @host.session
       @project_view = ProjectView.new(s.scope, s.host_overrides)
+      @project_view.registry = s.registry
     end
 
     def view : ProjectView
@@ -96,10 +97,10 @@ module Gori::Tui
       elsif @project_view.settings_toggle_row?
         "space/↵ toggle lens · ↑/↓ move · esc sub-tabs"
       else
-        # A proxy host/port with the protocol at None, a credential with auth at None: the row
+        # A proxy host/port with no usable protocol, a credential with auth off: the row
         # takes no key. It used to fall through to the lens hint, which named an action the
         # row does not have.
-        "unused while the proxy protocol or auth above is None · ↑/↓ move · esc sub-tabs"
+        "not in use with the proxy rows above as they are · ↑/↓ move · esc sub-tabs"
       end
     end
 

@@ -205,7 +205,8 @@ module Gori
       total
     end
 
-    # `ProjectRegistry::ID_FILE`, spelled here because this file is loaded without the registry.
+    # The registry's id sidecar. Defined here, and aliased as `ProjectRegistry::ID_FILE`, because
+    # this file is loaded without the registry and the two must not drift apart.
     CREATED_MARKER = ".id"
 
     # Best-effort project creation time. The registry writes the `.id` sidecar once, when it

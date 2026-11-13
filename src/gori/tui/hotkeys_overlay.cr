@@ -372,7 +372,10 @@ module Gori::Tui
     # that binding (rebind/unbind/reset stay keyboard-driven).
     def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
       box = overlay_box(area)
-      return :cancel if box.nil? || !box.contains?(mx, my)
+      armed = @discard_armed
+      @discard_armed = false
+      # A click outside dismisses, which discards like esc and so asks like esc.
+      return escape_browse(armed) if box.nil? || !box.contains?(mx, my)
       if idx = row_at(box, mx, my)
         set_selected(idx)
       end
