@@ -2,14 +2,14 @@
 
 ## Unreleased
 
-- Sequencer: fewer than 20 tokens rate INCONCLUSIVE (`only N usable tokens — need ≥ 20`) in `gori run sequence`, MCP and the Sequencer tab, instead of a CRITICAL or WEAK that the sample size alone produced; a repeated token still rates CRITICAL, and the tab will not file an inconclusive report as an issue
-- Authorize: `gori run authorize` and MCP `authorize_start` count only the requests that go on the wire, so an identity that changes nothing about a request is no longer counted as a send
-- JWT, Cookie: `gori run jwt` and `gori run cookie` decode the token in a value pasted straight from an `Authorization`, `Cookie` or `Set-Cookie` header (`Bearer …`, `session=…`, `…; Path=/`) instead of decoding the whole value as garbage, and `gori run cookie` exits 1 when no payload in it decodes
-- Redaction: `gori run redact rm` refuses the profile a safe export is set to use, a configured profile that no longer exists names `redact use` as the way out, and `gori run redact --help` lists the other subcommands
-- Issues: `gori run issues --export -` writes the report to stdout, with the count on stderr, instead of a file named `-`
-- Decoder: `gori run decoder` says on stderr when a result that is not text is printed re-encoded as base64 or hex, so a decode that prints its own input no longer passes for one that did nothing
-- Probe: a repeated promote names the Issue the finding already became, and `gori run probe rules delete` and MCP `delete_probe_rule` say an unknown rule id is no rule instead of advising to disable it
-- Fuzzer: `gori run fuzz --fail-if-no-matches` exits 1, not 3, when every send errored, so a dead target no longer reads as a run that matched nothing
+- Sequencer: fewer than 20 tokens rate INCONCLUSIVE (`only N usable tokens — need ≥ 20`) in `gori run sequence`, MCP and the Sequencer tab, instead of a CRITICAL or WEAK that the sample size alone produced; a repeated or sequential token still rates CRITICAL, and the tab will not file an inconclusive report as an issue (#1875)
+- Authorize: `gori run authorize` and MCP `authorize_start` count only the requests that go on the wire, so an identity that changes nothing about a request is no longer counted as a send (#1875)
+- JWT, Cookie: `gori run jwt` and `gori run cookie` decode the token in a value pasted straight from an `Authorization`, `Cookie` or `Set-Cookie` header (`Bearer …`, `session=…`, `…; Path=/`) instead of decoding the whole value as garbage, and `gori run cookie` exits 1 when no payload in it decodes (#1875)
+- Redaction: `gori run redact rm` refuses the profile a safe export is set to use, a configured profile that no longer exists names `redact use` as the way out, and `gori run redact --help` lists the other subcommands (#1875)
+- Issues: `gori run issues --export -` writes the report to stdout, with the count on stderr, instead of a file named `-` (#1875)
+- Decoder: `gori run decoder` says on stderr when a result that is not text is printed re-encoded as base64 or hex, so a decode that prints its own input no longer passes for one that did nothing (#1875)
+- Probe: a repeated promote names the Issue the finding already became, and `gori run probe rules delete` and MCP `delete_probe_rule` say an unknown rule id is no rule instead of advising to disable it (#1875)
+- Fuzzer: `gori run fuzz --fail-if-no-matches` exits 1, not 3, when every send errored, so a dead target no longer reads as a run that matched nothing (#1875)
 - TUI: hints name the key that is true where they are shown (Sitemap's `↵` on a folder, Project settings' proxy rows, the project picker's delete dialog, Evidence's issue picker, an empty Activity feed, the Sequencer's empty card), and turning on request-beside-response in a pane too narrow to split says so (#1874)
 - TUI: Preferences keeps a one-row section's row on screen (Reset, Hotkeys, Tabs), the hotkey editor asks once before `esc` discards a rebind, opening a Repeater row from Activity lands on that sub-tab, a project's Created no longer moves each time it is opened, and Cookie's decode reads verified once the secret checks out (#1874)
 - TUI: a new note no longer shows the previous note's links, `↵` on a notification with nowhere to jump opens its full text, the flow detail's pane chips stay inside a narrow pane, and what gori says about a flow there wraps instead of being cut (#1873)
