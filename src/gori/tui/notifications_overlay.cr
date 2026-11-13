@@ -276,7 +276,7 @@ module Gori::Tui
       # the two columns it takes, so the marker cannot land on top of the text.
       # An agent's question still waiting on the operator (#1324) wears `?` instead, in the
       # `ask:` chip's colour: ↵ there opens the answer card, not the long form.
-      marker = note.question_open? ? "?" : (note.detail ? "›" : "")
+      marker = note.question_open? ? "?" : (note.opens_card? ? "›" : "")
       marker_fg = note.question_open? ? Theme.orange : Theme.muted
       tail = stamp.size + 1 + (marker.empty? ? 0 : 2)
       msg_w = {box.right - 1 - msg_x - tail, 1}.max

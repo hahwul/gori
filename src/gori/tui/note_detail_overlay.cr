@@ -237,8 +237,9 @@ module Gori::Tui
     # one is bound to a dialog that sizes ITSELF to the wrapped result and this one wraps to
     # a card whose width is already fixed.
     private def wrap(width : Int32) : Array(String)
+      # A note with no long form is opened for its one line, which the ring row clipped.
       detail = @note.detail
-      return [] of String if detail.nil?
+      detail = @note.message if detail.nil? || detail.empty?
       NoteDetailOverlay.wrap_text(detail, width)
     end
 

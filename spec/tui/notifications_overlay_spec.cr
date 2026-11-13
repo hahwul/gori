@@ -269,3 +269,14 @@ describe "NotificationsOverlay clear guard" do
     store.all.size.should eq(0)
   end
 end
+
+describe "a notification with nowhere to jump" do
+  it "opens as a card, and its row says so" do
+    # Its one line is clipped to the ring's width. ↵ used to close the card and open nothing,
+    # so the rest of the sentence could only be read by copying it out.
+    store = Notifications.new
+    note = store.push(:warn, "network: no gori upstream proxy is set, so the environment's proxy carries every request")
+    note.opens_card?.should be_true
+    OverlayHarness.new(NotificationsOverlay.new(store)).rendered?("›").should be_true
+  end
+end

@@ -4125,7 +4125,7 @@ module Gori::Tui
         note = ov.selected_note
         if note && (q = answerable_question_for(note))
           question = {q, note.id}
-        elsif note && note.detail
+        elsif note && note.opens_card?
           detail_note = note
         else
           run_goto(note.try(&.goto))
