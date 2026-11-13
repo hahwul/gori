@@ -5530,3 +5530,31 @@ reproduced. Refines the palette order of 2026-09-25 and the `readOnlyHint` entry
 - **A not-found under `--json` prints the object `send` prints** (`Run.failure_json`), coded
   `NOT_FOUND` as MCP codes it. Single-document readers only: a usage error stays a stderr line
   and an empty list stays `[]`.
+
+### 2026-11-14: a label says what the thing does, in the width it has
+
+The wording half of the usability round: strings agreed from a before/after mock-up, then
+two of them cut to fit. No key, menu letter or verb id moved.
+
+- **Capture off is said as `proxy stopped`.** `c` closes the listener (`Session#toggle_capture`),
+  and "capture off" read as "recording paused" while the browser lost its proxy. The agreed
+  longer sentence did not fit: with the key note and READ's note the toast has 59 columns on
+  an 80×24 tab bar (`unbound_key_hint_spec`). The verb, the footer's `c capture` and the
+  header's `● OFF` keep their word.
+- **One on/off form for a header chip: `scope:on(N)` / `scope:off(N)`,** as `intercept:on(N)`.
+  A bare `scope:N` said neither on nor off and read as a count; it was the shape the comment
+  above `Runner.scope_chip` had recorded.
+- **`^P palette` is the palette; `space cmds` is the tab's menu.** One label had named both.
+  `Chrome.fit_hints` anchors its escape-hatch tail on either, and on the tab bar `q projects`
+  is the head's last segment, so it is the one an 80-column row drops.
+- **`Upstream proxy` labels the protocol row** in both settings panes: under Bind IP and Bind
+  Port, "Proxy port" read as gori's own. `Verify upstream TLS` still means the origin; the
+  field descriptions tell the two apart.
+- **A bind row shows the stored value and, when they differ, `· this run: PORT (-p)`.** The
+  flag is named only when a CLI flag is what moved it; a busy-port fallback gets no guess.
+- **The Scope legend says only what is exactly true:** the lens filters lists and the sandbox
+  refuses the rest. "MCP sends stay in scope" was left out, since `allow_unscoped` waives it.
+- **A recurring action has one title.** Probe and Evidence say `Send to Repeater` as History,
+  Sitemap, Issues, Fuzzer and Miner do; a setting has one label in Project settings,
+  Preferences and the palette (`Capture body limit (MiB)`, `Host overrides`).
+
