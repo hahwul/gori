@@ -261,10 +261,10 @@ describe Gori::Hotkeys do
   describe ".retag" do
     it "rewrites only the claimed family, and only under the alias" do
       with_modifier("ctrl") do
-        Gori::Hotkeys.retag("^P cmds · ^R send").should eq("^P cmds · ^R send")
+        Gori::Hotkeys.retag("^P palette · ^R send").should eq("^P palette · ^R send")
       end
       with_modifier("alt") do
-        Gori::Hotkeys.retag("^P cmds").should eq("⌥P cmds")
+        Gori::Hotkeys.retag("^P palette").should eq("⌥P palette")
         Gori::Hotkeys.retag("^1-9 jump · ^N new · ^W close").should eq("⌥1-9 jump · ⌥N new · ⌥W close")
         Gori::Hotkeys.retag("^, preferences").should eq("⌥, preferences")
         # NOT claimed — these keep their carets or the hints would lie.

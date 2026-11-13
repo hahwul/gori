@@ -1190,7 +1190,7 @@ module Gori::Tui
       chips << {@findings.size.to_s, Theme.muted} if filtering?
       scope_on = scope_active?
       scope_chip = Hotkeys.menu_chip(@registry, "probe.scope-toggle")
-      chips << (scope_on ? {"#{scope_chip} scope:#{@scope.try(&.size) || 0}", Theme.accent} : {"#{scope_chip} scope:off", Theme.muted})
+      chips << (scope_on ? {"#{scope_chip} scope:on(#{@scope.try(&.size) || 0})", Theme.accent} : {"#{scope_chip} scope:off", Theme.muted})
       scope_x = Frame.right_text_chain(screen, rect.right - 1, y, rect.x + 2, chips)
       left_w = {scope_x - (rect.x + 1) - 1, 0}.max
       if filtering?

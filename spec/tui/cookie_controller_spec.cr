@@ -389,7 +389,7 @@ describe "Gori::Tui::CookieController" do
           ctl.focus_first
           loop do
             hint = ctl.body_hint(:body)
-            Chrome.fit_hints(hint, 57).should end_with("cmds · esc sub-tabs"), hint
+            Chrome.fit_hints(hint, 57).should match(/(space cmds|\^P palette) · esc sub-tabs$/), hint
             break unless ctl.pane_advance(1)
           end
           ctl.toggle_mode

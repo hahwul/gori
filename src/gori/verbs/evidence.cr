@@ -54,9 +54,9 @@ module Gori
         intent: :export, group: :copy) { |ctx| ctx.evidence_export; nil }
 
       r.register Verb::Definition.new(
-        "evidence.repeater", "Duplicate into Repeater", "Create an editable Repeater tab from the frozen request",
+        "evidence.repeater", "Send to Repeater", "Create an editable Repeater tab from the frozen request",
         Verb::Scope::Evidence, [Verb::Chord.new("r")], available: selected,
-        group: :send, intent: :to_repeater, pinned: true) { |ctx| ctx.evidence_duplicate_repeater; nil }
+        group: :send, intent: :to_repeater, pinned: true, keywords: ["duplicate"]) { |ctx| ctx.evidence_duplicate_repeater; nil }
 
       # Menu-only, like `link.*.attach`: both open a picker, and neither has a chord to
       # spare here. Link is the lexicon's `L` on every tab (#1274); it was `k`, which the

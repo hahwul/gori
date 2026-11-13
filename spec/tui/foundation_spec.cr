@@ -457,14 +457,14 @@ describe Gori::Tui::Chrome do
   end
 
   it "drops whole hint segments before the command-menu tail, never cutting a token" do
-    hints = "←/→ switch tab · ↹/↵ enter · 1-9/0 tabs · c capture · ^P cmds · ? help · ^D quit"
+    hints = "←/→ switch tab · ↹/↵ enter · 1-9/0 tabs · c capture · ^P palette · ? help · ^D quit"
     Chrome.fit_hints(hints, 200).should eq(hints)
-    # Middle drops (before the `cmds` tail) are silent: the last segment is still there.
-    Chrome.fit_hints(hints, 50).should eq("←/→ switch tab · ^P cmds · ? help · ^D quit")
-    # No `cmds` tail (an overlay hint, a toast): segments go from the right, marked ` …`.
+    # Middle drops (before the `^P palette` tail) are silent: the last segment is still there.
+    Chrome.fit_hints(hints, 50).should eq("←/→ switch tab · ^P palette · ? help · ^D quit")
+    # No menu tail (an overlay hint, a toast): segments go from the right, marked ` …`.
     Chrome.fit_hints("↑/↓ select · ↵ run · esc close", 20).should eq("↑/↓ select · ↵ run …")
     # Too narrow even for head + tail: the tail goes from the right, the head stays.
-    Chrome.fit_hints(hints, 26).should eq("←/→ switch tab · ^P cmds …")
+    Chrome.fit_hints(hints, 29).should eq("←/→ switch tab · ^P palette …")
   end
 
   it "makes the CPU/MEM meter, then the clock, yield their room to overflowing hints" do

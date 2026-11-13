@@ -472,7 +472,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   # Click a top-bar chip: the notification badge (`notify:N`, left of scope) opens
-  # the center; the scope chip (`scope:N` / `scope:off`) flips the lens — the same
+  # the center; the scope chip (`scope:on(N)` / `scope:off`) flips the lens — the same
   # action as the global `s` chord; the probe chip opens the SET PROBE MODE picker
   # (the `m` chord inside the Probe tab); `bypass:N` opens the TLS-passthrough list; the
   # listen chip toggles capture; `session:NAME` opens the session-slot picker; the far-right

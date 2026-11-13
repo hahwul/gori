@@ -67,8 +67,8 @@ describe "Runner.read_mode_global?" do
   end
 
   it "appends the way to type, resolved against the live keymap" do
-    Gori::Hotkeys.expand(registry, Runner.read_mode_note("capture off"))
-      .should eq("capture off · READ: i/↵ to type")
+    Gori::Hotkeys.expand(registry, Runner.read_mode_note(Runner::CAPTURE_OFF_TOAST))
+      .should eq("proxy stopped · READ: i/↵ to type")
   end
 end
 
@@ -82,7 +82,26 @@ describe "Runner.undo_key_note" do
     note.should_not contain(" · ")
     # 80×24 leaves the tab bar 59 hint columns beside the companion chip.
     note.size.should be <= 59
-    read = Runner.read_mode_note(Runner.undo_key_note("capture off", "c", "turns it back on"))
+    read = Runner.read_mode_note(Runner.undo_key_note(Runner::CAPTURE_OFF_TOAST, "c", "turns it back on"))
     Gori::Hotkeys.expand(Gori::Verbs.registry, read).size.should be <= 59
+  end
+
+  # The tab bar's footer names the palette `^P palette`; three columns longer than `^P cmds`,
+  # so one more segment has to go at 80×24, and it is `q projects` (the head's last), not
+  # `↹/↵ enter`.
+  it "drops q projects first when the tab bar has its 59 columns" do
+    row = "←/→ switch tab · ↹/↵ enter · {capture.toggle} capture · {intercept.toggle} intercept · q projects · ^P palette · {help.hotkeys} help"
+    File.read("src/gori/tui/runner.cr").should contain(row)
+    Gori::Tui::Chrome.fit_hints(Gori::Hotkeys.expand(Gori::Verbs.registry, row), 59)
+      .should eq("←/→ switch tab · ↹/↵ enter · ^P palette · ? help")
+  end
+
+  # The add-rule toast's lens clause is the part a narrow status row drops whole, so it has to
+  # fit beside any rule count.
+  it "keeps the add-rule toast's lens clause inside 59 columns" do
+    tail = " · {space:scope.lens-toggle} filters to scope"
+    File.read("src/gori/tui/controllers/project_controller.cr").should contain(tail)
+    toast = Gori::Hotkeys.expand_menu_paths(Gori::Verbs.registry, "scope rule added — 1000 rules#{tail}")
+    toast.size.should be <= 59
   end
 end

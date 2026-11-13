@@ -1464,7 +1464,7 @@ module Gori::Tui
       chips << {:count, "#{@hosts.size}h", Theme.muted} if filtering?
       scope_on = @scope.try(&.active?) == true
       scope_key = key_label("scope.toggle-lens", "s")
-      chips << (scope_on ? {:scope, "#{scope_key} scope:#{@scope.try(&.size) || 0}", Theme.accent} : {:scope, "#{scope_key} scope:off", Theme.muted})
+      chips << (scope_on ? {:scope, "#{scope_key} scope:on(#{@scope.try(&.size) || 0})", Theme.accent} : {:scope, "#{scope_key} scope:off", Theme.muted})
       chips << {:fold, "#{key_label("sitemap.toggle-grouping", "g")}:fold", @grouping ? Theme.accent : Theme.muted}
       chips << {:static, "static:hidden", Theme.accent} if @hide_static # see HistoryView's
       chips << {:mark, mark_chip_text.not_nil!, Theme.accent} if mark_chip_text

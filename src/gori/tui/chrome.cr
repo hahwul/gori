@@ -411,7 +411,7 @@ module Gori::Tui
       x = render_wordmark(screen, rect.x + 1, rect.y, bg: Theme.bg)
       name_x = x + 1
 
-      # right-aligned status chips: notify:N · scope:N · probe:MODE · rules:N ·
+      # right-aligned status chips: notify:N · scope:on(N) · probe:MODE · rules:N ·
       # intercept:on(N) · bypass:N · ●listen · ⌘ · ⚙ — value-emphasized, dim · separators; the
       # hot intercept state in RED. `unread` rides just left of scope so a
       # background-job ping surfaces beside the state it's most likely to affect. The
@@ -1123,7 +1123,7 @@ module Gori::Tui
     end
 
     # The passive readouts give their room to the key hints before any hint is dropped: a
-    # beginner needs `^P cmds` more than gori's own CPU figure. Meter first, then the clock;
+    # beginner needs `^P palette` more than gori's own CPU figure. Meter first, then the clock;
     # activity (a running job) and the companion (clickable) always stay.
     YIELDING_CHIPS = {:resource, :time}
 
@@ -1141,18 +1141,19 @@ module Gori::Tui
 
     # Fit a ` · `-separated hint into `width` by dropping WHOLE segments, never cutting one
     # mid-token. Hints read most-important-first, except the escape hatches parked at the
-    # tail: the command menu (`^P cmds` / `space cmds`) and everything after it. So segments
+    # tail: the command menu (`^P palette` / `space cmds`) and everything after it. So segments
     # go right-to-left from just BEFORE that tail, keeping the first; only then the tail
-    # itself from the right. Losing the LAST segment (a toast has no `cmds` anchor, so that is
+    # itself from the right. Losing the LAST segment (a toast has no menu anchor, so that is
     # its only cut) ends the line with ` …`, so a cut tail still reads as cut; middle drops
-    # stay silent. A lone segment still too wide is left for Screen#text's `…`.
+    # stay silent. A lone segment still too wide is left for Screen#text's `…`. The anchor
+    # is `P palette`, not ` palette`, so it matches `^P`/`⌥P` and never a toast's prose.
     def self.fit_hints(hints : String, width : Int32) : String
       sep = " · "
       return hints if Screen.display_width(hints) <= width
       segs = hints.split(sep)
       last = segs.last
       text = -> { segs.last.same?(last) ? segs.join(sep) : "#{segs.join(sep)} …" }
-      cut = segs.rindex(&.ends_with?(" cmds")) || segs.size
+      cut = segs.rindex { |seg| seg.ends_with?(" cmds") || seg.ends_with?("P palette") } || segs.size
       while cut > 1 && Screen.display_width(text.call) > width
         cut -= 1
         segs.delete_at(cut)

@@ -191,8 +191,8 @@ module Gori::Tui
       # No "q projects": q (back to the picker) is tab-bar-only by design, so the
       # body must not advertise it as a key (esc/↹ to the bar first, then q).
       return "type to search · ↑/↓ scroll · esc clear" if @help.searching?
-      return "←/→ pages · ↹/esc tabs · ^P cmds" if about_page?
-      "↑/↓ scroll · ←/→ pages · / search · ↹/esc tabs · ^P cmds"
+      return "←/→ pages · ↹/esc tabs · ^P palette" if about_page?
+      "↑/↓ scroll · ←/→ pages · / search · ↹/esc tabs · ^P palette"
     end
   end
 end

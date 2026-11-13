@@ -4440,7 +4440,7 @@ module Gori::Tui
       end
       scope_on = @scope.try(&.active?) == true
       scope_key = key_label("scope.toggle-lens", "s")
-      chips << (scope_on ? {:scope, "#{scope_key} scope:#{@scope.try(&.size) || 0}", Theme.accent} : {:scope, "#{scope_key} scope:off", Theme.muted})
+      chips << (scope_on ? {:scope, "#{scope_key} scope:on(#{@scope.try(&.size) || 0})", Theme.accent} : {:scope, "#{scope_key} scope:off", Theme.muted})
       # `⌁follow`, and NOT `f:follow`: the key audit's F3 took the bare `f` back for the two
       # tiers it settles into (freeze in evidence contexts, find on the sub-tab strip), so
       # follow is `space → f` now. A chip that still printed `f:` would name a key nothing

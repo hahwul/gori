@@ -640,7 +640,18 @@ module Gori::Tui
       return @host.status("dismiss NOT applied (project busy) — the finding is unchanged") if st == was
       # A synchronous user action → transient toast (the list updates in place too),
       # matching the rest of the app; the notification center is for async events.
-      @host.status(st.open? ? "finding re-opened" : "finding dismissed")
+      return @host.status("finding re-opened") if st.open?
+      @host.status(Hotkeys.expand(@host.session.registry, dismissed_toast))
+    end
+
+    # Say the way back, with keys that work where the toast fires. On the open-only list the
+    # row has just left, so the lens comes first; with closed rows already shown, or in the
+    # detail (which stays open, and where the lens key is not bound), only the re-open key.
+    # 46 columns at most, so the ` · ` Chrome.fit_hints cuts at only splits it below 80.
+    private def dismissed_toast : String
+      return "finding dismissed ({probe.dismiss} re-opens)" if @probe.detail_open?
+      return "finding dismissed ({probe.dismiss-selected} re-opens)" if @probe.show_closed?
+      "finding dismissed ({probe.toggle-closed} shows closed · {probe.dismiss-selected} re-opens)"
     end
 
     # `a`: flip the open-only ⇄ show-closed lens.

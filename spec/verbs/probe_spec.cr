@@ -133,6 +133,17 @@ describe "Gori::Verbs.register_probe" do
     end
   end
 
+  # The cross-tool send reads the same on every tab ("Send to Repeater", as History, the
+  # Sitemap and Issues spell it), so the palette's `send to repeater` finds it here too, and
+  # the word the old title carried still finds the detail's row.
+  it "titles the Repeater send as every other tab does, and still answers `evidence`" do
+    {"probe.repeater-evidence", "probe.repeater-flow"}.each do |id|
+      r[id].title.should eq("Send to Repeater")
+      Gori::Verb::Registry.score(r[id], "send to repeater").should_not be_nil
+      Gori::Verb::Registry.score(r[id], "evidence").should_not be_nil
+    end
+  end
+
   describe "the Rules sub-tab" do
     it "leaves toggle and add ungated — every rule can be enabled or disabled" do
       ctx = FakeExecContext.new

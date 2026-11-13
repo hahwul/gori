@@ -219,6 +219,9 @@ describe Gori::Tui::ProbeView do
       view.render(Gori::Tui::Screen.new(b1), Gori::Tui::Rect.new(0, 0, 80, 20))
       b1.contains?("a.test").should be_true
       b1.contains?("b.test").should be_false
+      # The filter bar's chip says on/off the way the header's does (`intercept:on(N)`).
+      b0.contains?("scope:off").should be_true
+      b1.contains?("scope:on(1)").should be_true
     end
   end
 

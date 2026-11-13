@@ -263,7 +263,7 @@ module Gori
       end
     end
 
-    # The claimed family as it appears in hand-written hint/help PROSE ("^P cmds",
+    # The claimed family as it appears in hand-written hint/help PROSE ("^P palette",
     # "^1-9 jump"). A closed set on purpose: ^R/^S/^X/^C/^D are NOT claimed and must keep
     # their carets, so never widen this to a general `\^(\w)`.
     CLAIMED_CARET_RE = /\^([gfbepnwGFBEPNW,1-9])/
