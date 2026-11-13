@@ -574,6 +574,37 @@ describe "intercept in a VIEW-ONLY window" do
     end
   end
 
+  it "asks before catch-off drops an open edit, and not otherwise" do
+    # Turning catch off forwards every hold without an open editor's changes. The toast said
+    # so only after the bytes had gone, cut short at 120 columns.
+    with_sessions(1) do |sessions|
+      session = sessions.first
+      host = PeerSyncHost.new(session, :intercept)
+      ctrl = Gori::Tui::InterceptController.new(host)
+      ic = session.interceptor
+      hold = -> {
+        spawn { ic.hold_request("GET /x HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, method: "GET", target: "/x", host: "acme.test", port: 80, scheme: "http") }
+        Fiber.yield
+        ctrl.view.reload(ic)
+      }
+
+      ctrl.intercept_toggle # on
+      hold.call
+      ctrl.intercept_toggle # off, nothing edited
+      host.confirms.should be_empty
+      ic.enabled?.should be_false
+
+      ctrl.intercept_toggle # on
+      hold.call
+      ctrl.view.toggle_edit
+      ctrl.view.edit_insert('X')
+      ctrl.intercept_toggle # off over an edit
+      host.confirms.size.should eq(1)
+      host.confirms.last[1].should contain("WITHOUT your changes")
+      ic.enabled?.should be_false # the fake host answers yes
+    end
+  end
+
   it "still toggles in the window that holds capture" do
     with_sessions(1) do |sessions|
       session = sessions.first
