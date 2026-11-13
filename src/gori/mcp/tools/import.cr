@@ -21,7 +21,7 @@ module Gori
         "curl"     => :curl,
       }
 
-      @[Tool("import_flows", gated: true, agent_action: true, permission: "write")]
+      @[Tool("import_flows", gated: true, agent_action: true, permission: "write", open_world: false, destructive: false)]
       private def import_flows(h) : Result
         kind_s = str(h, "kind").try(&.strip.downcase).presence
         # ABSENT and WRONG are two different mistakes, and only one of them is a value to

@@ -70,7 +70,7 @@ module Gori
         end)
       end
 
-      @[Tool("create_session_slot", gated: true, agent_action: true, permission: "write")]
+      @[Tool("create_session_slot", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def create_session_slot(h) : Result
         name = required_str(h, "name")
         registry = fresh_slots
@@ -203,7 +203,7 @@ module Gori
       # A partial update: an argument left out keeps what the slot already has. That is the
       # shape an agent needs to rotate ONE cookie without having to re-send the rule list it
       # never read (and would blank).
-      @[Tool("update_session_slot", gated: true, agent_action: true, permission: "write")]
+      @[Tool("update_session_slot", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def update_session_slot(h) : Result
         name = required_str(h, "name")
         registry = fresh_slots
@@ -258,7 +258,7 @@ module Gori
         {set_headers, [] of String}
       end
 
-      @[Tool("delete_session_slot", gated: true, agent_action: true, permission: "write")]
+      @[Tool("delete_session_slot", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def delete_session_slot(h) : Result
         name = required_str(h, "name")
         registry = fresh_slots
@@ -282,7 +282,7 @@ module Gori
 
       # The send context for THIS server process. `name: null` (or omitted) deactivates, which
       # is `as-captured`: no header overlay, `$NAME` out of the global binding table.
-      @[Tool("set_active_session_slot", gated: true, agent_action: true, permission: "write")]
+      @[Tool("set_active_session_slot", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def set_active_session_slot(h) : Result
         registry = fresh_slots
         raw = str(h, "name").try(&.strip)

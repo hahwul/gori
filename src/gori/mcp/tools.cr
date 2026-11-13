@@ -142,9 +142,25 @@ module Gori
             {% raise "#{m.name}: @[Tool] takes the tool name as its one positional argument" %}
           {% end %}
           {% for key in ann.named_args.keys %}
-            {% unless %w[gated agent_action env_refresh unbound read_only requires permission].includes?(key.stringify) %}
-              {% raise "#{m.name}: unknown @[Tool] flag '#{key}' — allowed: gated, agent_action, env_refresh, unbound, read_only, requires, permission" %}
+            {% unless %w[gated agent_action env_refresh unbound read_only requires permission open_world destructive idempotent].includes?(key.stringify) %}
+              {% raise "#{m.name}: unknown @[Tool] flag '#{key}' — allowed: gated, agent_action, env_refresh, unbound, read_only, requires, permission, open_world, destructive, idempotent" %}
             {% end %}
+          {% end %}
+          # The three hint flags spell only the NON-default answer: unstated is the MCP spec's
+          # conservative default, so a tool nobody classified stays on the safe side.
+          {% keys = ann.named_args.keys.map(&.stringify) %}
+          {% for flag in [{"open_world", false}, {"destructive", false}, {"idempotent", true}] %}
+            {% if keys.includes?(flag[0]) %}
+              {% if ann[flag[0].id] != flag[1] %}
+                {% raise "#{m.name}: @[Tool] #{flag[0].id}: takes only #{flag[1]} — the other answer is the spec's default, stated by leaving it out" %}
+              {% end %}
+              {% if keys.includes?("read_only") ? ann[:read_only] : !ann[:gated] %}
+                {% raise "#{m.name}: @[Tool] #{flag[0].id}: is for a writer — a read tool already says openWorldHint:false, and the other two mean nothing on it" %}
+              {% end %}
+            {% end %}
+          {% end %}
+          {% if keys.includes?("open_world") && %w[send intercept].includes?(ann[:permission]) %}
+            {% raise "#{m.name}: @[Tool] open_world: false on a `#{ann[:permission].id}` tool — that group dials a target, an OAST server or live traffic" %}
           {% end %}
           {% if ann.named_args.keys.map(&.stringify).includes?("permission") %}
             {% unless Gori::Settings::MCP_PERMISSION_KEYS.includes?(ann[:permission]) %}
@@ -239,6 +255,12 @@ module Gori
         # whole exception list in mcp/tool.cr.
         {% read_only = tools.select { |m| m.annotation(Tool).named_args.keys.map(&.stringify).includes?("read_only") ? m.annotation(Tool)[:read_only] : !m.annotation(Tool)[:gated] } %}
         READ_ONLY_TOOLS = Set(String){ {{ read_only.map { |m| m.annotation(Tool)[0] }.splat }} }
+
+        # Writers that state a hint's non-default answer (`open_world: false`, `destructive:
+        # false`, `idempotent: true`); reasoning in mcp/tool.cr.
+        CLOSED_WORLD_WRITERS = Set(String){ {{ tools.select { |m| m.annotation(Tool).named_args.keys.map(&.stringify).includes?("open_world") }.map { |m| m.annotation(Tool)[0] }.splat }} }
+        ADDITIVE_TOOLS       = Set(String){ {{ tools.select { |m| m.annotation(Tool).named_args.keys.map(&.stringify).includes?("destructive") }.map { |m| m.annotation(Tool)[0] }.splat }} }
+        IDEMPOTENT_TOOLS     = Set(String){ {{ tools.select { |m| m.annotation(Tool)[:idempotent] }.map { |m| m.annotation(Tool)[0] }.splat }} }
       end
 
       # A live OAST listening session held server-side across tool calls (oast_start →
@@ -3099,6 +3121,15 @@ module Gori
         j.field "cut_by", "bytes" if cut
       end
 
+      # `has_more`, and `next_offset`: the `offset` that continues an offset-paged list, so a
+      # caller never derives it (one evaluator guessed `offset + limit` after a byte-cut page
+      # and re-read rows). null when nothing follows, as `get_response_body_chunk` spells it.
+      # `live`: a job still running, whose next poll continues from there even with no more now.
+      private def emit_more(j : JSON::Builder, more : Bool, next_offset : Int, live : Bool = false) : Nil
+        j.field "has_more", more
+        j.field "next_offset", (more || live) ? next_offset : nil
+      end
+
       # `rows` from `offset` on, for a list paged by `offset` alone (REPLY_ROWS_BUDGET ends the
       # page, not a `limit`); `emit_offset_page` writes its fields.
       private def offset_slice(rows : Array(T), offset : Int32) : Array(T) forall T
@@ -3121,7 +3152,7 @@ module Gori
         j.field "offset", pg.offset
         emit_clamp(j, pg.req_off, pg.offset, pg.req_lim, pg.limit)
         emit_cut(j, returned < page_size)
-        j.field "has_more", pg.offset + returned < total
+        emit_more(j, pg.offset + returned < total, pg.offset + returned)
       end
 
       private def page_args(h, limit : PageLimit) : Page
@@ -3133,7 +3164,7 @@ module Gori
       # The pagination fields of an object-returning list tool, in the order they all use:
       # returned/offset/limit and the clamp echo, `cut_by` when REPLY_ROWS_BUDGET ended the page
       # before `limit` did (`fit_rows`), then — given a `total` — that total under `total_key`
-      # and `has_more`. A caller with no `total` that was cut says `has_more` itself.
+      # and `has_more`/`next_offset`. A caller with no `total` says them itself (`emit_more`).
       private def emit_page(j : JSON::Builder, pg : Page, returned : Int32,
                             total : Int? = nil, total_key : String = "total", cut : Bool = false) : Nil
         j.field "returned", returned
@@ -3143,7 +3174,7 @@ module Gori
         emit_cut(j, cut)
         return unless total
         j.field total_key, total
-        j.field "has_more", pg.offset.to_i64 + returned < total
+        emit_more(j, pg.offset.to_i64 + returned < total, pg.offset.to_i64 + returned)
       end
 
       private def severity_from(s : String?) : Store::Severity?
@@ -3217,18 +3248,12 @@ module Gori
           # `!gated`), so the two differ only on the short list of exceptions spelled there
           # (see the `read_only` note in tool.cr).
           #
-          # `openWorldHint` is emitted only where we can answer it. A read tool answers from
-          # this project's store and never dials, so it is closed-world; an action tool may
-          # or may not reach the network (send_request does, create_note does not), and the
-          # spec's default for an unstated hint is `true` — the conservative answer, and the
-          # right one for the population that includes the fuzzer. `destructiveHint` is left
-          # unstated for the same reason: its default is also the safe side.
-          j.field("annotations") do
-            j.object do
-              j.field "readOnlyHint", read_only
-              j.field "openWorldHint", false if read_only
-            end
-          end
+          # The other three are stated only where gori can truthfully give the NON-default
+          # answer, and left unstated everywhere else, where the spec's default (`true` for
+          # open-world and destructive) is the conservative side. A read tool never dials, so
+          # it is closed-world; a writer opts in on its own `@[Tool]` (`open_world:`,
+          # `destructive:`, `idempotent:`, see tool.cr), so an unclassified tool errs safe.
+          j.field("annotations") { emit_annotations(j, name, read_only) }
           j.field "inputSchema" do
             j.object do
               j.field "type", "object"
@@ -3255,6 +3280,15 @@ module Gori
               end
             end
           end
+        end
+      end
+
+      private def emit_annotations(j : JSON::Builder, name : String, read_only : Bool) : Nil
+        j.object do
+          j.field "readOnlyHint", read_only
+          j.field "destructiveHint", false if ADDITIVE_TOOLS.includes?(name)
+          j.field "idempotentHint", true if IDEMPOTENT_TOOLS.includes?(name)
+          j.field "openWorldHint", false if read_only || CLOSED_WORLD_WRITERS.includes?(name)
         end
       end
 

@@ -193,7 +193,7 @@ module Gori
 
       # probe_dismiss — mute a finding. Either one `id` (toggles dismissed ⇄ open, same rule as
       # the TUI's `c`), or a bulk `code`/`host` mute of every OPEN issue sharing it.
-      @[Tool("probe_dismiss", gated: true, agent_action: true, permission: "write")]
+      @[Tool("probe_dismiss", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def probe_dismiss(h) : Result
         code = str(h, "code").try(&.strip).presence
         host = str(h, "host").try(&.strip).presence
@@ -227,7 +227,7 @@ module Gori
       end
 
       # probe_promote — turn a machine finding into a human-confirmed Issue (the Issues report).
-      @[Tool("probe_promote", gated: true, agent_action: true, permission: "write")]
+      @[Tool("probe_promote", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def probe_promote(h) : Result
         id = required_id(h, "id")
         issue = store.get_probe_issue(id)
@@ -254,7 +254,7 @@ module Gori
       # (code, host) suppression so the next scan does not immediately re-add it, whereas
       # all:true calls Store#clear_probe_issues, which wipes every suppression too — so a
       # rescan re-discovers everything. all:true is therefore gated on confirm:true.
-      @[Tool("probe_delete", gated: true, agent_action: true, permission: "write")]
+      @[Tool("probe_delete", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def probe_delete(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) if id.nil? && present?(h, "id")
@@ -307,7 +307,7 @@ module Gori
       # set_probe_rule_enabled — turn one rule on/off. Built-ins live in the project's
       # disabled-id set; a custom rule carries its own enabled flag (project rules only —
       # a GLOBAL custom rule lives in the user's settings.json, outside this project).
-      @[Tool("set_probe_rule_enabled", gated: true, agent_action: true, permission: "write")]
+      @[Tool("set_probe_rule_enabled", gated: true, agent_action: true, permission: "write", idempotent: true)]
       private def set_probe_rule_enabled(h) : Result
         id = required_str(h, "id", "(see list_probe_rules)")
         enabled = optional_bool_arg(h, "enabled")
@@ -400,7 +400,7 @@ module Gori
         Result.new({"id" => id, "title" => title}.to_json)
       end
 
-      @[Tool("delete_probe_rule", gated: true, agent_action: true, permission: "write")]
+      @[Tool("delete_probe_rule", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def delete_probe_rule(h) : Result
         id = required_str(h, "id", "(see list_probe_rules)")
         row_id = custom_rule_row_id(id)

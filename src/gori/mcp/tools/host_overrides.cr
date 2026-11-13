@@ -10,7 +10,7 @@ module Gori
         items_result(HostOverrides.load(store).entries.map { |e| {id: e.id, host: e.host, ip: e.ip} }.to_json)
       end
 
-      @[Tool("add_host_override", gated: true, agent_action: true, permission: "write")]
+      @[Tool("add_host_override", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def add_host_override(h) : Result
         host = required_str(h, "host")
         ip = required_str(h, "ip")
@@ -44,7 +44,7 @@ module Gori
         Result.new({id: entry.try(&.id), host: normalized, ip: ip}.to_json)
       end
 
-      @[Tool("update_host_override", gated: true, agent_action: true, permission: "write")]
+      @[Tool("update_host_override", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def update_host_override(h) : Result
         id = required_id(h, "id")
         ov = HostOverrides.load(store)
@@ -71,7 +71,7 @@ module Gori
         Result.new({id: id, host: normalized, ip: ip}.to_json)
       end
 
-      @[Tool("delete_host_override", gated: true, agent_action: true, permission: "write")]
+      @[Tool("delete_host_override", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def delete_host_override(h) : Result
         id = required_id(h, "id")
         ov = HostOverrides.load(store)

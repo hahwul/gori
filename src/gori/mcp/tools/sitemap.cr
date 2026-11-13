@@ -64,7 +64,8 @@ module Gori
             j.field "offset", offset
             j.field "limit", limit
             emit_clamp(j, pg.req_off, pg.offset, pg.req_lim, pg.limit)
-            j.field "has_more", has_more
+            # By `scanned`, not `returned`: `offset` pages raw rows, and a folded entry is several.
+            emit_more(j, has_more, offset + rows.size)
             emit_cut(j, cut)
             emit_ignored_terms(j, dropped)
             emit_tag_capped(j, tag_capped)
@@ -152,7 +153,7 @@ module Gori
       end
 
       # Pin (or clear) a free-text memo on one sitemap endpoint — the TUI Sitemap tab's `t`.
-      @[Tool("set_sitemap_tag", gated: true, agent_action: true, permission: "write")]
+      @[Tool("set_sitemap_tag", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def set_sitemap_tag(h) : Result
         host = required_str(h, "host")
         path = str(h, "path").try(&.strip).presence
@@ -409,7 +410,7 @@ module Gori
             j.field "offset", offset
             j.field "limit", limit
             emit_clamp(j, pg.req_off, pg.offset, pg.req_lim, pg.limit)
-            j.field "has_more", has_more
+            emit_more(j, has_more, offset + parts.size)
             emit_cut(j, cut)
             emit_ignored_terms(j, dropped)
             emit_tag_capped(j, tag_capped)
@@ -763,8 +764,8 @@ module Gori
           "(active tool -> recorded flows or saved fuzz results, per path sans query). Query-string " \
           "variants fold by default: `target` = path, `query_variants` = count, " \
           "`query_targets` = up to #{QUERY_SAMPLE_MAX} raw ones, memos in `variant_tags`. " \
-          "Returns {entries, returned, scanned, offset, limit, has_more}, not a bare array. " \
-          "`has_more:true` = more endpoints: advance `offset` until false, or you map only a " \
+          "Returns {entries, returned, scanned, offset, limit, has_more, next_offset}, not a bare array. " \
+          "`has_more:true` = more endpoints: pass `next_offset` as `offset` until false, or you map only a " \
           "fraction. Paging counts raw rows BEFORE folding (`scanned`), so a folded entry can " \
           "span pages." do |s|
           s.field "query", strprop("gori QL, plus sitemap-only `tag:x` (paths at/under/above a memo containing x) and `-tag:x` (drops that subtree)")

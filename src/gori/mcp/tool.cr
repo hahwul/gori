@@ -85,6 +85,21 @@ module Gori
     #   `read_only: true` with `agent_action: true` is a contradiction the macro refuses: an
     #   agent action is by definition a mutation or an outbound send.
     #
+    # - `open_world: false`, `destructive: false`, `idempotent: true` — a WRITER's other three
+    #   hints, each spelled only as its non-default answer: unstated, the MCP spec reads
+    #   open-world and destructive as `true`, the safe side, so a tool nobody classified can
+    #   only over-warn. `open_world: false` = the call only touches this project's store or
+    #   gori's own settings and never dials a target, an OAST server, live traffic or a host
+    #   command; refused by the macro on a `send` / `intercept` tool, and swept against
+    #   dial-shaped arguments by spec/mcp/tool_registry_spec.cr. A rule kind that runs a
+    #   command (Match&Replace `pipe`, probe `exec`) keeps its CRUD unstated. `destructive:
+    #   false` = purely additive (a new row; a duplicate is refused, not overwritten): never
+    #   on an update, delete, move or anything with an overwrite path, and not on a row that
+    #   widens or changes what gori may send or where it dials (`add_scope_rule`,
+    #   `add_host_override`, `create_oast_provider`, `create_extract_rule`):
+    #   new, but not harmless to run unattended. `idempotent: true`
+    #   only where it is trivially so (the required-boolean setters: `set_*_enabled`, `set_sandbox`).
+    #
     # - `unbound` — works with no project store open; every other tool is answered with
     #   NO_PROJECT (`Tools#no_project`) before dispatch. `diff_projects` qualifies because
     #   both sides can be NAMED, and then the diff needs no binding at all — an agent

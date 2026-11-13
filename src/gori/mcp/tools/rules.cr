@@ -566,7 +566,7 @@ module Gori
       # For a global rule this writes THIS PROJECT's override by default — the same meaning `x`
       # has in the Rewriter tab. `everywhere: true` changes the library's own default instead,
       # which reaches every project that has not overridden it.
-      @[Tool("set_rule_enabled", gated: true, agent_action: true, permission: "write")]
+      @[Tool("set_rule_enabled", gated: true, agent_action: true, permission: "write", idempotent: true)]
       private def set_rule_enabled(h) : Result
         id = required_id(h, "id")
         scope = rule_scope(h)
@@ -607,7 +607,7 @@ module Gori
         err("#{rule.inert_reason} — cannot enable this rule with this gori; use a newer version or delete it", "INVALID_ARGUMENT", field: "enabled")
       end
 
-      @[Tool("delete_rule", gated: true, agent_action: true, permission: "write")]
+      @[Tool("delete_rule", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def delete_rule(h) : Result
         id = required_id(h, "id")
         scope = rule_scope(h)
@@ -749,7 +749,7 @@ module Gori
         err("'pos_end' must be greater than 'pos_start' for kind=position", "INVALID_ARGUMENT", field: "pos_end")
       end
 
-      @[Tool("create_extract_rule", gated: true, agent_action: true, permission: "write")]
+      @[Tool("create_extract_rule", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def create_extract_rule(h) : Result
         name = extract_name_arg(str(h, "name"))
         return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") unless name
@@ -795,7 +795,7 @@ module Gori
         busy("extract rule created but the disable did not persist (store busy or unwritable); retry")
       end
 
-      @[Tool("update_extract_rule", gated: true, agent_action: true, permission: "write")]
+      @[Tool("update_extract_rule", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def update_extract_rule(h) : Result
         id = required_id(h, "id")
         existing = store.extract_rules.find { |r| r.id == id }
@@ -839,7 +839,7 @@ module Gori
         "nothing under it; update_session_slot to point them at the new name"
       end
 
-      @[Tool("set_extract_rule_enabled", gated: true, agent_action: true, permission: "write")]
+      @[Tool("set_extract_rule_enabled", gated: true, agent_action: true, permission: "write", open_world: false, idempotent: true)]
       private def set_extract_rule_enabled(h) : Result
         id = required_id(h, "id")
         enabled = optional_bool_arg(h, "enabled")
@@ -849,7 +849,7 @@ module Gori
         Result.new({id: id, enabled: enabled}.to_json)
       end
 
-      @[Tool("delete_extract_rule", gated: true, agent_action: true, permission: "write")]
+      @[Tool("delete_extract_rule", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def delete_extract_rule(h) : Result
         id = required_id(h, "id")
         existing = store.extract_rules.find(&.id.==(id))

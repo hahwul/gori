@@ -100,7 +100,7 @@ module Gori
             # query otherwise reads as "this host has no projects", which is the answer that
             # sends an agent to create_project for a project that already exists.
             j.field "total_projects", entries.size
-            j.field "has_more", pg.offset + page.size < matched.size
+            emit_more(j, pg.offset + page.size < matched.size, pg.offset + page.size)
             if note = projects_listing_note(query, matched.size, entries.size, pg.offset, page.size)
               j.field "note", note
             end

@@ -71,7 +71,7 @@ module Gori
 
       # add_link — attach an evidence pointer. Idempotent: an (owner, ref) pair that already
       # exists is a success, not a failure.
-      @[Tool("add_link", gated: true, agent_action: true, permission: "write")]
+      @[Tool("add_link", gated: true, agent_action: true, permission: "write", open_world: false, destructive: false)]
       private def add_entity_link(h) : Result
         owner = link_owner(h)
         return owner if owner.is_a?(Result)
@@ -91,7 +91,7 @@ module Gori
 
       # remove_link — detach by the (owner, ref) pair, so a caller that knows what it linked
       # need not first look up the link row's own id.
-      @[Tool("remove_link", gated: true, agent_action: true, permission: "write")]
+      @[Tool("remove_link", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def remove_entity_link(h) : Result
         owner = link_owner(h)
         return owner if owner.is_a?(Result)

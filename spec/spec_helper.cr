@@ -412,15 +412,19 @@ def tools_for(store : Gori::Store, allow_actions = true, verify_upstream = false
 end
 
 # Every row of an offset-paged MCP list: the block fetches the page at an offset, and the rows
-# under `key` are collected until the page's `more` flag goes false.
-def mcp_page_rows(key : String, more = "has_more", & : Int32 -> JSON::Any) : Array(JSON::Any)
+# under `key` are collected by following the `next_offset` each page hands back (null exactly
+# when `has_more` is false), so the page's own continuation is what is walked, not a derived one.
+def mcp_page_rows(key : String, & : Int32 -> JSON::Any) : Array(JSON::Any)
   rows = [] of JSON::Any
   offset = 0
   loop do
     page = yield offset
     rows.concat(page[key].as_a)
-    offset += page["returned"].as_i
-    break unless page[more].as_bool
+    nxt = page["next_offset"].as_i?
+    nxt.nil?.should eq(!page["has_more"].as_bool)
+    break unless nxt
+    nxt.should be > offset
+    offset = nxt
   end
   rows
 end

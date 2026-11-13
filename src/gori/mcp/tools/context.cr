@@ -344,7 +344,7 @@ module Gori
                 "last_response_body is hydrated for the first #{MCP_REPEATER_BODY_ROWS} rows of a page only " \
                 "(each is a separate BLOB read) — narrow with id/filter, or page, to read the rest"
             end
-            j.field "has_more", pg.offset + paginated_repeaters.size < total_count
+            emit_more(j, pg.offset + paginated_repeaters.size < total_count, pg.offset + paginated_repeaters.size)
             j.field("sessions") { raw_rows(j, sessions) }
             Serialize.emit_redaction_note(j, tally.try(&.note)) if include_content || include_response_body
             unless on_repeater

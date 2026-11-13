@@ -110,7 +110,7 @@ module Gori
         end)
       end
 
-      @[Tool("delete_fuzz_run", gated: true, agent_action: true, permission: "write")]
+      @[Tool("delete_fuzz_run", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def delete_fuzz_run(h) : Result
         run_id = optional_int_arg(h, "run_id")
         return err("missing required 'run_id'", "INVALID_ARGUMENT", field: "run_id") unless run_id
