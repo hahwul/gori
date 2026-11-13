@@ -320,6 +320,7 @@ describe "MCP probe triage tools" do
       # A second call must NOT mint a duplicate Issue.
       again = call_json(tools, "probe_promote", %({"id":#{issue.id}}))
       again["promoted"].as_bool.should be_false
+      again["issue_id"].as_i64.should eq(issue_id) # a retry still learns which Issue it is
       store.issues.size.should eq(1)
     end
   end

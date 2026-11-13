@@ -237,8 +237,9 @@ module Gori
         in Probe::Triage::Outcome::AlreadyPromoted
           # The desired end state already holds, so not an error — but say so rather than
           # reporting a promotion that did not happen.
-          Result.new({"id" => issue.id, "promoted" => false,
-                      "reason" => "already promoted to an issue"}.to_json)
+          reply = {"id" => issue.id, "promoted" => false, "reason" => "already promoted to an issue"} of String => String | Int64 | Bool
+          res.issue_id.try { |i| reply["issue_id"] = i }
+          Result.new(reply.to_json)
         in Probe::Triage::Outcome::Failed
           # Nothing was written. This IS an error: unlike AlreadyPromoted, retrying is correct.
           busy("probe finding #{issue.id} NOT promoted (store busy or unwritable); it is unchanged")

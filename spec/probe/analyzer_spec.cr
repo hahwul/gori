@@ -671,7 +671,7 @@ describe "Gori::Probe::Triage" do
       second = Gori::Probe::Triage.promote(store, again)
       second.promoted?.should be_false
       second.outcome.already_promoted?.should be_true
-      second.issue_id.should be_nil
+      second.issue_id.should eq(res.issue_id) # so a retry can name the Issue it already made
       store.issues.size.should eq(1)
     end
   end
