@@ -51,6 +51,7 @@ module Gori
           if final_bytes = result.output
             rendered, render = Decoder.display(final_bytes, output_mode)
             write_decoder_output(STDOUT, rendered, render, STDOUT.tty?)
+            decoder_render_note(render, output_mode).try { |n| STDERR.puts n }
           end
           report_convert_failure(result) unless result.ok?
         end
@@ -65,6 +66,14 @@ module Gori
         # the default job of this command is "give me the decoded bytes".
         rendered = CLI::Output.term_safe_multiline(rendered) if terminal && render.text?
         CLI::Output.write_value(io, rendered, terminal)
+      end
+
+      # A result that is not text is printed re-encoded, and base64-decoding `/w==` then prints
+      # `/w==` with nothing to say it was decoded at all. Said on STDERR so the pipe is unchanged;
+      # nil when the bytes were text or `--output` asked for the form.
+      def self.decoder_render_note(render : Decoder::RenderAs, output_mode : Decoder::RenderAs?) : String?
+        return nil if output_mode || render.text?
+        "gori run decoder: the result is not text, so it is shown as #{render.to_s.downcase} (--output text|hex|base64 picks the form)"
       end
 
       # The sentence `cmd_decoder` aborts with when `<chain>` holds no converter at all, or nil

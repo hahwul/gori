@@ -113,6 +113,21 @@ describe "gori run decoder --format json" do
   end
 end
 
+# A non-text result is printed re-encoded, so base64-decoding `/w==` (one 0xFF byte) printed
+# `/w==` again with no sign anything was decoded.
+describe "gori run decoder — re-encoded output note" do
+  it "says so when auto rendering re-encodes non-text bytes" do
+    _, render = Gori::Decoder.display(Bytes[0xff], nil)
+    Gori::CLI::Run.decoder_render_note(render, nil).not_nil!.should contain("not text")
+  end
+
+  it "stays quiet for text, and for a form --output asked for" do
+    _, render = Gori::Decoder.display("hi".to_slice, nil)
+    Gori::CLI::Run.decoder_render_note(render, nil).should be_nil
+    Gori::CLI::Run.decoder_render_note(Gori::Decoder::RenderAs::Base64, Gori::Decoder::RenderAs::Base64).should be_nil
+  end
+end
+
 # `gori run decoder <chain>` where the chain is only separators. The DECISION and the
 # MESSAGE are split out of the abort for the same reason `list_leftover_error` is —
 # `abort` calls `exit` and cannot run in-process.
