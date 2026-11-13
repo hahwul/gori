@@ -281,3 +281,15 @@ describe "Gori::Tui::NotesController — rows the editor was not drawn into" do
     end
   end
 end
+
+describe "Gori::Tui::NotesController — whose links the row shows" do
+  it "does not carry one note's links under a new note" do
+    # `link_preview` is one string for the view. `notes_new` did not refresh it, so the empty
+    # note it opened was drawn over the previous note's links.
+    with_notes_controller do |controller|
+      notes_rows(controller, 76, 12).any?(&.includes?("[repeater] XSS PoC (+2)")).should be_true
+      controller.notes_new
+      notes_rows(controller, 76, 12).any?(&.includes?("[repeater] XSS PoC")).should be_false
+    end
+  end
+end

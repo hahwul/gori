@@ -39,6 +39,11 @@ module Gori::Tui
       @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @notes.current_index, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?, find: subtab_find_shown?, find_lit: @host.subtab_find_focused?, marked: marked_chip_set) do |content|
         render_with_filter(screen, content, subtabs_focused) do |body|
           editor_rect = body
+          # `link_preview` is ONE string for the view, not one per note. Every path that changes
+          # the current note had to remember to refresh it, and two did not (the two New note
+          # paths), so an empty new note showed the previous note's links. Asking here, keyed on
+          # the note the row is about to be drawn under, covers them all.
+          refresh_link_preview if @notes.link_preview_stale?
           if links_row_shown?(body)
             links_rect, editor_rect = carve_links_row(body)
             screen.text(links_rect.x + 1, links_rect.y, "links", Theme.accent, width: 6)
