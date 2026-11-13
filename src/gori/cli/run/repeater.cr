@@ -380,7 +380,8 @@ module Gori
           full = i && store.get_repeater_full(id)
           {i && full ? {rows[i], i + 1, full} : nil, redact_choice(store, redaction)}
         end
-        row, tui_index, rec = found || abort "gori run repeater show: no repeater session ##{id} (ids from `gori run repeater list`)"
+        row, tui_index, rec = found || not_found_abort("gori run repeater show",
+          "no repeater session ##{id} (ids from `gori run repeater list`)", format)
         abort "gori run repeater show: #{choice.error}" if choice.error
         preview_format_error(redaction, format).try { |err| abort "gori run repeater show: #{err}" }
 
@@ -1261,8 +1262,7 @@ module Gori
       end
 
       def self.scope_blocked_json(reason : String) : String
-        {"ok" => false, "error" => reason, "error_kind" => "scope", "error_code" => "SCOPE_BLOCKED",
-         "retryable" => false, "delivered" => false}.to_json
+        failure_json(reason, "scope", "SCOPE_BLOCKED", delivered: false)
       end
 
       # The Layer-1 (include-list) gate for the hand-authored repeater send paths. `abort_if_blocked!`

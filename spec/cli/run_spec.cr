@@ -1359,3 +1359,35 @@ describe Gori::CLI::StderrLog do
     out.should_not contain('\e')
   end
 end
+
+# `gori run show 99999 --json` printed nothing on stdout while a failed `send --json` prints an
+# object: a script reading stdout had two error paths. A single-document reader's not-found
+# now prints the same failed-call shape, coded as MCP codes it. `not_found_abort` exits, so
+# the object is pinned here and the call sites by name.
+describe "gori run <reader> --format json — a not-found id" do
+  it "is the failed-call object with error_code NOT_FOUND" do
+    j = JSON.parse(Gori::CLI::Run.failure_json("no flow #99999", "not_found", "NOT_FOUND"))
+    j.as_h.keys.should eq(%w[ok error error_kind error_code retryable])
+    j["ok"].as_bool.should be_false
+    j["error"].as_s.should eq("no flow #99999")
+    j["error_code"].as_s.should eq("NOT_FOUND")
+    j["retryable"].as_bool.should be_false
+    # The scope refusal keeps its exact bytes, `delivered` last.
+    Gori::CLI::Run.scope_blocked_json("x").should eq(
+      %({"ok":false,"error":"x","error_kind":"scope","error_code":"SCOPE_BLOCKED","retryable":false,"delivered":false}))
+  end
+
+  it "routes every single-document reader's not-found through not_found_abort" do
+    root = File.join(__DIR__, "..", "..", "src", "gori", "cli", "run")
+    {
+      "history.cr" => "gori run show", "issues.cr" => "gori run issues show",
+      "repeater.cr" => "gori run repeater show", "evidence.cr" => "gori run evidence show",
+      "notes.cr" => "gori run notes", "fuzz_saved.cr" => "gori run fuzz show",
+      "retest.cr" => "gori run retest show", "session.cr" => "gori run session show",
+      "wordlist.cr" => "gori run wordlist show", "intercept.cr" => "gori run intercept get",
+      "compare.cr" => "gori run compare",
+    }.each do |file, prefix|
+      File.read(File.join(root, file)).should contain("not_found_abort(\"#{prefix}\""), failure_message: file
+    end
+  end
+end

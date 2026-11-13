@@ -975,7 +975,7 @@ module Gori
           {o || d, show_ws_messages(store, d, ws_match), redact_choice(store, redaction), d.try { store.interims(id) },
            ws_match && d ? store.count_ws_messages(id) : 0, original && o.nil?}
         end
-        abort "gori run show: no flow ##{id}" unless detail
+        not_found_abort("gori run show", "no flow ##{id}", format) unless detail
         return show_find(detail, find, req_only, format == :json, choice) if find.pattern
         detail, ws_msgs, redact_report, previewed = show_redaction(detail, ws_msgs, choice, redaction)
         return if previewed

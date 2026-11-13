@@ -58,7 +58,7 @@ module Gori
         end
 
         if n = index
-          abort "gori run notes: no note ##{n} (this project has #{Gori.plural(doc.size, "note")})" unless n <= doc.size
+          not_found_abort("gori run notes", "no note ##{n} (this project has #{Gori.plural(doc.size, "note")})", format) unless n <= doc.size
           show_note(doc, n - 1, format)
         elsif all
           show_all_notes(doc, format)

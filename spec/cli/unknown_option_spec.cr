@@ -54,3 +54,59 @@ describe "unknown options and subcommands (#1389)" do
     stray.should eq([] of String)
   end
 end
+
+# An agent that knows gori's MCP tool names guesses them as `gori run` subcommands
+# (`gori run list_history`) and got a bare refusal: the near-typo suggestion only reaches edit
+# distance 2. The refusal now names the CLI spelling of the MCP name, and only ever a command
+# `gori run -h` lists.
+describe "an MCP tool name as a gori run subcommand" do
+  it "names the CLI command for the MCP names agents reach for" do
+    {
+      "list_history" => "history", "get_flow" => "show", "send_request" => "send",
+      "export_openapi" => "sitemap export", "list_params" => "sitemap params",
+      "race_requests" => "repeater race", "timing_requests" => "repeater timing",
+      "run_retest" => "retest run", "create_repeater" => "repeater create",
+      "list_issues" => "issues", "get_issue" => "issues show", "probe_scan" => "probe",
+      "probe_issues" => "probe issues", "fuzz_start" => "fuzz", "list_sitemap" => "sitemap",
+      "switch_project" => "project switch", "import_project" => "project import",
+      "list_session_slots" => "session", "create_rule" => "rewriter",
+      "create_color_rule" => "colormarker", "add_scope_rule" => "project scope",
+      "list_host_overrides" => "project host-override", "cache_deception_check" => "cache-deception",
+      "graphql_schema" => "graphql schema", "list_probe_rules" => "probe rules",
+      "get_repeater_context" => "repeater show",
+    }.each do |tool, path|
+      {tool, tool.tr("_", "-"), tool.upcase}.each do |word|
+        Gori::CLI::Run.cli_spelling(word).should eq(path), failure_message: "#{word} → #{path}"
+      end
+    end
+  end
+
+  it "suggests only a listed command for every MCP tool, and nothing for one with no CLI side" do
+    Gori::MCP::Tools::TOOL_NAMES.each do |tool|
+      next unless path = Gori::CLI::Run.cli_spelling(tool)
+      Gori::CLI::Run::COMMAND_PATHS.should contain(path)
+      Gori::CLI::Run::SUBCOMMAND_NAMES.should contain(path.split.first)
+    end
+    Gori::CLI::Run::MCP_TOOL_PATHS.each_value { |path| Gori::CLI::Run::COMMAND_PATHS.should contain(path) }
+    Gori::CLI::Run::MCP_NOUNS.each_value { |path| Gori::CLI::Run::COMMAND_PATHS.should contain(path) }
+    %w[list_events ql_reference list_jobs get_current_context].each do |tool|
+      Gori::CLI::Run.cli_spelling(tool).should be_nil
+    end
+  end
+
+  it "says it in the one-line refusal, after the near-typo suggestion" do
+    msg = Gori::CLI::Run.unknown_verb_message("gori run", "list-history", Gori::CLI::Run::SUBCOMMAND_NAMES)
+    msg.should eq("gori run: unknown subcommand 'list-history' — the CLI spells that 'gori run history'\n" \
+                  "Run 'gori run --help' for the list.")
+    Gori::CLI::Run.unknown_verb_message("gori run repeater", "list_repeaters", %w[list show])
+      .should start_with("gori run repeater: unknown subcommand 'list_repeaters' — the CLI spells that 'gori run repeater list'")
+    # A subcommand's unknown verb is answered only with that subcommand's own verbs: `repeater
+    # send-ws` is not the top-level `gori run send`.
+    Gori::CLI::Run.unknown_verb_message("gori run repeater", "send-ws", %w[list show])
+      .should eq("gori run repeater: unknown subcommand 'send-ws'\nRun 'gori run repeater --help' for the list.")
+    Gori::CLI::Run.cli_spelling("send_request", "repeater").should be_nil
+    # A bare word is a typo or another command's verb, never an MCP name.
+    Gori::CLI::Run.cli_spelling("show").should be_nil
+    Gori::CLI::Run.cli_spelling("--list_history").should be_nil
+  end
+end

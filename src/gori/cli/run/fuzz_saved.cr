@@ -82,14 +82,14 @@ module Gori
         abort "gori run fuzz show: --order orders --clusters, and none was given" if order_given && !clusters
 
         with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
-          run = store.get_fuzz_run(run_id) || abort "gori run fuzz show: no saved run ##{run_id}"
+          run = store.get_fuzz_run(run_id) || not_found_abort("gori run fuzz show", "no saved run ##{run_id}", format, store)
           if clusters
             show_saved_fuzz_clusters(store, run, order, matched_only, limit, offset, format)
           elsif id = cluster
             show_saved_fuzz_cluster_members(store, run, id, matched_only, limit, offset, format)
           elsif idx = result_idx
             row = store.get_fuzz_result(run_id, idx) ||
-                  abort "gori run fuzz show: run ##{run_id} has no result ##{idx}"
+                  not_found_abort("gori run fuzz show", "run ##{run_id} has no result ##{idx}", format, store)
             show_saved_fuzz_result_detail(run, row, format)
           else
             # Summary pages never fetch the retained request/response BLOBs. Exact

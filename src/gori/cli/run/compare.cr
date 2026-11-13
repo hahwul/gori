@@ -48,8 +48,8 @@ module Gori
         detail_a, detail_b, choice = with_store(project, read_only: true) do |store|
           {store.get_flow(id_a), store.get_flow(id_b), redact_choice(store, redaction)}
         end
-        abort "gori run compare: no flow ##{id_a}" unless detail_a
-        abort "gori run compare: no flow ##{id_b}" unless detail_b
+        not_found_abort("gori run compare", "no flow ##{id_a}", format) unless detail_a
+        not_found_abort("gori run compare", "no flow ##{id_b}", format) unless detail_b
 
         abort "gori run compare: --changes-only and --context are mutually exclusive" if changes_only && context
         abort "gori run compare: #{choice.error}" if choice.error

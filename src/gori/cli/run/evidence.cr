@@ -166,7 +166,7 @@ module Gori
         # The project's default body redaction, as MCP `get_evidence` and the TUI apply it — read
         # while the store is open, since the profile lives on its settings row.
         ev, note = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
-          ev = store.get_evidence(id) || abort_closing(store, "gori run evidence show: no frozen evidence with id #{id}")
+          ev = store.get_evidence(id) || not_found_abort("gori run evidence show", "no frozen evidence with id #{id}", format, store)
           matcher = include_sensitive ? nil : Redact::Policy.ambient(store)
           next {ev, nil} unless matcher
           clean, count, decoded = Redact::Wire.evidence(ev, matcher)

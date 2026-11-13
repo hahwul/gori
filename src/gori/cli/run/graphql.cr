@@ -65,7 +65,7 @@ module Gori
         detail, overrides = with_store(project, read_only: true) do |store|
           {store.get_flow(flow_id), Gori::HostOverrides.load(store)}
         end
-        abort "#{prefix}: no flow with id #{flow_id}" unless detail
+        not_found_abort(prefix, "no flow with id #{flow_id}", format) unless detail
 
         status = nil.as(Int32?)
         schema =

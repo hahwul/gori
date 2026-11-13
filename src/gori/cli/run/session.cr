@@ -239,7 +239,7 @@ module Gori
         store, slots = session_slots(proj.name, proj.db)
         begin
           slot = slots.find(name)
-          abort "gori run session show: no session slot named #{name.inspect}" unless slot
+          not_found_abort("gori run session show", "no session slot named #{name.inspect}", format, store) unless slot
           if format == :json
             puts(JSON.build { |j| session_slot_json(j, slot, show_values, store) })
           else
