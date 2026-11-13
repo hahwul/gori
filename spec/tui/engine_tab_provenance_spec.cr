@@ -683,6 +683,41 @@ describe "engine tabs — budget (T5)" do
     uncapped.budget_exhausted?.should be_false
   end
 
+  it "a mine stopped by hand keeps how far it got, and the next run forgets it" do
+    # It finished as `done — nothing found … (stopped)` over a wordlist it had not finished.
+    view = MinerView.new
+    view.load("http://t.test", "GET /?a=1 HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice, false, nil,
+      Gori::Miner::Config.new(locations: [Gori::Miner::Location::Query]))
+    view.begin_run
+    view.apply_progress(Gori::Miner::Progress.new(1300_i64, 817_i64, 900_i64, 0, 0_i64))
+    view.finish_run(stopped: true)
+    view.stopped?.should be_true
+    view.tested_note.should eq("817 of 1300 names")
+    view.budget_exhausted?.should be_false # a stop is not a budget hit
+    view.begin_run
+    view.stopped?.should be_false
+  end
+
+  it "a running collection says which samples its verdict was computed over" do
+    # The mid-run report is throttled, so ANALYSIS showed a verdict over 3 tokens beside a
+    # counter reading 19, with nothing to say the two were out of step.
+    view = SequencerView.new
+    view.load("http://t.test", "GET / HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice, false, nil,
+      Gori::Sequencer::Config.new(mode: Gori::Sequencer::Mode::LiveReplay,
+        token_loc: Gori::Sequencer::TokenLoc.cookie("SID"), goal: 500))
+    view.begin_run
+    sample = ->(i : Int32) { Gori::Sequencer::Sample.new(i, "tok#{i}abcdef", 200, 10, 1_i64, nil) }
+    3.times { |i| view.append_sample(sample.call(i)) }
+    view.report
+    view.report_lag.should be_nil # computed over everything collected so far
+    5.times { |i| view.append_sample(sample.call(3 + i)) }
+    view.report
+    view.report_lag.should eq(3) # 8 collected, the report still rests on 3
+    view.finish_run
+    view.report
+    view.report_lag.should be_nil # a finished run recomputes
+  end
+
   it "a collection that ran out of budget flags the sample its verdict rests on" do
     cfg = Gori::Sequencer::Config.new(mode: Gori::Sequencer::Mode::LiveReplay,
       token_loc: Gori::Sequencer::TokenLoc.cookie("SID"), goal: 500)

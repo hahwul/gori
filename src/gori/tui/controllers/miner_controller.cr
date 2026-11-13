@@ -615,7 +615,7 @@ module Gori::Tui
         v.apply_progress(ev.progress)
         @host.jobs.progress(v.job_id, ev.progress.names_done.to_i, ev.progress.names_total.to_i, "#{ev.progress.found} found")
       when Miner::DoneEvent
-        v.finish_run
+        v.finish_run(stopped: ev.stopped)
         finish_job(v, ev)
       when Miner::ErrorEvent
         v.finish_run
@@ -631,15 +631,15 @@ module Gori::Tui
       return if @host.jobs.errored?(v.job_id) # an ErrorEvent already finalized this run — the
       #                                         engine's trailing DoneEvent must not log/notify success
       n = v.found_count
-      @host.jobs.finish(v.job_id, :done, "#{n} found")
-      tail = if ev.stopped
-               " (stopped)"
-             elsif v.budget_exhausted?
-               " — #{v.budget_note}"
-             else
-               ""
-             end
-      found = n > 0 ? "#{Gori.plural(n, "param")} found" : "done — nothing found"
+      @host.jobs.finish(v.job_id, ev.stopped ? :stopped : :done, "#{n} found")
+      tail = !ev.stopped && v.budget_exhausted? ? " — #{v.budget_note}" : ""
+      # A run halted by hand is not "done", and "nothing found" over the part of the wordlist
+      # it never reached is a claim it cannot make. It says how far it got instead.
+      found = if ev.stopped
+                "stopped at #{v.tested_note} — #{n > 0 ? "#{Gori.plural(n, "param")} found" : "nothing found so far"}"
+              else
+                n > 0 ? "#{Gori.plural(n, "param")} found" : "done — nothing found"
+              end
       msg = "Miner: #{found} on #{v.summary}#{tail}#{macro_failure_note(ev.progress)}"
       level = n > 0 ? :success : :info
       log_event(v, level, msg)
