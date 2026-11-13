@@ -41,9 +41,14 @@ module Gori::Tui
         Item.new(">", "send flow to… card, where the tab has one", "send-flow.open.body"),
         Item.new("⇧Z", "display… card, where the tab has one", "display.open.body"),
         Item.new("⇧P", "protocol… card (Repeater, Fuzzer)", "protocol.open.repeater"),
+        # The three Global letters fire from the tab bar and as a body's fallback; a tab that
+        # binds the letter itself (Probe's `c` dismiss, Evidence's `i` issue) answers it in its
+        # body instead (DESIGN.md §7, 2026-09-26). Said once on its own row: on each of the
+        # three it pushed `click scope:on(N)` past the popup's 49 columns at 80×24.
         Item.new("c", "toggle capture", "capture.toggle"),
         Item.new("i", "toggle intercept", "intercept.toggle"),
         Item.new("s", "toggle scope lens (or click scope:on(N))", "scope.toggle-lens"),
+        Item.new("{capture.toggle} · {intercept.toggle} · {scope.toggle-lens}", "a tab binding the letter answers it in its body"),
         # The header's standing chips, named once (#1842): nothing else says what they stand
         # for. `Chrome.top_bar_chips` draws scope and probe always and notify while something
         # is unread; `listen_chip` owns the three states of the dot.
@@ -113,7 +118,9 @@ module Gori::Tui
         Item.new("^R", "send the flow to Repeater", "history.repeater"),
         Item.new("⇧I", "send the flow to the Fuzzer", "history.fuzz"),
         Item.new("⇧F", "create an issue", "issue.create"),
-        Item.new("{space:history.toggle-follow}", "follow newest — the ⌁follow chip on the filter bar toggles it too", "history.toggle-follow"),
+        # `+N` is `HistoryView#unseen_count`: rows newer than the newest one on screen while
+        # following, so the flows that arrived since follow went off.
+        Item.new("{space:history.toggle-follow}", "follow newest · ⌁follow +N: N new while off · click the chip to toggle", "history.toggle-follow"),
         Item.new("/", "filter (query language — see the Query page)", "history.query"),
         Item.new("v", "view… — a saved filter under the bar; the {history.view}:name chip names it", "history.view"),
         Item.new("y", "copy flow", "history.copy"),
@@ -449,6 +456,22 @@ module Gori::Tui
       :notes       => "OTHER TABS",
       :project     => "OTHER TABS",
       :intercept   => "OTHER TABS",
+    }
+
+    # Where in OTHER TABS each tab sharing it lands: the key column of its first row there.
+    # Without it the popup opened at the section's top, Sitemap's and Discover's rows, with
+    # the tab's own row up to a screen below. :target has no row of its own, so Sitemap's
+    # (its first card). A spec pins every label against a real row of that section.
+    TAB_ROW = {
+      :target    => "Sitemap",
+      :sitemap   => "Sitemap",
+      :issues    => "Issues",
+      :evidence  => "Evidence",
+      :probe     => "Probe",
+      :authorize => "Authorize",
+      :notes     => "Notes",
+      :project   => "Project",
+      :intercept => "Intercept",
     }
 
     @rows : Array(Row)

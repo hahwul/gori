@@ -76,14 +76,17 @@ module Gori::Tui
 
     # Where the Shortcuts page opens: the `:head` row for the tab the operator came from, so
     # the popup answers the question they arrived with instead of making them scroll for it.
-    # 0 (the top) for a tab with no section of its own and for Help itself.
+    # 0 (the top) for a tab with no section of its own and for Help itself. A tab that shares
+    # OTHER TABS lands on its own row there (`HelpView::TAB_ROW`), not on the section's head.
     #
     # `render` clamps this against the card height afterwards, so a section near the tail
     # (COLORMARKER, OVERLAYS) in a tall terminal settles ABOVE its head rather than at it —
     # correct, and the reason the spec asserts the head is visible rather than at offset 0.
     def self.landing_scroll(rows : Array(HelpView::Row), tab : Symbol) : Int32
       return 0 unless title = HelpView::TAB_SECTION[tab]?
-      rows.index { |r| r.kind == :head && r.a == title } || 0
+      return 0 unless head = rows.index { |r| r.kind == :head && r.a == title }
+      return head unless label = HelpView::TAB_ROW[tab]?
+      rows.index(head) { |r| r.kind == :item && r.a == label } || head
     end
 
     def initialize(@title : String, @all : Array(HelpView::Row), @key_w : Int32, @scroll : Int32)
