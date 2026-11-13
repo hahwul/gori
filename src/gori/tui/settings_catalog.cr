@@ -19,7 +19,7 @@ module Gori::Tui
     # `sym` is the argument passed to open_settings (also the section's identity);
     # `id`/`desc` are the palette verb's id + description (kept verbatim); `title` is
     # the short label used for the sub-tab group members and section subheaders.
-    # `in_tab` is false for a section reachable another way (Hostnames lives as an
+    # `in_tab` is false for a section reachable another way (Host overrides lives as an
     # opener FIELD inside Network) so it still gets a palette verb but no tab row.
     record Section,
       sym : Symbol,
@@ -103,10 +103,12 @@ module Gori::Tui
         keywords: %w[proxy port bind listen upstream]),
       Section.new(:tabs, "settings.tabs", "Tabs",
         "Customize the top tab bar — one ordered list, the top nine are the slots", :network, :opener),
-      # Reachable via the Network section's "Hostname overrides" opener field, so it
-      # keeps its palette verb but is not given its own tab row (in_tab: false).
-      Section.new(:hosts, "settings.host-overrides", "Hostnames",
-        "Edit global hostname overrides — a /etc/hosts mapping hosts to IPs the proxy dials", :network, :opener, in_tab: false, resettable: false),
+      # Reachable via the Network section's "Host overrides" opener field, so it
+      # keeps its palette verb but is not given its own tab row (in_tab: false). The
+      # keywords keep the section's old name findable ("Hostnames").
+      Section.new(:hosts, "settings.host-overrides", "Host overrides",
+        "Edit global hostname overrides — a /etc/hosts mapping hosts to IPs the proxy dials", :network, :opener, in_tab: false, resettable: false,
+        keywords: %w[hostnames hosts]),
       # AI: how gori talks to the coding agents attached over MCP (#1090). Its own group,
       # not a row under Network — an operator looking for "how do I message my agent" should
       # not have to open the proxy-address section to find it.

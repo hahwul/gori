@@ -268,7 +268,7 @@ module Gori::Tui
       return open_or_block(sec.sym) if sec.kind == :opener
       form = @forms[sec.sym]
       if opener = form.focused_opener
-        return open_or_block(opener) # e.g. Network's "Hostname overrides" action row
+        return open_or_block(opener) # e.g. Network's "Host overrides" action row
       end
       msg = form.save
       @status = msg # reflect the save in the footer (self-contained feedback for the picker)

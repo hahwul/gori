@@ -61,7 +61,7 @@ describe Gori::Tui::SettingsCatalog do
     SettingsCatalog::SECTIONS.reject(&.resettable).map(&.sym).sort_by(&.to_s).should eq([:env, :hosts, :user_agents])
   end
 
-  it "keeps the Hostnames section out of the tab (reachable via Network's opener field)" do
+  it "keeps the Host overrides section out of the tab (reachable via Network's opener field)" do
     hosts = SettingsCatalog::SECTIONS.find(&.sym.==(:hosts)).not_nil!
     hosts.in_tab.should be_false
     SettingsCatalog.sections_in(hosts.group).map(&.sym).should_not contain(:hosts)

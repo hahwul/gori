@@ -42,6 +42,18 @@ describe Gori::Tui::PaletteState do
     end
   end
 
+  # The global map is titled "Host overrides" like the Project sub-tab, CLI and MCP; its old
+  # name "Hostnames" stays a keyword, so neither spelling loses the row.
+  it "finds the global host overrides by its name and its old one" do
+    ctx = FakeExecContext.new
+    palette = PaletteState.new(Gori::Verbs.registry)
+    {"host overrides", "hostnames", "hosts"}.each do |q|
+      palette.reset(ctx)
+      q.each_char { |c| palette.append(c, ctx) }
+      palette.results.map(&.id).should contain("settings.host-overrides"), q
+    end
+  end
+
   # Someone arriving from Burp, ZAP or Caido types THEIR tool's word for the job. Every one of
   # these found nothing while the tab that does it sat one row away under another name.
   it "finds a tab by what other tools call it" do

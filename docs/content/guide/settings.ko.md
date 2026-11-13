@@ -34,7 +34,7 @@ gori에 저장되는 모든 환경설정은 하나의 화면, **Preferences** �
 
 편집 내용은 작업 사본입니다. `↵`를 누르기 전에는 아무것도 기록되지 않고, `Esc`를 두 번 누르면 버립니다(첫 번째는 저장하지 않은 섹션을 알려줍니다). 저장은 재시작 없이 즉시 적용됩니다.
 
-필드 행에서의 `Ctrl-R`도 같은 규칙을 따릅니다. 해당 섹션의 기본값을 작업 사본에 되돌려 놓을 뿐이라 `↵`로 저장해야 합니다. **오프너** 행에는 되돌릴 작업 사본이 없으므로 확인을 물은 뒤 바로 기록합니다. 탭 바, 테마, 단축키를 그렇게 되돌릴 수 있습니다. **Env**, **User-Agents**, **호스트네임 오버라이드**는 설정이 아니라 직접 입력한 항목이라, 그곳의 `Ctrl-R`은 조용히 비우는 대신 그렇다고 알려 줍니다. 그것들을 지우는 것은 아래의 공장 초기화이며, 초기화는 먼저 경고합니다.
+필드 행에서의 `Ctrl-R`도 같은 규칙을 따릅니다. 해당 섹션의 기본값을 작업 사본에 되돌려 놓을 뿐이라 `↵`로 저장해야 합니다. **오프너** 행에는 되돌릴 작업 사본이 없으므로 확인을 물은 뒤 바로 기록합니다. 탭 바, 테마, 단축키를 그렇게 되돌릴 수 있습니다. **Env**, **User-Agents**, **Host overrides**는 설정이 아니라 직접 입력한 항목이라, 그곳의 `Ctrl-R`은 조용히 비우는 대신 그렇다고 알려 줍니다. 그것들을 지우는 것은 아래의 공장 초기화이며, 초기화는 먼저 경고합니다.
 
 ## 필드 종류 {#field-types}
 
@@ -105,7 +105,7 @@ Placement는 *세션에서의* 비용을 결정합니다 (선택 화면에는 �
 
 | 섹션 | 필드 |
 |------|------|
-| **Network** | Bind IP, Bind Port, Proxy protocol, Proxy host, Proxy port, Proxy TLS CA, Verify proxy TLS, Verify upstream TLS, Info page and CA download, Connect timeout (s), Idle timeout (s), Capture body limit (MiB), HTTP/2, Strip HTTP/3 Alt-Svc, TLS passthrough, Upstream rules(읽기 전용), Environment proxy(읽기 전용), Outbound TLS(읽기 전용), Hostname overrides(오프너) |
+| **Network** | Bind IP, Bind Port, Upstream proxy, Proxy host, Proxy port, Proxy TLS CA, Verify proxy TLS, Verify upstream TLS, Info page and CA download, Connect timeout (s), Idle timeout (s), Capture body limit (MiB), HTTP/2, Strip HTTP/3 Alt-Svc, TLS passthrough, Upstream rules(읽기 전용), Environment proxy(읽기 전용), Outbound TLS(읽기 전용), Host overrides(오프너) |
 | **Tabs** | 오프너: 하나로 이어진 목록이며, 경계선 위의 행이 탭 바의 번호 슬롯입니다. `⇧K` / `⇧J`로 행을 옮기고 `space`로 경계선 너머로 보냅니다. **Tab bar slots**가 켜져 있으면 열 번째는 거부됩니다(대신 `⇧K`로 행을 맞바꿔 올립니다). 바 밖의 탭도 `0`으로 계속 접근할 수 있습니다 |
 
 여기의 Network는 **전역 기본값**입니다. 프로젝트는 **Project** 탭에서 자체 바인드 주소, 포트, 업스트림을 고정할 수 있고 그 프로젝트에서는 그쪽이 우선합니다. 전체 우선순위는 [설정](/ko/getting-started/configuration/#network)을 참고하세요.

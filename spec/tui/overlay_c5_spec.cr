@@ -218,7 +218,7 @@ describe "C5 · TabsOverlay on the Overlay seam" do
 end
 
 # ---------------------------------------------------------------------------------------
-# HOSTNAME OVERRIDES
+# HOST OVERRIDES
 # ---------------------------------------------------------------------------------------
 
 private def with_hosts(entries : Array({String, String}), &)
@@ -244,7 +244,7 @@ describe "C5 · HostsOverlay on the Overlay seam" do
     with_hosts([] of {String, String}) do
       ov = hosts_editor
       h = OverlayHarness.new(ov)
-      h.assert_chrome(OverlayKind::Hosts, "HOSTNAME OVERRIDES")
+      h.assert_chrome(OverlayKind::Hosts, "HOST OVERRIDES")
       ov.hint.should contain("a add")
       mnemonic(h, 'a')
       ov.hint.should contain(%("IP host")) # the add row owns the bottom row while it is up
@@ -788,7 +788,7 @@ describe "C5 · SettingsOverlay on the Overlay seam" do
   end
 
   it "opens an action row's own editor instead of saving the section" do
-    # Network's "Hostname overrides" row. The card only ever shows :theme in-app, but the
+    # Network's "Host overrides" row. The card only ever shows :theme in-app, but the
     # opener path is the field engine's, not the theme section's — and the same branch
     # serves the mouse (click) and the keyboard (↵).
     with_theme("gori") do
@@ -798,7 +798,7 @@ describe "C5 · SettingsOverlay on the Overlay seam" do
       saved = 0
       ov.on_save = ->(_s : Symbol, _m : String) { saved += 1; nil }
       h = OverlayHarness.new(ov)
-      # Walk to the LAST network field — the Hostnames opener. By count, not a pinned index:
+      # Walk to the LAST network field — the Host overrides opener. By count, not a pinned index:
       # what matters is that it is last, and a literal only breaks on the next added field.
       (SettingsView::NETWORK_FIELDS.size - 1).times { h.press(DOWN) }
       h.press(ENTER).should eq(:open)

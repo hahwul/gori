@@ -384,10 +384,10 @@ describe Gori::Tui::PreferencesView do
 
   it "blocks opener rows the host has no editor for instead of emitting :open" do
     # The project picker passes Set{:theme}: Theme opens, everything else stays hidden and
-    # Network's Hostname-overrides field is inert rather than opening a dead overlay.
+    # Network's Host-overrides field is inert rather than opening a dead overlay.
     picker = PreferencesView.new(Set{:theme})
     picker.open(:network)
-    # Network's last field is the "Hostname overrides" opener row.
+    # Network's last field is the "Host overrides" opener row.
     12.times { picker.handle_key(pkey(DOWN)) }
     picker.handle_key(pkey(Termisu::Input::Key::Enter)).kind.should_not eq(:open)
   end

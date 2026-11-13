@@ -534,7 +534,7 @@ The value is an IP literal, optionally with a **port**: `IP`, `IP:PORT`, or `[v6
 
 SNI, the certificate hostname and the `Host` header still keep the **original** name; only the TCP connect target moves.
 
-Edit from Preferences → **Network & Tabs** → **Network** → **Hostname overrides**, or the Project tab for per-project entries. See [Proxy & History](/guide/proxy/#host-overrides).
+Edit from Preferences → **Network & Tabs** → **Network** → **Host overrides**, or the Project tab for per-project entries. See [Proxy & History](/guide/proxy/#host-overrides).
 
 ### env
 
@@ -940,7 +940,7 @@ A project can pin its own network settings without editing the global file. Thes
 
 **Destination host** limits proxy routing to one case-insensitive host pattern. `*` is the default and makes every destination eligible; `example.com` covers that host and its subdomains, while `*.example.com` covers subdomains only. Domain, IPv4, IPv6, and `*`-based IP patterns are accepted. A non-match always goes direct and does not fall through to `upstream_rules` or `network.upstream_proxy`. This gate applies to every gori-owned dial while the project is active, including capture, replay, scanners, the updater, and OAST traffic.
 
-To authenticate, choose a **Proxy protocol**, enter the **Proxy host** and **Proxy port**, turn **Proxy auth** on, then enter **Username** and **Password**. **SOCKS5** resolves destination names locally; **SOCKS5H** resolves them at the proxy. HTTP uses Basic authentication, while either SOCKS protocol uses RFC 1929 username/password authentication. NTLM is not supported. Turning authentication on always pins the displayed upstream address to the project, even when it was inherited from the global setting, so the credentials cannot later follow a changed global route or a destination rule.
+To authenticate, choose an **Upstream proxy** protocol, enter the **Proxy host** and **Proxy port**, turn **Proxy auth** on, then enter **Username** and **Password**. **SOCKS5** resolves destination names locally; **SOCKS5H** resolves them at the proxy. HTTP uses Basic authentication, while either SOCKS protocol uses RFC 1929 username/password authentication. NTLM is not supported. Turning authentication on always pins the displayed upstream address to the project, even when it was inherited from the global setting, so the credentials cannot later follow a changed global route or a destination rule.
 
 The password is visible while the **Password** row is focused for editing and masked again when focus leaves. It is stored as plaintext inside the project's owner-only (`0600`) SQLite database, alongside captured engagement data that may already contain credentials. Use a global `upstream_rules` entry with `password_env` instead when the secret must not be stored in a project. For a matching destination, a malformed or orphaned project auth value fails closed before an origin connection.
 

@@ -57,6 +57,10 @@ module Gori::Tui
     # Live capture state. NOT snapshotted by `reload`: capture starts and stops while this tab
     # sits open, so the controller re-supplies it on every render instead.
     @capturing : Bool
+    # The address the proxy is LISTENING on this run (the top bar's chip), handed in per frame.
+    # The SETTINGS bind rows show the configured value, which a `-l`/`-p` flag or a startup port
+    # fallback can leave different — `bind_run_note` says so beside them.
+    @live_bind : {String, Int32}? = nil
 
     # The body shows ONE card at a time, picked by the shell's sub-tab strip (@focus ==
     # :subtabs owns ←/→; the card underneath is only focused once you drop in with ↓/↵).
@@ -504,12 +508,13 @@ module Gori::Tui
     # "Proto schema" (#823) sits LAST and is deliberately not part of the network tuple: it is
     # committed on its own baseline, so editing it never re-applies (and re-BINDS) unchanged
     # network values. It is an engagement property for the same reason the timeouts are.
-    SETTINGS_LABELS = ["Scope lens", "Sandbox", "Bind IP", "Bind Port", "Proxy protocol",
+    SETTINGS_LABELS = ["Scope lens", "Sandbox", "Bind IP", "Bind Port", "Upstream proxy",
                        "Proxy host", "Proxy port", "Destination host", "Proxy auth", "Username",
-                       "Password", "Connect timeout (s)", "Idle timeout (s)", "Capture limit (MiB)", "Proto schema"]
+                       "Password", "Connect timeout (s)", "Idle timeout (s)", "Capture body limit (MiB)", "Proto schema"]
     SETTINGS_SCOPE_ROW         =  0
     SETTINGS_SANDBOX_ROW       =  1
     SETTINGS_FIELD_BASE        =  2 # first inline-editable network-field row
+    SETTINGS_BIND_PORT_INDEX   =  1 # field index; Bind IP is field 0
     SETTINGS_PROTOCOL_ROW      =  4
     SETTINGS_PROXY_HOST_ROW    =  5
     SETTINGS_PROXY_PORT_ROW    =  6
@@ -524,7 +529,7 @@ module Gori::Tui
     SETTINGS_USERNAME_INDEX    = SETTINGS_USERNAME_ROW - SETTINGS_FIELD_BASE
     SETTINGS_PASSWORD_INDEX    = SETTINGS_PASSWORD_ROW - SETTINGS_FIELD_BASE
     SETTINGS_PROTOS_FIELD      = 12
-    SETTINGS_LABEL_W           = 19 # value column starts past the widest label ("Capture limit (MiB)")
+    SETTINGS_LABEL_W           = 24 # value column starts past the widest label ("Capture body limit (MiB)")
     # LABELS, not stored codes — this card round-trips them through `downcase` (see
     # `settings_upstream_proxy`), so each one must be the setting's own spelling in caps.
     # `HTTP+TLS` is Settings::UPSTREAM_TLS_KIND: an HTTP CONNECT proxy reached over TLS, as
@@ -2002,11 +2007,12 @@ module Gori::Tui
     # — the two are mutually exclusive tiers of the shell's focus ring, so a focused strip
     # must leave the card below at rest.
     def render(screen : Screen, rect : Rect, focused : Bool = true, strip_focused : Bool = false,
-               capturing : Bool = false) : Nil
+               capturing : Bool = false, live_bind : {String, Int32}? = nil) : Nil
       return if rect.empty?
       # Read per frame, never cached in `reload`: capture toggles while this tab sits open, and
       # a stale "capturing" on the address an operator is about to point a client at is a lie.
       @capturing = capturing
+      @live_bind = live_bind
       oh = overview_h(rect)
       band = Rect.new(rect.x, rect.y, rect.w, oh)
       vw = viz_width(band.w)
@@ -2502,6 +2508,32 @@ module Gori::Tui
         render_rule_row(screen, inner, ry, rule, selected, bg)
       end
       Frame.scroll_gauge(screen, Rect.new(inner.x, y, inner.w, rows), rules.size, scroll, focused)
+      render_scope_legend(screen, inner, rows - shown)
+    end
+
+    # What the rules DO, in the rows the list leaves free — bottom-anchored, one blank row
+    # above it, and only when at least three rows are free: it never displaces a rule row, so
+    # it is not a row (`scope_row_at` stops at the last rule).
+    SCOPE_LEGEND = ["lens: lists show in-scope only", "sandbox: the rest is refused"]
+
+    private def render_scope_legend(screen : Screen, inner : Rect, free : Int32) : Nil
+      lines = scope_legend_lines(inner.w - 2)
+      return if free < 3 || free <= lines.size
+      lines.each_with_index do |line, i|
+        screen.text(inner.x + 1, inner.bottom - lines.size + i, line, Theme.muted, Theme.bg, width: inner.w - 2)
+      end
+    end
+
+    # SCOPE_LEGEND joined with " · ", broken onto a new line at a separator when the next
+    # clause would not fit `w` (a clause wider than `w` is truncated by the draw).
+    private def scope_legend_lines(w : Int32) : Array(String)
+      SCOPE_LEGEND.each_with_object([] of String) do |part, lines|
+        if (last = lines.last?) && last.size + 3 + part.size <= w
+          lines[-1] = "#{last} · #{part}"
+        else
+          lines << part
+        end
+      end
     end
 
     private def render_rule_row(screen : Screen, inner : Rect, y : Int32, rule : Scope::Rule, selected : Bool, bg : Color) : Nil
@@ -2521,7 +2553,7 @@ module Gori::Tui
       return if rect.w < 2 || rect.h < 2
       Frame.card(screen, rect, bg: Theme.bg, border: Frame.pane_border(focused))
       n = @host_overrides.size
-      # `project`, against Settings' near-identically titled HOSTNAME OVERRIDES — these are
+      # `project`, against Settings' identically titled HOST OVERRIDES — these are
       # layered OVER those, and a bare count said nothing about which list you are editing.
       # Empty title: the meta only needs the left stop it implies, and there is none to clear.
       Frame.border_meta(screen, rect, "", "project · #{n}",
@@ -2893,7 +2925,31 @@ module Gori::Tui
       else
         screen.text(vx, y, shown, Theme.text, bg, width: fw)
       end
+      draw_bind_run_note(screen, fi, vx + Screen.display_width(shown + preedit) + (selected ? 2 : 1), y, mx, bg)
       screen.text(mx, y, marker, overridden ? Theme.accent : Theme.muted, bg) if mx > vx + 3
+    end
+
+    # At `nx`, after the typed text (past the caret cell while editing), and only where it fits
+    # whole before the marker at `mx` — so it never overlaps the field or the marker.
+    private def draw_bind_run_note(screen : Screen, fi : Int32, nx : Int32, y : Int32, mx : Int32, bg : Color) : Nil
+      return unless note = bind_run_note(fi)
+      screen.text(nx, y, note, Theme.muted, bg) if nx + note.size < mx
+    end
+
+    # "· this run: 18981 (-p)" beside a bind row whose shown value is not what the proxy is
+    # listening on. The flag is named only when it is provably the cause: this run's override
+    # holds the live value and no project pin outranks it (`Settings.effective_bind_*`). A
+    # startup port fallback has no flag, so it gets none.
+    private def bind_run_note(fi : Int32) : String?
+      # Not while capture is off or this session is view-only: nothing is listening then.
+      return nil unless @capturing && (live = @live_bind) && fi <= SETTINGS_BIND_PORT_INDEX
+      port = fi == SETTINGS_BIND_PORT_INDEX
+      value = port ? live[1].to_s : live[0]
+      return nil if value == @set_values[fi].strip
+      cli = port ? Settings.cli_bind_port.try(&.to_s) : Settings.cli_bind_host
+      pinned = port ? Settings.project_bind_port : Settings.project_bind_host
+      flag = cli == value && pinned.nil? ? (port ? " (-p)" : " (--listen)") : ""
+      "· this run: #{value}#{flag}"
     end
 
     # The proto-schema row. Its marker is not "project / global" — there is no global to

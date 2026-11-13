@@ -815,7 +815,7 @@ Host overrides are a `/etc/hosts`-style map: dial a specific IP (or `IP:PORT`) f
 | Layer | Where | Precedence |
 |-------|-------|------------|
 | **Project** | **Project** tab → Host overrides pane (`a` / `e` / `d`) | Wins on collision |
-| **Global** | Preferences (`Ctrl-,`) → **Network & Tabs** → **Network** → **Hostname overrides**, `Ctrl-P` → **Settings: Hostnames**, or `hostname_overrides` in `settings.json` | Fallback |
+| **Global** | Preferences (`Ctrl-,`) → **Network & Tabs** → **Network** → **Host overrides**, `Ctrl-P` → **Settings: Host overrides**, or `hostname_overrides` in `settings.json` | Fallback |
 
 Useful for staging hosts, IP-based virtual hosts, or pointing a production hostname at a lab box while keeping the `Host` header intact.
 
@@ -823,7 +823,7 @@ Only the TCP connect target moves: SNI, the certificate hostname and the `Host` 
 
 ## Upstream Proxy {#upstream-proxy}
 
-gori can dial through another proxy instead of going direct, for a corporate egress, a SOCKS tunnel, or a second tool chained behind it. Set it in Preferences (`Ctrl-,`) → **Network & Tabs** → **Network**: **Proxy protocol** (`None`, `HTTP`, `HTTP+TLS`, `SOCKS5` which resolves names locally, or `SOCKS5H` which resolves them at the proxy), **Proxy host** and **Proxy port**, plus **Proxy TLS CA** and **Verify proxy TLS** for an `HTTP+TLS` hop. A project can pin its own with `gori run project network set upstream_proxy=socks5h://127.0.0.1:1080` (with `upstream_destination_host` and `upstream_auth` beside it), which wins over the global value for that project only. `upstream_rules` routes individual hosts differently. While the protocol is `None` and nothing else claims a host, gori follows `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` from its environment (honouring `NO_PROXY`, and keeping localhost direct); the **Environment proxy** row shows what is in effect. The keys are in the [configuration reference](/reference/config/#network).
+gori can dial through another proxy instead of going direct, for a corporate egress, a SOCKS tunnel, or a second tool chained behind it. Set it in Preferences (`Ctrl-,`) → **Network & Tabs** → **Network**: **Upstream proxy** (`None`, `HTTP`, `HTTP+TLS`, `SOCKS5` which resolves names locally, or `SOCKS5H` which resolves them at the proxy), **Proxy host** and **Proxy port**, plus **Proxy TLS CA** and **Verify proxy TLS** for an `HTTP+TLS` hop. A project can pin its own with `gori run project network set upstream_proxy=socks5h://127.0.0.1:1080` (with `upstream_destination_host` and `upstream_auth` beside it), which wins over the global value for that project only. `upstream_rules` routes individual hosts differently. While the protocol is `None` and nothing else claims a host, gori follows `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` from its environment (honouring `NO_PROXY`, and keeping localhost direct); the **Environment proxy** row shows what is in effect. The keys are in the [configuration reference](/reference/config/#network).
 
 ## Clients That Cannot Use a Proxy {#clients-without-proxy}
 

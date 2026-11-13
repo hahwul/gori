@@ -1529,7 +1529,7 @@ module Gori
         leftover = parse_args(args, "gori run project host-override") do |p|
           p.banner = "Usage: gori run project host-override [options]\n\n" \
                      "List project host overrides (/etc/hosts-style: dial IP[:PORT] for hostname).\n" \
-                     "Project overrides win over global Settings: Hostnames on collision.\n" \
+                     "Project overrides win over global Settings: Host overrides on collision.\n" \
                      "Or run with a subcommand:\n" \
                      "  gori run project host-override add --host=api.example.com --ip=10.0.0.1\n" \
                      "  gori run project host-override add 10.0.0.1 api.example.com\n" \
