@@ -26,6 +26,32 @@ describe Gori::Tui::Jobs do
   end
 end
 
+describe "a paused job" do
+  it "is live but not working, and the chip says so" do
+    # A paused crawl read `discovering 1` with the spinner turning on every tab but its own.
+    jobs = Jobs.new
+    id = jobs.start(:discover, "http://t.test/")
+    jobs.pause(id, true)
+    jobs.any_active?.should be_true # an exit prompt still has to count it
+    jobs.any_working?.should be_false
+    jobs.activity_label.should eq("discovering 1 paused")
+
+    jobs.pause(id, false)
+    jobs.any_working?.should be_true
+    jobs.activity_label.should eq("discovering 1")
+  end
+
+  it "is named apart from the working jobs, so the label still accounts for every live one" do
+    # The statusline publishes `running` (every live job) beside this label.
+    jobs = Jobs.new
+    jobs.pause(jobs.start(:discover, "a"), true)
+    jobs.start(:fuzz, "b")
+    jobs.any_working?.should be_true
+    jobs.active.size.should eq(2)
+    jobs.activity_label.should eq("fuzzing 1 +1 paused")
+  end
+end
+
 describe Gori::Tui::Notifications do
   it "pushes notes, counts unread, and marks them read" do
     n = Notifications.new

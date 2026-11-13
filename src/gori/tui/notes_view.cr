@@ -76,6 +76,7 @@ module Gori::Tui
       @dirty = false
       @cur_moved = false            # the active note changed since the last save (not an edit: see `switch_note`)
       @link_preview = ""            # resolved first-link line for the bottom strip (set by controller)
+      @link_preview_note = 0_i64    # the note it was resolved for; 0 = none yet
       @deleted_ids = Set(Int64).new # notes closed this session — so a merge-on-save doesn't resurrect them
       # Ids this session MINTED that no committed document has carried yet. A note in here
       # exists only in memory, so closing it can drop its `entity_links` on the spot: there is
@@ -126,7 +127,21 @@ module Gori::Tui
     getter link_preview : String
 
     def link_preview=(s : String) : Nil
+      set_link_preview(s, current_note_id)
+    end
+
+    # `note_id` is the note the line was resolved for, which is not always the current one
+    # (the links overlay refreshes its owner). Stamping the current note instead would mark
+    # another note's line as fresh.
+    def set_link_preview(s : String, note_id : Int64) : Nil
       @link_preview = s
+      @link_preview_note = note_id
+    end
+
+    # Whether the preview was resolved for a note other than the one now showing. It is ONE
+    # string for the view, so whoever draws it asks this first (`NotesController#render_body`).
+    def link_preview_stale? : Bool
+      @link_preview_note != current_note_id
     end
 
     # Stable id of the active note (for entity_links owner_id).

@@ -446,7 +446,18 @@ module Gori::Tui
       fresh = Sequencer::Stats.analyze(@samples.compact_map(&.token))
       @report = fresh
       @report_rev = @samples_rev
+      @report_samples = @samples.size
       fresh
+    end
+
+    @report_samples = 0
+
+    # How many samples the report on screen was computed over, while a run has collected
+    # more since. The mid-run recompute is throttled (above), so the card can show a verdict
+    # over 3 tokens while the counter beside it reads 19; this is what lets the card say so.
+    # nil when the report is current.
+    def report_lag : Int32?
+      @running && @report && @report_samples < @samples.size ? @report_samples : nil
     end
 
     # --- engine ---
@@ -704,6 +715,9 @@ module Gori::Tui
         @analysis.source(0, ->(_i : Int32) { "" })
         screen.text(inner.x + 1, inner.y, @running ? "collecting…" : "no tokens yet", Theme.muted, Theme.bg)
         return
+      end
+      if n = report_lag
+        Frame.border_meta(screen, rect, "ANALYSIS", "as of #{n} of #{@samples.size} samples")
       end
       lines = analysis_lines(rep, inner.w)
       sync_analysis

@@ -274,6 +274,7 @@ module Gori::Tui
     def begin_run : Nil
       @running = true
       @stop_requested = false
+      @stopped = false
       @results.clear
       @results_rev += 1
       @sel = 0
@@ -283,8 +284,19 @@ module Gori::Tui
       @baseline_stable = true
     end
 
-    def finish_run : Nil
+    # `stopped` is the engine's own word (`Miner::DoneEvent#stopped`): the operator halted
+    # the run, so what it tested is a prefix of the wordlist and its result is not a verdict.
+    def finish_run(stopped : Bool = false) : Nil
       @running = false
+      @stopped = stopped
+    end
+
+    getter? stopped : Bool = false
+
+    # "817 of 1300 names", for the surfaces that report a run halted part-way.
+    def tested_note : String
+      return "no names yet" if @progress.names_total == 0 # stopped during the baseline
+      "#{@progress.names_done} of #{@progress.names_total} names"
     end
 
     def apply_progress(p : Miner::Progress) : Nil
@@ -296,7 +308,7 @@ module Gori::Tui
     # already publishes both halves on `Miner::Progress`. Guarded on `max_requests` being
     # set so a run STOPPED by hand (^X) is not relabelled as a budget hit.
     def budget_exhausted? : Bool
-      return false if @running
+      return false if @running || @stopped
       return false unless @config.max_requests
       @progress.names_total > 0 && @progress.names_done < @progress.names_total
     end
@@ -561,7 +573,13 @@ module Gori::Tui
         # their own line: they are claims about a run that happened, and an onboarding card in
         # their place would read as "nothing has happened here", which is the opposite.
         if !@running && @progress.names_total > 0
-          msg = budget_exhausted? ? "none found in the #{@progress.names_done} of #{@progress.names_total} names the budget allowed" : "no hidden parameters found"
+          msg = if budget_exhausted?
+                  "none found in the #{tested_note} the budget allowed"
+                elsif stopped?
+                  "stopped: none found in the #{tested_note} tried"
+                else
+                  "no hidden parameters found"
+                end
           screen.text(inner.x + 1, inner.y, msg, Theme.muted, Theme.bg)
           return
         end

@@ -47,6 +47,14 @@ module Gori::Tui
         @question_state = nil
       end
 
+      # Whether ↵ on this note's ring row raises the long-form card rather than jumping. A
+      # note with a `detail` always does. So does one with nowhere to jump: its one line is
+      # clipped to the ring's width, and without the card the only way to read the rest was
+      # to copy it out.
+      def opens_card? : Bool
+        !detail.nil? || goto.nil?
+      end
+
       # A question that can still be answered from this note.
       def question_open? : Bool
         !@question_id.nil? && @question_state.nil?

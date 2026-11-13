@@ -20,6 +20,7 @@ require "./copy_menu"
 require "../redact/policy"
 require "../hotkeys"
 require "./preview_split"
+require "./note_detail_overlay"
 require "./line_edit"
 require "../store"
 require "../display_columns"
@@ -3002,7 +3003,7 @@ module Gori::Tui
       render_detail_stats(screen, rect)
       return if detail_footer_height(rect) == 0
       y = split_cards(rect)[0].bottom
-      detail_footer_lines.each_with_index do |line, i|
+      detail_footer_fit(rect).each_with_index do |line, i|
         Highlight.draw(screen, rect.x + 1, y + i, line, width: {rect.w - 2, 0}.max)
       end
     end
@@ -3819,21 +3820,59 @@ module Gori::Tui
     # hit-test. A chip is " LABEL " with a 1-col gap after it. Split, the request-side panes
     # start in the left half and the rest at the right half's edge.
     private def detail_chip_layout(rect : Rect) : Array({Symbol, Int32, Int32})
-      out = [] of {Symbol, Int32, Int32}
+      chips = [] of {Symbol, Int32, Int32}
       split = split_detail?(rect)
       lx = split ? rect.x + 2 : rect.x + 1 # split: on each card's top border, past its corner
       rx = split ? split_cards(rect)[1].x + 2 : 0
       detail_panes.each do |pane|
         w = detail_pane_label(pane).size + 2
         if split && !SPLIT_LEFT_PANES.includes?(pane)
-          out << {pane, rx, w}
+          chips << {pane, rx, w}
           rx += w + 1
         else
-          out << {pane, lx, w}
+          chips << {pane, lx, w}
           lx += w + 1
         end
       end
-      out
+      split ? chips : fit_detail_chips(chips, rect)
+    end
+
+    # More chips than the row holds (a rewritten flow has five, and at 50 columns they ran
+    # past the pane's border): show a window of them that always holds the active pane, so
+    # ←/→ still walks every pane and the strip follows. A chip that is not drawn is not in the
+    # layout either, so a click cannot land on one.
+    # ponytail: the split layout is left alone, it only exists on a pane wide enough for both
+    # halves' chips; window each half the same way if a pane ever grows more of them.
+    # A windowed strip (`fit_detail_chips`) says which way the hidden panes are.
+    private def draw_chip_overflow(screen : Screen, rect : Rect, layout : Array({Symbol, Int32, Int32})) : Nil
+      return if split_detail?(rect) || layout.empty?
+      panes = detail_panes
+      screen.text(rect.x, rect.y, "‹", Theme.muted) if layout.first[0] != panes.first?
+      screen.text(rect.right - 1, rect.y, "›", Theme.muted) if layout.last[0] != panes.last?
+    end
+
+    private def detail_chips_windowed?(rect : Rect) : Bool
+      !split_detail?(rect) && detail_chip_layout(rect).size < detail_panes.size
+    end
+
+    private def fit_detail_chips(chips : Array({Symbol, Int32, Int32}), rect : Rect) : Array({Symbol, Int32, Int32})
+      return chips if chips.empty? || chips.last[1] + chips.last[2] <= rect.right
+      active = chips.index { |c| c[0] == @detail_pane } || 0
+      limit = rect.right - 2 # the last column is the `›` that says more panes follow
+      room = limit - (rect.x + 1)
+      first = 0
+      while first < active && chips[first..active].sum { |c| c[2] + 1 } - 1 > room
+        first += 1
+      end
+      x = rect.x + 1
+      shown = [] of {Symbol, Int32, Int32}
+      chips.each_with_index do |(pane, _, w), i|
+        next if i < first
+        break if x + w > limit && i > active
+        shown << {pane, x, w}
+        x += w + 1
+      end
+      shown
     end
 
     # Compact mode word shown before the toggle chips (and asserted by specs).
@@ -3897,6 +3936,9 @@ module Gori::Tui
     private def render_detail_chrome(screen : Screen, rect : Rect, focused : Bool, strip_focused : Bool,
                                      mode : String) : Rect
       x = render_detail_chips(screen, rect, strip_focused)
+      # A windowed strip has no room for the mode word, and one drawn there read as one more
+      # chip (`REQUEST RESPONSE ORIGINAL PRETTY`) and sat on the `›` that says panes follow.
+      mode = "" if detail_chips_windowed?(rect)
       # The status word (PRETTY / RAW / HEX / BINARY …) and nothing else: the strip used to
       # carry a keyed chip per toggle plus a nav crib (`^X:hex  b:ws  p:pretty · ↑/↓←/→ · ⇧sel
       # · y · space · esc`), eleven tokens beside three pane tabs. The strip names the panes and
@@ -3940,10 +3982,8 @@ module Gori::Tui
     # fit — the same 0 the render reads, so a footer that is not drawn also does not shrink
     # the hit-test rect.
     private def detail_footer_height(inner : Rect) : Int32
-      n = detail_footer_lines.size
-      return 0 if n == 0
-      avail = inner.bottom - (inner.y + 2)
-      avail - (n + 1) >= DETAIL_FOOTER_MIN_BODY ? n + 1 : 0
+      n = detail_footer_fit(inner).size
+      n == 0 ? 0 : n + 1
     end
 
     # The footer strip: a divider, then gori's own sentences about the flow (provenance,
@@ -3955,8 +3995,8 @@ module Gori::Tui
     # bytes, and a reader copying the pane got gori's sentence with them).
     private def render_detail_footer(screen : Screen, inner : Rect, body : Rect, focused : Bool) : Nil
       render_detail_stats(screen, inner)
-      lines = detail_footer_lines
-      return if lines.empty? || detail_footer_height(inner) == 0
+      lines = detail_footer_fit(inner)
+      return if lines.empty?
       y = body.bottom
       Frame.inner_divider(screen, inner, y, border: Frame.pane_border(focused))
       lines.each_with_index do |line, i|
@@ -3978,6 +4018,40 @@ module Gori::Tui
     # The footer's rows, top to bottom. Built per call rather than memoised: a handful of
     # short strings, and a live flow's facts change under the pane (pending → complete) via
     # `refresh_detail`, which does not go through the view cache.
+    # The footer's lines as the ROWS they take at `width`. Each line was one clipped row, so
+    # the sentence naming the rules that rewrote a flow lost the rule names at 132 columns,
+    # with no other place to read them. A line gori wrote in one colour wraps instead, to
+    # `cap` rows at most so one long sentence cannot take the pane from the bytes; a sentence
+    # cut at the cap ends in ` …`, so a list of rule names never reads as complete when it
+    # is not. `cap` 1 is the old single row, clipped by the draw.
+    private def detail_footer_rows(width : Int32, cap : Int32) : Array(Highlight::Line)
+      width = {width, 1}.max
+      detail_footer_lines.flat_map do |line|
+        span = line[0]?
+        next [line] unless cap > 1 && span && line.size == 1 && Screen.display_width(span.text) > width
+        rows = NoteDetailOverlay.wrap_text(span.text, width)
+        if rows.size > cap
+          rows = rows.first(cap)
+          rows[-1] = "#{rows[-1][0, Screen.column_for(rows[-1], {width - 2, 0}.max)]} …"
+        end
+        rows.map { |text| [Highlight::Span.new(text, span.fg, span.attr)] }
+      end
+    end
+
+    DETAIL_FOOTER_WRAP = 3
+
+    # The rows the footer is drawn with in `inner`: as many wrap rows as leave the body its
+    # DETAIL_FOOTER_MIN_BODY, down to the one clipped row per line it always had, and none
+    # only when even that does not fit. ONE answer for the height and for both renders.
+    private def detail_footer_fit(inner : Rect) : Array(Highlight::Line)
+      avail = inner.bottom - (inner.y + 2)
+      DETAIL_FOOTER_WRAP.downto(1) do |cap|
+        rows = detail_footer_rows(inner.w - 2, cap)
+        return rows if rows.empty? || avail - (rows.size + 1) >= DETAIL_FOOTER_MIN_BODY
+      end
+      EMPTY_LINES
+    end
+
     private def detail_footer_lines : Array(Highlight::Line)
       detail = @detail
       return EMPTY_LINES unless detail
@@ -4094,13 +4168,15 @@ module Gori::Tui
       companion = split_detail?(rect) ? split_companion_pane : nil
       focus_left = split_focus_left?
       end_x = rect.x + 1
-      detail_chip_layout(rect).each do |(pane, cx, _)|
+      layout = detail_chip_layout(rect)
+      draw_chip_overflow(screen, rect, layout)
+      layout.each do |(pane, cx, _)|
         active = pane == @detail_pane
         shown = active || pane == companion
         fg = active && strip_focused ? Theme.ink_on(Theme.focus_gold) : (shown ? Theme.text_bright : Theme.muted)
         bg = active && strip_focused ? Theme.focus_gold : (shown ? Theme.accent_bg : Theme.bg)
         x = screen.text(cx, rect.y, " #{detail_pane_label(pane)} ", fg, bg,
-          attr: active ? Attribute::Bold : Attribute::None) + 1
+          attr: active ? Attribute::Bold : Attribute::None, width: {rect.right - cx, 0}.max) + 1
         same_side = companion.nil? || SPLIT_LEFT_PANES.includes?(pane) == focus_left
         end_x = x if same_side
       end

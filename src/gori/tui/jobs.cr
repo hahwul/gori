@@ -23,6 +23,9 @@ module Gori::Tui
       property sent : Int32?
       property total : Int32?
       property note : String? # short progress/summary, e.g. "3 found"
+      # Held by its operator (a paused crawl): still live, so an exit prompt counts it, but
+      # not working, so the activity chip must not spin for it.
+      property? paused : Bool = false
 
       def initialize(@id, @kind, @label, @goto = nil)
         @started_at = Time.instant
@@ -85,6 +88,15 @@ module Gori::Tui
       @jobs.select(&.running?)
     end
 
+    def pause(id : Int32, paused : Bool) : Nil
+      find(id).try(&.paused=(paused))
+    end
+
+    # Is any live job actually doing something? False when every one of them is paused.
+    def any_working? : Bool
+      @jobs.any? { |j| j.running? && !j.paused? }
+    end
+
     def any_active? : Bool
       @jobs.any?(&.running?)
     end
@@ -108,12 +120,21 @@ module Gori::Tui
 
     # The status-bar chip text (the Runner prepends a spinner glyph). nil → no chip.
     # One active kind → "mining 2"; mixed kinds → "jobs:3".
+    #
+    # A paused job is named apart from the working ones ("fuzzing 1 +1 paused"), so the label
+    # still accounts for every live job the statusline's `running` counts. When all of them
+    # are paused it reads "discovering 1 paused", and `any_working?` tells the Runner to hold
+    # the spinner: a paused crawl read as "discovering 1" with the spinner turning on every
+    # tab but its own.
     def activity_label : String?
       a = active
       return nil if a.empty?
-      kinds = a.map(&.kind).uniq!
-      return "jobs:#{a.size}" if kinds.size != 1
-      "#{KIND_LABELS.fetch(kinds.first, "jobs")} #{a.size}"
+      working = a.reject(&.paused?)
+      shown = working.empty? ? a : working
+      kinds = shown.map(&.kind).uniq!
+      label = kinds.size == 1 ? "#{KIND_LABELS.fetch(kinds.first, "jobs")} #{shown.size}" : "jobs:#{shown.size}"
+      return "#{label} paused" if working.empty?
+      working.size == a.size ? label : "#{label} +#{a.size - working.size} paused"
     end
 
     private def find(id : Int32) : Job?

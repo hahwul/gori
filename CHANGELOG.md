@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- TUI: a new note no longer shows the previous note's links, `↵` on a notification with nowhere to jump opens its full text, the flow detail's pane chips stay inside a narrow pane, and what gori says about a flow there wraps instead of being cut (#1873)
+- TUI: a paused crawl reads `paused` in the status row instead of spinning, the Fuzzer refuses a run that would send nothing, a mine stopped by hand says how far it got, the Sequencer's analysis names the sample count it rests on mid-run, and turning Intercept off over an open edit asks first (#1873)
 - TUI: a 1xx status no longer wears the 5xx red (a WebSocket's 101, the 1xx bar on Project's At a glance), and the Fuzzer's results colour a 3xx as the DIST panel beside them does (#1871)
 - TUI: a filter picker (Go to tab, Find sub-tab, Link to, Pick flow, the libraries) names its keys in the status row only, its bar and the find and replace bars read `filter ›`, `find ›` and `replace ›`, and the Shortcuts popup at its widest no longer shows a sliver of the pane underneath (#1871)
 - CLI: `gori ca info` prints the root's subject, validity, SHA-256 fingerprint, SPKI pin and Android file name (`--json` too), `gori ca --der` writes the certificate in DER (`-o FILE` writes either form to a file), `gori update --check` compares with the latest release and exits 10 when an update is available, and `gori settings --edit` offers to reopen a file that will not load (#1866, #1867)

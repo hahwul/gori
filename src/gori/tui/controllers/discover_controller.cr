@@ -333,9 +333,11 @@ module Gori::Tui
       return unless run = @view.current
       if run.paused?
         run.resume
+        @host.jobs.pause(run.job_id, false)
         @host.status("resumed #{run.label(40)}")
       elsif run.running?
         run.pause
+        @host.jobs.pause(run.job_id, true)
         @host.status("paused #{run.label(40)} — p to resume")
       else
         @host.status("selected run is #{run.status} — nothing to pause")

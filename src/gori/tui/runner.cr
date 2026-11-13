@@ -3294,12 +3294,14 @@ module Gori::Tui
     # which is only in lockstep with the chip because it is the same question and the same
     # counter, not a second guess at both.
     private def background_work? : Bool
-      @jobs.any_active? || repeater_controller.any_inflight?
+      @jobs.any_working? || repeater_controller.any_inflight?
     end
 
     # The bottom-bar background-activity chip (spinner + label), or nil when no job runs.
     private def activity_chip : {String, Color}?
       return nil unless label = @jobs.activity_label
+      # Every live job paused: no spinner, and the muted tone of something at rest.
+      return {"‖ #{label}", Theme.muted} unless @jobs.any_working?
       {"#{SPINNER[@spinner_frame % SPINNER.size]} #{label}", Theme.accent}
     end
 
@@ -4125,7 +4127,7 @@ module Gori::Tui
         note = ov.selected_note
         if note && (q = answerable_question_for(note))
           question = {q, note.id}
-        elsif note && note.detail
+        elsif note && note.opens_card?
           detail_note = note
         else
           run_goto(note.try(&.goto))

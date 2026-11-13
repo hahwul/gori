@@ -143,13 +143,19 @@ describe Gori::Tui::NoteDetailOverlay do
     ov.hint.should_not contain("copied")
   end
 
-  it "falls back to the summary alone when there is no detail to draw" do
-    # Not reachable from the ring (that row has no marker and jumps instead), but the card
-    # must not draw a blank body or copy an empty string if another open-site ever hands it
-    # a bare note.
-    ov = NoteDetailOverlay.new(note("summary only", nil))
-    ov.copy_text.should eq("summary only")
-    OverlayHarness.new(ov).rendered?("(no detail)").should be_true
+  it "shows a bare note's one line in full, wrapped, when there is no detail" do
+    # Reachable from the ring: a note with nowhere to jump opens this card, because its row
+    # clipped the line and copying it out was the only way to read the rest.
+    long = "network: no gori upstream proxy is set, so the environment's proxy is used for every " \
+           "request gori sends itself and the operator should know which one that is"
+    ov = NoteDetailOverlay.new(note(long, nil))
+    ov.copy_text.should eq(long)
+    h = OverlayHarness.new(ov)
+    h.rendered?("(no detail)").should be_false
+    h.rendered?("which one that is").should be_true
+    # Once: the line is the body, so the card has no heading repeating it.
+    mb = h.render
+    (0...24).count { |y| mb.row(y).includes?("network: no gori upstream") }.should eq(1)
   end
 
   it "declines to draw — and dismisses a click — in a window too small for the card" do

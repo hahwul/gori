@@ -281,3 +281,24 @@ describe "Gori::Tui::NotesController — rows the editor was not drawn into" do
     end
   end
 end
+
+describe "Gori::Tui::NotesController — whose links the row shows" do
+  it "does not carry one note's links under a new note" do
+    # `link_preview` is one string for the view. `notes_new` did not refresh it, so the empty
+    # note it opened was drawn over the previous note's links.
+    with_notes_controller do |controller|
+      notes_rows(controller, 76, 12).any?(&.includes?("[repeater] XSS PoC (+2)")).should be_true
+      controller.notes_new
+      notes_rows(controller, 76, 12).any?(&.includes?("[repeater] XSS PoC")).should be_false
+    end
+  end
+
+  it "does not take a line resolved for another note as its own" do
+    # The links overlay refreshes its OWNER's line, which need not be the note on screen.
+    with_notes_controller do |controller|
+      controller.view.set_link_preview("[issue] someone else's", controller.view.current_note_id + 1)
+      controller.view.link_preview_stale?.should be_true
+      notes_rows(controller, 76, 12).any?(&.includes?("someone else's")).should be_false
+    end
+  end
+end

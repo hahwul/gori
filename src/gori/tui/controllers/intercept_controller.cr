@@ -674,6 +674,31 @@ module Gori::Tui
     def intercept_toggle : Nil
       return unless catch_control_allowed?
       edited = !@intercept.held_edit_id.nil? # read before the reload forgets the released hold
+      # Turning catch off forwards every hold WITHOUT an open editor's changes, on purpose: `i`
+      # is reachable from any tab, and a stray press must not put half-typed bytes on the wire.
+      # But the toast was the only notice, it arrived after the bytes had gone, and it was cut
+      # short of the clause that said so at 120 columns. With an edit open, ask first.
+      if edited && @host.session.interceptor.enabled?
+        @host.confirm("INTERCEPT OFF",
+          "The held message you edited is forwarded WITHOUT your changes.\n⇧F forwards every hold with them instead.",
+          confirm_label: "forward original", danger: true) { confirmed_intercept_off }
+        return
+      end
+      apply_intercept_toggle(edited)
+    end
+
+    # The dialog can sit open while another surface (MCP, `gori run intercept`) turns catch off.
+    # A blind toggle would then turn it back ON, so the answer is applied only if catch is
+    # still on, and against the edit that exists now.
+    private def confirmed_intercept_off : Nil
+      unless @host.session.interceptor.enabled?
+        @intercept.reload(@host.session.interceptor)
+        return @host.status("intercept is already off")
+      end
+      apply_intercept_toggle(!@intercept.held_edit_id.nil?)
+    end
+
+    private def apply_intercept_toggle(edited : Bool) : Nil
       result = @host.session.interceptor.toggle
       @intercept.reload(@host.session.interceptor)
       @host.status(InterceptController.toggle_status(result, edited))
