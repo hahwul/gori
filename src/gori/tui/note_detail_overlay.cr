@@ -40,6 +40,17 @@ module Gori::Tui
     # meta row (+2), and the divider that separates them from the body (+3).
     LIST_OFFSET = 4
 
+    # A note with no long form is opened for its one line, which then IS the body. Printing it
+    # as the heading too would be the same sentence twice in one card, so that card has no
+    # heading row and its body starts one row higher.
+    private def bare? : Bool
+      (d = @note.detail).nil? || d.empty?
+    end
+
+    private def list_offset : Int32
+      bare? ? LIST_OFFSET - 1 : LIST_OFFSET
+    end
+
     getter note : Notifications::Note
 
     # The copy verdict, shown in the hint until the next key — the same device
@@ -157,7 +168,7 @@ module Gori::Tui
     def overlay_box(area : Rect) : Rect?
       w = {area.w - 4, MAX_W}.min
       rows = {lines({w - 4, 1}.max).size, 4}.max
-      h = {area.h - 2, LIST_OFFSET + rows + 1}.min
+      h = {area.h - 2, list_offset + rows + 1}.min
       return nil if w < MIN_W || h < MIN_H
       area.center(w, h)
     end
@@ -171,7 +182,7 @@ module Gori::Tui
       Frame.card(screen, box, "NOTE", border: Theme.border_focus)
       Frame.border_meta(screen, box, "NOTE", NoteDetailOverlay.source_label(@note.source), bg: Theme.panel)
       draw_head(screen, box)
-      Frame.tee_divider(screen, box, box.y + LIST_OFFSET - 1)
+      Frame.tee_divider(screen, box, box.y + list_offset - 1)
       draw_body(screen, box)
     end
 
@@ -179,12 +190,15 @@ module Gori::Tui
     # level, how long ago.
     private def draw_head(screen : Screen, box : Rect) : Nil
       w = {box.w - 4, 1}.max
-      screen.text(box.x + 2, box.y + 1, @note.message, Theme.text_bright, Theme.panel,
-        Attribute::Bold, width: w)
+      meta_y = box.y + list_offset - 2
+      unless bare?
+        screen.text(box.x + 2, box.y + 1, @note.message, Theme.text_bright, Theme.panel,
+          Attribute::Bold, width: w)
+      end
       glyph, color = level_glyph
-      x = screen.text(box.x + 2, box.y + 2, glyph.to_s, color, Theme.panel)
+      x = screen.text(box.x + 2, meta_y, glyph.to_s, color, Theme.panel)
       meta = "#{@note.level} · #{NoteDetailOverlay.source_label(@note.source)} · #{Fmt.ago(@note.created_at)}"
-      screen.text(x + 1, box.y + 2, meta, Theme.muted, Theme.panel, width: {box.right - 2 - x - 1, 1}.max)
+      screen.text(x + 1, meta_y, meta, Theme.muted, Theme.panel, width: {box.right - 2 - x - 1, 1}.max)
     end
 
     private def draw_body(screen : Screen, box : Rect) : Nil
@@ -208,8 +222,8 @@ module Gori::Tui
     # The card's interior body band: below the divider, above the bottom border. The gauge
     # draws on `body.right`, which is the card's right hairline.
     private def body_rect(box : Rect) : Rect
-      Rect.new(box.x + 1, box.y + LIST_OFFSET, box.w - 2,
-        {box.bottom - 1 - (box.y + LIST_OFFSET), 0}.max)
+      Rect.new(box.x + 1, box.y + list_offset, box.w - 2,
+        {box.bottom - 1 - (box.y + list_offset), 0}.max)
     end
 
     # Columns a wrapped line may occupy: the body band less the one-column pad on each side.
@@ -238,9 +252,7 @@ module Gori::Tui
     # a card whose width is already fixed.
     private def wrap(width : Int32) : Array(String)
       # A note with no long form is opened for its one line, which the ring row clipped.
-      detail = @note.detail
-      detail = @note.message if detail.nil? || detail.empty?
-      NoteDetailOverlay.wrap_text(detail, width)
+      NoteDetailOverlay.wrap_text(bare? ? @note.message : @note.detail.not_nil!, width)
     end
 
     # The same wrap for another card that shows peer-written prose at a fixed width — the

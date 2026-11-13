@@ -1248,9 +1248,9 @@ module Gori::Tui
       end
       # A run that can send nothing is refused like one with no position or no payload set.
       # It used to start, clear the results pane and finish on "0 sent", which read as a run
-      # that never happened and cost the previous run's rows (a Numbers set with From > To).
+      # that never happened and cost the previous run's rows (a Numbers set with From > To, an empty list).
       if total == 0
-        @host.status("nothing to send: the payload sets produce 0 requests (check a range's From and To)", :error)
+        @host.status("nothing to send: the payload sets produce 0 requests", :error)
         return
       end
       # Judged, like `gori run fuzz`'s and MCP's gates, on what the run can SEND: a positive

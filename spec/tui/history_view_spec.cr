@@ -3821,6 +3821,7 @@ describe "HistoryView — Intercept edits and drops" do
         view.set_detail_pane_public(pane)
         b = MemoryBackend.new(60, 16)
         view.render_detail(Gori::Tui::Screen.new(b), inner)
+        b.row(inner.y).should contain(pane == :request ? "›" : "‹")        # which way the hidden panes are
         b.row(inner.y).should contain(shown)                               # the active pane is always in the window
         b.row(inner.y).should_not contain(hidden)                          # dropped whole, not clipped
         b.row(inner.y)[inner.right..].strip.should eq("")                  # nothing past the pane's edge
@@ -3851,6 +3852,13 @@ describe "HistoryView — Intercept edits and drops" do
       view.render_detail(Gori::Tui::Screen.new(narrow), Gori::Tui::Rect.new(0, 0, 40, 16))
       sentence.size.should be > 38 # or this example proves nothing
       narrow.contains?(tail).should be_true
+
+      # A pane too short for the wrapped rows keeps the one clipped row it always had, rather
+      # than losing the sentence altogether.
+      short = MemoryBackend.new(40, 7)
+      view.render_detail(Gori::Tui::Screen.new(short), Gori::Tui::Rect.new(0, 0, 40, 7))
+      short.contains?(sentence[0, 20]).should be_true
+      short.contains?(tail).should be_false
     end
   end
 

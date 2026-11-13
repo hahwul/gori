@@ -153,6 +153,9 @@ describe Gori::Tui::NoteDetailOverlay do
     h = OverlayHarness.new(ov)
     h.rendered?("(no detail)").should be_false
     h.rendered?("which one that is").should be_true
+    # Once: the line is the body, so the card has no heading repeating it.
+    mb = h.render
+    (0...24).count { |y| mb.row(y).includes?("network: no gori upstream") }.should eq(1)
   end
 
   it "declines to draw — and dismisses a click — in a window too small for the card" do

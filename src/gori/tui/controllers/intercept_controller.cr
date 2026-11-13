@@ -681,10 +681,21 @@ module Gori::Tui
       if edited && @host.session.interceptor.enabled?
         @host.confirm("INTERCEPT OFF",
           "The held message you edited is forwarded WITHOUT your changes.\n⇧F forwards every hold with them instead.",
-          confirm_label: "forward original", danger: true) { apply_intercept_toggle(edited) }
+          confirm_label: "forward original", danger: true) { confirmed_intercept_off }
         return
       end
       apply_intercept_toggle(edited)
+    end
+
+    # The dialog can sit open while another surface (MCP, `gori run intercept`) turns catch off.
+    # A blind toggle would then turn it back ON, so the answer is applied only if catch is
+    # still on, and against the edit that exists now.
+    private def confirmed_intercept_off : Nil
+      unless @host.session.interceptor.enabled?
+        @intercept.reload(@host.session.interceptor)
+        return @host.status("intercept is already off")
+      end
+      apply_intercept_toggle(!@intercept.held_edit_id.nil?)
     end
 
     private def apply_intercept_toggle(edited : Bool) : Nil

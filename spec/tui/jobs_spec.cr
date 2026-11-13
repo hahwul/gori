@@ -41,12 +41,14 @@ describe "a paused job" do
     jobs.activity_label.should eq("discovering 1")
   end
 
-  it "is left out of the count beside working jobs" do
+  it "is named apart from the working jobs, so the label still accounts for every live one" do
+    # The statusline publishes `running` (every live job) beside this label.
     jobs = Jobs.new
     jobs.pause(jobs.start(:discover, "a"), true)
     jobs.start(:fuzz, "b")
     jobs.any_working?.should be_true
-    jobs.activity_label.should eq("fuzzing 1")
+    jobs.active.size.should eq(2)
+    jobs.activity_label.should eq("fuzzing 1 +1 paused")
   end
 end
 

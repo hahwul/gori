@@ -121,8 +121,9 @@ module Gori::Tui
     # The status-bar chip text (the Runner prepends a spinner glyph). nil → no chip.
     # One active kind → "mining 2"; mixed kinds → "jobs:3".
     #
-    # A paused job is not counted beside working ones. When every live job is paused the
-    # label says so ("discovering 1 paused"), and `any_working?` tells the Runner to hold
+    # A paused job is named apart from the working ones ("fuzzing 1 +1 paused"), so the label
+    # still accounts for every live job the statusline's `running` counts. When all of them
+    # are paused it reads "discovering 1 paused", and `any_working?` tells the Runner to hold
     # the spinner: a paused crawl read as "discovering 1" with the spinner turning on every
     # tab but its own.
     def activity_label : String?
@@ -132,7 +133,8 @@ module Gori::Tui
       shown = working.empty? ? a : working
       kinds = shown.map(&.kind).uniq!
       label = kinds.size == 1 ? "#{KIND_LABELS.fetch(kinds.first, "jobs")} #{shown.size}" : "jobs:#{shown.size}"
-      working.empty? ? "#{label} paused" : label
+      return "#{label} paused" if working.empty?
+      working.size == a.size ? label : "#{label} +#{a.size - working.size} paused"
     end
 
     private def find(id : Int32) : Job?

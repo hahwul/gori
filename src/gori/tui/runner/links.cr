@@ -350,7 +350,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   private def refresh_note_link_preview(note_id : Int64) : Nil
-    notes_controller.view.link_preview = note_link_preview_line(note_id)
+    notes_controller.view.set_link_preview(note_link_preview_line(note_id), note_id)
   end
 
   private def note_link_preview_line(note_id : Int64) : String

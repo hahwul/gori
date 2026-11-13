@@ -605,6 +605,28 @@ describe "intercept in a VIEW-ONLY window" do
     end
   end
 
+  it "does not turn catch back on when it went off while the dialog was up" do
+    # Another surface (MCP, `gori run intercept`) can flip it under the open dialog. A blind
+    # toggle on "yes" would then turn intercept ON.
+    with_sessions(1) do |sessions|
+      session = sessions.first
+      host = PeerSyncHost.new(session, :intercept)
+      ctrl = Gori::Tui::InterceptController.new(host)
+      ic = session.interceptor
+      ctrl.intercept_toggle # on
+      spawn { ic.hold_request("GET /x HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, method: "GET", target: "/x", host: "acme.test", port: 80, scheme: "http") }
+      Fiber.yield
+      ctrl.view.reload(ic)
+      ctrl.view.toggle_edit
+      ctrl.view.edit_insert('X')
+      host.under_modal = -> { ic.toggle; nil }
+      ctrl.intercept_toggle
+      host.confirms.size.should eq(1)
+      ic.enabled?.should be_false
+      host.last_status.should contain("already off")
+    end
+  end
+
   it "still toggles in the window that holds capture" do
     with_sessions(1) do |sessions|
       session = sessions.first

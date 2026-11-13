@@ -127,8 +127,15 @@ module Gori::Tui
     getter link_preview : String
 
     def link_preview=(s : String) : Nil
+      set_link_preview(s, current_note_id)
+    end
+
+    # `note_id` is the note the line was resolved for, which is not always the current one
+    # (the links overlay refreshes its owner). Stamping the current note instead would mark
+    # another note's line as fresh.
+    def set_link_preview(s : String, note_id : Int64) : Nil
       @link_preview = s
-      @link_preview_note = current_note_id
+      @link_preview_note = note_id
     end
 
     # Whether the preview was resolved for a note other than the one now showing. It is ONE

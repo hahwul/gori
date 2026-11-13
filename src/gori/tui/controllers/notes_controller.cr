@@ -59,10 +59,10 @@ module Gori::Tui
       id = @notes.current_note_id
       links = @host.session.store.list_links(Store::LinkOwnerKind::Note, id)
       if links.empty?
-        @notes.link_preview = ""
+        @notes.set_link_preview("", id)
       else
         line = Links.resolve(@host.session.store, links.first).line
-        @notes.link_preview = links.size > 1 ? "#{line} (+#{links.size - 1})" : line
+        @notes.set_link_preview(links.size > 1 ? "#{line} (+#{links.size - 1})" : line, id)
       end
     end
 

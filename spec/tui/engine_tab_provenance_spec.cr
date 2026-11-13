@@ -696,6 +696,21 @@ describe "engine tabs — budget (T5)" do
     view.budget_exhausted?.should be_false # a stop is not a budget hit
     view.begin_run
     view.stopped?.should be_false
+
+    # Nor with a request cap set: `budget_exhausted?` is derived from "finished short of the
+    # wordlist", which a stop also is, so the stopped run read "the budget allowed".
+    capped = MinerView.new
+    capped.load("http://t.test", "GET /?a=1 HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice, false, nil,
+      Gori::Miner::Config.new(locations: [Gori::Miner::Location::Query], max_requests: 5000_i64))
+    capped.begin_run
+    capped.apply_progress(Gori::Miner::Progress.new(1300_i64, 817_i64, 900_i64, 0, 0_i64))
+    capped.finish_run(stopped: true)
+    capped.budget_exhausted?.should be_false
+
+    early = MinerView.new # stopped during the baseline, before the wordlist was sized
+    early.begin_run
+    early.finish_run(stopped: true)
+    early.tested_note.should eq("no names yet")
   end
 
   it "a running collection says which samples its verdict was computed over" do

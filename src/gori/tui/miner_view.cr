@@ -295,6 +295,7 @@ module Gori::Tui
 
     # "817 of 1300 names", for the surfaces that report a run halted part-way.
     def tested_note : String
+      return "no names yet" if @progress.names_total == 0 # stopped during the baseline
       "#{@progress.names_done} of #{@progress.names_total} names"
     end
 
@@ -307,7 +308,7 @@ module Gori::Tui
     # already publishes both halves on `Miner::Progress`. Guarded on `max_requests` being
     # set so a run STOPPED by hand (^X) is not relabelled as a budget hit.
     def budget_exhausted? : Bool
-      return false if @running
+      return false if @running || @stopped
       return false unless @config.max_requests
       @progress.names_total > 0 && @progress.names_done < @progress.names_total
     end

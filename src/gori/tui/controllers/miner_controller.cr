@@ -615,6 +615,9 @@ module Gori::Tui
         v.apply_progress(ev.progress)
         @host.jobs.progress(v.job_id, ev.progress.names_done.to_i, ev.progress.names_total.to_i, "#{ev.progress.found} found")
       when Miner::DoneEvent
+        # The engine's final count. Progress events are offered, not delivered, so the last
+        # one the view saw can be behind what the run actually tested.
+        v.apply_progress(ev.progress)
         v.finish_run(stopped: ev.stopped)
         finish_job(v, ev)
       when Miner::ErrorEvent
@@ -636,7 +639,7 @@ module Gori::Tui
       # A run halted by hand is not "done", and "nothing found" over the part of the wordlist
       # it never reached is a claim it cannot make. It says how far it got instead.
       found = if ev.stopped
-                "stopped at #{v.tested_note} — #{n > 0 ? "#{Gori.plural(n, "param")} found" : "nothing found so far"}"
+                "stopped after #{v.tested_note} — #{n > 0 ? "#{Gori.plural(n, "param")} found" : "nothing found so far"}"
               else
                 n > 0 ? "#{Gori.plural(n, "param")} found" : "done — nothing found"
               end

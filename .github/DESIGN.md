@@ -5429,8 +5429,9 @@ to be otherwise.
 
 - **A paused job is live but not working.** `Jobs` had no paused state, so a paused crawl
   read `discovering 1` with the spinner turning on every tab but its own. `Jobs#pause`
-  marks it; the chip reads `‖ discovering 1 paused`, muted and still, and a paused job is
-  left out of the count beside working ones. An exit prompt still counts it (`any_active?`).
+  marks it; the chip reads `‖ discovering 1 paused`, muted and still, and beside working
+  jobs it is named apart (`fuzzing 1 +1 paused`) so the label accounts for every live job
+  the statusline counts. An exit prompt still counts it (`any_active?`).
 - **A stopped run does not claim a verdict.** A mine halted by hand finished as
   `done — nothing found … (stopped)`. It files as `:stopped` and says how many names it
   tested. The Sequencer's mid-run report is throttled on purpose, so ANALYSIS names the
