@@ -692,8 +692,7 @@ module Gori
         end
 
         id = positional.first? || abort("gori run probe rules delete: <custom-rule-id> is required")
-        row_id = probe_custom_row_id(id) ||
-                 abort("gori run probe rules delete: '#{id}' is not a project custom rule — a built-in can only be disabled (`probe rules disable #{id}`)")
+        row_id = probe_custom_row_id(id) || abort("gori run probe rules delete: #{probe_rule_delete_refusal(id)}")
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
           abort "gori run probe rules delete: no custom rule with id '#{id}'" unless store.probe_custom_rules.any? { |r| r.id == row_id }
@@ -744,6 +743,18 @@ module Gori
 
       # "custom_p_12" → 12. nil for a built-in id or a GLOBAL custom rule ("custom_g_…"),
       # neither of which is a project DB row.
+      # Why `rules delete` cannot take a non-project-custom id. Only a real built-in is pointed
+      # at `disable`: an unknown id sent there just fails a second time.
+      def self.probe_rule_delete_refusal(id : String) : String
+        if Probe::RuleCatalog.builtin?(id)
+          "'#{id}' is a built-in rule — it can only be disabled (`gori run probe rules disable #{id}`)"
+        elsif id.starts_with?("custom_g_")
+          "'#{id}' is a global custom rule (settings.json), not this project's"
+        else
+          "no project custom rule with id '#{id}' (see `gori run probe rules`)"
+        end
+      end
+
       private def self.probe_custom_row_id(id : String) : Int64?
         return nil unless id.starts_with?("custom_p_")
         id[9..].to_i64?

@@ -403,8 +403,12 @@ module Gori
       private def delete_probe_rule(h) : Result
         id = required_str(h, "id", "(see list_probe_rules)")
         row_id = custom_rule_row_id(id)
-        return err("'#{id}' is not a project custom rule — a built-in can only be DISABLED (set_probe_rule_enabled), never deleted",
-          "INVALID_ARGUMENT", field: "id") unless row_id
+        unless row_id
+          # Only a real built-in is pointed at the toggle: an unknown id would just fail there too.
+          return not_found("no project custom rule with id '#{id}' (see list_probe_rules)") unless Probe::RuleCatalog.builtin?(id)
+          return err("'#{id}' is a built-in rule — it can only be DISABLED (set_probe_rule_enabled), never deleted",
+            "INVALID_ARGUMENT", field: "id")
+        end
         return not_found("no custom rule with id '#{id}'") unless store.probe_custom_rules.any? { |r| r.id == row_id }
         # Checked, like every other single-item delete on this surface (delete_color_rule,
         # delete_extract_rule, probe_delete) and like the CLI twin (cli/run/probe.cr): a

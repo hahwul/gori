@@ -48,6 +48,12 @@ module Gori
         entries
       end
 
+      # Is `id` a built-in rule's? Static, so a surface can tell "built-in, disable it instead"
+      # from "no such rule" before it opens a store.
+      def builtin?(id : String) : Bool
+        Passive::RULES.any? { |r| r.info.id == id } || Active::RULES.any? { |r| r.info.id == id }
+      end
+
       # A built-in's id is its RuleInfo#id — the slug `probe_disabled_rules` keys off, and the
       # one the enable/disable surfaces take.
       private def builtin(info : RuleInfo, kind : String, disabled : Set(String),

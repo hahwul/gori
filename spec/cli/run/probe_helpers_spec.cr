@@ -179,3 +179,17 @@ describe "gori run probe --fail-on" do
     Gori::CLI::Run.probe_fail_count(groups, Gori::Store::Severity::Critical).should eq(0)
   end
 end
+
+# `rules delete` on an id it cannot delete: only a real built-in is told to disable instead —
+# an unknown id sent to `disable` just fails a second time.
+describe "gori run probe rules delete — refusal" do
+  it "points a built-in at disable" do
+    Gori::CLI::Run.probe_rule_delete_refusal("secret_in_url").should contain("probe rules disable secret_in_url")
+  end
+
+  it "says an unknown id is no rule" do
+    msg = Gori::CLI::Run.probe_rule_delete_refusal("totally_made_up")
+    msg.should contain("no project custom rule")
+    msg.should_not contain("disable")
+  end
+end
