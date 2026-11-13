@@ -5452,3 +5452,27 @@ Repeater and Fuzzer TARGET, Decoder, JWT and Cookie, `↑` on the first line han
 strip with INS retained, and letters typed next run strip commands. That is the READ/INS
 model the 2026-11-07 entry set aside, across six editors, and it wants its own decision.
 
+### 2026-11-13: a hint is a claim, and a default method is a silent no
+
+A third walk, this one checking the hint row against the keys it names, tab by tab.
+
+- **A hint that falls through an `else` names the wrong row.** Project settings' proxy rows
+  and the project picker's delete dialog both reached a default arm written for one case
+  (`toggle lens`, the action menu's mnemonics). Each has its own arm now; a row that takes no
+  key says why. Sitemap's `↵` on a folder reads `expand/fold`, because it folds an open one.
+  The Evidence issue picker reads `↵ pick`: its title names the act and nothing is set.
+- **A key drawn where it does something else wears its route.** The Sequencer's empty card
+  is on screen from the tab bar and the strip, where its `c` is the Global key that stops
+  capture. It takes the `↓` route off the body, as Intercept's queue keys do. Activity's
+  empty feed names the Clear filters path from the registry instead of "space".
+- **`reveal_session` is an empty default, and Repeater had not written one.** A jump to a
+  Repeater session (an Activity row, a minimize notice) switched tabs and left whichever
+  sub-tab was current. History still has none: a jump there lands on the tab, not the flow.
+- **Preferences scrolls to the row, not its header.** A one-row section (Reset, Hotkeys,
+  Tabs) reported its header as the focused row, so on a short card the row itself was below
+  the fold and `↵` opened FACTORY RESET unseen.
+- **The hotkey editor asks once before `esc` discards**, as Preferences does. A rebind
+  answers `✓ bound`, which read as saved.
+- **Created is the `.id` sidecar's time**, not the folder's mtime, which moves on every
+  open. The earlier of the two, since a legacy project's sidecar is backfilled later.
+

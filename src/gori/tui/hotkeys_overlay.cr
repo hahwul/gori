@@ -165,6 +165,18 @@ module Gori::Tui
       :stay
     end
 
+    # ↵ saves; esc discards the working copy. A rebind answers "✓ bound to z", which read as
+    # done, and the one key that leaves threw it away without a word (the hint that says "esc
+    # cancel" is cut off under 160 columns). So esc over unsaved changes asks once, as
+    # Preferences does.
+    private def escape_browse(armed : Bool) : Symbol
+      return :cancel if armed || !unsaved? # discard the working copy
+      @discard_armed = true
+      @feedback_kind = :hint
+      @feedback = "not saved yet — ↵ saves · esc again discards"
+      :stay
+    end
+
     # :browse — navigate/edit the list. ↵ saves+applies, esc discards the working copy.
     private def handle_browse_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
@@ -173,17 +185,7 @@ module Gori::Tui
       if ev.ctrl? && key.lower_p?
         on_palette.try(&.call)
       elsif key.escape?
-        # ↵ saves; esc discards the working copy. A rebind answers "✓ bound to z", which read
-        # as done, and the one key that leaves threw it away without a word (the hint that says
-        # "esc cancel" is cut off under 160 columns). So esc over unsaved changes asks once,
-        # as Preferences does.
-        if unsaved? && !armed
-          @discard_armed = true
-          @feedback_kind = :hint
-          @feedback = "not saved yet — ↵ saves · esc again discards"
-          return :stay
-        end
-        return :cancel # discard the working copy
+        return escape_browse(armed)
       elsif key.enter?
         return :commit
       elsif key.up?
