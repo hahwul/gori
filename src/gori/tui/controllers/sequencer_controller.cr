@@ -345,6 +345,7 @@ module Gori::Tui
       return @host.status("no sequencer session") unless tab && v
       rep = v.report
       return @host.status("nothing to file — collect tokens first (^R)") if rep.usable_count == 0
+      return @host.status("nothing to file — #{rep.rationale}") if rep.rating.inconclusive?
       store = @host.session.store
       severity = Store::Severity.parse?(Sequencer::Present.issue_severity_label(rep)) || Store::Severity::Info
       id = store.insert_issue(Sequencer::Present.issue_title(rep, v.subject), severity, v.target_host, tab.flow_id)
@@ -630,7 +631,7 @@ module Gori::Tui
                ""
              end
       msg = "Sequencer: #{Gori.plural(n, "token")} on #{v.summary} — #{rep.rating.label}#{tail}"
-      level = rep.rating.value <= Sequencer::Stats::Rating::Weak.value ? :warning : :success
+      level = rep.rating.critical? || rep.rating.weak? ? :warning : :success
       log_event(v, level, msg)
       push_notification(v, level, msg, collected: n)
       @host.status(msg) if v.config.notify.posts_notification?(n)

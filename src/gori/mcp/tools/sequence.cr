@@ -80,7 +80,7 @@ module Gori
       # A collection that got NOTHING because every replay failed is not a clean "0 collected".
       #
       # This tool's output is a VERDICT: with no token to analyze, `sequence_results` renders
-      # `rating: "CRITICAL", rationale: "no usable tokens"` — and with `error: null` beside it,
+      # `rating: "INCONCLUSIVE", rationale: "no usable tokens"` — and with `error: null` beside it,
       # an agent reads a sentence about the ORIGIN'S entropy over traffic that never reached
       # the origin, and files it. Nothing else on the MCP side could tell the two apart: the
       # samples carry the per-send reason and are never returned (they are secrets), so the
@@ -329,7 +329,8 @@ module Gori
       private def list_sequence_tools(j : JSON::Builder) : Nil
         tool j, "sequence_analyze",
           "Analyze the randomness of tokens you already have (session IDs, CSRF/reset tokens, " \
-          "API keys). Pure compute. Returns a rating (SECURE/MODERATE/WEAK/CRITICAL), " \
+          "API keys). Pure compute. Returns a rating (SECURE/MODERATE/WEAK/CRITICAL, or " \
+          "INCONCLUSIVE below #{Sequencer::Stats::SMALL_SAMPLE} tokens), " \
           "effective + Shannon entropy, character set, uniqueness/sequential detection, " \
           "FIPS-style bit tests." do |s|
           s.field "tokens", strarrprop("tokens, one per element (>=20 recommended)"), required: true

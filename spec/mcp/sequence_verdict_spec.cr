@@ -81,10 +81,10 @@ describe "MCP sequence job verdict honesty" do
       status["errors"].as_i.should be > 0
 
       results = seq_call(tools, "sequence_results", {job_id: job_id}.to_json)
-      # The report still reads CRITICAL — it is honest about the sample it has — so the
-      # reason has to sit beside it in the SAME payload, or `sequence_results` alone still
-      # reads as a finding about the target.
-      results["report"]["rating"].as_s.should eq("CRITICAL")
+      # The report reads INCONCLUSIVE — it is honest about the sample it has — and the
+      # reason still has to sit beside it in the SAME payload, or `sequence_results` alone
+      # cannot say why there was nothing to grade.
+      results["report"]["rating"].as_s.should eq("INCONCLUSIVE")
       results["report"]["rationale"].as_s.should eq("no usable tokens")
       results["error"].as_s.should start_with("every replay failed — ")
       results["status"].as_s.should eq("error")

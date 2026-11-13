@@ -12,7 +12,13 @@ module Gori::Sequencer
   # chi-square approximation, so the whole module is closed-form and deterministic.
   module Stats
     # Below this usable-sample count the statistical bands are unreliable, so a would-be
-    # FAIL softens to WARN and the rating can't certify Secure (clamped ≤ Moderate).
+    # FAIL softens to WARN and the rating is Inconclusive (a duplicate still condemns it).
+    #
+    # The grade itself is the reason it is this number. A column credits at most log2(n) bits,
+    # so a small sample caps effective entropy below the tiers no matter what the token is:
+    # one token is 0 bits, three random 16-hex tokens ~25 — both CRITICAL. At 20 a column can
+    # credit log2(20) ≈ 4.3 bits, a whole hex digit, so any token of 7+ positions can show the
+    # 30 bits that part CRITICAL from WEAK; below it the cap decides, not the token.
     SMALL_SAMPLE = 20
 
     # Bytes of concatenated token text fed to the compression test. The deflate ratio settles
@@ -82,19 +88,22 @@ module Gori::Sequencer
       end
     end
 
-    # Overall grade. Ordinal (Critical=0 … Secure=3) so demotion is arithmetic.
+    # Overall grade. Ordinal (Critical=0 … Secure=3) so demotion is arithmetic; Inconclusive
+    # is off that scale (too few tokens to grade, see SMALL_SAMPLE), so test it by name.
     enum Rating
       Critical
       Weak
       Moderate
       Secure
+      Inconclusive
 
       def label : String
         case self
-        in Critical then "CRITICAL"
-        in Weak     then "WEAK"
-        in Moderate then "MODERATE"
-        in Secure   then "SECURE"
+        in Critical     then "CRITICAL"
+        in Weak         then "WEAK"
+        in Moderate     then "MODERATE"
+        in Secure       then "SECURE"
+        in Inconclusive then "INCONCLUSIVE"
         end
       end
     end
@@ -190,7 +199,9 @@ module Gori::Sequencer
       # A one-line rationale for the rating banner.
       def rationale : String
         return "no usable tokens" if usable_count == 0
-        if duplicate_count > 0
+        if rating.inconclusive?
+          "only #{Gori.plural(usable_count, "usable token")} — need ≥ #{SMALL_SAMPLE}"
+        elsif duplicate_count > 0
           "#{duplicate_count} duplicate token#{duplicate_count == 1 ? "" : "s"} · effective entropy #{effective_entropy.round(1)}b"
         elsif sequential
           "sequential pattern · effective entropy #{effective_entropy.round(1)}b"
@@ -484,15 +495,15 @@ module Gori::Sequencer
     private def self.rate(effective : Float64, duplicate_count : Int32, seq : Bool,
                           tests : Array(TestRow), small : Bool) : Rating
       return Rating::Critical if duplicate_count > 0
+      # Before Sequential: at this size an ordered run is as likely coincidence (`detect_sequential`).
+      return Rating::Inconclusive if small
       # Sequential is predictability only when little varies BESIDE the order: a counter or a
       # bare timestamp. A time-ordered id with a large random tail (UUIDv7, ULID) still carries
       # its entropy, so there the Sequential FAIL demotes once like any other failed test.
       return Rating::Critical if seq && effective < 60.0
       base = tier(effective)
       fails = tests.count(&.verdict.fail?)
-      r = Rating.from_value((base.value - fails).clamp(0, 3))
-      r = Rating::Moderate if small && r.value > Rating::Moderate.value
-      r
+      Rating.from_value((base.value - fails).clamp(0, 3))
     end
 
     private def self.tier(bits : Float64) : Rating
@@ -1335,7 +1346,7 @@ module Gori::Sequencer
         min_len: 0, max_len: 0, variable_length: false,
         charset_size: 0, charset_label: "—",
         bits_per_char: 0.0, shannon_total: 0.0, effective_entropy: 0.0, length_entropy: 0.0,
-        uniqueness: 0.0, duplicate_count: 0, sequential: false, rating: Rating::Critical,
+        uniqueness: 0.0, duplicate_count: 0, sequential: false, rating: Rating::Inconclusive,
         tests: [TestRow.new("Samples", "0", "no usable tokens", Verdict::Info)],
         char_counts: [] of {UInt8, Int32}, len_hist: [] of Int32, len_min: 0, len_max: 0,
         per_pos_entropy: [] of Float64, bit_bias: [] of Float64)

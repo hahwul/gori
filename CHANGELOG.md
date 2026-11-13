@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Sequencer: fewer than 20 tokens rate INCONCLUSIVE (`only N usable tokens — need ≥ 20`) in `gori run sequence`, MCP and the Sequencer tab, instead of a CRITICAL or WEAK that the sample size alone produced; a repeated token still rates CRITICAL, and the tab will not file an inconclusive report as an issue
 - Authorize: `gori run authorize` and MCP `authorize_start` count only the requests that go on the wire, so an identity that changes nothing about a request is no longer counted as a send
 - JWT, Cookie: `gori run jwt` and `gori run cookie` decode the token in a value pasted straight from an `Authorization`, `Cookie` or `Set-Cookie` header (`Bearer …`, `session=…`, `…; Path=/`) instead of decoding the whole value as garbage, and `gori run cookie` exits 1 when no payload in it decodes
 - Redaction: `gori run redact rm` refuses the profile a safe export is set to use, a configured profile that no longer exists names `redact use` as the way out, and `gori run redact --help` lists the other subcommands

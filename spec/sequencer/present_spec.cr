@@ -117,7 +117,7 @@ describe Gori::Sequencer::Present do
     it "produces the documented empty-report shape for no usable tokens" do
       rep = S.analyze(["", ""])
       j = JSON.parse(P.report_json(rep)).as_h
-      j["rating"].as_s.should eq("CRITICAL")
+      j["rating"].as_s.should eq("INCONCLUSIVE")
       j["sample_count"].as_i.should eq(2)
       j["usable_count"].as_i.should eq(0)
       j["rationale"].as_s.should eq("no usable tokens")
@@ -193,7 +193,7 @@ describe Gori::Sequencer::Present do
     it "formats the empty-report tests row as verdict.ljust(5) name.ljust(14) value (detail)" do
       rep = S.analyze(["", ""])
       text = P.report_text(rep)
-      text.should contain("rating:    CRITICAL  (no usable tokens)")
+      text.should contain("rating:    INCONCLUSIVE  (no usable tokens)")
       text.should contain("samples:   0 usable / 2 total")
       text.should contain("charset:   0 (—)")
       text.should contain("length:    0 (fixed)")
@@ -308,10 +308,11 @@ describe Gori::Sequencer::Present do
       # `issue_severity_label` returns a STRING so Present stays free of the db layer. That
       # indirection is only safe while every value round-trips — this is the pin.
       {
-        S::Rating::Critical => Gori::Store::Severity::Critical,
-        S::Rating::Weak     => Gori::Store::Severity::High,
-        S::Rating::Moderate => Gori::Store::Severity::Medium,
-        S::Rating::Secure   => Gori::Store::Severity::Info,
+        S::Rating::Critical     => Gori::Store::Severity::Critical,
+        S::Rating::Weak         => Gori::Store::Severity::High,
+        S::Rating::Moderate     => Gori::Store::Severity::Medium,
+        S::Rating::Secure       => Gori::Store::Severity::Info,
+        S::Rating::Inconclusive => Gori::Store::Severity::Info,
       }.each do |rating, severity|
         label = P.issue_severity_label(build_report(rating: rating))
         Gori::Store::Severity.parse?(label).should eq(severity)

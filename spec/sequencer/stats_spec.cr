@@ -33,8 +33,8 @@ describe Gori::Sequencer::Stats do
     report.duplicate_count.should eq(0)
     report.sequential.should be_false
     report.charset_label.should eq("lower-hex")
-    report.effective_entropy.should be > 110.0 # ~32 positions × 4 bits
-    report.rating.value.should be >= S::Rating::Moderate.value
+    report.effective_entropy.should be > 110.0                               # ~32 positions × 4 bits
+    report.rating.in?(S::Rating::Moderate, S::Rating::Secure).should be_true # Inconclusive is off the ordinal scale
     report.tests.find { |t| t.name == "Uniqueness" }.not_nil!.verdict.should eq(S::Verdict::Pass)
   end
 
@@ -67,16 +67,30 @@ describe Gori::Sequencer::Stats do
     report.rating.value.should be <= S::Rating::Weak.value
   end
 
-  it "clamps the rating below Secure for a tiny sample" do
+  it "grades nothing for a tiny sample: the per-column cap, not the token, would decide" do
     report = S.analyze(random_hex(6, 32))
     report.usable_count.should eq(6)
-    report.rating.value.should be <= S::Rating::Moderate.value
+    report.rating.should eq(S::Rating::Inconclusive)
+    report.rationale.should eq("only 6 usable tokens — need ≥ 20")
+  end
+
+  # `gori run sequence --tokens one.txt` printed `CRITICAL (effective entropy 0.0b · all tests
+  # passed)`: one token has no column that can vary. Three random 16-hex tokens cap ~25 bits.
+  it "does not rate one token, or three, CRITICAL" do
+    one = S.analyze(["deadbeefcafef00d1234"])
+    one.rating.should eq(S::Rating::Inconclusive)
+    one.rationale.should eq("only 1 usable token — need ≥ 20")
+    S.analyze(random_hex(3, 16)).rating.should eq(S::Rating::Inconclusive)
+  end
+
+  it "still condemns a duplicate in a small sample: a repeat is observed at any size" do
+    S.analyze(["deadbeef", "deadbeef", "cafef00d"]).rating.should eq(S::Rating::Critical)
   end
 
   it "returns an empty report for no usable tokens" do
     report = S.analyze(["", "", ""])
     report.usable_count.should eq(0)
-    report.rating.should eq(S::Rating::Critical)
+    report.rating.should eq(S::Rating::Inconclusive)
   end
 
   it "detects a variable-length corpus" do
@@ -387,16 +401,14 @@ describe Gori::Sequencer::Stats do
     report.rationale.includes?("tests failed").should be_false
   end
 
-  it "clamps to <= Moderate below the small-sample threshold — n==20 vs n==19 boundary" do
+  it "grades from the small-sample threshold up — n==20 vs n==19 boundary" do
     at_threshold = S.analyze(random_hex(20, 32)) # n == SMALL_SAMPLE (20): not small
     at_threshold.effective_entropy.should be >= 88.0
     at_threshold.tests.count(&.verdict.fail?).should eq(0)
-    at_threshold.rating.should eq(S::Rating::Secure) # clamp does not apply
+    at_threshold.rating.should eq(S::Rating::Secure)
 
     below = S.analyze(random_hex(19, 32)) # n == 19: small
-    below.effective_entropy.should be >= 88.0
-    below.tests.count(&.verdict.fail?).should eq(0)
-    below.rating.should eq(S::Rating::Moderate) # Secure tier clamped down
+    below.rating.should eq(S::Rating::Inconclusive)
   end
 
   # ── single-distinct-byte corpus (charset_size 1) ─────────────────────────────────
