@@ -89,3 +89,21 @@ describe Gori::Project do
     end
   end
 end
+
+describe "Gori::Project#created" do
+  it "does not move when the project is opened again" do
+    # It read the DIRECTORY's mtime, which moves whenever an entry is added or removed inside
+    # (the open lock, the WAL), so a project with no flows showed the time it was last opened.
+    root = File.tempname("gori-created")
+    Dir.mkdir_p(root)
+    begin
+      project = Gori::ProjectRegistry.new(root).create("when")
+      made = Time.utc(2026, 1, 2, 3, 4, 5)
+      File.utime(made, made, File.join(project.dir, Gori::Project::CREATED_MARKER))
+      File.write(File.join(project.dir, "later-entry"), "x") # bumps the directory's mtime
+      project.created.should eq(made)
+    ensure
+      FileUtils.rm_rf(root)
+    end
+  end
+end

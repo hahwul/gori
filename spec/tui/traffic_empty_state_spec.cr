@@ -641,6 +641,29 @@ describe Gori::Tui::TrafficEmptyState do
     backend.contains?("SAMPLES").should be_false
   end
 
+  it "offers the sequencer card's c as a key only where it is the tab's own" do
+    # The card is on screen from the tab bar and the sub-tab strip, where a bare `c` is the
+    # Global key that stops capture. No `↓ c` route either: this tab has a strip, so from the
+    # tab bar `↓` lands on it and the `c` after it is still the Global one.
+    off = MemoryBackend.new(60, 10)
+    TrafficEmptyState.render(Screen.new(off), Rect.new(0, 0, 60, 10),
+      variant: :sequencer_samples, running: false, body_focused: false)
+    off.contains?("inside the pane").should be_true
+    off.contains?("↓ c").should be_false
+    inside = MemoryBackend.new(60, 10)
+    TrafficEmptyState.render(Screen.new(inside), Rect.new(0, 0, 60, 10),
+      variant: :sequencer_samples, running: false, body_focused: true)
+    inside.contains?("inside the pane").should be_false
+    inside.contains?(" c ").should be_true
+
+    # The compact tiers, which the 42%-wide SAMPLES pane often falls to, say the same.
+    {Rect.new(0, 0, 60, 4), Rect.new(0, 0, 60, 1)}.each do |small|
+      mb = MemoryBackend.new(60, 10)
+      TrafficEmptyState.render(Screen.new(mb), small, variant: :sequencer_samples, running: false, body_focused: false)
+      (0...10).each { |y| mb.row(y).should_not match(/\bc (token location|configure)/) }
+    end
+  end
+
   # Running is a different sentence and drops the chord — the run is already going, so "^R start
   # mining" would be an instruction to do what is happening.
   {% for variant, chord in {miner_results: "start mining", sequencer_samples: "collect samples"} %}

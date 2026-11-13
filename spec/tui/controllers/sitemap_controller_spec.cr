@@ -127,7 +127,9 @@ describe "SitemapController ↵" do
       leaf = (0..3).find! { |i| view.leaf_at?(i) }
 
       view.select_index(0) # the host row: a folder
-      ctl.body_hint(:body).should contain("↵/→ expand")
+      # ↵ folds an open folder as well as opening a shut one (the two toggles below), so the
+      # hint calls it a toggle; only → always expands.
+      ctl.body_hint(:body).should contain("↵ toggle · → expand")
       ctl.sitemap_toggle
       host.sitemap_opens.should eq(0)
       view.leaf_at?(leaf).should be_false # folded away

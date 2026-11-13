@@ -180,7 +180,7 @@ module Gori::Tui
         when :fuzzer_results    then render_fuzzer_results_full(screen, rect, headline, running, fuzz_step)
         when :probe             then render_probe_full(screen, rect, headline, addr, capturing, scan_on)
         when :miner_results     then render_miner_results_full(screen, rect, headline, running)
-        when :sequencer_samples then render_sequencer_samples_full(screen, rect, headline, running)
+        when :sequencer_samples then render_sequencer_samples_full(screen, rect, headline, running, body_focused)
         when :oast              then render_oast_full(screen, rect, headline, has_provider)
         end
       end
@@ -229,7 +229,7 @@ module Gori::Tui
               when :sequencer
                 [headline, "collect ──► samples ──► entropy", "Send to Sequencer (#{menu("history.sequence")}) on a flow"]
               when :sequencer_samples
-                running ? [headline, "collecting tokens…"] : [headline, "#{key("c", "sequence.configure")} token location · #{key("^R", "sequence.run")} collect"]
+                running ? [headline, "collecting tokens…"] : [headline, "#{sequence_config_key(body_focused, "token location")}#{key("^R", "sequence.run")} collect"]
               when :oast
                 if has_provider
                   [headline, "payload ──► target ──► callback", "#{key("g", "oast.generate")} payload URL · #{key("^R", "oast.listen")} listen"]
@@ -290,7 +290,7 @@ module Gori::Tui
              when :sequencer
                "Send to Sequencer (#{menu("history.sequence")})"
              when :sequencer_samples
-               running ? "collecting…" : "#{key("c", "sequence.configure")} configure · #{key("^R", "sequence.run")} collect"
+               running ? "collecting…" : "#{sequence_config_key(body_focused, "configure")}#{key("^R", "sequence.run")} collect"
              when :oast
                has_provider ? "#{key("g", "oast.generate")} payload · #{key("^R", "oast.listen")} listen" : "^2 Providers — add one first"
              when :notes
@@ -689,7 +689,8 @@ module Gori::Tui
       draw_chord_hint(screen, ix, y, iw, " ^R ", "start mining", bullet: "▸ ", verb: "mine.run") unless running
     end
 
-    private def render_sequencer_samples_full(screen : Screen, rect : Rect, headline : String, running : Bool) : Nil
+    private def render_sequencer_samples_full(screen : Screen, rect : Rect, headline : String, running : Bool,
+                                              body_focused : Bool) : Nil
       inner_h = full_inner_h(:sequencer_samples, running: running)
       msg = running ? "Collecting — one token per send lands here." : "A run re-sends this request and keeps one token from each response."
       inner, ix, iw = begin_card(screen, rect, :sequencer_samples, headline, "TOKEN RUN", inner_h, Screen.display_width(msg))
@@ -698,8 +699,18 @@ module Gori::Tui
       draw_wrapped_message(screen, ix, y, iw, msg)
       return if running
       y += 2
-      draw_chord_lines(screen, ix, y, iw, [ChordLine.new(" c ", "where the token lives", "sequence.configure"),
-                                           ChordLine.new(" ^R ", "collect samples", "sequence.run")])
+      # `c` is the tab's only from inside the body: on the tab bar or the sub-tab strip the
+      # same letter is Global and stops capture. Off the body the line says where the key
+      # lives and offers no chip to press. NOT Intercept's `↓ c` route: this tab has a strip, so
+      # from the tab bar `↓` lands there and the `c` after it is still the Global one.
+      run = ChordLine.new(" ^R ", "collect samples", "sequence.run")
+      lines = if body_focused
+                [ChordLine.new(" c ", "where the token lives", "sequence.configure"), run]
+              else
+                # A chordless line does not advance the row (`draw_chord_lines`), so it goes last.
+                [run, ChordLine.new(nil, "#{key("c", "sequence.configure")} inside the pane sets where the token lives")]
+              end
+      draw_chord_lines(screen, ix, y, iw, lines)
     end
 
     # OAST is the one workbench tab that had no card at all: an empty CALLBACKS pane is the
@@ -843,6 +854,11 @@ module Gori::Tui
     # The queue's keys (f/d/c//) answer only inside the Intercept body. From the tab bar a hint
     # spells the key that gets there first ("↓ then f forward"), so it never implies a key is
     # live where it is not. `i` needs no route: it is Global, and the tab bar answers it too.
+    # The compact Sequencer hints' configure key: named only where it is the tab's own.
+    private def sequence_config_key(body_focused : Bool, label : String) : String
+      body_focused ? "#{key("c", "sequence.configure")} #{label} · " : ""
+    end
+
     private def queue_route(body_focused : Bool) : String
       body_focused ? "" : "#{key("↓", "sidebar.enter")} then "
     end

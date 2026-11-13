@@ -75,6 +75,14 @@ module Gori::Tui
       @search_origin = @selected
       @feedback = nil
       @feedback_kind = :hint
+      @discard_armed = false
+    end
+
+    @discard_armed = false
+
+    # Whether the working copy differs from what Settings holds, i.e. esc would lose something.
+    def unsaved? : Bool
+      @overrides != load_overrides || @profile != Hotkeys.os_profile
     end
 
     private def build_rows : Array(Row)
@@ -157,13 +165,27 @@ module Gori::Tui
       :stay
     end
 
+    # ↵ saves; esc discards the working copy. A rebind answers "✓ bound to z", which read as
+    # done, and the one key that leaves threw it away without a word (the hint that says "esc
+    # cancel" is cut off under 160 columns). So esc over unsaved changes asks once, as
+    # Preferences does.
+    private def escape_browse(armed : Bool) : Symbol
+      return :cancel if armed || !unsaved? # discard the working copy
+      @discard_armed = true
+      @feedback_kind = :hint
+      @feedback = "not saved yet — ↵ saves · esc again discards"
+      :stay
+    end
+
     # :browse — navigate/edit the list. ↵ saves+applies, esc discards the working copy.
     private def handle_browse_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
+      armed = @discard_armed
+      @discard_armed = false
       if ev.ctrl? && key.lower_p?
         on_palette.try(&.call)
       elsif key.escape?
-        return :cancel # discard the working copy
+        return escape_browse(armed)
       elsif key.enter?
         return :commit
       elsif key.up?
@@ -350,7 +372,10 @@ module Gori::Tui
     # that binding (rebind/unbind/reset stay keyboard-driven).
     def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
       box = overlay_box(area)
-      return :cancel if box.nil? || !box.contains?(mx, my)
+      armed = @discard_armed
+      @discard_armed = false
+      # A click outside dismisses, which discards like esc and so asks like esc.
+      return escape_browse(armed) if box.nil? || !box.contains?(mx, my)
       if idx = row_at(box, mx, my)
         set_selected(idx)
       end
@@ -466,7 +491,7 @@ module Gori::Tui
       end
       @overrides[selected_id] = chord
       @feedback_kind = :ok
-      @feedback = "bound to #{chord.label}"
+      @feedback = "bound to #{chord.label} — ↵ saves"
       @mode = :browse
     end
 

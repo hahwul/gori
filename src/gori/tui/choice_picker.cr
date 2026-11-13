@@ -101,7 +101,10 @@ module Gori::Tui
       when :export_format   then "export"
       when :shell, :android then "go"
       when :past_sends      then "restore"
-      else                       "set"
+        # Evidence's issue picker asks WHICH issue for the act its title names (open the linked
+        # one, link to one): nothing is set. "↵ set" over OPEN LINKED ISSUE named a write.
+      when :evidence_issue then "pick"
+      else                      "set"
       end
     end
 

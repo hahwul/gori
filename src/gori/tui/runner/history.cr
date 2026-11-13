@@ -117,6 +117,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     Settings.history_split_detail = !Settings.history_split_detail?
     saved = Settings.save
     state = Settings.history_split_detail? ? "on" : "off"
+    # Turned on in a pane too narrow to split, nothing moves on screen and the toast alone
+    # said "on". It is saved either way, so say what it is waiting for.
+    if Settings.history_split_detail? && !history_controller.view.split_room?
+      state += " — shows on a pane #{HistoryView::DETAIL_SPLIT_MIN_W} columns or wider"
+    end
     @toast = saved ? "request beside response: #{state}" : "request beside response: #{state} — could not save to #{Settings.path}"
   end
 

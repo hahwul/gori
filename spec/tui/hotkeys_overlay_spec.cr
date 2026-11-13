@@ -121,6 +121,10 @@ describe HotkeysOverlay do
       o.hint.should contain("esc cancel")
       o.unbind_selected
       o.to_working[0].keys.first.should eq(expected)
+      # Unsaved now, so esc asks once before it discards (a rebind's "✓ bound" read as saved).
+      o.unsaved?.should be_true
+      h.press(Termisu::Input::Key::Escape).should eq(:open)
+      h.rendered?("esc again discards").should be_true
       h.press(Termisu::Input::Key::Escape).should eq(:closed)
     end
 
@@ -301,4 +305,16 @@ end
 private def reset_settings
   Gori::Settings.keymap_os = "auto"
   Gori::Settings.keymap_overrides = {} of String => Array(String)
+end
+
+describe "HotkeysOverlay — leaving with unsaved rebinds" do
+  it "asks once on a click outside the card, as it does on esc" do
+    o = fresh_overlay
+    o.move(1)
+    o.unbind_selected
+    o.unsaved?.should be_true
+    area = Rect.new(0, 0, 120, 40)
+    o.handle_click(area, 0, 0).should eq(:stay)   # outside: warns instead of discarding
+    o.handle_click(area, 0, 0).should eq(:cancel) # again: discards
+  end
 end

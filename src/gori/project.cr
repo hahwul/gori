@@ -205,10 +205,20 @@ module Gori
       total
     end
 
-    # Best-effort project creation time (project dir mtime from mkdir in registry;
-    # falls back to earliest flow activity inside the Project tab view).
+    # The registry's id sidecar. Defined here, and aliased as `ProjectRegistry::ID_FILE`, because
+    # this file is loaded without the registry and the two must not drift apart.
+    CREATED_MARKER = ".id"
+
+    # Best-effort project creation time. The registry writes the `.id` sidecar once, when it
+    # makes the project, so that file's mtime stays put. The directory's own mtime does not:
+    # it moves whenever an entry is added or removed inside it (the open lock, the WAL), so a
+    # project with no flows read "Created: <the last time it was opened>". A legacy or temp
+    # project has no sidecar and keeps the directory's mtime, the old best effort. The EARLIER
+    # of the two, because a legacy project's sidecar is backfilled long after it was made.
     def created : Time?
-      File.info?(dir).try { |i| i.directory? ? i.modification_time : nil }
+      marker = File.info?(File.join(dir, CREATED_MARKER)).try(&.modification_time)
+      folder = File.info?(dir).try { |i| i.directory? ? i.modification_time : nil }
+      marker && folder ? {marker, folder}.min : (marker || folder)
     rescue File::Error
       nil # same best-effort stance as `last_modified` — a peer may be deleting this project
     end

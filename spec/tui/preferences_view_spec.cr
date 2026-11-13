@@ -52,6 +52,18 @@ describe Gori::Tui::PreferencesView do
     v.handle_key(pkey(ESC)).kind.should eq(:none) # so this esc warns rather than discarding
   end
 
+  it "keeps the focused row on screen when it is a section's opener, not a field" do
+    # RESET, Hotkeys and Tabs are one-row sections. The scroll tracked their HEADER, so on a
+    # card too short for the group the row itself sat below the fold: focused, invisible, and
+    # ↵ on it opened FACTORY RESET.
+    v = PreferencesView.new
+    v.open_default
+    20.times { v.handle_key(pkey(DOWN)) } # to the last row of General
+    backend = MemoryBackend.new(120, 28)
+    v.render(Screen.new(backend), Rect.new(0, 0, 120, 28))
+    backend.contains?("Restore every setting to its factory default").should be_true
+  end
+
   it "guards the group strip's esc/↑ close too" do
     v = PreferencesView.new
     v.open_default

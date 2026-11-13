@@ -624,7 +624,11 @@ module Gori::Tui
           end
           row += field_count(sec.sym)
         else
-          return {header, header} if sec.sym == fsec.sym
+          # The row that takes focus is the opener UNDER the header (`render_group` draws the
+          # subheader, then `draw_opener`). Answering with the header twice kept only the title
+          # in view, so on a short card the last section's row was focused below the fold and
+          # ↵ on it opened FACTORY RESET with nothing on screen to say so.
+          return {row, header} if sec.sym == fsec.sym
           row += 1
         end
         row += 1

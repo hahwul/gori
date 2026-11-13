@@ -16,6 +16,7 @@ module Gori::Tui
       super(host)
       s = @host.session
       @project_view = ProjectView.new(s.scope, s.host_overrides)
+      @project_view.registry = s.registry
     end
 
     def view : ProjectView
@@ -91,8 +92,15 @@ module Gori::Tui
         "←/→/space protocol · SOCKS5 local DNS · SOCKS5H proxy DNS · ↑/↓ move · esc sub-tabs"
       elsif @project_view.settings_sandbox_row?
         "space/↵ sandbox — ON blocks ALL out-of-scope traffic · ↑/↓ move · esc sub-tabs"
-      else
+      elsif @project_view.settings_auth_row?
+        "←/→/space proxy auth · ↑/↓ move · esc sub-tabs"
+      elsif @project_view.settings_toggle_row?
         "space/↵ toggle lens · ↑/↓ move · esc sub-tabs"
+      else
+        # A proxy host/port with no usable protocol, a credential with auth off: the row
+        # takes no key. It used to fall through to the lens hint, which named an action the
+        # row does not have.
+        "not in use with the proxy rows above as they are · ↑/↓ move · esc sub-tabs"
       end
     end
 

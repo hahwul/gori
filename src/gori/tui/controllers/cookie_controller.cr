@@ -111,7 +111,7 @@ module Gori::Tui
       if s.mode == :decode
         s.view.render_decode(screen, body,
           input: s.input, input_mode: s.input_mode, input_read: s.input_read,
-          decoded: s.decoded, format: display_format(s), resolved_format: effective_format(s),
+          decoded: shown_decoded(s), format: display_format(s), resolved_format: effective_format(s),
           algorithm: effective_algorithm(s), salt: s.salt, salt_cx: s.salt_cx, salt_pre: s.salt_pre,
           salt_preset: salt_preset_label(s),
           verify_state: s.verify_state, crack_note: s.crack_note,
@@ -525,7 +525,7 @@ module Gori::Tui
       when :payload then band_or_all(s.payload)
       when :opts    then s.salt
       when :secret  then s.secret
-      when :decoded then s.decoded
+      when :decoded then shown_decoded(s)
       when :output  then s.output_ok? ? s.output : ""
       else               ""
       end
@@ -535,7 +535,7 @@ module Gori::Tui
       s = cur
       case s.pane
       when :input   then input_selection_text(s)
-      when :decoded then s.decoded
+      when :decoded then shown_decoded(s)
       when :output  then s.output_ok? ? s.output : ""
       else               ""
       end
@@ -621,6 +621,21 @@ module Gori::Tui
       recompute_verify(s)
       s.view.reset_decoded_scroll
     end
+
+    # The engine's decode text ends "signature (not verified)": decoding takes no key. Once the
+    # SECRET field verifies (typed, or found by the cracker) the pane kept saying so, beside a
+    # border reading `✓ verified` or `cracked: …`.
+    #
+    # The LAST occurrence: the signature line closes the text, and the cookie's own payload
+    # is printed above it and may contain the same words. Read by the pane and by both copy
+    # paths, so what is copied is what was shown.
+    private def shown_decoded(s : CookieSession) : String
+      return s.decoded unless s.verify_state == :ok
+      i = s.decoded.rindex(NOT_VERIFIED) || return s.decoded
+      "#{s.decoded[0, i]}verified with the secret below)#{s.decoded[i + NOT_VERIFIED.size..]}"
+    end
+
+    NOT_VERIFIED = "not verified)"
 
     private def decode_text(token : String, format : String?) : String
       return "" if token.empty?

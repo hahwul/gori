@@ -39,6 +39,7 @@ module Gori::Tui
     @db_size : Int64
     @total_captured : Int64
     @created : Time?
+    property registry : Verb::Registry? = nil
     # AT A GLANCE viz snapshot (color-free: raw counts only, colours resolve live at
     # draw so a theme switch needs no rebuild — the Fuzzer DistData convention).
     @status_counts : Array({Int32?, Store::FlowState?, Int64})
@@ -3053,7 +3054,10 @@ module Gori::Tui
       # `⇧X` is not offered either: that key empties the feed.
       # NOT named `out`: `out` is a Crystal keyword, and `screen.text(…, out, …)` parses as an
       # out-param (the same trap `Store#ids_matching` documents).
-      way = activity_more? ? "↓ looks further back · space clears the filters" : "s/l cycle back to all · space clears the filters"
+      # The menu path, read from the live registry the controller hands over: `space` alone
+      # opens the menu and clears nothing.
+      clear = Hotkeys.expand_menu_paths(@registry, "{space:activity.clear-filters}")
+      way = activity_more? ? "↓ looks further back · #{clear} clears the filters" : "s/l cycle back to all · #{clear} clears the filters"
       screen.text(x, list.y + 1, way, Theme.muted, width: w)
     end
 

@@ -28,7 +28,7 @@ module Gori
     # slug. Optional: legacy projects created before this sidecar have none and
     # stay addressable by slug/name (see #find) — no backfill, no write-on-read.
     # Lives inside the project dir, so it is never itself listed as a project.
-    ID_FILE = ".id"
+    ID_FILE = Project::CREATED_MARKER # one spelling: `Project#created` reads this file's time
     # The project `gori run project switch` pinned as the default for a command that names
     # none (#1387): its short id, or its slug for a legacy project. Beside the projects, not in
     # one, and a dot-name so `#list` never mistakes it for a project. Owned here because
