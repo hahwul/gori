@@ -368,3 +368,23 @@ describe "Gori::Cookie.decode_json" do
     JSON.parse(json)
   end
 end
+
+# A value pasted straight from a header decoded `session=<flask>` as Flask with the name glued
+# onto the payload, and `<cookie>; Path=/` with the attributes glued onto the signature.
+describe "Gori::Cookie.locate" do
+  it "leaves a bare cookie as it is, padded Rack included" do
+    [FLASK, FLASK_COMPRESSED, DJANGO, RACK].each { |c| Gori::Cookie.locate(c).should eq(c) }
+  end
+
+  it "takes the cookie out of a Cookie pair and a Set-Cookie value" do
+    Gori::Cookie.locate("session=#{FLASK}").should eq(FLASK)
+    Gori::Cookie.locate("theme=dark; session=#{DJANGO}").should eq(DJANGO)
+    Gori::Cookie.locate("#{FLASK}; Path=/; HttpOnly").should eq(FLASK)
+    Gori::Cookie.locate("rack.session=#{RACK}; Expires=Wed, 21 Oct 2026 07:28:00 GMT").should eq(RACK)
+  end
+
+  it "finds nothing in a value that holds no decodable cookie" do
+    Gori::Cookie.locate("session=a.b.c").should be_nil
+    Gori::Cookie.locate("not-a-cookie").should be_nil
+  end
+end

@@ -100,6 +100,17 @@ module Gori
       nil
     end
 
+    # The JOSE token in a value pasted from a header (`Bearer <t>`, `session=<t>; Path=/`),
+    # found as a flow's body is scanned; the input itself when it already is one or holds none.
+    # Only a value a token cannot be (a space, `;` or `=`) is scanned: in a malformed bare token
+    # the scan would find `payload.sig` and decode the claims as the header.
+    def locate(input : String) : String
+      s = input.strip
+      return s if jose?(s) || !s.matches?(/[\s;=]/)
+      s.scan(SCAN_RE) { |m| (tok = narrow(m[0])) && return tok }
+      s
+    end
+
     # The `exp` claim of a JWS payload SEGMENT (the token's second part), or nil. Public for
     # `SessionRefresh`'s `jwt-exp` policy (#1233), which reads the expiry of a bound value.
     def claim_exp(payload_segment : String) : Int64?

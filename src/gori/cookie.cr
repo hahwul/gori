@@ -56,6 +56,28 @@ module Gori
       nil
     end
 
+    # The signed cookie in a value pasted from a header — a `Cookie` pair (`session=<c>`) or a
+    # `Set-Cookie` value (`<c>; Path=/`) — split as `Jwt`'s header scan splits one, or nil when
+    # nothing in it decodes. Each pair whole first: a bare Rack value may carry `=` padding.
+    # `detect` alone is not enough: it reads `session=<flask>` as Flask, name and all.
+    def locate(input : String) : String?
+      input.split(';') do |part|
+        part = part.strip
+        return part if decodes?(part)
+        _, sep, v = part.partition('=')
+        return v.strip if !sep.empty? && decodes?(v.strip)
+      end
+      nil
+    end
+
+    private def decodes?(c : String) : Bool
+      return false unless detect(c)
+      j = JSON.parse(decode_json(c))
+      !(j["payload"]? || j["value_size"]).raw.nil?
+    rescue CookieError | JSON::ParseException
+      false
+    end
+
     # Pretty, human-readable dump of a cookie's parts — the Decoder-tab / `gori run cookie`
     # (text) / MCP-`decode` projection. Auto-detects the format unless `format` pins it.
     # Never verifies (no key material here). Raises CookieError when undetectable.
