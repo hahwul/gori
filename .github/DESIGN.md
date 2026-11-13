@@ -5478,3 +5478,23 @@ A third walk, this one checking the hint row against the keys it names, tab by t
 - **Created is the `.id` sidecar's time**, not the folder's mtime, which moves on every
   open. The earlier of the two, since a legacy project's sidecar is backfilled later.
 
+### 2026-11-13: a sample too small to judge is INCONCLUSIVE, and an exit code says which failure
+
+Found by running `gori run` the way a script does.
+
+- **`Sequencer::Stats::Rating::Inconclusive`, below `SMALL_SAMPLE` (20).** A column credits at
+  most log2(n) bits, so with few tokens the sample size, not the token, set the grade: one token
+  read `CRITICAL (effective entropy 0.0b · all tests passed)`. The old clamp to MODERATE only
+  capped the top; it could not stop a small sample reading CRITICAL. A duplicate or a
+  sequential run still rates CRITICAL ahead of it: nineteen ids in arrival order are a
+  counter. Inconclusive sits off the ordinal scale, so code tests it by name. The TUI does
+  not file it as an issue and posts it as info, not success.
+- **An exit code tells failure apart from a negative result.** `fuzz --fail-if-no-matches`
+  exits 1, not 3, when every send errored: a dead target is not "nothing matched". `cookie`
+  exits 1 when the payload it printed did not decode.
+- **A pasted header value is read as its token**, by `Jwt.locate` and `Cookie.locate`, in
+  `gori run jwt`/`cookie` and every MCP JWT and cookie tool alike.
+- **A safety cap is judged on the strict bound.** `Authorize::Plan#total_sends` now counts
+  only identities that change a request, which is what the run reports; MCP's cap stays on
+  `send_bound` (flows × identities), because the engine re-decides each send.
+
