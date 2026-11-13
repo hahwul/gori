@@ -63,7 +63,7 @@ describe SettingsView do
       Gori::Settings.upstream_proxy = "http://proxy.local:8080"
       v = SettingsView.new
       v.reload(:network)
-      2.times { v.move_field(1) } # Proxy protocol: HTTP
+      2.times { v.move_field(1) } # Upstream proxy: HTTP
       v.toggle_or_move(1)         # HTTP+TLS, automatic 8080 → 443
       v.save
       # The cycle reaches the TLS-to-proxy kind from HTTP, which is where an operator looking
@@ -79,7 +79,7 @@ describe SettingsView do
       v.reload(:network)
       4.times { v.move_field(1) } # Proxy port
       set_text(v, "9051")
-      2.times { v.move_field(-1) } # Proxy protocol
+      2.times { v.move_field(-1) } # Upstream proxy
       v.toggle_or_move(1)          # SOCKS5H; custom port survives
       v.save
       Gori::Settings.upstream_proxy.should eq("socks5h://proxy.local:9051")
@@ -188,7 +188,7 @@ describe SettingsView do
       v.save
       Gori::Settings.serve_landing?.should eq(Gori::Settings::DEFAULT_SERVE_LANDING)
 
-      # The Hostname-overrides opener must still be the focusable action row after the
+      # The Host-overrides opener must still be the focusable action row after the
       # inserted field (index shift didn't misalign fields/values). Walked by field COUNT,
       # not a pinned index: it is the LAST network row, and hard-coding the number just
       # breaks this on the next inserted field without telling us anything new.
@@ -392,7 +392,7 @@ describe SettingsView do
       Gori::Settings.io_timeout_secs.should eq(7)
       Gori::Settings.capture_max_mib.should eq(9)
 
-      # The Hostname-overrides opener is still the focusable action row after the inserted
+      # The Host-overrides opener is still the focusable action row after the inserted
       # fields — walked by field count (see the note in the Info-page example).
       v.reload(:network)
       (SettingsView::NETWORK_FIELDS.size - 1).times { v.move_field(1) }
@@ -713,7 +713,7 @@ describe SettingsView do
     end
   end
 
-  # The Proxy protocol row reads "None" for a blank scalar whether the install is direct or
+  # The Upstream proxy row reads "None" for a blank scalar whether the install is direct or
   # sending everything through `$HTTPS_PROXY` — this row is where the difference shows (#1114).
   it "shows the environment proxy in effect on its own NETWORK row, never its credentials" do
     prev = {ENV["HTTPS_PROXY"]?, Gori::Settings.upstream_proxy, Gori::Settings.project_upstream_proxy}

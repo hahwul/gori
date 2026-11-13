@@ -68,10 +68,10 @@ module Gori::Tui
     NETWORK_FIELDS = [
       Field.new("Bind IP", "global default listen address — projects may pin their own"),
       Field.new("Bind Port", "global default port (0-65535) — project overrides win when set"),
-      Field.new("Proxy protocol", "None = direct · SOCKS5 resolves names locally · SOCKS5H resolves at the proxy — ←/→ cycles",
+      Field.new("Upstream proxy", "None = direct · SOCKS5 resolves names locally · SOCKS5H resolves at the proxy — ←/→ cycles",
         choices: PROXY_PROTOCOL_CHOICES, choice_labels: PROXY_PROTOCOL_LABELS),
-      Field.new("Proxy host", "upstream proxy hostname or IP — disabled when protocol is None"),
-      Field.new("Proxy port", "upstream proxy port (1-65535) — disabled when protocol is None"),
+      Field.new("Proxy host", "upstream proxy hostname or IP — disabled when Upstream proxy is None"),
+      Field.new("Proxy port", "upstream proxy port (1-65535) — disabled when Upstream proxy is None"),
       Field.new("Proxy TLS CA",
         "PEM bundle trusted for the PROXY's own certificate, in addition to the system store — for an `HTTP+TLS` proxy (and http+tls upstream rules); blank = system trust only. This is the hop to the proxy, not the origin"),
       Field.new("Verify proxy TLS",
@@ -90,12 +90,12 @@ module Gori::Tui
         "per-host routing / proxy auth — edit with `gori settings --edit` (upstream_rules)",
         readonly: true),
       Field.new("Environment proxy",
-        "HTTPS_PROXY / HTTP_PROXY / ALL_PROXY as this process sees them — the route while Proxy protocol is None and no project pin or rule claims the host (a `*` rule shadows them entirely); localhost stays direct, NO_PROXY exceptions apply; set a proxy above or unset the variable to change it",
+        "HTTPS_PROXY / HTTP_PROXY / ALL_PROXY as this process sees them — the route while Upstream proxy is None and no project pin or rule claims the host (a `*` rule shadows them entirely); localhost stays direct, NO_PROXY exceptions apply; set a proxy above or unset the variable to change it",
         readonly: true),
       Field.new("Outbound TLS",
         "per-host client certificates, protocol range and TLS fingerprint (groups/sigalgs/ALPN, or a chrome/firefox/safari/curl preset) — edit with `gori settings --edit` (outbound_tls); check what actually goes on the wire with `gori settings tls-fingerprint`",
         readonly: true),
-      Field.new("Hostname overrides", "↵ to edit the global IP→host map (a /etc/hosts for this proxy)", opener: :hosts),
+      Field.new("Host overrides", "↵ to edit the global IP→host map (a /etc/hosts for this proxy)", opener: :hosts),
     ]
     # Command modifier: the stored values ARE the choices (Settings.command_modifier); the
     # labels are what the row shows for each.
@@ -573,7 +573,7 @@ module Gori::Tui
       presets.empty? ? base : "#{base} · #{presets.join(", ")}"
     end
 
-    # The environment-proxy row's value. The Proxy protocol row above it reads "None" for a
+    # The environment-proxy row's value. The Upstream proxy row above it reads "None" for a
     # blank scalar, which is also what an install routing everything through `$HTTPS_PROXY`
     # shows — so this row is where that fact lives (#1114). "none" when nothing is exported;
     # `Settings.environment_upstream_status` (the variables, the proxies, and how far they
@@ -765,7 +765,7 @@ module Gori::Tui
       fields[@focused].opener
     end
 
-    # The display value for the "Hostname overrides" action row — a live count + an ↵ cue.
+    # The display value for the "Host overrides" action row — a live count + an ↵ cue.
     private def hostnames_summary : String
       n = Settings.hostname_overrides.size
       n == 0 ? "none — ↵ to add" : "#{n} entr#{n == 1 ? "y" : "ies"} — ↵ to edit"
@@ -1376,7 +1376,7 @@ module Gori::Tui
       :stay
     end
 
-    # ↵: an action row (e.g. "Hostname overrides") opens its sub-editor instead of saving
+    # ↵: an action row (e.g. "Host overrides") opens its sub-editor instead of saving
     # the section — the sub-editor persists on its own. Any other row saves, and the shell
     # live-applies the section through apply_settings_saved so the Preferences modal and
     # this card can't drift.

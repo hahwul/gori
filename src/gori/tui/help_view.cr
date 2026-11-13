@@ -43,7 +43,7 @@ module Gori::Tui
         Item.new("⇧P", "protocol… card (Repeater, Fuzzer)", "protocol.open.repeater"),
         Item.new("c", "toggle capture", "capture.toggle"),
         Item.new("i", "toggle intercept", "intercept.toggle"),
-        Item.new("s", "toggle scope lens (or click scope:N)", "scope.toggle-lens"),
+        Item.new("s", "toggle scope lens (or click scope:on(N))", "scope.toggle-lens"),
         # The header's standing chips, named once (#1842): nothing else says what they stand
         # for. `Chrome.top_bar_chips` draws scope and probe always and notify while something
         # is unread; `listen_chip` owns the three states of the dot.

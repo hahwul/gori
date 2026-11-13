@@ -248,7 +248,7 @@ describe "JWT footer on an 80-column row" do
         ctl.focus_first
         loop do
           hint = ctl.body_hint(:body)
-          Chrome.fit_hints(hint, 57).should end_with("cmds · esc sub-tabs"), hint
+          Chrome.fit_hints(hint, 57).should match(/(space cmds|\^P palette) · esc sub-tabs$/), hint
           break unless ctl.pane_advance(1)
         end
         ctl.toggle_mode
@@ -261,7 +261,7 @@ describe "JWT footer on an 80-column row" do
       ctl.toggle_mode # ENCODE: HEADER captures every key
       ctl.focus_first
       hint = ctl.body_hint(:body)
-      hint.should contain("^P cmds")
+      hint.should contain("^P palette")
       hint.should_not contain("space cmds")
     end
   end

@@ -19,6 +19,8 @@ private def reset_projnet
   Gori::Settings.bind_host = "127.0.0.1"
   Gori::Settings.bind_port = 8070
   Gori::Settings.upstream_proxy = ""
+  Gori::Settings.cli_bind_host = nil
+  Gori::Settings.cli_bind_port = nil
 end
 
 private def render_ta(ta : TextArea, h : Int32) : MemoryBackend
@@ -265,6 +267,44 @@ describe "ProjectView SCOPE list" do
   end
 end
 
+describe "ProjectView SCOPE legend" do
+  rect = Rect.new(0, 0, 120, 30)
+  scope_view = ->(store : Gori::Store, n : Int32) do
+    scope = Gori::Scope.load(store)
+    n.times { |i| scope.add("include", "host", "h#{i}.test") }
+    view = ProjectView.new(scope, Gori::HostOverrides.load(store))
+    view.reload(Gori::Project.new("t", File.tempname("gori-scope-legend")), store)
+    view.focus_pane(:scope)
+    b = MemoryBackend.new(120, 30)
+    view.render(Screen.new(b), rect, focused: true)
+    {view, b}
+  end
+  legend_y = ->(b : MemoryBackend) { (0...30).find { |y| b.row(y).includes?("lens: lists show in-scope only") } }
+
+  it "explains the rules in the free rows under a short list, without becoming a row" do
+    with_store do |store|
+      view, b = scope_view.call(store, 3)
+      y = legend_y.call(b).should_not be_nil
+      b.row(y).should contain("lens: lists show in-scope only · sandbox: the rest is refused")
+      rule_y = (0...30).find! { |yy| b.row(yy).includes?("h0.test") }
+      view.scope_row_at(rect, 10, rule_y).should eq(0)
+      view.scope_row_at(rect, 10, y).should be_nil
+    end
+  end
+
+  it "yields when the list fills the pane, or leaves two rows or fewer" do
+    rows = 0
+    with_store do |store|
+      view, b = scope_view.call(store, 40)
+      legend_y.call(b).should be_nil
+      rows = (0...30).count { |y| view.scope_row_at(rect, 10, y) }
+    end
+    rows.should be > 3
+    with_store { |store| legend_y.call(scope_view.call(store, rows - 2)[1]).should be_nil }
+    with_store { |store| legend_y.call(scope_view.call(store, rows - 3)[1]).should_not be_nil }
+  end
+end
+
 describe "ProjectView AT A GLANCE Technologies" do
   it "drops tech facts fingerprinted only on out-of-scope hosts once the scope lens is ON" do
     with_store do |store|
@@ -477,7 +517,7 @@ describe "ProjectView PROJECT SETTINGS pane" do
       b.contains?("Sandbox").should be_true
       b.contains?("Bind IP").should be_true
       b.contains?("Bind Port").should be_true
-      b.contains?("Proxy protocol").should be_true
+      b.contains?("Upstream proxy").should be_true
       b.contains?("Proxy host").should be_true
       b.contains?("Proxy port").should be_true
       b.contains?("Destination host").should be_true
@@ -486,9 +526,75 @@ describe "ProjectView PROJECT SETTINGS pane" do
       b.contains?("Username").should be_true
       b.contains?("Password").should be_true
       b.contains?("Proto schema").should be_true
+      b.contains?("Capture body limit (MiB)").should be_true
       b.contains?("None").should be_true
       b.contains?("127.0.0.1").should be_true # inherited global bind host
       b.contains?("· global").should be_true  # no override yet → inheriting
+    ensure
+      reset_projnet
+    end
+  end
+
+  # The bind rows show the CONFIGURED value (`Settings.configured_bind_*`); a `-l`/`-p` run or
+  # a startup port fallback listens elsewhere, and the row says so beside the stored value.
+  describe "this-run bind note" do
+    bind_row = ->(live : {String, Int32}, label : String, capturing : Bool) do
+      row = ""
+      with_store do |store|
+        view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+        view.refresh_settings
+        view.focus_pane(:settings)
+        b = MemoryBackend.new(120, 30)
+        view.render(Screen.new(b), Rect.new(0, 0, 120, 30), focused: true, capturing: capturing, live_bind: live)
+        row = (0...30).map { |y| b.row(y) }.find!(&.includes?(label))
+      end
+      row
+    end
+
+    it "names -p when this run's flag moved the port" do
+      reset_projnet
+      Gori::Settings.cli_bind_port = 18981
+      row = bind_row.call({"127.0.0.1", 18981}, "Bind Port", true)
+      row.should contain("8070 · this run: 18981 (-p)")
+      row.should contain("· global") # the source marker stays
+      bind_row.call({"127.0.0.1", 18981}, "Bind IP", true).should_not contain("this run")
+    ensure
+      reset_projnet
+    end
+
+    it "names --listen when this run's flag moved the address" do
+      reset_projnet
+      Gori::Settings.cli_bind_host = "0.0.0.0"
+      bind_row.call({"0.0.0.0", 8070}, "Bind IP", true).should contain("127.0.0.1 · this run: 0.0.0.0 (--listen)")
+    ensure
+      reset_projnet
+    end
+
+    it "is absent when the live listener matches the row" do
+      reset_projnet
+      bind_row.call({"127.0.0.1", 8070}, "Bind Port", true).should_not contain("this run")
+      # A project pin outranks the flag, so the proxy is on the pin and nothing differs.
+      Gori::Settings.cli_bind_port = 18981
+      Gori::Settings.project_bind_port = 9100
+      bind_row.call({"127.0.0.1", 9100}, "Bind Port", true).should_not contain("this run")
+    ensure
+      reset_projnet
+    end
+
+    it "names no flag for a startup port fallback" do
+      reset_projnet
+      row = bind_row.call({"127.0.0.1", 8071}, "Bind Port", true)
+      row.should contain("· this run: 8071")
+      row.should_not contain("(-p)")
+    ensure
+      reset_projnet
+    end
+
+    # Capture off, or a view-only session: the proxy keeps its last address but nothing is
+    # listening on it, so there is no "this run" to report.
+    it "says nothing while this session is not listening" do
+      reset_projnet
+      bind_row.call({"127.0.0.1", 8071}, "Bind Port", false).should_not contain("this run")
     ensure
       reset_projnet
     end

@@ -97,7 +97,7 @@ module Gori
         Verb::Scope::Probe, [Verb::Chord.new("s")], mnemonic: 'o', group: :view) { |ctx| ctx.probe_open_flow; nil }
 
       r.register Verb::Definition.new(
-        "probe.repeater-evidence", "Repeater evidence", "Send the selected finding's sample flow to Repeater",
+        "probe.repeater-evidence", "Send to Repeater", "Send the selected finding's sample flow to Repeater",
         Verb::Scope::Probe, [Verb::Chord.new("r")], group: :send, intent: :to_repeater, pinned: true) { |ctx| ctx.probe_repeater_flow; nil }
 
       # Re-run the ACTIVE checks against the selected issue's sample flow (menu-only 'A') — opens
@@ -191,8 +191,8 @@ module Gori
         Verb::Scope::ProbeDetail, [Verb::Chord.new("s")], mnemonic: 'o') { |ctx| ctx.probe_open_flow; nil }
 
       r.register Verb::Definition.new(
-        "probe.repeater-flow", "Repeater evidence", "Send the sample flow to the Repeater tab",
-        Verb::Scope::ProbeDetail, [Verb::Chord.new("r")], intent: :to_repeater, pinned: true) { |ctx| ctx.probe_repeater_flow; nil }
+        "probe.repeater-flow", "Send to Repeater", "Send the sample flow to the Repeater tab",
+        Verb::Scope::ProbeDetail, [Verb::Chord.new("r")], intent: :to_repeater, pinned: true, keywords: ["evidence"]) { |ctx| ctx.probe_repeater_flow; nil }
 
       r.register Verb::Definition.new(
         "probe.promote", "Promote to issue", "Create an Issue from this finding", Verb::Scope::ProbeDetail,

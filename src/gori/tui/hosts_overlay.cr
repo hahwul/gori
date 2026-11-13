@@ -385,7 +385,7 @@ module Gori::Tui
     end
   end
 
-  # Global hostname-overrides editor (settings → "Hostname overrides"): a process-wide
+  # Global hostname-overrides editor (settings → "Host overrides"): a process-wide
   # /etc/hosts (Settings.hostname_overrides). Each row maps a host to the IP the proxy
   # DIALS for it; SNI / cert / Host header keep the original host (Proxy::Upstream.dial).
   # Layered UNDER each project's own HOST OVERRIDES pane (the project wins on a clash).
@@ -420,7 +420,7 @@ module Gori::Tui
     end
 
     def title : String
-      "HOSTNAME OVERRIDES"
+      "HOST OVERRIDES"
     end
 
     def hint : String
@@ -458,7 +458,7 @@ module Gori::Tui
     end
 
     # `global`, for the reason `EnvOverlay` gives: the Project tab's HOST OVERRIDES pane is
-    # this card's twin under a title one word apart, and the layering between them (project
+    # this card's twin under the same title, and the layering between them (project
     # wins) is invisible unless each says which it is.
     private def meta : String
       "global · #{@items.size} entr#{@items.size == 1 ? "y" : "ies"}"

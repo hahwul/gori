@@ -893,7 +893,7 @@ module Gori::Settings
     kind = protocol.strip.downcase
     return {"", nil} if kind == "none"
     unless UPSTREAM_PROTOCOLS.includes?(kind)
-      return {"", "settings: proxy protocol must be one of none, http, socks5, socks5h"}
+      return {"", "settings: upstream proxy must be one of #{UPSTREAM_PROTOCOLS.join(", ")}"}
     end
     bare = host.strip
     bare = bare[1...-1] if bare.starts_with?('[') && bare.ends_with?(']')

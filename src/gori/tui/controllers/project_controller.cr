@@ -184,7 +184,7 @@ module Gori::Tui
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       # Self-frames its OVERVIEW band, the sub-tab strip, and the active card.
       @project_view.render(screen, rect, focused: focus == :body, strip_focused: focus == :subtabs,
-        capturing: @host.session.capturing?)
+        capturing: @host.session.capturing?, live_bind: {@host.session.proxy.host, @host.session.proxy.port})
     end
 
     # Every field on the Project tab that takes characters: the description editor in INS, the
@@ -1011,11 +1011,12 @@ module Gori::Tui
         n = @host.session.scope.size
         edited = !edit_id.nil?
         verb = edited ? "updated" : "added"
-        # Confirm the write AND surface that the lens is still off (the common "I added
-        # a rule but nothing filtered" confusion — the space menu's Toggle scope lens enables it).
+        # Confirm the write AND say what the lens would do, since it is still off (the common
+        # "I added a rule but nothing filtered" confusion). Kept under the 59 columns an 80×24
+        # status row has, where a longer clause lost the whole hint.
         msg = "scope rule #{verb} — #{Gori.plural(n, "rule")}"
         unless @host.session.scope.enabled? || edited
-          msg += Hotkeys.expand_menu_paths(@host.session.registry, " · {space:scope.lens-toggle} to enable the lens")
+          msg += Hotkeys.expand_menu_paths(@host.session.registry, " · {space:scope.lens-toggle} filters to scope")
         end
         # An EDIT can black-hole the proxy too (flip the last include to an exclude), so
         # this path re-asks the same question the delete path does.

@@ -813,7 +813,7 @@ gori run project import acme-api.gori
 | 레이어 | 위치 | 우선순위 |
 |-------|-------|------------|
 | **Project** | **Project** 탭 → Host overrides 패널 (`a` / `e` / `d`) | 충돌 시 우선 |
-| **Global** | Preferences(`Ctrl-,`) → **Network & Tabs** → **Network** → **Hostname overrides**, `Ctrl-P` → **Settings: Hostnames**, 또는 `settings.json`의 `hostname_overrides` | 폴백 |
+| **Global** | Preferences(`Ctrl-,`) → **Network & Tabs** → **Network** → **Host overrides**, `Ctrl-P` → **Settings: Host overrides**, 또는 `settings.json`의 `hostname_overrides` | 폴백 |
 
 스테이징 호스트, IP 기반 가상 호스트, 또는 `Host` 헤더를 그대로 유지하면서 프로덕션 호스트명을 랩 박스로 향하게 할 때 유용합니다.
 
@@ -821,7 +821,7 @@ gori run project import acme-api.gori
 
 ## 업스트림 프록시 {#upstream-proxy}
 
-gori는 직접 접속하는 대신 다른 프록시를 거쳐 나갈 수 있습니다. 회사 이그레스, SOCKS 터널, 뒤에 이어 붙인 다른 도구 같은 경우입니다. Preferences(`Ctrl-,`) → **Network & Tabs** → **Network**에서 설정합니다. **Proxy protocol**(`None`, `HTTP`, `HTTP+TLS`, 이름을 로컬에서 해석하는 `SOCKS5`, 프록시에서 해석하는 `SOCKS5H`), **Proxy host**와 **Proxy port**, 그리고 `HTTP+TLS` 홉에 쓰는 **Proxy TLS CA**와 **Verify proxy TLS**입니다. 프로젝트는 `gori run project network set upstream_proxy=socks5h://127.0.0.1:1080`(옆에 `upstream_destination_host`, `upstream_auth`)으로 자기 값을 고정할 수 있고, 그 값은 해당 프로젝트에서만 전역 값보다 우선합니다. `upstream_rules`는 호스트별로 경로를 따로 정합니다. 프로토콜이 `None`이고 다른 설정이 호스트를 가져가지 않으면 gori는 환경의 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`를 따르며(`NO_PROXY`를 존중하고 localhost는 직접 접속), 지금 무엇이 적용되는지는 **Environment proxy** 행이 보여 줍니다. 키는 [설정 레퍼런스](/ko/reference/config/#network)에 있습니다.
+gori는 직접 접속하는 대신 다른 프록시를 거쳐 나갈 수 있습니다. 회사 이그레스, SOCKS 터널, 뒤에 이어 붙인 다른 도구 같은 경우입니다. Preferences(`Ctrl-,`) → **Network & Tabs** → **Network**에서 설정합니다. **Upstream proxy**(`None`, `HTTP`, `HTTP+TLS`, 이름을 로컬에서 해석하는 `SOCKS5`, 프록시에서 해석하는 `SOCKS5H`), **Proxy host**와 **Proxy port**, 그리고 `HTTP+TLS` 홉에 쓰는 **Proxy TLS CA**와 **Verify proxy TLS**입니다. 프로젝트는 `gori run project network set upstream_proxy=socks5h://127.0.0.1:1080`(옆에 `upstream_destination_host`, `upstream_auth`)으로 자기 값을 고정할 수 있고, 그 값은 해당 프로젝트에서만 전역 값보다 우선합니다. `upstream_rules`는 호스트별로 경로를 따로 정합니다. 프로토콜이 `None`이고 다른 설정이 호스트를 가져가지 않으면 gori는 환경의 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`를 따르며(`NO_PROXY`를 존중하고 localhost는 직접 접속), 지금 무엇이 적용되는지는 **Environment proxy** 행이 보여 줍니다. 키는 [설정 레퍼런스](/ko/reference/config/#network)에 있습니다.
 
 ## 프록시를 설정할 수 없는 클라이언트 {#clients-without-proxy}
 

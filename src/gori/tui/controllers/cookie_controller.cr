@@ -558,14 +558,14 @@ module Gori::Tui
         keys("↑/↓ scroll · {cookie.crack} crack · #{y} copy · ↑-top input · ↓ options · #{lens} forge · space cmds · esc sub-tabs")
       when :opts
         if effective_format(s) == "django"
-          keys("type salt · salt:#{salt_preset_label(s)} (click/space) · {cookie.cycle-format} format · algo #{effective_algorithm(s)} · ↑/↓ cross · #{lens} forge · ^P cmds · esc sub-tabs")
+          keys("type salt · salt:#{salt_preset_label(s)} (click/space) · {cookie.cycle-format} format · algo #{effective_algorithm(s)} · ↑/↓ cross · #{lens} forge · ^P palette · esc sub-tabs")
         else
-          keys("type salt · {cookie.cycle-format} format · ↑/↓ cross · #{lens} forge · ^P cmds · esc sub-tabs")
+          keys("type salt · {cookie.cycle-format} format · ↑/↓ cross · #{lens} forge · ^P palette · esc sub-tabs")
         end
       when :secret
-        keys("type secret · ^Y copy · {cookie.cycle-format} format · ↑/↓ cross · #{lens} forge · ^P cmds · esc sub-tabs")
+        keys("type secret · ^Y copy · {cookie.cycle-format} format · ↑/↓ cross · #{lens} forge · ^P palette · esc sub-tabs")
       when :payload
-        keys("type payload · ⇧arrows select · ^Y copy · ↑/↓ move+cross · {cookie.cycle-format} format · #{lens} decode · ^P cmds · esc sub-tabs")
+        keys("type payload · ⇧arrows select · ^Y copy · ↑/↓ move+cross · {cookie.cycle-format} format · #{lens} decode · ^P palette · esc sub-tabs")
       when :output
         keys("↑/↓ scroll · #{y} copy cookie · {cookie.cycle-format} format · #{lens} decode · space cmds · esc sub-tabs")
       else

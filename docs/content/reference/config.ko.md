@@ -532,7 +532,7 @@ TUI 맨 아래에 선택적으로 추가되는 행입니다 (Preferences → **G
 
 SNI, 인증서 호스트명, `Host` 헤더는 여전히 **원래** 이름을 유지합니다. 바뀌는 것은 TCP 연결 대상만입니다.
 
-Preferences → **Network & Tabs** → **Network** → **Hostname overrides**에서, 또는 프로젝트별 항목은 Project 탭에서 편집합니다. [Proxy & History](/ko/guide/proxy/#host-overrides)를 참고하세요.
+Preferences → **Network & Tabs** → **Network** → **Host overrides**에서, 또는 프로젝트별 항목은 Project 탭에서 편집합니다. [Proxy & History](/ko/guide/proxy/#host-overrides)를 참고하세요.
 
 ### env {#env}
 
@@ -938,7 +938,7 @@ salt는 **비밀**이며, `env`의 토큰 값과 같은 조건으로 보관됩�
 
 **Destination host**는 프록시 라우팅을 대소문자를 구분하지 않는 하나의 호스트 패턴으로 제한합니다. 기본값 `*`는 모든 목적지를 프록시 대상으로 허용합니다. `example.com`은 해당 호스트와 서브도메인을 포함하고, `*.example.com`은 서브도메인만 포함합니다. 도메인, IPv4, IPv6 및 `*` 기반 IP 패턴을 사용할 수 있습니다. 일치하지 않는 목적지는 항상 직접 연결되며 `upstream_rules`나 `network.upstream_proxy`로 폴백하지 않습니다. 이 게이트는 프로젝트가 활성화된 동안 캡처, 재생, 스캐너, 업데이터 및 OAST 트래픽을 포함해 gori가 여는 모든 연결에 적용됩니다.
 
-인증하려면 **Proxy protocol**을 고르고 **Proxy host**와 **Proxy port**를 입력한 뒤 **Proxy auth**를 켜고 **Username**과 **Password**를 입력합니다. **SOCKS5**는 대상 이름을 로컬에서, **SOCKS5H**는 프록시에서 해석합니다. HTTP는 Basic 인증을, 두 SOCKS 프로토콜은 RFC 1929 사용자명/비밀번호 인증을 사용합니다. NTLM은 지원하지 않습니다. 인증을 켜면 표시 중인 업스트림 주소가 전역 설정에서 상속된 값이더라도 항상 프로젝트에 고정됩니다. 따라서 나중에 전역 경로나 목적지 규칙이 바뀌어 자격증명이 다른 프록시로 전송되지 않습니다.
+인증하려면 **Upstream proxy** 프로토콜을 고르고 **Proxy host**와 **Proxy port**를 입력한 뒤 **Proxy auth**를 켜고 **Username**과 **Password**를 입력합니다. **SOCKS5**는 대상 이름을 로컬에서, **SOCKS5H**는 프록시에서 해석합니다. HTTP는 Basic 인증을, 두 SOCKS 프로토콜은 RFC 1929 사용자명/비밀번호 인증을 사용합니다. NTLM은 지원하지 않습니다. 인증을 켜면 표시 중인 업스트림 주소가 전역 설정에서 상속된 값이더라도 항상 프로젝트에 고정됩니다. 따라서 나중에 전역 경로나 목적지 규칙이 바뀌어 자격증명이 다른 프록시로 전송되지 않습니다.
 
 비밀번호는 **Password** 행에 포커스가 있어 편집하는 동안 표시되고, 포커스가 벗어나면 다시 마스킹됩니다. 캡처된 engagement 데이터와 함께 소유자 전용(`0600`) 프로젝트 SQLite 데이터베이스에는 평문으로 저장됩니다. 프로젝트에 비밀을 저장하면 안 되는 경우 `password_env`를 쓰는 전역 `upstream_rules` 항목을 사용하세요. 일치하는 목적지에서는 잘못되거나 업스트림 주소 없이 남은 프로젝트 인증 값이 원 서버 연결 전에 fail-closed 처리됩니다.
 

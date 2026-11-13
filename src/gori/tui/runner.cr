@@ -3239,11 +3239,12 @@ module Gori::Tui
       Runner.scope_chip(@scope.active?, @scope.size)
     end
 
-    # `scope:N` while the lens filters. Off, a bare `scope:off` read as "the rules did nothing"
-    # right after adding one, so rules waiting on the lens show as `scope:off(N)` — the
-    # `intercept:on(N)` shape, and still `:off`-muted (see `Chrome.top_bar_chips`).
+    # One on/off form, shared with `intercept:on(N)`: `scope:on(N)` while the lens filters,
+    # `scope:off(N)` while N rules wait on it (a bare `scope:off` read as "the rules did
+    # nothing" right after adding one), `scope:off` with none. A bare `scope:N` said neither
+    # on nor off. Off stays `:off`-muted (see `Chrome.top_bar_chips`).
     def self.scope_chip(active : Bool, rules : Int32) : String
-      return "scope:#{rules}" if active
+      return "scope:on(#{rules})" if active
       rules > 0 ? "scope:off(#{rules})" : "scope:off"
     end
 
@@ -3409,7 +3410,7 @@ module Gori::Tui
       when .detail?  then history_controller.body_hint(:body)
       else
         # Focus on the far-right `0:Tabs` stop: ↵/↓ opens the Go-to picker, same as the key.
-        return "↵/↓ go to tab… · ← back · ^P cmds · q projects" if @focus == :menu && @menu_more
+        return "↵/↓ go to tab… · ← back · ^P palette · q projects" if @focus == :menu && @menu_more
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
         #
         # `c` and `i` earn their place here even though they are Global verbs reachable from
@@ -3417,13 +3418,15 @@ module Gori::Tui
         # keypress lands on one of them — and both change what the PROXY does, from a tab that
         # shows neither: `i` starts holding every request, `c` stops recording entirely. They
         # were the only unadvertised keys at this focus with an effect outside the current tab.
-        # `{help.hotkeys}` sits in the escape-hatch tail with `^P cmds`, which Chrome.fit_hints keeps
-        # when the row is narrow: it drops the head's extras first.
+        # `{help.hotkeys}` sits in the escape-hatch tail with `^P palette`, which Chrome.fit_hints keeps
+        # when the row is narrow: it drops the head's extras first, right to left. `q projects`
+        # is the head's LAST segment so it is the first to go: at 80×24 the row has 59 columns
+        # beside the companion, and after it `↹/↵ enter` still fits there.
         #
         # Seven tokens, so the CPU/MEM readout keeps its room at a common width (it yields to
         # hints — Chrome::YIELDING_CHIPS). Not here: `1-9/0 tabs`, which the bar's own `1:`…`0:Tabs`
         # labels already say, and `^D quit`, which Help lists and the project picker offers.
-        return Hotkeys.expand(@session.registry, "←/→ switch tab · ↹/↵ enter · {capture.toggle} capture · {intercept.toggle} intercept · ^P cmds · {help.hotkeys} help · q projects") if @focus == :menu
+        return Hotkeys.expand(@session.registry, "←/→ switch tab · ↹/↵ enter · {capture.toggle} capture · {intercept.toggle} intercept · q projects · ^P palette · {help.hotkeys} help") if @focus == :menu
         if @focus == :subtabs
           # On the ⌕ affordance the strip's own keys are the wrong story — ↵ lists every
           # sub-tab here instead of entering one. Only ever reached when the pill is really
@@ -3469,7 +3472,7 @@ module Gori::Tui
     # least to go on.
     private def body_hints : String
       fallback = String.build do |s|
-        s << "↹/esc tabs · ^P cmds · "
+        s << "↹/esc tabs · ^P palette · "
         s << "q projects · " if back_key_live?
         s << "^D quit"
       end
@@ -5971,10 +5974,15 @@ module Gori::Tui
       (@active_tab == :notes && @focus == :body) || notes_controller.view.dirty?
     end
 
+    CAPTURE_OFF_TOAST = "proxy stopped"
+
     def toggle_capture : Nil
       if @session.capturing?
         @session.toggle_capture # => false (now off); keeps the project lock
-        @toast = "capture off"
+        # `c` closes the listener, so the toast says that and not "capture off", which read as
+        # "recording paused" while the browser lost its proxy. Short on purpose: with the key
+        # note and READ's note it still has to fit the tab bar's 59 columns at 80×24.
+        @toast = CAPTURE_OFF_TOAST
       elsif @session.toggle_capture
         @toast = "capture on"
       else

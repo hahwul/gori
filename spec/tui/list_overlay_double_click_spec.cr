@@ -8,7 +8,7 @@ include Gori::Tui
 
 # The modal LIST cards answer a double-click on a row with what ↵ does there. Two shapes:
 #
-#   * Settings › Hostname overrides / Env open the row's inline editor and stay up (`:stay`);
+#   * Settings › Host overrides / Env open the row's inline editor and stay up (`:stay`);
 #   * the Authorize identities and History columns lists hand off to a FORM — they arm
 #     `pending` and close (`:cancel`), and the Runner's `on_close` opens the form.
 #
