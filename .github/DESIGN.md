@@ -5498,3 +5498,35 @@ Found by running `gori run` the way a script does.
   only identities that change a request, which is what the run reports; MCP's cap stays on
   `send_bound` (flows × identities), because the engine re-decides each send.
 
+### 2026-11-13: found by using it cold (a palette, a paging field, three hints, a name bridge)
+
+Four evaluators used each surface from its own help and hints alone, then the top claims were
+reproduced. Refines the palette order of 2026-09-25 and the `readOnlyHint` entry above.
+
+- **The way back to where an issue was filed waits for the `esc` that leaves it.** The one-shot
+  ran before the detail's own keys, so the NOTES editor's `esc` (INS saves) returned to History
+  and dropped the note. `IssuesView#esc_closes_detail?` gates it; working in the issue does
+  not disarm it, but closing the detail does (`detail_opens`): reopened from the list later,
+  the same issue's `esc` is the ordinary one.
+- **A palette row that says the query drops the rows that only scatter it.** Group order is
+  unchanged (the tab's rows, then Global's). `Registry.strong?`: a run of the title or id, the
+  start of a keyword, or every word of a several-word query one of those. With no such row the
+  scattered ones stay, since that is how an abbreviation is typed, and the cursor starts on
+  the first row that is not `:danger` or `:wipe`. A keyword still ranks under a title word.
+- **The palette prints a chord as every footer does** (`Hotkeys.display_label`). `Chord#label`
+  stays `ctrl-r`: it is the settings keymap's spelling and round-trips through `Chord.parse`.
+- **An offset-paged list names its own continuation: `next_offset`,** null when nothing
+  follows. A running job's result rows keep it set with `has_more:false`, because rows held
+  behind `rows_pending` join the end. `list_history` keeps its cursor (`next_before_id`).
+- **A writer states a hint only when the answer is the safe one.** `open_world: false`,
+  `destructive: false` and `idempotent: true` are opt-in on `@[Tool]`, and the macro refuses the
+  other value, so an unclassified tool keeps the spec's default and can only over-warn.
+  `destructive: false` is not given to a row that widens or changes what gori may send or
+  where it dials (`add_scope_rule`, `add_host_override`, `create_oast_provider`,
+  `create_extract_rule`), and CRUD on a rule kind that runs a command stays unstated.
+- **`gori run` answers an MCP tool name with its own command,** derived from the `-h` rows and
+  only ever a path that is listed there: no suggestion beats a wrong one, so a subcommand's
+  unknown verb is answered only with that subcommand's own. The verb registry stays TUI-only.
+- **A not-found under `--json` prints the object `send` prints** (`Run.failure_json`), coded
+  `NOT_FOUND` as MCP codes it. Single-document readers only: a usage error stays a stderr line
+  and an empty list stays `[]`.

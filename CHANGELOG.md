@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Issues: `esc` in the notes editor of an issue you just filed saves the note instead of jumping back to the tab it was filed from and discarding it; the way back waits for the `esc` that leaves the issue
+- MCP: every offset-paged list returns `next_offset`, the `offset` that continues it (null at the end), and a tool that only touches the project's own store says `openWorldHint:false`, a purely additive one `destructiveHint:false` and an on/off setter `idempotentHint:true`
+- CLI: `gori run` answers an MCP tool name with the command it means (`gori run list_history` names `gori run history`), and under `--json` a reader given an id that does not exist (`show`, `issues show`, `repeater show`, `evidence show`, `fuzz show`, …) prints `{"ok":false,"error_code":"NOT_FOUND",…}` on stdout as `send` does, still exiting 1
 - Sequencer: fewer than 20 tokens rate INCONCLUSIVE (`only N usable tokens — need ≥ 20`) in `gori run sequence`, MCP and the Sequencer tab, instead of a CRITICAL or WEAK that the sample size alone produced; a repeated or sequential token still rates CRITICAL, and the tab will not file an inconclusive report as an issue (#1875)
 - Authorize: `gori run authorize` and MCP `authorize_start` count only the requests that go on the wire, so an identity that changes nothing about a request is no longer counted as a send (#1875)
 - JWT, Cookie: `gori run jwt` and `gori run cookie` decode the token in a value pasted straight from an `Authorization`, `Cookie` or `Set-Cookie` header (`Bearer …`, `session=…`, `…; Path=/`) instead of decoding the whole value as garbage, and `gori run cookie` exits 1 when no payload in it decodes (#1875)
@@ -40,7 +43,7 @@
 - TUI: an empty Intercept queue's footer names the keys that set up a catch, a Miner that has not run shows no empty progress bar or tally, the Rewriter's sub-tabs look like every other strip, the Fuzzer's CONFIG text no longer touches its border, a narrow header keeps a `·` between the project name and the chips, and Probe's closed toggle follows the severity counts as `+CLOSED` (#1863)
 - TUI: an empty note's card says how to start writing, Target's Diff shows a card like the other tabs until a baseline is picked, an empty Rewriter names its presets, an empty Issues list no longer offers Open, and the two labels on an empty card line up (#1854)
 - Help: `?` opens the shortcuts as a popup over the pane you are in, starting at that tab's section, and `?` again inside it opens the Help tab (#1852)
-- TUI: `^P` and the `0` tab picker find a tab by what other tools call it, such as intruder, scanner, collaborator or param miner (#1852)
+- TUI: `^P` and the `0` tab picker find a tab by what other tools call it, such as intruder, scanner, collaborator or param miner, and `^P` finds everyday words and several-word queries (`proxy`, `port`, `diff`, `copy as curl`, `dark mode`). It drops scattered-letter matches once a command contains what you typed, so `cert` opens on Copy CA certificate path rather than Clear history, and writes shortcuts as `^R` and `⇧X` (#1852)
 - TUI: pressing `c` or `i` by accident now shows which key turns capture back on or intercept off, and the menus read Send to Repeater and Send request and spell sub-tab one way (#1852, #1855)
 - TUI: on a narrow terminal the Intercept queue footer keeps forward, drop and edit ahead of mark and range, and the flow detail, Params, empty Discover, JWT, Cookie and Fuzzer CONFIG footers keep the menu and the key that leaves the pane (#1853, #1857, #1860)
 - History: with no flows yet, `Space` offers Open browser instead of Mark all and Clear history, the footer names the way to it, and the card adds the Import route (#1853)
