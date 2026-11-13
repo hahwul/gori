@@ -235,6 +235,8 @@ describe Gori::MCP::Server do
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_decode","arguments":{"token":"Bearer #{jwt}"}}})
         resp = mcp_drive(store, call, allow_actions: false)[0]
         resp["result"]["isError"]?.should_not be_true
+        # The HEADER is the half that broke: the claims decoded either way, `Bearer eyJ…` did not.
+        mcp_tool_payload(resp)["alg"].as_s.should eq("HS256")
         mcp_tool_payload(resp)["payload"]["sub"].as_s.should eq("1")
       end
     end
