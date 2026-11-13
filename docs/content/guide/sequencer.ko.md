@@ -48,7 +48,7 @@ session cookie, CSRF token, 비밀번호 리셋 코드, API key가 예측 가능
 
 **중복**되거나 **순차적인** token이 하나라도 있으면 entropy가 아무리 높아 보여도 판정이 곧바로 Critical로 떨어집니다. 내부적으로 gori는 token의 심볼 bitstream에 대해 일련의 통계 테스트(monobit, poker, runs, longest-run, per-bit 편향, cumulative sums, approximate entropy, spectral)를 실행하고, byte 빈도에 대한 chi-square, lag-1 serial correlation, 알파벳의 entropy 하한과 대조하는 압축 검사를 함께 수행합니다. p-value로 판정하는 테스트들은 Bonferroni 보정된 임계값을 공유하므로, 테스트가 늘어나도 정상적인 token이 잘못 걸릴 확률은 올라가지 않습니다.
 
-샘플이 작으면(사용 가능한 token이 약 20개 미만) 확실히 판단할 데이터가 부족하므로, 강한 실패를 경고로 완화하고 등급의 상한을 제한합니다.
+샘플이 작으면(사용 가능한 token이 20개 미만) 강한 실패를 경고로 완화하고, 등급을 추측하지 않고 **Inconclusive**로 둡니다. 이 크기에서는 token이 아니라 샘플 크기가 entropy 수치를 정하기 때문입니다. 중복 token이 있으면 여전히 Critical입니다.
 
 ### 구조는 비밀이 아닙니다 {#structure-is-not-secret}
 

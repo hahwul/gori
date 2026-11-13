@@ -176,7 +176,7 @@ module Gori
       private def jwt_decode_tool(h) : Result
         token = str(h, "token")
         return Result.new("missing required 'token'", is_error: true) if token.nil? || token.strip.empty?
-        t = token.strip
+        t = Jwt.locate(token) # `Bearer <t>` pasted from a header decodes its token, as `gori run jwt`
         return Result.new(Jwt::NOT_DECODABLE, is_error: true) unless Jwt.decodable?(t)
         Result.new(Jwt.decode_json(t))
       end

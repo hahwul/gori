@@ -230,6 +230,15 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "jwt_decode decodes the token in a value pasted from an Authorization header" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_decode","arguments":{"token":"Bearer #{jwt}"}}})
+        resp = mcp_drive(store, call, allow_actions: false)[0]
+        resp["result"]["isError"]?.should_not be_true
+        mcp_tool_payload(resp)["payload"]["sub"].as_s.should eq("1")
+      end
+    end
+
     it "jwt_encode re-signs and the signature verifies with the given secret" do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_encode","arguments":{"token":"#{jwt}","alg":"HS256","secret":"hunter2"}}})

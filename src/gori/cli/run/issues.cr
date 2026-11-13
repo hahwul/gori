@@ -99,7 +99,8 @@ module Gori
           end
           # `text` to STDOUT only: every other format has a meaningful empty document (an empty
           # JSON array, a header-only report, a SARIF log with `results: []` — which is how a CI
-          # gate learns the scan RAN and found nothing), and an --export always writes a file.
+          # gate learns the scan RAN and found nothing), and an --export always writes its document
+          # (to the file, or to stdout for `-`).
           if issues.empty? && format == :text && export_path.nil?
             STDERR.puts query.try { |qq| "no issues match #{qq.inspect}" } || "no issues"
             return

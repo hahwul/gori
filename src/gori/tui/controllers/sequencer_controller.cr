@@ -631,7 +631,14 @@ module Gori::Tui
                ""
              end
       msg = "Sequencer: #{Gori.plural(n, "token")} on #{v.summary} — #{rep.rating.label}#{tail}"
-      level = rep.rating.critical? || rep.rating.weak? ? :warning : :success
+      # Too few tokens to grade is neither a finding nor a pass, so it is not a green check.
+      level = if rep.rating.critical? || rep.rating.weak?
+                :warning
+              elsif rep.rating.inconclusive?
+                :info
+              else
+                :success
+              end
       log_event(v, level, msg)
       push_notification(v, level, msg, collected: n)
       @host.status(msg) if v.config.notify.posts_notification?(n)

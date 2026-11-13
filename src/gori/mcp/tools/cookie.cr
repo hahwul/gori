@@ -13,7 +13,8 @@ module Gori
       private def cookie_decode_tool(h) : Result
         cookie = str(h, "cookie")
         return Result.new("missing required 'cookie'", is_error: true) if cookie.nil? || cookie.strip.empty?
-        Result.new(Cookie.decode_json(cookie.strip, cookie_format(h)))
+        # A value pasted from a `Cookie`/`Set-Cookie` header decodes its cookie, as `gori run cookie`.
+        Result.new(Cookie.decode_json(Cookie.locate(cookie) || cookie.strip, cookie_format(h)))
       rescue ex : Cookie::CookieError
         Result.new(ex.message || "not a decodable cookie", is_error: true)
       end
