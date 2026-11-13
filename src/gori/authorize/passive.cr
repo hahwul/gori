@@ -107,15 +107,28 @@ module Gori
       # put in a run summary.
       def self.any_identity_changes?(detail : Store::FlowDetail,
                                      identities : Array(Identity)) : Bool
-        return false if identities.size < 2
+        each_changing_identity(detail, identities) { return true }
+        false
+      end
+
+      # How many identities besides the baseline change this flow: the ones `Engine#send_one`
+      # sends rather than records as `NoEffect`.
+      def self.changing_identity_count(detail : Store::FlowDetail, identities : Array(Identity)) : Int32
+        n = 0
+        each_changing_identity(detail, identities) { n += 1 }
+        n
+      end
+
+      private def self.each_changing_identity(detail : Store::FlowDetail, identities : Array(Identity), &) : Nil
+        return if identities.size < 2
         head = detail.request_head
         base_id = identities.find(&.baseline?) || identities.first
         # A context per identity, dial-less: nothing here goes on a wire, and a `$GEN` value
         # differing between two identities is not what this predicate asks about.
         base = SessionSlot.overlay_head(head, Authorize.resolve_without_report(base_id, Env::Generation.new))
-        identities.any? do |id|
-          next false if id.same?(base_id)
-          SessionSlot.overlay_head(head, Authorize.resolve_without_report(id, Env::Generation.new)) != base
+        identities.each do |id|
+          next if id.same?(base_id)
+          yield if SessionSlot.overlay_head(head, Authorize.resolve_without_report(id, Env::Generation.new)) != base
         end
       end
 

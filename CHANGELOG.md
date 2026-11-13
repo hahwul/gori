@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Authorize: `gori run authorize` and MCP `authorize_start` count only the requests that go on the wire, so an identity that changes nothing about a request is no longer counted as a send
 - JWT, Cookie: `gori run jwt` and `gori run cookie` decode the token in a value pasted straight from an `Authorization`, `Cookie` or `Set-Cookie` header (`Bearer …`, `session=…`, `…; Path=/`) instead of decoding the whole value as garbage, and `gori run cookie` exits 1 when no payload in it decodes
 - Redaction: `gori run redact rm` refuses the profile a safe export is set to use, a configured profile that no longer exists names `redact use` as the way out, and `gori run redact --help` lists the other subcommands
 - Issues: `gori run issues --export -` writes the report to stdout, with the count on stderr, instead of a file named `-`
