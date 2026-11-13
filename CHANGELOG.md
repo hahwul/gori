@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fuzzer: `gori run fuzz --fail-if-no-matches` exits 1, not 3, when every send errored, so a dead target no longer reads as a run that matched nothing
 - TUI: hints name the key that is true where they are shown (Sitemap's `↵` on a folder, Project settings' proxy rows, the project picker's delete dialog, Evidence's issue picker, an empty Activity feed, the Sequencer's empty card), and turning on request-beside-response in a pane too narrow to split says so (#1874)
 - TUI: Preferences keeps a one-row section's row on screen (Reset, Hotkeys, Tabs), the hotkey editor asks once before `esc` discards a rebind, opening a Repeater row from Activity lands on that sub-tab, a project's Created no longer moves each time it is opened, and Cookie's decode reads verified once the secret checks out (#1874)
 - TUI: a new note no longer shows the previous note's links, `↵` on a notification with nowhere to jump opens its full text, the flow detail's pane chips stay inside a narrow pane, and what gori says about a flow there wraps instead of being cut (#1873)
