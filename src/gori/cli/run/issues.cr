@@ -74,7 +74,7 @@ module Gori
           p.on("--count", "Print how many issues match instead of listing them") { count_only = true }
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text, as the TUI bar does") { lenient = true }
           format_flag(p, [:text, :json, :markdown, :sarif], "Output: text (default) | json | markdown | sarif") { |f| format = f }
-          p.on("--export=PATH", "Write to PATH instead of STDOUT") { |v| export_path = v }
+          p.on("--export=PATH", "Write to PATH instead of STDOUT (`-` = STDOUT, with the count on STDERR)") { |v| export_path = v }
           p.on("--include-sensitive", "Emit Authorization/Cookie/Set-Cookie/API-key values in --format sarif's webRequest/webResponse headers instead of [REDACTED]") { include_sensitive = true }
         end
         query = issues_list_query(positional, query, neg_terms, lenient)
@@ -143,14 +143,21 @@ module Gori
         end
       end
 
-      private def self.write_issues_report(content : String, count : Int32, export_path : String?) : Nil
-        if path = export_path
+      private def self.write_issues_report(content : String, count : Int32, export_path : String?,
+                                           stdout : IO = STDOUT, stderr : IO = STDERR) : Nil
+        if export_path == "-"
+          # The file's bytes on STDOUT, for a pipe; the count goes to STDERR so STDOUT is only
+          # the document. A terminal still gets them scrubbed, for the reason below.
+          doc = stdout.tty? ? Issues::Export.scrub_controls(content) : content
+          stdout.print(doc.ends_with?('\n') ? doc : "#{doc}\n")
+          stderr.puts "exported #{Gori.plural(count, "issue")} → stdout"
+        elsif path = export_path
           begin
             File.write(path, content.ends_with?('\n') ? content : "#{content}\n")
           rescue ex : IO::Error
             abort "gori run issues: cannot write to #{path}: #{ex.message}"
           end
-          STDERR.puts "exported #{Gori.plural(count, "issue")} → #{path}"
+          stderr.puts "exported #{Gori.plural(count, "issue")} → #{path}"
         else
           # Neutralize terminal escape sequences before writing to STDOUT/a TTY: the markdown
           # report embeds attacker-controlled evidence bodies (proxied traffic) and free-text
@@ -158,7 +165,7 @@ module Gori
           # terminal (window-title spoof, OSC 52 clipboard write). Newlines/tabs are preserved,
           # so structure is intact. File export (above) keeps the bytes verbatim — a saved file
           # is not a live terminal, and stripping would corrupt captured evidence.
-          puts Issues::Export.scrub_controls(content)
+          stdout.puts Issues::Export.scrub_controls(content)
         end
       end
 

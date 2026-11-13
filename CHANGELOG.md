@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Issues: `gori run issues --export -` writes the report to stdout, with the count on stderr, instead of a file named `-`
 - Decoder: `gori run decoder` says on stderr when a result that is not text is printed re-encoded as base64 or hex, so a decode that prints its own input no longer passes for one that did nothing
 - Fuzzer: `gori run fuzz --fail-if-no-matches` exits 1, not 3, when every send errored, so a dead target no longer reads as a run that matched nothing
 - TUI: hints name the key that is true where they are shown (Sitemap's `↵` on a folder, Project settings' proxy rows, the project picker's delete dialog, Evidence's issue picker, an empty Activity feed, the Sequencer's empty card), and turning on request-beside-response in a pane too narrow to split says so (#1874)
