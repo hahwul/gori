@@ -3164,9 +3164,11 @@ module Gori
       # The pagination fields of an object-returning list tool, in the order they all use:
       # returned/offset/limit and the clamp echo, `cut_by` when REPLY_ROWS_BUDGET ended the page
       # before `limit` did (`fit_rows`), then — given a `total` — that total under `total_key`
-      # and `has_more`/`next_offset`. A caller with no `total` says them itself (`emit_more`).
+      # and `has_more`/`next_offset` (`live` as `emit_more`). A caller with no `total` says them
+      # itself (`emit_more`).
       private def emit_page(j : JSON::Builder, pg : Page, returned : Int32,
-                            total : Int? = nil, total_key : String = "total", cut : Bool = false) : Nil
+                            total : Int? = nil, total_key : String = "total", cut : Bool = false,
+                            live : Bool = false) : Nil
         j.field "returned", returned
         j.field "offset", pg.offset
         j.field "limit", pg.limit
@@ -3174,7 +3176,7 @@ module Gori
         emit_cut(j, cut)
         return unless total
         j.field total_key, total
-        emit_more(j, pg.offset.to_i64 + returned < total, pg.offset.to_i64 + returned)
+        emit_more(j, pg.offset.to_i64 + returned < total, pg.offset.to_i64 + returned, live: live)
       end
 
       private def severity_from(s : String?) : Store::Severity?

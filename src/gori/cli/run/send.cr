@@ -83,7 +83,7 @@ module Gori
           p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
           p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
           p.on("--grpc-field PATH=VALUE", GRPC_FIELD_HELP) { |v| grpc_fields << v }
-          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
+          format_flag(p, [:text, :json], "Output: text (default) | json. For the #{RAW_ROUTE}", {:raw, RAW_ROUTE}) { |f| format = f }
         end
         refresh_verify_upstream(!insecure)
 

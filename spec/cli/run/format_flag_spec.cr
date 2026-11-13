@@ -44,10 +44,19 @@ describe "gori run --format / --json (#1386)" do
       next if FORMAT_FLAG_EXEMPT.includes?(File.basename(path))
       File.read_lines(path).each_with_index do |line, i|
         next if line.lstrip.starts_with?('#')
-        next if line.includes?("set.call(parse_format(v, allowed))") # `format_flag` itself
+        next if line.includes?("set.call(parse_format(v, allowed, refused))") # `format_flag` itself
         bare << "#{path.sub(root, "src/gori/cli")}:#{i + 1}" if line.includes?(".on(\"--format")
       end
     end
     bare.should eq([] of String)
+  end
+
+  # `--format raw` is `show`'s alone; a sender's refusal names the way there (`RAW_ROUTE`).
+  it "points a sender's refused --format raw at show" do
+    Gori::CLI::Run::RAW_ROUTE.should contain("--record-history")
+    Gori::CLI::Run::RAW_ROUTE.should contain("gori run show <flow-id> --format raw")
+    root = File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run")
+    File.read(File.join(root, "send.cr")).scan("{:raw, RAW_ROUTE}").size.should eq(1)
+    File.read(File.join(root, "repeater.cr")).scan("{:raw, RAW_ROUTE}").size.should eq(2) # <flow-id>, send
   end
 end

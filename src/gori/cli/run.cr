@@ -2118,9 +2118,11 @@ module Gori
       # option; registering both here is what keeps it on every command that takes `--format`.
       # `spec/cli/run/format_flag_spec.cr` fails on a bare `p.on("--format=…")` that bypasses
       # it. A command whose `--format` does not offer `json` gets no `--json` (it would only
-      # ever refuse).
-      private def self.format_flag(p : OptionParser, allowed : Array(Symbol), help : String, &set : Symbol ->) : Nil
-        p.on("--format=FMT", help) { |v| set.call(parse_format(v, allowed)) }
+      # ever refuse). `refused` = a {format, note} pair: the note follows the refusal of that
+      # one format, naming where it does exist (`RAW_ROUTE`).
+      private def self.format_flag(p : OptionParser, allowed : Array(Symbol), help : String,
+                                   refused : {Symbol, String}? = nil, &set : Symbol ->) : Nil
+        p.on("--format=FMT", help) { |v| set.call(parse_format(v, allowed, refused)) }
         p.on("--json", "Same as --format=json") { set.call(:json) } if allowed.includes?(:json)
       end
 
@@ -2180,7 +2182,10 @@ module Gori
         CLI.option_parser(prefix, "#{prefix}: ") { |p| yield p }
       end
 
-      private def self.parse_format(v : String, allowed : Array(Symbol)) : Symbol
+      # A sender's way to the exact response bytes, which only `show` prints (`--format raw`).
+      RAW_ROUTE = "exact response bytes: add --record-history, then `gori run show <flow-id> --format raw`"
+
+      private def self.parse_format(v : String, allowed : Array(Symbol), refused : {Symbol, String}? = nil) : Symbol
         sym = case v.downcase
               when "text"                         then :text
               when "json"                         then :json
@@ -2200,7 +2205,10 @@ module Gori
               when "urls"                         then :urls
               else                                     abort "gori run: unknown --format '#{v}'"
               end
-        abort "gori run: --format #{v} not valid here (use #{allowed.join("|")})" unless allowed.includes?(sym)
+        unless allowed.includes?(sym)
+          note = refused.try { |(f, n)| " — #{n}" if f == sym }
+          abort "gori run: --format #{v} not valid here (use #{allowed.join("|")})#{note}"
+        end
         sym
       end
 

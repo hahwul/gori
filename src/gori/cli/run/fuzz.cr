@@ -277,7 +277,7 @@ module Gori
         # `--flow` used to skip this and `--request` then skipped `open_store`, so
         # `--slot` / `--bind-from` lied with SLOT_NO_PROJECT despite `--project`.
         hydrate_project_env(proj.name, proj.db) if project_named?(proj.name, proj.db)
-        seed = fuzz_source(flow_id, repeater_id, request_file, proj.name, proj.db)
+        seed = fuzz_source(flow_id, repeater_id, request_file, proj.name, proj.db, format)
         text = seed.text
         default_target = seed.target
         evidence = seed.evidence
@@ -747,16 +747,16 @@ module Gori
       # the host: `FlowRequest.seed_sni`) and is a DEFAULT —
       # an explicit `--sni` still wins.
       private def self.fuzz_source(flow_id : Int64?, repeater_id : Int64?, request_file : String?,
-                                   project_name : String?, db_path : String?) : FuzzSeed
+                                   project_name : String?, db_path : String?, format : Symbol = :text) : FuzzSeed
         if file = request_file
           FuzzSeed.new(read_input_file(file, "gori run fuzz"), nil, false, false, nil)
         elsif rid = repeater_id
-          fuzz_source_repeater(rid, project_name, db_path)
+          fuzz_source_repeater(rid, project_name, db_path, format)
         elsif id = flow_id
           detail = with_store(resolve_read_project(project_name, db_path), read_only: true) do |store|
             store.get_flow(id)
           end
-          abort "gori run fuzz: no flow ##{id}" unless detail
+          not_found_abort("gori run fuzz", "no flow ##{id}", format) unless detail
           built = Repeater::FlowRequest.build(detail)
           # The sweep runs against a request line gori changed, so say so — see
           # `warn_request_line_rewrite`. No flag here: unlike the repeater there is no
@@ -803,7 +803,7 @@ module Gori
       # would not sweep it. It now seeds the handshake AND the session's outbound frames, and
       # the frames are where the positions go.
       private def self.fuzz_source_repeater(id : Int64, project_name : String?,
-                                            db_path : String?) : FuzzSeed
+                                            db_path : String?, format : Symbol) : FuzzSeed
         rec, ws_rows, evidence = with_store(resolve_read_project(project_name, db_path), read_only: true) do |store|
           r = store.get_repeater(id)
           # Fetched while the store is open, and only for a session that IS one — the same
@@ -811,7 +811,7 @@ module Gori
           rows = r && Repeater::WsEngine.replayable?(String.new(r.request)) ? store.ws_messages_for_repeater(id) : nil
           {r, rows, r ? Repeater::DraftMarkers.evidence?(store, r) : false}
         end
-        abort "gori run fuzz: no repeater session ##{id}" unless rec
+        not_found_abort("gori run fuzz", "no repeater session ##{id}", format) unless rec
         # `evidence` per FRAME mirrors `cmd_repeater_send_ws`: a session SEEDED from a captured
         # flow holds the client's recorded frames (evidence), while one built from
         # `--request-raw` or MCP `ws_out_messages` holds the operator's draft (not).

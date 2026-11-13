@@ -1377,15 +1377,21 @@ describe "gori run <reader> --format json — a not-found id" do
       %({"ok":false,"error":"x","error_kind":"scope","error_code":"SCOPE_BLOCKED","retryable":false,"delivered":false}))
   end
 
+  # …and every reader keyed by a parent id, and every resend of a named flow or session.
   it "routes every single-document reader's not-found through not_found_abort" do
     root = File.join(__DIR__, "..", "..", "src", "gori", "cli", "run")
     {
-      "history.cr" => "gori run show", "issues.cr" => "gori run issues show",
-      "repeater.cr" => "gori run repeater show", "evidence.cr" => "gori run evidence show",
-      "notes.cr" => "gori run notes", "fuzz_saved.cr" => "gori run fuzz show",
-      "retest.cr" => "gori run retest show", "session.cr" => "gori run session show",
-      "wordlist.cr" => "gori run wordlist show", "intercept.cr" => "gori run intercept get",
-      "compare.cr" => "gori run compare",
+      {"history.cr", "gori run show"}, {"issues.cr", "gori run issues show"},
+      {"repeater.cr", "gori run repeater show"}, {"evidence.cr", "gori run evidence show"},
+      {"notes.cr", "gori run notes"}, {"fuzz_saved.cr", "gori run fuzz show"},
+      {"retest.cr", "gori run retest show"}, {"session.cr", "gori run session show"},
+      {"wordlist.cr", "gori run wordlist show"}, {"intercept.cr", "gori run intercept get"},
+      {"compare.cr", "gori run compare"},
+      {"links.cr", "gori run links"}, {"evidence.cr", "gori run evidence"},
+      {"repeater.cr", "gori run repeater"}, {"repeater.cr", "gori run repeater send"},
+      {"repeater_minimize.cr", "gori run repeater minimize"}, {"fuzz.cr", "gori run fuzz"},
+      {"mine.cr", "gori run mine"}, {"sequence.cr", "gori run sequence"},
+      {"authorize.cr", "gori run authorize"},
     }.each do |file, prefix|
       File.read(File.join(root, file)).should contain("not_found_abort(\"#{prefix}\""), failure_message: file
     end

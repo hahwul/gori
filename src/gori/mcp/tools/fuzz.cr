@@ -771,6 +771,29 @@ module Gori
         notes.empty? ? nil : notes.join("; ")
       end
 
+      # The NoTarget sentence of `fuzz_start`, `mine_start` and `sequence_start`. An agent reads
+      # a template's Host header as its target, and one evaluator lost a call to it: the plan
+      # never takes it (a header names no scheme), so the refusal says why when there is one.
+      # The echoed Host is the caller's text: scrubbed, one line, clipped.
+      private def no_target_message(template : (String | Bytes)?) : String
+        plain = "provide a 'url' target (scheme://host) or a flow_id that carries one"
+        text = template.is_a?(Bytes) ? String.new(template) : template
+        host = text.try { |t| template_host(t) }
+        return plain unless host
+        %(#{plain} — a template's Host header does not choose the target (it carries no scheme), e.g. url:"https://#{host}")
+      end
+
+      # The first Host header value of a hand-authored head (CRLF or bare LF), or nil.
+      private def template_host(text : String) : String?
+        text.each_line do |line|
+          break if line.empty?
+          name, sep, value = line.partition(':')
+          next if sep.empty? || name.compare("host", case_insensitive: true) != 0
+          return Serialize.text(value).gsub(/[\x00-\x1f\x7f]/, "").strip[0, 80].presence
+        end
+        nil
+      end
+
       # MCP's wording for a plan the args can't produce — the builder reports the
       # machine-readable `reason`, the sentence (and the arg names it points at) is ours.
       # `template` is the seeded text, needed only to tell the two NoPositions cases apart.
@@ -794,7 +817,7 @@ module Gori
             end
           end
         in Fuzz::PlanError::Reason::NoTarget
-          "provide a 'url' target (scheme://host) or a flow_id that carries one"
+          no_target_message(template)
         in Fuzz::PlanError::Reason::BadTarget
           ex.message.to_s # names the host it could not parse, or the scheme it refused
         in Fuzz::PlanError::Reason::NoPayloads

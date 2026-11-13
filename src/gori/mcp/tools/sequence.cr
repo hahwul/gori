@@ -248,15 +248,15 @@ module Gori
           overrides: HostOverrides.load(store))
         Sequencer::Plan.build(options, ob)
       rescue ex : Sequencer::PlanError
-        raise FuzzArgError.new(sequence_plan_error(ex))
+        raise FuzzArgError.new(sequence_plan_error(ex, bytes))
       end
 
       # MCP's wording for a collection the args can't produce — the builder reports the
       # machine-readable `reason`, the sentence (and the arg names it points at) is ours.
-      private def sequence_plan_error(ex : Sequencer::PlanError) : String
+      private def sequence_plan_error(ex : Sequencer::PlanError, template : Bytes? = nil) : String
         case ex.reason
         in Sequencer::PlanError::Reason::NoTarget
-          "provide a 'url' target (scheme://host) or a flow_id that carries one"
+          no_target_message(template) # fuzz.cr
         in Sequencer::PlanError::Reason::BadTarget
           ex.message.to_s # names the host it could not parse, or the scheme it refused
         in Sequencer::PlanError::Reason::NoTokenLoc

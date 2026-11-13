@@ -128,7 +128,7 @@ module Gori
 
         metas = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           if iid
-            abort "gori run evidence: no issue with id #{iid}" unless store.get_issue(iid)
+            not_found_abort("gori run evidence", "no issue with id #{iid}", format) unless store.get_issue(iid)
             store.issue_evidence(iid)
           else
             store.evidence

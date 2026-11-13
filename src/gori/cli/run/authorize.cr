@@ -99,7 +99,7 @@ module Gori
         rescue ex : Authorize::PlanError
           store.close
           outbound.close
-          authorize_plan_abort(ex)
+          authorize_plan_abort(ex, format)
         end
         # The plan holds every target's FlowDetail already, and nothing downstream reads the DB
         # again — so the read connection goes now rather than being held for the whole run.
@@ -320,9 +320,11 @@ module Gori
 
       # Refuse a selection that cannot become a run, listing what it reached first: `skipped` is
       # populated for `NothingToSend`, and a per-reason tally alone cannot say WHICH flow was
-      # dropped for which reason.
-      private def self.authorize_plan_abort(ex : Authorize::PlanError) : NoReturn
+      # dropped for which reason. `NoFlows` with no query is every named id naming no flow: the
+      # not-found every reader answers with (`not_found_abort`).
+      private def self.authorize_plan_abort(ex : Authorize::PlanError, format : Symbol = :text) : NoReturn
         report_authorize_skips(ex.skipped)
+        not_found_abort("gori run authorize", authorize_plan_error(ex), format) if ex.reason.no_flows? && ex.detail.nil?
         abort "gori run authorize: #{authorize_plan_error(ex)}"
       end
 

@@ -59,7 +59,7 @@ module Gori
         ensure
           store.close
         end
-        abort "gori run repeater minimize: no repeater session ##{id}" unless rec
+        not_found_abort("gori run repeater minimize", "no repeater session ##{id}", format) unless rec
         activate_slot(slot, "gori run repeater minimize")
         outbound = project_outbound(project, allow_unscoped)
 

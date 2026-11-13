@@ -1852,6 +1852,45 @@ describe "MCP fuzz — a live job's results page in index order (#1432)" do
     end
   end
 
+  # A cluster's member page pages the same done prefix, so it keeps `next_offset` set while
+  # the job runs, as `fuzz_results` does; it had dropped it to null with has_more:false.
+  it "walks a live cluster's members by next_offset alone, null once the job is done" do
+    with_store do |store|
+      tools = tools_for(store)
+      cfg = Gori::Fuzz::Config.new
+      gen = Gori::Fuzz::Generator.new(Gori::Fuzz::Template.parse("GET / HTTP/1.1\r\nHost: h\r\n\r\n"), [] of Gori::Fuzz::PayloadSet, cfg)
+      engine = Gori::Fuzz::Engine.new(gen, Gori::Fuzz::Matcher.new, NullFuzzBackend.new, cfg)
+      audit = Gori::MCP::Tools::JobAudit.new("http://h:80", nil, 1, nil, 0_i64)
+      fjob = Gori::MCP::Tools::FuzzJob.new("fz_cl_live", 6_i64, engine, :none,
+        Gori::Fuzz::Origin.new("http", "h", 80), false, audit, tools.__db_path)
+      tools.__register_fuzz_job(fjob)
+      land = ->(i : Int32) {
+        tools.__store_fuzz_result(fjob, Gori::Fuzz::Result.new(i.to_i64, ["p#{i}"], nil, 200, 1_i64,
+          1, 1, 1_i64, nil, true, false, nil).tap { |r| fjob.clusters.add(r) })
+      }
+      [0, 1].each { |i| land.call(i) }
+      shape = Gori::Fuzz::Shape.hex(Gori::Fuzz::Clusters.key(fjob.results.first)[0])
+      read = ->(offset : JSON::Any | Int32) {
+        call_json(tools, "fuzz_results", %({"job_id":"fz_cl_live","cluster":#{shape.to_json},"offset":#{offset}}))
+      }
+
+      p1 = read.call(0)
+      p1["results"].as_a.map(&.["index"].as_i).should eq([0, 1])
+      p1["has_more"].as_bool.should be_false
+      p1["next_offset"].as_i.should eq(2) # the job runs on: the next poll continues here
+      [2, 3].each { |i| land.call(i) }
+      p2 = read.call(p1["next_offset"])
+      p2["results"].as_a.map(&.["index"].as_i).should eq([2, 3])
+      p2["next_offset"].as_i.should eq(4)
+
+      fjob.status = :done
+      done = read.call(p2["next_offset"])
+      done["results"].as_a.should be_empty
+      done["job_complete"].as_bool.should be_true
+      done["next_offset"].raw.should be_nil
+    end
+  end
+
   it "walks a live run cut by the reply budget by next_offset, every row once" do
     with_store do |store|
       tools = tools_for(store)

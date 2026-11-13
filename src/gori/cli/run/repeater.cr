@@ -1815,7 +1815,9 @@ module Gori
         parser = option_parser("gori run repeater send") do |p|
           p.banner = "Usage: gori run repeater send <repeater-id> [options]\n\n" \
                      "Replay a saved repeater SESSION (ids from `gori run repeater list`).\n" \
-                     "A WebSocket-upgrade session performs a real RFC 6455 framed exchange."
+                     "A WebSocket-upgrade session performs a real RFC 6455 framed exchange.\n" \
+                     "To re-point a captured flow (--target, -X, -d) and diff against what was\n" \
+                     "captured, replay the flow itself: gori run repeater <flow-id> --target URL --diff"
           project_options(p, proj, "read")
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds). Ignored on the WebSocket path, which paces itself with --idle-ms") { |v| timeout = parse_count(v, "--timeout").seconds }
@@ -1841,7 +1843,7 @@ module Gori
           p.on("--apply-rules", APPLY_RULES_HELP) { apply_rules = true }
           p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
           p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
-          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
+          format_flag(p, [:text, :json], "Output: text (default) | json", {:raw, RAW_ROUTE}) { |f| format = f }
           p.unknown_args { |before, after| positional = before + after }
         end
         parser.parse(args)
@@ -1896,7 +1898,7 @@ module Gori
         ensure
           store.close
         end
-        abort "gori run repeater send: no repeater session ##{id}" unless rec
+        not_found_abort("gori run repeater send", "no repeater session ##{id}", format) unless rec
         unless request
           abort "gori run repeater send: session ##{id}'s stored request has no request line target to " \
                 "replace (#{request_line_preview(rec.request)}) — edit the session instead"
@@ -3340,7 +3342,7 @@ module Gori
           p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
           p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
           p.on("--grpc-field PATH=VALUE", GRPC_FIELD_HELP) { |v| grpc_fields << v }
-          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
+          format_flag(p, [:text, :json], "Output: text (default) | json", {:raw, RAW_ROUTE}) { |f| format = f }
         end
         refresh_verify_upstream(!insecure)
         id = take_flow_id(positional, "repeater")
@@ -3371,7 +3373,7 @@ module Gori
         ensure
           store.close
         end
-        abort "gori run repeater: no flow ##{id}" unless detail
+        not_found_abort("gori run repeater", "no flow ##{id}", format) unless detail
         # Judged by the method that will go out: a replay rarely passes `-X`, and an old
         # `-b BODY` script replaying a captured POST would otherwise swap its Cookie unsaid.
         if note = cookie_as_body_note(cookies, method_override || detail.row.method, !body_override.nil?)

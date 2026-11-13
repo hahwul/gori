@@ -186,6 +186,33 @@ describe "MCP flow seeds carry PROVENANCE" do
     end
   end
 
+  # An agent read a template's Host header as its target and lost a call to the bare
+  # NoTarget refusal. The plan still never takes it (no scheme); the refusal now says so, and
+  # is unchanged for a template with no Host.
+  it "fuzz/mine/sequence_start name a template's Host header in the no-url refusal" do
+    with_store do |store|
+      tools = tools_for(store)
+      plain = "provide a 'url' target (scheme://host) or a flow_id that carries one"
+      extra = {
+        "fuzz_start"     => {"payloads" => %([{"list":["a"]}])},
+        "mine_start"     => {} of String => String,
+        "sequence_start" => {"cookie" => "sid"},
+      }
+      extra.each do |tool, more|
+        bare = {"template" => "GET /?q=§x§ HTTP/1.1\r\nX-A: b\r\n\r\n", "allow_unscoped" => true}.merge(more)
+        text, err = call_raw(tools, tool, bare.to_json)
+        err.should be_true
+        text.should eq(plain)
+
+        hosted = bare.merge({"template" => "GET /?q=§x§ HTTP/1.1\nhost:  app.test:8443 \n\n"})
+        text, err = call_raw(tools, tool, hosted.to_json)
+        err.should be_true
+        text.should eq(
+          %(#{plain} — a template's Host header does not choose the target (it carries no scheme), e.g. url:"https://app.test:8443"))
+      end
+    end
+  end
+
   # The other half of the same bit, and the one that silently changes what a whole sweep
   # measures: `expand_wire` re-terminates a head with CRLF. A bare LF between header lines is
   # itself a front-end/back-end desync primitive, so promoting it does not merely tidy the

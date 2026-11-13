@@ -257,7 +257,7 @@ module Gori
           project_names: mine_project_names(h), project: store)
         Miner::Plan.build(options, ob)
       rescue ex : Miner::PlanError
-        raise FuzzArgError.new(mine_plan_error(ex))
+        raise FuzzArgError.new(mine_plan_error(ex, text))
       rescue ex : RequestMacro::Runner::ApprovalPending
         raise ex # `mine_start` raises the card for it
       rescue ex : Gori::Error
@@ -286,10 +286,10 @@ module Gori
 
       # MCP's wording for a plan the args can't produce — the builder reports the
       # machine-readable `reason`, the sentence (and the arg names it points at) is ours.
-      private def mine_plan_error(ex : Miner::PlanError) : String
+      private def mine_plan_error(ex : Miner::PlanError, template : String? = nil) : String
         case ex.reason
         in Miner::PlanError::Reason::NoTarget
-          "provide a 'url' target (scheme://host) or a flow_id that carries one"
+          no_target_message(template) # fuzz.cr
         in Miner::PlanError::Reason::BadTarget
           ex.message.to_s # names the host it could not parse, or the scheme it refused
         in Miner::PlanError::Reason::NoLocations
