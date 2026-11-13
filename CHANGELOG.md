@@ -2,8 +2,8 @@
 
 ## Unreleased
 
-- TUI: hints name the key that is true where they are shown (Sitemap's `↵` on a folder, Project settings' proxy rows, the project picker's delete dialog, Evidence's issue picker, an empty Activity feed, the Sequencer's empty card), and turning on request-beside-response in a pane too narrow to split says so
-- TUI: Preferences keeps a one-row section's row on screen (Reset, Hotkeys, Tabs), the hotkey editor asks once before `esc` discards a rebind, opening a Repeater row from Activity lands on that sub-tab, a project's Created no longer moves each time it is opened, and Cookie's decode reads verified once the secret checks out
+- TUI: hints name the key that is true where they are shown (Sitemap's `↵` on a folder, Project settings' proxy rows, the project picker's delete dialog, Evidence's issue picker, an empty Activity feed, the Sequencer's empty card), and turning on request-beside-response in a pane too narrow to split says so (#1874)
+- TUI: Preferences keeps a one-row section's row on screen (Reset, Hotkeys, Tabs), the hotkey editor asks once before `esc` discards a rebind, opening a Repeater row from Activity lands on that sub-tab, a project's Created no longer moves each time it is opened, and Cookie's decode reads verified once the secret checks out (#1874)
 - TUI: a new note no longer shows the previous note's links, `↵` on a notification with nowhere to jump opens its full text, the flow detail's pane chips stay inside a narrow pane, and what gori says about a flow there wraps instead of being cut (#1873)
 - TUI: a paused crawl reads `paused` in the status row instead of spinning, the Fuzzer refuses a run that would send nothing, a mine stopped by hand says how far it got, the Sequencer's analysis names the sample count it rests on mid-run, and turning Intercept off over an open edit asks first (#1873)
 - TUI: a 1xx status no longer wears the 5xx red (a WebSocket's 101, the 1xx bar on Project's At a glance), and the Fuzzer's results colour a 3xx as the DIST panel beside them does (#1871)
