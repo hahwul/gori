@@ -20,6 +20,7 @@ require "./copy_menu"
 require "../redact/policy"
 require "../hotkeys"
 require "./preview_split"
+require "./note_detail_overlay"
 require "./line_edit"
 require "../store"
 require "../display_columns"
@@ -3002,7 +3003,7 @@ module Gori::Tui
       render_detail_stats(screen, rect)
       return if detail_footer_height(rect) == 0
       y = split_cards(rect)[0].bottom
-      detail_footer_lines.each_with_index do |line, i|
+      detail_footer_rows(rect.w - 2).each_with_index do |line, i|
         Highlight.draw(screen, rect.x + 1, y + i, line, width: {rect.w - 2, 0}.max)
       end
     end
@@ -3819,21 +3820,46 @@ module Gori::Tui
     # hit-test. A chip is " LABEL " with a 1-col gap after it. Split, the request-side panes
     # start in the left half and the rest at the right half's edge.
     private def detail_chip_layout(rect : Rect) : Array({Symbol, Int32, Int32})
-      out = [] of {Symbol, Int32, Int32}
+      chips = [] of {Symbol, Int32, Int32}
       split = split_detail?(rect)
       lx = split ? rect.x + 2 : rect.x + 1 # split: on each card's top border, past its corner
       rx = split ? split_cards(rect)[1].x + 2 : 0
       detail_panes.each do |pane|
         w = detail_pane_label(pane).size + 2
         if split && !SPLIT_LEFT_PANES.includes?(pane)
-          out << {pane, rx, w}
+          chips << {pane, rx, w}
           rx += w + 1
         else
-          out << {pane, lx, w}
+          chips << {pane, lx, w}
           lx += w + 1
         end
       end
-      out
+      split ? chips : fit_detail_chips(chips, rect)
+    end
+
+    # More chips than the row holds (a rewritten flow has five, and at 50 columns they ran
+    # past the pane's border): show a window of them that always holds the active pane, so
+    # ←/→ still walks every pane and the strip follows. A chip that is not drawn is not in the
+    # layout either, so a click cannot land on one.
+    # ponytail: the split layout is left alone, it only exists on a pane wide enough for both
+    # halves' chips; window each half the same way if a pane ever grows more of them.
+    private def fit_detail_chips(chips : Array({Symbol, Int32, Int32}), rect : Rect) : Array({Symbol, Int32, Int32})
+      return chips if chips.empty? || chips.last[1] + chips.last[2] <= rect.right
+      active = chips.index { |c| c[0] == @detail_pane } || 0
+      room = rect.right - (rect.x + 1)
+      first = 0
+      while first < active && chips[first..active].sum { |c| c[2] + 1 } - 1 > room
+        first += 1
+      end
+      x = rect.x + 1
+      shown = [] of {Symbol, Int32, Int32}
+      chips.each_with_index do |(pane, _, w), i|
+        next if i < first
+        break if x + w > rect.right && i > active
+        shown << {pane, x, w}
+        x += w + 1
+      end
+      shown
     end
 
     # Compact mode word shown before the toggle chips (and asserted by specs).
@@ -3940,7 +3966,7 @@ module Gori::Tui
     # fit — the same 0 the render reads, so a footer that is not drawn also does not shrink
     # the hit-test rect.
     private def detail_footer_height(inner : Rect) : Int32
-      n = detail_footer_lines.size
+      n = detail_footer_rows(inner.w - 2).size
       return 0 if n == 0
       avail = inner.bottom - (inner.y + 2)
       avail - (n + 1) >= DETAIL_FOOTER_MIN_BODY ? n + 1 : 0
@@ -3955,7 +3981,7 @@ module Gori::Tui
     # bytes, and a reader copying the pane got gori's sentence with them).
     private def render_detail_footer(screen : Screen, inner : Rect, body : Rect, focused : Bool) : Nil
       render_detail_stats(screen, inner)
-      lines = detail_footer_lines
+      lines = detail_footer_rows(inner.w - 2)
       return if lines.empty? || detail_footer_height(inner) == 0
       y = body.bottom
       Frame.inner_divider(screen, inner, y, border: Frame.pane_border(focused))
@@ -3978,6 +4004,23 @@ module Gori::Tui
     # The footer's rows, top to bottom. Built per call rather than memoised: a handful of
     # short strings, and a live flow's facts change under the pane (pending → complete) via
     # `refresh_detail`, which does not go through the view cache.
+    # The footer's lines as the ROWS they take at `width`. Each line was one clipped row, so
+    # the sentence naming the rules that rewrote a flow lost the rule names at 132 columns,
+    # with no other place to read them. A line gori wrote in one colour wraps instead, to
+    # DETAIL_FOOTER_WRAP rows at most so one long sentence cannot take the pane from the bytes.
+    private def detail_footer_rows(width : Int32) : Array(Highlight::Line)
+      width = {width, 1}.max
+      detail_footer_lines.flat_map do |line|
+        span = line[0]?
+        next [line] unless span && line.size == 1 && Screen.display_width(span.text) > width
+        NoteDetailOverlay.wrap_text(span.text, width).first(DETAIL_FOOTER_WRAP).map do |text|
+          [Highlight::Span.new(text, span.fg, span.attr)]
+        end
+      end
+    end
+
+    DETAIL_FOOTER_WRAP = 3
+
     private def detail_footer_lines : Array(Highlight::Line)
       detail = @detail
       return EMPTY_LINES unless detail
@@ -4100,7 +4143,7 @@ module Gori::Tui
         fg = active && strip_focused ? Theme.ink_on(Theme.focus_gold) : (shown ? Theme.text_bright : Theme.muted)
         bg = active && strip_focused ? Theme.focus_gold : (shown ? Theme.accent_bg : Theme.bg)
         x = screen.text(cx, rect.y, " #{detail_pane_label(pane)} ", fg, bg,
-          attr: active ? Attribute::Bold : Attribute::None) + 1
+          attr: active ? Attribute::Bold : Attribute::None, width: {rect.right - cx, 0}.max) + 1
         same_side = companion.nil? || SPLIT_LEFT_PANES.includes?(pane) == focus_left
         end_x = x if same_side
       end

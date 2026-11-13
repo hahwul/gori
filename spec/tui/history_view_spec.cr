@@ -3802,6 +3802,58 @@ describe "HistoryView — Intercept edits and drops" do
     end
   end
 
+  it "windows the pane chips instead of running them past the border" do
+    # REQUEST, RESPONSE and ORIGINAL need 31 columns. On a narrower pane the last chip ran over
+    # the `│` and off the frame; the strip shows a window that always holds the active pane.
+    with_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "GET", target: "/?id=2", http_version: "HTTP/1.1",
+        head: "GET /?id=2 HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil,
+        source: Gori::FlowSource::Kind::Proxy, intercept_original: original))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
+      view = Gori::Tui::HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      inner = Gori::Tui::Rect.new(1, 1, 26, 14)
+      {:request => {" REQUEST ", " ORIGINAL "}, :original => {" ORIGINAL ", " REQUEST "}}.each do |pane, (shown, hidden)|
+        view.set_detail_pane_public(pane)
+        b = MemoryBackend.new(60, 16)
+        view.render_detail(Gori::Tui::Screen.new(b), inner)
+        b.row(inner.y).should contain(shown)                               # the active pane is always in the window
+        b.row(inner.y).should_not contain(hidden)                          # dropped whole, not clipped
+        b.row(inner.y)[inner.right..].strip.should eq("")                  # nothing past the pane's edge
+        view.detail_pane_at(inner, inner.right + 2, inner.y).should be_nil # nor a click target there
+      end
+    end
+  end
+
+  it "wraps what gori says about a flow instead of clipping it" do
+    # The footer strip drew each sentence on one row, so on a pane narrower than the sentence
+    # its end (the rule names, the advice) could not be read anywhere.
+    with_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "GET", target: "/?id=2", http_version: "HTTP/1.1",
+        head: "GET /?id=2 HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil,
+        source: Gori::FlowSource::Kind::Proxy, intercept_original: original))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
+      view = Gori::Tui::HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      wide = MemoryBackend.new(200, 16)
+      view.render_detail(Gori::Tui::Screen.new(wide), Gori::Tui::Rect.new(0, 0, 200, 16))
+      sentence = (0...16).map { |y| wide.row(y) }.find!(&.includes?("edited at Intercept")).strip
+      tail = sentence[-12..]
+      narrow = MemoryBackend.new(40, 16)
+      view.render_detail(Gori::Tui::Screen.new(narrow), Gori::Tui::Rect.new(0, 0, 40, 16))
+      sentence.size.should be > 38 # or this example proves nothing
+      narrow.contains?(tail).should be_true
+    end
+  end
+
   it "offers no ORIGINAL pane on a flow nobody edited" do
     with_store do |store|
       add_flow(store, "GET", "/plain", 200)
