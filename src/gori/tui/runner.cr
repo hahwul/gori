@@ -2627,7 +2627,8 @@ module Gori::Tui
     # piece of the origin that does not live in a controller: the list's cursor, the open
     # flow and the Repeater's sub-tab index all survive on their own, so restoring is a
     # matter of pointing focus back at them.
-    record FilingOrigin, issue_id : Int64, tab : Symbol, focus : Symbol, drill_in : Bool, label : String
+    record FilingOrigin, issue_id : Int64, tab : Symbol, focus : Symbol, drill_in : Bool, label : String,
+      opened : Int32 = 0
 
     @filing_origin : FilingOrigin? = nil
 
@@ -2676,17 +2677,26 @@ module Gori::Tui
       # Filed FROM the Issues tab (its own `n`): there is nowhere to send esc back to, so the
       # detail closes into the list the ordinary way and the toast promises nothing.
       return "" if origin_tab == :issues
-      @filing_origin = FilingOrigin.new(id, origin_tab, origin_focus, drill_in, label)
+      @filing_origin = FilingOrigin.new(id, origin_tab, origin_focus, drill_in, label, issues_controller.view.detail_opens)
       Runner.filing_return_hint(label)
     end
 
     # `esc` on the detail of an issue that was just filed: back to exactly where the form was
     # opened from. One shot — the origin is spent here, so a second esc closes the detail the
     # ordinary way.
+    #
+    # Only for the esc that would otherwise have CLOSED the detail (`esc_closes_detail?`). An
+    # esc that NOTES owns — INS saving the note, READ stepping to RELATED — does its own job and
+    # leaves the origin armed: working in the issue does not change where it was filed from,
+    # so the toast's promise still holds for the esc that finally leaves.
     private def return_to_filing_origin : Bool
       origin = @filing_origin
       return false unless origin
+      return false unless issues_controller.view.esc_closes_detail?
       return false unless issues_controller.view.detail_issue.try(&.id) == origin.issue_id
+      # Still the opening that filed it: left by `←` or a click and opened again from the list,
+      # the issue is no longer "just filed".
+      return false unless issues_controller.view.detail_opens == origin.opened
       @filing_origin = nil
       issues_controller.view.close_detail
       @active_tab, @focus, @overlay = Runner.filing_return_state(origin)
