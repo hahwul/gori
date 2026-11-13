@@ -27,7 +27,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "sitemap.query", "Filter (QL)", "Filter the tree with a query (host: path: method: status: tag: …)",
-        Verb::Scope::Sitemap, [Verb::Chord.new("/")], group: :view, intent: :filter) { |ctx| ctx.sitemap_query; nil }
+        Verb::Scope::Sitemap, [Verb::Chord.new("/")], group: :view, intent: :filter, keywords: %w[search find]) { |ctx| ctx.sitemap_query; nil }
 
       # `y` — the cursor row's host/path, or every marked row one per line. The lists this
       # sits beside (History, Probe, Issues) all copy on `y`; the tree was the one that did not.

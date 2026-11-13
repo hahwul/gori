@@ -138,7 +138,7 @@ module Gori
 
       # Drop one cached reflection target (or all of them). The operator's/agent's exit from
       # a schema fetched earlier — nothing here expires on its own.
-      @[Tool("grpc_forget", gated: true, agent_action: true, permission: "write")]
+      @[Tool("grpc_forget", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def grpc_forget(h) : Result
         target = str(h, "target")
         all = bool_arg(h, "all", false)

@@ -80,7 +80,7 @@ module Gori
         iid = require_issue_id(issue_id, "gori run retest")
 
         planned, last = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
-          abort "gori run retest: no issue with id #{iid}" unless store.get_issue(iid)
+          not_found_abort("gori run retest", "no issue with id #{iid}", format, store) unless store.get_issue(iid)
           {Retest.plan(store, iid), store.last_retest_run(iid)}
         end
 
@@ -411,7 +411,7 @@ module Gori
         iid = require_issue_id(issue_id, "gori run retest runs")
 
         runs = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
-          abort "gori run retest runs: no issue with id #{iid}" unless store.get_issue(iid)
+          not_found_abort("gori run retest runs", "no issue with id #{iid}", format, store) unless store.get_issue(iid)
           store.retest_runs(iid, limit)
         end
 
@@ -439,7 +439,7 @@ module Gori
         id = require_positional_id(positional, "gori run retest show", "run", "gori run retest")
 
         run, steps = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
-          r = store.get_retest_run(id) || abort("gori run retest show: no retest run with id #{id}")
+          r = store.get_retest_run(id) || not_found_abort("gori run retest show", "no retest run with id #{id}", format, store)
           {r, store.retest_run_steps(id)}
         end
 

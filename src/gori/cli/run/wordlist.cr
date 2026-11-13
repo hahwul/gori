@@ -116,6 +116,7 @@ module Gori
         info = begin
           WordlistCatalog.info(name)
         rescue ex : WordlistCatalog::Error
+          not_found_abort("gori run wordlist show", ex.message.to_s, format) if ex.reason.not_found?
           wordlist_error("show", ex)
         end
         preview = if head > 0

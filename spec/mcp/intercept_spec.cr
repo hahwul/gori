@@ -58,7 +58,7 @@ describe "MCP intercept_list" do
       hold(store, 4_i64)
       out = JSON.parse(tools_for(store).call("intercept_list", JSON.parse("{}")).text)
       out.as_h.keys.should eq(%w[available capturing enabled direction filter heartbeat_age_seconds pending_count
-        returned offset has_more items])
+        returned offset has_more next_offset items])
       out["capturing"].as_bool.should be_true
       out["enabled"].as_bool.should be_true
       out["direction"].as_s.should eq("request")

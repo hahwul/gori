@@ -195,7 +195,7 @@ module Gori
             j.field "total_available", mjob.results.size
             j.field "job_complete", mjob.status != :running
             j.field "page_complete", pg.offset + page.size >= mjob.results.size
-            j.field "has_more", pg.offset + page.size < mjob.results.size
+            emit_more(j, pg.offset + page.size < mjob.results.size, pg.offset + page.size, live: mjob.status == :running)
             j.field "incomplete_reason", incomplete_reason(mjob.status)
             j.field "results_truncated", mjob.truncated?
           end

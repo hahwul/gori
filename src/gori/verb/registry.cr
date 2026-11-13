@@ -508,20 +508,42 @@ module Gori
       # does, then a keyword. The middle rung is what lets a tab carry other tools' names for
       # it: `hi` is the start of History before it is the start of Miner's "hidden", and `int`
       # is Intercept before it is Fuzzer's "intruder". Without it every short prefix of a
-      # gori name went to whichever verb had a synonym beginning the same way.
+      # gori name went to whichever verb had a synonym beginning the same way. A fourth rung,
+      # under the keyword, takes a several-word query whose words the row says apart.
       def self.score(verb : Definition, query : String) : Int32?
         title = verb.title.downcase
         best = Gori::Fuzzy.score(query, "#{title} #{verb.id}".downcase)
         return best if query.size < KEYWORD_MIN_QUERY
         top = Gori::Fuzzy.score(query, query) || return best
         best = top - 1 if title.split(/[^a-z0-9]+/).any?(&.starts_with?(query)) && (best.nil? || best < top - 1)
-        if (best.nil? || best < top - 2) && verb.keywords.any?(&.starts_with?(query))
-          best = top - 2
-        end
+        best = top - 2 if (best.nil? || best < top - 2) && keyword_hit?(verb, query)
+        # A rung under the keyword: several words, each one the row says (`copy as curl`,
+        # `proxy port`), found nowhere as one run.
+        best = top - 3 if (best.nil? || best < top - 3) && words_hit?(verb, query)
         best
       end
 
       KEYWORD_MIN_QUERY = 2
+
+      # Whether the row SAYS the query rather than scattering it: a run of its title or id, the
+      # start of a keyword, or every word of a several-word query one of those. The palette
+      # drops the rows that are not, once any row is (`PaletteState#refresh`): `cert` put Clear
+      # history (c…e…r…t) above Copy CA certificate path. One letter is always a run, so a
+      # one-letter query loses nothing.
+      def self.strong?(verb : Definition, query : String) : Bool
+        "#{verb.title} #{verb.id}".downcase.includes?(query) || keyword_hit?(verb, query) || words_hit?(verb, query)
+      end
+
+      private def self.keyword_hit?(verb : Definition, query : String) : Bool
+        query.size >= KEYWORD_MIN_QUERY && verb.keywords.any?(&.starts_with?(query))
+      end
+
+      private def self.words_hit?(verb : Definition, query : String) : Bool
+        words = query.split
+        return false if words.size < 2
+        hay = "#{verb.title} #{verb.id}".downcase
+        words.all? { |w| hay.includes?(w) || keyword_hit?(verb, w) }
+      end
 
       # What a first session needs before anything else, in this order: the empty-state cards
       # send the operator here for the first two (`^P → Open browser`).

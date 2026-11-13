@@ -181,15 +181,68 @@ describe "MCP tool annotations" do
 
       # Tools that mutate, may send, or require the action-enabled surface all need the
       # conservative false hint even though some are gated at dispatch.
-      {"send_request", "create_issue", "probe_scan", "oast_poll", "oast_payload",
-       "switch_project", "reply_to_operator"}.each do |name|
+      {"send_request", "create_rule", "probe_scan", "oast_poll", "oast_payload",
+       "switch_project", "reply_to_operator", "delete_project"}.each do |name|
         by_name[name]["annotations"]["readOnlyHint"].as_bool.should be_false
-        # Left unstated, so the spec's conservative default (true) stands: an action tool
-        # may or may not reach the network, and the population that does includes the fuzzer.
-        by_name[name]["annotations"]["openWorldHint"]?.should be_nil
+        # Left unstated, so the spec's conservative default (true) stands: these dial, run a
+        # host command (a rule's `pipe`), or reach past this project's store.
+        by_name[name]["annotations"].as_h.keys.should eq(["readOnlyHint"])
       end
 
+      # A writer's non-default answers, each opted into on its own `@[Tool]` (mcp/tool.cr).
+      by_name["create_note"]["annotations"].should eq(JSON.parse(%({"readOnlyHint":false,"destructiveHint":false,"openWorldHint":false})))
+      by_name["delete_note"]["annotations"].should eq(JSON.parse(%({"readOnlyHint":false,"openWorldHint":false})))
+      by_name["set_scope_enabled"]["annotations"].should eq(JSON.parse(%({"readOnlyHint":false,"idempotentHint":true,"openWorldHint":false})))
+      # Idempotent, but a rule can `pipe` to a host command: open-world stays unstated.
+      by_name["set_rule_enabled"]["annotations"].should eq(JSON.parse(%({"readOnlyHint":false,"idempotentHint":true})))
+
       listed.each { |t| t["annotations"]["readOnlyHint"].raw.should be_a(Bool) }
+    end
+  end
+
+  # `open_world: false` is a promise that the call never leaves this project's store or
+  # gori's settings. The macro refuses it on a `send` / `intercept` tool; this sweeps what the
+  # macro cannot see: an argument that dials, a mode that sends, a rule kind that runs a command.
+  it "never declares closed-world a writer that can dial or run a command" do
+    with_store do |store|
+      listed = JSON.parse(JSON.build { |j| tools_for(store).list(j) }).as_a
+      by_name = listed.to_h { |t| {t["name"].as_s, t} }
+      dial_args = %w[allow_unscoped insecure url tls_preset sni http2 timeout_ms send active server verify]
+      # `Tools#call_sends?`: a tool outside the `send` group whose one mode dials.
+      sends_per_call = %w[probe_scan graphql_schema set_probe_mode]
+      # Match&Replace `pipe` and probe `exec` rules run a host command once enabled.
+      runs_a_command = %w[create_rule update_rule set_rule_enabled create_rule_from_preset
+        create_probe_rule update_probe_rule set_probe_rule_enabled]
+      closed = Gori::MCP::Tools::CLOSED_WORLD_WRITERS
+      closed.should_not be_empty
+      closed.each do |name|
+        Gori::MCP::Tools::READ_ONLY_TOOLS.should_not contain(name)
+        %w[send intercept].should_not contain(Gori::MCP::Tools::TOOL_PERMISSIONS[name]?)
+        sends_per_call.should_not contain(name)
+        runs_a_command.should_not contain(name)
+        Gori::MCP::Tools::ENV_REFRESH_TOOLS.should_not contain(name) unless name.ends_with?("_env_var")
+        dialing = by_name[name]["inputSchema"]["properties"].as_h.keys & dial_args
+        dialing.should be_empty, "#{name} is declared closed-world but takes #{dialing}"
+        by_name[name]["annotations"]["openWorldHint"].as_bool.should be_false
+      end
+    end
+  end
+
+  # `destructive: false` means purely additive. Anything that edits, removes, reorders or can
+  # overwrite in place is not, whatever else it does.
+  it "never declares additive a tool that updates, removes or overwrites" do
+    with_store do |store|
+      listed = JSON.parse(JSON.build { |j| tools_for(store).list(j) }).as_a
+      by_name = listed.to_h { |t| {t["name"].as_s, t} }
+      additive = Gori::MCP::Tools::ADDITIVE_TOOLS
+      additive.should contain("create_note")
+      additive.each do |name|
+        name.should_not match(/\A(delete|clear|remove|update|set|move|rename)_/)
+        overwriting = by_name[name]["inputSchema"]["properties"].as_h.keys & %w[overwrite replace force]
+        overwriting.should be_empty, "#{name} is declared additive but takes #{overwriting}"
+        by_name[name]["annotations"]["destructiveHint"].as_bool.should be_false
+      end
+      Gori::MCP::Tools::IDEMPOTENT_TOOLS.each(&.should(start_with("set_")))
     end
   end
 

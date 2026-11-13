@@ -317,8 +317,84 @@ module Gori
         msg = "#{prefix}: unknown subcommand '#{CLI::Output.term_safe(word)}'"
         if near = nearest_name(word, candidates)
           msg += " — did you mean '#{near}'?"
+        elsif path = cli_spelling(word, prefix.lchop("gori run").strip)
+          msg += " — the CLI spells that 'gori run #{path}'"
         end
         "#{msg}\nRun '#{prefix} --help' for the list."
+      end
+
+      # Every command path `gori run -h` lists — "history", "repeater race", "sitemap export" —
+      # read off its rows' name column (the leading lowercase words), plus each row's bare
+      # subcommand ("graphql" from "graphql schema <flow-id>").
+      COMMAND_PATHS = SUBCOMMANDS.flat_map do |name, _|
+        words = name.split.take_while(&.matches?(/\A[a-z][a-z-]*\z/))
+        [words.first, words.join(' ')]
+      end.uniq!
+
+      # The MCP tool names derivation (`derive_cli_path`) cannot reach, or reaches wrongly.
+      # Every value is checked against COMMAND_PATHS (spec/cli/run_spec.cr).
+      MCP_TOOL_PATHS = {
+        "get_flow"                => "show",
+        "get_response_body_chunk" => "show",
+        "delete_flow"             => "history delete",
+        "delete_probe_rule"       => "probe rules",
+        "get_retest_run"          => "retest runs",
+        "delete_retest_run"       => "retest",
+        "link_evidence"           => "evidence",
+        "list_rule_presets"       => "rewriter preset",
+        "create_rule_from_preset" => "rewriter preset",
+        "send_websocket"          => "repeater send",
+        "ws_session_open"         => "repeater ws",
+        "ws_session_send"         => "repeater ws",
+        "ws_inject"               => "intercept",
+        "reply_to_operator"       => "notify",
+      }
+
+      # A word of an MCP name naming a command it does not spell: `list_rules` is `rewriter`,
+      # `list_params` is `sitemap params`. Tried last, after the name's own words.
+      MCP_NOUNS = {
+        "rule" => "rewriter", "color" => "colormarker", "scope" => "project scope",
+        "sandbox" => "project sandbox", "env" => "project env", "override" => "project host-override",
+        "params" => "sitemap params", "js" => "sitemap js", "openapi" => "sitemap export",
+        "race" => "repeater race", "timing" => "repeater timing",
+      }
+
+      # The `gori run` command an MCP tool name (or a hyphenated guess at one) means, or nil:
+      # `list_history` → "history", `run_retest` → "retest run". Only a word with a `_`/`-` in
+      # it: a bare word reaching here is a typo or a verb of another command (`intercept show`),
+      # not an MCP name. Only ever a path `gori run -h` lists, so a stale guess says nothing.
+      # `under`: the subcommand whose verb was unknown (`repeater`), which then has to own the
+      # answer: `repeater send-ws` must not be sent to the top-level `gori run send`.
+      def self.cli_spelling(word : String, under : String = "") : String?
+        return nil if word.starts_with?('-')
+        w = word.downcase.tr("-", "_")
+        return nil unless w.includes?('_')
+        path = MCP_TOOL_PATHS[w]? || derive_cli_path(w.split('_').reject(&.empty?))
+        return nil unless path && COMMAND_PATHS.includes?(path)
+        path if under.empty? || path.starts_with?("#{under} ")
+      end
+
+      # MCP spells `verb_noun` (`create_repeater`) or `noun_verb` (`probe_dismiss`); the CLI
+      # spells `noun verb`. So: a listed "noun verb" out of the name's words (its leading verb
+      # first), else the first word that is a subcommand, else a word MCP_NOUNS knows.
+      private def self.derive_cli_path(words : Array(String)) : String?
+        pairs = (1...words.size).map { |i| {words[i], words[0]} }
+        words.each_combination(2) { |(a, b)| pairs << {a, b} }
+        pairs.each do |noun, verb|
+          next unless cmd = subcommand_for(noun)
+          {verb, "#{verb}s", verb.rchop('s'), verb == "get" ? "show" : verb}.each do |v|
+            return "#{cmd} #{v}" if COMMAND_PATHS.includes?("#{cmd} #{v}")
+          end
+        end
+        joined = (0...words.size - 1).map { |i| "#{words[i]}-#{words[i + 1]}" } # cache_deception_check
+        (words + joined).each { |t| subcommand_for(t).try { |cmd| return cmd } }
+        words.each { |t| (MCP_NOUNS[t]? || MCP_NOUNS[t.rchop('s')]?).try { |path| return path } }
+        nil
+      end
+
+      # The subcommand a word of an MCP name names, singular or plural (`issue`, `links`).
+      private def self.subcommand_for(word : String) : String?
+        {word, "#{word}s", word.rchop('s')}.find { |c| !c.includes?(' ') && COMMAND_PATHS.includes?(c) }
       end
 
       # The one name within edit distance of `word` — 1 for a short word, where 2 would make
@@ -928,6 +1004,33 @@ module Gori
       private def self.abort_closing(store : Store?, message : String) : NoReturn
         store.try &.close
         abort message
+      end
+
+      # The refusal for an id (or name) a single-document reader could not find. Under `--format
+      # json`/`jsonl` stdout also gets the failed-call object `send` prints for a scope block
+      # (`failure_json`), coded as MCP codes it (`NOT_FOUND`), so a script reading stdout gets an
+      # object instead of nothing. The human line stays on STDERR and the exit stays 1; text
+      # mode prints exactly what it always did.
+      def self.not_found_abort(prefix : String, reason : String, format : Symbol, store : Store? = nil) : NoReturn
+        puts failure_json(reason, "not_found", "NOT_FOUND") if format.in?(:json, :jsonl)
+        abort_closing(store, "#{prefix}: #{reason}")
+      end
+
+      # The `{ok: false, …}` object a failed `--format json` call prints on stdout: the sentence,
+      # the coarse kind, the MCP error code and whether a retry may succeed. `delivered` only for
+      # a send, where whether bytes left matters.
+      def self.failure_json(reason : String, kind : String, code : String, retryable : Bool = false,
+                            delivered : Bool? = nil) : String
+        JSON.build do |j|
+          j.object do
+            j.field "ok", false
+            j.field "error", reason
+            j.field "error_kind", kind
+            j.field "error_code", code
+            j.field "retryable", retryable
+            j.field("delivered", delivered) unless delivered.nil?
+          end
+        end
       end
 
       # The one sentence for a project that could not be opened: SQLite's own words (or the

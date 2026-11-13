@@ -102,7 +102,7 @@ module Gori
         not_found("no view named #{name.inspect}")
       end
 
-      @[Tool("create_view", gated: true, agent_action: true, permission: "write")]
+      @[Tool("create_view", gated: true, agent_action: true, permission: "write", open_world: false, destructive: false)]
       private def create_view(h) : Result
         name = required_str(h, "name", blank: true)
         query = required_str(h, "query", blank: true)
@@ -123,7 +123,7 @@ module Gori
 
       # Rename, re-query, or both. Omitted fields are left unchanged, the same contract
       # `update_color_rule` has.
-      @[Tool("update_view", gated: true, agent_action: true, permission: "write")]
+      @[Tool("update_view", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def update_view(h) : Result
         name = required_str(h, "name", blank: true)
         scope = view_write_scope(h)
@@ -149,7 +149,7 @@ module Gori
         view_result(SavedViews::View.new(found.id, new_name, new_query, scope), "updated")
       end
 
-      @[Tool("delete_view", gated: true, agent_action: true, permission: "write")]
+      @[Tool("delete_view", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def delete_view(h) : Result
         name = required_str(h, "name", blank: true)
         scope = view_write_scope(h)

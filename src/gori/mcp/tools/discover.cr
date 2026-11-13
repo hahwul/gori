@@ -403,7 +403,7 @@ module Gori
             j.field "job_complete", djob.status != :running
             # `has_more` is about this PAGE. A budget-capped run has no more stored findings
             # and still is not an exhaustive answer — that is what incomplete_reason says.
-            j.field "has_more", pg.offset + page.size < djob.results.size
+            emit_more(j, pg.offset + page.size < djob.results.size, pg.offset + page.size, live: djob.status == :running)
             j.field "incomplete_reason", incomplete_reason(djob.status)
             j.field "queued", djob.queued
             j.field "results_truncated", djob.truncated?

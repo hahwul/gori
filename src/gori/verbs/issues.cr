@@ -9,7 +9,7 @@ module Gori
       r.register Verb::Definition.new(
         "issue.create", "Add issue", "Create an issue from the selected flow (every marked flow is attached as a link)", Verb::Scope::Body,
         [Verb::Chord.new("f", shift: true)],
-        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_ids.empty? }, intent: :file_issue, group: :triage) { |ctx| ctx.issue_create; nil }
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_ids.empty? }, intent: :file_issue, group: :triage, keywords: ["new issue"]) { |ctx| ctx.issue_create; nil }
 
       # issues list
       r.register Verb::Definition.new(
@@ -351,7 +351,7 @@ module Gori
       # rather than raising.
       r.register Verb::Definition.new(
         "issues.export", "Export issues…", "Write all issues to a file (asks for the format, then the path)",
-        Verb::Scope::Global, [] of Verb::Chord) { |ctx| ctx.issues_export_pick; nil }
+        Verb::Scope::Global, [] of Verb::Chord, keywords: %w[save]) { |ctx| ctx.issues_export_pick; nil }
 
       # The discoverable export key on the Issues tab (the verb above is the palette entry).
       # NON-hidden so it joins the Issues list's "space" menu.

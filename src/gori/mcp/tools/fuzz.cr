@@ -526,9 +526,9 @@ module Gori
             # whether it reached the end of the stored rows.
             j.field "job_complete", fjob.status != :running
             j.field "page_complete", last >= picked.size
-            j.field "has_more", last < picked.size
+            emit_more(j, last < picked.size, last, live: fjob.status == :running)
             # Completed rows held back behind a lower index still in flight; they join the
-            # end of this ordering as it lands, so page on from offset + returned.
+            # end of this ordering as it lands, so page on from `next_offset` (offset + returned).
             j.field "rows_pending", pending if pending > 0
             j.field "incomplete_reason", incomplete_reason(fjob.status)
             j.field "results_truncated", fjob.truncated?

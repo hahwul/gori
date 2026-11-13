@@ -123,7 +123,7 @@ gori run <subcommand> [verb] [options]
 | `project host-override` | 프로젝트 호스트 → IP 접속 오버라이드 목록 / 추가 / 수정 / 삭제 |
 | `project network` | 프로젝트 자체 네트워크 설정(`net.*`: 업스트림 프록시와 자격증명, 목적지 호스트, 타임아웃, 캡처 상한, bind) 목록 / 조회 / 설정 / 해제 |
 
-읽기 서브커맨드에 공통인 플래그: `--project=NAME`, `--db=PATH`, `--format=FMT` (보통 `text` 또는 `json`), 그리고 `--format`이 `json`을 제공하는 모든 명령에서 `--format=json`과 같은 `--json`. 모르는 옵션이나 서브커맨드를 주면 가장 가까운 실제 이름(`did you mean --format?`)과 `--help` 위치를 한 줄로 stderr에 출력합니다. 전역 플래그는 **동사 뒤에** 옵니다. `gori run rewriter rm 1 --project=x`는 되지만 `gori run rewriter --project=x rm 1`은 조용히 목록만 찍는 대신 사용법 오류로 거부됩니다.
+읽기 서브커맨드에 공통인 플래그: `--project=NAME`, `--db=PATH`, `--format=FMT` (보통 `text` 또는 `json`), 그리고 `--format`이 `json`을 제공하는 모든 명령에서 `--format=json`과 같은 `--json`. 모르는 옵션이나 서브커맨드를 주면 가장 가까운 실제 이름(`did you mean --format?`)과 `--help` 위치를 한 줄로 stderr에 출력합니다. 서브커맨드를 MCP 도구 이름으로 치면 그에 해당하는 명령을 알려 줍니다(`gori run list_history`에는 `gori run history`). `--json`에서 없는 id를 조회한 명령은 `send`가 거부된 전송에 찍는 것과 같은 객체 `{"ok":false,"error":…,"error_kind":"not_found","error_code":"NOT_FOUND","retryable":false}`를 stdout에 출력하고, stderr의 평문 한 줄과 종료 코드 1은 그대로입니다. 전역 플래그는 **동사 뒤에** 옵니다. `gori run rewriter rm 1 --project=x`는 되지만 `gori run rewriter --project=x rm 1`은 조용히 목록만 찍는 대신 사용법 오류로 거부됩니다.
 
 읽기 서브커맨드는 스토어를 읽기 전용으로 열고 캡처 락을 잡지 않으므로, 라이브 TUI가 캡처 중인 프로젝트를 대상으로 실행해도 안전합니다. `body:` 질의는 검색 인덱스를 비우므로 쓰기입니다. gori 프로젝트가 아닌 `--db` 파일(다른 도구의 SQLite 데이터베이스나 빈 파일)은 파일에 손대기 전에 거부합니다. 데이터베이스를 만드는 명령(`import --db`, `capture --db`)은 빈 파일은 계속 초기화하지만, 다른 도구의 테이블이 든 파일은 거부합니다.
 

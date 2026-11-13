@@ -69,11 +69,12 @@ module Gori::Tui
     # `tab.*` verbs' `keywords:` and by TabGotoPicker; both match a query that is a PREFIX of a
     # keyword, so the FIRST word of an entry is what has to be foreign. Other tools' words
     # only, never gori's own: "proxy history" would answer `proxy` with a jump to History.
-    # `:discover` is Target's sub-tab, which has its own `tab.discover` jump.
+    # `:discover` is Target's sub-tab, which has its own `tab.discover` jump; its Sitemap
+    # sub-tab has none, so `sitemap` is the one gori word here.
     TAB_KEYWORDS = {
-      :target      => ["site map", "spider", "crawl"],
+      :target      => ["site map", "sitemap", "spider", "crawl"],
       :discover    => ["crawler", "spider", "dirbuster", "content discovery", "forced browsing"],
-      :history     => ["logger"],
+      :history     => ["logger", "websockets history"],
       :intercept   => ["breakpoint"],
       :repeater    => ["replay", "resend", "requester"],
       :fuzzer      => ["intruder", "automate", "bruteforce", "brute force"],
@@ -81,6 +82,7 @@ module Gori::Tui
       :oast        => ["collaborator", "interactsh", "oob", "out-of-band"],
       :sequencer   => ["entropy", "randomness"],
       :decoder     => ["encoder", "base64"],
+      :comparer    => ["diff"],
       :rewriter    => ["match and replace", "tamper"],
       :colormarker => ["highlight"],
       :probe       => ["scanner", "audit", "vulnerability"],

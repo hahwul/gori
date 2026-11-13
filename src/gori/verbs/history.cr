@@ -63,7 +63,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "history.query", "Filter (QL)", "Filter the list with a query (host: status:>=500 size:>10000 body~regex …)",
-        Verb::Scope::Body, [Verb::Chord.new("/")], available: in_history, group: :view, intent: :filter) { |ctx| ctx.history_query; nil }
+        Verb::Scope::Body, [Verb::Chord.new("/")], available: in_history, group: :view, intent: :filter, keywords: %w[search find]) { |ctx| ctx.history_query; nil }
 
       # MENU-ONLY since the key audit's F3. `f` carried six unrelated meanings across the tabs
       # and settles into two TIERS: **freeze** in every evidence context (the Issues detail and
@@ -185,7 +185,7 @@ module Gori
       # from the Project tab — that verb now lives in Verb::Scope::ProjectDesc.)
       r.register Verb::Definition.new(
         "history.copy-as", "Copy as…", "Pick a copy format for the selected/marked flows (urls/hosts/curl/raw)",
-        Verb::Scope::Body, available: history_targets, intent: :copy_as, group: :copy) { |ctx| ctx.copy_as_open; nil }
+        Verb::Scope::Body, available: history_targets, intent: :copy_as, group: :copy, keywords: %w[curl]) { |ctx| ctx.copy_as_open; nil }
 
       r.register Verb::Definition.new(
         "history.repeater", "Send to Repeater", "Open the selected flow in the Repeater tab",
@@ -304,7 +304,7 @@ module Gori
       # across COMMON ∪ every Repeater section (all-lowercase keys there).
       r.register Verb::Definition.new(
         "repeater.copy-as", "Copy as…", "Pick a copy format for the focused pane (url/headers/body/cookies/curl/wscat/raw)",
-        Verb::Scope::Repeater, available: in_repeater_read, intent: :copy_as) { |ctx| ctx.copy_as_open; nil }
+        Verb::Scope::Repeater, available: in_repeater_read, intent: :copy_as, keywords: %w[curl]) { |ctx| ctx.copy_as_open; nil }
 
       # History's open-in-browser for the response IN HAND. Gated on a sub-tab, not on a
       # response: the refusal names what is missing ("send the request first"),

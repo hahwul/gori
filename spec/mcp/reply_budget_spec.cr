@@ -55,41 +55,51 @@ describe "MCP reply budget" do
     end
   end
 
-  it "cuts list_sitemap in raw rows, so offset += scanned reaches every endpoint once" do
+  it "cuts list_sitemap in raw rows, so next_offset (offset + scanned) reaches every endpoint once" do
     with_store do |store|
       120.times { |i| mcp_seed_flow(store, "a.test", "GET", long_path(i), 200) }
-      targets = [] of String
-      offset = 0
       cut_seen = false
-      loop do
-        page = call(store, "list_sitemap", %({"limit":5000,"offset":#{offset},"fold_query":false}))
+      targets = mcp_page_rows("entries") do |o|
+        page = call(store, "list_sitemap", %({"limit":5000,"offset":#{o},"fold_query":false}))
         cut_seen ||= page["cut_by"]? == "bytes"
-        targets.concat(page["entries"].as_a.map(&.["target"].as_s))
-        break unless page["has_more"].as_bool
-        offset += page["scanned"].as_i
-      end
+        page["next_offset"].as_i.should eq(o + page["scanned"].as_i) if page["has_more"].as_bool
+        page
+      end.map(&.["target"].as_s)
       cut_seen.should be_true
       targets.size.should eq(120)
       targets.uniq.size.should eq(120)
     end
   end
 
+  # A folded entry stands for several raw rows, so `returned` undercounts what a page
+  # consumed and a caller advancing by it re-read rows; `next_offset` advances by `scanned`.
+  it "walks a folded, byte-cut list_sitemap by next_offset reading every raw row once" do
+    with_store do |store|
+      60.times { |i| 3.times { |q| mcp_seed_flow(store, "a.test", "GET", "#{long_path(i)}?q=#{q}", 200) } }
+      cut_seen = false
+      entries = mcp_page_rows("entries") do |o|
+        page = call(store, "list_sitemap", %({"limit":5000,"offset":#{o}}))
+        cut_seen ||= page["cut_by"]? == "bytes"
+        page
+      end
+      cut_seen.should be_true
+      # A path's variants may straddle a cut and show on both pages; no raw row is skipped
+      # or read twice, so the variants still add up to every row seeded.
+      entries.map(&.["target"].as_s).uniq!.sort!.should eq((0...60).map { |i| long_path(i) }.sort!)
+      entries.sum(&.["query_variants"].as_i).should eq(180)
+    end
+  end
+
   it "cuts an offset-paged tool and keeps total/has_more honest" do
     with_store do |store|
       80.times { |i| store.insert_issue("issue #{i} #{"y" * 1500}", Gori::Store::Severity::Low, "a.test", nil) }
-      seen = 0
-      offset = 0
       page = call(store, "list_issues", %({"limit":500}))
       page["cut_by"].as_s.should eq("bytes")
       page["total"].as_i.should eq(80)
-      loop do
-        page = call(store, "list_issues", %({"limit":500,"offset":#{offset}}))
-        n = page["returned"].as_i
-        seen += n
-        break unless page["has_more"].as_bool
-        offset += n
-      end
-      seen.should eq(80)
+      page["next_offset"].as_i.should eq(page["returned"].as_i)
+      seen = mcp_page_rows("issues") { |o| call(store, "list_issues", %({"limit":500,"offset":#{o}})) }
+      seen.size.should eq(80)
+      seen.map(&.["id"].as_i64).uniq!.size.should eq(80)
     end
   end
 

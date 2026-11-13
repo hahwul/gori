@@ -282,7 +282,8 @@ module Gori
           bridge = store.intercept_bridge_state
           abort "gori run intercept get: no capturing gori instance is publishing intercept state" unless bridge
           row = store.intercept_held_item(bridge, item_id)
-          abort "gori run intercept get: held item #{item_id} is not currently held (already forwarded/dropped, or never held)" unless row
+          not_found_abort("gori run intercept get", "held item #{item_id} is not currently held " \
+                                                    "(already forwarded/dropped, or never held)", format, store) unless row
           now_ms = Time.utc.to_unix_ms
           store.touch_intercept_held(bridge.token, [row.item_id], now_ms)
 

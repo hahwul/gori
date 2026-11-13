@@ -53,6 +53,7 @@ module Gori
             j.field("wordlists") { raw_rows(j, parts) }
             emit_page(j, pg, parts.size, cut: parts.size < page.size)
             j.field "truncated", (listing.truncated || pg.offset + parts.size < listing.entries.size)
+            emit_more(j, pg.offset + parts.size < listing.entries.size, pg.offset + parts.size)
           end
         end)
       end
@@ -98,7 +99,7 @@ module Gori
       # bound to, and credential material stays out unless `include_sensitive` says otherwise —
       # and the reply carries the source's report. A value that cannot be one line of the file (it
       # holds a line break) is left out and COUNTED, since the format cannot carry it.
-      @[Tool("save_wordlist", gated: true, agent_action: true, unbound: true, permission: "write")]
+      @[Tool("save_wordlist", gated: true, agent_action: true, unbound: true, permission: "write", open_world: false)]
       private def save_wordlist(h) : Result
         name = wordlist_name_arg(h, "name") || return wordlist_name_missing("name")
         overwrite = bool_arg(h, "overwrite", false)
@@ -156,7 +157,7 @@ module Gori
         {lines, resolved.report, skipped}
       end
 
-      @[Tool("rename_wordlist", gated: true, agent_action: true, unbound: true, permission: "write")]
+      @[Tool("rename_wordlist", gated: true, agent_action: true, unbound: true, permission: "write", open_world: false)]
       private def rename_wordlist(h) : Result
         from = wordlist_name_arg(h, "name") || return wordlist_name_missing("name")
         to = wordlist_name_arg(h, "new_name") || return wordlist_name_missing("new_name")
@@ -177,7 +178,7 @@ module Gori
 
       # `confirm:true` is the gate, as it is on `clear_history`: a list is a file outside any
       # project, and a deleted one is gone. Without it the call says what it would remove.
-      @[Tool("delete_wordlist", gated: true, agent_action: true, unbound: true, permission: "write")]
+      @[Tool("delete_wordlist", gated: true, agent_action: true, unbound: true, permission: "write", open_world: false)]
       private def delete_wordlist(h) : Result
         name = wordlist_name_arg(h, "name") || return wordlist_name_missing("name")
         entry = begin

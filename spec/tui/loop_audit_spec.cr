@@ -253,6 +253,21 @@ describe "the core-loop hints" do
       body.should contain("@filing_origin = nil")
     end
 
+    # The esc that saves a note on the just-filed issue was taken for the way back, and the
+    # note was dropped. The gate sits in the one-shot itself, BEFORE the origin is spent.
+    it "fires only for the esc that would have closed the detail, never NOTES' own" do
+      body = runner_src[/private def return_to_filing_origin.*?\n    end/m].not_nil!
+      gate = body.index("esc_closes_detail?")
+      spend = body.index("@filing_origin = nil")
+      gate.should_not be_nil
+      gate.not_nil!.should be < spend.not_nil!
+      # And only for the opening that filed it: reopened from the list later, esc is ordinary.
+      opening = body.index("detail_opens == origin.opened")
+      opening.should_not be_nil
+      opening.not_nil!.should be < spend.not_nil!
+      runner_src.should contain("label, issues_controller.view.detail_opens)")
+    end
+
     it "leaves the open/stay question where it is still a question — a NOTE" do
       links_src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner", "links.cr"))
       links_src.should_not contain("ISSUE CREATED")

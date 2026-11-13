@@ -48,7 +48,7 @@ module Gori
         Result.new(JSON.build { |j| Serialize.issue(j, f, store, retest: true, items_cap: ISSUE_ITEMS_MAX) })
       end
 
-      @[Tool("create_issue", gated: true, agent_action: true, permission: "write")]
+      @[Tool("create_issue", gated: true, agent_action: true, permission: "write", open_world: false, destructive: false)]
       private def create_issue(h) : Result
         title = str(h, "title")
         return Result.new("missing required 'title'", is_error: true) if title.nil? || title.strip.empty?
@@ -123,7 +123,7 @@ module Gori
         store.ensure_link(Store::LinkOwnerKind::Issue, issue_id, Store::LinkRefKind::Repeater, repeater_id)
       end
 
-      @[Tool("update_issue", gated: true, agent_action: true, permission: "write")]
+      @[Tool("update_issue", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def update_issue(h) : Result
         id = required_id(h, "id")
         return not_found("no issue with id #{id}") unless store.get_issue(id)
@@ -192,7 +192,7 @@ module Gori
       # Remove an issue outright (the TUI Issues tab's delete). Distinct from status
       # "resolved"/"false-positive", which keep it in the report — this drops it, along with
       # its entity links (Store#delete_issue clears those in the same transaction).
-      @[Tool("delete_issue", gated: true, agent_action: true, permission: "write")]
+      @[Tool("delete_issue", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def delete_issue(h) : Result
         id = required_id(h, "id")
         return not_found("no issue with id #{id}") unless store.get_issue(id)

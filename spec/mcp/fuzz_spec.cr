@@ -1825,21 +1825,59 @@ describe "MCP fuzz — a live job's results page in index order (#1432)" do
       first["results"].as_a.should be_empty # #0 is still in flight
       first["rows_pending"].as_i.should eq(2)
       first["has_more"].as_bool.should be_false
+      # Nothing more NOW, but the job runs on: the next poll continues from here.
+      first["next_offset"].as_i.should eq(0)
 
+      # Walked by next_offset alone, each read continues exactly where the last one ended.
       land.call(0)
-      read.call(%({"job_id":"fz_live","limit":2}))["results"].as_a.map(&.["index"].as_i).should eq([0, 1])
+      p1 = read.call(%({"job_id":"fz_live","limit":2}))
+      p1["results"].as_a.map(&.["index"].as_i).should eq([0, 1])
+      p1["has_more"].as_bool.should be_true
       [5, 3].each { |i| land.call(i) }
       # #4 is outstanding: offset 2 sees 2 and 3, never a reshuffled 1.
-      read.call(%({"job_id":"fz_live","offset":2}))["results"].as_a.map(&.["index"].as_i).should eq([2, 3])
+      p2 = read.call(%({"job_id":"fz_live","offset":#{p1["next_offset"]}}))
+      p2["results"].as_a.map(&.["index"].as_i).should eq([2, 3])
+      p2["next_offset"].as_i.should eq(4)
       land.call(4)
-      read.call(%({"job_id":"fz_live","offset":4}))["results"].as_a.map(&.["index"].as_i).should eq([4, 5])
+      p3 = read.call(%({"job_id":"fz_live","offset":#{p2["next_offset"]}}))
+      p3["results"].as_a.map(&.["index"].as_i).should eq([4, 5])
 
-      # A finished job pages everything, held rows or not.
+      # A finished job pages everything, held rows or not, and then says there is no more.
       land.call(7)
       fjob.status = :done
       done = read.call(%({"job_id":"fz_live","offset":4}))
       done["results"].as_a.map(&.["index"].as_i).should eq([4, 5, 7])
       done.as_h.has_key?("rows_pending").should be_false
+      done["next_offset"].raw.should be_nil
+    end
+  end
+
+  it "walks a live run cut by the reply budget by next_offset, every row once" do
+    with_store do |store|
+      tools = tools_for(store)
+      cfg = Gori::Fuzz::Config.new
+      gen = Gori::Fuzz::Generator.new(Gori::Fuzz::Template.parse("GET / HTTP/1.1\r\nHost: h\r\n\r\n"), [] of Gori::Fuzz::PayloadSet, cfg)
+      engine = Gori::Fuzz::Engine.new(gen, Gori::Fuzz::Matcher.new, NullFuzzBackend.new, cfg)
+      audit = Gori::MCP::Tools::JobAudit.new("http://h:80", nil, 1, nil, 0_i64)
+      fjob = Gori::MCP::Tools::FuzzJob.new("fz_cut", 81_i64, engine, :none,
+        Gori::Fuzz::Origin.new("http", "h", 80), false, audit, tools.__db_path)
+      tools.__register_fuzz_job(fjob)
+      (0...80).each do |i|
+        tools.__store_fuzz_result(fjob, Gori::Fuzz::Result.new(i.to_i64, ["#{i}:#{"x" * 1500}"], nil, 200, 1_i64,
+          1, 1, 1_i64, nil, true, false, nil).tap { |r| fjob.clusters.add(r) })
+      end
+      cut_seen = false
+      seen = [] of Int32
+      offset = 0
+      loop do
+        page = call_json(tools, "fuzz_results", %({"job_id":"fz_cut","limit":1000,"offset":#{offset}}))
+        cut_seen ||= page["cut_by"]? == "bytes"
+        seen.concat(page["results"].as_a.map(&.["index"].as_i))
+        break unless page["has_more"].as_bool
+        offset = page["next_offset"].as_i
+      end
+      cut_seen.should be_true
+      seen.should eq((0...80).to_a)
     end
   end
 end

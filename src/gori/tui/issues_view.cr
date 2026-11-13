@@ -221,6 +221,14 @@ module Gori::Tui
       !@detail.nil?
     end
 
+    # Would a bare esc here be the detail's plain "back" (close into the list)? Not while the
+    # NOTES pane holds focus: its INS esc saves the edit, its READ esc steps to RELATED
+    # (`IssuesController#handle_detail_key`). `Runner#return_to_filing_origin` asks this so the
+    # #F19 way back never eats the esc that saves a note.
+    def esc_closes_detail? : Bool
+      detail_open? && !notes_focused? && !notes_insert_mode?
+    end
+
     # The drill-in's breadcrumb. ONE derivation, read by `render_detail` AND by
     # IssuesController's click hit-test — the `‹` is a control, and a control drawn from one
     # rect and hit-tested against another is a dead button (which is what ` ‹ list ` was).
@@ -418,8 +426,14 @@ module Gori::Tui
       open_detail_issue(issue, store)
     end
 
+    # How many times a detail has been opened. `Runner`'s way back to where an issue was filed
+    # holds only for the opening that filed it: closed and opened again from the list, the
+    # same issue's esc is the ordinary one.
+    getter detail_opens : Int32 = 0
+
     private def open_detail_issue(issue : Store::Issue, store : Store) : Bool
       @detail = issue
+      @detail_opens += 1
       reload_detail_links(store)
       refresh_retest_summary(store)
       @links_scroll = 0

@@ -194,7 +194,7 @@ module Gori
 
         store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
         content = begin
-          issue = store.get_issue(id) || abort_closing(store, "gori run issues show: no issue with id #{id}")
+          issue = store.get_issue(id) || not_found_abort("gori run issues show", "no issue with id #{id}", format, store)
           if format == :json
             Issues::Export.issue_json(issue, store)
           else

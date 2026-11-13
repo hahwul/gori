@@ -43,28 +43,41 @@ describe "MCP list_sitemap paging" do
       # The row fetched to DECIDE has_more is not reported as data.
       page["entries"].as_a.size.should eq(2)
 
+      page["next_offset"].as_i.should eq(2)
+
       whole = sm_call(tools, "{}")
       whole["returned"].as_i.should eq(5)
       whole["has_more"].as_bool.should be_false
+      whole["next_offset"].raw.should be_nil
     end
   end
 
-  it "walks every endpoint through offset, with no repeat and no gap" do
+  it "walks every endpoint through next_offset, with no repeat and no gap" do
     with_store do |store|
       5.times { |i| seed_endpoint(store, "/p#{i}") }
       tools = tools_for(store)
 
-      seen = [] of String
-      offset = 0
-      loop do
-        page = sm_call(tools, %({"limit":2,"offset":#{offset}}))
-        seen.concat(page["entries"].as_a.map(&.["target"].as_s))
-        break unless page["has_more"].as_bool
-        offset += page["limit"].as_i
-      end
-
+      seen = mcp_page_rows("entries") { |o| sm_call(tools, %({"limit":2,"offset":#{o}})) }.map(&.["target"].as_s)
       seen.should eq(["/p0", "/p1", "/p2", "/p3", "/p4"])
-      seen.uniq.size.should eq(seen.size)
+    end
+  end
+
+  # A folded entry is several raw rows and `offset` pages raw rows, so the continuation is
+  # offset + `scanned`: advancing by `returned` would re-read /s?q=2 here.
+  it "advances next_offset by scanned rows when entries fold" do
+    with_store do |store|
+      seed_endpoint(store, "/s?q=1")
+      seed_endpoint(store, "/s?q=2")
+      seed_endpoint(store, "/t")
+      seed_endpoint(store, "/u")
+      tools = tools_for(store)
+
+      page = sm_call(tools, %({"limit":2}))
+      page["returned"].as_i.should eq(1)
+      page["scanned"].as_i.should eq(2)
+      page["next_offset"].as_i.should eq(2)
+      seen = mcp_page_rows("entries") { |o| sm_call(tools, %({"limit":2,"offset":#{o}})) }.map(&.["target"].as_s)
+      seen.should eq(["/s", "/t", "/u"])
     end
   end
 
@@ -90,10 +103,12 @@ describe "MCP list_sitemap paging" do
       page = sm_call(tools, %({"limit":2,"collapse_transport":true}))
       page["entries"].as_a.size.should eq(2)
       page["has_more"].as_bool.should be_true
+      page["next_offset"].as_i.should eq(2)
 
       rest = sm_call(tools, %({"limit":2,"offset":2,"collapse_transport":true}))
       rest["entries"].as_a.size.should eq(1)
       rest["has_more"].as_bool.should be_false
+      rest["next_offset"].raw.should be_nil
     end
   end
 end

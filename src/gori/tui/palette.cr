@@ -141,10 +141,24 @@ module Gori::Tui
     # matches first, then Global's, each group fuzzy-ranked on its own — a tab action is
     # what the operator is most likely looking for from inside the tab, and a score that
     # interleaved the two would move rows between groups on every keystroke.
+    #
+    # Once any row says the query (`Registry.strong?`), the rows that only scatter it drop out
+    # of both groups, so the group order stays and `cert` no longer opens on Clear history.
+    # With no such row the scattered ones stay — `stp` still finds what an abbreviation
+    # means — but the cursor starts on the first one that destroys nothing.
     def refresh(ctx : Verb::ExecContext) : Nil
       tab = @query.empty? ? [] of Verb::Definition : @registry.rank(@tab_all, @query)
+      app = @registry.for_scope(Verb::Scope::Global, ctx, @query)
+      q = @query.downcase.strip # `cert ` on the way to `cert path` is still `cert`
+      said = ->(v : Verb::Definition) { Verb::Registry.strong?(v, q) }
+      scattered = !q.empty? && tab.none?(&said) && app.none?(&said)
+      unless q.empty? || scattered
+        tab.select!(&said)
+        app.select!(&said)
+      end
       @tab_count = tab.size
-      @results = tab + @registry.for_scope(Verb::Scope::Global, ctx, @query)
+      @results = tab + app
+      @selected = (@results.index { |v| !v.group.in?(:danger, :wipe) } || 0) if scattered && @selected == 0
       @selected = @selected.clamp(0, {@results.size - 1, 0}.max)
     end
 
@@ -234,7 +248,7 @@ module Gori::Tui
     # to it next time.
     private def fast_path(verb : Verb::Definition, overrides : Hash(String, Array(Verb::Chord)), *, tab : Bool) : String?
       if chord = Hotkeys.binding_for(@registry, verb.id, overrides)
-        return chord.label
+        return Hotkeys.display_label(chord) # `^R` / `⇧X`, as every footer and Help spell it
       end
       return nil unless tab
       Hotkeys.menu_path(@registry, verb.id, compact: true, strip_focus: @strip_focus)

@@ -194,6 +194,24 @@ describe Gori::Verb do
       reg.search("zzxq-nope", ctx).should be_empty
     end
 
+    # What the palette keeps once any row qualifies: a run of the title or id, a keyword's
+    # start, or every word of a several-word query one of those. A scattered subsequence is not.
+    it "tells a row that says the query from one that scatters it" do
+      v = Definition.new("ca.export", "Copy CA certificate path", "", Gori::Verb::Scope::Global,
+        keywords: %w[curl]) { |_| nil }
+      Registry.strong?(v, "cert").should be_true      # a run of the title
+      Registry.strong?(v, "ca.exp").should be_true    # a run of the id
+      Registry.strong?(v, "cu").should be_true        # a keyword's start
+      Registry.strong?(v, "copy curl").should be_true # each word, apart
+      Registry.strong?(v, "c").should be_true         # one letter is always a run
+      Registry.strong?(v, "cpy").should be_false      # scattered
+      Registry.strong?(v, "copy rl").should be_false  # `rl` is scattered
+
+      # The words rung gives a several-word query a score where no run of it exists.
+      Gori::Fuzzy.score("copy curl", "copy ca certificate path ca.export").should be_nil
+      Registry.score(v, "copy curl").should_not be_nil
+    end
+
     # One membership rule for "what can I do here", read by the space menu and the palette's
     # typed search alike (#1282).
     it "for_view is COMMON, the focused section, and the SUB-TABS bucket when the tab has a strip" do

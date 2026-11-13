@@ -275,6 +275,38 @@ describe Gori::Tui::IssuesView do
     end
   end
 
+  # #F19's "esc returns to <tab>" one-shot (`Runner#return_to_filing_origin`) fired ahead of
+  # the NOTES pane's own esc, so the esc that saves a note on a freshly filed issue jumped
+  # back to History and dropped the note. The one-shot now asks this first.
+  it "leaves esc to the NOTES pane while it holds focus, READ or INS" do
+    with_store do |store|
+      id = store.insert_issue("XSS", Gori::Store::Severity::Medium, "acme.test", nil)
+      view = IssuesView.new
+      view.reload(store)
+      view.esc_closes_detail?.should be_false # no detail, nothing to close
+      view.open_detail(store).should be_true
+      view.esc_closes_detail?.should be_true # RELATED: esc is the plain back
+
+      view.focus_notes!
+      view.esc_closes_detail?.should be_false # READ esc steps to RELATED
+      view.enter_notes_insert!
+      "VERIFY-NOTE-123".each_char { |ch| view.notes_insert(ch) }
+      view.esc_closes_detail?.should be_false # INS esc saves the note
+
+      view.save_notes(store).should be_true
+      store.get_issue(id).not_nil!.notes.should eq("VERIFY-NOTE-123")
+      view.esc_closes_detail?.should be_false # still on NOTES after the save
+      view.focus_links!
+      view.esc_closes_detail?.should be_true
+
+      # Closed and opened again is a new opening: the way back belongs to the first one.
+      filed = view.detail_opens
+      view.close_detail
+      view.open_detail(store).should be_true
+      view.detail_opens.should eq(filed + 1)
+    end
+  end
+
   it "keeps the notes caret across an external-change tick (#1122)" do
     with_store do |store|
       id = store.insert_issue("XSS", Gori::Store::Severity::Medium, "acme.test", nil)

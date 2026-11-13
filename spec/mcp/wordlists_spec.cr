@@ -102,7 +102,7 @@ describe "MCP wordlist catalog" do
         first["cut_by"].as_s.should eq("bytes")
         first["truncated"].as_bool.should be_true
         first.to_json.bytesize.should be < Gori::MCP::Tools::REPLY_ROWS_BUDGET + 4096
-        seen = mcp_page_rows("wordlists", "truncated") do |o|
+        seen = mcp_page_rows("wordlists") do |o|
           ok(t, "list_wordlists", %({"limit":1000,"offset":#{o}}))
         end.map(&.["name"].as_s)
         seen.should eq(names)

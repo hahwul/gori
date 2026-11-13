@@ -73,7 +73,7 @@ module Gori
       # `Notes.create` runs the read and the write inside one `BEGIN IMMEDIATE` (see
       # `Store#mutate_setting`), and mints the id from the set the transaction read — so two
       # concurrent creates get two ids and both notes survive.
-      @[Tool("create_note", gated: true, agent_action: true, permission: "write")]
+      @[Tool("create_note", gated: true, agent_action: true, permission: "write", open_world: false, destructive: false)]
       private def create_note(h) : Result
         # Refused, as `gori run notes create` refuses "no note text": a blank note is a row the
         # caller has to find and delete, and usually a misspelt argument.
@@ -86,7 +86,7 @@ module Gori
         Result.new({id: new_id, message: "Note created successfully"}.to_json)
       end
 
-      @[Tool("update_note", gated: true, agent_action: true, permission: "write")]
+      @[Tool("update_note", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def update_note(h) : Result
         id = required_id(h, "id")
         text = str(h, "text")
@@ -107,7 +107,7 @@ module Gori
         Result.new({id: id, message: "Note updated successfully"}.to_json)
       end
 
-      @[Tool("delete_note", gated: true, agent_action: true, permission: "write")]
+      @[Tool("delete_note", gated: true, agent_action: true, permission: "write", open_world: false)]
       private def delete_note(h) : Result
         id = required_id(h, "id")
 
