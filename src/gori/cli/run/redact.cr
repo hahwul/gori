@@ -45,7 +45,34 @@ module Gori
       # than aborting on a bad profile name: every caller here is holding an open store, and
       # `abort` skips `ensure` (see `cmd_show`), so the refusal has to happen after the close.
       private def self.redact_choice(store : Store?, flags : RedactFlags) : Redact::Policy::Choice
-        Redact::Policy.resolve(store, flags.profile, flags.mode)
+        choice = Redact::Policy.resolve(store, flags.profile, flags.mode)
+        return choice unless (e = choice.error) && flags.profile.nil?
+        choice.copy_with(error: "#{e}#{redact_dangling_hint(store)}")
+      end
+
+      # The way out when the CONFIGURED profile name no longer resolves (a hand-edited
+      # settings.json, a profile removed before `rm` refused that): the `use` that names
+      # another, at the scope that holds the stale name. "" when the name still resolves.
+      def self.redact_dangling_hint(store : Store?) : String
+        project = Redact::Policy.project_scope(store).active.presence
+        name = project || Settings.redaction_active.presence
+        return "" if name.nil? || Redact::Policy.profile(store, name)
+        flag = project ? "" : " --global"
+        " — pick another with `gori run redact use#{flag} <name>`, or clear it with `gori run redact use#{flag} --none`"
+      end
+
+      # Why `rm` must not take `name`: it is the profile a safe export uses at that scope, and
+      # removing it leaves every later `--redact` refusing a name nothing defines. `project_active`
+      # is nil for `--global`, which can only see settings.json's choice. nil when free to go.
+      #
+      # A project rm is pointed at a project `use` even when settings.json holds the choice:
+      # clearing that would change every other project too.
+      def self.redact_rm_refusal(name : String, project_active : String?, global_active : String) : String?
+        in_project = project_active.presence
+        return nil unless (in_project || global_active) == name
+        flag = project_active ? "" : " --global"
+        clear = in_project || project_active.nil? ? " or clear the choice (`gori run redact use#{flag} --none`)" : ""
+        "#{name.inspect} is the redaction profile in use — pick another first (`gori run redact use#{flag} <name>`)#{clear}"
       end
 
       # One flow's report in the shape the reporters below take. `nil` for the id: there is no
@@ -192,10 +219,12 @@ module Gori
         format = :text
         parse_no_positionals(args, "gori run redact profiles",
           "`profiles` takes no positional arguments; to pick one use `gori run redact use <name>`") do |p|
-          p.banner = "Usage: gori run redact profiles [options]\n\n" \
+          p.banner = "Usage: gori run redact [profiles] [options]\n\n" \
                      "Lists every redaction profile available here — the project's own first,\n" \
                      "then settings.json's, then the built-ins — and says which one a safe\n" \
-                     "export would use."
+                     "export would use.\n\n" \
+                     "Subcommands: redact use <name>|--none · redact default on|off · " \
+                     "redact set <name> [--json-field F]… · redact rm <name>"
           project_options(p, proj, "read")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
@@ -438,6 +467,7 @@ module Gori
         name = positional.first
 
         if global
+          redact_rm_refusal(name, nil, Settings.redaction_active).try { |r| abort "gori run redact rm: #{r}" }
           kept = Settings.redaction_profiles.reject(&.name.==(name))
           abort "gori run redact rm: no global profile named #{name.inspect}" if kept.size == Settings.redaction_profiles.size
           Settings.redaction_profiles = kept
@@ -449,6 +479,8 @@ module Gori
           kept = scope.profiles.reject(&.name.==(name))
           if kept.size == scope.profiles.size
             "no profile named #{name.inspect} in this project"
+          elsif refusal = redact_rm_refusal(name, scope.active, Settings.redaction_active)
+            refusal
           else
             scope.copy_with(profiles: kept)
           end
