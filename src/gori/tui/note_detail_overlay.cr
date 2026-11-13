@@ -252,7 +252,9 @@ module Gori::Tui
     # a card whose width is already fixed.
     private def wrap(width : Int32) : Array(String)
       # A note with no long form is opened for its one line, which the ring row clipped.
-      NoteDetailOverlay.wrap_text(bare? ? @note.message : @note.detail.not_nil!, width)
+      text = @note.detail
+      text = @note.message if text.nil? || text.empty? # `bare?`: the one line is the body
+      NoteDetailOverlay.wrap_text(text, width)
     end
 
     # The same wrap for another card that shows peer-written prose at a fixed width — the

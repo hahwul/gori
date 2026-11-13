@@ -3843,6 +3843,14 @@ module Gori::Tui
     # layout either, so a click cannot land on one.
     # ponytail: the split layout is left alone, it only exists on a pane wide enough for both
     # halves' chips; window each half the same way if a pane ever grows more of them.
+    # A windowed strip (`fit_detail_chips`) says which way the hidden panes are.
+    private def draw_chip_overflow(screen : Screen, rect : Rect, layout : Array({Symbol, Int32, Int32})) : Nil
+      return if split_detail?(rect) || layout.empty?
+      panes = detail_panes
+      screen.text(rect.x, rect.y, "‹", Theme.muted) if layout.first[0] != panes.first?
+      screen.text(rect.right - 1, rect.y, "›", Theme.muted) if layout.last[0] != panes.last?
+    end
+
     private def detail_chips_windowed?(rect : Rect) : Bool
       !split_detail?(rect) && detail_chip_layout(rect).size < detail_panes.size
     end
@@ -4161,12 +4169,7 @@ module Gori::Tui
       focus_left = split_focus_left?
       end_x = rect.x + 1
       layout = detail_chip_layout(rect)
-      # A windowed strip (`fit_detail_chips`) says which way the hidden panes are.
-      if (first = layout.first?) && (last = layout.last?) && !split_detail?(rect)
-        panes = detail_panes
-        screen.text(rect.x, rect.y, "‹", Theme.muted) if first[0] != panes.first?
-        screen.text(rect.right - 1, rect.y, "›", Theme.muted) if last[0] != panes.last?
-      end
+      draw_chip_overflow(screen, rect, layout)
       layout.each do |(pane, cx, _)|
         active = pane == @detail_pane
         shown = active || pane == companion
