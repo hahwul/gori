@@ -5420,3 +5420,34 @@ what each screen printed twice.
 - **The Shortcuts popup clears its margin when it is at its widest.** A card that stops two
   columns short of the body showed the frame, scrollbar and cursor bar of the pane underneath
   as a second box around itself. On a wider terminal the margin is real context and stays.
+
+### 2026-11-13: what the screen says about state has to be true
+
+Found by doing whole jobs in the demo project (send, fuzz, mine, crawl, hold, write up)
+instead of reading first screens. Each of these was a screen stating something the app knew
+to be otherwise.
+
+- **A paused job is live but not working.** `Jobs` had no paused state, so a paused crawl
+  read `discovering 1` with the spinner turning on every tab but its own. `Jobs#pause`
+  marks it; the chip reads `‖ discovering 1 paused`, muted and still, and a paused job is
+  left out of the count beside working ones. An exit prompt still counts it (`any_active?`).
+- **A stopped run does not claim a verdict.** A mine halted by hand finished as
+  `done — nothing found … (stopped)`. It files as `:stopped` and says how many names it
+  tested. The Sequencer's mid-run report is throttled on purpose, so ANALYSIS names the
+  sample count it was computed over whenever the run has collected more.
+- **A run that can send nothing is refused**, like one with no position (a Numbers set with
+  From above To). It used to start, clear the results pane and end on `0 sent`.
+- **Turning Intercept off still drops an open editor's changes, and now asks first.** The
+  drop is deliberate: `i` is reachable from any tab and a stray press must not put
+  half-typed bytes on the wire. The toast was the only notice, came after the bytes had gone
+  and was cut short of that clause at 120 columns.
+- **One string, one owner.** The Notes links row is one string for the view; two paths that
+  change the current note forgot to refresh it. The row asks `link_preview_stale?` when it
+  is drawn. The flow detail's chips window themselves inside the pane, its footer sentences
+  wrap (three rows at most), and a notification with nowhere to jump opens as a card.
+
+Left alone: a pane keeps INS when focus leaves it (`Frame.mode_badge`). In Notes, the
+Repeater and Fuzzer TARGET, Decoder, JWT and Cookie, `↑` on the first line hands focus to the
+strip with INS retained, and letters typed next run strip commands. That is the READ/INS
+model the 2026-11-07 entry set aside, across six editors, and it wants its own decision.
+
