@@ -203,7 +203,12 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ field · ←/→ options · ↹ complete · ↵ save · esc cancel"
+      "↑/↓ field · ←/→ options · ↹ complete · #{enter_hint} · esc cancel"
+    end
+
+    # ↵ on the condition, the last text row, commits; earlier rows move on.
+    def enter_commits? : Bool
+      on_save_row? || @sel == ROW_WHEN
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol
@@ -231,7 +236,7 @@ module Gori::Tui
       elsif @sel == ROW_SAVE
         (key.enter? || key.space?) ? :commit : :stay
       else # text row
-        text_row_key(ev, @sel == ROW_WHEN)
+        text_row_key(ev, enter_commits?)
       end
     end
 

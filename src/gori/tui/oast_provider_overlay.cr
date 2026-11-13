@@ -126,7 +126,7 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ field · ←/→ options · type name/host/token · ↵ save · esc cancel"
+      "↑/↓ field · ←/→ options · type name/host/token · #{enter_hint} · esc cancel"
     end
 
     def move(d : Int32) : Nil

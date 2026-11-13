@@ -89,7 +89,12 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ field · ↵ save · esc cancel"
+      "↑/↓ field · #{enter_hint} · esc cancel"
+    end
+
+    # ↵ on the name moves to the colour; on the colour it commits.
+    def enter_commits? : Bool
+      on_save_row? || @sel == ROW_HEX
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol
@@ -100,7 +105,7 @@ module Gori::Tui
       if @sel == ROW_SAVE
         (key.enter? || key.space?) ? :commit : :stay
       else
-        text_row_key(ev, @sel == ROW_HEX)
+        text_row_key(ev, enter_commits?)
       end
     end
 

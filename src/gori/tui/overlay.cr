@@ -517,6 +517,20 @@ module Gori::Tui
       @sel == row_count - 1
     end
 
+    # Whether ↵ on the selected row commits: the commit row, by default. A form whose last
+    # text row commits too answers that row as well, and passes this same answer to
+    # `text_row_key`, so its hint and its key cannot disagree.
+    def enter_commits? : Bool
+      on_save_row?
+    end
+
+    # The hint's ↵ segment, true for the selected row: before the row that commits, ↵ moves
+    # to the next field (`cycler_key`, `text_row_key`), so `↵ save` there named a key that
+    # did not save.
+    private def enter_hint : String
+      enter_commits? ? "↵ save" : "↵ next"
+    end
+
     # One row per step whatever `d`'s size, walking PAST rows `skip_row?` names instead of
     # landing on them, and stopping at the ends rather than wrapping. A form whose wheel notch
     # moves the full `d` overrides with a clamp.

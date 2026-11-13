@@ -208,9 +208,13 @@ module Gori::Tui
         # printed the literal `{fuzz.sort} sort` into the footer, braces and all, and the one
         # key it named answered "nothing bound here". The `space:` form spells the menu path
         # from the registry, as the Rewriter does for its own menu-only action.
+        #
+        # Direct keys first, menu paths last: `space → o sort · m matched` read as if `m` were
+        # behind `space` too. The paths sit just before `space cmds`, so a narrow row drops
+        # them before any direct key.
         fold = v.grouped? ? " · ←/→ fold" : ""
-        "↑/↓ select · ↵ detail#{fold} · #{keys("{space:fuzz.sort} sort · {fuzz.matched} matched · {fuzz.dist} dist · {space:fuzz.group} shapes")}#{save} · " \
-        "#{run} run · #{stop} stop · space cmds · esc sub-tabs"
+        "↑/↓ select · ↵ detail#{fold} · #{keys("{fuzz.matched} matched · {fuzz.dist} dist")}#{save} · " \
+        "#{run} run · #{stop} stop · #{keys("{space:fuzz.sort} sort · {space:fuzz.group} shapes")} · space cmds · esc sub-tabs"
       when :detail then "↑/↓ move · ←/→ pane · ^F find · space cmds · esc back"
       else              "↹/esc sub-tabs"
       end

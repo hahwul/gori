@@ -412,7 +412,18 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ field · ←/→ options · type find/value · ↵ save · esc cancel"
+      "↑/↓ field · ←/→ options · type find/value · #{enter_hint} · esc cancel"
+    end
+
+    # ↵ on the LAST text row commits — the value, or the header name when the op has no value
+    # row (remove header). A short-circuit op's value row is a button instead (`enter_hint`).
+    def enter_commits? : Bool
+      on_save_row? || (!short_circuit_op? && (@sel == ROW_VALUE || (@sel == ROW_FIND && skip_row?(ROW_VALUE))))
+    end
+
+    # The `response:` and `options:` rows are buttons: ↵ opens their sub-editor.
+    private def enter_hint : String
+      @sel == ROW_OPTIONS || (@sel == ROW_VALUE && short_circuit_op?) ? "↵ open" : super
     end
 
     # :stay | :commit | :cancel. A key that leaves the form open also refreshes the match
@@ -440,10 +451,10 @@ module Gori::Tui
         @on_edit_options.try(&.call) if key.enter? || key.space?
         :stay
       else # text row
-        # ↵ on the LAST text row commits — the value, or the header name when the op has no
-        # value row (remove header). A stub's body-file row is followed by its options, so ↵
-        # there moves on like every other row before the end.
-        text_row_key(ev, @sel == ROW_VALUE || (@sel == ROW_FIND && skip_row?(ROW_VALUE) && !short_circuit_op?))
+        # ↵ on the LAST text row commits (`enter_commits?`, which the hint reads too). A stub's
+        # body-file row is followed by its options, so ↵ there moves on like every other row
+        # before the end.
+        text_row_key(ev, enter_commits?)
       end
     end
 

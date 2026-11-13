@@ -189,7 +189,7 @@ module Gori::Tui
       # setup: with no payload set in the CONFIG pane the run produces nothing, and the two
       # halves sit in different panes, so the tooltip over the position names the pane that
       # completes it. (In the Repeater a marker IS complete on its own — hence the default.)
-      @editor.chain_peek_hint = "^Q edit · ^O sets"
+      @editor.chain_peek_hint = CHAIN_HINT
       @last_synced_config = "" # last store config blob applied (reconcile equality)
       @config = Fuzz::Config.new(keep_bodies: :all)
       @sets = [] of SetSpec
@@ -931,6 +931,24 @@ module Gori::Tui
         @marker_spans = Fuzz::Template.marked_spans(@editor.text)
       end
       @marker_spans
+    end
+
+    # What `^Q` and `^O` do for the position under the caret (see the chain peek setup).
+    CHAIN_HINT = "^Q edit · ^O sets"
+
+    # The chain-less marker's hint, on the template's bottom border where no byte is drawn.
+    # 32 columns, so an 80-column body's 39-wide pane keeps `^O sets`, the half that names
+    # where the chain is made; narrower, trailing segments drop first (`Chrome.fit_hints`).
+    private def draw_chain_hint(screen : Screen, rect : Rect, focused : Bool) : Nil
+      return unless focused && chain_under_cursor == "" && rect.w >= 12
+      text = Chrome.fit_hints("no chain yet · #{CHAIN_HINT}", rect.w - 6)
+      screen.text(rect.x + 2, rect.bottom - 1, " #{text} ", Theme.muted, Theme.bg, width: rect.w - 4)
+    end
+
+    # The caret tooltip's feed: only a REAL chain (a chain-less marker has `draw_chain_hint`).
+    private def tooltip_chain : String?
+      chain = chain_under_cursor
+      chain == "" ? nil : chain
     end
 
     # The chain (`¦…`) of the marker under the cursor, or nil (not in a marker) / "" (marker,
@@ -3133,14 +3151,17 @@ module Gori::Tui
       end
       @editor.bg_regions = bg
       @editor.conceal_spans = conceal
-      # A marker WITHOUT a chain gets the tooltip too (`""` → "no chain yet · ^Q edit · ^O
-      # sets"). That is the state a freshly auto-marked template is in for every one of its
-      # positions, i.e. the one an operator meets first and the one that used to say nothing.
-      # nil (caret outside every marker) still draws nothing.
-      @editor.chain_peek_text = chain_under_cursor
+      # A marker WITHOUT a chain says so too ("no chain yet · ^Q edit · ^O sets"). That is the
+      # state a freshly auto-marked template is in for every one of its positions, i.e. the one
+      # an operator meets first and the one that used to say nothing. It rides the bottom
+      # border (`draw_chain_hint`), not the caret tooltip: that is a row over the template's
+      # next line, and it hid the Host value being edited under line 1. Only a REAL chain keeps
+      # the tooltip — it shows bytes the buffer conceals. nil (outside every marker) draws nothing.
+      @editor.chain_peek_text = tooltip_chain
       inner = rect.inset(1, 1)
       read_active = focused && !ins
       @editor.render(screen, inner, cursor: ins, highlight: :request, peek: focused, gauge: true, gauge_focused: focused)
+      draw_chain_hint(screen, rect, focused)
       # READ-mode over-paint (selection band + block caret) on top of the frame the editor drew.
       #
       # Band and caret both go through the EDITOR, which owns the concealed-run map. This pane is

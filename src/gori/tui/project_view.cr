@@ -2936,20 +2936,11 @@ module Gori::Tui
       screen.text(nx, y, note, Theme.muted, bg) if nx + note.size < mx
     end
 
-    # "· this run: 18981 (-p)" beside a bind row whose shown value is not what the proxy is
-    # listening on. The flag is named only when it is provably the cause: this run's override
-    # holds the live value and no project pin outranks it (`Settings.effective_bind_*`). A
-    # startup port fallback has no flag, so it gets none.
+    # The rule lives in `Settings.bind_run_note`, shared with Preferences › Network.
     private def bind_run_note(fi : Int32) : String?
       # Not while capture is off or this session is view-only: nothing is listening then.
       return nil unless @capturing && (live = @live_bind) && fi <= SETTINGS_BIND_PORT_INDEX
-      port = fi == SETTINGS_BIND_PORT_INDEX
-      value = port ? live[1].to_s : live[0]
-      return nil if value == @set_values[fi].strip
-      cli = port ? Settings.cli_bind_port.try(&.to_s) : Settings.cli_bind_host
-      pinned = port ? Settings.project_bind_port : Settings.project_bind_host
-      flag = cli == value && pinned.nil? ? (port ? " (-p)" : " (--listen)") : ""
-      "· this run: #{value}#{flag}"
+      Settings.bind_run_note(fi == SETTINGS_BIND_PORT_INDEX, @set_values[fi], live)
     end
 
     # The proto-schema row. Its marker is not "project / global" — there is no global to

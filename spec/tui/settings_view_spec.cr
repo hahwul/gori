@@ -930,6 +930,38 @@ describe SettingsView do
       FileUtils.rm_rf(dir)
     end
   end
+
+  # Preferences › Network edits the GLOBAL bind, so a `-p` run or a project pin listens
+  # elsewhere; the row says so under the Project pane's rule (`Settings.bind_run_note`).
+  it "notes the port this run listens on beside the global Bind rows" do
+    prev = {Gori::Settings.bind_host, Gori::Settings.bind_port}
+    begin
+      Gori::Settings.bind_host = "127.0.0.1"
+      Gori::Settings.bind_port = 8070
+      row = ->(live : {String, Int32}?, label : String) do
+        v = SettingsView.new
+        v.reload(:network)
+        v.live_bind = -> { live }
+        b = MemoryBackend.new(120, 40)
+        v.render_fields_into(Screen.new(b), Rect.new(0, 0, 120, 30), -1) # no row focused (a focused one leaves the caret cell)
+        (0...30).map { |y| b.row(y) }.find!(&.includes?(label))
+      end
+      Gori::Settings.cli_bind_port = 18981
+      row.call({"127.0.0.1", 18981}, "Bind Port").should contain("8070 · this run: 18981 (-p)")
+      row.call({"127.0.0.1", 18981}, "Bind IP").should_not contain("this run")
+      row.call(nil, "Bind Port").should_not contain("this run") # nothing is listening
+      # A project pin is what the proxy is on: say the port, name no flag.
+      Gori::Settings.project_bind_port = 9100
+      r = row.call({"127.0.0.1", 9100}, "Bind Port")
+      r.should contain("8070 · this run: 9100")
+      r.should_not contain("(-p)")
+      row.call({"127.0.0.1", 8070}, "Bind Port").should_not contain("this run")
+    ensure
+      Gori::Settings.cli_bind_port = nil
+      Gori::Settings.project_bind_port = nil
+      Gori::Settings.bind_host, Gori::Settings.bind_port = prev
+    end
+  end
 end
 
 # termisu reads Tab as the printable '\t'; a settings text field must not take it as text.

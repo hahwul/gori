@@ -70,6 +70,12 @@ describe "Runner.read_mode_global?" do
     Gori::Hotkeys.expand(registry, Runner.read_mode_note(Runner::CAPTURE_OFF_TOAST))
       .should eq("proxy stopped · READ: i/↵ to type")
   end
+
+  # The on toast is the off toast's pair: both say what happened to the listener.
+  it "pairs the capture toasts and keeps the on one inside 80×24's 59 columns" do
+    Runner::CAPTURE_ON_TOAST.should eq("proxy listening")
+    Gori::Hotkeys.expand(registry, Runner.read_mode_note(Runner::CAPTURE_ON_TOAST)).size.should be <= 59
+  end
 end
 
 # `c` and `i` are bare letters live on the tab bar a session lands on: one closes the listener,
