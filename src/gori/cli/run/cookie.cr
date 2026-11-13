@@ -131,7 +131,7 @@ module Gori
           puts CLI::Output.term_safe_multiline(Cookie.decode(cookie, type))
         end
         # Shown as far as it parses, but a payload that did not decode is no decoded cookie.
-        exit 1 unless Cookie.locate(cookie)
+        exit 1 unless Cookie.decodes?(cookie, type)
       end
 
       private def self.emit_cookie_verify(cookie : String, type : String?, secret : String?,

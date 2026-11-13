@@ -236,6 +236,10 @@ describe "gori run redact rm — the profile in use" do
     Gori::CLI::Run.redact_rm_refusal("bp", nil, "").should be_nil
   end
 
+  it "lets the profile in use go when a global or built-in of its name takes over" do
+    Gori::CLI::Run.redact_rm_refusal("bp", "bp", "", still_resolves: true).should be_nil
+  end
+
   it "names the way out when the configured profile is already gone" do
     with_store do |store|
       Gori::Redact::Policy.write_project_scope(store, Gori::Redact::Policy::ProjectScope.new(active: "bp"))

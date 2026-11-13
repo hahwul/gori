@@ -109,6 +109,8 @@ describe Gori::Authorize::Plan do
         plan = Plan.build(opts, ungated_outbound)
         plan.identities.size.should eq(3) # the as-captured baseline is prepended
         plan.total_sends.should eq(2)     # baseline + anonymous; `noop` is NoEffect
+        # The cap is judged on the strict bound, not the prediction the engine re-decides per send.
+        plan.send_bound.should eq(3)
 
         # …and the prediction is what the run puts on the wire, and what `sent_count` reports.
         backend = FakeBackend.new(Gori::Fuzz::Origin.new("https", "acme.test", 443))

@@ -495,12 +495,14 @@ module Gori::Sequencer
     private def self.rate(effective : Float64, duplicate_count : Int32, seq : Bool,
                           tests : Array(TestRow), small : Bool) : Rating
       return Rating::Critical if duplicate_count > 0
-      # Before Sequential: at this size an ordered run is as likely coincidence (`detect_sequential`).
-      return Rating::Inconclusive if small
       # Sequential is predictability only when little varies BESIDE the order: a counter or a
       # bare timestamp. A time-ordered id with a large random tail (UUIDv7, ULID) still carries
       # its entropy, so there the Sequential FAIL demotes once like any other failed test.
+      # Ahead of the small-sample rule, as a duplicate is: nineteen ids in arrival order are a
+      # counter, not a sample too small to judge (`detect_sequential` gates its only
+      # coincidence-prone test, the sorted step, behind SMALL_SAMPLE itself).
       return Rating::Critical if seq && effective < 60.0
+      return Rating::Inconclusive if small
       base = tier(effective)
       fails = tests.count(&.verdict.fail?)
       Rating.from_value((base.value - fails).clamp(0, 3))

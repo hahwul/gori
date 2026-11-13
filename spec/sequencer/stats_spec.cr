@@ -230,6 +230,15 @@ describe Gori::Sequencer::Stats do
     S.analyze(tiny).sequential.should be_false
   end
 
+  it "still condemns a counter under SMALL_SAMPLE, as it condemns a duplicate" do
+    # Nineteen ids in arrival order are a counter, not a sample too small to judge. The
+    # small-sample rule must not get ahead of it.
+    counter = (1000..1018).map(&.to_s)
+    report = S.analyze(counter)
+    report.sequential.should be_true
+    report.rating.should eq(S::Rating::Critical)
+  end
+
   it "does not claim shuffling for a large sample that truly arrived in ascending order" do
     # Regression: the sorted-order check must only run once the arrival-order (inc/dec)
     # check has already failed, or it falsely claims "arrival order was shuffled" for a

@@ -174,16 +174,22 @@ module Gori
 
       @[Tool("jwt_decode", unbound: true)]
       private def jwt_decode_tool(h) : Result
-        token = str(h, "token")
+        token = jwt_input(h)
         return Result.new("missing required 'token'", is_error: true) if token.nil? || token.strip.empty?
-        t = Jwt.locate(token) # `Bearer <t>` pasted from a header decodes its token, as `gori run jwt`
+        t = token.strip
         return Result.new(Jwt::NOT_DECODABLE, is_error: true) unless Jwt.decodable?(t)
         Result.new(Jwt.decode_json(t))
       end
 
+      # Every JWT tool's `token`, with a value pasted from a header (`Bearer <t>`) narrowed to its
+      # token, as `gori run jwt` reads its argument.
+      private def jwt_input(h) : String?
+        str(h, "token").try { |t| Jwt.locate(t) }
+      end
+
       @[Tool("jwt_encode", unbound: true)]
       private def jwt_encode_tool(h) : Result
-        token = str(h, "token")
+        token = jwt_input(h)
         raw_header = str(h, "header").try(&.presence)
         raw_payload = str(h, "payload").try(&.presence)
         # Need something to build from: a token to derive header+payload, or an explicit
@@ -231,7 +237,7 @@ module Gori
 
       @[Tool("jwt_attacks", unbound: true)]
       private def jwt_attacks_tool(h) : Result
-        token = str(h, "token")
+        token = jwt_input(h)
         return Result.new("missing required 'token'", is_error: true) if token.nil? || token.strip.empty?
         attacks = begin
           Jwt.attacks(token.strip, str(h, "public_key").try(&.presence))
@@ -250,7 +256,7 @@ module Gori
       # look like it might be checking a signature when it never was.
       @[Tool("jwt_verify", unbound: true)]
       private def jwt_verify_tool(h) : Result
-        token = str(h, "token")
+        token = jwt_input(h)
         return Result.new("missing required 'token'", is_error: true) if token.nil? || token.strip.empty?
         secret = str(h, "secret")
         pem = str(h, "key").try(&.presence)

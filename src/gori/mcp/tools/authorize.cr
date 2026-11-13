@@ -34,8 +34,8 @@ module Gori
         # 500-row query under four identities is two thousand requests on a target from one
         # tool call. Refused up front (naming both factors) rather than truncated: a silently
         # shortened selection would report "enforced" for flows it never sent.
-        if plan.total_sends > AUTHORIZE_MAX_SENDS
-          return err("this selection would send #{plan.total_sends} requests " \
+        if plan.send_bound > AUTHORIZE_MAX_SENDS
+          return err("this selection could send #{plan.send_bound} requests " \
                      "(#{plan.targets.size} flows × #{plan.identities.size} identities), over the " \
                      "#{AUTHORIZE_MAX_SENDS} cap — narrow 'query', lower 'limit', or name fewer flow_ids",
             "INVALID_ARGUMENT", field: "limit")

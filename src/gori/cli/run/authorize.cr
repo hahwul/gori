@@ -131,7 +131,8 @@ module Gori
         total = plan.targets.size
         ids = plan.identities.size
         STDERR.puts "authorizing #{Gori.plural(total, "request")} × #{ids} identities " \
-                    "(#{CLI::Output.term_safe(plan.identities.map(&.name).join(", "))}) = #{plan.total_sends} requests"
+                    "(#{CLI::Output.term_safe(plan.identities.map(&.name).join(", "))}) — #{Gori.plural(plan.total_sends, "send")}, " \
+                    "an identity that changes nothing about a request is not sent"
         report_authorize_skips(plan.skipped)
 
         buffered = [] of Authorize::Target

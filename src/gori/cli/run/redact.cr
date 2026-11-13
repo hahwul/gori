@@ -67,9 +67,11 @@ module Gori
       #
       # A project rm is pointed at a project `use` even when settings.json holds the choice:
       # clearing that would change every other project too.
-      def self.redact_rm_refusal(name : String, project_active : String?, global_active : String) : String?
+      def self.redact_rm_refusal(name : String, project_active : String?, global_active : String,
+                                 still_resolves : Bool = false) : String?
         in_project = project_active.presence
         return nil unless (in_project || global_active) == name
+        return nil if still_resolves # a global or built-in of the same name takes over
         flag = project_active ? "" : " --global"
         clear = in_project || project_active.nil? ? " or clear the choice (`gori run redact use#{flag} --none`)" : ""
         "#{name.inspect} is the redaction profile in use — pick another first (`gori run redact use#{flag} <name>`)#{clear}"
@@ -467,9 +469,10 @@ module Gori
         name = positional.first
 
         if global
-          redact_rm_refusal(name, nil, Settings.redaction_active).try { |r| abort "gori run redact rm: #{r}" }
           kept = Settings.redaction_profiles.reject(&.name.==(name))
           abort "gori run redact rm: no global profile named #{name.inspect}" if kept.size == Settings.redaction_profiles.size
+          builtin = Redact::BUILTIN_PROFILES.any?(&.name.==(name))
+          redact_rm_refusal(name, nil, Settings.redaction_active, builtin).try { |r| abort "gori run redact rm: #{r}" }
           Settings.redaction_profiles = kept
           abort "gori run redact rm: could not write #{Settings.path}" unless Settings.save
           puts "removed global profile #{name.inspect}"
@@ -479,7 +482,8 @@ module Gori
           kept = scope.profiles.reject(&.name.==(name))
           if kept.size == scope.profiles.size
             "no profile named #{name.inspect} in this project"
-          elsif refusal = redact_rm_refusal(name, scope.active, Settings.redaction_active)
+          elsif refusal = redact_rm_refusal(name, scope.active, Settings.redaction_active,
+                  (Settings.redaction_profiles + Redact::BUILTIN_PROFILES).any?(&.name.==(name)))
             refusal
           else
             scope.copy_with(profiles: kept)

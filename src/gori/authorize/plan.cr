@@ -204,6 +204,13 @@ module Gori::Authorize
     # and never sent, so `targets × identities` over-counted. Once, here: MCP reads it per poll.
     getter total_sends : Int32
 
+    # `targets × identities`: what the run could send if every identity changed every request.
+    # A safety cap is judged on this, not on `total_sends`, which is a plan-time prediction the
+    # engine re-decides per send (a slot refreshed before the send can change what it carries).
+    def send_bound : Int32
+      @targets.size * @identities.size
+    end
+
     def initialize(@engine : Engine, @identities : Array(Identity),
                    @targets : Array(Store::FlowDetail), @skipped : Array(Skipped),
                    @query_rows : Int32 = 0, @limit : Int32 = 0)

@@ -208,7 +208,7 @@ module Gori::Tui
     # `a.to_i? || 0` silently turned every unparseable entry into the range `0:0`, and
     # `TokenExtract.position` answers nil whenever `hi <= lo` — so a forgotten `:B` (`100`),
     # a reversed pair, or a typo started a REAL collection in which every one of the samples
-    # missed, and the report read "0 usable · CRITICAL (no usable tokens)": a verdict about
+    # missed, and the report read "0 usable · no usable tokens": a report about
     # the origin's entropy, produced by a descriptor that never looked at a byte of it.
     # `gori run sequence --position` and MCP's `position` both refuse the same string; the
     # Sequencer tab was the surface that ran it.

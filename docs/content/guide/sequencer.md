@@ -48,7 +48,7 @@ The headline is **effective entropy** in bits: a conservative estimate of how mu
 
 Any **duplicate** or **sequential** token drops the verdict straight to Critical, however high the entropy looks. Underneath, gori runs a battery of statistical tests over the token's symbol bitstream (monobit, poker, runs, longest-run, per-bit bias, cumulative sums, approximate entropy, and a spectral test), a chi-square on byte frequencies, a lag-1 serial correlation, and a compression check against the alphabet's entropy floor. The tests judged on a p-value share a Bonferroni-corrected threshold, so a clean token is no likelier to be flagged as the battery grows.
 
-A small sample (fewer than 20 usable tokens) softens hard failures to warnings and rates the run **Inconclusive** rather than guessing, since below that size the sample, not the token, sets the entropy figure. A duplicate still rates it Critical.
+A small sample (fewer than 20 usable tokens) softens hard failures to warnings and rates the run **Inconclusive** rather than guessing, since below that size the sample, not the token, sets the entropy figure. A duplicate or a sequential run still rates it Critical.
 
 ### Structure Is Not Secret
 

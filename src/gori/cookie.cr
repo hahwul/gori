@@ -70,9 +70,10 @@ module Gori
       nil
     end
 
-    private def decodes?(c : String) : Bool
-      return false unless detect(c)
-      j = JSON.parse(decode_json(c))
+    # Whether `c` decodes to a payload, read as `type` when one is forced (the CLI's `--type`).
+    def decodes?(c : String, type : String? = nil) : Bool
+      return false unless type || detect(c)
+      j = JSON.parse(decode_json(c, type))
       !(j["payload"]? || j["value_size"]).raw.nil?
     rescue CookieError | JSON::ParseException
       false

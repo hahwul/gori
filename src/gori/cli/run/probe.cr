@@ -744,8 +744,6 @@ module Gori
         %w[passive active custom].includes?(k) ? k : abort("gori run probe rules: invalid --kind '#{v}' (passive|active|custom)")
       end
 
-      # "custom_p_12" → 12. nil for a built-in id or a GLOBAL custom rule ("custom_g_…"),
-      # neither of which is a project DB row.
       # Why `rules delete` cannot take a non-project-custom id. Only a real built-in is pointed
       # at `disable`: an unknown id sent there just fails a second time.
       def self.probe_rule_delete_refusal(id : String) : String
@@ -758,6 +756,8 @@ module Gori
         end
       end
 
+      # "custom_p_12" → 12. nil for a built-in id or a GLOBAL custom rule ("custom_g_…"),
+      # neither of which is a project DB row.
       private def self.probe_custom_row_id(id : String) : Int64?
         return nil unless id.starts_with?("custom_p_")
         id[9..].to_i64?

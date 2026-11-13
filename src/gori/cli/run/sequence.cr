@@ -325,8 +325,8 @@ module Gori
           STDERR.puts "sequence: every replay failed — #{CLI::Output.term_line(reason)}"
           exit 1
         end
-        # Replies came back but none carried a token where the locator looked: the CRITICAL
-        # "no usable tokens" report above rates the locator, not the generator, so it is not
+        # Replies came back but none carried a token where the locator looked: the "no usable
+        # tokens" report above is about the locator, not the generator, so it is not
         # a result a script may read as one.
         if tokens.empty?
           STDERR.puts "sequence: no response carried a token at #{loc.label} — check the locator"

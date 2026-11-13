@@ -262,7 +262,7 @@ module Gori::Sequencer
       # header both hand back `""`, which is truthy in Crystal, so those samples counted
       # toward the goal, carried no error, and were then dropped by `Stats.analyze` (which
       # rejects empty tokens): the run reported "500 collected" over a report reading
-      # "0 usable / 500 total · rating CRITICAL (no usable tokens)". Manual mode has always
+      # "0 usable / 500 total · no usable tokens". Manual mode has always
       # skipped an empty token; live replay was the half that did not.
       token = nil if token && token.empty?
       idx = (@idx += 1)
