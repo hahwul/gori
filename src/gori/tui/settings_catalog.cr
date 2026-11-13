@@ -65,7 +65,8 @@ module Gori::Tui
         "Restore every setting to its factory default", :general, :action),
       # Appearance
       Section.new(:theme, "settings.theme", "Theme",
-        "Switch the TUI colour theme (built-ins + your own from ~/.gori/themes/*.json)", :appearance, :opener),
+        "Switch the TUI colour theme (built-ins + your own from ~/.gori/themes/*.json)", :appearance, :opener,
+        keywords: ["dark mode", "light mode"]),
       # One section for what used to be Display + Layout; settings.json keeps both keys.
       Section.new(:display, "settings.display", "Display",
         "List order, time and previews, message-pane rendering, tab bar and window chrome", :appearance, :form,
@@ -98,7 +99,8 @@ module Gori::Tui
         keywords: %w[keybindings keymap shortcuts rebind]),
       # Network & Tabs
       Section.new(:network, "settings.network", "Network",
-        "Edit the proxy bind address + upstream proxy", :network, :form),
+        "Edit the proxy bind address + upstream proxy", :network, :form,
+        keywords: %w[proxy port bind listen upstream]),
       Section.new(:tabs, "settings.tabs", "Tabs",
         "Customize the top tab bar — one ordered list, the top nine are the slots", :network, :opener),
       # Reachable via the Network section's "Hostname overrides" opener field, so it

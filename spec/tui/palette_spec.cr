@@ -212,13 +212,14 @@ describe Gori::Tui::PaletteState do
       Gori::Settings.keymap_overrides = {} of String => Array(String)
       base = MemoryBackend.new(80, 24)
       palette.render(Screen.new(base), Rect.new(0, 0, 80, 24))
-      base.contains?("ctrl-y").should be_false
+      base.contains?("^Y").should be_false
 
       # Rebind capture.toggle → ^Y; the palette's chord column must follow the keymap.
       Gori::Settings.keymap_overrides = {"capture.toggle" => ["ctrl-y"]}
       rebound = MemoryBackend.new(80, 24)
       palette.render(Screen.new(rebound), Rect.new(0, 0, 80, 24))
-      rebound.contains?("ctrl-y").should be_true
+      rebound.contains?("^Y").should be_true # written as every footer writes it (#1852)
+      rebound.contains?("ctrl-y").should be_false
     ensure
       Gori::Settings.keymap_overrides = prev
     end
@@ -237,8 +238,8 @@ describe Gori::Tui::PaletteState do
       Gori::Settings.keymap_overrides = {"app.palette" => ["ctrl-y"]}
       backend = MemoryBackend.new(80, 24)
       palette.render(Screen.new(backend), Rect.new(0, 0, 80, 24))
-      backend.contains?("ctrl-y").should be_false # the dead override is filtered out
-      backend.contains?("ctrl-p").should be_true  # the real (default, hardcoded) chord shows
+      backend.contains?("^Y").should be_false # the dead override is filtered out
+      backend.contains?("^P").should be_true  # the real (default, hardcoded) chord shows
     ensure
       Gori::Settings.keymap_overrides = prev
     end
@@ -367,9 +368,10 @@ describe Gori::Tui::PaletteState, "tab actions" do
   it "ranks tab matches ahead of Global ones, under a THIS TAB header" do
     ctx = FakeExecContext.new
     reg = Gori::Verb::Registry.new
-    # The Global title is the exact query, so it would win any single ranking.
+    # The Global title is the exact query, so it would win any single ranking (the tab row says
+    # it too, later: a row that only scattered it would drop out — `Registry.strong?`).
     reg.register(Gori::Verb::Definition.new("demo.global", "zap", "", Gori::Verb::Scope::Global) { |_| nil })
-    reg.register(Gori::Verb::Definition.new("demo.tab", "Zoom and pan", "", Gori::Verb::Scope::Body) { |_| nil })
+    reg.register(Gori::Verb::Definition.new("demo.tab", "Pan and zap", "", Gori::Verb::Scope::Body) { |_| nil })
     palette = PaletteState.new(reg)
     palette.capture(history_body, ctx)
     palette.reset(ctx)
@@ -382,7 +384,7 @@ describe Gori::Tui::PaletteState, "tab actions" do
     palette.render(Screen.new(backend), Rect.new(0, 0, 80, 24))
     rows = (0...24).map { |y| backend.row(y) }
     tab_header = rows.index(&.includes?("THIS TAB")).not_nil!
-    tab_row = rows.index(&.includes?("Zoom and pan")).not_nil!
+    tab_row = rows.index(&.includes?("Pan and zap")).not_nil!
     app_header = rows.index(&.includes?("─ APP ─")).not_nil!
     tab_header.should be < tab_row
     tab_row.should be < app_header
@@ -436,7 +438,7 @@ describe Gori::Tui::PaletteState, "tab actions" do
     backend = MemoryBackend.new(80, 24)
     palette.render(Screen.new(backend), Rect.new(0, 0, 80, 24))
     rows = (0...24).map { |y| backend.row(y) }
-    rows.find(&.includes?("Zap chorded")).not_nil!.should contain("ctrl-r")
+    rows.find(&.includes?("Zap chorded")).not_nil!.should contain("^R")
     rows.find(&.includes?("Zap lettered")).not_nil!.should contain("␣ Q")
     rows.find(&.includes?("Zap bare")).not_nil!.should_not contain("␣")
   end
@@ -497,5 +499,73 @@ describe Gori::Tui::PaletteState, "tab actions" do
     card.over_detail = true # stamped by open_overlay over the drill-in; a nested card inherits it
     Runner.detail_beneath?(card.key, none, card).should be_true
     Runner.detail_beneath?(card.key, none, nil).should be_false # a reset @overlay leaves no card
+  end
+end
+
+# Two evaluators coming from Burp and Caido typed their own words into ^P on History and got
+# Clear history for `cert`, Mock this response for `theme`, and nothing at all for `proxy`.
+describe Gori::Tui::PaletteState, "what a newcomer types" do
+  history_body = Gori::Tui::ActionContext.new(Gori::Verb::Scope::Body, :common)
+
+  typed = ->(q : String) do
+    ctx = FakeExecContext.new
+    ctx.selected = 5_i64 # History's flow actions are listed, as on the seeded project
+    palette = PaletteState.new(Gori::Verbs.registry)
+    palette.capture(history_body, ctx)
+    palette.reset(ctx)
+    q.each_char { |c| palette.append(c, ctx) }
+    palette
+  end
+
+  it "lands each word within the first three rows" do
+    {
+      "proxy" => "settings.network", "port" => "settings.network",
+      "bind" => "settings.network", "listen" => "settings.network",
+      "upstream" => "settings.network", "proxy port" => "settings.network",
+      "sitemap" => "tab.target", "copy as curl" => "history.copy-as",
+      "curl" => "history.copy-as", "diff" => "tab.comparer",
+      "compare" => "tab.comparer", "decode base64" => "tab.decoder",
+      "base64" => "tab.decoder", "websocket" => "tab.history",
+      "dark mode" => "settings.theme", "find" => "history.query",
+      "search" => "history.query", "new issue" => "issue.create",
+      "save" => "issues.export", "export" => "issues.export",
+      "har" => "import.har", "scope" => "scope.add-host",
+      "int" => "tab.intercept", "intruder" => "tab.fuzzer",
+      "match and replace" => "tab.rewriter", "replay" => "tab.repeater",
+    }.each do |q, id|
+      top = typed.call(q).results.first(3).map(&.id)
+      top.should contain(id), "#{q.inspect} → #{top}"
+    end
+  end
+
+  it "opens on the row that says the query, not one that scatters it" do
+    {"cert" => "ca.export", "theme" => "settings.theme"}.each do |q, id|
+      palette = typed.call(q)
+      palette.selected_verb.try(&.id).should eq(id), "#{q} → #{palette.results.first(3).map(&.id)}"
+      palette.results.map(&.id).should_not contain("history.clear") # c…e…r…t
+    end
+    typed.call("theme").tab_count.should eq(0) # no THIS TAB row says it, so none is listed
+    # The space on the way to a second word is still the same query.
+    typed.call("cert ").results.map(&.id).sort!.should eq(typed.call("cert").results.map(&.id).sort!)
+  end
+
+  # Nothing better exists, so an abbreviation keeps its scattered finds — but the cursor does
+  # not start on a wipe.
+  it "keeps scattered finds when no row says the query, off a destructive row" do
+    typed.call("stp").selected_verb.try(&.id).should eq("history.repeater") # S…end T…o rePeater
+    clr = typed.call("clr")
+    clr.results.first.id.should eq("history.clear") # still found, and still first
+    clr.selected_verb.not_nil!.group.should_not eq(:wipe)
+  end
+
+  it "leaves a one-letter query exactly as it ranked before" do
+    reg = Gori::Verbs.registry
+    ctx = FakeExecContext.new
+    ctx.selected = 5_i64
+    %w[a c x r].each do |q|
+      expected = reg.rank(reg.for_view(Gori::Verb::Scope::Body, :common, ctx), q) +
+                 reg.for_scope(Gori::Verb::Scope::Global, ctx, q)
+      typed.call(q).results.map(&.id).should eq(expected.map(&.id))
+    end
   end
 end

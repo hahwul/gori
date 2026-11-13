@@ -97,7 +97,8 @@ module Gori
       # Tui::Keybind.from_event emits. Anything else must be a single ASCII char.
       NAMED_KEYS = %w[enter escape tab up down left right backspace space]
 
-      # Human-readable label for palette hints, e.g. "ctrl-p", "g", "enter".
+      # The stored spelling, e.g. "ctrl-p", "g", "enter": settings.json's keymap overrides
+      # round-trip through it (#parse). Screens print `Hotkeys.display_label` (`^P`) instead.
       def label : String
         String.build do |io|
           io << "ctrl-" if ctrl
