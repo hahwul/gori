@@ -333,7 +333,7 @@ module Gori::Tui
       @host.status(msg)
       true
     rescue ex
-      @host.status("export failed: #{ex.message}")
+      @host.status("export failed: #{ex.message}", :error)
       false
     end
 

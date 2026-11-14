@@ -629,7 +629,7 @@ module Gori::Tui
       @host.status("exported note → #{path}")
       true
     rescue ex
-      @host.status("export failed: #{ex.message}")
+      @host.status("export failed: #{ex.message}", :error)
       false
     end
   end
