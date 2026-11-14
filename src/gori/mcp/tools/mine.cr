@@ -141,6 +141,7 @@ module Gori
             j.field "results_truncated", mjob.truncated?
             j.field "job_complete", mjob.status != :running
             j.field "incomplete_reason", incomplete_reason(mjob.status)
+            emit_nothing_found_note(j, mjob)
             j.field "error", mjob.error_msg
             emit_mine_skipped(j, mjob)
             emit_audit(j, mjob.audit, mjob.ended_at_ms)
@@ -197,9 +198,17 @@ module Gori
             j.field "page_complete", pg.offset + page.size >= mjob.results.size
             emit_more(j, pg.offset + page.size < mjob.results.size, pg.offset + page.size, live: mjob.status == :running)
             j.field "incomplete_reason", incomplete_reason(mjob.status)
+            emit_nothing_found_note(j, mjob)
             j.field "results_truncated", mjob.truncated?
           end
         end)
+      end
+
+      # `note` only on a run that finished every name, got answers, and found nothing — the one
+      # reply an agent reads as "no hidden parameters" (see `Miner::NOTHING_FOUND_NOTE`).
+      private def emit_nothing_found_note(j : JSON::Builder, mjob : MineJob) : Nil
+        return unless mjob.status == :done && mjob.results.empty? && mjob.engine.successful_sends > 0
+        j.field "note", Miner::NOTHING_FOUND_NOTE
       end
 
       @[Tool("mine_stop", gated: true, agent_action: true, permission: "send")]

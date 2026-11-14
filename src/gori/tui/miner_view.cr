@@ -573,14 +573,7 @@ module Gori::Tui
         # their own line: they are claims about a run that happened, and an onboarding card in
         # their place would read as "nothing has happened here", which is the opposite.
         if !@running && @progress.names_total > 0
-          msg = if budget_exhausted?
-                  "none found in the #{tested_note} the budget allowed"
-                elsif stopped?
-                  "stopped: none found in the #{tested_note} tried"
-                else
-                  "no hidden parameters found"
-                end
-          screen.text(inner.x + 1, inner.y, msg, Theme.muted, Theme.bg)
+          render_nothing_found(screen, inner)
           return
         end
         # Never run, or in flight — the two states the Fuzzer answers with a card. This pane
@@ -604,6 +597,26 @@ module Gori::Tui
       end
       # Gauge over the rows region (below the header), aligned to what @scroll windows.
       Frame.scroll_gauge(screen, Rect.new(inner.x, inner.y + 1, inner.w, cap), vis.size, @scroll, focused)
+    end
+
+    # A finished run with no findings: how far it got, and — only when it looked at every name,
+    # the one run that can claim absence — what that absence cannot cover, wrapped into the rows left.
+    private def render_nothing_found(screen : Screen, inner : Rect) : Nil
+      msg = if budget_exhausted?
+              "none found in the #{tested_note} the budget allowed"
+            elsif stopped?
+              "stopped: none found in the #{tested_note} tried"
+            else
+              "no hidden parameters found"
+            end
+      screen.text(inner.x + 1, inner.y, msg, Theme.muted, Theme.bg)
+      # The same gate `gori run mine` and MCP hold: a run cut short by an error (an unreachable
+      # baseline ends with no name tested) did not look, so it has no absence to qualify.
+      return if budget_exhausted? || stopped? || @progress.names_done < @progress.names_total
+      note = NoteDetailOverlay.wrap_text("Note: #{Miner::NOTHING_FOUND_NOTE}.", {inner.w - 2, 1}.max)
+      note.first({inner.h - 2, 0}.max).each_with_index do |row, i|
+        screen.text(inner.x + 1, inner.y + 2 + i, row, Theme.muted, Theme.bg)
+      end
     end
 
     private def header_row(screen : Screen, inner : Rect) : Nil
