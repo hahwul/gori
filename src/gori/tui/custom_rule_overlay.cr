@@ -127,6 +127,16 @@ module Gori::Tui
       Probe::CustomRule.valid_pattern?(pattern, kind)
     end
 
+    private def blocking_row : Int32?
+      return nil if valid?
+      return ROW_TITLE if rule_title.empty?
+      description.empty? ? ROW_DESC : ROW_PATTERN
+    end
+
+    private def save_refusal : String
+      "complete title, description & #{kind == "exec" ? "command" : "pattern"}"
+    end
+
     # --- Overlay contract (see overlay.cr) ---
     def key : OverlayKind
       OverlayKind::ProbeRule
@@ -220,7 +230,7 @@ module Gori::Tui
       when ROW_SEV     then Frame.option_cycle(screen, x, py, box.right - 2, bg, "severity:", SEVS, @sev_i, sel)
       else
         ok = valid?
-        label = ok ? "[ Save rule ]" : "[ complete title, description & #{kind == "exec" ? "command" : "pattern"} ]"
+        label = ok ? "[ Save rule ]" : "[ #{save_refusal} ]"
         screen.text(x, py, label, ok ? Theme.accent : Theme.muted, bg, Attribute::Bold, width: {box.right - 2 - x, 0}.max)
       end
     end

@@ -60,6 +60,8 @@ class OverlayHarness
   # The shell still holds this modal — false once a :cancel, or a :commit whose closure
   # returned true, dropped it.
   getter? open = true
+  # What the shell last put on the status line for this modal (a refused ↵).
+  getter status : String? = nil
 
   # `commit` is what the injected closure reports back to the shell: true = "applied,
   # close me", false = the validation-rejected path that keeps the form up. Override it
@@ -110,7 +112,15 @@ class OverlayHarness
   def press(k : Termisu::Input::Key, char : Char? = nil,
             ctrl : Bool = false, alt : Bool = false, shift : Bool = false) : Symbol
     live!
-    dispatch(@overlay.handle_key(event(k, char, ctrl, alt, shift)))
+    ev = event(k, char, ctrl, alt, shift)
+    outcome = @overlay.handle_key(ev)
+    # ↵ on a form that cannot save stays up on the field that blocks it, the reason on the
+    # status line (`Overlay#commit_blocker`).
+    if outcome == :commit && ev.key.enter? && (why = @overlay.commit_blocker)
+      @status = why
+      return :open
+    end
+    dispatch(outcome)
   end
 
   # Type a literal string one printable key at a time. Returns the state after the LAST

@@ -113,7 +113,8 @@ describe "Gori::Tui::OastProviderOverlay — Overlay seam" do
     ov.valid?.should be_false # no name yet
     h = OverlayHarness.new(ov, commit: false)
     ov.set_selected(5) # Save row
-    h.press(Termisu::Input::Key::Enter).should eq(:open)
+    # Space on Save: ↵ stops at the form first (`FormOverlay#commit_blocker`).
+    h.press(Termisu::Input::Key::Space).should eq(:open)
     h.commits.should eq(1) # save_provider DID run — it just returned false
   end
 

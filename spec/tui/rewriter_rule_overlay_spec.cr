@@ -304,7 +304,8 @@ describe "Gori::Tui::RewriterRuleOverlay — Overlay seam" do
     ov.valid?.should be_false
     h = OverlayHarness.new(ov, commit: false)
     ov.set_selected(RewriterRuleOverlay::ROW_SAVE)
-    h.press(Termisu::Input::Key::Enter).should eq(:open)
+    # Space on Save: ↵ stops at the form first (`FormOverlay#commit_blocker`).
+    h.press(Termisu::Input::Key::Space).should eq(:open)
     h.commits.should eq(1) # apply_rewriter_rule DID run — it just returned false
   end
 
@@ -465,5 +466,46 @@ describe "Gori::Tui::RewriterRuleOverlay ↵ hint" do
     stub.set_selected(RewriterRuleOverlay::ROW_VALUE)
     stub.hint.should contain("↵ open")
     stub.handle_key(skey(Termisu::Input::Key::Enter)).should eq(:stay)
+  end
+end
+
+describe "Gori::Tui::RewriterRuleOverlay ↵ on a form that cannot save" do
+  it "lands on the row the Save label is about" do
+    {
+      RewriterRuleOverlay.new(op: "replace", match: "regex", pattern: "(a")                               => RewriterRuleOverlay::ROW_FIND,
+      RewriterRuleOverlay.new(op: "replace", pattern: "a", host: "a.test:8080")                           => RewriterRuleOverlay::ROW_HOST,
+      RewriterRuleOverlay.new(op: "pipe", pattern: "a")                                                   => RewriterRuleOverlay::ROW_VALUE,
+      RewriterRuleOverlay.new(op: "json_set", part: "body", pattern: "$.a", replacement: "x")             => RewriterRuleOverlay::ROW_VALUE,
+      RewriterRuleOverlay.new(op: "short_circuit", pattern: "/x")                                         => RewriterRuleOverlay::ROW_VALUE,
+      RewriterRuleOverlay.new(op: "short_circuit", pattern: "/x", replacement: "200 OK", respond: "file") => RewriterRuleOverlay::ROW_BODY_FILE,
+    }.each do |ov, row|
+      ov.set_selected(RewriterRuleOverlay::ROW_SAVE)
+      ov.commit_blocker.should eq("not saved — #{ov.invalid_reason}")
+      ov.@sel.should eq(row)
+    end
+  end
+end
+
+# A paste reaches a modal key by key, and this form's preview rescans recent flows: a scan per
+# pasted character held a 5,000-character paste for ~9 s. The Runner hands a tick's keys (or a
+# whole bracketed paste) over as one batch (`Overlay#batching?`), and the preview runs once
+# when it ends.
+describe "Gori::Tui::RewriterRuleOverlay preview over a batch of keys" do
+  it "scans once, at the end, over the text the keys built" do
+    ov = RewriterRuleOverlay.adding
+    asked = [] of String
+    ov.on_preview = ->(candidate : Gori::Store::MatchRule) {
+      asked << candidate.pattern
+      "affects 0 of 0 recent flows"
+    }
+    ov.set_selected(RewriterRuleOverlay::ROW_FIND)
+    ov.batching = true
+    stype(ov, "x" * 5000)
+    asked.should be_empty
+    ov.batch_ended
+    ov.batching?.should be_false
+    asked.should eq(["x" * 5000])
+    stype(ov, "y") # typed after the batch: per key again
+    asked.should eq(["x" * 5000, "x" * 5000 + "y"])
   end
 end

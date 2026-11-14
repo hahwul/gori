@@ -138,9 +138,23 @@ module Gori::Tui
     # The Save row says what is wrong, as the Rewriter's does (`fix the regex`): a typed `(abc`
     # is not a missing pattern.
     def save_label : String
-      return "[ enter a valid pattern ]" if pattern.empty?
-      return "[ Save rule ]" if Scope.valid?(match_type, pattern)
-      match_type == "regex" ? "[ fix the regex ]" : "[ fix the host pattern ]"
+      blocking_row ? "[ #{save_refusal} ]" : "[ Save rule ]"
+    end
+
+    private def blocking_row : Int32?
+      2 if pattern.empty? || !Scope.valid?(match_type, pattern)
+    end
+
+    private def save_refusal : String
+      return "enter a valid pattern" if pattern.empty?
+      match_type == "regex" ? "fix the regex" : "fix the host pattern"
+    end
+
+    # ↵ says WHY, as the commit site did before ↵ stopped reaching it: the Save row's words are
+    # where to go, `Scope.validation_error` is what is wrong with the regex.
+    def commit_blocker : String?
+      return nil unless why = super
+      (detail = Gori::Scope.validation_error(match_type, pattern.strip)) ? "not saved — #{detail}" : why
     end
 
     # What each match type matches — see the dialect notes at the top of `Gori::Scope`.

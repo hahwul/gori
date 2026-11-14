@@ -153,6 +153,14 @@ module Gori::Tui
       Colormarker.unusable_reason(condition) || ""
     end
 
+    private def blocking_row : Int32?
+      ROW_WHEN unless valid?
+    end
+
+    private def save_refusal : String
+      invalid_reason
+    end
+
     # A live rule for the preview scan. `enabled` is true regardless of anything: the question
     # the preview answers is "what WOULD this paint".
     #
@@ -212,9 +220,7 @@ module Gori::Tui
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol
-      out = edit_key(ev)
-      refresh_preview if out == :stay
-      out
+      after_key(edit_key(ev))
     end
 
     private def edit_key(ev : Termisu::Event::Key) : Symbol

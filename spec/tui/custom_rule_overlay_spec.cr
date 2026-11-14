@@ -50,7 +50,8 @@ describe Gori::Tui::CustomRuleOverlay do
     ov.valid?.should be_false # nothing filled in
     h = OverlayHarness.new(ov, commit: false)
     ov.set_selected(8) # Save row
-    h.press(Termisu::Input::Key::Enter).should eq(:open)
+    # Space on Save: ↵ stops at the form first (`FormOverlay#commit_blocker`).
+    h.press(Termisu::Input::Key::Space).should eq(:open)
     h.commits.should eq(1) # apply_custom_rule DID run — it just returned false
   end
 
