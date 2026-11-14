@@ -46,6 +46,10 @@ module Gori::Tui
     # before the keymap, for the read-only panes that sit beside an editor.
     INSERT_CHORD = Verb::Chord.new("i")
 
+    # The bare `/` the sub-tab strip reads as "filter these" — a raw key there
+    # (`Runner#handle_subtabs_key`), so the tab bar compares against it the same way.
+    FILTER_CHORD = Verb::Chord.new("/")
+
     # A US-layout shifted digit, folded back onto shift+digit. `⇧1`-`⇧9` jump to a sub-tab
     # and `⇧0` opens the sub-tab find picker, and the two ways a terminal can deliver that
     # keypress do not look alike: a terminal speaking the kitty keyboard protocol reports

@@ -1904,6 +1904,13 @@ module Gori::Tui
       # the action to the typing. The named keys (arrows, ↵, esc, ↹) and every modified chord
       # stay silent: those are navigation, legitimately unbound in some scopes (`space` is a
       # named key too, so the leader below is never named here).
+      # The filter key on the tab bar is the filter key one level down: enter the tab and hand
+      # it the same press (see `Runner.filter_below`).
+      if @focus == :menu && !@menu_more && (pane = filter_pane_below(chord))
+        focus_pane(pane)
+        handle_key(ev)
+        return
+      end
       # A bare printable or Ctrl chord the TAB BAR does not bind but the tab's body does: name
       # the `↵` that gets there, rather than "nothing bound here" one row above a header
       # advertising the very key that was pressed (F10), or silence for a `^R`.
@@ -2954,6 +2961,37 @@ module Gori::Tui
       # already have run above.
       return nil if verb.nil? || verb.scope == Verb::Scope::Global
       verb
+    end
+
+    # Where the filter key pressed on the tab bar opens the tab's filter: the sub-tab strip when
+    # it draws one, else the body when its scope binds a filter to the key. Nil for any other key.
+    #
+    # The one key the bar lets through (2026-11-14). Every other body key is still answered
+    # with directions rather than run, because it ACTS; this one opens an input row that `esc`
+    # closes, and it is the only one followed by free text. Refused, that text ran as the bar's
+    # own keys: `/cdn` stopped the proxy on its `c`, a query with an `s` flipped the scope lens,
+    # a digit changed tab.
+    def self.filter_below(chord : Verb::Chord, scope : Verb::Scope, keymap : Verb::Keymap,
+                          registry : Verb::Registry, strip_filter : Bool,
+                          editor_pane : Bool = false) : {Symbol, Verb::Definition?}?
+      return {:subtabs, nil} if strip_filter && chord == Keybind::FILTER_CHORD
+      # The body's first claim on the key wins there, so it is asked here: a pane that is a text
+      # editor (a held Intercept message left in INS, then the bar clicked) would TYPE the key,
+      # and under the vim keyset find in the pane. That keeps the bar's directions.
+      return nil if editor_pane
+      verb = body_scope_verb(chord, scope, keymap, registry)
+      # `section: :tab` is a strip verb: its filter is the strip's, answered above or absent.
+      {:body, verb} if verb && verb.intent == :filter && verb.section != :tab
+    end
+
+    private def filter_pane_below(chord : Verb::Chord) : Symbol?
+      return nil unless ctl = @tabs[@active_tab]?
+      strip = subtabs_shown? && ctl.subtab_filter_shown?
+      found = Runner.filter_below(chord, ctl.command_scope, @keymap, @session.registry, strip, ctl.editor_pane?)
+      return nil unless found
+      pane, verb = found
+      # A filter the body would refuse right now (nothing to filter) is not worth entering for.
+      pane if verb.nil? || verb.available?(self)
     end
 
     # The pane `verb`'s chord is live in, when ↵ from the tab bar resumes into `lands`, where

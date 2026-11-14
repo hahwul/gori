@@ -81,6 +81,7 @@ module Gori::Tui
         Item.new("←/→", "switch tab (on the tab bar)"),
         Item.new("↹ / ⇧↹", "focus ring: tab bar ↔ panes"),
         Item.new("↵ / ↓", "enter the tab body"),
+        Item.new("/", "filter, on a tab that has one — from the tab bar too, where it enters the tab first"),
         Item.new("1-9", "jump to slot N on the tab bar — the bar is nine numbered slots"),
         Item.new("0", "go to ANY tab — a type-to-filter list of all 21, with a line on what each is for", "nav.goto"),
         Item.new("⇧1-9", "jump to sub-tab N of the active tab (on a non-US layout see ^1-9 / f)"),

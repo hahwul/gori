@@ -401,9 +401,36 @@ describe "the core-loop hints" do
       Runner.gated_pane(Gori::Verbs.registry["repeater.send"], :request).should be_nil
     end
 
+    # The one key the bar lets through (2026-11-14): refused, the query typed after it ran as
+    # the bar's own keys — `/cdn` stopped the proxy on its `c`.
+    it "lets the filter key through to where the tab's filter is, and no other key" do
+      reg = Gori::Verbs.registry
+      keymap = Gori::Verb::Keymap.build(reg)
+      slash = Gori::Verb::Chord.new("/")
+      pane, verb = Runner.filter_below(slash, Gori::Verb::Scope::Body, keymap, reg, strip_filter: false).not_nil!
+      pane.should eq(:body)
+      verb.not_nil!.intent.should eq(:filter)
+      # A strip that draws a filter is one ↵ down, so it answers first.
+      Runner.filter_below(slash, Gori::Verb::Scope::Fuzzer, keymap, reg, strip_filter: true).should eq({:subtabs, nil})
+      # A strip verb is not a body filter: one chip, no strip filter, nothing to open.
+      Runner.filter_below(slash, Gori::Verb::Scope::Fuzzer, keymap, reg, strip_filter: false).should be_nil
+      # A body pane that is a text editor would type the key: directions, not a `/` in a held message.
+      Runner.filter_below(slash, Gori::Verb::Scope::Intercept, keymap, reg, strip_filter: false).not_nil![0].should eq(:body)
+      Runner.filter_below(slash, Gori::Verb::Scope::Intercept, keymap, reg, strip_filter: false, editor_pane: true).should be_nil
+      # Every key that acts is still answered with directions.
+      Runner.filter_below(Gori::Verb::Chord.new("d"), Gori::Verb::Scope::Body, keymap, reg, strip_filter: true).should be_nil
+      Runner.filter_below(Gori::Verb::Chord.new("r", ctrl: true), Gori::Verb::Scope::Body, keymap, reg, strip_filter: false).should be_nil
+      # `Runner` owns a terminal: the order is read from source. The filter key is handed down
+      # before the refusal is composed, and never from the `0:Tabs` stop.
+      src = File.read("src/gori/tui/runner.cr")
+      through = src.index("if @focus == :menu && !@menu_more && (pane = filter_pane_below(chord))").not_nil!
+      refusal = src.index("status(Runner.enter_first_hint(chord, below.title").not_nil!
+      (through < refusal).should be_true
+    end
+
     it "is reached only for a key the tab bar itself does not bind" do
       # The answer is a REFUSAL with directions, not a fall-through: the letter still does
-      # nothing here, which is the tab bar's own decision.
+      # nothing here, which is the tab bar's own decision (the filter key above is the exception).
       reg = Gori::Verbs.registry
       keymap = Gori::Verb::Keymap.build(reg)
       body = Gori::Verb::Scope::Body
