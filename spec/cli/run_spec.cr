@@ -1442,6 +1442,16 @@ describe "gori run <cmd> --format json — a project that is busy or will not op
     j["retryable"].as_bool.should be_false
   end
 
+  # …and a project that does not resolve at all: every refusal of `resolve_read_project`
+  # goes through `project_abort`, and a file that is not a database is answered in `open_store`.
+  it "routes every project-resolution refusal through project_abort" do
+    src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "cli", "run.cr"))
+    body = src[/def self\.resolve_read_project\(.*?\n      end\n/m].not_nil!
+    body.scan("project_abort(").size.should eq(5)
+    body.lines.count(&.lstrip.starts_with?("abort ")).should eq(0)
+    src[/def self\.open_store\(.*?\n      end\n/m].not_nil!.should contain(%("open_failed", "NO_PROJECT"))
+  end
+
   it "prints several deleted ids as ids, and an emptied table as count" do
     Gori::CLI::Run.deleted_json([3_i64, 5_i64]).should eq(%({"ok":true,"deleted":true,"ids":[3,5]}))
     Gori::CLI::Run.deleted_count_json(12_i64).should eq(%({"ok":true,"deleted":true,"count":12}))

@@ -622,7 +622,7 @@ module Gori
       private def self.resolve_read_project(project_name : String?, db_path : String?) : Project
         refuse_two_targets(project_name, db_path)
         if path = db_path
-          abort "gori run: --db is not a readable file: #{path}" unless File.exists?(path) && !File.directory?(path)
+          project_abort("--db is not a readable file: #{path}", "not_found", "NOT_FOUND") unless File.exists?(path) && !File.directory?(path)
           return Project.new(File.basename(File.dirname(path)), path)
         end
         registry = ProjectRegistry.new(Paths.projects_dir)
@@ -630,18 +630,27 @@ module Gori
           found = begin
             registry.find(name)
           rescue ex : ProjectRegistry::Ambiguous
-            abort "gori run: #{ex.message}"
+            project_abort(ex.message.to_s, "ambiguous", "INVALID_ARGUMENT")
           end
           return found if found
-          abort "gori run: no project matching '#{CLI::Output.term_safe(name)}'#{have_projects(registry, name)}"
+          project_abort("no project matching '#{CLI::Output.term_safe(name)}'#{have_projects(registry, name)}", "not_found", "NOT_FOUND")
         end
         case chosen = default_project(registry, ENV[DEFAULT_PROJECT_ENV]?, read_default_pin)
-        in String then abort "gori run: #{chosen}"
-        in Nil    then abort "gori run: no projects yet — capture some traffic first, create one with `gori run project create NAME`, or pass --db PATH"
+        in String then project_abort(chosen, "no_project", "NO_PROJECT")
+        in Nil    then project_abort("no projects yet — capture some traffic first, create one with `gori run project create NAME`, or pass --db PATH", "no_project", "NO_PROJECT")
         in Tuple
           announce_default_project(*chosen)
           chosen[0]
         end
+      end
+
+      # `resolve_read_project`'s refusal. Under `--json` stdout gets the failed-call object too,
+      # coded as MCP codes the same answer: `NOT_FOUND` for a name that matches nothing (its
+      # `switch_project`), `INVALID_ARGUMENT` for one that matches two, `NO_PROJECT` when there
+      # is none to default to.
+      private def self.project_abort(reason : String, kind : String, code : String) : NoReturn
+        puts failure_json(reason, kind, code) if json_stdout?
+        abort "gori run: #{reason}"
       end
 
       # Whether this process has already said which project it defaulted to.
@@ -930,8 +939,12 @@ module Gori
       rescue ex : DB::Error | SQLite3::Exception
         raise ex unless abort_on_failure
         message = open_failure_message(ex, project, read_only)
-        puts open_failure_json(ex, message, read_only) if json_stdout?
+        puts open_failure_json(ex, message.lchop("gori run: "), read_only) if json_stdout?
         abort message
+      rescue ex : Gori::Error
+        # Not a database, or one a newer gori wrote: `CLI.run` prints the line, as it always did.
+        puts failure_json(ex.message.to_s, "open_failed", "NO_PROJECT") if abort_on_failure && json_stdout?
+        raise ex
       end
 
       # `open_store`, yield, close — the shape nearly every command wants. Returns the block's
