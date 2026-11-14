@@ -5614,3 +5614,26 @@ stay open.
   name and found nothing says so once (`Miner::NOTHING_FOUND_NOTE`), on all three surfaces; a
   run that was stopped, ran out of budget or never got a baseline did not look and says
   nothing more.
+
+### 2026-11-14: the filter key is the one the tab bar lets through
+
+The 2026-09-12 rule stands: a body key pressed on the tab bar is answered with directions
+(`‹d› — press ↵ to enter the list, then d delete flow`), never run, because the bar is
+app-level focus and its bare keys are Sidebar → Global.
+
+`/` is the exception. It is the only body key followed by free text, and refusing it left that
+text to run as the bar's own keys: an evaluator's `/orders` flipped the scope lens on its `s`,
+the digits of `/127.0.0.1` changed tab, and `/cdn` stops the proxy on its `c` (reproduced). The
+directions were on screen; the hand had typed the query before the eye read them.
+
+- **`/` on the bar is `/` one level down.** The Runner moves focus to where the tab's filter
+  is and hands the same key event down (`Runner.filter_below`): the sub-tab strip where it
+  draws a filter, else the body where its scope binds a `:filter` verb that is available.
+  Nothing new is drawn; the screen reached is the one `↵` `/` reached.
+- **Letting it through is safe where running a body key is not.** It opens an input row that
+  `esc` closes and changes nothing; every other body key acts on a row the operator has not
+  entered.
+- **A tab with no filter is unchanged,** and so are `c`, `i`, `s` and the digits. Text typed
+  on the bar of such a tab still runs as keys.
+- **A cancelled filter leaves focus where `↵` `/` leaves it,** on the list or the strip:
+  `esc` goes one level at a time.
