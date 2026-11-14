@@ -8,6 +8,10 @@ module Gori::CLI::Run
   def self.one_positional_list_for_spec(before : Array(String), after : Array(String)) : Array(String)
     one_positional_list(before, after, "gori run x", "name")
   end
+
+  def self.one_positional_list_for_spec(args : Array(String)) : Array(String)
+    one_positional_list(args, "gori run x", "name") { }
+  end
 end
 
 module JsonRefusals
@@ -143,5 +147,14 @@ describe "gori run — one positional, counted inside unknown_args" do
     Gori::CLI::Run.one_positional_list_for_spec(["work", "--json"], [] of String).should eq(["work"])
     Gori::CLI::Run.one_positional_list_for_spec(["-"], [] of String).should eq(["-"])
     Gori::CLI::Run.one_positional_list_for_spec([] of String, ["--odd-name"]).should eq(["--odd-name"])
+  end
+
+  # The parsed-args path joins both halves before the count, so nothing is filtered there:
+  # `probe mode off -- -extra` must stay "too many arguments", never a write with a word dropped.
+  it "drops nothing on the parsed-args path" do
+    Gori::CLI::Run.one_positional_list_for_spec(["--", "-x"]).should eq(["-x"])
+    Gori::CLI::Run.extra_positional_error(["off", "-extra"], "gori run probe mode", "<mode>").should_not be_nil
+    src = File.read(File.join(JsonRefusals::ROOT, "..", "run.cr"))
+    src.scan("before.reject").size.should eq(1)
   end
 end

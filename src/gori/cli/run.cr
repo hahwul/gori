@@ -504,7 +504,7 @@ module Gori
       # `probe rules enable a b` and `probe mode passive active`. Four of those are mutations.
       private def self.one_positional_list(args : Array(String), prefix : String, what : String,
                                            & : OptionParser ->) : Array(String)
-        one_positional_list(parse_args(args, prefix) { |p| yield p }, [] of String, prefix, what)
+        refuse_extra_positionals(parse_args(args, prefix) { |p| yield p }, prefix, what)
       end
 
       # …and from INSIDE an `unknown_args` handler, for a parser kept whole because its usage
@@ -514,7 +514,12 @@ module Gori
       # Left out here, it reaches `invalid_option` and is named as unknown.
       private def self.one_positional_list(before : Array(String), after : Array(String),
                                            prefix : String, what : String) : Array(String)
-        all = before.reject { |a| a.starts_with?('-') && a != "-" } + after
+        refuse_extra_positionals(before.reject { |a| a.starts_with?('-') && a != "-" } + after, prefix, what)
+      end
+
+      # Only `before` is filtered, and only there: a word after `--` is a positional whatever it
+      # starts with, and `parse_args` has already joined the two halves.
+      private def self.refuse_extra_positionals(all : Array(String), prefix : String, what : String) : Array(String)
         if msg = extra_positional_error(all, prefix, what)
           abort msg
         end
