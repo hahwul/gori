@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- TUI: confirmation dialogs scroll long warnings with ↑/↓ or the mouse wheel and require the last line to be visible before confirming (#1882).
+
 - Help: `?` from a tab without its own Shortcuts section opens on that tab's row instead of the top of OTHER TABS, `?` works in the Sequencer's body, and Shortcuts explains History's `⌁follow +N` and that a tab's own `c`, `i` or `s` wins over the Global toggle in its body (#1878)
 - TUI: rule forms (Scope, Rewriter, Colormarker, Extract, custom probe rule, custom colour, column, OAST provider) say `↵ next` on a row where Enter moves to the next field, `↵ save` only where it saves and `↵ fix` while a required field is missing, where Enter moves to that field and says what it needs; when intercept starts holding traffic while another tab is open a toast says so once, until Intercept is opened or turned off (#1878, #1879)
 - Fuzzer: the template's `no chain yet` hint sits on the pane border instead of over the line below the caret, and the results footer lists direct keys before `space →` menu paths (#1878)

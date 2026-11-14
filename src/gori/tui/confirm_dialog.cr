@@ -3,6 +3,7 @@ require "./theme"
 require "./frame"
 require "./overlay"
 require "./note_detail_overlay"
+require "./viewport"
 
 module Gori::Tui
   # A centered yes/no confirmation modal for destructive actions — deleting a
@@ -61,6 +62,10 @@ module Gori::Tui
       # make every non-rendering driver (the spec harness, ProjectPicker's own ladder) unable
       # to answer a card that is in fact on screen.
       @drawn = true
+      @scroll = 0
+      @scroll_max = 0
+      @message_room = 1
+      @can_confirm = true
     end
 
     # --- Overlay contract (see overlay.cr) ---
@@ -76,7 +81,10 @@ module Gori::Tui
     # names the verb it stands for rather than a generic "confirm" the button never says.
     def hint : String
       lit = @selected == :confirm ? @confirm_label : @cancel_label
-      "←/→ choose · ↵ #{lit} · #{CONFIRM_KEY} #{@confirm_label} · #{CANCEL_KEY}/esc #{@cancel_label}"
+      return "make window taller to read · n/esc cancel" if @message_room == 0
+      scroll = @scroll_max > 0 ? "↑/↓ scroll · " : ""
+      return "#{scroll}read to the end · n/esc cancel" unless @can_confirm
+      "#{scroll}←/→ choose · ↵ #{lit} · #{CONFIRM_KEY} #{@confirm_label} · #{CANCEL_KEY}/esc #{@cancel_label}"
     end
 
     # ←/→ or Tab move between the buttons; `y` confirms, `n`/esc cancels, ↵ acts on the
@@ -118,12 +126,20 @@ module Gori::Tui
       when ConfirmDialog.affirmative?(ev)
         # An answer to a question nobody could read is not an answer. `n`/esc stay open to a
         # window this short — cancelling costs a keystroke, committing costs the data.
-        @drawn ? :commit : :stay
+        @drawn && @can_confirm ? :commit : :stay
+      when key.up?
+        handle_wheel(-1)
+        :stay
+      when key.down?
+        handle_wheel(1)
+        :stay
       when key.left?, key.right?, key.tab?, key.back_tab?
         move
         :stay
-      when key.enter? then confirm_selected? && @drawn ? :commit : :cancel
-      else                 :stay
+      when key.enter?
+        return :cancel unless confirm_selected? && @drawn
+        @can_confirm ? :commit : :stay
+      else :stay
       end
     end
 
@@ -133,16 +149,15 @@ module Gori::Tui
       box = overlay_box(area)
       return :cancel unless box.contains?(mx, my)
       case button_at(box, mx, my)
-      when :confirm then :commit
+      when :confirm then @drawn && @can_confirm ? :commit : :stay
       when :cancel  then :cancel
       else               :stay
       end
     end
 
-    # Inert on purpose. The base default routes a wheel notch to `move`, which here FLIPS
-    # the lit button — a stray scroll must never re-aim a destructive choice onto it. The
-    # pre-seam shell had no wheel arm for :confirm either.
+    # The wheel scrolls disclosure, never the selected destructive button.
     def handle_wheel(step : Int32) : Nil
+      @scroll = (@scroll + step).clamp(0, @scroll_max)
     end
 
     # Toggle between the two buttons (←/→ or Tab). With only two choices the
@@ -169,27 +184,20 @@ module Gori::Tui
     # message / title / button row.
     def render(screen : Screen, area : Rect) : Nil
       @drawn = false
+      @can_confirm = false
       box = overlay_box(area)
       return if box.empty?
       @drawn = true
       Frame.card(screen, box, @heading, border: Theme.border_focus)
-      fitted_lines(display_lines(area), box).each_with_index do |line, i|
+      lines = display_lines(area)
+      @message_room = {box.h - (CHROME_H - 1), 0}.max
+      @scroll_max = {lines.size - @message_room, 0}.max
+      @scroll = Viewport.clamp_scroll(@scroll, @message_room, lines.size)
+      @can_confirm = @message_room > 0 && @scroll == @scroll_max
+      lines.skip(@scroll).first(@message_room).each_with_index do |line, i|
         screen.text(box.x + 3, box.y + 2 + i, line, Theme.text, Theme.panel, width: box.w - 6)
       end
       render_buttons(screen, box)
-    end
-
-    # The message rows this box can actually hold, and what goes in them. A card that fits
-    # spends `CHROME_H` and draws every line; a shorter one spends the blank above the buttons
-    # first and then CLIPS — the tail of the message is folded into the last visible row so
-    # `Screen#text` ellipsises it, because "there is more of this sentence" is exactly what the
-    # operator has to know before answering. Refusing to draw at all (what this did) left a
-    # destructive modal holding every key with nothing on screen naming it.
-    private def fitted_lines(lines : Array(String), box : Rect) : Array(String)
-      room = {box.h - (CHROME_H - 1), 0}.max
-      return lines if lines.size <= room
-      return [] of String if room == 0
-      lines[0, room - 1] + [lines[(room - 1)..].join(' ')]
     end
 
     # Inverts render's centering math: the centered card rect for `area`. Pure;
@@ -204,7 +212,7 @@ module Gori::Tui
       # The roomy height, capped by what there IS. The card used to demand its full height and
       # draw nothing at all below it — on an 80×12 terminal (body 6 rows) `⇧X Clear history`
       # armed a modal that showed no heading, no count and no warning, and `y` still wiped the
-      # project's whole History. It degrades instead; `fitted_lines` spends the shortfall.
+      # project's whole History. Short cards scroll the disclosure instead.
       h = {lines.size + CHROME_H, area.h}.min
       w = (content + TEXT_INSET).clamp(16, {area.w - 2, MAX_WIDTH}.min)
       area.center(w, h)

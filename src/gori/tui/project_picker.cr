@@ -1925,15 +1925,16 @@ module Gori::Tui
 
     private def picker_wheel(delta : Int32) : Nil
       case @mode
-      when :settings                                     then @preferences.wheel(delta)
-      when :theme                                        then (@theme_card.move_field(delta); preview_theme)
-      when :space                                        then @space_selected = (@space_selected + delta.sign).clamp(0, space_entries.size - 1)
-      when :compress                                     then @compact.try(&.move(delta.sign))
-      when :global_search                                then @search.try(&.wheel(delta))
-      when :archive_export_path                          then @archive_export_overlay.try(&.move(delta))
-      when :archive_import_path                          then @archive_import_overlay.try(&.move(delta))
-      when :new, :confirm, :rename, :archive_import_name then nil # nothing to scroll
-      when .in?(BUSY_LABELS.keys)                        then nil # a blocking step owns the loop
+      when :settings                           then @preferences.wheel(delta)
+      when :theme                              then (@theme_card.move_field(delta); preview_theme)
+      when :space                              then @space_selected = (@space_selected + delta.sign).clamp(0, space_entries.size - 1)
+      when :compress                           then @compact.try(&.move(delta.sign))
+      when :global_search                      then @search.try(&.wheel(delta))
+      when :archive_export_path                then @archive_export_overlay.try(&.move(delta))
+      when :archive_import_path                then @archive_import_overlay.try(&.move(delta))
+      when :confirm                            then @confirm.try(&.handle_wheel(delta))
+      when :new, :rename, :archive_import_name then nil # nothing to scroll
+      when .in?(BUSY_LABELS.keys)              then nil # a blocking step owns the loop
       else
         # The picker's wheel moves the SELECTION (it has no independent scroll of its own),
         # so it is an arrow by another name and ends a ⇧arrow range exactly as one does.
@@ -1946,11 +1947,9 @@ module Gori::Tui
     private def handle_confirm_mouse(w : Int32, h : Int32, mx : Int32, my : Int32) : Nil
       dlg = @confirm
       return if dlg.nil?
-      box = dlg.overlay_box(Rect.new(0, 0, w, h))
-      return cancel_confirm unless box.contains?(mx, my) # click away → cancel
-      case dlg.button_at(box, mx, my)
-      when :confirm then commit_confirmed
-      when :cancel  then cancel_confirm
+      case dlg.handle_click(Rect.new(0, 0, w, h), mx, my)
+      when :commit then commit_confirmed
+      when :cancel then cancel_confirm
       end
     end
 

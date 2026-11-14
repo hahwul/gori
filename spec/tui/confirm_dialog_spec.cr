@@ -172,7 +172,7 @@ describe "ConfirmDialog — Overlay contract" do
   # The base default routes a wheel notch to `move`, which HERE flips the lit button — a
   # stray scroll must never re-aim a destructive choice onto the danger button. The
   # pre-seam shell had no wheel arm for :confirm either.
-  it "ignores the scroll wheel rather than flipping the lit button" do
+  it "keeps the selected button while scrolling" do
     h = OverlayHarness.new(ConfirmDialog.new("T", "m"))
     h.wheel(3) # ONE notch: `move` toggles regardless of direction, so two would cancel out
     h.overlay.as(ConfirmDialog).confirm_selected?.should be_false
@@ -255,9 +255,9 @@ describe "ConfirmDialog on a short pane" do
     backend.contains?("CLEAR HISTORY").should be_true
     backend.contains?("clear").should be_true
     backend.contains?("cancel").should be_true
-    # The message is CLIPPED, not dropped — and the ellipsis is what says there is more of it.
+    # The first wrapped line stays readable; the rest is reachable by scrolling.
     backend.contains?("Delete ALL 143 History flows").should be_true
-    backend.contains?("…").should be_true
+    backend.contains?("…").should be_false
   end
 
   # Between `MIN_H` and the message's own height the card keeps what it can afford: the
@@ -302,5 +302,43 @@ describe "ConfirmDialog on a short pane" do
     dlg.overlay_box(Rect.new(0, 0, 76, ConfirmDialog::MIN_H - 1)).empty?.should be_true
     dlg.overlay_box(Rect.new(0, 0, 17, 24)).empty?.should be_true
     dlg.overlay_box(Rect.new(0, 0, 76, ConfirmDialog::MIN_H)).empty?.should be_false
+  end
+end
+
+describe "ConfirmDialog scrollable disclosure" do
+  it "requires the end of an overflowing message before keyboard or mouse confirmation" do
+    dlg = ConfirmDialog.new("CLOSE FUZZER", "Close session?\nEvery saved run is deleted.")
+    area = Rect.new(0, 0, 76, 6)
+    backend = render_dialog(dlg, 76, 6)
+    backend.contains?("Close session?").should be_true
+    yes = Termisu::Event::Key.new(Termisu::Input::Key::LowerY)
+    dlg.handle_key(yes).should eq(:stay)
+    button, _ = dlg.button_rects(dlg.overlay_box(area))
+    dlg.handle_click(area, button.x, button.y).should eq(:stay)
+    dlg.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Down)).should eq(:stay)
+    backend = render_dialog(dlg, 76, 6)
+    backend.contains?("Every saved run is deleted.").should be_true
+    dlg.handle_key(yes).should eq(:commit)
+  end
+
+  it "scrolls the message with the wheel without changing the selected button" do
+    dlg = ConfirmDialog.new("DELETE", "First line\nLast line")
+    render_dialog(dlg, 76, 6)
+    dlg.handle_wheel(3)
+    backend = render_dialog(dlg, 76, 6)
+    backend.contains?("Last line").should be_true
+    dlg.confirm_selected?.should be_false
+  end
+end
+
+describe "ConfirmDialog disclosure after resize" do
+  it "blocks confirmation when no message row fits, then recovers on enlargement" do
+    dlg = ConfirmDialog.new("DELETE", "All saved runs are deleted.")
+    render_dialog(dlg, 76, 4)
+    yes = Termisu::Event::Key.new(Termisu::Input::Key::LowerY)
+    dlg.handle_key(yes).should eq(:stay)
+    dlg.hint.should contain("taller")
+    render_dialog(dlg, 76, 12)
+    dlg.handle_key(yes).should eq(:commit)
   end
 end
