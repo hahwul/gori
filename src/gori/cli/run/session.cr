@@ -294,7 +294,7 @@ module Gori
             refresh: edit.refresh || [] of Int64,
             refresh_before: edit.refresh_before || Gori::SessionSlot::RefreshBefore.off)
           baseline_before = slots.baseline_name
-          abort "gori run session add: the project could not be written — #{name.inspect} was NOT saved" unless slots.add(slot)
+          busy_abort("gori run session add", "the project could not be written — #{name.inspect} was NOT saved") unless slots.add(slot)
           # The row as saved, not as built: `add` may auto-mark the first slot baseline and
           # drops empty entries, and the printed row must not deny either.
           puts session_slot_row(slots.find(name) || slot, false)
@@ -379,8 +379,8 @@ module Gori
           end
           draft = drafted.as(Gori::SessionFromFlow::Draft)
           slot = draft.slot(name, baseline)
-          abort "gori run session from-flow: the project could not be written — " \
-                "#{name.inspect} was NOT saved" unless slots.add(slot)
+          busy_abort("gori run session from-flow", "the project could not be written — " \
+                                                   "#{name.inspect} was NOT saved") unless slots.add(slot)
           puts session_slot_row(slot, show_values)
           # Provenance on stderr, so stdout stays the one row `session add` prints and a script
           # that pipes it keeps working. Names WHERE each header came from and never a value.
@@ -458,8 +458,8 @@ module Gori
           end
           draft = drafted.as(Gori::SessionFromFlow::Draft)
           slot = draft.slot(name, baseline)
-          abort "gori run session from-request: the project could not be written — " \
-                "#{name.inspect} was NOT saved" unless slots.add(slot)
+          busy_abort("gori run session from-request", "the project could not be written — " \
+                                                      "#{name.inspect} was NOT saved") unless slots.add(slot)
           puts session_slot_row(slot, show_values)
           # Provenance belongs on stderr so stdout remains the one redacted slot row. The engine
           # supplies header names/sources only; values must never be repeated in this audit text.
@@ -505,8 +505,8 @@ module Gori
           updated = session_edited(current, edit, renamed)
           baseline_before = slots.baseline_name
           baseline_before = updated.name if baseline_before == current.name # a rename is not a move
-          abort "gori run session edit: the project could not be written — " \
-                "#{target.inspect} is unchanged" unless slots.update(target, updated)
+          busy_abort("gori run session edit", "the project could not be written — " \
+                                              "#{target.inspect} is unchanged") unless slots.update(target, updated)
           puts session_slot_row(updated, false)
           warn_slot_env(updated, slots, "gori run session edit")
           warn_baseline_moved(baseline_before, slots, "gori run session edit")
@@ -557,8 +557,8 @@ module Gori
         begin
           not_found_abort("gori run session rm", "no session slot named #{name.inspect}", format, store) unless slots.find(name)
           baseline_before = slots.baseline_name
-          abort "gori run session rm: the project could not be written — " \
-                "#{name.inspect} is still there" unless slots.remove(name)
+          busy_abort("gori run session rm", "the project could not be written — " \
+                                            "#{name.inspect} is still there") unless slots.remove(name)
           puts format == :json ? deleted_json("name", name) : "deleted session slot #{name.inspect}"
           warn_baseline_moved(baseline_before, slots, "gori run session rm")
         ensure
@@ -580,8 +580,8 @@ module Gori
         store, slots = session_slots(proj.name, proj.db)
         begin
           abort "gori run session baseline: no session slot named #{name.inspect}" unless slots.find(name)
-          abort "gori run session baseline: the project could not be written — the baseline " \
-                "did not move" unless slots.set_baseline(name)
+          busy_abort("gori run session baseline", "the project could not be written — the baseline " \
+                                                  "did not move") unless slots.set_baseline(name)
           puts "#{name} is the baseline"
         ensure
           store.close

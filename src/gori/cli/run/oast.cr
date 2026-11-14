@@ -330,7 +330,7 @@ module Gori
           # See the MCP twin: `--token=` with an empty value is a CLEAR, not an omission.
           token.nil? ? existing.token : token.strip.presence,
           enabled.nil? ? existing.enabled? : enabled)
-        abort "gori run oast providers update: NOT applied (project busy) — the provider is unchanged" unless ok
+        busy_abort("gori run oast providers update", "NOT applied (project busy) — the provider is unchanged") unless ok
         puts "OAST provider p_#{row} updated."
       end
 
@@ -343,7 +343,7 @@ module Gori
         abort "gori run oast providers add: --host is required for #{k.label} (it has no default preset)" if h.nil?
         id = store.insert_oast_provider(name, k.label, h, token.try(&.strip).presence,
           enabled.nil? ? true : enabled, store.oast_providers.size)
-        abort "gori run oast providers add: failed to persist the provider (store busy or unwritable)" if id == 0
+        busy_abort("gori run oast providers add", "failed to persist the provider (store busy or unwritable)") if id == 0
         puts oast_provider_added_output(store, id, format)
       end
 
@@ -373,30 +373,32 @@ module Gori
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
           row = oast_provider_row_id(store, id, verb)
-          abort "gori run oast providers: enable/disable NOT applied (project busy)" unless store.set_oast_provider_enabled(row, enabled)
+          busy_abort("gori run oast providers", "enable/disable NOT applied (project busy)") unless store.set_oast_provider_enabled(row, enabled)
           puts "OAST provider p_#{row} is now #{enabled ? "enabled" : "disabled"}."
         end
       end
 
       private def self.cmd_oast_provider_delete(args : Array(String)) : Nil
         proj = ProjectFlags.new
+        format = :text
 
         leftover = one_positional_list(args, "gori run oast providers delete", "<id>") do |p|
           p.banner = "Usage: gori run oast providers delete <id>"
           project_options(p, proj, "update")
+          format_flag(p, [:text, :json], delete_format_help) { |f| format = f }
         end
         id = leftover.first?
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
-          row = oast_provider_row_id(store, id, "delete")
-          abort "gori run oast providers: NOT deleted (project busy) — the provider is unchanged" unless store.delete_oast_provider(row)
-          puts "OAST provider p_#{row} deleted."
+          row = oast_provider_row_id(store, id, "delete", format)
+          busy_abort("gori run oast providers", "NOT deleted (project busy) — the provider is unchanged") unless store.delete_oast_provider(row)
+          puts format == :json ? deleted_json("id", "p_#{row}") : "OAST provider p_#{row} deleted."
         end
       end
 
       # The PROJECT row id behind a "p_<n>" key, refusing a global one (settings.json, shared
       # across projects) and an id that names no row.
-      private def self.oast_provider_row_id(store : Store, id : String?, verb : String) : Int64
+      private def self.oast_provider_row_id(store : Store, id : String?, verb : String, format : Symbol = :text) : Int64
         key = id
         abort "gori run oast providers #{verb}: <id> is required (see `gori run oast providers`)" if key.nil?
         if key.starts_with?("g_")
@@ -404,7 +406,9 @@ module Gori
         end
         row = key.starts_with?("p_") ? key[2..].to_i64? : key.to_i64?
         abort "gori run oast providers #{verb}: malformed provider id '#{key}' (expected p_<n>)" if row.nil?
-        abort "gori run oast providers #{verb}: no project OAST provider with id '#{key}'" unless store.oast_providers.any? { |p| p.id == row }
+        unless store.oast_providers.any? { |p| p.id == row }
+          not_found_abort("gori run oast providers #{verb}", "no project OAST provider with id '#{key}'", format)
+        end
         row
       end
 

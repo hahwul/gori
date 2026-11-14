@@ -508,10 +508,13 @@ module Gori
       end
 
       # …and from INSIDE an `unknown_args` handler, for a parser kept whole because its usage
-      # is printed later (`redact use`, `repeater move`).
+      # is printed later (`redact use`, `repeater move`). Minus the stray flags: OptionParser
+      # runs `unknown_args` BEFORE `invalid_option`, so a flag the parser does not know was
+      # counted as a second token — `redact rm NAME --json` refused as "too many arguments".
+      # Left out here, it reaches `invalid_option` and is named as unknown.
       private def self.one_positional_list(before : Array(String), after : Array(String),
                                            prefix : String, what : String) : Array(String)
-        all = before + after
+        all = before.reject { |a| a.starts_with?('-') && a != "-" } + after
         if msg = extra_positional_error(all, prefix, what)
           abort msg
         end

@@ -35,7 +35,8 @@ module Gori
 
       # A catalog refusal in this surface's words: the builder's sentence, plus the flag that
       # answers the one refusal a flag can answer.
-      private def self.wordlist_error(verb : String, ex : WordlistCatalog::Error) : NoReturn
+      private def self.wordlist_error(verb : String, ex : WordlistCatalog::Error, format : Symbol = :text) : NoReturn
+        not_found_abort("gori run wordlist #{verb}", ex.message.to_s, format) if ex.reason.not_found?
         hint = ex.reason.exists? ? " (--overwrite replaces it)" : ""
         abort "gori run wordlist #{verb}: #{ex.message}#{hint}"
       end
@@ -321,10 +322,12 @@ module Gori
       # command says what it would have removed and refuses (the `history clear` shape).
       private def self.cmd_wordlist_delete(args : Array(String)) : Nil
         yes = false
+        format = :text
         positional = parse_args(args, "gori run wordlist delete") do |p|
           p.banner = "Usage: gori run wordlist delete <name> --yes [options]\n\n" \
                      "Delete a list from the catalog. A symlink is removed, never the file it names."
           p.on("--yes", "Actually delete it (required — there is no interactive prompt here)") { yes = true }
+          format_flag(p, [:text, :json], delete_format_help("name")) { |f| format = f }
         end
         name = positional.first? || abort "gori run wordlist delete: expected a wordlist name"
         if msg = extra_positional_error(positional, "gori run wordlist delete", "wordlist name")
@@ -340,9 +343,9 @@ module Gori
                   "(#{CLI::Output.human_size(info.bytes)}) without --yes"
           end
           WordlistCatalog.delete(name)
-          puts "deleted #{CLI::Output.term_safe(name)}"
+          puts format == :json ? deleted_json("name", name) : "deleted #{CLI::Output.term_safe(name)}"
         rescue ex : WordlistCatalog::Error
-          wordlist_error("delete", ex)
+          wordlist_error("delete", ex, format)
         end
       end
     end

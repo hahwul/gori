@@ -164,7 +164,7 @@ module Gori
         unless Settings.colormarker_colors.any? { |c| c.name == name }
           not_found_abort("gori run colormarker color rm", "no custom colour named '#{name}'", format)
         end
-        abort "gori run colormarker color rm: settings not writable (nothing was deleted)" unless Settings.delete_colormarker_color(name)
+        busy_abort("gori run colormarker color rm", "settings not writable (nothing was deleted)") unless Settings.delete_colormarker_color(name)
         # A rule that still names it is left inert — it falls back to a visible default rather
         # than this surface reaching into every project's DB to rewrite the rules.
         puts format == :json ? deleted_json("name", name) : "Custom colour “#{name}” deleted."
@@ -305,7 +305,7 @@ module Gori
         if scope.global?
           colormarker_global_project_check(proj.name, proj.db)
           id = Settings.add_colormarker_rule(f, color, style.label, name, !disabled)
-          abort "gori run colormarker add: failed to persist rule (settings not writable)" if id == 0
+          busy_abort("gori run colormarker add", "failed to persist rule (settings not writable)") if id == 0
           puts format == :json ? colormarker_added_json(id, nil) : "Global colour rule ##{id} added — it applies in every project."
           print_color_advice(f)
           return
@@ -315,7 +315,7 @@ module Gori
         with_store(project) do |store|
           id = store.insert_color_rule(f, color, style, name, !disabled)
           if id == 0
-            abort_closing(store, "gori run colormarker add: project is busy (write did not commit) — try again")
+            busy_abort("gori run colormarker add", "project is busy (write did not commit) — try again", store)
           end
           puts format == :json ? colormarker_added_json(id, store) : "Colour rule ##{id} added."
           print_color_advice(f)
@@ -412,7 +412,7 @@ module Gori
         f = filter || current.match_filter
         unless Settings.update_colormarker_rule(id, f, color || current.color,
                  style.try(&.label) || current.style, name || current.name)
-          abort "gori run colormarker update: settings not writable — the rule is unchanged"
+          busy_abort("gori run colormarker update", "settings not writable — the rule is unchanged")
         end
         puts "Global colour rule ##{id} updated — in every project."
         print_color_advice(f)
@@ -428,7 +428,7 @@ module Gori
           f = filter || current.match_filter
           unless store.update_color_rule(id, f, color || current.color,
                    style || current.style, name || current.name)
-            abort_closing(store, "gori run colormarker update: project is busy (write did not commit) — the rule is unchanged")
+            busy_abort("gori run colormarker update", "project is busy (write did not commit) — the rule is unchanged", store)
           end
           puts "Colour rule ##{id} updated."
           print_color_advice(f)
@@ -462,7 +462,7 @@ module Gori
           unless Settings.colormarker_rules.any? { |r| r.id == id }
             not_found_abort("gori run colormarker rm", "no global rule with id #{id}", format)
           end
-          abort "gori run colormarker rm: settings not writable (nothing was deleted)" unless Settings.delete_colormarker_rule(id)
+          busy_abort("gori run colormarker rm", "settings not writable (nothing was deleted)") unless Settings.delete_colormarker_rule(id)
           puts format == :json ? deleted_json("id", id) : "Global colour rule ##{id} deleted — from every project."
           return
         end
@@ -470,7 +470,7 @@ module Gori
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
           store.color_rules.any? { |r| r.id == id } || not_found_abort("gori run colormarker rm", "no colour rule with id #{id}", format, store)
-          store.delete_color_rule(id) || abort_closing(store, "gori run colormarker rm: project is busy (write did not commit) — the row colour is unchanged")
+          store.delete_color_rule(id) || busy_abort("gori run colormarker rm", "project is busy (write did not commit) — the row colour is unchanged", store)
           puts format == :json ? deleted_json("id", id) : "Colour rule ##{id} deleted."
         end
       end
@@ -504,7 +504,7 @@ module Gori
           abort "gori run colormarker #{action}: no global rule with id #{id}" unless rule
           default = rule.enabled
           if everywhere
-            abort "gori run colormarker #{action}: settings not writable (the rule is unchanged)" unless Settings.set_colormarker_rule_enabled(id, enable)
+            busy_abort("gori run colormarker #{action}", "settings not writable (the rule is unchanged)") unless Settings.set_colormarker_rule_enabled(id, enable)
             puts "Global colour rule ##{id} #{enable ? "enabled" : "disabled"} by default (every project without an override)."
             return
           end
@@ -516,12 +516,12 @@ module Gori
             # Same disposition `Colormarker#toggle` writes: agreeing with the default DROPS the
             # override rather than pinning it, so this project keeps following the library.
             ok = default == enable ? store.clear_colormarker_override(id) : store.set_colormarker_override(id, enable)
-            ok || abort_closing(store, "gori run colormarker #{action}: project is busy (write did not commit) — try again")
+            ok || busy_abort("gori run colormarker #{action}", "project is busy (write did not commit) — try again", store)
             puts "Global colour rule ##{id} #{enable ? "enabled" : "disabled"} in project #{CLI::Output.term_safe(project.name)}."
             return
           end
           store.color_rules.any? { |r| r.id == id } || abort_closing(store, "gori run colormarker #{action}: no colour rule with id #{id}")
-          store.set_color_rule_enabled(id, enable) || abort_closing(store, "gori run colormarker #{action}: project is busy (write did not commit) — the row colour is unchanged")
+          store.set_color_rule_enabled(id, enable) || busy_abort("gori run colormarker #{action}", "project is busy (write did not commit) — the row colour is unchanged", store)
           puts "Colour rule ##{id} #{enable ? "enabled" : "disabled"}."
         end
       end
@@ -576,7 +576,7 @@ module Gori
             abort "gori run colormarker move: rule ##{id} is already at the #{dir < 0 ? "top" : "bottom"} of the global block"
           end
           unless Settings.move_colormarker_rule(id, dir)
-            abort "gori run colormarker move: settings not writable — the precedence order is unchanged"
+            busy_abort("gori run colormarker move", "settings not writable — the precedence order is unchanged")
           end
           puts "Global colour rule ##{id} moved #{dir < 0 ? "up" : "down"}."
           return
@@ -591,7 +591,7 @@ module Gori
           if j < 0 || j >= ids.size
             abort_closing(store, "gori run colormarker move: rule ##{id} is already at the #{dir < 0 ? "top" : "bottom"} of the project block")
           end
-          store.move_color_rule(id, dir) || abort_closing(store, "gori run colormarker move: project is busy (write did not commit) — the precedence order is unchanged")
+          store.move_color_rule(id, dir) || busy_abort("gori run colormarker move", "project is busy (write did not commit) — the precedence order is unchanged", store)
           puts "Colour rule ##{id} moved #{dir < 0 ? "up" : "down"}."
         end
       end

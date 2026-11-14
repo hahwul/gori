@@ -147,7 +147,7 @@ module Gori
             abort "gori run views add: a #{scope} view named '#{name}' already exists — use `set` to change its query"
           end
           unless created = SavedViews.add(store, name, q, scope)
-            abort "gori run views add: failed to persist the view (#{views_write_hint(scope)})"
+            busy_abort("gori run views add", "failed to persist the view (#{views_write_hint(scope)})")
           end
           puts view_added_output(store, created, format)
         end
@@ -172,14 +172,16 @@ module Gori
       private def self.cmd_views_rm(args : Array(String)) : Nil
         proj = ProjectFlags.new
         scope = "project"
+        format = :text
         name = views_one_positional(args, "rm", "<name>") do |p|
           p.banner = "Usage: gori run views rm <name> [--scope=project|global]"
           project_options(p, proj, "update")
           p.on("--scope=SCOPE", "Which <name>: project (default) | global") { |v| scope = parse_view_scope(v) }
+          format_flag(p, [:text, :json], delete_format_help("name")) { |f| format = f }
         end
 
         with_views_store(proj.name, proj.db) do |store|
-          view = views_find_or_abort(store, name, scope, "rm")
+          view = views_find_or_abort(store, name, scope, "rm", format)
           # A project pointing at this view keeps a `history_view` key naming it. THIS project's
           # is kept off it (see `SavedViews.delete`). Only a GLOBAL view can be named from another
           # project, and that pointer stays inert: global ids come from a monotonic counter and
@@ -187,18 +189,22 @@ module Gori
           # is a rowid and is not.
           case SavedViews.delete(store, view)
           in SavedViews::DeleteOutcome::NotDeleted
-            abort "gori run views rm: failed to reset the project's active view, so nothing was deleted " \
-                  "(#{views_write_hint("project")})"
+            busy_abort("gori run views rm", "failed to reset the project's active view, so nothing was deleted " \
+                                            "(#{views_write_hint("project")})")
           in SavedViews::DeleteOutcome::RemoveRefused
-            abort "gori run views rm: failed to delete the view (#{views_write_hint(scope)}); " \
-                  "if it was the project's active view, that is All now"
+            busy_abort("gori run views rm", "failed to delete the view (#{views_write_hint(scope)}); " \
+                                            "if it was the project's active view, that is All now")
           in SavedViews::DeleteOutcome::PointerLeft
             STDERR.puts "gori run views rm: warning: another gori made '#{view.name}' the project's active view " \
                         "meanwhile and that pointer could not be reset (#{views_write_hint("project")}); it names " \
                         "the deleted id, which the next project view created can take"
           in SavedViews::DeleteOutcome::Deleted
           end
-          puts scope == "global" ? "Global view '#{view.name}' deleted — from every project." : "View '#{view.name}' deleted."
+          if format == :json
+            puts deleted_json("name", view.name)
+          else
+            puts scope == "global" ? "Global view '#{view.name}' deleted — from every project." : "View '#{view.name}' deleted."
+          end
         end
       end
 
@@ -221,7 +227,7 @@ module Gori
             abort "gori run views rename: a #{scope} view named '#{dest}' already exists"
           end
           unless SavedViews.update(store, view, dest, view.query)
-            abort "gori run views rename: failed to rename the view (#{views_write_hint(scope)})"
+            busy_abort("gori run views rename", "failed to rename the view (#{views_write_hint(scope)})")
           end
           puts "View '#{view.name}' renamed to '#{dest.strip}'."
         end
@@ -244,7 +250,7 @@ module Gori
         with_views_store(proj.name, proj.db) do |store|
           view = views_find_or_abort(store, name, scope, "set")
           unless SavedViews.update(store, view, view.name, q)
-            abort "gori run views set: failed to update the view (#{views_write_hint(scope)})"
+            busy_abort("gori run views set", "failed to update the view (#{views_write_hint(scope)})")
           end
           puts "View '#{view.name}' now matches #{q}."
         end
@@ -274,7 +280,7 @@ module Gori
             abort "gori run views scope: a #{dest} view named '#{view.name}' already exists"
           end
           unless moved = SavedViews.set_scope(store, view, dest)
-            abort "gori run views scope: failed to move the view (#{views_write_hint(dest)}); it was left where it was"
+            busy_abort("gori run views scope", "failed to move the view (#{views_write_hint(dest)}); it was left where it was")
           end
           # The move minted a new id in the destination store, so a `history_view` key naming
           # the OLD one is now dangling. Re-point it rather than leaving the project to fall
@@ -326,7 +332,7 @@ module Gori
       # operator names a view and gori picks the most specific. A mutator must touch the one the
       # operator said, so the two stores stay independently addressable.
       private def self.views_find_or_abort(store : Store, name : String, scope : String,
-                                           sub : String) : SavedViews::View
+                                           sub : String, format : Symbol = :text) : SavedViews::View
         want = name.strip.downcase
         views = SavedViews.merged(store)
         found = views.find { |v| v.scope == scope && v.name.downcase == want }
@@ -338,9 +344,9 @@ module Gori
           abort "gori run views #{sub}: '#{name}' is a built-in view — it can't be edited or deleted"
         end
         if views.any? { |v| v.name.downcase == want }
-          abort "gori run views #{sub}: no #{scope} view named '#{name}' (it exists in another scope — pass --scope)"
+          not_found_abort("gori run views #{sub}", "no #{scope} view named '#{name}' (it exists in another scope — pass --scope)", format)
         end
-        abort "gori run views #{sub}: no view named '#{name}'"
+        not_found_abort("gori run views #{sub}", "no view named '#{name}'", format)
       end
     end
   end

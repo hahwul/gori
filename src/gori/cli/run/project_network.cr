@@ -160,7 +160,7 @@ module Gori
         edit = begin
           plan, err = Settings.plan_project_network_set(Settings.project_network_rows(store), k, value, password)
           plan || abort_closing(store, "gori run project network set: #{network_refusal_text(k, err || "invalid value")}")
-          Settings.apply_project_network_edit(store, plan) || abort_closing(store, "gori run project network set: project is busy (write did not commit) — #{k.key} is unchanged; try again")
+          Settings.apply_project_network_edit(store, plan) || busy_abort("gori run project network set", "project is busy (write did not commit) — #{k.key} is unchanged; try again", store)
           plan
         ensure
           store.close
@@ -185,7 +185,7 @@ module Gori
         edit = with_store(project) do |store|
           plan, err = Settings.plan_project_network_unset(Settings.project_network_rows(store), k)
           plan || abort_closing(store, "gori run project network unset: #{err || "cannot unset #{k.key}"}")
-          Settings.apply_project_network_edit(store, plan) || abort_closing(store, "gori run project network unset: project is busy (write did not commit) — #{k.key} is unchanged; try again")
+          Settings.apply_project_network_edit(store, plan) || busy_abort("gori run project network unset", "project is busy (write did not commit) — #{k.key} is unchanged; try again", store)
           plan
         end
         puts "#{k.key} unset — the project inherits the global value" unless edit.rows.empty?

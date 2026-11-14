@@ -116,8 +116,8 @@ module Gori
         with_store(project) do |store|
           ids = Gori::Rules.load(store).add_preset(preset, scope: scope, enabled: !disabled)
           if ids.empty?
-            abort "gori run rewriter preset add: failed to persist rules " \
-                  "(#{scope.global? ? "settings not writable" : "store busy or unwritable"})"
+            busy_abort("gori run rewriter preset add", "failed to persist rules " \
+                                                       "(#{scope.global? ? "settings not writable" : "store busy or unwritable"})")
           end
           if format == :json
             puts MCP::Serialize.preset_install(preset, scope, !disabled, ids)
@@ -232,17 +232,18 @@ module Gori
           # compiles — rather than a UNIQUE-constraint failure that reads as "store busy".
           bindings = Bindings.new(store, store.extract_rules)
           if err = bindings.add(name, when_s, kind, selector, a, b, host)
+            busy_abort("gori run rewriter extract add", err) if err == Bindings::STORE_REFUSED
             abort "gori run rewriter extract add: #{err}"
           end
           id = store.extract_rules.find { |r| r.name == name }.try(&.id) || 0_i64
-          abort "gori run rewriter extract add: failed to persist rule (store busy or unwritable)" if id == 0
+          busy_abort("gori run rewriter extract add", "failed to persist rule (store busy or unwritable)") if id == 0
           # The disable's own answer, not a fire-and-forget: dropping it reported success
           # while leaving an ENABLED rule that immediately starts binding from live proxy
           # traffic — the opposite of what was asked, at exit 0. MCP's
           # `apply_created_extract_state` already refuses this way.
           if disabled && !store.set_extract_rule_enabled(id, false)
-            abort "gori run rewriter extract add: rule ##{id} was created but the disable did not persist " \
-                  "(store busy or unwritable) — it is ENABLED and already binding; retry the disable"
+            busy_abort("gori run rewriter extract add", "rule ##{id} was created but the disable did not persist " \
+                                                        "(store busy or unwritable) — it is ENABLED and already binding; retry the disable")
           end
           puts extract_added_output(store, id, name, kind, format)
         end
@@ -328,10 +329,11 @@ module Gori
         if err = Bindings.new(store, store.extract_rules).update(id, name || existing.name,
              f.when_s || existing.match_filter, f.kind || existing.kind, f.selector || existing.selector,
              a, b, f.host || existing.host)
+          busy_abort(cmd, err, store) if err == Bindings::STORE_REFUSED
           abort_closing(store, "#{cmd}: #{err}")
         end
         if (en = f.enabled).is_a?(Bool) && !store.set_extract_rule_enabled(id, en)
-          abort_closing(store, "#{cmd}: rule ##{id}'s fields were updated but the enable/disable did not persist (store busy or unwritable); retry")
+          busy_abort(cmd, "rule ##{id}'s fields were updated but the enable/disable did not persist (store busy or unwritable); retry", store)
         end
         puts "Extract rule ##{id} updated."
       end
@@ -340,7 +342,7 @@ module Gori
         id, store = extract_target(args, "rm|delete")
         begin
           abort "gori run rewriter extract rm: no rule ##{id}" unless store.extract_rules.any?(&.id.==(id))
-          abort "gori run rewriter extract rm: failed to delete (store busy or unwritable)" unless store.delete_extract_rule(id)
+          busy_abort("gori run rewriter extract rm", "failed to delete (store busy or unwritable)") unless store.delete_extract_rule(id)
           puts "Extract rule ##{id} deleted."
         ensure
           store.close
@@ -352,7 +354,7 @@ module Gori
         id, store = extract_target(args, verb)
         begin
           abort "gori run rewriter extract #{verb}: no rule ##{id}" unless store.extract_rules.any?(&.id.==(id))
-          abort "gori run rewriter extract #{verb}: failed to persist (store busy or unwritable)" unless store.set_extract_rule_enabled(id, enabled)
+          busy_abort("gori run rewriter extract #{verb}", "failed to persist (store busy or unwritable)") unless store.set_extract_rule_enabled(id, enabled)
           puts "Extract rule ##{id} #{enabled ? "enabled" : "disabled"}."
         ensure
           store.close
@@ -774,8 +776,8 @@ module Gori
           id = Gori::Rules.load(store).create(target, part, f, rule_value, op, match, name, rule_host,
             body_file, scope: scope, enabled: !disabled, respond: respond, respond_args: respond_args)
           if id == 0
-            abort "gori run rewriter add: failed to persist rule " \
-                  "(#{scope.global? ? "settings not writable" : "store busy or unwritable"})"
+            busy_abort("gori run rewriter add", "failed to persist rule " \
+                                                "(#{scope.global? ? "settings not writable" : "store busy or unwritable"})")
           end
           puts rewriter_added_output(store, id, scope, format)
         end
@@ -910,10 +912,10 @@ module Gori
         rules = Gori::Rules.load(store)
         unless rules.update(id, e.target, e.part, e.pattern, e.replacement, e.op, e.match, e.name, e.host,
                  e.body_file, scope: scope, respond: e.respond, respond_args: e.respond_args)
-          abort_closing(store, "#{cmd}: rule not updated (#{scope.global? ? "settings not writable" : "store busy or unwritable"}); it is unchanged")
+          busy_abort(cmd, "rule not updated (#{scope.global? ? "settings not writable" : "store busy or unwritable"}); it is unchanged", store)
         end
         if !enabled.nil? && !rules.set_enabled(id, enabled, scope)
-          abort_closing(store, "#{cmd}: the rule's fields were updated but the enable/disable did not persist; retry")
+          busy_abort(cmd, "the rule's fields were updated but the enable/disable did not persist; retry", store)
         end
         puts scope.global? ? "Global rule ##{id} updated — in every project." : "Rule ##{id} updated."
       end
@@ -1154,8 +1156,8 @@ module Gori
               store.match_rules.any? { |r| r.id == id }
             end
           exists || not_found_abort("gori run rewriter rm", "no #{scope.global? ? "global " : ""}rule with id #{id}", format, store)
-          Gori::Rules.load(store).remove(id, scope) || abort_closing(store, scope.global? ? "gori run rewriter rm: settings not writable (nothing was deleted)" \
-                                                                                             : "gori run rewriter rm: project is busy (write did not commit) — try again")
+          Gori::Rules.load(store).remove(id, scope) ||
+            busy_abort("gori run rewriter rm", scope.global? ? "settings not writable (nothing was deleted)" : "project is busy (write did not commit) — try again", store)
           if format == :json
             puts deleted_json("id", id)
           else
@@ -1199,12 +1201,12 @@ module Gori
             # The library's own default. `set_default`, not `set_enabled`: the latter writes
             # THIS project's override, and agreeing with the default drops it rather than
             # pinning it — the disposition the Rewriter tab's `x` has.
-            rules.set_default(id, enable) || abort_closing(store, "gori run rewriter #{action}: settings not writable (the rule is unchanged)")
+            rules.set_default(id, enable) || busy_abort("gori run rewriter #{action}", "settings not writable (the rule is unchanged)", store)
             puts "Global rule ##{id} #{enable ? "enabled" : "disabled"} by default (every project without an override)."
             return
           end
           scope.global? || store.match_rules.any? { |r| r.id == id } || abort_closing(store, "gori run rewriter #{action}: no rule with id #{id}")
-          rules.set_enabled(id, enable, scope) || abort_closing(store, "gori run rewriter #{action}: project is busy (write did not commit) — try again")
+          rules.set_enabled(id, enable, scope) || busy_abort("gori run rewriter #{action}", "project is busy (write did not commit) — try again", store)
           if scope.global?
             puts "Global rule ##{id} #{enable ? "enabled" : "disabled"} in project #{CLI::Output.term_safe(project.name)}."
           else

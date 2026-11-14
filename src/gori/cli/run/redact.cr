@@ -176,21 +176,26 @@ module Gori
       # had to remember on its own that `abort` skips `ensure`, so a refusal must travel back out
       # rather than fire in place — which is exactly the leak this now gets right once.
       #
-      # The block answers with the scope to write, or with a String to refuse by.
+      # The block answers with the scope to write, or with a String to refuse by — a
+      # `RedactMissing` when the refusal is that the row is not there, so `--json` gets NOT_FOUND.
       private def self.update_project_scope(project_name : String?, db_path : String?,
-                                            command : String,
+                                            command : String, format : Symbol = :text,
                                             &) : Nil
-        ok, refusal = with_store(resolve_read_project(project_name, db_path)) do |store|
+        ok, refusal, missing = with_store(resolve_read_project(project_name, db_path)) do |store|
           answer = yield store, Redact::Policy.project_scope(store)
-          if answer.is_a?(String)
-            {false, answer}
-          else
-            {Redact::Policy.write_project_scope(store, answer), nil}
+          case answer
+          when String        then {false, answer, false}
+          when RedactMissing then {false, answer.reason, true}
+          else                    {Redact::Policy.write_project_scope(store, answer), nil, false}
           end
         end
+        not_found_abort("gori run #{command}", refusal, format) if refusal && missing
         abort "gori run #{command}: #{refusal}" if refusal
-        abort "gori run #{command}: the project is busy — nothing was saved" unless ok
+        busy_abort("gori run #{command}", "the project is busy — nothing was saved") unless ok
       end
+
+      # `update_project_scope`'s refusal for a row that is not there (NOT_FOUND under `--json`).
+      record RedactMissing, reason : String
 
       # --- the subcommand ------------------------------------------------------
 
@@ -335,7 +340,7 @@ module Gori
           abort "gori run redact use: #{Redact::Policy.unknown(nil, name)}"
         end
         Settings.redaction_active = none ? "" : name
-        abort "gori run redact use: could not write #{Settings.path}" unless Settings.save
+        busy_abort("gori run redact use", "could not write #{Settings.path}") unless Settings.save
         puts none ? "cleared the global redaction profile" : "global redaction profile: #{name}"
       end
 
@@ -384,7 +389,7 @@ module Gori
 
         if global
           Settings.redaction_default = !!value
-          abort "gori run redact default: could not write #{Settings.path}" unless Settings.save
+          busy_abort("gori run redact default", "could not write #{Settings.path}") unless Settings.save
           puts "global: redaction #{value ? "applies by default" : "applies only with --redact"}"
         else
           redact_default_project(proj.name, proj.db, value)
@@ -442,7 +447,7 @@ module Gori
 
         if global
           Settings.redaction_profiles = Settings.redaction_profiles.reject(&.name.==(name)) << profile
-          abort "gori run redact set: could not write #{Settings.path}" unless Settings.save
+          busy_abort("gori run redact set", "could not write #{Settings.path}") unless Settings.save
           puts "global profile #{name.inspect}: #{redact_rule_counts(profile)}"
           return
         end
@@ -455,6 +460,7 @@ module Gori
       private def self.cmd_redact_rm(args : Array(String)) : Nil
         proj = ProjectFlags.new
         global = false
+        format = :text
         positional = [] of String
         parser = option_parser("gori run redact rm") do |p|
           p.banner = "Usage: gori run redact rm <name> [options]\n\n" \
@@ -462,6 +468,7 @@ module Gori
                      "A built-in profile cannot be deleted; define one of the same name to replace it."
           project_options(p, proj, "write")
           p.on("--global", "Write settings.json instead of this project") { global = true }
+          format_flag(p, [:text, :json], delete_format_help("name")) { |f| format = f }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run redact rm", "profile name") }
         end
         parser.parse(args)
@@ -470,18 +477,18 @@ module Gori
 
         if global
           kept = Settings.redaction_profiles.reject(&.name.==(name))
-          abort "gori run redact rm: no global profile named #{name.inspect}" if kept.size == Settings.redaction_profiles.size
+          not_found_abort("gori run redact rm", "no global profile named #{name.inspect}", format) if kept.size == Settings.redaction_profiles.size
           builtin = Redact::BUILTIN_PROFILES.any?(&.name.==(name))
           redact_rm_refusal(name, nil, Settings.redaction_active, builtin).try { |r| abort "gori run redact rm: #{r}" }
           Settings.redaction_profiles = kept
-          abort "gori run redact rm: could not write #{Settings.path}" unless Settings.save
-          puts "removed global profile #{name.inspect}"
+          busy_abort("gori run redact rm", "could not write #{Settings.path}") unless Settings.save
+          puts format == :json ? deleted_json("name", name) : "removed global profile #{name.inspect}"
           return
         end
-        update_project_scope(proj.name, proj.db, "redact rm") do |_, scope|
+        update_project_scope(proj.name, proj.db, "redact rm", format) do |_, scope|
           kept = scope.profiles.reject(&.name.==(name))
           if kept.size == scope.profiles.size
-            "no profile named #{name.inspect} in this project"
+            RedactMissing.new("no profile named #{name.inspect} in this project")
           elsif refusal = redact_rm_refusal(name, scope.active, Settings.redaction_active,
                   (Settings.redaction_profiles + Redact::BUILTIN_PROFILES).any?(&.name.==(name)))
             refusal
@@ -489,7 +496,7 @@ module Gori
             scope.copy_with(profiles: kept)
           end
         end
-        puts "removed project profile #{name.inspect}"
+        puts format == :json ? deleted_json("name", name) : "removed project profile #{name.inspect}"
       end
     end
   end

@@ -173,7 +173,7 @@ module Gori
             unless store.link_id(owner_kind, oid, ref_kind, rid)
               abort "gori run links delete: no link from #{owner_kind.label} ##{oid} to #{ref_kind.label} ##{rid}"
             end
-            abort "gori run links rm: NOT removed (project busy) — the link is unchanged" unless store.remove_link(owner_kind, oid, ref_kind, rid)
+            busy_abort("gori run links rm", "NOT removed (project busy) — the link is unchanged") unless store.remove_link(owner_kind, oid, ref_kind, rid)
             puts "Unlinked #{owner_kind.label} ##{oid} → #{ref_kind.label} ##{rid}."
           end
         end
@@ -201,8 +201,8 @@ module Gori
           return sentence
         end
         unless link
-          abort_closing(store, "gori run links add: no link from #{owner_kind.label} ##{oid} to #{ref_kind.label} ##{rid} " \
-                               "after the write (project busy or unwritable, or removed by a peer) — try again")
+          busy_abort("gori run links add", "no link from #{owner_kind.label} ##{oid} to #{ref_kind.label} ##{rid} " \
+                                           "after the write (project busy or unwritable, or removed by a peer) — try again", store)
         end
         resolved = Links.resolve(store, link)
         JSON.build do |j|

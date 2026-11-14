@@ -572,7 +572,7 @@ module Gori
             ids = rows.map(&.id)
             ids.delete_at(from - 1)
             ids.insert(target - 1, id)
-            abort "gori run repeater move: NOT moved (project busy or unwritable); the order is unchanged" unless store.set_repeater_positions(ids)
+            busy_abort("gori run repeater move", "NOT moved (project busy or unwritable); the order is unchanged") unless store.set_repeater_positions(ids)
           end
 
           if format == :json
@@ -1047,11 +1047,11 @@ module Gori
             tls_preset: tls_preset
           )
 
-          abort project_write_failure("gori run repeater create: failed to create repeater session", project) if id == 0
+          busy_abort("gori run repeater create", project_write_failure("failed to create repeater session", project)) if id == 0
 
           unless apply_repeater_metadata(store, id, name, tags)
-            abort project_write_failure(
-              "gori run repeater create: session ##{id} was created, but its name/tag metadata was NOT fully saved", project)
+            busy_abort("gori run repeater create", project_write_failure(
+              "session ##{id} was created, but its name/tag metadata was NOT fully saved", project))
           end
 
           if is_ws && !ws_messages.empty?
@@ -1059,8 +1059,8 @@ module Gori
             # `DELETE FROM ws_messages`), so the success line below would name a WebSocket
             # session that cannot replay anything.
             unless store.update_repeater_ws_messages(id, ws_messages)
-              abort project_write_failure(
-                "gori run repeater create: session ##{id} was created, but its WebSocket messages were NOT saved", project)
+              busy_abort("gori run repeater create", project_write_failure(
+                "session ##{id} was created, but its WebSocket messages were NOT saved", project))
             end
           end
 
@@ -1183,9 +1183,9 @@ module Gori
           http2: http2, auto_cl: f.auto_cl.nil? ? existing.auto_content_length? : f.auto_cl == true,
           sni: sni, ws_keep_key: existing.ws_keep_key?,
           ws_http_only: existing.ws_http_only?, tls_preset: existing.tls_preset)
-        abort project_write_failure("#{cmd}: session ##{id} was NOT updated (it is unchanged)", project) unless written
+        busy_abort(cmd, project_write_failure("session ##{id} was NOT updated (it is unchanged)", project)) unless written
         unless apply_repeater_metadata(store, id, f.name, f.tags)
-          abort project_write_failure("#{cmd}: session ##{id}'s request was updated, but its name/tag metadata was NOT fully saved", project)
+          busy_abort(cmd, project_write_failure("session ##{id}'s request was updated, but its name/tag metadata was NOT fully saved", project))
         end
         if unterminated_head?(request, ws_http_only: existing.ws_http_only?, http2: http2)
           STDERR.puts "#{cmd}: #{unterminated_head_note}"
