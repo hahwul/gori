@@ -5629,11 +5629,15 @@ directions were on screen; the hand had typed the query before the eye read them
 - **`/` on the bar is `/` one level down.** The Runner moves focus to where the tab's filter
   is and hands the same key event down (`Runner.filter_below`): the sub-tab strip where it
   draws a filter, else the body where its scope binds a `:filter` verb that is available.
-  Nothing new is drawn; the screen reached is the one `↵` `/` reached.
+  Nothing new is drawn; the screen reached is the one `↵` `/` reached, or `↵` `↓` `/` on a tab
+  whose strip has no filter of its own (Probe, Target, OAST), where the list's is the only one.
 - **Letting it through is safe where running a body key is not.** It opens an input row that
   `esc` closes and changes nothing; every other body key acts on a row the operator has not
   entered.
 - **A tab with no filter is unchanged,** and so are `c`, `i`, `s` and the digits. Text typed
-  on the bar of such a tab still runs as keys.
-- **A cancelled filter leaves focus where `↵` `/` leaves it,** on the list or the strip:
+  on the bar of such a tab still runs as keys. So is a tab whose body would not take the key
+  as a filter: a pane left in a text editor (a held Intercept message in INS) would type it,
+  and the Miner's findings filter is a pane's own key, not the tab's (`mine.filter` declares
+  no `:filter` intent), so one session's bar still answers with directions.
+- **A cancelled filter leaves focus where the keys above leave it,** on the list or the strip:
   `esc` goes one level at a time.

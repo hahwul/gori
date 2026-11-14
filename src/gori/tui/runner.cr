@@ -2972,8 +2972,13 @@ module Gori::Tui
     # own keys: `/cdn` stopped the proxy on its `c`, a query with an `s` flipped the scope lens,
     # a digit changed tab.
     def self.filter_below(chord : Verb::Chord, scope : Verb::Scope, keymap : Verb::Keymap,
-                          registry : Verb::Registry, strip_filter : Bool) : {Symbol, Verb::Definition?}?
+                          registry : Verb::Registry, strip_filter : Bool,
+                          editor_pane : Bool = false) : {Symbol, Verb::Definition?}?
       return {:subtabs, nil} if strip_filter && chord == Keybind::FILTER_CHORD
+      # The body's first claim on the key wins there, so it is asked here: a pane that is a text
+      # editor (a held Intercept message left in INS, then the bar clicked) would TYPE the key,
+      # and under the vim keyset find in the pane. That keeps the bar's directions.
+      return nil if editor_pane
       verb = body_scope_verb(chord, scope, keymap, registry)
       # `section: :tab` is a strip verb: its filter is the strip's, answered above or absent.
       {:body, verb} if verb && verb.intent == :filter && verb.section != :tab
@@ -2982,7 +2987,8 @@ module Gori::Tui
     private def filter_pane_below(chord : Verb::Chord) : Symbol?
       return nil unless ctl = @tabs[@active_tab]?
       strip = subtabs_shown? && ctl.subtab_filter_shown?
-      return nil unless found = Runner.filter_below(chord, ctl.command_scope, @keymap, @session.registry, strip)
+      found = Runner.filter_below(chord, ctl.command_scope, @keymap, @session.registry, strip, ctl.editor_pane?)
+      return nil unless found
       pane, verb = found
       # A filter the body would refuse right now (nothing to filter) is not worth entering for.
       pane if verb.nil? || verb.available?(self)

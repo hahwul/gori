@@ -414,6 +414,9 @@ describe "the core-loop hints" do
       Runner.filter_below(slash, Gori::Verb::Scope::Fuzzer, keymap, reg, strip_filter: true).should eq({:subtabs, nil})
       # A strip verb is not a body filter: one chip, no strip filter, nothing to open.
       Runner.filter_below(slash, Gori::Verb::Scope::Fuzzer, keymap, reg, strip_filter: false).should be_nil
+      # A body pane that is a text editor would type the key: directions, not a `/` in a held message.
+      Runner.filter_below(slash, Gori::Verb::Scope::Intercept, keymap, reg, strip_filter: false).not_nil![0].should eq(:body)
+      Runner.filter_below(slash, Gori::Verb::Scope::Intercept, keymap, reg, strip_filter: false, editor_pane: true).should be_nil
       # Every key that acts is still answered with directions.
       Runner.filter_below(Gori::Verb::Chord.new("d"), Gori::Verb::Scope::Body, keymap, reg, strip_filter: true).should be_nil
       Runner.filter_below(Gori::Verb::Chord.new("r", ctrl: true), Gori::Verb::Scope::Body, keymap, reg, strip_filter: false).should be_nil
