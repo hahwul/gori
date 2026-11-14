@@ -69,7 +69,8 @@ module Gori::Tui
     # Close the active session, or the marked ones. The last one is reset to blank (always
     # keep ≥1).
     def comparer_close : Nil
-      close_sessions("CLOSE COMPARISONS", "Each pair of slots is discarded.", "comparison cleared", "comparison closed")
+      close_sessions("CLOSE COMPARISONS", "Each pair of slots is discarded.", "comparison cleared", "comparison closed",
+        blank: view.name.nil? && view.slot(:a).nil? && view.slot(:b).nil?)
     end
 
     # The last comparison is RESET IN PLACE rather than replaced — which is exactly why the
