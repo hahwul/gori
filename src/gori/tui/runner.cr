@@ -6226,7 +6226,7 @@ module Gori::Tui
       "repeater.send"             => "Send %s",
       "repeater.duplicate-subtab" => "Duplicate %s",
       "repeater.tag-subtab"       => "Tag %s",
-      "fuzz.close-subtab"         => "Close %s",
+      "fuzz.close-subtab"         => "Delete %s + runs",
       "fuzz.duplicate-subtab"     => "Duplicate %s",
       "mine.close-subtab"         => "Close %s",
       "mine.duplicate-subtab"     => "Duplicate %s",
