@@ -30,3 +30,26 @@ describe "Runner.decorate_status" do
     Runner.decorate_status("x", {"x", :sparkly}, spinner).should eq("x")
   end
 end
+
+# A request Intercept holds while another tab is up makes the client look hung; the first one
+# is toasted once, and not again until the operator has opened Intercept or turned it off —
+# a queue an agent empties and refills must not toast on every refill.
+describe "Runner.first_hold?" do
+  it "fires once for a hold, off the Intercept tab only" do
+    Runner.first_hold?(false, 1, :history).should be_true
+    Runner.first_hold?(false, 2, :fuzzer).should be_true  # two in one tick: still one toast
+    Runner.first_hold?(true, 1, :history).should be_false # already said; a refill is not news
+    Runner.first_hold?(false, 1, :intercept).should be_false
+    Runner.first_hold?(false, 0, :history).should be_false
+    src = File.read("src/gori/tui/runner.cr")
+    src.should contain("@hold_announced = false if @active_tab == :intercept || !@session.interceptor.enabled?")
+  end
+
+  it "names the first held message and fits 80×24's 59 columns" do
+    Runner.first_hold_toast(Gori::Interceptor::Kind::Request)
+      .should eq("intercept holding a request (go to Intercept to forward)")
+    Gori::Interceptor::Kind.values.each do |kind|
+      Runner.first_hold_toast(kind).size.should be <= 59
+    end
+  end
+end

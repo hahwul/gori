@@ -673,6 +673,21 @@ module Gori::Settings
     project_bind_port || bind_port
   end
 
+  # "· this run: 18981 (-p)" beside a bind row whose `shown` value is not what the proxy is
+  # listening on (`live`), nil when they match. Shared by the Project pane (which shows
+  # `configured_bind_*`) and Preferences › Network (the persisted global), so both say the
+  # same thing about the same listener. The flag is named only when it is provably the cause:
+  # this run's override holds the live value and no project pin outranks it
+  # (`effective_bind_*`). A project pin or a startup port fallback has no flag, so it gets none.
+  def self.bind_run_note(port : Bool, shown : String, live : {String, Int32}) : String?
+    value = port ? live[1].to_s : live[0]
+    return nil if value == shown.strip
+    cli = port ? cli_bind_port.try(&.to_s) : cli_bind_host
+    pinned = port ? project_bind_port : project_bind_host
+    flag = cli == value && pinned.nil? ? (port ? " (-p)" : " (--listen)") : ""
+    "· this run: #{value}#{flag}"
+  end
+
   # The upstream proxy the proxy actually dials through: a project override wins, else the
   # global. NOTE an explicit project "" (direct) is truthy in Crystal, so it correctly beats
   # a non-blank global — only an ABSENT override (nil) falls through to the global value.

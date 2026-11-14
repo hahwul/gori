@@ -212,6 +212,21 @@ describe "FuzzerController — CONFIG footer on an 80-column row" do
   end
 end
 
+# `space → o sort · m matched · v dist` read as if `m` and `v` were behind `space` too.
+describe "FuzzerController — RESULTS footer" do
+  it "names the direct keys before the menu paths, and keeps the tail at 80 columns" do
+    with_fuzzer_controller do |ctl, _session|
+      finished_results(ctl, [fuzz_result(0), fuzz_result(1)])
+      hint = ctl.body_hint(:body)
+      first_path = hint.index!("space →")
+      hint.index!("matched").should be < first_path
+      hint.index!("dist").should be < first_path
+      hint.index!(" run").should be < first_path
+      Chrome.fit_hints(hint, 57).should end_with("space cmds · esc sub-tabs")
+    end
+  end
+end
+
 describe "FuzzerController — an edit made while a run is going" do
   it "toasts once per run that it applies to the next run" do
     with_fuzzer_controller do |ctl|

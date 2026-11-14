@@ -132,11 +132,25 @@ describe Gori::Tui::HelpPopupOverlay do
       rendered.contains?("send the request").should be_true
     end
 
-    it "lands on OTHER TABS for a tab with no section of its own" do
-      HelpPopupOverlay.landing_scroll(HelpView.shortcut_rows(registry), :issues).should_not eq(0)
+    it "lands on the tab's own row inside OTHER TABS" do
+      # The section opens on Sitemap's and Discover's rows; Probe's own was ten rows below.
       rows = HelpView.shortcut_rows(registry)
-      idx = HelpPopupOverlay.landing_scroll(rows, :issues)
-      rows[idx].a.should eq("OTHER TABS")
+      head = rows.index { |r| r.kind == :head && r.a == "OTHER TABS" }.not_nil!
+      HelpView::TAB_ROW.each do |tab, label|
+        HelpView::TAB_SECTION[tab].should eq("OTHER TABS")
+        idx = HelpPopupOverlay.landing_scroll(rows, tab)
+        idx.should be > head
+        rows[idx].a.should eq(label), "#{tab} lands on #{rows[idx].a.inspect}, not its #{label} row"
+        rows[head + 1...idx].none?(&.kind.== :head).should be_true, "#{tab}'s #{label} row is not in OTHER TABS"
+      end
+      # Every tab sharing the section has a row to land on.
+      HelpView::TAB_SECTION.each do |tab, title|
+        HelpView::TAB_ROW.has_key?(tab).should be_true, "no TAB_ROW for #{tab}" if title == "OTHER TABS"
+      end
+      # The popup draws from that offset, so the row is the first one under the filter.
+      h = OverlayHarness.new(shortcuts(:probe))
+      h.render
+      h.overlay.as(HelpPopupOverlay).scroll.should eq(HelpPopupOverlay.landing_scroll(rows, :probe))
     end
 
     it "opens at the top from Help itself and from an unmapped tab" do

@@ -78,8 +78,11 @@ module Gori::Tui
     # `sequence.configure` moved nothing. The `:detail` test comes along because that is
     # the one focus where the arm did not run, and the swallow below is what has always
     # made `c` inert there.
+    #
+    # `?` is Global's `help.hotkeys`: swallowed here, the Shortcuts popup opened from every
+    # Sequencer pane but this body.
     private def session_key(ev : Termisu::Event::Key, v : SequencerView, c : Char?) : Bool
-      return false if c == 'E'
+      return false if c == 'E' || c == '?'
       return false if c == 'c' && !ev.ctrl? && !ev.alt? && v.focus != :detail
       # PgUp/PgDn/Home/End over SAMPLES go to the Runner's page/jump route (`body_scroll`
       # below), declined by name for the same reason. ANALYSIS and DETAIL keep them: there

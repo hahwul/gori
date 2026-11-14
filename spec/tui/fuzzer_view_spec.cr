@@ -461,6 +461,15 @@ describe Gori::Tui::FuzzerView do
     grid = (0...30).map { |y| b.row(y) }.join("\n")
     grid.should contain("no chain yet")
     grid.should contain("^Q edit · ^O sets")
+    # …on the pane's bottom border, not a tooltip row over the next template line: that hid
+    # the `Host:` value the operator was editing.
+    rows = (0...30).map { |y| b.row(y) }
+    rows.find!(&.includes?("no chain yet")).should contain("╰")
+    rows.find!(&.includes?("Host:")).should contain("Host: h")
+    # At 80 columns the pane is 39 wide and the hint still names both keys.
+    narrow = MemoryBackend.new(80, 24)
+    view.render(Screen.new(narrow), Rect.new(0, 0, 80, 24))
+    (0...24).map { |y| narrow.row(y) }.join("\n").should contain("no chain yet · ^Q edit · ^O sets")
   end
 
   # `template_scroll_view` used to bail on `template_insert?`, so the wheel died the moment `i`

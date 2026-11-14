@@ -123,7 +123,7 @@ gori run <subcommand> [verb] [options]
 | `project host-override` | 프로젝트 호스트 → IP 접속 오버라이드 목록 / 추가 / 수정 / 삭제 |
 | `project network` | 프로젝트 자체 네트워크 설정(`net.*`: 업스트림 프록시와 자격증명, 목적지 호스트, 타임아웃, 캡처 상한, bind) 목록 / 조회 / 설정 / 해제 |
 
-읽기 서브커맨드에 공통인 플래그: `--project=NAME`, `--db=PATH`, `--format=FMT` (보통 `text` 또는 `json`), 그리고 `--format`이 `json`을 제공하는 모든 명령에서 `--format=json`과 같은 `--json`. 모르는 옵션이나 서브커맨드를 주면 가장 가까운 실제 이름(`did you mean --format?`)과 `--help` 위치를 한 줄로 stderr에 출력합니다. 서브커맨드를 MCP 도구 이름으로 치면 그에 해당하는 명령을 알려 줍니다(`gori run list_history`에는 `gori run history`). `--json`에서 없는 id를 조회한 명령은 `send`가 거부된 전송에 찍는 것과 같은 객체 `{"ok":false,"error":…,"error_kind":"not_found","error_code":"NOT_FOUND","retryable":false}`를 stdout에 출력하고, stderr의 평문 한 줄과 종료 코드 1은 그대로입니다. 전역 플래그는 **동사 뒤에** 옵니다. `gori run rewriter rm 1 --project=x`는 되지만 `gori run rewriter --project=x rm 1`은 조용히 목록만 찍는 대신 사용법 오류로 거부됩니다.
+읽기 서브커맨드에 공통인 플래그: `--project=NAME`, `--db=PATH`, `--format=FMT` (보통 `text` 또는 `json`), 그리고 `--format`이 `json`을 제공하는 모든 명령에서 `--format=json`과 같은 `--json`. 모르는 옵션이나 서브커맨드를 주면 가장 가까운 실제 이름(`did you mean --format?`)과 `--help` 위치를 한 줄로 stderr에 출력합니다. 서브커맨드를 MCP 도구 이름으로 치면 그에 해당하는 명령을 알려 줍니다(`gori run list_history`에는 `gori run history`). `--json`에서 없는 id(또는 `links --issue N`처럼 부모 id)를 조회한 명령과, 없는 흐름이나 세션을 다시 보내려 한 명령(`repeater`, `repeater send`, `fuzz`, `mine`, `sequence`, `authorize`)은 `send`가 거부된 전송에 찍는 것과 같은 객체 `{"ok":false,"error":…,"error_kind":"not_found","error_code":"NOT_FOUND","retryable":false}`를 stdout에 출력하고, stderr의 평문 한 줄과 종료 코드 1은 그대로입니다. 전역 플래그는 **동사 뒤에** 옵니다. `gori run rewriter rm 1 --project=x`는 되지만 `gori run rewriter --project=x rm 1`은 조용히 목록만 찍는 대신 사용법 오류로 거부됩니다.
 
 읽기 서브커맨드는 스토어를 읽기 전용으로 열고 캡처 락을 잡지 않으므로, 라이브 TUI가 캡처 중인 프로젝트를 대상으로 실행해도 안전합니다. `body:` 질의는 검색 인덱스를 비우므로 쓰기입니다. gori 프로젝트가 아닌 `--db` 파일(다른 도구의 SQLite 데이터베이스나 빈 파일)은 파일에 손대기 전에 거부합니다. 데이터베이스를 만드는 명령(`import --db`, `capture --db`)은 빈 파일은 계속 초기화하지만, 다른 도구의 테이블이 든 파일은 거부합니다.
 
@@ -557,7 +557,7 @@ gori run repeater update 7 --target https://staging.example.com --tags "idor aut
 generate-request | gori run repeater update 7 --request-stdin
 ```
 
-**`repeater send <repeater-id>`**: 저장된 세션을 실행합니다. HTTP와 WebSocket 모두 해당됩니다.
+**`repeater send <repeater-id>`**: 저장된 세션을 실행합니다. HTTP와 WebSocket 모두 해당됩니다. `--target`, `-X`, `-d`는 없고, `--diff`는 세션에 마지막으로 저장된 응답과 비교합니다. 캡처한 흐름 하나를 한 번에 다른 곳으로 보내거나 고쳐서 캡처와 비교하려면 `repeater <flow-id> --target …`을 쓰세요.
 
 ```bash
 gori run repeater send 3 --diff
@@ -671,7 +671,7 @@ gori run send --url https://api.example.com --request-file req.http --headers-on
 
 WebSocket 핸드셰이크인 요청은 평범한 요청으로 나가고 그 `101`이 응답이 되며, 명령은 이를 STDERR에 알립니다. 프레임을 주고받는 교환에는 세션이 필요합니다: `repeater create` 다음 `repeater send`를 쓰세요.
 
-`send`, `repeater <flow-id>`, `repeater send`의 `--format json`은 원시 `head` 옆에 MCP `send_request`의 오류 계약을 싣습니다. 실패한 전송에는 `error_kind`(`connect`, `timeout`, `protocol`, `no_response`, `truncated_request`, `budget`, `busy`, `other`), `error_code`, `retryable`, `delivered`가 붙으므로, 스크립트는 `error` 문장을 매칭하지 않고도 거부된 연결과 타임아웃을 구분할 수 있습니다. 응답에는 `reason`, `http_version`, 파싱된 `headers`(`[{"name","value"}]`, 와이어 순서, UTF-8이 아닌 값에는 `value_lossy`/`value_base64`)가 붙습니다. `match_replace_applied: true`는 `--apply-rules`가 요청을 바꿨다는 뜻이고, `bounded`(`events` 또는 `time`)는 이벤트 스트림이 `--sse-events` / `--sse-time` 한도에서 멈췄다는 뜻입니다.
+`send`, `repeater <flow-id>`, `repeater send`의 `--format json`은 원시 `head` 옆에 MCP `send_request`의 오류 계약을 싣습니다. 실패한 전송에는 `error_kind`(`connect`, `timeout`, `protocol`, `no_response`, `truncated_request`, `budget`, `busy`, `other`), `error_code`, `retryable`, `delivered`가 붙으므로, 스크립트는 `error` 문장을 매칭하지 않고도 거부된 연결과 타임아웃을 구분할 수 있습니다. 응답에는 `reason`, `http_version`, 파싱된 `headers`(`[{"name","value"}]`, 와이어 순서, UTF-8이 아닌 값에는 `value_lossy`/`value_base64`)가 붙습니다. `match_replace_applied: true`는 `--apply-rules`가 요청을 바꿨다는 뜻이고, `bounded`(`events` 또는 `time`)는 이벤트 스트림이 `--sse-events` / `--sse-time` 한도에서 멈췄다는 뜻입니다. 세 명령 모두 `--format raw`는 받지 않습니다. 그것은 [`show`](#run-show)의 형식이므로, 응답의 정확한 바이트가 필요하면 `--record-history`로 보낸 뒤 출력된 흐름에 `show <flow-id> --format raw`를 실행하세요.
 
 ### run fuzz {#run-fuzz}
 

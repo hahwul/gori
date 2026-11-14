@@ -100,7 +100,7 @@ module Gori
         # Always, not only when `flow_id` is nil: `--request` + `--flow` used to skip
         # this and then skip `open_store`, so `--slot` lied about no project.
         hydrate_project_env(proj.name, proj.db) if project_named?(proj.name, proj.db)
-        text, default_target, src_h2, evidence, src_sni = mine_source(flow_id, request_file, proj.name, proj.db)
+        text, default_target, src_h2, evidence, src_sni = mine_source(flow_id, request_file, proj.name, proj.db, format)
         # A capture's SNI (when it is not just the host) is a default: an explicit --sni wins, and
         # it goes with the capture's origin, never onto a `--target` (as `run fuzz --flow` has it).
         sni ||= src_sni unless target_override
@@ -225,14 +225,14 @@ module Gori
       # PROVENANCE, not a knob: only the `--flow` branch hands back captured bytes, and only
       # that branch may therefore skip the draft-time passes (see `Miner::PlanOptions#evidence?`).
       private def self.mine_source(flow_id : Int64?, request_file : String?,
-                                   project_name : String?, db_path : String?) : {String, String?, Bool, Bool, String?}
+                                   project_name : String?, db_path : String?, format : Symbol) : {String, String?, Bool, Bool, String?}
         if file = request_file
           {read_input_file(file, "gori run mine"), nil, false, false, nil}
         elsif id = flow_id
           detail = with_store(resolve_read_project(project_name, db_path)) do |store|
             store.get_flow(id)
           end
-          abort "gori run mine: no flow ##{id}" unless detail
+          not_found_abort("gori run mine", "no flow ##{id}", format) unless detail
           built = Repeater::FlowRequest.build(detail)
           # Every probe of the run carries a request line gori changed — see
           # `warn_request_line_rewrite`.

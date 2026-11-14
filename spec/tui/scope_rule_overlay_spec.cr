@@ -249,3 +249,18 @@ describe "Gori::Tui::ScopeRuleOverlay pattern example" do
     ScopeRuleOverlay::PATTERN_EXAMPLES.keys.should eq(Gori::Scope::TYPES)
   end
 end
+
+# ↵ on kind / type moves to the next field and only the pattern and Save rows commit, so the
+# status hint said `↵ save` on two rows where it did not save.
+describe "Gori::Tui::ScopeRuleOverlay ↵ hint" do
+  it "says next where ↵ moves on and save where it commits" do
+    ov = ScopeRuleOverlay.adding
+    ov.hint.should contain("↵ next")
+    ov.handle_key(skey(Termisu::Input::Key::Enter)).should eq(:stay) # kind → type
+    ov.hint.should contain("↵ next")
+    ov.handle_key(skey(Termisu::Input::Key::Enter)).should eq(:stay) # type → pattern
+    ov.hint.should contain("↵ save")
+    stype(ov, "acme.test")
+    ov.handle_key(skey(Termisu::Input::Key::Enter)).should eq(:commit)
+  end
+end

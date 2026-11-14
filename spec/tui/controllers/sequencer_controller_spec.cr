@@ -152,6 +152,17 @@ describe SequencerController do
       end
     end
 
+    # The swallow above ate Global's `help.hotkeys`: `?` opened nothing from this body.
+    it "declines `?` to the keymap from every pane" do
+      with_sequencer_controller do |ctl, _session|
+        view = collected_samples(ctl)
+        %i[config samples analysis].each do |pane|
+          view.focus_pane(pane)
+          ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Slash, char: '?')).should be_false
+        end
+      end
+    end
+
     # A tab marked clean over a rolled-back UPDATE is no longer locked against reconcile, which
     # then restores the stale row over the operator's reconfigure.
     it "stays dirty when its session UPDATE did not commit" do

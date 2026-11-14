@@ -65,12 +65,12 @@ module Gori
         oid_opt, pos_opt = link_owner_selection("list", owner)
 
         oid, resolved = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
-          resolved_id = resolve_link_owner_id(store, owner_kind, oid_opt, pos_opt, "list")
+          resolved_id = resolve_link_owner_id(store, owner_kind, oid_opt, pos_opt, "list", format)
           # Validate the owner exists, like the mutate path and the MCP list_links tool do —
           # otherwise a typo'd id prints "no links on issue #99999", which reads as "this
           # issue has no evidence" rather than "there is no such issue".
           unless link_owner_exists?(store, owner_kind, resolved_id)
-            abort "gori run links: no #{owner_kind.label} with id #{resolved_id}"
+            not_found_abort("gori run links", "no #{owner_kind.label} with id #{resolved_id}", format)
           end
           {resolved_id, Links.resolve_all(store, Links.owner_links(store, owner_kind, resolved_id))}
         end
@@ -274,12 +274,13 @@ module Gori
       end
 
       private def self.resolve_link_owner_id(store : Store, kind : Store::LinkOwnerKind,
-                                             owner_id : Int64?, note_position : Int32?, verb : String) : Int64
+                                             owner_id : Int64?, note_position : Int32?, verb : String,
+                                             format : Symbol = :text) : Int64
         if position = note_position
           abort "gori run links #{verb}: --note-position requires --owner=note" unless kind.note?
           doc = Notes.load(store)
           entry = doc.notes[position - 1]?
-          abort "gori run links #{verb}: no note at position #{position} (this project has #{doc.size} notes)" unless entry
+          not_found_abort("gori run links #{verb}", "no note at position #{position} (this project has #{doc.size} notes)", format) unless entry
           entry.id
         else
           owner_id || abort("gori run links #{verb}: --id is required")

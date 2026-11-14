@@ -314,6 +314,10 @@ module Gori::Tui
 
     getter? saved : Bool = false
     getter section : Symbol = :network
+    # Where the proxy is listening right now, nil while nothing is (capture off, view-only,
+    # the project picker). A Proc, not a snapshot: saving NETWORK re-binds the listener while
+    # this form is still on screen. Feeds the Bind rows' `Settings.bind_run_note`.
+    property live_bind : Proc({String, Int32}?)? = nil
 
     def initialize
       @values = ["", "", ""]
@@ -1141,7 +1145,21 @@ module Gori::Tui
         vw = {rect.right - vx, 1}.max
         render_field_value(screen, field, @values[i], vx, ry, vw, focused, bg,
           disabled: disabled_field?(i))
+        draw_bind_run_note(screen, i, vx, ry, rect.right, focused, bg)
       end
+    end
+
+    # These rows edit the GLOBAL default, so a `-p` flag or a project pin leaves the proxy on
+    # another port than the one shown. Drawn after the typed text (past the caret cell while
+    # editing) and only where it fits whole, so it never covers the value.
+    private def draw_bind_run_note(screen : Screen, i : Int32, vx : Int32, ry : Int32,
+                                   right : Int32, focused : Bool, bg : Color) : Nil
+      # A cleared field shows its placeholder where the note would go.
+      return if @values[i].empty?
+      return unless @section == :network && i <= NETWORK_BIND_PORT && (live = @live_bind.try(&.call))
+      return unless note = Settings.bind_run_note(i == NETWORK_BIND_PORT, @values[i], live)
+      nx = vx + Screen.display_width(@values[i] + (focused ? @preedit : "")) + (focused ? 2 : 1)
+      screen.text(nx, ry, note, Theme.muted, bg) if nx + note.size < right
     end
 
     # The value column of one field: a choice cycle, a bool toggle, the editable line

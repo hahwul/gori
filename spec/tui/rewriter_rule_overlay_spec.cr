@@ -449,3 +449,21 @@ describe "Gori::Tui::RewriterRuleOverlay — mock sources" do
     ov.candidate_rule.respond_args.should eq(%({"fault":"reset","delay_ms":250}))
   end
 end
+
+# The hint's ↵ segment follows the row: rows before the last text row move on, the value row
+# commits, and a short-circuit op's response / options rows open their sub-editor.
+describe "Gori::Tui::RewriterRuleOverlay ↵ hint" do
+  it "names what ↵ does on the selected row" do
+    ov = RewriterRuleOverlay.new(op: "replace", pattern: "a", replacement: "b")
+    ov.hint.should contain("↵ next") # opens on the name row
+    ov.set_selected(RewriterRuleOverlay::ROW_VALUE)
+    ov.hint.should contain("↵ save")
+    ov.set_selected(RewriterRuleOverlay::ROW_SAVE)
+    ov.hint.should contain("↵ save")
+
+    stub = RewriterRuleOverlay.new(op: "short_circuit", pattern: "/x", replacement: "200 OK")
+    stub.set_selected(RewriterRuleOverlay::ROW_VALUE)
+    stub.hint.should contain("↵ open")
+    stub.handle_key(skey(Termisu::Input::Key::Enter)).should eq(:stay)
+  end
+end

@@ -308,6 +308,9 @@ module Gori::Tui
       # Whether an untrusted-CA handshake has already raised its one toast (see
       # drain_untrusted_handshakes).
       @untrusted_toasted = false
+      # A hold was announced and the Intercept tab has not been opened since (see
+      # announce_first_hold).
+      @hold_announced = false
       # #123: high-water-mark of intercept_commands drained + applied to the live interceptor
       # (agent forward/drop/edit/toggle). Seeded to the current max at run start so a fresh
       # session never replays a prior command; advances monotonically as commands are consumed.
@@ -787,6 +790,9 @@ module Gori::Tui
             dirty = true if drain_ws_inject_outcomes
             # …and a client that refused gori's certificate. Same placement, same reason.
             dirty = true if drain_untrusted_handshakes
+            # …and what intercept just started holding, while another tab is up. After the
+            # notices above: it is said once, so none of them may take the toast from it.
+            dirty = true if announce_first_hold
             # Session-slot refreshes (#1233): a finished one raises its toast, and a start or
             # finish moves the `session:` chip (`⟳` / `!`), so repaint on the runner's rev
             # rather than on a timer.
@@ -4455,6 +4461,33 @@ module Gori::Tui
       true
     end
 
+    # The first hold while another tab is up: the client just looks hung, and the header chip
+    # and the tab's `(N)` are the only other signs. Said ONCE, then not again until the operator
+    # has opened Intercept or turned it off: an agent or the reaper can empty and refill the
+    # queue many times a second, and a toast per refill would take the row from everything else.
+    private def announce_first_hold : Bool
+      @hold_announced = false if @active_tab == :intercept || !@session.interceptor.enabled?
+      return false unless Runner.first_hold?(@hold_announced, @session.interceptor.pending_count, @active_tab)
+      return false unless first = @session.interceptor.pending.min_by?(&.id)
+      @hold_announced = true
+      status(Runner.first_hold_toast(first.kind))
+      true
+    end
+
+    def self.first_hold?(announced : Bool, count : Int32, tab : Symbol) : Bool
+      !announced && count > 0 && tab != :intercept
+    end
+
+    # Names the first held message only: the tab's `(N)` has the count. Fits 80×24's 59.
+    def self.first_hold_toast(kind : Gori::Interceptor::Kind) : String
+      what = case kind
+             in .request?         then "a request"
+             in .response?        then "a response"
+             in .ws_out?, .ws_in? then "a WS message"
+             end
+      "intercept holding #{what} (go to Intercept to forward)"
+    end
+
     # Say on screen that a client refused gori's certificate. Otherwise the only trace is
     # `Tunnel#notice_handshake_failure`'s `::Log.warn`, which under `gori tui` lands in
     # `~/.gori/gori.log`: a beginner who just pointed a browser at gori saw an empty History and
@@ -5975,6 +6008,7 @@ module Gori::Tui
     end
 
     CAPTURE_OFF_TOAST = "proxy stopped"
+    CAPTURE_ON_TOAST  = "proxy listening"
 
     def toggle_capture : Nil
       if @session.capturing?
@@ -5984,7 +6018,8 @@ module Gori::Tui
         # note and READ's note it still has to fit the tab bar's 59 columns at 80×24.
         @toast = CAPTURE_OFF_TOAST
       elsif @session.toggle_capture
-        @toast = "capture on"
+        # The pair of the off toast: `c` re-binds the listener, so say that.
+        @toast = CAPTURE_ON_TOAST
       else
         # Refused: another live instance holds this project's capture lock.
         @toast = "another gori instance is capturing this project — can't capture here"
@@ -6741,6 +6776,8 @@ module Gori::Tui
     # view with a restricted allowed_openers set.
     def open_preferences(section : Symbol? = nil) : Nil
       ov = PreferencesOverlay.new(section)
+      # Nothing is listening while capture is off or the session is view-only.
+      ov.view.live_bind = -> { @session.capturing? ? {@session.proxy.host, @session.proxy.port} : nil }
       ov.on_palette = -> { jump_to_palette }
       # Live-apply the saved section through the shared seam, so a save takes effect
       # identically from the modal and the dedicated settings card — one seam, no drift.

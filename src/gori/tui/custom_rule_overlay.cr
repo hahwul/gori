@@ -144,7 +144,12 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ field · ←/→ options · type title/pattern · ↵ save · esc cancel"
+      "↑/↓ field · ←/→ options · type title/pattern · #{enter_hint} · esc cancel"
+    end
+
+    # ↵ on the pattern, the last text row, commits; earlier rows move on.
+    def enter_commits? : Bool
+      on_save_row? || @sel == ROW_PATTERN
     end
 
     def move(d : Int32) : Nil
@@ -184,7 +189,7 @@ module Gori::Tui
       elsif @sel == ROW_SAVE
         (key.enter? || key.space?) ? :commit : :stay
       else # text row: title / description / pattern
-        text_row_key(ev, @sel == ROW_PATTERN)
+        text_row_key(ev, enter_commits?)
       end
     end
 

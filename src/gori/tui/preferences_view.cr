@@ -59,6 +59,12 @@ module Gori::Tui
       end
     end
 
+    # The live listener for Network's Bind rows (see SettingsView#live_bind). In-app only:
+    # the picker has no proxy.
+    def live_bind=(fn : Proc({String, Int32}?)) : Nil
+      @forms[:network]?.try(&.live_bind=(fn))
+    end
+
     # Reopen at the default entry (Ctrl+, / ⚙): refresh from disk, land on the group strip
     # so the user picks a group first (then ↓ into fields).
     def open_default : Nil

@@ -67,7 +67,12 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ field · ←/→ options · type pattern · ↵ save · esc cancel"
+      "↑/↓ field · ←/→ options · type pattern · #{enter_hint} · esc cancel"
+    end
+
+    # ↵ on kind / type moves on; on the pattern and the Save row it commits.
+    def enter_commits? : Bool
+      @sel >= 2
     end
 
     def row_count : Int32

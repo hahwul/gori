@@ -148,7 +148,12 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ field · ←/→ options · type label/selector · ↵ save · esc back"
+      "↑/↓ field · ←/→ options · type label/selector · #{enter_hint} · esc back"
+    end
+
+    # ↵ on the width, the last text row, commits; earlier rows move on.
+    def enter_commits? : Bool
+      on_save_row? || @sel == ROW_WIDTH
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol
@@ -167,7 +172,7 @@ module Gori::Tui
       elsif @sel == ROW_SAVE
         (key.enter? || key.space?) ? :commit : :stay
       else
-        text_row_key(ev, @sel == ROW_WIDTH)
+        text_row_key(ev, enter_commits?)
       end
     end
 

@@ -93,7 +93,9 @@ module Gori
                 end
               end
               j.field("results") { raw_rows(j, parts) }
-              emit_page(j, pg, parts.size, picked.size, "total_available", cut: parts.size < page.size)
+              # `live` as `fuzz_results`: done-prefix rows join the end, so the next poll goes on.
+              emit_page(j, pg, parts.size, picked.size, "total_available", cut: parts.size < page.size,
+                live: fjob.status == :running)
               j.field "matched_only", matched_only
               # Members this job's row cache holds, against the cluster's whole count.
               j.field "members_retained", rows.count { |r| Fuzz::Clusters.key(r)[0] == id }
