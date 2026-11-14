@@ -234,7 +234,7 @@ module Gori::Tui
     # last just resets it to a blank session (like Notes). The runner re-resolves focus after.
     def decoder_close : Nil
       close_sessions("CLOSE CONVERSIONS", "Each conversion’s input, chain and output are discarded.",
-        "conversion closed", "conversion closed")
+        "conversion closed", "conversion closed", blank: blank_session?(cur))
     end
 
     # Every session-set change: drop the sub-tab filter when the ACTIVE session is one it hides

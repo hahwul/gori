@@ -79,20 +79,28 @@ module Gori::Tui
       @host.status("#{msg || single} (#{@sessions.size} open)")
     end
 
-    # ^W closes the MARKED sub-tabs when the strip carries marks, the active one otherwise
-    # (`target_subtab_indices` — the one target rule). The single close stays confirm-free as
-    # it has always been; a plural one asks, because it discards more than the operator can
-    # see at the moment they press the key. `cleared` toasts closing the last session (which
-    # leaves a blank one), `closed` every other close.
-    private def close_sessions(title : String, discarded : String, cleared : String, closed : String) : Nil
+    # Nonempty sessions lose their editors and undo history on close, so ask first.
+    private def close_sessions(title : String, discarded : String, cleared : String, closed : String, *, blank : Bool) : Nil
       if refs = batch_subtab_refs
         @host.confirm(title, "Close #{marked_subtab_phrase(refs.size)}?\n#{discarded}",
           confirm_label: "close", danger: true) { close_marked_sessions(refs) }
         return
       end
-      close_subtab_at(@idx)
+      return unless ref = subtab_ref(@idx)
+      if blank
+        close_memory_session(ref, cleared, closed)
+      else
+        @host.confirm(title, "Close “#{session_label(@sessions[@idx])}”?\n#{discarded}",
+          confirm_label: "close", danger: true) { close_memory_session(ref, cleared, closed) }
+      end
+    end
+
+    private def close_memory_session(ref : SubtabRef, cleared : String, closed : String) : Nil
+      return unless idx = subtab_index_of(ref)
+      close_subtab_at(idx)
       after_change
       @host.status(@sessions.size == 1 ? cleared : "#{closed} (#{@sessions.size} open)")
+      @host.resolve_subtab_focus
     end
 
     private def close_marked_sessions(refs : Array(SubtabRef)) : Nil
@@ -103,8 +111,8 @@ module Gori::Tui
     end
 
     # Close sub-tab `idx`, keeping at least one session: the last one is REPLACED by
-    # `blank_session` rather than removed. Nothing here is persisted, so a close can never
-    # leave a saved session behind: always false.
+    # `blank_session` rather than removed. No store DELETE is issued here, so there is no
+    # failed deletion to report to the batch driver.
     protected def close_subtab_at(idx : Int32) : Bool
       return false if idx < 0 || idx >= @sessions.size
       if @sessions.size <= 1

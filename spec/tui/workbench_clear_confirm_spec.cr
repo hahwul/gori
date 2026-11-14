@@ -64,3 +64,93 @@ describe "workbench clears ask first" do
     end
   end
 end
+
+private class DeferredCloseHost < FakeHost
+  property pending : Proc(Nil)?
+
+  def confirm(title : String, message : String, *, confirm_label : String, danger : Bool,
+              return_to : Symbol = :none, &action : -> Nil) : Nil
+    @confirms << {title, message}
+    @pending = action
+  end
+end
+
+describe "workbench single-session closes ask before discarding work" do
+  {% for tool in [JwtController, CookieController] %}
+    it "protects {{ tool.id }} text while keeping empty closes immediate" do
+      with_clear_session do |base|
+        host = DeferredCloseHost.new(base.session)
+        ctl = {{ tool }}.new(host)
+        ctl.close_session
+        host.pending.should be_nil
+        ctl.session_from_text("authored text")
+        ctl.close_session
+        host.pending.should_not be_nil
+        ctl.subtab_labels.first.should_not eq("1:empty")
+        host.pending.not_nil!.call
+        ctl.subtab_labels.should eq(["1:empty"])
+      end
+    end
+  {% end %}
+
+  it "keeps Decoder input until confirmation and closes the original session after a switch" do
+    with_clear_session do |base|
+      host = DeferredCloseHost.new(base.session)
+      ctl = DecoderController.new(host)
+      ctl.decoder_close
+      host.pending.should be_nil
+      ctl.decoder_from_text("original")
+      ctl.decoder_close
+      host.pending.should_not be_nil
+      ctl.decoder_new
+      ctl.decoder_from_text("keep me")
+      host.pending.not_nil!.call
+      ctl.subtab_labels.should eq(["1:keep me"])
+    end
+  end
+
+  it "protects a named comparison until confirmation" do
+    with_clear_session do |base|
+      host = DeferredCloseHost.new(base.session)
+      ctl = ComparerController.new(host)
+      ctl.comparer_close
+      host.pending.should be_nil
+      ctl.view.name = "keep pair"
+      ctl.comparer_close
+      host.pending.should_not be_nil
+      ctl.view.name.should eq("keep pair")
+      host.pending.not_nil!.call
+      ctl.view.name.should be_nil
+    end
+  end
+end
+
+describe "workbench closes protect work outside the visible input" do
+  {% for tool in [JwtController, CookieController] %}
+    it "protects a {{ tool.id }} secret with an empty input" do
+      with_clear_session do |base|
+        host = DeferredCloseHost.new(base.session)
+        ctl = {{ tool }}.new(host)
+        ctl.@sessions.first.secret = "authored secret"
+        ctl.close_session
+        host.pending.should_not be_nil
+        ctl.@sessions.first.secret.should eq("authored secret")
+      end
+    end
+  {% end %}
+
+  it "protects Decoder undo history even when the input is empty" do
+    with_clear_session do |base|
+      host = DeferredCloseHost.new(base.session)
+      ctl = DecoderController.new(host)
+      input = ctl.@sessions.first.input
+      input.insert('x')
+      input.backspace
+      input.text.should be_empty
+      input.undoable?.should be_true
+      ctl.decoder_close
+      host.pending.should_not be_nil
+      ctl.@sessions.first.input.should be(input)
+    end
+  end
+end

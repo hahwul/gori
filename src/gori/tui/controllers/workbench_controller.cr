@@ -191,7 +191,7 @@ module Gori::Tui
 
     def close_session : Nil
       close_sessions("CLOSE #{tool_label.upcase} SESSIONS", "Each #{item_noun} and its edits are discarded.",
-        "session closed", "session closed")
+        "session closed", "session closed", blank: blank?(cur))
     end
 
     # Holds no text of the operator's: no name, and every editor and field empty with nothing

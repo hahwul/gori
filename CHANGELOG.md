@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- TUI: closing a Decoder, JWT, Cookie or Comparer session asks before discarding its contents; empty sessions still close immediately (#1883).
+
 - TUI: confirmation dialogs scroll long warnings with ↑/↓ or the mouse wheel and require the last line to be visible before confirming (#1882).
 
 - Help: `?` from a tab without its own Shortcuts section opens on that tab's row instead of the top of OTHER TABS, `?` works in the Sequencer's body, and Shortcuts explains History's `⌁follow +N` and that a tab's own `c`, `i` or `s` wins over the Global toggle in its body (#1878)
