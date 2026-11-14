@@ -31,6 +31,17 @@ describe "gori run --format / --json (#1386)" do
     Gori::CLI::Run.format_flag_for_spec(["--format", "md"], [:text, :markdown]).should eq(:markdown)
   end
 
+  # A refusal raised where no `format` is in reach (`open_store`, `busy_abort`) reads this.
+  it "remembers whether the invocation asked for JSON on stdout, last flag winning" do
+    Gori::CLI::Run.format_flag_for_spec(["--json"], [:text, :json])
+    Gori::CLI::Run.json_stdout?.should be_true
+    Gori::CLI::Run.format_flag_for_spec(["--json", "--format", "text"], [:text, :json])
+    Gori::CLI::Run.json_stdout?.should be_false
+    Gori::CLI::Run.format_flag_for_spec(["--format", "jsonl"], [:text, :jsonl])
+    Gori::CLI::Run.json_stdout?.should be_true
+    Gori::CLI::Run.json_stdout = false
+  end
+
   it "registers no --json where --format offers no json" do
     expect_raises(Exception, "unknown option: --json") do
       Gori::CLI::Run.format_flag_for_spec(["--json"], [:text, :paths])
@@ -44,7 +55,7 @@ describe "gori run --format / --json (#1386)" do
       next if FORMAT_FLAG_EXEMPT.includes?(File.basename(path))
       File.read_lines(path).each_with_index do |line, i|
         next if line.lstrip.starts_with?('#')
-        next if line.includes?("set.call(parse_format(v, allowed, refused))") # `format_flag` itself
+        next if line.includes?("pick.call(parse_format(v, allowed, refused))") # `format_flag` itself
         bare << "#{path.sub(root, "src/gori/cli")}:#{i + 1}" if line.includes?(".on(\"--format")
       end
     end

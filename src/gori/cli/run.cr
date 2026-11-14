@@ -156,8 +156,14 @@ module Gori
     # capturing instance (SQLite WAL; #752).
     module Run
       # A broken STDOUT pipe (`gori run … | head`) is answered once, in `CLI.run`.
+      # Did this invocation ask for JSON on stdout? `format_flag` — the one parser every
+      # `--format` goes through — keeps it, for a refusal raised where no `format` is in reach:
+      # `open_store`, and the write that did not commit (`busy_abort`).
+      class_property? json_stdout : Bool = false
+
       def self.dispatch(args : Array(String)) : Nil
         route_logs_to_stderr
+        self.json_stdout = false
         repeated_target_flag_error(args).try { |err| abort err }
         args = hoist_target_flags(args)
         dispatch_subcommand(args)
@@ -922,8 +928,10 @@ module Gori
         end
         store
       rescue ex : DB::Error | SQLite3::Exception
-        abort open_failure_message(ex, project, read_only) if abort_on_failure
-        raise ex
+        raise ex unless abort_on_failure
+        message = open_failure_message(ex, project, read_only)
+        puts open_failure_json(ex, message, read_only) if json_stdout?
+        abort message
       end
 
       # `open_store`, yield, close — the shape nearly every command wants. Returns the block's
@@ -1024,6 +1032,36 @@ module Gori
                                store : Store? = nil) : NoReturn
         puts failure_json(reason, "duplicate", "INVALID_ARGUMENT", existing_id: existing_id) if format.in?(:json, :jsonl)
         abort_closing(store, "#{prefix}: #{reason}")
+      end
+
+      # The refusal for a write that did not commit: a peer gori holds the project's writer slot,
+      # or the file (the project's, or settings.json for a global row) is not writable. Coded as
+      # MCP codes both (`PROJECT_BUSY`, retryable — see `Tools#busy`). It reads `json_stdout?`
+      # instead of taking a `format`, so the command that prints no JSON never prints this one.
+      def self.busy_abort(prefix : String, reason : String, store : Store? = nil) : NoReturn
+        puts failure_json(reason, "busy", "PROJECT_BUSY", retryable: true) if json_stdout?
+        abort_closing(store, "#{prefix}: #{reason}")
+      end
+
+      # `open_store`'s refusal as the failed-call object. A peer's lock clears by itself, so it
+      # is the retryable `PROJECT_BUSY`; a file that is not a database, or cannot be written, is
+      # what MCP starts unbound over and answers `NO_PROJECT` for.
+      def self.open_failure_json(ex : Exception, message : String, read_only : Bool) : String
+        if lock_failure_hint(ex.message.to_s, read_only)
+          failure_json(message, "busy", "PROJECT_BUSY", retryable: true)
+        else
+          failure_json(message, "open_failed", "NO_PROJECT")
+        end
+      end
+
+      # `delete --format json` for a command that takes several ids (always `ids`, also for
+      # one, so the command has one shape) and for one that empties a table (`count`).
+      def self.deleted_json(ids : Array(Int64)) : String
+        {ok: true, deleted: true, ids: ids}.to_json
+      end
+
+      def self.deleted_count_json(count : Int64) : String
+        {ok: true, deleted: true, count: count}.to_json
       end
 
       # The `{ok: true, …}` object a `delete --format json` prints: what went, under the key the
@@ -2150,8 +2188,9 @@ module Gori
       # one format, naming where it does exist (`RAW_ROUTE`).
       private def self.format_flag(p : OptionParser, allowed : Array(Symbol), help : String,
                                    refused : {Symbol, String}? = nil, &set : Symbol ->) : Nil
-        p.on("--format=FMT", help) { |v| set.call(parse_format(v, allowed, refused)) }
-        p.on("--json", "Same as --format=json") { set.call(:json) } if allowed.includes?(:json)
+        pick = ->(f : Symbol) { self.json_stdout = f.in?(:json, :jsonl); set.call(f) }
+        p.on("--format=FMT", help) { |v| pick.call(parse_format(v, allowed, refused)) }
+        p.on("--json", "Same as --format=json") { pick.call(:json) } if allowed.includes?(:json)
       end
 
       # `--project=NAME` / `--db=PATH`, the two ways a command names its project. A class and

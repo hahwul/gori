@@ -1421,6 +1421,33 @@ describe "gori run <reader> --format json — a not-found id" do
   end
 end
 
+# A project a peer gori holds, or a file that cannot be written, printed nothing on stdout
+# under `--json` — on every command. MCP codes a write that did not commit `PROJECT_BUSY`
+# (retryable) and answers `NO_PROJECT` over a database it could not open.
+describe "gori run <cmd> --format json — a project that is busy or will not open" do
+  it "codes a peer's lock PROJECT_BUSY and retryable" do
+    ex = Exception.new("database is locked")
+    j = JSON.parse(Gori::CLI::Run.open_failure_json(ex, "cannot open", false))
+    j["ok"].as_bool.should be_false
+    j["error"].as_s.should eq("cannot open")
+    j["error_kind"].as_s.should eq("busy")
+    j["error_code"].as_s.should eq("PROJECT_BUSY")
+    j["retryable"].as_bool.should be_true
+  end
+
+  it "codes a file that is not a database NO_PROJECT and not retryable" do
+    j = JSON.parse(Gori::CLI::Run.open_failure_json(Exception.new("file is not a database"), "cannot open", false))
+    j["error_kind"].as_s.should eq("open_failed")
+    j["error_code"].as_s.should eq("NO_PROJECT")
+    j["retryable"].as_bool.should be_false
+  end
+
+  it "prints several deleted ids as ids, and an emptied table as count" do
+    Gori::CLI::Run.deleted_json([3_i64, 5_i64]).should eq(%({"ok":true,"deleted":true,"ids":[3,5]}))
+    Gori::CLI::Run.deleted_count_json(12_i64).should eq(%({"ok":true,"deleted":true,"count":12}))
+  end
+end
+
 # `project scope add --json` of a rule that already existed printed nothing on stdout. The
 # refusal is MCP's `add_scope_rule` one (non-retryable INVALID_ARGUMENT), plus the row that is
 # already there, so a script that meant "make sure this rule exists" can go on with its id.
