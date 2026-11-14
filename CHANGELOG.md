@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- TUI: failed Notes, Issues, Sequencer and Params exports remain in notifications so their errors can be read again after typing (#1884).
+
 - TUI: closing a Decoder, JWT, Cookie or Comparer session asks before discarding its contents; empty sessions still close immediately (#1883).
 
 - TUI: confirmation dialogs scroll long warnings with ↑/↓ or the mouse wheel and require the last line to be visible before confirming (#1882).

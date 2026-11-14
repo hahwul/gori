@@ -240,7 +240,7 @@ module Gori::Tui
       entry = save_under_free_name("params-#{label}-#{stamp}", names)
       @host.status("saved #{names.size} names as #{entry.name} → #{entry.path}")
     rescue ex : WordlistCatalog::Error
-      @host.status("wordlist export failed: #{ex.message}")
+      @host.status("wordlist export failed: #{ex.message}", :error)
     end
 
     # The stamp has one-second resolution and the catalog never replaces a list, so a second
