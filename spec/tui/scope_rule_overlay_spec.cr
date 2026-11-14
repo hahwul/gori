@@ -32,6 +32,9 @@ describe Gori::Tui::ScopeRuleOverlay do
   # A broken regex is not a missing pattern — name it, as the Rewriter's Save row does.
   it "names the regex problem on the Save row" do
     ScopeRuleOverlay.new(match_type: "regex", pattern: "(abc").save_label.should eq("[ fix the regex ]")
+    # ↵ keeps the detail the commit site used to give (the Save row only says where to go).
+    ScopeRuleOverlay.new(match_type: "regex", pattern: "(abc").commit_blocker.to_s.should start_with("not saved — invalid regex")
+    ScopeRuleOverlay.new(match_type: "regex", pattern: "").commit_blocker.should eq("not saved — enter a valid pattern")
     ScopeRuleOverlay.new(match_type: "regex", pattern: "").save_label.should eq("[ enter a valid pattern ]")
     ScopeRuleOverlay.new(match_type: "regex", pattern: "a.c").save_label.should eq("[ Save rule ]")
   end
@@ -259,8 +262,9 @@ describe "Gori::Tui::ScopeRuleOverlay ↵ hint" do
     ov.handle_key(skey(Termisu::Input::Key::Enter)).should eq(:stay) # kind → type
     ov.hint.should contain("↵ next")
     ov.handle_key(skey(Termisu::Input::Key::Enter)).should eq(:stay) # type → pattern
-    ov.hint.should contain("↵ save")
+    ov.hint.should contain("↵ fix")                                  # nothing to save yet
     stype(ov, "acme.test")
+    ov.hint.should contain("↵ save")
     ov.handle_key(skey(Termisu::Input::Key::Enter)).should eq(:commit)
   end
 end

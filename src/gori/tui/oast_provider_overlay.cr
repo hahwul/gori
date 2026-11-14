@@ -109,6 +109,16 @@ module Gori::Tui
       Gori::Oast::Provider.endpoint_error(host) unless host.empty?
     end
 
+    private def blocking_row : Int32?
+      return nil if valid?
+      (host_error || !provider_name.empty?) ? ROW_HOST : ROW_NAME
+    end
+
+    # The Save row says only "fix the host"; the status line has room for why.
+    private def save_refusal : String
+      host_error || "name + host required"
+    end
+
     # --- Overlay contract (see overlay.cr) ---
     def key : OverlayKind
       OverlayKind::OastProvider

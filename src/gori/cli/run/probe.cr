@@ -687,20 +687,24 @@ module Gori
 
       private def self.cmd_probe_rule_delete(args : Array(String)) : Nil
         proj = ProjectFlags.new
+        format = :text
 
         positional = one_positional_list(args, "gori run probe rules delete", "<custom-rule-id>") do |p|
           p.banner = "Usage: gori run probe rules delete <custom-rule-id>\n\n" \
                      "Delete a project custom rule. A built-in can only be DISABLED, never deleted."
           project_options(p, proj, "write")
+          format_flag(p, [:text, :json], delete_format_help) { |f| format = f }
         end
 
         id = positional.first? || abort("gori run probe rules delete: <custom-rule-id> is required")
         row_id = probe_custom_row_id(id) || abort("gori run probe rules delete: #{probe_rule_delete_refusal(id)}")
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
-          abort "gori run probe rules delete: no custom rule with id '#{id}'" unless store.probe_custom_rules.any? { |r| r.id == row_id }
+          unless store.probe_custom_rules.any? { |r| r.id == row_id }
+            not_found_abort("gori run probe rules delete", "no custom rule with id '#{id}'", format, store)
+          end
           abort "gori run probe rules delete: custom rule '#{id}' NOT deleted (project busy)" unless store.delete_probe_custom_rule(row_id)
-          puts "Custom rule '#{id}' deleted."
+          puts format == :json ? deleted_json("id", id) : "Custom rule '#{id}' deleted."
         end
       end
 

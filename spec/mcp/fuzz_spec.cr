@@ -654,6 +654,30 @@ describe "MCP fuzz tools" do
     end
   end
 
+  it "refuses a wrong-shaped payload set or processor with the example, never accepting it" do
+    with_store do |store|
+      base = {
+        "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url"            => "http://127.0.0.1:1",
+        "allow_unscoped" => true,
+      }
+      text, bad = call_raw(tools_for(store), "fuzz_start", base.merge({"payloads" => ["1001", "1002", "1003"]}).to_json)
+      bad.should be_true
+      text.should contain(%(e.g. [{"list":["a","b"]}]))
+      text.should contain(%(did you mean one list set, [{"list":["1001","1002",…]}]?))
+
+      text, bad = call_raw(tools_for(store), "fuzz_start", base.merge({"payloads" => [1, {"list" => ["a"]}]}).to_json)
+      bad.should be_true
+      text.should contain(%(e.g. [{"list":["a","b"]}]))
+      text.should_not contain("did you mean")
+
+      text, bad = call_raw(tools_for(store), "fuzz_start",
+        base.merge({"payloads" => [{"list" => ["a"]}], "processors" => ["prefix"]}).to_json)
+      bad.should be_true
+      text.should contain(%(each processor must be a JSON object, e.g. [{"type":"prefix","text":"x"}]))
+    end
+  end
+
   it "accepts structured object payload sets for numbers and brute" do
     port = start_origin
     with_store do |store|

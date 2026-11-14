@@ -1130,10 +1130,12 @@ module Gori
       private def self.cmd_rewriter_rm(args : Array(String)) : Nil
         proj = ProjectFlags.new
         scope_flag : Store::RuleScope? = nil
+        format = :text
         positional = parse_args(args, "gori run rewriter rm") do |p|
           p.banner = "Usage: gori run rewriter rm|delete <id> [options]"
           project_options(p, proj, "update")
           p.on("--scope=SCOPE", "Which <id>: project (default) | global; a listed P#/G# id names it itself") { |v| scope_flag = parse_rule_scope(v) }
+          format_flag(p, [:text, :json], delete_format_help) { |f| format = f }
         end
         id, scope = rule_id_arg(positional, "gori run rewriter rm", scope_flag)
 
@@ -1151,10 +1153,14 @@ module Gori
             else
               store.match_rules.any? { |r| r.id == id }
             end
-          exists || abort_closing(store, "gori run rewriter rm: no #{scope.global? ? "global " : ""}rule with id #{id}")
+          exists || not_found_abort("gori run rewriter rm", "no #{scope.global? ? "global " : ""}rule with id #{id}", format, store)
           Gori::Rules.load(store).remove(id, scope) || abort_closing(store, scope.global? ? "gori run rewriter rm: settings not writable (nothing was deleted)" \
                                                                                              : "gori run rewriter rm: project is busy (write did not commit) — try again")
-          puts scope.global? ? "Global rule ##{id} deleted — from every project." : "Rule ##{id} deleted."
+          if format == :json
+            puts deleted_json("id", id)
+          else
+            puts scope.global? ? "Global rule ##{id} deleted — from every project." : "Rule ##{id} deleted."
+          end
         end
       end
 

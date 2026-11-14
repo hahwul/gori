@@ -55,6 +55,11 @@ module Gori::Tui
       position? ? row == selector_row : row == selector_row + 1
     end
 
+    # The live one of selector/range: where a descriptor refusal is fixed.
+    private def descriptor_row : Int32
+      position? ? selector_row + 1 : selector_row
+    end
+
     # Cycle the kind. It decides which of selector/range is live; if the caret is now on the
     # dead one, walk it forward rather than leaving it parked there.
     private def cycle_kind(d : Int32) : Nil
@@ -187,6 +192,22 @@ module Gori::Tui
         return "enter a #{kind.label} selector"
       end
       @on_validate.try(&.call(self))
+    end
+
+    # The row `invalid_reason` is about. The table's refusals (`on_validate`) that are not the
+    # selector's or the host's are the name's: not a valid key, or written by another rule.
+    private def blocking_row : Int32?
+      return nil if valid?
+      return ROW_NAME if name.empty?
+      return ROW_WHEN if Gori::InterceptFilter.refusal(match_filter)
+      if position? ? pos_end <= pos_start : (selector.empty? || Gori::TokenExtract.selector_error(kind, selector))
+        return descriptor_row
+      end
+      Gori::Rules.host_error(host) ? ROW_HOST : ROW_NAME
+    end
+
+    private def save_refusal : String
+      invalid_reason || ""
     end
 
     def adjust(d : Int32) : Nil

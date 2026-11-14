@@ -266,6 +266,23 @@ module Gori::Tui
       false
     end
 
+    # True while the Runner hands this card one tick's keys, or a whole bracketed paste
+    # (`Runner#run`); `batch_ended` clears it once they are in. A card whose keystroke does work
+    # derived from the whole form (a preview that rescans recent flows) skips it per key in the
+    # batch and does it once at the end: a 5,000-character paste was 5,000 rescans and ~9 s of
+    # a dead keyboard. Typing is one key per tick, so it still refreshes after every key.
+    property? batching : Bool = false
+
+    def batch_ended : Nil
+      @batching = false
+    end
+
+    # Why ↵ cannot commit this card now, after moving the focus to what blocks it; the Runner
+    # puts it on the status line and keeps the card up. Nil lets the commit run.
+    def commit_blocker : String?
+      nil
+    end
+
     # The whole paste, line breaks as `\n`. False hands it back to the Runner, which replays
     # it keystroke by keystroke.
     def paste_text(text : String) : Bool
@@ -513,6 +530,21 @@ module Gori::Tui
       false
     end
 
+    # Recompute the preview band from the fields, if the form has one: after a key that left the
+    # card open, or once at the end of a batch of them (`Overlay#batching?`).
+    private def refresh_preview : Nil
+    end
+
+    private def after_key(outcome : Symbol) : Symbol
+      refresh_preview if outcome == :stay && !batching?
+      outcome
+    end
+
+    def batch_ended : Nil
+      super
+      refresh_preview
+    end
+
     def on_save_row? : Bool
       @sel == row_count - 1
     end
@@ -526,9 +558,26 @@ module Gori::Tui
 
     # The hint's ↵ segment, true for the selected row: before the row that commits, ↵ moves
     # to the next field (`cycler_key`, `text_row_key`), so `↵ save` there named a key that
-    # did not save.
+    # did not save. Where it commits but the form cannot save, ↵ goes to the field to fix.
     private def enter_hint : String
-      enter_commits? ? "↵ save" : "↵ next"
+      return "↵ next" unless enter_commits?
+      blocking_row ? "↵ fix" : "↵ save"
+    end
+
+    # The row whose field keeps the form from saving, nil when it can save; `save_refusal` is
+    # the Save row's own words for why. A form that never refuses keeps the defaults.
+    private def blocking_row : Int32?
+      nil
+    end
+
+    private def save_refusal : String
+      ""
+    end
+
+    def commit_blocker : String?
+      return nil unless row = blocking_row
+      @sel = row
+      "not saved — #{save_refusal}"
     end
 
     # One row per step whatever `d`'s size, walking PAST rows `skip_row?` names instead of

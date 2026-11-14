@@ -187,6 +187,20 @@ describe "gori run repeater send --format json — did the post-send writes land
     ws_body.index("persist_repeater_response(id, result.handshake_head").not_nil!
       .should be < ws_body.index("emit_ws_result(id, result, format").not_nil!
   end
+
+  # A failed `send --json` printed its object on stdout and nothing on STDERR, while every other
+  # `--json` refusal says its sentence there too. Both emitters say it in both formats.
+  it "says a failed send on STDERR under --format json too, terminal-safe" do
+    line = Gori::CLI::Run.send_failed_line("gori run send", "connect failed: \e[2Jx")
+    line.should start_with("gori run send: send failed: connect failed:")
+    line.should_not contain('\e')
+    src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "repeater.cr"))
+    emit = src[/private def self\.emit_repeater_result\(.*?\n      end\n/m].not_nil!
+    json_branch = emit[/if format == :json\n.*?\n        elsif/m].not_nil!
+    json_branch.should contain("STDERR.puts send_failed_line(prefix, result.error) unless result.ok?")
+    ws = src[/private def self\.emit_ws_result\(.*?\n      end\n/m].not_nil!
+    ws.should contain("if !result.ok?\n          STDERR.puts send_failed_line(")
+  end
 end
 
 describe "gori run send/repeater --save-as-repeater --format json" do

@@ -145,7 +145,8 @@ describe "Gori::Tui::ExtractRuleOverlay — Overlay seam" do
     ov = ExtractRuleOverlay.adding
     h = OverlayHarness.new(ov, commit: false)
     ov.set_selected(ExtractRuleOverlay::ROW_SAVE)
-    h.press(Termisu::Input::Key::Enter).should eq(:open)
+    # Space on Save: ↵ stops at the form first (`FormOverlay#commit_blocker`).
+    h.press(Termisu::Input::Key::Space).should eq(:open)
     h.commits.should eq(1) # apply_extract_rule DID run — it just returned false
   end
 end

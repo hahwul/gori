@@ -347,8 +347,10 @@ describe "Overlay seam — ScopeRuleOverlay (first migrated modal)" do
     h.commits.should eq(1)
   end
 
-  it "keeps the form open when on_commit reports failure (invalid pattern)" do
-    ov = ScopeRuleOverlay.new(kind: "include", match_type: "host")
+  it "keeps the form open when on_commit reports failure" do
+    # A pattern the form accepts, so ↵ reaches the closure (an empty one stops at the form,
+    # `commit_blocker`); the store refusing it is what keeps the card up.
+    ov = ScopeRuleOverlay.new(kind: "include", match_type: "host", pattern: "acme.test")
     h = OverlayHarness.new(ov, commit: false) # apply rejected it
 
     ov.set_selected(3) # Save row
@@ -519,5 +521,59 @@ describe "Overlay seam — MineConfigOverlay (laggard: keys were shell-owned; cl
     away = OverlayHarness.new(MineConfigOverlay.new(mseed))
     away.click(0, 0).should eq(:closed)
     away.commits.should eq(0) # ditto: a dismiss must not kick off the miner
+  end
+end
+
+# ↵ on a row that commits a form which cannot save (#1878 left these footers saying `↵ save`
+# and the key silently refused): the footer says `↵ fix`, and ↵ moves the focus to the first
+# field that blocks the save and names it on the status line, never reaching the closure.
+describe "FormOverlay — ↵ on a form that cannot save" do
+  blank = {
+    RewriterRuleOverlay.adding    => {RewriterRuleOverlay::ROW_FIND, "not saved — enter a pattern"},
+    ColormarkerRuleOverlay.adding => {ColormarkerRuleOverlay::ROW_WHEN, nil},
+    ExtractRuleOverlay.adding     => {ExtractRuleOverlay::ROW_NAME, "not saved — enter a binding name"},
+    ColumnOverlay.adding          => {ColumnOverlay::ROW_LABEL, "not saved — enter a column label"},
+    CustomColorOverlay.adding     => {CustomColorOverlay::ROW_NAME, nil},
+    CustomRuleOverlay.adding      => {CustomRuleOverlay::ROW_TITLE, "not saved — complete title, description & pattern"},
+    ScopeRuleOverlay.adding       => {2, "not saved — enter a valid pattern"},
+    OastProviderOverlay.adding    => {OastProviderOverlay::ROW_NAME, "not saved — name + host required"},
+  } of FormOverlay => {Int32, String?}
+
+  blank.each do |ov, (row, said)|
+    it "#{ov.class.name.split("::").last} goes to the blocking field instead of claiming a save" do
+      ov.set_selected(ov.row_count - 1) # the Save row
+      ov.hint.should contain("↵ fix")
+      ov.hint.should_not contain("↵ save")
+      h = OverlayHarness.new(ov)
+      h.press(Termisu::Input::Key::Enter).should eq(:open)
+      h.commits.should eq(0)
+      ov.@sel.should eq(row)
+      status = h.status.should_not be_nil
+      status.should start_with("not saved — ")
+      status.should eq(said) if said
+    end
+  end
+
+  it "says ↵ save and commits once the field is filled" do
+    ov = RewriterRuleOverlay.adding
+    ov.set_selected(RewriterRuleOverlay::ROW_VALUE)
+    ov.hint.should contain("↵ fix")
+    h = OverlayHarness.new(ov)
+    h.press(Termisu::Input::Key::Enter).should eq(:open)
+    ov.@sel.should eq(RewriterRuleOverlay::ROW_FIND)
+    h.type("secret")
+    h.press(Termisu::Input::Key::Down) # → replace:
+    ov.hint.should contain("↵ save")
+    h.press(Termisu::Input::Key::Enter).should eq(:closed)
+    h.commits.should eq(1)
+  end
+
+  it "leaves a key other than ↵ that commits as it was" do
+    ov = ScopeRuleOverlay.adding
+    ov.set_selected(3)
+    h = OverlayHarness.new(ov, commit: false)
+    h.press(Termisu::Input::Key::Space).should eq(:open)
+    h.commits.should eq(1)
+    h.status.should be_nil
   end
 end

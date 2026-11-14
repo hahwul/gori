@@ -576,7 +576,7 @@ module Gori
           s.field "copy_headers", strarrprop("header names to copy (values redacted in replies); Content-Length, Transfer-Encoding, Host refused")
           s.field "remove_headers", strarrprop("header names to STRIP (e.g. [\"Cookie\",\"Authorization\"] for anonymous)")
           s.field "rules", strarrprop("extract-rule binding NAMES owned by this slot (not the global table)")
-          s.field "baseline", boolprop("make this the authorize BASELINE (one slot holds it)")
+          s.field "baseline", boolprop("make this the authorize BASELINE (one slot holds it; the first slot by default)")
           s.field "refresh", refresh_ids_prop
           s.field "refresh_before", refresh_before_prop
         end

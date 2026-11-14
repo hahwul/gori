@@ -123,7 +123,7 @@ gori run <subcommand> [verb] [options]
 | `project host-override` | List / add / update / delete project host to IP dial overrides |
 | `project network` | List / get / set / unset the project's own network settings (`net.*`: upstream proxy and credentials, destination host, timeouts, capture cap, bind) |
 
-Common flags across read subcommands: `--project=NAME`, `--db=PATH`, `--format=FMT` (usually `text` or `json`), and `--json`, which is `--format=json` on every command whose `--format` offers it. An unknown option or subcommand prints one line naming the nearest real one (`did you mean --format?`) and where `--help` is, on stderr; a subcommand typed as an MCP tool name is answered with the command it means (`gori run list_history` names `gori run history`). Under `--json`, a reader given an id that does not exist (or a parent id, as `links --issue N`), and a resend of a flow or session that does not exist (`repeater`, `repeater send`, `fuzz`, `mine`, `sequence`, `authorize`), prints `{"ok":false,"error":…,"error_kind":"not_found","error_code":"NOT_FOUND","retryable":false}` on stdout, the object `send` prints for a refused send, and still exits 1 with the plain line on stderr. Global flags go **after** the verb: `gori run rewriter rm 1 --project=x`, not `gori run rewriter --project=x rm 1`, which is rejected as a usage error rather than silently listing.
+Common flags across read subcommands: `--project=NAME`, `--db=PATH`, `--format=FMT` (usually `text` or `json`), and `--json`, which is `--format=json` on every command whose `--format` offers it. An unknown option or subcommand prints one line naming the nearest real one (`did you mean --format?`) and where `--help` is, on stderr; a subcommand typed as an MCP tool name is answered with the command it means (`gori run list_history` names `gori run history`). Under `--json`, a reader given an id that does not exist (or a parent id, as `links --issue N`), a resend of a flow or session that does not exist (`repeater`, `repeater send`, `fuzz`, `mine`, `sequence`, `authorize`), and a single-row `delete`/`rm` that takes `--json` (or `project scope update` / `project host-override update`) of a row that does not exist, prints `{"ok":false,"error":…,"error_kind":"not_found","error_code":"NOT_FOUND","retryable":false}` on stdout, the object `send` prints for a refused send, and still exits 1 with the plain line on stderr. A write refused as a duplicate (`project scope add`/`update`, `project host-override add`/`update`) prints the same shape with `"error_kind":"duplicate"`, MCP's `"error_code":"INVALID_ARGUMENT"` and the row already there as `existing_id`. A single-row delete that takes `--json` answers `{"ok":true,"deleted":true,"id":…}` (`name` or `key` for a row addressed by one); a delete's `--help` says whether it does. Global flags go **after** the verb: `gori run rewriter rm 1 --project=x`, not `gori run rewriter --project=x rm 1`, which is rejected as a usage error rather than silently listing.
 
 Read subcommands open the store read-only and never take the capture lock, so they are safe to run against a project a live TUI is capturing into. A `body:` query drains the search index and is therefore a write. A `--db` file that is not a gori project (another tool's SQLite database, or an empty file) is refused before anything touches it; commands that create their database (`import --db`, `capture --db`) still initialise an empty file, but refuse one that holds another tool's tables.
 
@@ -1836,9 +1836,9 @@ gori run project scope disable
 | --------------------- | ------------- |
 | (default) | List rules; `--format` is `text` or `json` |
 | `add` | `--kind=include\|exclude` (default `include`), `--type=host\|string\|regex` (default `host`), `--pattern=…` (required). Prints the new rule's id; `--format json` prints the rule as the listing does (`id`, `kind`, `type`, `pattern`) |
-| `update <rule-id>` (`edit`) | Change a rule's `--kind` / `--type` / `--pattern`; a field you omit keeps its value |
+| `update <rule-id>` (`edit`) | Change a rule's `--kind` / `--type` / `--pattern`; a field you omit keeps its value. `--format json` prints the edited rule as `add` does |
 | `delete <rule-id>` (`rm`) | Remove a rule by id |
-| `enable` / `disable` | Toggle whether scope filtering is applied |
+| `enable` / `disable` | Toggle whether scope filtering is applied; `--format json` prints `{"enabled":…}` |
 
 The listing prints a second line for the other thing the rules do: `Active-send gate: ON (N rules)` whenever a rule exists, **enabled or not**, because every active send (`send`, `repeater`, `fuzz`, `mine`, `discover`, MCP) refuses a target the rules leave out of scope unless `--allow-unscoped`. An exclude rule still stops `fuzz`, `mine` and `discover` under `--allow-unscoped`, and a scope with only exclude rules leaves every target out of scope (`scope add` warns when it makes one). `--format json` carries it as `active_send_gate`, beside `sandbox`. With no rules, `gori run` sends are unrestricted and MCP refuses every send, unless the [Sandbox](#project-sandbox) is on: it refuses every out-of-scope send, `--allow-unscoped` or not, and the line says so.
 
@@ -1857,7 +1857,7 @@ gori run project sandbox off             # stop blocking
 | --------------------- | ------------- |
 | (default) / `status` | Show the gate state; `--format` is `text` or `json` |
 | `on` / `enable` | Block every request the scope does not allow |
-| `off` / `disable` | Stop blocking |
+| `off` / `disable` | Stop blocking. Both take `--format json`, which prints `{"sandbox":…}` as `status` does |
 
 > With no include rule, turning the sandbox on blocks **all** captured traffic until you add one (`gori run project scope add …`). The command warns and proceeds, so it can bootstrap containment for CI.
 
@@ -1899,7 +1899,7 @@ gori run project host-override delete 1
 | --------------------- | ------------- |
 | (default) | List overrides; `--format` is `text` or `json` |
 | `add` | `--host=…` + `--ip=…`, or positional `IP HOST`. `--format json` prints the new override as the listing does (`id`, `host`, `ip`) |
-| `update <id>` | `--host=…` + `--ip=…` (both required) |
+| `update <id>` | `--host=…` + `--ip=…` (both required). `--format json` prints the edited override as `add` does |
 | `delete <id>` (`rm`) | Remove an override by id |
 
 #### project network

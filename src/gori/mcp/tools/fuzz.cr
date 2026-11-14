@@ -821,7 +821,7 @@ module Gori
         in Fuzz::PlanError::Reason::BadTarget
           ex.message.to_s # names the host it could not parse, or the scheme it refused
         in Fuzz::PlanError::Reason::NoPayloads
-          %(no payloads — pass 'payloads' as a JSON array of sets, e.g. [{"list":["a","b"]}])
+          "no payloads — pass 'payloads' as a JSON array of sets, e.g. #{PAYLOADS_EXAMPLE}"
         in Fuzz::PlanError::Reason::UnresolvedEnv
           env_unresolved_error(ex.detail)
         in Fuzz::PlanError::Reason::BadRaceCount
@@ -1096,9 +1096,23 @@ module Gori
       private def fuzz_sources(h) : Array(Fuzz::PayloadSource)
         arr = json_array_arg(h["payloads"]?, "payloads", " of sets") || return [] of Fuzz::PayloadSource
         arr.map do |spec|
-          obj = spec.as_h? || raise FuzzArgError.new("each payload set must be a JSON object")
+          obj = spec.as_h? || raise FuzzArgError.new(payload_set_shape_error(arr))
           fuzz_source_from(obj, spec)
         end
+      end
+
+      # The examples the `payloads` / `processors` refusals show — one each, so the "absent"
+      # and "wrong shape" messages cannot drift apart.
+      PAYLOADS_EXAMPLE   = %([{"list":["a","b"]}])
+      PROCESSORS_EXAMPLE = %([{"type":"prefix","text":"x"}])
+
+      # A bare array of strings is almost always ONE list set written without its wrapper. Say
+      # so with the caller's own values — never accept it as one: the shape is the contract.
+      private def payload_set_shape_error(arr : Array(JSON::Any)) : String
+        msg = "each payload set must be a JSON object, e.g. #{PAYLOADS_EXAMPLE}"
+        return msg unless arr.all?(&.as_s?)
+        values = arr.first(2).join(',', &.to_json) + (arr.size > 2 ? ",…" : "")
+        %(#{msg} — did you mean one list set, [{"list":[#{values}]}]?)
       end
 
       # The processing pipeline applied to EVERY payload set (mirrors the CLI's
@@ -1112,7 +1126,7 @@ module Gori
       end
 
       private def fuzz_processor_from(spec : JSON::Any) : Fuzz::Processor
-        obj = spec.as_h? || raise FuzzArgError.new("each processor must be a JSON object")
+        obj = spec.as_h? || raise FuzzArgError.new("each processor must be a JSON object, e.g. #{PROCESSORS_EXAMPLE}")
         case obj["type"]?.try(&.as_s?).try(&.downcase)
         when "prefix"        then Fuzz::Prefix.new(fuzz_processor_text(obj, "text", "prefix"))
         when "suffix"        then Fuzz::Suffix.new(fuzz_processor_text(obj, "text", "suffix"))

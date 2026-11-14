@@ -153,17 +153,21 @@ module Gori
       end
 
       private def self.cmd_colormarker_color_rm(args : Array(String)) : Nil
+        format = :text
         positional = parse_args(args, "gori run colormarker color rm") do |p|
           p.banner = "Usage: gori run colormarker color rm <name>"
+          format_flag(p, [:text, :json], delete_format_help("name")) { |f| format = f }
         end
         abort "gori run colormarker color rm: missing <name>" if positional.empty?
         abort "gori run colormarker color rm: too many arguments (expected one <name>)" if positional.size > 1
         name = positional[0].strip.downcase
-        abort "gori run colormarker color rm: no custom colour named '#{name}'" unless Settings.colormarker_colors.any? { |c| c.name == name }
+        unless Settings.colormarker_colors.any? { |c| c.name == name }
+          not_found_abort("gori run colormarker color rm", "no custom colour named '#{name}'", format)
+        end
         abort "gori run colormarker color rm: settings not writable (nothing was deleted)" unless Settings.delete_colormarker_color(name)
         # A rule that still names it is left inert — it falls back to a visible default rather
         # than this surface reaching into every project's DB to rewrite the rules.
-        puts "Custom colour “#{name}” deleted."
+        puts format == :json ? deleted_json("name", name) : "Custom colour “#{name}” deleted."
         warn_dangling_color_rules(name)
       end
 
@@ -434,10 +438,12 @@ module Gori
       private def self.cmd_colormarker_rm(args : Array(String)) : Nil
         proj = ProjectFlags.new
         scope_flag : Store::RuleScope? = nil
+        format = :text
         positional = parse_args(args, "gori run colormarker rm") do |p|
           p.banner = "Usage: gori run colormarker rm <id> [options]"
           project_options(p, proj, "update")
           p.on("--scope=SCOPE", "Which <id>: project (default) | global; a listed P#/G# id names it itself") { |v| scope_flag = parse_rule_scope(v, "gori run colormarker") }
+          format_flag(p, [:text, :json], delete_format_help) { |f| format = f }
         end
         id, scope = rule_id_arg(positional, "gori run colormarker rm", scope_flag)
 
@@ -453,17 +459,19 @@ module Gori
           # between: "no global rule with id N" for a rule that exists, or "settings not writable"
           # for one that is already gone.
           Settings.reload_colormarker_from_disk
-          abort "gori run colormarker rm: no global rule with id #{id}" unless Settings.colormarker_rules.any? { |r| r.id == id }
+          unless Settings.colormarker_rules.any? { |r| r.id == id }
+            not_found_abort("gori run colormarker rm", "no global rule with id #{id}", format)
+          end
           abort "gori run colormarker rm: settings not writable (nothing was deleted)" unless Settings.delete_colormarker_rule(id)
-          puts "Global colour rule ##{id} deleted — from every project."
+          puts format == :json ? deleted_json("id", id) : "Global colour rule ##{id} deleted — from every project."
           return
         end
 
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
-          store.color_rules.any? { |r| r.id == id } || abort_closing(store, "gori run colormarker rm: no colour rule with id #{id}")
+          store.color_rules.any? { |r| r.id == id } || not_found_abort("gori run colormarker rm", "no colour rule with id #{id}", format, store)
           store.delete_color_rule(id) || abort_closing(store, "gori run colormarker rm: project is busy (write did not commit) — the row colour is unchanged")
-          puts "Colour rule ##{id} deleted."
+          puts format == :json ? deleted_json("id", id) : "Colour rule ##{id} deleted."
         end
       end
 

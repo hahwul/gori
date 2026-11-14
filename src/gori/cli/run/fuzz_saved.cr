@@ -104,18 +104,20 @@ module Gori
         proj = ProjectFlags.new
         yes = false
         force_stale = false
+        format = :text
 
         positional = parse_args(args, "gori run fuzz delete") do |p|
           p.banner = "Usage: gori run fuzz delete RUN_ID --yes [options]"
           project_options(p, proj, "update")
           p.on("--yes", "Actually delete the run and every stored result") { yes = true }
           p.on("--force-stale", "Also delete a running/saving row left by a crashed writer") { force_stale = true }
+          format_flag(p, [:text, :json], delete_format_help) { |f| format = f }
         end
         abort "gori run fuzz delete: expected one RUN_ID" unless positional.size == 1
         run_id = parse_id(positional[0], "gori run fuzz delete", "run id")
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
-          run = store.get_fuzz_run(run_id) || abort "gori run fuzz delete: no saved run ##{run_id}"
+          run = store.get_fuzz_run(run_id) || not_found_abort("gori run fuzz delete", "no saved run ##{run_id}", format, store)
           unless yes
             count = store.fuzz_result_count(run_id)
             abort "gori run fuzz delete: refusing to delete run ##{run_id} (#{count} results) without --yes"
@@ -127,9 +129,9 @@ module Gori
           case deleted.status
           in Store::FuzzRunDeleteStatus::Deleted
             count = deleted.deleted_results
-            puts "Deleted fuzz run ##{run_id} and #{Gori.plural(count, "result")}."
+            puts format == :json ? deleted_json("id", run_id) : "Deleted fuzz run ##{run_id} and #{Gori.plural(count, "result")}."
           in Store::FuzzRunDeleteStatus::NotFound
-            abort "gori run fuzz delete: no saved run ##{run_id}"
+            not_found_abort("gori run fuzz delete", "no saved run ##{run_id}", format, store)
           in Store::FuzzRunDeleteStatus::Active
             abort "gori run fuzz delete: run ##{run_id} is still #{run.status}; if its writer crashed, " \
                   "retry with --force-stale (never use it while another gori is saving)"

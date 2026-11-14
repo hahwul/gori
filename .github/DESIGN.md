@@ -5588,3 +5588,29 @@ code or layout changed. An item whose only fix needed one of those was left open
   `sequence_start` without a `url` name the template's `Host` (scrubbed to one printable line)
   and say it carries no scheme; `send --format raw` names the `--record-history` route.
 
+
+### 2026-11-14: round two — what a task run end to end turned up
+
+Four evaluators finished one job each instead of touring a surface. Eight findings needed no
+decision; the ones that did (a `/` typed on the tab bar, a Miner value list, Note–Issue links)
+stay open.
+
+- **A preview is recomputed once per batch of keys, not once per key.** A rule form rescanned
+  recent flows on every character, so a 5,000-character paste held the screen for seconds. The
+  run loop marks the modal's keys of one tick, or of one bracketed paste, as a batch
+  (`Overlay#batching?`), and `FormOverlay#after_key` refreshes when it ends. The keys still take
+  the per-key path, so the field holds exactly what typing builds and `takes_pasted?` still cuts
+  at ↵. Typing refreshes on every key as before.
+- **`↵ save` is a claim the form checks.** A form that cannot save says `↵ fix`; Enter there
+  moves to the row that blocks it (`FormOverlay#blocking_row`) and says what it needs. Only
+  Enter is intercepted: Space and a click on Save still reach the commit site and its guard.
+- **A duplicate is a refusal on every surface, and a refusal under `--json` is an object.**
+  `project scope add` keeps exit 1, as MCP's `add_scope_rule` keeps `INVALID_ARGUMENT`: the
+  write did not happen. The object carries the row already there as `existing_id`, which is
+  what a script that meant "make sure this exists" needs. A busy store under `--json` still
+  prints nothing on stdout; that is the next sweep.
+- **A negative result says what it could not see.** The Miner sends every name with a random
+  value, so a switch that acts on one value answers like the baseline. A run that tested every
+  name and found nothing says so once (`Miner::NOTHING_FOUND_NOTE`), on all three surfaces; a
+  run that was stopped, ran out of budget or never got a baseline did not look and says
+  nothing more.

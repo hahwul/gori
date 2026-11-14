@@ -590,6 +590,9 @@ module Gori::Tui
               # until the paste closes, and a 1 MB paste is ~32k such ticks: marking each one
               # rendered the unchanged frame 32k times, 63% of the main thread (P6). The close
               # itself — the marker or the watchdog — dirties the frame it lands on.
+              # A modal takes this tick's keys, or a whole bracketed paste, as one batch
+              # (`Overlay#batching?`), closed below.
+              @batch_card ||= active_overlay.try { |c| c.batching = true; c }
               dirty = handle(ev)
               # Drain any input already queued behind `ev` in the SAME tick, then
               # render once. A fast scroll arrives as a burst — held ↑/↓/j/k key
@@ -613,6 +616,10 @@ module Gori::Tui
             # leaves this loop swallowing every keystroke — see `PasteStall`.
             if @paste_newline.pasting? && @paste_stall.stalled?(Time.instant)
               dirty = true if end_stalled_paste
+            end
+            if (card = @batch_card) && !@paste_newline.pasting?
+              @batch_card = nil
+              card.batch_ended # does once what it skipped per key
             end
             dirty = true if drain_events # always drains; true if anything arrived
             if repeater_controller.drain_results
@@ -1434,6 +1441,8 @@ module Gori::Tui
     # the first key the cut actually drops.
     @paste_cut = false
     @paste_cut_note = nil.as(String?)
+    # The modal in a key batch — see `Overlay#batching?`.
+    @batch_card = nil.as(Overlay?)
     # Bounds a paste whose end marker never comes — the decision lives there, not here.
     @paste_stall = PasteStall.new
 
@@ -1492,6 +1501,9 @@ module Gori::Tui
         return false if buffer_bulk_paste(ev)
         handle_key(ev)
         cut_paste_at_commands
+        # A paste typed into a modal key by key is drawn once, when it closes: a frame per
+        # 32-key input batch was most of a 5,000-character paste's second.
+        return false if @batch_card && @paste_newline.pasting?
       when Termisu::Event::Mouse
         # A click is not part of a paste, and acting on one mid-paste moves the target out from
         # under it: the tab/focus changes, and the buffered clipboard is then flushed into
@@ -2122,6 +2134,11 @@ module Gori::Tui
       case ov.handle_key(ev)
       when :cancel then close_active_overlay(ov)
       when :commit
+        # ↵ on a form that cannot save lands on the field that blocks it and says what is missing.
+        if ev.key.enter? && (why = ov.commit_blocker)
+          status(why)
+          return
+        end
         # A commit closure may open a CHILD modal in the parent's place (a picker raised from
         # a form's row, the Links card's add-picker). `close_active_overlay` then declines —
         # the shell holds the child — and the parent's `on_close` never runs, so the pop-back
@@ -5958,7 +5975,7 @@ module Gori::Tui
       ov = rule ? ExtractRuleOverlay.editing(rule) : ExtractRuleOverlay.adding
       ov.on_validate = ->(form : ExtractRuleOverlay) do
         @session.bindings.validate(form.name, form.kind, form.selector, except_id: form.edit_id,
-          match_filter: form.match_filter, host: form.host)
+          match_filter: form.match_filter, host: form.host, pos_start: form.pos_start, pos_end: form.pos_end)
       end
       ov.on_commit = -> { rewriter_controller.apply_extract_rule(ov) }
       open_overlay(ov)

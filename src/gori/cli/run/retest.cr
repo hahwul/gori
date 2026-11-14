@@ -209,6 +209,7 @@ module Gori
 
       private def self.cmd_retest_remove(args : Array(String)) : Nil
         proj = ProjectFlags.new
+        format = :text
 
         positional = parse_args(args, "gori run retest remove") do |p|
           p.banner = "Usage: gori run retest remove STEP\n\n" \
@@ -217,17 +218,22 @@ module Gori
                      "The Repeater session and any entity link to it are untouched: a retest step is\n" \
                      "a test plan, not a link."
           project_options(p, proj, "update")
+          format_flag(p, [:text, :json], delete_format_help) { |f| format = f }
         end
         id = require_positional_id(positional, "gori run retest remove", "step", "gori run retest")
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
-          step = store.get_retest_step(id) || abort("gori run retest remove: no retest step with id #{id}")
+          step = store.get_retest_step(id) || not_found_abort("gori run retest remove", "no retest step with id #{id}", format, store)
           case store.remove_retest_step(id)
           in .issue_gone?, .step_gone? then abort "gori run retest remove: step ##{id} was already gone"
           in .busy?                    then abort "gori run retest remove: NOT removed (project busy or unwritable)"
           in .ok?                      then nil
           end
-          puts "Removed step ##{step.id} (position #{step.position}, #{step.role.label}, #{step.ref_label}) from issue ##{step.issue_id}."
+          if format == :json
+            puts deleted_json("id", step.id)
+          else
+            puts "Removed step ##{step.id} (position #{step.position}, #{step.role.label}, #{step.ref_label}) from issue ##{step.issue_id}."
+          end
         end
       end
 
@@ -462,19 +468,25 @@ module Gori
       # it are untouched.
       private def self.cmd_retest_forget(args : Array(String)) : Nil
         proj = ProjectFlags.new
+        format = :text
 
         positional = parse_args(args, "gori run retest forget") do |p|
           p.banner = "Usage: gori run retest forget RUN\n\n" \
                      "Delete one run summary and its result rows. The retest steps stay, and the\n" \
                      "History flows each send recorded stay — this drops the report, not the evidence."
           project_options(p, proj, "update")
+          format_flag(p, [:text, :json], delete_format_help) { |f| format = f }
         end
         id = require_positional_id(positional, "gori run retest forget", "run", "gori run retest")
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
-          run = store.get_retest_run(id) || abort("gori run retest forget: no retest run with id #{id}")
+          run = store.get_retest_run(id) || not_found_abort("gori run retest forget", "no retest run with id #{id}", format, store)
           abort "gori run retest forget: NOT deleted (project busy or unwritable)" unless store.delete_retest_run(id)
-          puts "Forgot retest run ##{id} of issue ##{run.issue_id} (#{run.verdict.label}, #{Gori.plural(run.total, "step")})."
+          if format == :json
+            puts deleted_json("id", id)
+          else
+            puts "Forgot retest run ##{id} of issue ##{run.issue_id} (#{run.verdict.label}, #{Gori.plural(run.total, "step")})."
+          end
         end
       end
 

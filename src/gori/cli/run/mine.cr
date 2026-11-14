@@ -288,7 +288,7 @@ module Gori
           when Miner::BaselineEvent then mine_baseline(ev)
           when Miner::FindingEvent  then findings << ev.finding; emit_mine_finding(ev.finding, format)
           when Miner::ProgressEvent then mine_progress(ev, total)
-          when Miner::DoneEvent     then mine_done(ev, findings.size, config); note_request_macro_result("gori run mine", ev.progress.request_macro); print_pool_connections(pool)
+          when Miner::DoneEvent     then mine_done(ev, findings.size, config, engine); note_request_macro_result("gori run mine", ev.progress.request_macro); print_pool_connections(pool)
           when Miner::ErrorEvent    then had_error = true; STDERR.puts "mine error: #{ev.message}"
           end
         end
@@ -348,7 +348,7 @@ module Gori
         STDERR.flush
       end
 
-      private def self.mine_done(ev : Miner::DoneEvent, found : Int32, config : Miner::Config) : Nil
+      private def self.mine_done(ev : Miner::DoneEvent, found : Int32, config : Miner::Config, engine : Miner::Engine) : Nil
         STDERR.print "\r" if STDERR.tty? # clear the in-place meter (none was drawn when piped)
         p = ev.progress
         STDERR.puts "done · #{p.names_done}/#{p.names_total} names · #{found} found · " \
@@ -359,7 +359,12 @@ module Gori
         # `--max-requests 4` over 434 names ended in "done · 0 found" and exit 0, which reads
         # as "there are no hidden parameters here". The \r meter that DID show them is
         # `STDERR.tty?`-gated, so in CI or a pipe there was no counter anywhere.
-        return if ev.stopped || p.names_done >= p.names_total
+        if ev.stopped || p.names_done >= p.names_total
+          # A finished, answered run that found nothing — every format, since `--format json`
+          # stdout is the bare findings array and the `done ·` line above is stderr too.
+          STDERR.puts "note: #{Miner::NOTHING_FOUND_NOTE}" if !ev.stopped && found.zero? && engine.successful_sends > 0
+          return
+        end
         left = p.names_total - p.names_done
         # Name the CAP only when there is one: the same shortfall with no --max-requests set
         # means the run ended some other way (a dead target), and pointing at a flag the

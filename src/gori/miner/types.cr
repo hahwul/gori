@@ -141,6 +141,13 @@ module Gori
 
     alias Event = BaselineEvent | FindingEvent | ProgressEvent | DoneEvent | ErrorEvent
 
+    # What a run that FINISHED with nothing found cannot see, said once by every surface. Every
+    # value the miner sends is a fresh `Canary`, so a switch that only acts on its own value
+    # (`debug=1`) answers like the baseline and reads as absent — and was concluded absent.
+    NOTHING_FOUND_NOTE = "each name was sent with a random value, so a parameter that only " \
+                         "reacts to a specific one (debug=1, admin=true) does not show: fuzz " \
+                         "a likely name's value with the Fuzzer to check"
+
     # Fixed-length canary so no canary can be a substring of another (which would
     # wrongly attribute a reflection). "gq" + 8 lower-hex chars — all URL/JSON/header/cookie
     # safe, so it survives any location's encoding verbatim and reflects unchanged.

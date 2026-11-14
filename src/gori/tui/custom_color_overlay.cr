@@ -64,6 +64,15 @@ module Gori::Tui
       "hex must be #rrggbb"
     end
 
+    private def blocking_row : Int32?
+      return nil if valid?
+      Settings.normalize_color_name(name).nil? ? ROW_NAME : ROW_HEX
+    end
+
+    private def save_refusal : String
+      invalid_reason
+    end
+
     def row_count : Int32
       ROW_COUNT
     end

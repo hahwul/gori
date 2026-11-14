@@ -62,6 +62,36 @@ describe Gori::Tui::MinerView do
     backend.row(5).should contain("FINDINGS")
   end
 
+  # Two evaluators mined a planted `debug=1` switch, got nothing, and concluded there were no
+  # hidden parameters: a complete empty run says what a random value cannot reach; a stopped one does not.
+  it "says what a complete run that found nothing cannot see" do
+    view = Gori::Tui::MinerView.new
+    view.load("http://h.test", "GET /a HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, false, nil,
+      Gori::Miner::Config.new(locations: [Gori::Miner::Location::Query]))
+    view.begin_run
+    view.apply_progress(Gori::Miner::Progress.new(10_i64, 10_i64, 12_i64, 0, 0_i64))
+    view.finish_run
+    backend = MemoryBackend.new(80, 30)
+    view.render(Gori::Tui::Screen.new(backend), Gori::Tui::Rect.new(0, 0, 80, 30), true)
+    backend.contains?("no hidden parameters found").should be_true
+    backend.contains?("debug=1").should be_true
+
+    view.begin_run
+    view.apply_progress(Gori::Miner::Progress.new(10_i64, 4_i64, 5_i64, 0, 0_i64))
+    view.finish_run(stopped: true)
+    backend = MemoryBackend.new(80, 30)
+    view.render(Gori::Tui::Screen.new(backend), Gori::Tui::Rect.new(0, 0, 80, 30), true)
+    backend.contains?("debug=1").should be_false
+
+    # An unreachable baseline ends un-stopped with no name tested: it did not look either.
+    view.begin_run
+    view.apply_progress(Gori::Miner::Progress.new(10_i64, 0_i64, 3_i64, 0, 3_i64))
+    view.finish_run
+    backend = MemoryBackend.new(80, 30)
+    view.render(Gori::Tui::Screen.new(backend), Gori::Tui::Rect.new(0, 0, 80, 30), true)
+    backend.contains?("debug=1").should be_false
+  end
+
   it "verifies at_top? and results_at_top? behavior for vertical navigation" do
     view = Gori::Tui::MinerView.new
     view.focus_pane(:summary)

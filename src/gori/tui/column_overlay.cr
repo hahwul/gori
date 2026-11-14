@@ -115,6 +115,15 @@ module Gori::Tui
       Gori::DisplayColumns.invalid_reason(label, kind, selector, pos_start, pos_end)
     end
 
+    private def blocking_row : Int32?
+      return nil if valid?
+      label.strip.empty? ? ROW_LABEL : descriptor_row
+    end
+
+    private def save_refusal : String
+      invalid_reason || ""
+    end
+
     def adjust(d : Int32) : Nil
       case @sel
       when ROW_SIDE then @side_i = (@side_i + d) % SIDES.size
@@ -157,9 +166,7 @@ module Gori::Tui
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol
-      out = dispatch_key(ev)
-      refresh_preview if out == :stay
-      out
+      after_key(dispatch_key(ev))
     end
 
     private def dispatch_key(ev : Termisu::Event::Key) : Symbol

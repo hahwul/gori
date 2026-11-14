@@ -309,23 +309,44 @@ module Gori::Tui
 
     # What is missing, for the Save row's label.
     def invalid_reason : String
-      return "enter a #{find_row[1]}" if pattern.empty?
+      blocker[1]
+    end
+
+    # The row to fix and the Save row's words for it — ONE ladder, so ↵ lands on the field the
+    # label names (`FormOverlay#blocking_row`).
+    private def blocker : {Int32, String}
+      return {ROW_FIND, "enter a #{find_row[1]}"} if pattern.empty?
       if why = Gori::Rules.host_error(host)
-        return why
+        return {ROW_HOST, why}
       end
       if short_circuit_op? && (why = respond_error)
-        # The editor says what is wrong with a response as it is typed; the Save row only has to
-        # say where to go.
-        stub = (respond.inline? || respond.file?) && !RuleStub.valid?(@stub)
-        return stub ? "write a stub response (↵ on response:)" : why
+        return stub_blocker(why)
       end
       if pipe_op? && (why = Gori::Rules.pipe_argv_error(op, replacement))
-        return replacement.strip.empty? ? "enter a command to pipe through" : "fix the command: #{why}"
+        return {ROW_VALUE, replacement.strip.empty? ? "enter a command to pipe through" : "fix the command: #{why}"}
       end
       if why = Gori::Rules.json_rule_error(op, part, pattern, replacement)
-        return why
+        # The path is fine when a plain JSON value clears the error: then it is the value's.
+        return {Gori::Rules.json_rule_error(op, part, pattern, "0") ? ROW_FIND : ROW_VALUE, why}
       end
-      "fix the regex"
+      {ROW_FIND, "fix the regex"}
+    end
+
+    # The editor says what is wrong with a response as it is typed; the Save row only has to say
+    # where to go.
+    private def stub_blocker(why : String) : {Int32, String}
+      if (respond.inline? || respond.file?) && !RuleStub.valid?(@stub)
+        return {ROW_VALUE, "write a stub response (↵ on response:)"}
+      end
+      {respond.file? || respond.dir? ? ROW_BODY_FILE : ROW_OPTIONS, why}
+    end
+
+    private def blocking_row : Int32?
+      blocker[0] unless valid?
+    end
+
+    private def save_refusal : String
+      invalid_reason
     end
 
     # The shared validator (#1237) over what this form would save.
@@ -429,9 +450,7 @@ module Gori::Tui
     # :stay | :commit | :cancel. A key that leaves the form open also refreshes the match
     # preview (only the :stay path — there is nothing to preview once it closes).
     def handle_key(ev : Termisu::Event::Key) : Symbol
-      out = edit_key(ev)
-      refresh_preview if out == :stay
-      out
+      after_key(edit_key(ev))
     end
 
     private def edit_key(ev : Termisu::Event::Key) : Symbol
