@@ -1396,4 +1396,51 @@ describe "gori run <reader> --format json — a not-found id" do
       File.read(File.join(root, file)).should contain("not_found_abort(\"#{prefix}\""), failure_message: file
     end
   end
+
+  # `project scope delete 999 --json` was "unknown option: --json" while its siblings took it.
+  # Every single-row delete that takes --json answers a missing id the same way, and a
+  # deleted one with `{ok: true, deleted: true, <key>: …}`.
+  it "routes every --json delete's not-found through not_found_abort" do
+    root = File.join(__DIR__, "..", "..", "src", "gori", "cli", "run")
+    {
+      {"project.cr", "gori run project scope delete"}, {"project.cr", "gori run project scope update"},
+      {"project.cr", "gori run project host-override delete"}, {"project.cr", "gori run project host-override update"},
+      {"project.cr", "gori run project env delete"}, {"evidence.cr", "gori run evidence delete"},
+      {"fuzz_saved.cr", "gori run fuzz delete"}, {"colormarker.cr", "gori run colormarker rm"},
+      {"colormarker.cr", "gori run colormarker color rm"}, {"rewriter.cr", "gori run rewriter rm"},
+      {"retest.cr", "gori run retest remove"}, {"retest.cr", "gori run retest forget"},
+      {"session.cr", "gori run session rm"}, {"probe.cr", "gori run probe rules delete"},
+      {"repeater.cr", "gori run repeater delete"},
+    }.each do |file, prefix|
+      File.read(File.join(root, file)).should contain("not_found_abort(\"#{prefix}\""), failure_message: file
+    end
+    JSON.parse(Gori::CLI::Run.deleted_json("id", 7_i64)).as_h.should eq({
+      "ok" => JSON::Any.new(true), "deleted" => JSON::Any.new(true), "id" => JSON::Any.new(7_i64),
+    })
+    JSON.parse(Gori::CLI::Run.deleted_json("name", "x"))["name"].as_s.should eq("x")
+  end
+end
+
+# `project scope add --json` of a rule that already existed printed nothing on stdout. The
+# refusal is MCP's `add_scope_rule` one (non-retryable INVALID_ARGUMENT), plus the row that is
+# already there, so a script that meant "make sure this rule exists" can go on with its id.
+describe "gori run <write> --format json — a refused duplicate" do
+  it "is the failed-call object with error_code INVALID_ARGUMENT and existing_id" do
+    j = JSON.parse(Gori::CLI::Run.failure_json("rule NOT added", "duplicate", "INVALID_ARGUMENT", existing_id: 3_i64))
+    j.as_h.keys.should eq(%w[ok error error_kind error_code retryable existing_id])
+    j["ok"].as_bool.should be_false
+    j["error_code"].as_s.should eq("INVALID_ARGUMENT")
+    j["retryable"].as_bool.should be_false
+    j["existing_id"].as_i64.should eq(3)
+  end
+
+  it "routes scope add/update and both host-override writes through duplicate_abort" do
+    src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "cli", "run", "project.cr"))
+    src.should contain("duplicate_abort(\"gori run project scope add\"")
+    src.should contain("duplicate_abort(\"gori run project scope update\"")
+    src[/def self\.abort_if_override_taken\(.*?\n      end\n/m].not_nil!.should contain("duplicate_abort(prefix")
+    src.scan("abort_if_override_taken(store, ov, h, \"gori run project host-override").size.should eq(2)
+    # …and `scope add --help` says so.
+    src.should contain(%(with the existing rule's id as \\"existing_id\\"))
+  end
 end

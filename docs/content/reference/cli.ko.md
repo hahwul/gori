@@ -123,7 +123,7 @@ gori run <subcommand> [verb] [options]
 | `project host-override` | 프로젝트 호스트 → IP 접속 오버라이드 목록 / 추가 / 수정 / 삭제 |
 | `project network` | 프로젝트 자체 네트워크 설정(`net.*`: 업스트림 프록시와 자격증명, 목적지 호스트, 타임아웃, 캡처 상한, bind) 목록 / 조회 / 설정 / 해제 |
 
-읽기 서브커맨드에 공통인 플래그: `--project=NAME`, `--db=PATH`, `--format=FMT` (보통 `text` 또는 `json`), 그리고 `--format`이 `json`을 제공하는 모든 명령에서 `--format=json`과 같은 `--json`. 모르는 옵션이나 서브커맨드를 주면 가장 가까운 실제 이름(`did you mean --format?`)과 `--help` 위치를 한 줄로 stderr에 출력합니다. 서브커맨드를 MCP 도구 이름으로 치면 그에 해당하는 명령을 알려 줍니다(`gori run list_history`에는 `gori run history`). `--json`에서 없는 id(또는 `links --issue N`처럼 부모 id)를 조회한 명령과, 없는 흐름이나 세션을 다시 보내려 한 명령(`repeater`, `repeater send`, `fuzz`, `mine`, `sequence`, `authorize`)은 `send`가 거부된 전송에 찍는 것과 같은 객체 `{"ok":false,"error":…,"error_kind":"not_found","error_code":"NOT_FOUND","retryable":false}`를 stdout에 출력하고, stderr의 평문 한 줄과 종료 코드 1은 그대로입니다. 전역 플래그는 **동사 뒤에** 옵니다. `gori run rewriter rm 1 --project=x`는 되지만 `gori run rewriter --project=x rm 1`은 조용히 목록만 찍는 대신 사용법 오류로 거부됩니다.
+읽기 서브커맨드에 공통인 플래그: `--project=NAME`, `--db=PATH`, `--format=FMT` (보통 `text` 또는 `json`), 그리고 `--format`이 `json`을 제공하는 모든 명령에서 `--format=json`과 같은 `--json`. 모르는 옵션이나 서브커맨드를 주면 가장 가까운 실제 이름(`did you mean --format?`)과 `--help` 위치를 한 줄로 stderr에 출력합니다. 서브커맨드를 MCP 도구 이름으로 치면 그에 해당하는 명령을 알려 줍니다(`gori run list_history`에는 `gori run history`). `--json`에서 없는 id(또는 `links --issue N`처럼 부모 id)를 조회한 명령과, 없는 흐름이나 세션을 다시 보내려 한 명령(`repeater`, `repeater send`, `fuzz`, `mine`, `sequence`, `authorize`), `--json`을 받는 단건 `delete`/`rm`(그리고 `project scope update` / `project host-override update`)으로 없는 행을 가리킨 명령은 `send`가 거부된 전송에 찍는 것과 같은 객체 `{"ok":false,"error":…,"error_kind":"not_found","error_code":"NOT_FOUND","retryable":false}`를 stdout에 출력하고, stderr의 평문 한 줄과 종료 코드 1은 그대로입니다. 중복이라 거부된 쓰기(`project scope add`/`update`, `project host-override add`/`update`)는 같은 모양에 `"error_kind":"duplicate"`, MCP와 같은 `"error_code":"INVALID_ARGUMENT"`, 이미 있는 행의 id인 `existing_id`를 담습니다. `--json`을 받는 단건 삭제는 `{"ok":true,"deleted":true,"id":…}`로 답합니다(이름이나 키로 가리키는 행은 `name`이나 `key`). 받는지는 각 삭제의 `--help`에 나옵니다. 전역 플래그는 **동사 뒤에** 옵니다. `gori run rewriter rm 1 --project=x`는 되지만 `gori run rewriter --project=x rm 1`은 조용히 목록만 찍는 대신 사용법 오류로 거부됩니다.
 
 읽기 서브커맨드는 스토어를 읽기 전용으로 열고 캡처 락을 잡지 않으므로, 라이브 TUI가 캡처 중인 프로젝트를 대상으로 실행해도 안전합니다. `body:` 질의는 검색 인덱스를 비우므로 쓰기입니다. gori 프로젝트가 아닌 `--db` 파일(다른 도구의 SQLite 데이터베이스나 빈 파일)은 파일에 손대기 전에 거부합니다. 데이터베이스를 만드는 명령(`import --db`, `capture --db`)은 빈 파일은 계속 초기화하지만, 다른 도구의 테이블이 든 파일은 거부합니다.
 
@@ -1827,9 +1827,9 @@ gori run project scope disable
 |---------------------|-------------|
 | (default) | 규칙 목록; `--format`은 `text` 또는 `json` |
 | `add` | `--kind=include\|exclude` (기본 `include`), `--type=host\|string\|regex` (기본 `host`), `--pattern=…` (필수). 새 규칙의 id를 출력합니다; `--format json`은 목록과 같은 형태(`id`, `kind`, `type`, `pattern`)로 규칙을 출력합니다 |
-| `update <rule-id>` (`edit`) | 규칙의 `--kind` / `--type` / `--pattern` 변경. 생략한 필드는 그대로 유지 |
+| `update <rule-id>` (`edit`) | 규칙의 `--kind` / `--type` / `--pattern` 변경. 생략한 필드는 그대로 유지. `--format json`은 `add`처럼 고친 규칙을 출력 |
 | `delete <rule-id>` (`rm`) | id로 규칙 제거 |
-| `enable` / `disable` | 스코프 필터링 적용 여부 토글 |
+| `enable` / `disable` | 스코프 필터링 적용 여부 토글. `--format json`은 `{"enabled":…}` 출력 |
 
 목록은 규칙이 하는 또 다른 일을 두 번째 줄로 출력합니다. 규칙이 하나라도 있으면 **활성 여부와 관계없이** `Active-send gate: ON (N rules)`가 찍히는데, 모든 액티브 전송(`send`, `repeater`, `fuzz`, `mine`, `discover`, MCP)이 `--allow-unscoped` 없이는 규칙상 스코프 밖인 대상을 거부하기 때문입니다. exclude 규칙은 `--allow-unscoped`에서도 `fuzz`, `mine`, `discover`를 막고, exclude 규칙만 있는 스코프에서는 모든 대상이 스코프 밖입니다(`scope add`가 그런 스코프를 만들면 경고합니다). `--format json`에서는 `active_send_gate`로, `sandbox`와 함께 실립니다. 규칙이 없으면 `gori run` 전송은 제한이 없고 MCP는 모든 전송을 거부합니다. 단, [Sandbox](#project-sandbox)가 켜져 있으면 `--allow-unscoped`와 관계없이 스코프 밖 전송을 모두 거부하며, 이 줄도 그렇게 표시합니다.
 
@@ -1848,7 +1848,7 @@ gori run project sandbox off             # 차단 중지
 |---------------------|-------------|
 | (default) / `status` | 게이트 상태 표시; `--format`은 `text` 또는 `json` |
 | `on` / `enable` | 스코프가 허용하지 않는 모든 요청 차단 |
-| `off` / `disable` | 차단 중지 |
+| `off` / `disable` | 차단 중지. 둘 다 `--format json`을 받으며 `status`처럼 `{"sandbox":…}`를 출력 |
 
 > include 규칙이 없으면 샌드박스를 켤 때 규칙을 추가하기 전까지 **모든** 캡처 트래픽이 차단됩니다(`gori run project scope add …`). 이 명령은 경고 후 진행하므로 CI에서 컨테인먼트를 부트스트랩할 수 있습니다.
 
@@ -1890,7 +1890,7 @@ gori run project host-override delete 1
 |---------------------|-------------|
 | (default) | 오버라이드 목록; `--format`은 `text` 또는 `json` |
 | `add` | `--host=…` + `--ip=…`, 또는 positional `IP HOST`. `--format json`은 목록과 같은 형태(`id`, `host`, `ip`)로 새 오버라이드를 출력합니다 |
-| `update <id>` | `--host=…` + `--ip=…` (둘 다 필수) |
+| `update <id>` | `--host=…` + `--ip=…` (둘 다 필수). `--format json`은 `add`처럼 고친 오버라이드를 출력 |
 | `delete <id>` (`rm`) | id로 오버라이드 제거 |
 
 #### project network {#project-network}

@@ -1016,11 +1016,38 @@ module Gori
         abort_closing(store, "#{prefix}: #{reason}")
       end
 
+      # The refusal for a write that would duplicate an existing row (a scope rule's triple, a
+      # host override's host). Coded as MCP codes the same refusal (`INVALID_ARGUMENT`, never
+      # retryable — it is deterministic), and carrying the row that is already there as
+      # `existing_id`, so a script that meant "make sure this exists" can go on with it.
+      def self.duplicate_abort(prefix : String, reason : String, existing_id : Int64, format : Symbol,
+                               store : Store? = nil) : NoReturn
+        puts failure_json(reason, "duplicate", "INVALID_ARGUMENT", existing_id: existing_id) if format.in?(:json, :jsonl)
+        abort_closing(store, "#{prefix}: #{reason}")
+      end
+
+      # The `{ok: true, …}` object a `delete --format json` prints: what went, under the key the
+      # command named it by (`id`, or `name`/`key` for a named row) — MCP's delete tools'
+      # `{id, deleted: true}`, with `failure_json`'s `ok` so one field tells the two apart.
+      def self.delete_format_help(key : String = "id") : String
+        %(Output: text (default) | json — {"ok":true,"deleted":true,"#{key}":…}, or the NOT_FOUND failure object)
+      end
+
+      def self.deleted_json(key : String, value : Int64 | String) : String
+        JSON.build do |j|
+          j.object do
+            j.field "ok", true
+            j.field "deleted", true
+            j.field key, value
+          end
+        end
+      end
+
       # The `{ok: false, …}` object a failed `--format json` call prints on stdout: the sentence,
       # the coarse kind, the MCP error code and whether a retry may succeed. `delivered` only for
-      # a send, where whether bytes left matters.
+      # a send, where whether bytes left matters; `existing_id` only for a refused duplicate.
       def self.failure_json(reason : String, kind : String, code : String, retryable : Bool = false,
-                            delivered : Bool? = nil) : String
+                            delivered : Bool? = nil, existing_id : Int64? = nil) : String
         JSON.build do |j|
           j.object do
             j.field "ok", false
@@ -1029,6 +1056,7 @@ module Gori
             j.field "error_code", code
             j.field "retryable", retryable
             j.field("delivered", delivered) unless delivered.nil?
+            j.field("existing_id", existing_id) if existing_id
           end
         end
       end

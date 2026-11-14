@@ -240,6 +240,7 @@ module Gori
       private def self.cmd_evidence_delete(args : Array(String)) : Nil
         proj = ProjectFlags.new
         yes = false
+        format = :text
 
         positional = parse_args(args, "gori run evidence delete") do |p|
           p.banner = "Usage: gori run evidence delete ID --yes\n\n" \
@@ -247,11 +248,12 @@ module Gori
                      "why they were frozen — so prefer freezing a newer copy beside it."
           p.on("-y", "--yes", "Confirm deletion") { yes = true }
           project_options(p, proj, "update")
+          format_flag(p, [:text, :json], delete_format_help) { |f| format = f }
         end
         id = require_positional_id(positional, "gori run evidence delete", "id", "gori run evidence")
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
-          meta = store.get_evidence_meta(id) || abort("gori run evidence delete: no frozen evidence with id #{id}")
+          meta = store.get_evidence_meta(id) || not_found_abort("gori run evidence delete", "no frozen evidence with id #{id}", format, store)
           # Gated like every other destructive verb here (`issues delete`, `notes delete`, …),
           # and for the reason the help gives: a frozen copy is the one that cannot come back.
           unless yes
@@ -260,7 +262,7 @@ module Gori
           end
           abort "gori run evidence delete: NOT deleted (project busy or unwritable) — the copy is unchanged" unless store.delete_evidence(id)
           linked = meta.issue_ids.empty? ? " (orphaned)" : " linked to #{meta.issue_ids.map { |iid| "issue ##{iid}" }.join(", ")}"
-          puts "Frozen evidence ##{id}#{linked} deleted."
+          puts format == :json ? deleted_json("id", id) : "Frozen evidence ##{id}#{linked} deleted."
         end
       end
 

@@ -618,8 +618,10 @@ module Gori
           rows = store.repeaters_mcp
           by_id = rows.index_by(&.id)
           missing = ids.reject { |i| by_id.has_key?(i) }
-          abort "gori run repeater delete: no repeater session #{missing.join(", ")} — nothing was deleted " \
-                "(see `gori run repeater list`)" unless missing.empty?
+          unless missing.empty?
+            not_found_abort("gori run repeater delete", "no repeater session #{missing.join(", ")} — nothing was deleted " \
+                                                        "(see `gori run repeater list`)", format, store)
+          end
 
           unless yes
             abort "gori run repeater delete: refusing to delete #{Gori.plural(ids.size, "session")} " \
@@ -2665,18 +2667,25 @@ module Gori
         s.valid_encoding? ? CLI::Output.term_safe(s) : "0x#{payload.hexstring}"
       end
 
+      # The STDERR line for a send that failed, in text AND json mode (stdout keeps the one
+      # object). Named after the command that sent it: `gori run send` said "repeater failed:", a
+      # surface the operator never invoked (#1389). The error quotes origin-chosen bytes.
+      def self.send_failed_line(prefix : String, error : String?) : String
+        "#{prefix}: send failed: #{CLI::Output.term_line(error.to_s)}"
+      end
+
       private def self.emit_ws_result(id : Int64, result : Repeater::WsEngine::Result, format : Symbol,
                                       response_write : WriteOutcome? = nil) : Nil
-        if format == :json
-          puts ws_result_json(id, result, response_write)
-        elsif result.ok?
+        # A failure is said on STDERR in both formats: JSON keeps stdout to its one object.
+        puts ws_result_json(id, result, response_write) if format == :json
+        if !result.ok?
+          STDERR.puts send_failed_line("gori run repeater send", result.error)
+        elsif format != :json
           STDERR.puts "→ WebSocket upgraded=#{result.upgraded?} in #{CLI::Output.human_us(result.duration_us)}#{result.close_code ? " (close #{result.close_code})" : ""}"
           STDERR.puts "note: #{result.note}" if result.note
           STDERR.puts "truncated: #{result.truncated}" if result.truncated
           # A server frame's text is the remote's choice of bytes: named, never replayed raw.
           result.messages.each { |m| puts CLI::Output.term_safe(ws_transcript_line(m)) }
-        else
-          STDERR.puts "gori run repeater send: send failed: #{CLI::Output.term_line(result.error.to_s)}"
         end
       end
 
@@ -2806,6 +2815,9 @@ module Gori
             request_target: request_target, applied_rules: applied_rules,
             saved_repeater_id: saved_repeater_id, repeater_write: repeater_write,
             repeater_response_write: repeater_response_write, via: via)
+          # Stdout is the one object; the human at the terminal gets the failure too, as every
+          # other `--json` refusal (`not_found_abort`) gives it on STDERR.
+          STDERR.puts send_failed_line(prefix, result.error) unless result.ok?
         elsif result.ok?
           STDERR.puts "→ #{result.response.try(&.status) || "?"} in #{CLI::Output.human_us(result.duration_us)}#{at}#{result.incomplete? ? " (#{incomplete_reason(result, result.timed_out?)})" : ""}"
           if d = diff
@@ -2822,9 +2834,7 @@ module Gori
             print_message_text(result.head, new_body, result.body, cap, SEND_EXACT_BYTES)
           end
         else
-          # Named after the command that sent it: `gori run send` said "repeater failed:", a
-          # surface the operator never invoked (#1389).
-          STDERR.puts "#{prefix}: send failed: #{CLI::Output.term_line(result.error.to_s)}"
+          STDERR.puts send_failed_line(prefix, result.error)
           # An error and a RESPONSE are not exclusive. The engine deliberately keeps the head
           # for exactly this case (`engine.cr` — "must NOT throw the head away as a bare error
           # string"), and two shapes reach here with both: a framing error over a head gori

@@ -119,7 +119,7 @@ module Gori
         p.on("-HLINE", "--set=LINE", "Header to UPSERT (-H as in send), as 'Name: value' (repeatable); its value resolves bindings and generators, never env vars") { |v| e.push_set(parse_session_header(v, cmd)) }
         p.on("--remove=NAME", "Header to STRIP before sending (repeatable)") { |v| e.push_remove(v.strip) }
         p.on("--rule=NAME", "Extract rule (binding NAME) whose values belong to THIS slot (repeatable)") { |v| e.push_rule(v.strip) }
-        p.on("--baseline", "Make this the Authorize baseline every other slot is judged against") { e.baseline = agree(e.baseline, true, "--baseline/--no-baseline") }
+        p.on("--baseline", "Make this the Authorize baseline every other slot is judged against (the first slot by default)") { e.baseline = agree(e.baseline, true, "--baseline/--no-baseline") }
         p.on("--no-baseline", "Clear the baseline flag (the first slot then inherits it)") { e.baseline = agree(e.baseline, false, "--baseline/--no-baseline") }
         p.on("--clear-set", "Drop every set-header (combine with --set to replace them)") { e.set = [] of {String, String} }
         p.on("--clear-remove", "Drop every remove-header") { e.remove = [] of String }
@@ -346,7 +346,7 @@ module Gori
                      "  gori run session from-flow 4211 --name admin\n" \
                      "  gori run repeater 900 --slot admin"
           p.on("--name=NAME", "Name for the new slot (required; must not already exist)") { |v| slot_name = v.strip }
-          p.on("--baseline", "Make it the Authorize baseline every other slot is judged against") { baseline = true }
+          p.on("--baseline", "Make it the Authorize baseline every other slot is judged against (the first slot by default)") { baseline = true }
           p.on("--show-values", "Print the captured header values instead of [REDACTED]") { show_values = true }
           project_options(p, proj, "read and write")
         end
@@ -428,7 +428,7 @@ module Gori
           p.on("--copy-header=NAME", "Copy this request header (repeatable; at least one required)") do |v|
             copy_headers << v.strip
           end
-          p.on("--baseline", "Make it the Authorize baseline every other slot is judged against") { baseline = true }
+          p.on("--baseline", "Make it the Authorize baseline every other slot is judged against (the first slot by default)") { baseline = true }
           p.on("--show-values", "Print the captured header values instead of [REDACTED]") { show_values = true }
           project_options(p, proj, "read and write")
         end
@@ -542,22 +542,24 @@ module Gori
 
       private def self.cmd_session_rm(args : Array(String)) : Nil
         proj = ProjectFlags.new
+        format = :text
         positional = one_positional_list(args, "gori run session rm", "name") do |p|
           p.banner = "Usage: gori run session rm <name> [options]\n\n" \
                      "Delete a session slot. Any extract rule it claimed goes back to writing the\n" \
                      "GLOBAL binding table, which is where an unclaimed rule has always written."
           project_options(p, proj, "write")
+          format_flag(p, [:text, :json], delete_format_help("name")) { |f| format = f }
         end
         name = positional.first?
         abort "gori run session rm: name the slot to delete (`gori run session list`)" if name.nil?
 
         store, slots = session_slots(proj.name, proj.db)
         begin
-          abort "gori run session rm: no session slot named #{name.inspect}" unless slots.find(name)
+          not_found_abort("gori run session rm", "no session slot named #{name.inspect}", format, store) unless slots.find(name)
           baseline_before = slots.baseline_name
           abort "gori run session rm: the project could not be written — " \
                 "#{name.inspect} is still there" unless slots.remove(name)
-          puts "deleted session slot #{name.inspect}"
+          puts format == :json ? deleted_json("name", name) : "deleted session slot #{name.inspect}"
           warn_baseline_moved(baseline_before, slots, "gori run session rm")
         ensure
           store.close
