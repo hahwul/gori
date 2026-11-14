@@ -1830,8 +1830,8 @@ module Gori::Tui
     def request_close : Nil
       return unless tab = current_tab_obj
       if refs = batch_subtab_refs
-        @host.confirm("CLOSE FUZZERS", "Close #{marked_subtab_phrase(refs.size)}?\nEach template/config, its private temporary spool, and every saved run are deleted.",
-          confirm_label: "close", danger: true) { close_marked_fuzzers(refs) }
+        @host.confirm("DELETE FUZZ SESSIONS", "Delete #{marked_subtab_phrase(refs.size)} and their saved runs?\nEach template/config, its private temporary spool, and every saved run are deleted.",
+          confirm_label: "delete", danger: true) { close_marked_fuzzers(refs) }
         return
       end
       if reason = close_subtab_refusal(@current_idx)
@@ -1839,8 +1839,8 @@ module Gori::Tui
         return
       end
       ref = subtab_ref(@current_idx)
-      @host.confirm("CLOSE FUZZER", "Close fuzz session “#{tab.view.summary}”?\nIts template/config, private temporary spool, and every saved run are deleted.",
-        confirm_label: "close", danger: true) { close_named(ref) }
+      @host.confirm("DELETE FUZZ SESSION", "Delete fuzz session “#{tab.view.summary}” and its saved runs?\nIts template/config, private temporary spool, and every saved run are deleted.",
+        confirm_label: "delete", danger: true) { close_named(ref) }
     end
 
     private def close_marked_fuzzers(refs : Array(SubtabRef)) : Nil

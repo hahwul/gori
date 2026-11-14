@@ -974,7 +974,7 @@ module Gori
         "fuzz.rename-subtab", "Rename sub-tab", "Rename the active fuzz session's sub-tab chip",
         Verb::Scope::Fuzzer, available: fuzz_session, intent: :rename, section: :subtab) { |ctx| ctx.fuzzer_rename_subtab; nil }
       r.register Verb::Definition.new(
-        "fuzz.close-subtab", "Close sub-tab", "Close the active fuzz session",
+        "fuzz.close-subtab", "Delete session + runs", "Close the active fuzz sub-tab by permanently deleting its session and saved runs",
         Verb::Scope::Fuzzer, [Verb::Chord.new("w", ctrl: true)],
         available: fuzz_session, intent: :close, section: :subtab) { |ctx| ctx.fuzzer_close_subtab; nil }
       # Content-only clone of the active fuzz session (no run results / flow / links).
