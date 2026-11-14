@@ -371,10 +371,10 @@ module Gori
           # source at all means the issue is created bodiless, exactly as before.
           id = store.insert_issue(masked_title, severity, masked_host, flow_id, cvss: cvss,
             notes: body.try { |n| Env.mask_secrets(n) } || "")
-          abort_closing(store, "gori run issues create: failed to persist issue (store busy or unwritable)") if id == 0
+          busy_abort("gori run issues create", "failed to persist issue (store busy or unwritable)", store) if id == 0
           # The issue IS stored, so the refusal names it: a retry of the create would file a duplicate.
-          link_issue_repeater(store, id, repeater_id,
-            "gori run issues create: issue ##{id} created but its repeater link NOT written (store busy " \
+          link_issue_repeater(store, id, repeater_id, "gori run issues create",
+            "issue ##{id} created but its repeater link NOT written (store busy " \
             "or unwritable); retry with `gori run issues update #{id} --repeater #{repeater_id}`")
           puts issue_created_output(store, id, format)
         end
@@ -436,11 +436,11 @@ module Gori
       end
 
       # Link the issue to `--repeater`, through `Store#ensure_link` as MCP does; abort with
-      # `failure` when the link did not commit.
-      private def self.link_issue_repeater(store : Store, issue_id : Int64, repeater_id : Int64?, failure : String) : Nil
+      # `prefix: failure` when the link did not commit.
+      private def self.link_issue_repeater(store : Store, issue_id : Int64, repeater_id : Int64?, prefix : String, failure : String) : Nil
         return unless rid = repeater_id
         return if store.ensure_link(Store::LinkOwnerKind::Issue, issue_id, Store::LinkRefKind::Repeater, rid)
-        abort_closing(store, failure)
+        busy_abort(prefix, failure, store)
       end
 
       private def self.issue_flow_range_error(flow_id : Int64?) : String?
@@ -453,6 +453,7 @@ module Gori
       private def self.cmd_issues_delete(args : Array(String)) : Nil
         proj = ProjectFlags.new
         yes = false
+        format = :text
 
         positional = parse_args(args, "gori run issues delete") do |p|
           p.banner = "Usage: gori run issues delete <id>… --yes\n\n" \
@@ -461,16 +462,17 @@ module Gori
                      "`gori run issues update <id> --status=resolved` instead."
           p.on("-y", "--yes", "Confirm deletion") { yes = true }
           project_options(p, proj, "update")
+          format_flag(p, [:text, :json], delete_format_help("ids")) { |f| format = f }
         end
         ids = issue_ids(positional, "gori run issues delete")
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
-          refuse_missing_issues(store, ids, "gori run issues delete", "deleted")
+          refuse_missing_issues(store, ids, "gori run issues delete", "deleted", format)
           if err = issue_delete_confirmation_error(ids, yes)
             abort_closing(store, "gori run issues delete: #{err}")
           end
-          abort_closing(store, "gori run issues delete: #{issue_noun(ids)} NOT deleted (store busy or unwritable)") unless store.delete_issues(ids)
-          puts "#{issue_noun(ids).capitalize} deleted."
+          busy_abort("gori run issues delete", "#{issue_noun(ids)} NOT deleted (store busy or unwritable)", store) unless store.delete_issues(ids)
+          puts format == :json ? deleted_json(ids) : "#{issue_noun(ids).capitalize} deleted."
         end
       end
 
@@ -486,10 +488,11 @@ module Gori
       end
 
       # Every id must name an issue before anything is written — `history delete`'s rule.
-      private def self.refuse_missing_issues(store : Store, ids : Array(Int64), cmd : String, verb : String) : Nil
+      private def self.refuse_missing_issues(store : Store, ids : Array(Int64), cmd : String, verb : String,
+                                             format : Symbol = :text) : Nil
         missing = ids.reject { |id| store.get_issue(id) }
         return if missing.empty?
-        abort_closing(store, "#{cmd}: no issue with id #{missing.join(", ")}#{ids.size > 1 ? " — nothing was #{verb}" : ""}")
+        not_found_abort(cmd, "no issue with id #{missing.join(", ")}#{ids.size > 1 ? " — nothing was #{verb}" : ""}", format, store)
       end
 
       # `issue #3`, or `3 issues (#1, #2, #5)`.
@@ -607,10 +610,10 @@ module Gori
           if fields && !store.update_issues(ids, title: masked_title, severity: severity, notes: masked_notes, status: status,
                cvss: cvss, clear_cvss: clear_cvss, host: host.try { |h| Env.mask_secrets(h) }, clear_host: clear_host,
                flow_id: flow_id, clear_flow: clear_flow)
-            abort_closing(store, "gori run issues update: project is busy (write did not commit) — try again")
+            busy_abort("gori run issues update", "project is busy (write did not commit) — try again", store)
           end
           # One id whenever there is a repeater: `issues_batch_update_error` refused the rest.
-          link_issue_repeater(store, ids[0], repeater_id, "gori run issues update: repeater link NOT written (store busy or unwritable); try again")
+          link_issue_repeater(store, ids[0], repeater_id, "gori run issues update", "repeater link NOT written (store busy or unwritable); try again")
           puts ids.size == 1 ? "Issue ##{ids[0]} updated successfully." : "#{issue_noun(ids).capitalize} updated."
         end
       end

@@ -44,6 +44,7 @@ module Gori
         proj = ProjectFlags.new
         query : String? = nil
         yes = false
+        format = :text
 
         # Same two pre-passes the listing runs, for the same reason: `-q` with a separate
         # value, and QL negation terms ("-status:200"), which OptionParser would otherwise
@@ -59,6 +60,7 @@ module Gori
           project_options(p, proj, "update")
           p.on("-qQL", "--query=QL", "Delete every flow matching this QL query (host: status:>=500 method: …)") { |v| query = once(query, v, "-q/--query") }
           p.on("--yes", "Actually delete the query's matches (required — there is no interactive prompt here)") { yes = true }
+          format_flag(p, [:text, :json], delete_format_help("ids")) { |f| format = f }
         end
         query, dropped = Run.compose_history_query(query, [] of String, neg_terms)
         Run.warn_dropped_query_terms("history delete", dropped)
@@ -67,9 +69,9 @@ module Gori
           abort "gori run history delete: #{err}"
         end
         if q = query
-          delete_by_query(q, yes, proj.name, proj.db)
+          delete_by_query(q, yes, proj.name, proj.db, format)
         else
-          delete_by_id(positional, proj.name, proj.db)
+          delete_by_id(positional, proj.name, proj.db, format)
         end
       end
 
@@ -101,7 +103,7 @@ module Gori
       # never becomes "two of three gone, success". The rest go in ONE transaction
       # (`Store#delete_flows`), so a busy project deletes all of them or none.
       private def self.delete_by_id(positional : Array(String), project_name : String?,
-                                    db_path : String?) : Nil
+                                    db_path : String?, format : Symbol = :text) : Nil
         ids = positional.map { |v| parse_flow_id(v, "gori run history delete") }.uniq!
 
         with_store(resolve_read_project(project_name, db_path)) do |store|
@@ -109,19 +111,19 @@ module Gori
           # "does this exist?" — a 40 MB response would be read and discarded.
           missing = ids.reject { |id| store.flow_row(id) }
           unless missing.empty?
-            abort "gori run history delete: no flow with id #{missing.join(", ")}" \
-                  "#{ids.size > 1 ? " — nothing was deleted" : ""}"
+            not_found_abort("gori run history delete", "no flow with id #{missing.join(", ")}" \
+                                                       "#{ids.size > 1 ? " — nothing was deleted" : ""}", format)
           end
           unless store.delete_flows(ids)
-            abort "gori run history delete: #{ids.size == 1 ? "flow ##{ids[0]}" : "flows"} NOT deleted (project busy) — try again"
+            busy_abort("gori run history delete", "#{ids.size == 1 ? "flow ##{ids[0]}" : "flows"} NOT deleted (project busy) — try again")
           end
-          puts ids.size == 1 ? "Flow ##{ids[0]} deleted." : "#{ids.size} flows deleted (#{ids.map { |id| "##{id}" }.join(", ")})."
+          puts format == :json ? deleted_json(ids) : ids.size == 1 ? "Flow ##{ids[0]} deleted." : "#{ids.size} flows deleted (#{ids.map { |id| "##{id}" }.join(", ")})."
         end
       end
 
       # `history delete -q QL [--yes]` — every flow the query names.
       private def self.delete_by_query(q : String, yes : Bool, project_name : String?,
-                                       db_path : String?) : Nil
+                                       db_path : String?, format : Symbol = :text) : Nil
         # BEFORE the store is opened, so a refusal costs nothing and cannot be confused with
         # a store error. The listing only WARNS about these; a delete must not.
         if err = delete_query_error(q)
@@ -156,6 +158,7 @@ module Gori
         begin
           if ids.empty?
             STDERR.puts "gori run history delete: no flows match #{q.inspect} — nothing deleted"
+            puts deleted_json(ids) if format == :json
             return
           end
           if err = delete_confirmation_error(q, ids.size, yes)
@@ -167,12 +170,12 @@ module Gori
           # counted, so a mid-run failure reports what actually went rather than all-or-nothing.
           ids.each_slice(DELETE_BATCH) do |chunk|
             unless store.delete_flows(chunk)
-              abort "gori run history delete: stopped after #{Gori.plural(deleted, "flow")} " \
-                    "(project busy) — the rest are still there; re-run to continue"
+              busy_abort("gori run history delete", "stopped after #{Gori.plural(deleted, "flow")} " \
+                                                    "(project busy) — the rest are still there; re-run to continue")
             end
             deleted += chunk.size
           end
-          puts "Deleted #{Gori.plural(deleted, "flow")} matching #{q.inspect}."
+          puts format == :json ? deleted_json(ids) : "Deleted #{Gori.plural(deleted, "flow")} matching #{q.inspect}."
         ensure
           store.close
         end
@@ -319,6 +322,7 @@ module Gori
       private def self.cmd_history_clear(args : Array(String)) : Nil
         proj = ProjectFlags.new
         yes = false
+        format = :text
 
         parse_no_positionals(args, "gori run history clear",
           "this deletes ALL flows, not those ids. To delete one flow: `gori run history delete <id>`") do |p|
@@ -326,16 +330,17 @@ module Gori
                      "Delete ALL captured flows in the project. This can't be undone."
           project_options(p, proj, "update")
           p.on("--yes", "Actually do it (required — there is no interactive prompt here)") { yes = true }
+          format_flag(p, [:text, :json], delete_format_help("count")) { |f| format = f }
         end
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
           n = store.count?
-          abort "gori run history clear: could not count the flows (project busy) — nothing deleted" unless n
+          busy_abort("gori run history clear", "could not count the flows (project busy) — nothing deleted") unless n
           unless yes
             abort "gori run history clear: refusing to delete #{Gori.plural(n, "flow")} without --yes"
           end
-          abort "gori run history clear: NOT cleared (project busy) — every flow is still there" unless store.clear_flows
-          puts "Deleted #{Gori.plural(n, "flow")}."
+          busy_abort("gori run history clear", "NOT cleared (project busy) — every flow is still there") unless store.clear_flows
+          puts format == :json ? deleted_count_json(n) : "Deleted #{Gori.plural(n, "flow")}."
         end
       end
 

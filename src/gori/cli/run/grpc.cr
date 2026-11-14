@@ -233,6 +233,7 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         all = false
+        format = :text
 
         target = one_positional(args, "gori run grpc forget", "TARGET") do |p|
           p.banner = "Usage: gori run grpc forget TARGET | --all\n\n" \
@@ -242,6 +243,8 @@ module Gori
           p.on("--project=NAME", "Project to use (#{DEFAULT_PROJECT_HELP})") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file") { |v| db_path = v }
           p.on("--all", "Forget every cached reflection target") { all = true }
+          format_flag(p, [:text, :json], %(Output: text (default) | json — {"ok":true,"deleted":true,"target":…} ) +
+                                         %((--all: "count":N), or the NOT_FOUND / PROJECT_BUSY failure object)) { |f| format = f }
         end
 
         chosen = target
@@ -256,15 +259,27 @@ module Gori
           if (t = chosen) && !known.includes?(t)
             # A typo'd target must not print "forgotten" — that reads as "the schema is gone"
             # while the lens is still in place.
-            abort "gori run grpc forget: no cached reflection for '#{t}'#{known.empty? ? "" : " (have: #{known.join(", ")})"}"
+            not_found_abort("gori run grpc forget", "no cached reflection for '#{t}'#{known.empty? ? "" : " (have: #{known.join(", ")})"}", format)
           end
           saved = Gori::Protobuf::Schemas.forget(store, chosen)
-          puts chosen ? "forgot #{chosen}" : "forgot #{known.size} reflected target(s)"
-          puts "schema: #{Gori::Protobuf::Schemas.status}"
-          puts "  ! not saved (project busy); it comes back when you reopen this project" unless saved
+          grpc_forget_report(store, chosen, known.size, saved, format)
           saved
         end
         exit 1 unless committed
+      end
+
+      # What `grpc forget` prints. The text path prints its result and then says it was not
+      # saved; `--json` gets the one answer instead — the forget only happened in this process.
+      private def self.grpc_forget_report(store : Store, target : String?, known : Int32, saved : Bool,
+                                          format : Symbol) : Nil
+        if format == :json
+          busy_abort("gori run grpc forget", "not saved (project busy); it comes back when you reopen this project", store) unless saved
+          puts target ? deleted_json("target", target) : deleted_count_json(known.to_i64)
+          return
+        end
+        puts target ? "forgot #{target}" : "forgot #{known} reflected target(s)"
+        puts "schema: #{Gori::Protobuf::Schemas.status}"
+        puts "  ! not saved (project busy); it comes back when you reopen this project" unless saved
       end
     end
   end

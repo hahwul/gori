@@ -71,7 +71,7 @@ module Gori
           in .issue_gone? then abort "gori run evidence freeze: issue ##{iid} was deleted before the copy was written"
           in .quota?
             abort "gori run evidence freeze: evidence quota reached (#{store.evidence_bytes} of #{Evidence::QUOTA_BYTES} bytes used) — delete a frozen copy first"
-          in .busy? then abort "gori run evidence freeze: nothing frozen (project busy or unwritable)"
+          in .busy? then busy_abort("gori run evidence freeze", "nothing frozen (project busy or unwritable)")
           in .ok?   then nil
           end
           meta = store.get_evidence_meta(id) || abort("gori run evidence freeze: frozen evidence ##{id} vanished before it could be read back")
@@ -224,7 +224,7 @@ module Gori
           puts "Frozen evidence ##{meta.id} was already linked to issue ##{iid}."
           return
         end
-        abort "gori run evidence link: NOT linked (project busy or either row disappeared)" unless store.link_evidence(meta.id, iid)
+        busy_abort("gori run evidence link", "NOT linked (project busy or either row disappeared)") unless store.link_evidence(meta.id, iid)
         puts "Linked frozen evidence ##{meta.id} to issue ##{iid}."
       end
 
@@ -232,7 +232,7 @@ module Gori
         unless meta.issue_ids.includes?(iid)
           abort "gori run evidence unlink: frozen evidence ##{meta.id} is not linked to issue ##{iid}"
         end
-        abort "gori run evidence unlink: NOT unlinked (project busy or link disappeared)" unless store.unlink_evidence(meta.id, iid)
+        busy_abort("gori run evidence unlink", "NOT unlinked (project busy or link disappeared)") unless store.unlink_evidence(meta.id, iid)
         orphaned = store.get_evidence_meta(meta.id).try(&.orphaned?) || false
         puts "Unlinked frozen evidence ##{meta.id} from issue ##{iid}.#{orphaned ? " The snapshot is now orphaned." : ""}"
       end
@@ -260,7 +260,7 @@ module Gori
             abort "gori run evidence delete: refusing to delete frozen evidence ##{id} without --yes; " \
                   "its bytes cannot be recovered"
           end
-          abort "gori run evidence delete: NOT deleted (project busy or unwritable) — the copy is unchanged" unless store.delete_evidence(id)
+          busy_abort("gori run evidence delete", "NOT deleted (project busy or unwritable) — the copy is unchanged") unless store.delete_evidence(id)
           linked = meta.issue_ids.empty? ? " (orphaned)" : " linked to #{meta.issue_ids.map { |iid| "issue ##{iid}" }.join(", ")}"
           puts format == :json ? deleted_json("id", id) : "Frozen evidence ##{id}#{linked} deleted."
         end

@@ -42,7 +42,7 @@ module Gori
           store.record_script_notice(summary, detail.try(&.presence), level,
             "gori run pid #{Process.pid}", Process.pid.to_i64)
         end
-        abort "gori run notify: project is busy (write did not commit) — try again" if id <= 0
+        busy_abort("gori run notify", "project is busy (write did not commit) — try again") if id <= 0
         puts notify_output(id, project.name, AgentReply.summary_line(summary), windows, format)
       end
 

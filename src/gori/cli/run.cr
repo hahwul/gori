@@ -156,8 +156,14 @@ module Gori
     # capturing instance (SQLite WAL; #752).
     module Run
       # A broken STDOUT pipe (`gori run … | head`) is answered once, in `CLI.run`.
+      # Did this invocation ask for JSON on stdout? `format_flag` — the one parser every
+      # `--format` goes through — keeps it, for a refusal raised where no `format` is in reach:
+      # `open_store`, and the write that did not commit (`busy_abort`).
+      class_property? json_stdout : Bool = false
+
       def self.dispatch(args : Array(String)) : Nil
         route_logs_to_stderr
+        self.json_stdout = false
         repeated_target_flag_error(args).try { |err| abort err }
         args = hoist_target_flags(args)
         dispatch_subcommand(args)
@@ -498,14 +504,22 @@ module Gori
       # `probe rules enable a b` and `probe mode passive active`. Four of those are mutations.
       private def self.one_positional_list(args : Array(String), prefix : String, what : String,
                                            & : OptionParser ->) : Array(String)
-        one_positional_list(parse_args(args, prefix) { |p| yield p }, [] of String, prefix, what)
+        refuse_extra_positionals(parse_args(args, prefix) { |p| yield p }, prefix, what)
       end
 
       # …and from INSIDE an `unknown_args` handler, for a parser kept whole because its usage
-      # is printed later (`redact use`, `repeater move`).
+      # is printed later (`redact use`, `repeater move`). Minus the stray flags: OptionParser
+      # runs `unknown_args` BEFORE `invalid_option`, so a flag the parser does not know was
+      # counted as a second token — `redact rm NAME --json` refused as "too many arguments".
+      # Left out here, it reaches `invalid_option` and is named as unknown.
       private def self.one_positional_list(before : Array(String), after : Array(String),
                                            prefix : String, what : String) : Array(String)
-        all = before + after
+        refuse_extra_positionals(before.reject { |a| a.starts_with?('-') && a != "-" } + after, prefix, what)
+      end
+
+      # Only `before` is filtered, and only there: a word after `--` is a positional whatever it
+      # starts with, and `parse_args` has already joined the two halves.
+      private def self.refuse_extra_positionals(all : Array(String), prefix : String, what : String) : Array(String)
         if msg = extra_positional_error(all, prefix, what)
           abort msg
         end
@@ -616,7 +630,7 @@ module Gori
       private def self.resolve_read_project(project_name : String?, db_path : String?) : Project
         refuse_two_targets(project_name, db_path)
         if path = db_path
-          abort "gori run: --db is not a readable file: #{path}" unless File.exists?(path) && !File.directory?(path)
+          project_abort("--db is not a readable file: #{path}", "not_found", "NOT_FOUND") unless File.exists?(path) && !File.directory?(path)
           return Project.new(File.basename(File.dirname(path)), path)
         end
         registry = ProjectRegistry.new(Paths.projects_dir)
@@ -624,18 +638,27 @@ module Gori
           found = begin
             registry.find(name)
           rescue ex : ProjectRegistry::Ambiguous
-            abort "gori run: #{ex.message}"
+            project_abort(ex.message.to_s, "ambiguous", "INVALID_ARGUMENT")
           end
           return found if found
-          abort "gori run: no project matching '#{CLI::Output.term_safe(name)}'#{have_projects(registry, name)}"
+          project_abort("no project matching '#{CLI::Output.term_safe(name)}'#{have_projects(registry, name)}", "not_found", "NOT_FOUND")
         end
         case chosen = default_project(registry, ENV[DEFAULT_PROJECT_ENV]?, read_default_pin)
-        in String then abort "gori run: #{chosen}"
-        in Nil    then abort "gori run: no projects yet — capture some traffic first, create one with `gori run project create NAME`, or pass --db PATH"
+        in String then project_abort(chosen, "no_project", "NO_PROJECT")
+        in Nil    then project_abort("no projects yet — capture some traffic first, create one with `gori run project create NAME`, or pass --db PATH", "no_project", "NO_PROJECT")
         in Tuple
           announce_default_project(*chosen)
           chosen[0]
         end
+      end
+
+      # `resolve_read_project`'s refusal. Under `--json` stdout gets the failed-call object too,
+      # coded as MCP codes the same answer: `NOT_FOUND` for a name that matches nothing (its
+      # `switch_project`), `INVALID_ARGUMENT` for one that matches two, `NO_PROJECT` when there
+      # is none to default to.
+      private def self.project_abort(reason : String, kind : String, code : String) : NoReturn
+        puts failure_json(reason, kind, code) if json_stdout?
+        abort "gori run: #{reason}"
       end
 
       # Whether this process has already said which project it defaulted to.
@@ -922,7 +945,13 @@ module Gori
         end
         store
       rescue ex : DB::Error | SQLite3::Exception
-        abort open_failure_message(ex, project, read_only) if abort_on_failure
+        raise ex unless abort_on_failure
+        message = open_failure_message(ex, project, read_only)
+        puts open_failure_json(ex, message.lchop("gori run: "), read_only) if json_stdout?
+        abort message
+      rescue ex : Gori::Error
+        # Not a database, or one a newer gori wrote: `CLI.run` prints the line, as it always did.
+        puts failure_json(ex.message.to_s, "open_failed", "NO_PROJECT") if abort_on_failure && json_stdout?
         raise ex
       end
 
@@ -1024,6 +1053,36 @@ module Gori
                                store : Store? = nil) : NoReturn
         puts failure_json(reason, "duplicate", "INVALID_ARGUMENT", existing_id: existing_id) if format.in?(:json, :jsonl)
         abort_closing(store, "#{prefix}: #{reason}")
+      end
+
+      # The refusal for a write that did not commit: a peer gori holds the project's writer slot,
+      # or the file (the project's, or settings.json for a global row) is not writable. Coded as
+      # MCP codes both (`PROJECT_BUSY`, retryable — see `Tools#busy`). It reads `json_stdout?`
+      # instead of taking a `format`, so the command that prints no JSON never prints this one.
+      def self.busy_abort(prefix : String, reason : String, store : Store? = nil) : NoReturn
+        puts failure_json(reason, "busy", "PROJECT_BUSY", retryable: true) if json_stdout?
+        abort_closing(store, "#{prefix}: #{reason}")
+      end
+
+      # `open_store`'s refusal as the failed-call object. A peer's lock clears by itself, so it
+      # is the retryable `PROJECT_BUSY`; a file that is not a database, or cannot be written, is
+      # what MCP starts unbound over and answers `NO_PROJECT` for.
+      def self.open_failure_json(ex : Exception, message : String, read_only : Bool) : String
+        if lock_failure_hint(ex.message.to_s, read_only)
+          failure_json(message, "busy", "PROJECT_BUSY", retryable: true)
+        else
+          failure_json(message, "open_failed", "NO_PROJECT")
+        end
+      end
+
+      # `delete --format json` for a command that takes several ids (always `ids`, also for
+      # one, so the command has one shape) and for one that empties a table (`count`).
+      def self.deleted_json(ids : Array(Int64)) : String
+        {ok: true, deleted: true, ids: ids}.to_json
+      end
+
+      def self.deleted_count_json(count : Int64) : String
+        {ok: true, deleted: true, count: count}.to_json
       end
 
       # The `{ok: true, …}` object a `delete --format json` prints: what went, under the key the
@@ -2150,8 +2209,9 @@ module Gori
       # one format, naming where it does exist (`RAW_ROUTE`).
       private def self.format_flag(p : OptionParser, allowed : Array(Symbol), help : String,
                                    refused : {Symbol, String}? = nil, &set : Symbol ->) : Nil
-        p.on("--format=FMT", help) { |v| set.call(parse_format(v, allowed, refused)) }
-        p.on("--json", "Same as --format=json") { set.call(:json) } if allowed.includes?(:json)
+        pick = ->(f : Symbol) { self.json_stdout = f.in?(:json, :jsonl); set.call(f) }
+        p.on("--format=FMT", help) { |v| pick.call(parse_format(v, allowed, refused)) }
+        p.on("--json", "Same as --format=json") { pick.call(:json) } if allowed.includes?(:json)
       end
 
       # `--project=NAME` / `--db=PATH`, the two ways a command names its project. A class and

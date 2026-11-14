@@ -100,7 +100,7 @@ module Gori
           # saying "this is what I am working on now", the same thing `^N` means in the TUI
           # — which is what `Notes.create` persists.
           new_id = Notes.create(store, body)
-          new_id || abort_closing(store, "gori run notes create: project is busy (write did not commit) — try again")
+          new_id || busy_abort("gori run notes create", "project is busy (write did not commit) — try again", store)
           # The position is a DISPLAY figure read back after the commit, so it names the note
           # where it actually landed among a peer's; a peer that deletes it in that instant
           # leaves nothing to number, and the id is then the only honest thing to print.
@@ -157,7 +157,7 @@ module Gori
         id = doc.notes[resolve_note_index(store, doc, n, note_id, "gori run notes update")].id
         case Notes.update(store, id, body, append: append)
         when .busy?
-          abort_closing(store, "gori run notes update: project is busy (write did not commit) — try again")
+          busy_abort("gori run notes update", "project is busy (write did not commit) — try again", store)
         when .missing?
           abort_closing(store, "gori run notes update: note (id #{id}) was deleted before it could be updated")
         end
@@ -200,12 +200,13 @@ module Gori
       end
 
       # The 0-based index of the note `<n>` or `--id ID` names, or abort naming what is missing.
-      private def self.resolve_note_index(store : Store, doc : Notes::Doc, n : Int32?, id : Int64?, cmd : String) : Int32
+      private def self.resolve_note_index(store : Store, doc : Notes::Doc, n : Int32?, id : Int64?, cmd : String,
+                                          format : Symbol = :text) : Int32
         if id
-          doc.notes.index { |e| e.id == id } || abort_closing(store, "#{cmd}: no note with id #{id}")
+          doc.notes.index { |e| e.id == id } || not_found_abort(cmd, "no note with id #{id}", format, store)
         else
           n = n.not_nil!
-          n <= doc.size || abort_closing(store, "#{cmd}: no note ##{n} (this project has #{Gori.plural(doc.size, "note")})")
+          n <= doc.size || not_found_abort(cmd, "no note ##{n} (this project has #{Gori.plural(doc.size, "note")})", format, store)
           n - 1
         end
       end
@@ -226,6 +227,7 @@ module Gori
         proj = ProjectFlags.new
         yes = false
         note_id : Int64? = nil
+        format = :text
 
         positional = parse_args(args, "gori run notes delete") do |p|
           p.banner = "Usage: gori run notes delete <n>|--id ID --yes [options]\n\n" \
@@ -233,6 +235,7 @@ module Gori
           p.on("-y", "--yes", "Confirm the deletion (required — there is no interactive prompt here)") { yes = true }
           p.on("--id=ID", "Address the note by its stable id (the listing's \"id N\") instead of <n>") { |v| note_id = parse_id(v, "gori run notes delete", "--id") }
           project_options(p, proj, "update")
+          format_flag(p, [:text, :json], delete_format_help) { |f| format = f }
         end
 
         abort "gori run notes delete: pass <n> or --id ID, not both" if note_id && !positional.empty?
@@ -242,7 +245,7 @@ module Gori
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
           persisted = Notes.load(store)
-          idx = resolve_note_index(store, persisted, n_arg, note_id, "gori run notes delete")
+          idx = resolve_note_index(store, persisted, n_arg, note_id, "gori run notes delete", format)
           n = idx + 1
           target = persisted.notes[idx]
           # Gated AFTER the note is resolved, so the refusal can name the text that would go —
@@ -273,8 +276,8 @@ module Gori
           # reported success. (`Notes.delete` would be the smaller call but it re-clamps `cur`
           # by POSITION, which is exactly the drift `keep_id` above exists to avoid.)
           merged = Notes.save(store, [] of Notes::NoteEntry, Set{target_id}, keep_id, persisted.next_id)
-          merged || abort_closing(store, "gori run notes delete: project is busy (write did not commit) — try again")
-          puts "#{note_ref(idx, target_id)} deleted."
+          merged || busy_abort("gori run notes delete", "project is busy (write did not commit) — try again", store)
+          puts format == :json ? deleted_json("id", target_id) : "#{note_ref(idx, target_id)} deleted."
         end
       end
 

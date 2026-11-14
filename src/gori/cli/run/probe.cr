@@ -339,16 +339,16 @@ module Gori
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
           if c = code
             n = store.open_probe_issue_count(code: c)
-            abort "gori run probe dismiss: NOT applied (project busy) — the findings are unchanged" unless store.dismiss_probe_by_code(c)
+            busy_abort("gori run probe dismiss", "NOT applied (project busy) — the findings are unchanged") unless store.dismiss_probe_by_code(c)
             puts "Dismissed #{n} open \"#{c}\" finding#{n == 1 ? "" : "s"}."
           elsif hst = host
             n = store.open_probe_issue_count(host: hst)
-            abort "gori run probe dismiss: NOT applied (project busy) — the findings are unchanged" unless store.dismiss_probe_by_host(hst)
+            busy_abort("gori run probe dismiss", "NOT applied (project busy) — the findings are unchanged") unless store.dismiss_probe_by_host(hst)
             puts "Dismissed #{n} open finding#{n == 1 ? "" : "s"} on #{hst}."
           elsif iid = id
             issue = store.get_probe_issue(iid) || abort("gori run probe dismiss: no probe finding with id #{iid}")
             landed = Probe::Triage.toggle_dismiss(store, issue)
-            abort "gori run probe dismiss: NOT applied (project busy) — finding ##{iid} is unchanged" if landed == issue.status
+            busy_abort "gori run probe dismiss", "NOT applied (project busy) — finding ##{iid} is unchanged" if landed == issue.status
             puts "Finding ##{issue.id} is now #{landed.label}."
           end
         end
@@ -395,7 +395,7 @@ module Gori
             puts(format == :json ? probe_promote_json(issue.id, res) : "Finding ##{issue.id} was already promoted#{to}.")
           in Probe::Triage::Outcome::Failed
             # Nothing was written — exit non-zero so a script retries rather than moving on.
-            abort "gori run probe promote: finding ##{issue.id} NOT promoted (store busy or unwritable); it is unchanged"
+            busy_abort("gori run probe promote", "finding ##{issue.id} NOT promoted (store busy or unwritable); it is unchanged")
           end
         end
       end
@@ -404,6 +404,7 @@ module Gori
         proj = ProjectFlags.new
         all = false
         yes = false
+        format = :text
 
         positional = one_positional_list(args, "gori run probe delete", "<id>") do |p|
           p.banner = "Usage: gori run probe delete <id> | --all --yes\n\n" \
@@ -415,6 +416,8 @@ module Gori
           project_options(p, proj, "write")
           p.on("--all", "Delete EVERY probe finding AND every suppression in the project") { all = true }
           p.on("--yes", "Required with --all (there is no interactive prompt here)") { yes = true }
+          format_flag(p, [:text, :json], %(Output: text (default) | json — {"ok":true,"deleted":true,"id":…} ) +
+                                         %((--all: "count":N), or the NOT_FOUND failure object)) { |f| format = f }
         end
 
         id = parse_probe_issue_id(positional.first?, "gori run probe delete")
@@ -423,18 +426,23 @@ module Gori
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
           if all
-            n = store.count_probe_issues
-            unless yes
-              abort "gori run probe delete: refusing to delete #{Gori.plural(n, "finding")} (and every suppression) without --yes"
-            end
-            abort "gori run probe delete: NOT cleared (project busy) — every finding is still there" unless store.clear_probe_issues
-            puts "Deleted #{Gori.plural(n, "finding")} and cleared every suppression."
+            probe_delete_all(store, yes, format)
           elsif iid = id
-            issue = store.get_probe_issue(iid) || abort("gori run probe delete: no probe finding with id #{iid}")
-            abort "gori run probe delete: finding ##{issue.id} NOT deleted (project busy)" unless store.delete_probe_issue(issue.id)
-            puts "Deleted finding ##{issue.id}."
+            issue = store.get_probe_issue(iid) || not_found_abort("gori run probe delete", "no probe finding with id #{iid}", format)
+            busy_abort("gori run probe delete", "finding ##{issue.id} NOT deleted (project busy)") unless store.delete_probe_issue(issue.id)
+            puts format == :json ? deleted_json("id", issue.id) : "Deleted finding ##{issue.id}."
           end
         end
+      end
+
+      # `probe delete --all`: every finding and every suppression, behind `--yes`.
+      private def self.probe_delete_all(store : Store, yes : Bool, format : Symbol) : Nil
+        n = store.count_probe_issues
+        unless yes
+          abort "gori run probe delete: refusing to delete #{Gori.plural(n, "finding")} (and every suppression) without --yes"
+        end
+        busy_abort("gori run probe delete", "NOT cleared (project busy) — every finding is still there") unless store.clear_probe_issues
+        puts format == :json ? deleted_count_json(n.to_i64) : "Deleted #{Gori.plural(n, "finding")} and cleared every suppression."
       end
 
       # --- scan rules + mode ----------------------------------------------------------------
@@ -520,7 +528,7 @@ module Gori
             else
               store.set_probe_rule_enabled(id, enabled)
             end
-          abort "gori run probe rules #{verb}: NOT applied (project busy) — rule '#{id}' is unchanged" unless ok
+          busy_abort("gori run probe rules #{verb}", "NOT applied (project busy) — rule '#{id}' is unchanged") unless ok
           puts "Rule '#{id}' is now #{enabled ? "enabled" : "disabled"}."
         end
       end
@@ -572,7 +580,7 @@ module Gori
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
           id = store.insert_probe_custom_rule(t, description, side, region, match_kind, pat, severity)
-          abort "gori run probe rules add: failed to persist the rule (store busy or unwritable)" if id == 0
+          busy_abort("gori run probe rules add", "failed to persist the rule (store busy or unwritable)") if id == 0
           puts probe_rule_added_output(store, id, format)
         end
       end
@@ -664,7 +672,7 @@ module Gori
           r = probe_rule_update(f, prev)
           abort_closing(store, "#{cmd}: #{r}") if r.is_a?(String)
           unless store.update_probe_custom_rule(row_id, r.title, r.description, r.side, r.region, r.kind, r.pattern, r.severity)
-            abort_closing(store, "#{cmd}: custom rule '#{id}' NOT updated (project busy) — it keeps its previous pattern")
+            busy_abort(cmd, "custom rule '#{id}' NOT updated (project busy) — it keeps its previous pattern", store)
           end
           puts "Custom rule '#{id}' updated."
         end
@@ -703,7 +711,7 @@ module Gori
           unless store.probe_custom_rules.any? { |r| r.id == row_id }
             not_found_abort("gori run probe rules delete", "no custom rule with id '#{id}'", format, store)
           end
-          abort "gori run probe rules delete: custom rule '#{id}' NOT deleted (project busy)" unless store.delete_probe_custom_rule(row_id)
+          busy_abort("gori run probe rules delete", "custom rule '#{id}' NOT deleted (project busy)") unless store.delete_probe_custom_rule(row_id)
           puts format == :json ? deleted_json("id", id) : "Custom rule '#{id}' deleted."
         end
       end
@@ -735,7 +743,7 @@ module Gori
         with_store(resolve_read_project(project_name, db_path)) do |store|
           if w = want
             mode = Probe::Mode.from_setting(w)
-            store.set_probe_mode(mode) || abort_closing(store, "gori run probe mode: project is busy (write did not commit) — try again")
+            store.set_probe_mode(mode) || busy_abort("gori run probe mode", "project is busy (write did not commit) — try again", store)
             puts "Scan mode set to #{mode.label}."
           else
             puts store.probe_mode.label

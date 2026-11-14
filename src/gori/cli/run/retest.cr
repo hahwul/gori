@@ -155,7 +155,7 @@ module Gori
           case status
           in .issue_gone? then abort "gori run retest add: issue ##{iid} was deleted before the step was written"
           in .step_gone?  then abort "gori run retest add: the step disappeared before it could be written"
-          in .busy?       then abort "gori run retest add: nothing added (project busy or unwritable)"
+          in .busy?       then busy_abort("gori run retest add", "nothing added (project busy or unwritable)")
           in .ok?         then nil
           end
           step = store.get_retest_step(id) || abort("gori run retest add: step ##{id} vanished before it could be read back")
@@ -199,7 +199,7 @@ module Gori
           case store.update_retest_step(id, role: role, assertion: stored_assertion)
           in .issue_gone? then abort "gori run retest update: the issue was deleted before the edit landed"
           in .step_gone?  then abort "gori run retest update: step ##{id} was deleted before the edit landed"
-          in .busy?       then abort "gori run retest update: NOT updated (project busy or unwritable)"
+          in .busy?       then busy_abort("gori run retest update", "NOT updated (project busy or unwritable)")
           in .ok?         then nil
           end
           step = store.get_retest_step(id) || abort("gori run retest update: step ##{id} vanished before it could be read back")
@@ -226,7 +226,7 @@ module Gori
           step = store.get_retest_step(id) || not_found_abort("gori run retest remove", "no retest step with id #{id}", format, store)
           case store.remove_retest_step(id)
           in .issue_gone?, .step_gone? then abort "gori run retest remove: step ##{id} was already gone"
-          in .busy?                    then abort "gori run retest remove: NOT removed (project busy or unwritable)"
+          in .busy?                    then busy_abort("gori run retest remove", "NOT removed (project busy or unwritable)")
           in .ok?                      then nil
           end
           if format == :json
@@ -264,7 +264,7 @@ module Gori
           abort "gori run retest move: no retest step with id #{id}" unless store.get_retest_step(id)
           case store.move_retest_step(id, pos)
           in .issue_gone?, .step_gone? then abort "gori run retest move: step ##{id} was deleted before the move landed"
-          in .busy?                    then abort "gori run retest move: NOT moved (project busy or unwritable)"
+          in .busy?                    then busy_abort("gori run retest move", "NOT moved (project busy or unwritable)")
           in .ok?                      then nil
           end
           step = store.get_retest_step(id) || abort("gori run retest move: step ##{id} vanished before it could be read back")
@@ -300,7 +300,7 @@ module Gori
           unless yes
             abort "gori run retest clear: this would delete #{Gori.plural(n, "step")} from issue ##{iid} — pass --yes to do it"
           end
-          abort "gori run retest clear: NOT cleared (project busy or unwritable)" unless store.clear_retest_steps(iid)
+          busy_abort("gori run retest clear", "NOT cleared (project busy or unwritable)") unless store.clear_retest_steps(iid)
           puts "Cleared #{n} retest step#{n == 1 ? "" : "s"} from issue ##{iid}."
         end
       end
@@ -481,7 +481,7 @@ module Gori
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
           run = store.get_retest_run(id) || not_found_abort("gori run retest forget", "no retest run with id #{id}", format, store)
-          abort "gori run retest forget: NOT deleted (project busy or unwritable)" unless store.delete_retest_run(id)
+          busy_abort("gori run retest forget", "NOT deleted (project busy or unwritable)") unless store.delete_retest_run(id)
           if format == :json
             puts deleted_json("id", id)
           else

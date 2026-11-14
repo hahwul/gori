@@ -127,7 +127,7 @@ module Gori
         text = clear ? "" : tag.to_s
         matched = store.sitemap_node_exists?(host, key)
         js_node = matched == false && JsRefs.unrequested_node?(store, host, key)
-        abort "gori run sitemap tag: NOT applied (project busy) — the node is unchanged" unless store.set_sitemap_tag(host, key, text)
+        busy_abort("gori run sitemap tag", "NOT applied (project busy) — the node is unchanged") unless store.set_sitemap_tag(host, key, text)
         where = "#{CLI::Output.term_safe(host)}#{CLI::Output.term_safe(key)}"
         puts text.empty? ? "Tag cleared on #{where}." : "Tagged #{where}: #{CLI::Output.term_safe(text)}"
         if warning = tag_match_warning(matched, host, key, text, js_node)

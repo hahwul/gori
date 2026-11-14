@@ -136,7 +136,7 @@ module Gori
             abort "gori run fuzz delete: run ##{run_id} is still #{run.status}; if its writer crashed, " \
                   "retry with --force-stale (never use it while another gori is saving)"
           in Store::FuzzRunDeleteStatus::WriteFailed
-            abort "gori run fuzz delete: NOT deleted (project busy)"
+            busy_abort("gori run fuzz delete", "NOT deleted (project busy)")
           end
         end
       end
