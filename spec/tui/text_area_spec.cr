@@ -1160,3 +1160,86 @@ describe Gori::Tui::TextArea do
     end
   end
 end
+
+describe "TextArea IME preview rendering" do
+  it "keeps reveal markers aligned while composing, including horizontal scroll" do
+    {false, true}.each do |wrapped|
+      {"A\t", "A" * 20 + "\t"}.each do |prefix|
+        area = TextArea.new(prefix + "Z")
+        area.wrap = wrapped
+        area.follow_x = true
+        area.reveal = true
+        area.move(0, prefix.size)
+        area.set_preedit("한")
+        backend = MemoryBackend.new(8, 8)
+        area.render(Screen.new(backend), Rect.new(0, 0, 8, 8), cursor: true, highlight: :request)
+        rows = (0...8).map { |y| backend.cluster_row(y) }.join
+        rows.should contain("→한 Z")
+        rows.should_not contain("⟨TAB⟩")
+        rows.scan(/한/).size.should eq(1)
+        area.text.should eq(prefix + "Z")
+      end
+    end
+  end
+
+  it "draws a composing syllable once at the end of a wrapped or unwrapped line" do
+    {false, true}.each do |wrapped|
+      area = TextArea.new("A")
+      area.wrap = wrapped
+      area.end_of_line
+      area.set_preedit("한")
+      backend = MemoryBackend.new(20, 4)
+      area.render(Screen.new(backend), Rect.new(0, 0, 20, 4), cursor: true)
+      backend.cluster_row(0).rstrip.should eq("A한")
+      area.text.should eq("A")
+    end
+  end
+
+  it "keeps the suffix glyph under the block caret with highlighting and reveal" do
+    {false, true}.each do |wrapped|
+      {nil, :request}.each do |highlight|
+        {false, true}.each do |reveal|
+          { {"한", "한 "}, {"한", "한 "}, {"👩‍💻", "👩‍💻 "}, {"가나", "가 나 "} }.each do |(preedit, cells)|
+            area = TextArea.new("AZ")
+            area.wrap = wrapped
+            area.reveal = reveal
+            area.move(0, 1)
+            area.set_preedit(preedit)
+            backend = MemoryBackend.new(20, 4)
+            area.render(Screen.new(backend), Rect.new(0, 0, 20, 4), cursor: true, highlight: highlight)
+            backend.cluster_row(0).rstrip.should eq("A#{cells}Z")
+            backend.bg_at(1 + Screen.draw_width(preedit), 0).should eq(Theme.accent)
+            area.text.should eq("AZ")
+          end
+        end
+      end
+    end
+  end
+
+  it "draws composing text once when it wraps across a row boundary" do
+    area = TextArea.new("ABZ")
+    area.wrap = true
+    area.move(0, 2)
+    area.set_preedit("한글")
+    backend = MemoryBackend.new(4, 4)
+    area.render(Screen.new(backend), Rect.new(0, 0, 4, 4), cursor: true)
+    backend.cluster_row(0).should eq("AB한 ")
+    backend.cluster_row(1).rstrip.should eq("글 Z")
+    backend.bg_at(2, 1).should eq(Theme.accent)
+    area.text.should eq("ABZ")
+  end
+
+  it "keeps the preview and suffix visible in a horizontally scrolled editor" do
+    {nil, :request}.each do |highlight|
+      area = TextArea.new("A" * 20 + "Z")
+      area.follow_x = true
+      area.move(0, 20)
+      area.set_preedit("한")
+      backend = MemoryBackend.new(8, 3)
+      area.render(Screen.new(backend), Rect.new(0, 0, 8, 3), cursor: true, highlight: highlight)
+      backend.cluster_row(0).rstrip.should eq("AAAAA한 Z")
+      backend.bg_at(7, 0).should eq(Theme.accent)
+      area.text.should eq("A" * 20 + "Z")
+    end
+  end
+end
