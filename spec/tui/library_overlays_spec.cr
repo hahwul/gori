@@ -63,6 +63,27 @@ describe Gori::Tui::NamePromptOverlay do
     ov.name.should be_empty
   end
 
+  it "keeps a rejected name and its error visible until edited, then accepts a retry" do
+    ov = NamePromptOverlay.new("SAVE CHAIN", "sha256", "base64-decode")
+    h = OverlayHarness.new(ov)
+    h.on_commit do
+      if ov.name == "base64-decode"
+        ov.error = "pick another name"
+        false
+      else
+        true
+      end
+    end
+    h.press(Termisu::Input::Key::Enter).should eq(:open)
+    ov.name.should eq("base64-decode")
+    h.rendered?("pick another name").should be_true
+    h.press(Termisu::Input::Key::Left)
+    ov.error.should eq("pick another name")
+    h.type("x")
+    ov.error.should be_nil
+    h.press(Termisu::Input::Key::Enter).should eq(:closed)
+  end
+
   it "strips surrounding whitespace off the committed name" do
     ov = NamePromptOverlay.new("SAVE CHAIN", "hex", "  padded  ")
     ov.name.should eq("padded")

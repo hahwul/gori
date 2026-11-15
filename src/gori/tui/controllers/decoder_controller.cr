@@ -1180,7 +1180,7 @@ module Gori::Tui
     # token; a built-in's name (or alias) keeps resolving to the built-in, because the catalog
     # has to win — a library that could shadow `base64-decode` would change what every OTHER
     # saved chain, and every spec in every project, already means.
-    def save_chain(name : String) : Nil
+    def save_chain(name : String) : Bool
       # Stored STRIPPED, and refused when that leaves nothing. `Registry.normalize` strips
       # before it folds, so "  my enc  " already resolved as `my-enc` while the library row,
       # the ^O picker and `delete_decoder_chain`'s exact-name match all carried the padding —
@@ -1191,17 +1191,17 @@ module Gori::Tui
       name = name.strip
       if err = Decoder::Library.name_error(name)
         @host.status(err)
-        return
+        return false
       end
       # An empty spec saves a step that is the identity — a silent pass-through in every
       # chain that names it, and a blank detail column in the picker. Nothing to save.
       if cur.chain.strip.empty?
         @host.status("nothing to save — the chain is empty")
-        return
+        return false
       end
       if (c = registry[name]?) && !c.category.saved?
         @host.status("\"#{name}\" is a built-in converter — pick another name")
-        return
+        return false
       end
       # Reject by NORMALIZED name, the key the registry resolves on: saving "my chain" while
       # "my-chain" is in the library would otherwise append a second entry that register_all
@@ -1220,11 +1220,13 @@ module Gori::Tui
       if Settings.save
         library_changed # the new name is a callable step now — see the method
         @host.status(existing ? "updated chain \"#{name}\"" : "saved chain \"#{name}\"")
+        true
       else
         # Memory follows disk: a name that resolves in this process alone, and is gone at
         # the next start, is a library that lies. Mirrors `Settings.delete_decoder_chain`.
         Settings.decoder_chains = before
         @host.status("could not save chain")
+        false
       end
     end
 
