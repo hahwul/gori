@@ -297,6 +297,8 @@ The projection is never written back over anything you are about to send. Format
 
 For these two formats the dispatch is on the content type alone. A body labelled `application/octet-stream` is not offered to either reader, because a reader with no schema will make *something* of any bytes. Use the Decoder tab (`msgpack-decode`, `cbor-decode`) for an unlabelled body. The four readers in the next section dispatch on a marker instead.
 
+**A DNS-over-HTTPS body is rendered the same way.** `application/dns-message` shows the header flags, the question, and every record with its type, TTL and data. `A`, `AAAA`, `NS`, `CNAME`, `PTR`, `MX`, `SOA`, `TXT` and `SVCB` / `HTTPS` records are read, and any other type keeps its data as `{"$bin": "…"}`. An `HTTPS` record's `alpn` is where a client is handed an HTTP/3 route with no response header involved. A body that is not one whole DNS message is left to the hex view.
+
 ### Native serialization: Java, ViewState, PHP, pickle {#serialized-objects}
 
 gori *flags* serialized objects such as `AC ED 00 05` in a cookie, `/wE…` in a hidden field or `O:8:"stdClass":…` in a parameter (the passive `serialized_object` rule points at the insecure-deserialization surface). Four readers show what is inside, with the same labelled-tree projection MessagePack and CBOR get.

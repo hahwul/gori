@@ -12,6 +12,7 @@ require "./binary_document"
 require "./msgpack"
 require "./decoder/serialized"
 require "./cbor"
+require "./dns_message"
 
 module Gori
   # The single JSON projection of a flow's decoded protocols (SAML / JWT / GraphQL /

@@ -1,7 +1,7 @@
 require "./spec_helper"
 require "./support/serialized_vectors"
 
-# The SIX schema-less readers each make the same two promises, and neither can be checked by
+# The SIX schema-less readers, and the DNS message reader beside them, each make the same two promises, and neither can be checked by
 # reading: NEVER RAISE on any input, and always emit a document that parses. A body handed to
 # any of them came off the wire, so hostile and truncated input is the normal case — and the
 # failure mode of getting this wrong is a raise unwinding into a TUI draw, or a JSON document
@@ -20,6 +20,8 @@ private DOC_READERS = {
   "viewstate" => ->(d : Bytes) { Gori::Decoder::Serialized::DotnetViewState.to_json(d) },
   "php"       => ->(d : Bytes) { Gori::Decoder::Serialized::Php.to_json(d) },
   "pickle"    => ->(d : Bytes) { Gori::Decoder::Serialized::Pickle.to_json(d) },
+  # Not schema-less, but reached from the same dispatch and bound by the same two promises.
+  "dns" => ->(d : Bytes) { Gori::DnsMessage.to_json(d) },
 }
 
 describe "the binary document readers" do

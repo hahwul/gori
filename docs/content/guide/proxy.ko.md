@@ -297,6 +297,8 @@ protoc --descriptor_set_out=api.desc --include_imports -I. api.proto
 
 이 두 형식은 content type만으로 디스패치합니다. `application/octet-stream`으로 표시된 본문은 어느 리더에도 넘기지 않습니다. 스키마 없는 리더는 어떤 바이트로도 *무언가*를 만들어 내기 때문입니다. 라벨 없는 본문은 Decoder 탭(`msgpack-decode`, `cbor-decode`)에서 보세요. 바로 아래 네 리더는 마커로 디스패치합니다.
 
+**DNS-over-HTTPS 본문도 같은 방식으로 렌더됩니다.** `application/dns-message`는 헤더 플래그, 질의, 그리고 각 레코드의 타입·TTL·데이터를 보여 줍니다. `A`, `AAAA`, `NS`, `CNAME`, `PTR`, `MX`, `SOA`, `TXT`, `SVCB` / `HTTPS` 레코드를 읽고, 그 밖의 타입은 데이터를 `{"$bin": "…"}`로 둡니다. `HTTPS` 레코드의 `alpn`은 응답 헤더 없이 클라이언트가 HTTP/3 경로를 넘겨받는 자리입니다. 온전한 DNS 메시지 하나가 아닌 본문은 hex 뷰로 넘어갑니다.
+
 ### 네이티브 직렬화: Java, ViewState, PHP, pickle {#serialized-objects}
 
 gori는 쿠키 속의 `AC ED 00 05`, 히든 필드 속의 `/wE…`, 파라미터 속의 `O:8:"stdClass":…` 같은 직렬화 객체를 *탐지*합니다(패시브 `serialized_object` 규칙이 역직렬화 공격면을 가리킵니다). 네 개의 리더가 MessagePack·CBOR과 같은 이름 붙은 트리 투영으로 그 안에 무엇이 들었는지 보여 줍니다.

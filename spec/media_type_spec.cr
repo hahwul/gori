@@ -246,6 +246,11 @@ describe Gori::MediaType do
       Gori::MediaType.binary_document?(nil).should be_false
     end
 
+    it "matches a DNS-over-HTTPS wire message, and not the JSON form" do
+      Gori::MediaType.binary_document?("application/dns-message").should be_true
+      Gori::MediaType.dns_message?("application/dns-json").should be_false
+    end
+
     it "declines a CBOR SEQUENCE, which is several documents and not one" do
       Gori::MediaType.cbor?("application/cbor-seq").should be_false
     end

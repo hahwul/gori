@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- History: a DNS-over-HTTPS body (`application/dns-message`) renders as JSON in the detail pane, `gori run show --format json` and MCP `get_flow` (#1899)
 - Proxy: a chunked `multipart/x-mixed-replace` stream (an MJPEG feed) reaches the client while a Match & Replace body rule, a body extract rule or the response intercept is on for its host (#1899)
 
 ## v0.9.4
