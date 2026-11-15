@@ -87,6 +87,7 @@ require "./hotkeys_overlay"
 require "./palette"
 require "./space_menu"
 require "./jobs"
+require "./exit_guard"
 require "./notifications"
 require "./companion"
 require "./notifications_overlay"
@@ -193,6 +194,7 @@ module Gori::Tui
   # poll(50ms) → drain new-flow events → render (diff). `run` returns :quit (exit
   # gori) or :back (return to the project picker).
   class Runner < Verb::ExecContext
+    include ExitGuard
     include Host # the narrow facade per-tab controllers drive the shell through
 
     def initialize(@session : Session, @term : Termisu)
@@ -3702,9 +3704,10 @@ module Gori::Tui
     # press — where the first press already served as the confirmation — and the accept block
     # of the QUIT GORI modal.
     private def finish_quit : Nil
-      stop_all_jobs
-      commit_pending_edits
-      @outcome = :quit
+      close_space_menu if @space_menu_open
+      close_copy_picker if copy_as_shown?
+      close_send_picker if send_to_shown?
+      finish_exit(:quit)
     end
 
     # The one QUIT GORI modal, raised from both quit paths so the chord and the palette cannot
@@ -3728,9 +3731,7 @@ module Gori::Tui
       confirm("LEAVE PROJECT", Runner.leave_confirm_message(active, @jobs.active.size, notes_conflict),
         confirm_label: "leave", danger: !active.nil? || notes_conflict, return_to: @overlay.to_sym) do
         # Inside the accept block, so a CANCEL leaves every job running untouched.
-        stop_all_jobs
-        commit_pending_edits
-        @outcome = :back
+        finish_exit(:back)
       end
     end
 
@@ -3968,21 +3969,6 @@ module Gori::Tui
     def self.quit_chord_claimed?(ev : Termisu::Event::Key, modal : Bool) : Bool
       return false if modal
       ev.ctrl_c? || (ev.ctrl? && ev.key.lower_d?)
-    end
-
-    # Flush any in-progress editor before leaving/quitting (quit is now centralized,
-    # so the per-handler ctrl-c saves moved here). save_notes/save_project_desc are
-    # dirty-guarded; issues notes only persist when actively being edited.
-    private def commit_pending_edits : Nil
-      notes_controller.save_notes
-      project_controller.commit
-      repeater_controller.save_current_repeater
-      fuzzer_controller.save_all # every dirty sub-tab, not only the one in front
-      miner_controller.save_current
-      sequencer_controller.save_current
-      issues_controller.commit
-      decoder_controller.commit
-      rewriter_controller.commit # the editable preview sample
     end
 
     def status(message : String) : Nil
@@ -6725,14 +6711,14 @@ module Gori::Tui
     # well. Refreshes the Settings runtime layer, then rebinds the live proxy (the upstream is
     # already live via upstream_route).
     def apply_project_network(bind_host : String, bind_port : Int32, upstream : String,
-                              connect_secs : Int32, io_secs : Int32, capture_mib : Int32) : String
+                              connect_secs : Int32, io_secs : Int32, capture_mib : Int32) : {String, Bool}
       apply_project_network(Settings::ProjectNetworkConfig.new(
         bind_host, bind_port, upstream, Settings.project_upstream_auth,
         connect_secs, io_secs, capture_mib, Settings.effective_project_upstream_destination
       ))
     end
 
-    def apply_project_network(config : Settings::ProjectNetworkConfig) : String
+    def apply_project_network(config : Settings::ProjectNetworkConfig) : {String, Bool}
       # The bind pair compares against the bare GLOBAL, which is exactly what ProjectView seeded
       # the pane with for an unpinned project (`Settings.configured_bind_*`) — so "unchanged
       # means inherit" tracks what the operator was shown. A `-l`/`-p` override is in neither
@@ -6753,8 +6739,8 @@ module Gori::Tui
       # composes the rest of the sentence (rebound / on fallback / unchanged), so the warning
       # goes in front of whichever it picks.
       applied = apply_settings(persisted ? "project network saved" : "project network applied")
-      return applied if persisted
-      "#{applied} — but NOT saved (project busy); it reverts when you reopen this project"
+      line = persisted ? applied : "#{applied} — but NOT saved (project busy); it reverts when you reopen this project"
+      {line, persisted}
     end
 
     # Persist + load this project's gRPC `.proto` schema path (#823) and report what came of
@@ -6765,7 +6751,7 @@ module Gori::Tui
     # `apply_project_network` states: the operator asked to look through this `.proto`, and
     # refusing to show it because another instance holds the writer would be the worse half.
     # What must not happen is calling it saved.
-    def apply_project_protos(spec : String) : String
+    def apply_project_protos(spec : String) : {String, Bool}
       key = Gori::Protobuf::Schemas::SETTING_KEY
       store = @session.store
       persisted = spec.empty? ? store.delete_setting(key) : store.set_setting(key, spec)
@@ -6773,7 +6759,7 @@ module Gori::Tui
       # `status` is the whole answer: how many files/messages/rpcs loaded, or the reason none
       # did (a missing path, or the `.proto` SOURCE file mistaken for a descriptor set).
       line = "proto schema: #{Gori::Protobuf::Schemas.status}"
-      persisted ? line : "#{line} — but NOT saved (project busy); it reverts when you reopen this project"
+      {persisted ? line : "#{line} — but NOT saved (project busy); it reverts when you reopen this project", persisted}
     end
 
     def import_running? : Bool

@@ -863,21 +863,15 @@ module Gori::Tui
       @host.status("notes changed by another session — esc will refuse to overwrite; ^W discards yours")
     end
 
-    # The flush the shell runs on a tab switch and on `commit_pending_edits` (quit /
-    # leave-project). NO retry hint here, unlike the `esc` path: on a tab switch the buffer
-    # really is still there, but on the quit path the Runner is torn down immediately after —
-    # nothing more is drawn and the text goes with the session. That last case is pre-existing
-    # and deliberate (quit wins; `NotesView#save` keeps `@dirty` on a failed write and nobody
-    # blocks the exit on it either), so this reports without promising a retry that one of its
-    # three callers cannot honour.
-    def commit : Nil
+    # A confirmed peer conflict may be discarded; a storage failure keeps the exit open.
+    def commit : Bool
       # Still INS-gated, deliberately, now that `IssuesView#notes_dirty?` can be true in READ
       # (the READ/INS chip leaves the editor without saving). `esc` is this pane's save key and
       # the chip is not — flushing a buffer the operator stepped out of would persist an edit
       # they never committed, on a tab switch they may not connect to it. What that buffer
       # needed was to stop being silently ERASED, and it no longer is: the tick and a re-entry
       # both leave it alone, so `i` picks the text back up exactly where it was.
-      return unless @issues.notes_insert_mode?
+      return true unless @issues.notes_insert_mode?
       # The lost-update refusal belongs here as much as on `esc`: a tab switch and a quit both
       # route through this, and either one would have written this window's buffer over a peer's
       # writeup without the operator ever seeing the two versions.
@@ -891,10 +885,11 @@ module Gori::Tui
       # by finding the writeup gone.
       if @issues.notes_conflict?(@host.session.store)
         @host.status("notes NOT saved — another session rewrote them; esc in the notes pane overwrites theirs, ^W takes theirs")
-        return
+        return true
       end
-      return if @issues.save_notes(@host.session.store)
+      return true if @issues.save_notes(@host.session.store)
       @host.status("notes NOT saved — project busy")
+      false
     end
 
     # `esc` out of the notes editor. IssuesView#save_notes returns false when the write was

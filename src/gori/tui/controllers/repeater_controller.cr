@@ -1285,7 +1285,7 @@ module Gori::Tui
       end
     end
 
-    def commit : Nil
+    def commit : Bool
       save_current_repeater
     end
 
@@ -3498,6 +3498,11 @@ module Gori::Tui
     def save_current_repeater : Bool
       return true unless tab = current_repeater_tab
       save_repeater_tab(tab)
+    end
+
+    # An earlier refused save may have left an inactive sub-tab dirty.
+    def save_all : Bool
+      @repeaters.map { |tab| save_repeater_tab(tab) }.all?
     end
 
     # Persist ONE session's request side. Parametrized rather than reading the active tab,

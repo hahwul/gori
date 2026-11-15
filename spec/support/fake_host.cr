@@ -208,11 +208,11 @@ class FakeHost
   end
 
   def apply_project_network(bind_host : String, bind_port : Int32, upstream : String,
-                            connect_secs : Int32, io_secs : Int32, capture_mib : Int32) : String
-    ""
+                            connect_secs : Int32, io_secs : Int32, capture_mib : Int32) : {String, Bool}
+    {"", true}
   end
 
-  def apply_project_protos(spec : String) : String
-    ""
+  def apply_project_protos(spec : String) : {String, Bool}
+    {"", true}
   end
 end

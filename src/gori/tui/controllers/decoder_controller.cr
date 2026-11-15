@@ -633,9 +633,11 @@ module Gori::Tui
 
     # Stays dirty when the write did not commit (store busy/locked/closing) so the next
     # leave/quit retries instead of silently dropping the conversion.
-    def commit : Nil
-      return unless @dirty
-      @dirty = false if persist_sessions
+    def commit : Bool
+      return true unless @dirty
+      saved = persist_sessions
+      @dirty = false if saved
+      saved
     end
 
     # The persisted form of the open sub-tabs ({input, chain, name}).

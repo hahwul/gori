@@ -551,9 +551,10 @@ module Gori::Tui
       reload
     end
 
-    def commit : Nil
-      save
-      commit_project_settings(on_leave: true) # apply a pending pane edit before the tab leaves/quits
+    def commit : Bool
+      saved = save
+      commit_project_settings(on_leave: false) # a refused exit must leave the pending fields editable
+      saved && !@project_view.settings_dirty? && !@project_view.protos_dirty?
     end
 
     # True while an inline add/edit row (HOST OVERRIDES or ENV) is composing — the
@@ -618,7 +619,7 @@ module Gori::Tui
       @host.status("could not read the event feed — see gori.log")
     end
 
-    def save : Nil
+    def save : Bool
       @project_view.save(@host.session.store)
     end
 
@@ -1362,8 +1363,8 @@ module Gori::Tui
     # convention directory.
     private def commit_project_protos : String?
       return nil unless @project_view.protos_dirty?
-      line = @host.apply_project_protos(@project_view.protos_value)
-      @project_view.refresh_protos # NOT refresh_settings — that would reset the network fields
+      line, saved = @host.apply_project_protos(@project_view.protos_value)
+      @project_view.refresh_protos if saved # NOT refresh_settings — that would reset the network fields
       line
     end
 
@@ -1460,8 +1461,12 @@ module Gori::Tui
       return settings_invalid("invalid capture limit #{cap_s.inspect} (MiB, min 1)", on_leave) unless cap
       cap = cap.clamp(1, Settings::MAX_CAPTURE_MAX_MIB) # keep cap*1024*1024 inside Int32
       config = Settings::ProjectNetworkConfig.new(host, port, upstream, auth, connect, idle, cap, destination)
-      line = @host.apply_project_network(config)
-      @project_view.refresh_settings
+      persist_project_network(config)
+    end
+
+    private def persist_project_network(config : Settings::ProjectNetworkConfig) : String
+      line, saved = @host.apply_project_network(config)
+      @project_view.refresh_settings if saved
       line
     end
 

@@ -29,7 +29,7 @@ describe Gori::Tui::ProjectView do
       view.replace_desc("staging sweep — creds in note 3")
 
       store.close # every write from here answers false
-      view.save(store)
+      view.save(store).should be_false
 
       # The flag must still be up: it is the only thing that would make a later exit retry.
       # `reload` is what ran next in the real path (tab enter), and it used to re-seed the

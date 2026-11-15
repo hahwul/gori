@@ -1942,8 +1942,8 @@ module Gori::Tui
 
     # EVERY dirty tab, for the exits that close the whole Runner (quit, leave project): only
     # the current tab used to be flushed there, so an edit left on any other sub-tab was lost.
-    def save_all : Nil
-      @sessions.each { |tab| save_tab(tab) }
+    def save_all : Bool
+      @sessions.map { |tab| save_tab(tab) }.all?
     end
 
     private def save_tab(tab : FuzzerTab) : Bool

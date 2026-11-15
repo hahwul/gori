@@ -5641,3 +5641,8 @@ directions were on screen; the hand had typed the query before the eye read them
   no `:filter` intent), so one session's bar still answers with directions.
 - **A cancelled filter leaves focus where the keys above leave it,** on the list or the strip:
   `esc` goes one level at a time.
+
+
+### 2026-11-15: exiting requires successful editor writes or explicit discard (#1886)
+
+`TabController#commit` reports whether the editor writes committed. A project exit collects every outcome, including inactive Repeater, Fuzzer, Miner and Sequencer sessions; failed writes leave their buffers and Project settings baselines intact. The shared `ExitGuard` keeps the project open and offers a danger confirmation naming the failed editors before discarding them. Jobs stop only after saving succeeds or that discard is accepted: Fuzzer teardown closes its temporary spool, so it cannot precede a save attempt the operator may cancel. The existing explicit Issues peer-conflict warning and READ-mode writeup policy remain in effect.
