@@ -2143,6 +2143,9 @@ module Gori::Tui
       case ov.handle_key(ev)
       when :cancel then close_active_overlay(ov)
       when :commit
+        # An unusable frame omits the card, leaving its own "drawn" flag stale.
+        w, h = @backend.size
+        return unless Layout.usable?(w, h)
         # ↵ on a form that cannot save lands on the field that blocks it and says what is missing.
         if ev.key.enter? && (why = ov.commit_blocker)
           status(why)

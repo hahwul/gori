@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- TUI: hidden modal actions cannot commit while the terminal is smaller than 40×8, including deletion confirmations opened before or after shrinking the window (#1889).
+
 - TUI: single-line form fields support Ctrl-A/E/U/W like filters, with selection and undo preserved (#1888).
 
 - TUI: Decoder chain save failures keep the entered name and show the error in the prompt so it can be corrected or retried (#1887).

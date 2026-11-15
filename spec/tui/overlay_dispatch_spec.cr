@@ -577,3 +577,36 @@ describe "FormOverlay — ↵ on a form that cannot save" do
     h.status.should be_nil
   end
 end
+
+# Exercise the production dispatch without opening /dev/tty. The callback returns false,
+# so these commit/stay paths never reach terminal teardown or the rest of Runner's state.
+class Gori::Tui::Runner
+  def dispatch_modal_for_spec(backend : Backend, overlay : Overlay, event : Termisu::Event::Key) : Nil
+    @backend = backend
+    @paste_newline = PasteNewline.new
+    dispatch_overlay_key(overlay, event)
+  end
+end
+
+describe "Runner modal dispatch in an unusable terminal" do
+  it "refuses unseen and previously drawn confirmations until the window is usable" do
+    {false, true}.each do |previously_drawn|
+      {Termisu::Input::Key::LowerY, Termisu::Input::Key::Enter}.each do |key|
+        dialog = ConfirmDialog.new("DELETE NOTE", "Discard the saved note?")
+        render = MemoryBackend.new(80, 24)
+        dialog.render(Screen.new(render), Rect.new(0, 0, 80, 18)) if previously_drawn
+        dialog.move # select confirm for Enter
+        commits = 0
+        dialog.on_commit = -> { commits += 1; false }
+        runner = Runner.allocate
+        { {35, 6}, {39, 24}, {80, 7} }.each do |(w, h)|
+          runner.dispatch_modal_for_spec(MemoryBackend.new(w, h), dialog, skey(key))
+        end
+        commits.should eq(0)
+        dialog.render(Screen.new(render), Rect.new(0, 0, 80, 18))
+        runner.dispatch_modal_for_spec(render, dialog, skey(key))
+        commits.should eq(1)
+      end
+    end
+  end
+end
