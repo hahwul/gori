@@ -77,7 +77,7 @@ loop_k = "루프 안에서"
 loop_pre = "클라이언트와 "
 loop_em = "타깃"
 loop_post = " 사이에."
-loop_lede = "모든 요청은 <b>플로우</b>가 됩니다. 잡아 두고, 다시 보내고, 퍼징하고, 스캔합니다. HTTP/1.1, HTTP/2, WebSocket, gRPC, SSE."
+loop_lede = "모든 요청은 잡아 두고, 다시 보내고, 퍼징하고, 스캔할 수 있는 <b>플로우</b>가 됩니다. HTTP/1.1, HTTP/2, WebSocket, gRPC, SSE."
 
 numbers_k = "숫자로"
 n1 = "바이너리 하나.<br>TUI, MCP, CLI가 그 안에."
@@ -94,7 +94,7 @@ seam_em = "에이전트"
 seam_post = "에 맡기세요."
 
 name_pron = "/고·리/ · 명사, 한국어"
-name_def = "고리, 연결, 순환. 떨어진 두 가지를 하나로 묶는 조각. 캡처한 트래픽, 다시 보낸 요청, 등록한 버그를 gori는 한 사슬로 이어 둡니다."
+name_def = "고리, 연결, 순환. 떨어진 두 가지를 하나로 묶는 조각. gori는 캡처한 트래픽, 다시 보낸 요청, 등록한 버그를 한 사슬로 이어 둡니다."
 
 begin_k = "시작"
 begin_pre = "첫 "

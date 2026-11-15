@@ -20,7 +20,7 @@ curl -fsSL https://gori.hahwul.com/install.sh | bash
 
 설치 스크립트는 최신 릴리스가 무엇인지 GitHub API에 묻는데, 이 API는 **비인증 요청을 IP당 시간당 60회**만 허용합니다. 공용 CI나 NAT 뒤에서는 `403`이 돌아올 수 있습니다. 설치 스크립트와 `gori update` 모두 rate limit이 없는 릴리스 리다이렉트로 자동 폴백하므로 그대로 동작하며, `resolved v0.9.3 via ... (no API call)` 같은 줄이 보입니다.
 
-인증 시 한도인 5000회/시간을 쓰려면 토큰을 먼저 export하세요. `curl` 앞에 붙이면 안 되고 반드시 export해야 합니다. 스크립트는 파이프로 연결된 `bash`에서 실행되므로 `curl`에만 걸린 변수는 상속되지 않습니다:
+인증 시 한도인 5000회/시간을 쓰려면 토큰을 먼저 export하세요. `curl` 앞에 붙이면 동작하지 않습니다. 스크립트는 파이프로 연결된 `bash`에서 실행되므로 `curl`에만 걸린 변수는 상속되지 않습니다:
 
 ```bash
 export GITHUB_TOKEN=<personal access token>
@@ -62,7 +62,7 @@ shasum -a 256 -c --ignore-missing SHA256SUMS   # macOS
 brew install hahwul/gori/gori
 ```
 
-이 명령은 tap을 먼저 추가하는 과정을 줄인 형태이며, 나눠서 실행해도 됩니다:
+tap을 먼저 추가하는 과정을 줄인 형태입니다:
 
 ```bash
 brew tap hahwul/gori
@@ -130,7 +130,7 @@ NixOS / home-manager 설정에 입력(input)으로 고정할 수도 있습니다
 }
 ```
 
-다른 채널과 달리 이 채널은 **소스에서 빌드**합니다. nixpkgs의 Crystal이 gori가 요구하는 버전보다 한 단계 낮아, 플레이크가 컴파일러를 직접 고정하며 첫 빌드는 그것까지 함께 컴파일합니다. 몇 분이 걸리고 이후로는 캐시됩니다. Brotli와 Zstd 디코딩이 포함되며 호스트에 따로 준비할 것은 없습니다.
+다른 채널과 달리 이 채널은 소스에서 빌드합니다. nixpkgs의 Crystal이 gori가 요구하는 버전보다 한 단계 낮아, 플레이크가 컴파일러를 직접 고정하며 첫 빌드는 그것까지 함께 컴파일합니다. 몇 분이 걸리고 이후로는 캐시됩니다. Brotli와 Zstd 디코딩이 포함되며 호스트에 따로 준비할 것은 없습니다.
 
 Linux(x86_64 및 arm64)와 Apple Silicon macOS를 지원합니다. nixpkgs가 Intel macOS 지원을 중단했으므로, 그쪽에서는 [Homebrew](#homebrew)나 [사전 빌드 바이너리](#pre-built-binary)를 사용하세요.
 
@@ -176,7 +176,7 @@ container run --rm -it \
   ghcr.io/hahwul/gori --listen 0.0.0.0
 ```
 
-컨테이너마다 호스트의 `vmnet` 네트워크에서 자기 IP를 받으므로 포트 게시는 선택입니다. `container ls`가 출력하는 주소를 클라이언트 프록시에 `<ip>:8070`으로 바로 지정해도 똑같이 동작합니다.
+컨테이너마다 호스트의 `vmnet` 네트워크에서 자기 IP를 받으므로 포트 게시는 선택입니다. `container ls`가 주소를 출력하며, 클라이언트 프록시를 `<ip>:8070`으로 지정할 수 있습니다.
 
 `container build -f packaging/docker/Dockerfile -t gori:dev .`로 소스에서 이미지를 빌드할 수 있으며, `packaging/docker/Dockerfile.dockerignore`를 읽습니다. Dockerfile 옆의 무시 목록만 찾으므로 BuildKit과 달리 컨텍스트 루트의 `.dockerignore`로 되돌아가지 않습니다. 빌더는 자체 VM에서 동작하므로 호스트의 `HTTP_PROXY`를 상속하지 않으며, 기본값이 CPU 2개에 2 GB입니다(`container builder status`). 그 크기에서는 gori의 `--release` 빌드가 한 시간을 훌쩍 넘기므로, 먼저 늘려 두는 편이 좋습니다:
 
@@ -264,7 +264,7 @@ cp bin/gori /usr/local/bin/
 
 ### Brotli / Zstd 없이 빌드 {#building-without-brotli-zstd}
 
-해당 라이브러리를 사용할 수 없다면 이를 빼고 빌드하세요. Gzip과 deflate 디코딩(Crystal 표준 라이브러리 제공)은 계속 동작하며, Brotli와 Zstd 본문은 디코드된 텍스트 대신 "decoder not built in" 안내를 표시합니다:
+해당 라이브러리를 사용할 수 없다면 이를 빼고 빌드하세요. Gzip과 deflate 디코딩(Crystal 표준 라이브러리 제공)은 계속 동작합니다. Brotli와 Zstd 본문에는 "decoder not built in" 안내가 표시됩니다:
 
 ```bash
 shards build --release -Dwithout_native_codecs
@@ -301,4 +301,4 @@ shards run gori
 
 ## 다음 단계 {#next-steps}
 
-이제 트래픽을 캡처할 준비가 되었습니다. [빠른 시작](/ko/getting-started/quick-start/)으로 이동하세요.
+[빠른 시작](/ko/getting-started/quick-start/)에서 첫 트래픽을 캡처하세요.

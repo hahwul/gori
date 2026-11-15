@@ -4,7 +4,7 @@ description = "Install gori, trust its CA, and capture your first HTTP request w
 weight = 10
 +++
 
-Welcome to gori. This section takes you from a clean machine to a live proxy session: traffic in History, a few Day-1 keys under your fingers, and a first Repeater.
+Install gori, get live traffic into History, learn a few Day-1 keys, and send your first Repeater request.
 
 ## What You'll Learn
 
@@ -18,9 +18,9 @@ Welcome to gori. This section takes you from a clean machine to a live proxy ses
 
 ## What Is gori?
 
-gori (고리, Korean for *ring, link, loop*) is a keyboard-driven HTTP/HTTPS **intercepting proxy** and web-hacking toolkit that runs entirely in your terminal. It sits *in the loop* between your client and the target, records every request/response as a *flow*, and gives you a pentest workbench to inspect, replay, fuzz, and scan that traffic without leaving the shell.
+gori (고리, Korean for *ring, link, loop*) is a keyboard-driven HTTP/HTTPS **intercepting proxy** and web-hacking toolkit that runs in your terminal. It sits *in the loop* between your client and the target, records every request/response as a *flow*, and gives you a pentest workbench to inspect, replay, fuzz, and scan that traffic without leaving the shell.
 
-It understands **HTTP/1.1, HTTP/2, WebSocket, gRPC, and Server-Sent Events**, and decodes common formats inline: JWT, SAML, GraphQL, protobuf, MessagePack and CBOR. The core project and testing workflows use the same engines in the TUI, `gori run`, and the built-in [MCP server](/guide/mcp/), so agents and scripts can drive the same project. TUI navigation is not part of that surface; the [capability matrix](/reference/capabilities/) lists the exact boundaries.
+It understands **HTTP/1.1, HTTP/2, WebSocket, gRPC, and Server-Sent Events**, and decodes common formats inline: JWT, SAML, GraphQL, protobuf, MessagePack and CBOR. The core project and testing workflows use the same engines in the TUI, `gori run`, and the built-in [MCP server](/guide/mcp/), so agents and scripts can drive the same project. TUI navigation is not part of that surface. The [capability matrix](/reference/capabilities/) lists the boundaries.
 
 ## Next Steps
 

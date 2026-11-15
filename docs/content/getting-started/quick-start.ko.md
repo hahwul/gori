@@ -4,9 +4,9 @@ description = "직접 따라 하는 튜토리얼: CA를 신뢰하고, 실제 요
 weight = 20
 +++
 
-이 페이지는 처음부터 끝까지 따라 하는 튜토리얼입니다. 위에서 아래로 진행하면 갓 설치한 상태에서 시작해, 캡처한 HTTPS 요청을 살펴보고 **Repeater**로 보내 편집한 뒤 재전송하는 것까지 터미널을 벗어나지 않고 끝낼 수 있습니다. 10분 정도 잡아 두세요.
+이 페이지는 처음부터 끝까지 따라 하는 튜토리얼입니다. 갓 설치한 상태에서 시작해 HTTPS 요청을 캡처하고, 살펴보고, **Repeater**로 보내 편집한 뒤 재전송합니다. 모두 터미널 안에서 합니다. 10분 정도 걸립니다.
 
-각 단계는 **체크포인트**로 끝납니다. 다음으로 넘어가기 전에 보여야 하는 상태입니다. 화면이 다르게 보인다면 그 지점에서 멈추고 바로잡으세요.
+각 단계는 **체크포인트**로 끝납니다. 다음으로 넘어가기 전에 보여야 하는 상태입니다. 화면이 다르다면 거기서 멈추고 바로잡으세요.
 
 > **시작하기 전에.** [gori를 설치](/ko/getting-started/installation/)하고 브라우저를 준비하세요. 자신의 브라우징을 캡처하게 되므로, 테스트 권한이 있는 사이트(자신의 앱, 스테이징 서버, 또는 의도적으로 취약하게 만든 연습용 타깃)를 고르세요. 정확한 결과가 필요한 부분에서는 안정적인 일회용 타깃인 `example.com`을 사용합니다.
 
@@ -64,13 +64,13 @@ curl -x http://127.0.0.1:8070 https://example.com
 
 gori는 필요할 때 루트로 호스트별 리프 인증서를 발급하므로, 루트만 한 번 신뢰하면 됩니다.
 
-커맨드라인 도구에는 지름길이 있습니다. `gori run shell`(또는 팔레트의 **Open shell**)은 OS 설정을 건드리지 않고, curl, git, Python, Go, Node 트래픽이 실행 중인 gori를 거치며 그 CA를 신뢰하는 셸을 엽니다. `gori run shell -- curl https://example.com`은 명령 하나만 그렇게 실행합니다. [`gori run shell`](/ko/reference/cli/#run-shell)을 참고하세요.
+커맨드라인 도구에는 `gori run shell`(또는 팔레트의 **Open shell**)은 OS 설정을 건드리지 않고, curl, git, Python, Go, Node 트래픽이 실행 중인 gori를 거치며 그 CA를 신뢰하는 셸을 엽니다. `gori run shell -- curl https://example.com`은 명령 하나만 그렇게 실행합니다. [`gori run shell`](/ko/reference/cli/#run-shell)을 참고하세요.
 
-> gori의 개인 키는 이 머신에만 두는 비밀입니다. `0600` 권한으로 기록되며 머신 밖으로 나가지 않습니다. 이전의 모든 신뢰를 무효화하려 할 때만 팔레트(**Regenerate CA certificate**)에서 교체하세요.
+> gori의 개인 키는 `0600` 권한으로 기록되며 이 머신 밖으로 나가지 않습니다. 이전의 모든 신뢰를 무효화하려 할 때만 팔레트(**Regenerate CA certificate**)에서 교체하세요.
 
 ### Option C: 휴대폰이나 태블릿에 CA 설치하기 {#option-c-install-the-ca-on-a-phone-or-tablet}
 
-휴대폰은 파일 시스템에서 CA를 읽을 수 없으므로, gori가 네트워크로 직접 제공합니다.
+휴대폰은 파일 시스템에서 CA를 읽을 수 없으므로, gori가 네트워크로 제공합니다.
 
 1. 기기가 접근할 수 있도록 프록시를 바인딩하고 머신의 LAN IP를 확인하세요:
 
@@ -82,7 +82,7 @@ gori는 필요할 때 루트로 호스트별 리프 인증서를 발급하므로
 3. 그 기기의 브라우저에서 **`http://gori.proxy/`**로 접속합니다(`http://gori/`도 됩니다).
 4. 인증서를 내려받아 신뢰 등록합니다. iOS는 두 단계입니다. 프로파일을 설치한 뒤 **설정 → 일반 → 정보 → 인증서 신뢰 설정**에서 활성화하세요. Android는 **설정 → 보안 → 암호화 및 인증 정보 → 인증서 설치 → CA 인증서**에서 설치합니다.
 
-`gori.proxy`는 gori가 스스로 응답하는 예약된 이름입니다. 프록시를 설정한 뒤에만 동작하며 네트워크로 나가지 않습니다. 프록시를 먼저 설정하고 싶지 않다면 `http://<LAN-IP>:8070/`으로 바로 접속해도 같은 페이지가 나옵니다.
+`gori.proxy`는 gori가 스스로 응답하는 예약된 이름입니다. 프록시를 설정한 뒤에만 동작하며 네트워크로 나가지 않습니다. 프록시를 설정하기 전이라면 `http://<LAN-IP>:8070/`으로 접속해도 같은 페이지가 나옵니다.
 
 ### Option D: adb로 Android 에뮬레이터 설정하기 {#option-d-set-up-an-android-emulator-over-adb}
 
@@ -94,7 +94,7 @@ gori run android setup --system    # Play Store 없는 에뮬레이터, 또는 �
 gori run android undo              # 프록시와 포트 매핑 해제
 ```
 
-`--system`은 root 권한으로 gori의 루트 인증서를 시스템 저장소에 넣으므로, 앱은 network security config 없이도 신뢰합니다. 기기를 재부팅하면 사라집니다. root가 필요하며 Android 14+(API 34)는 아직 지원하지 않습니다. 기본값인 `--user`는 인증서를 `/sdcard/Download/gori-ca.crt`에 올리고 보안 설정을 열어 **CA 인증서**로 설치하게 합니다. API 24 이상을 대상으로 하는 앱은 network security config에서 허용해야만 사용자 CA를 신뢰합니다. TUI에서는 팔레트의 **Set up Android device**가 같은 단계를 실행합니다. [`gori run android`](/reference/cli/#run-android)를 참고하세요.
+`--system`은 root 권한으로 gori의 루트 인증서를 시스템 저장소에 넣으므로, 앱은 network security config 없이도 신뢰합니다. 기기를 재부팅하면 사라집니다. root가 필요하며 Android 14+(API 34)는 아직 지원하지 않습니다. 기본값인 `--user`는 인증서를 `/sdcard/Download/gori-ca.crt`에 올리고 보안 설정을 열어 **CA 인증서**로 설치하게 합니다. API 24 이상을 대상으로 하는 앱은 network security config에서 허용해야만 사용자 CA를 신뢰합니다. TUI에서는 팔레트의 **Set up Android device**가 같은 단계를 실행합니다. [`gori run android`](/ko/reference/cli/#run-android)를 참고하세요.
 
 **체크포인트.** **History**로 전환하세요(`3`). 최소 한 개의 행이 보여야 합니다. `200` 상태의 `GET https://example.com/` 요청입니다. History가 비어 있다면 트래픽이 gori에 닿지 않는 것입니다. 프록시 설정(Option B)을 다시 확인하거나 **Open browser**(Option A)를 사용하세요.
 
@@ -119,7 +119,7 @@ gori run android undo              # 프록시와 포트 매핑 해제
 
 [space 메뉴와 팔레트](/ko/guide/space-menu-and-palette/)에서 `Z` **Display…**, `P` **Protocol…** 카드와 팔레트에만 있는 동작까지 자세히 다룹니다.
 
-처음부터 알아 두면 좋은 전역 토글 세 가지입니다:
+전역 토글 세 가지:
 
 | 키 | 동작 |
 |-----|--------|
@@ -139,7 +139,7 @@ gori의 화면은 한 줄로 늘어선 탭입니다. 기본 순서는 Project �
 | `Esc` | 포커스를 탭 바 쪽으로 되돌림 |
 | `Tab` / `Shift-Tab` | 탭 바와 패널 사이로 포커스 이동 |
 
-마우스는 활성화하면(Preferences → **Editor & Keys** → **Mouse**) 동작합니다. 탭을 클릭하고, 행을 클릭해 선택하고, 한 번 더 클릭해 엽니다. `?`를 누르면 전체 키 치트시트가 팝업으로 열리고, 지금 있는 탭의 섹션부터 보여줍니다.
+마우스는 활성화하면(Preferences → **Editor & Keys** → **Mouse**) 동작합니다. 탭을 클릭하고, 행을 클릭해 선택하고, 한 번 더 클릭해 엽니다. `?`를 누르면 키 치트시트가 팝업으로 열리고, 지금 있는 탭의 섹션부터 보여줍니다.
 
 ## 5. History에서 플로우 읽기 {#5-read-a-flow-in-history}
 
@@ -175,11 +175,11 @@ method:POST body:password
 
 이제 `example.com` 플로우를 선택하고 `Enter`를 누르세요. 상세 화면에서는 `↑` / `↓`로 스크롤하고 `y`로 복사하며, hex / whitespace / pretty 본문은 `Ctrl-X` / `b` / `p`로 토글합니다. `Esc`로 목록에 돌아옵니다.
 
-**체크포인트.** History를 호스트 하나로 필터하고, 플로우를 열어 전체 요청과 응답을 읽을 수 있습니다.
+**체크포인트.** History를 호스트 하나로 필터하고, 플로우를 열어 요청과 응답을 읽을 수 있습니다.
 
 ## 6. Repeater로 보내 재전송하기 (핵심 루프) {#6-send-it-to-repeater-and-re-send-the-core-loop}
 
-대부분의 시간을 보내게 될 루프입니다. 캡처한 요청을 가져와 무언가를 바꾸고, 다시 보내고, 비교합니다.
+작업 시간 대부분은 이 루프에서 보냅니다. 캡처한 요청을 가져와 무언가를 바꾸고, 다시 보내고, 비교합니다.
 
 1. **History**에서 `example.com` 플로우를 선택합니다.
 2. `Ctrl-R`을 누릅니다. gori가 플로우를 **Repeater** 탭으로 복사하고 그쪽으로 전환합니다.
@@ -189,7 +189,7 @@ method:POST body:password
    ```
 4. `Esc`로 편집 모드를 벗어난 뒤 `Ctrl-R`로 **전송**합니다.
 
-   편집 중 복사하기: `Shift`+화살표는 두 모드 모두에서 선택하지만, 복사 키는 다릅니다. READ에서는 `y`이고, INS에서 `y`는 리터럴 문자라 선택 위에 입력하면 선택을 *덮어씁니다*. 그러니 **`Ctrl-Y`**를 쓰세요. `Esc`도 선택을 INS 밖으로 들고 나오므로 `Esc` 뒤 `y`도 됩니다. 어떤 키 입력이 선택을 지워 버렸다면, `Ctrl-Z`가 한 번에 되돌립니다.
+   편집 중 복사하기: `Shift`+화살표는 두 모드 모두에서 선택하지만, 복사 키는 다릅니다. READ에서는 `y`입니다. INS에서 `y`는 리터럴 문자라 선택 위에 입력하면 선택을 덮어쓰므로 `Ctrl-Y`를 쓰세요. `Esc`도 선택을 INS 밖으로 들고 나오므로 `Esc` 뒤 `y`도 됩니다. 키 입력이 선택을 덮어썼다면 `Ctrl-Z`가 한 번에 되돌립니다.
 5. 응답과 타이밍, 이전 응답 대비 diff가 오른쪽에 나타납니다. `Tab`으로 target → request → response를 순회합니다.
 
 <figure class="tui-shot">
@@ -197,19 +197,17 @@ method:POST body:password
   <figcaption><strong>Repeater</strong>는 요청의 어느 부분이든 편집해 재전송합니다. 응답, 타이밍, 그리고 마지막 응답 대비 diff가 나란히 놓입니다.</figcaption>
 </figure>
 
-**체크포인트.** Repeater 상태 줄에 `sent → 200 in … ms` 같은 문구가 보이고, `Ctrl-R`로 원하는 만큼 재전송할 수 있습니다. 이것이 완전한 캡처 → 검사 → 리플레이 루프입니다.
+**체크포인트.** Repeater 상태 줄에 `sent → 200 in … ms` 같은 문구가 보이고, `Ctrl-R`로 원하는 만큼 재전송할 수 있습니다.
 
 ## 7. 다음으로 갈 곳 {#7-where-to-go-next}
 
-이제 핵심 루프를 갖췄습니다. 여기서부터는 [Playbooks](/ko/playbooks/)가 이어받아, 스코프·매핑·인터셉트·퍼징·리포트를 한 번에 하나씩 체크포인트와 함께 끝까지 안내합니다. 아래는 먼저 가 볼 만한 방향 몇 가지이며, 각각 [가이드](/ko/guide/)에서도 깊이 다룹니다:
+[Playbooks](/ko/playbooks/)는 스코프·매핑·인터셉트·퍼징·리포트를 한 번에 하나씩 체크포인트와 함께 끝까지 안내합니다. 아래는 다음 단계 몇 가지이며, 각각 [가이드](/ko/guide/)에서 깊이 다룹니다:
 
 - **파라미터 퍼징.** 플로우를 선택하고 `Shift-I`로 **Fuzzer**에 보낸 뒤, 위치를 표시하고(`Ctrl-A`가 흔한 파라미터를 자동 표시), 워드리스트를 붙이고 `Ctrl-R`로 실행합니다. [Repeater & Fuzzer](/ko/guide/repeater-and-fuzzer/)를 보세요.
 - **오가는 도중에 잡아 편집하기.** `i`를 눌러 일치하는 요청을 잡아 두고, 계속 진행되기 전에 forward, drop, 또는 수정합니다. [Proxy & History](/ko/guide/proxy/#intercept)를 보세요.
 - **찾은 것 추적하기.** 보고할 가치가 있는 것은 `Shift-F`로 **Issue**로 만들고, 둘러보는 동안 **Probe** 탭에서 패시브 결과를 읽으세요. [Scanning & Issues](/ko/guide/scanning/)를 보세요.
 
 ## Day-1 키 맵 {#day-1-key-map}
-
-키 조합이 손에 익을 때까지 이 표를 가까이 두세요:
 
 | 키 | 위치 | 동작 |
 |-----|--------|--------|
@@ -235,9 +233,9 @@ method:POST body:password
 gori wizard
 ```
 
-첫 실행에서는 기본 주소(`127.0.0.1:8070`)를 쓸 수 있으면 마법사가 테마 스텝에서 시작하고, `Shift-Tab`으로 바인드 스텝에 돌아갈 수 있습니다. `gori wizard`는 항상 바인드 스텝에서 시작합니다. 수신 IP의 기본값 `127.0.0.1`은 이 컴퓨터에서만 접속할 수 있고, `0.0.0.0`을 고르면 다른 기기에서도 접속할 수 있습니다. 첫 `Enter`는 IP에서 포트로 이동하고 다음 `Enter`는 계속 진행합니다. 이 값은 `settings.json`의 공유 기본값이며, 프로젝트별 주소는 Project 탭에서 따로 고정할 수 있습니다. 포트가 이미 사용 중이면 `Enter`를 한 번 더 눌러 그대로 유지할 수 있습니다. `Esc`를 두 번 누르면 마법사를 건너뜁니다.
+첫 실행에서는 기본 주소(`127.0.0.1:8070`)를 쓸 수 있으면 마법사가 테마 스텝에서 시작하고, `Shift-Tab`으로 바인드 스텝에 돌아갈 수 있습니다. `gori wizard`는 항상 바인드 스텝에서 시작합니다. 수신 IP의 기본값 `127.0.0.1`은 이 컴퓨터에서만 접속할 수 있고, `0.0.0.0`을 고르면 다른 기기에서도 접속할 수 있습니다. 첫 `Enter`는 IP에서 포트로 이동하고 다음 `Enter`는 계속 진행합니다. 이 값은 `settings.json`의 공유 기본값이 됩니다. 프로젝트별 주소는 Project 탭에서 따로 고정할 수 있습니다. 포트가 이미 사용 중이면 `Enter`를 한 번 더 눌러 그대로 유지할 수 있습니다. `Esc`를 두 번 누르면 마법사를 건너뜁니다.
 
-마지막 **Review** 스텝은 선택한 값을 요약하고, 현재 [에디터 키셋](/ko/guide/hotkeys/#editor-keysets)과 바꾸는 곳을 알려 줍니다(마법사는 키셋을 바꾸지 않습니다). 편집 가능한 행이 하나 있습니다. **Shortcuts**입니다. `←`/`→`로 gori 내장 키 조합 패밀리(`^P` `^N` `^W` `^1-9`)의 모디파이어를 `Ctrl`과 `Option (⌥)` 사이에서 전환합니다. Option을 고르면 Ctrl을 대체하는 게 아니라 `⌥` 별칭이 *추가*됩니다. 터미널이나 멀티플렉서가 Ctrl 형태를 전달하지 않을 때 유용합니다. macOS의 Option-as-Meta 요구사항은 [커맨드 모디파이어](/ko/guide/hotkeys/#command-modifier)를 참고하세요.
+마지막 **Review** 스텝은 선택한 값을 요약하고, 현재 [에디터 키셋](/ko/guide/hotkeys/#editor-keysets)과 바꾸는 곳을 알려 줍니다(마법사는 키셋을 바꾸지 않습니다). 편집 가능한 행이 하나 있습니다. **Shortcuts**입니다. `←`/`→`로 gori 내장 키 조합 패밀리(`^P` `^N` `^W` `^1-9`)의 모디파이어를 `Ctrl`과 `Option (⌥)` 사이에서 전환합니다. Option을 고르면 Ctrl은 그대로 두고 `⌥` 별칭을 추가합니다. 터미널이나 멀티플렉서가 Ctrl 형태를 전달하지 않을 때 쓰세요. macOS의 Option-as-Meta 요구사항은 [커맨드 모디파이어](/ko/guide/hotkeys/#command-modifier)를 참고하세요.
 
 ## 가이드 UI 투어 {#guided-ui-tour}
 

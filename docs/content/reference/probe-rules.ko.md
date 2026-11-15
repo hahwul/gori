@@ -10,7 +10,7 @@ weight = 35
 
 ## 룰 켜고 끄기 {#managing}
 
-스위치는 프로젝트 단위입니다. 내장 룰을 끄면 새로운 탐지만 멈추고, 이미 만든 발견은 Probe 목록에 그대로 남습니다.
+스위치는 프로젝트 단위입니다. 내장 룰을 끄면 새로운 탐지가 멈춥니다. 이미 만든 발견은 Probe 목록에 남습니다.
 
 | 어디서 | 방법 |
 |---------|-----|
@@ -63,16 +63,16 @@ gori run probe rules disable sri            # 시끄러운 패시브 체크 하�
 | `session_id_in_url` | Session identifier in URL | `infoleak` | 요청 URL에 실린 알려진 프레임워크 세션 식별자(PHPSESSID, JSESSIONID, ASP.NET_SessionId 등)를 표시합니다. 로그, 방문 기록, Referer로 새어 나갑니다. |
 | `open_cross_domain_policy` | Permissive cross-domain policy | `cors` | 모든 origin에 접근을 허용하는(`domain="*"`) Flash/Silverlight 크로스 도메인 정책을 표시합니다. |
 | `bare_lf_response` | Bare-LF response head | `headers` | 응답 헤드의 줄 끝이 CRLF가 아닌 단독 LF인 경우를 표시합니다. 파서마다 메시지 프레이밍을 다르게 읽을 수 있습니다(응답 desync / splitting의 전제 조건). |
-| `oauth` | Weak OAuth/OIDC authorization request | `headers` | RFC 9700 기준으로 implicit grant, PKCE plain 메서드, PKCE 누락, CSRF 보호 전무(PKCE·state·nonce 모두 없음)인 OAuth 2.0 / OIDC 인가 요청을 표시합니다. |
-| `llm_prompt_injection` | Prompt injection aimed at an LLM agent | `client` | LLM을 겨냥한 지시문(ignore previous instructions, NOTE TO SYSTEM 같은 덮어쓰기 문구나 gori 액션 도구를 호출하라는 명령)을 담은 응답 본문을 표시합니다. 탐지만 하며 본문은 바꾸지 않습니다. |
+| `oauth` | Weak OAuth/OIDC authorization request | `headers` | RFC 9700 기준으로 implicit grant, PKCE plain 메서드, PKCE 누락, CSRF 보호 없음(PKCE·state·nonce 모두 없음)인 OAuth 2.0 / OIDC 인가 요청을 표시합니다. |
+| `llm_prompt_injection` | Prompt injection aimed at an LLM agent | `client` | LLM을 겨냥한 지시문(ignore previous instructions, NOTE TO SYSTEM 같은 덮어쓰기 문구나 gori 액션 도구를 호출하라는 명령)을 담은 응답 본문을 표시합니다. 탐지만 합니다. 본문은 바꾸지 않습니다. |
 
 ## 액티브 룰 {#active}
 
-액티브 룰은 직접 요청을 보냅니다. 자동 파이프라인은 프로젝트 스캔 모드가 `active`나 `aggressive`일 때만 이 룰을 실행합니다. 플로우별 **Run active scan**과 `gori run probe --active`는 어느 모드에서든 실행합니다. 기본적으로 안전한 메서드(`GET` / `HEAD`)만 다시 보내고, 고유한 표면마다 한 번씩만 테스트합니다. 두 룰은 의도적으로 예외입니다. `graphql_introspection_active`는 `POST` 엔드포인트를 `POST`로 유지하고(읽기 전용 쿼리), `insecure_http_methods`는 자체 `OPTIONS`와 `TRACE`를 보냅니다.
+액티브 룰은 직접 요청을 보냅니다. 자동 파이프라인은 프로젝트 스캔 모드가 `active`나 `aggressive`일 때만 이 룰을 실행합니다. 플로우별 **Run active scan**과 `gori run probe --active`는 어느 모드에서든 실행합니다. 기본적으로 안전한 메서드(`GET` / `HEAD`)만 다시 보내고, 고유한 표면마다 한 번씩만 테스트합니다. 두 룰은 예외입니다. `graphql_introspection_active`는 `POST` 엔드포인트를 `POST`로 유지하고(읽기 전용 쿼리), `insecure_http_methods`는 자체 `OPTIONS`와 `TRACE`를 보냅니다.
 
 **비용**은 룰이 플로우 하나에 보내는 요청 수이며, Rules 서브탭이 행 옆에 보여 주는 값과 같습니다. **비고**는 기본값만으로는 실행되지 않는 룰을 표시합니다.
 
-- **기본 비활성**: 꺼진 채 출하됩니다. 의도적으로 켜세요([위](#managing) 참고).
+- **기본 비활성**: 꺼진 채 출하됩니다. 직접 켜세요([위](#managing) 참고).
 - **unsafe 필요**: 룰이 보내는 프로브가 모두 안전하지 않은 메서드라, unsafe 메서드를 허용하기 전에는(팝업의 **unsafe methods** 체크, `--unsafe`, AGGRESSIVE 모드) 아무것도 만들지 않습니다.
 - **OAST 필요**: 켜져 있지만, 프로젝트에 페이로드를 찍어 낼 [OAST](/ko/guide/oast/) 리스너가 등록되기 전까지는 작동하지 않습니다. 그때까지 그 비용은 추정치에서 빠집니다.
 
@@ -85,7 +85,7 @@ gori run probe rules disable sri            # 시끄러운 패시브 체크 하�
 | `backslash_powered` | Backslash-powered scanning | `active` | 4-8 |  | 쿼리·폼·JSON 파라미터마다 `\`와 `\\`를 덧붙여, 백슬래시 하나는 응답을 흔들지만 둘은 그렇지 않은 파라미터를 표시합니다(서버 측 문자열 해석). |
 | `sqli_error_based` | Error-based SQL injection | `active` | 3-5 |  | 쿼리·폼·JSON 파라미터마다 SQL 구문을 깨는 페이로드를 덧붙이고, 깨끗한 baseline에는 없는 데이터베이스 오류 서명이 프로브 응답에 나타나면 표시합니다. |
 | `sqli_boolean_based` | Boolean-based blind SQL injection | `active` | 4-8 |  | 파라미터마다 항상 참인 SQL 조건과 항상 거짓인 조건을 덧붙여, 참 쪽은 baseline과 같고 거짓 쪽은 달라지는 파라미터를 표시합니다(오류도 반사도 없는 블라인드 인젝션). |
-| `sqli_time_based` | Time-based blind SQL injection | `active` | 6-10 | 기본 비활성 | 파라미터마다 서버 측 지연(SLEEP/pg_sleep/WAITFOR)을 주입하고, baseline과 점점 늘린 두 번의 지연에 걸쳐 응답 지연 시간으로 확인합니다. 일부러 기다리기 때문에 기본 비활성으로 출하됩니다. |
+| `sqli_time_based` | Time-based blind SQL injection | `active` | 6-10 | 기본 비활성 | 파라미터마다 서버 측 지연(SLEEP/pg_sleep/WAITFOR)을 주입하고, baseline과 점점 늘린 두 번의 지연에 걸쳐 응답 지연 시간으로 확인합니다. 프로브마다 지연만큼 기다리기 때문에 기본 비활성으로 출하됩니다. |
 | `graphql_introspection_active` | GraphQL introspection (active) | `infoleak` | 1 |  | GraphQL 엔드포인트에 introspection 쿼리를 보내 스키마가 노출되는지 확인합니다. |
 | `lfi_param_traversal` | Parameter path traversal | `active` | 3 |  | 파일 파라미터를 접힌 `..`(file=x/../doc) 경로로 다시 가져와, 바이트 단위로 같은 응답이 오면 표시합니다. |
 | `open_redirect` | Open redirect | `active` | 1 |  | 리다이렉트 파라미터를 외부 호스트로 바꾸고, Location이 그대로 따라가면 표시합니다. |

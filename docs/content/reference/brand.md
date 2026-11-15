@@ -5,13 +5,13 @@ weight = 40
 +++
 
 These are the files this site itself uses. Right-clicking the mark in the header
-opens the logo downloads as a menu; this page adds the palette and the
+opens the logo downloads as a menu. This page adds the palette and the
 wallpapers, and says which variant belongs where.
 
 ## The mark {#mark}
 
 Three variants, each shipped as SVG, PNG and WebP. The raster files are
-512 × 512; the SVGs draw on a `0 0 512 512` viewBox and scale to anything.
+512 × 512. The SVGs draw on a `0 0 512 512` viewBox and scale to anything.
 
 <div class="art-gallery">
   <figure>
@@ -45,9 +45,9 @@ Three variants, each shipped as SVG, PNG and WebP. The raster files are
 
 On disk the three are `gori`, `gori_dark` and `gori_white`, and the header's
 download menu labels them **Mark**, **Dark** and **Color**.
-`gori_white` is the *gradient*, not a white knockout: the filename predates the
+`gori_white` is the *gradient*, not a white knockout. The filename predates the
 labels and other things point at it, so it keeps the name. There is no reversed
-white-on-dark mark; on a dark background, use the flat gold.
+white-on-dark mark. On a dark background, use the flat gold.
 
 ## Colours {#colours}
 
@@ -67,7 +67,7 @@ homes:
 
 | Colour | Hex | Role | Where the value lives |
 |--------|-----|------|-----------------------|
-| Brand gold | `#d9c28b` | The mark, and the focus ring around whatever has your attention | The fill in `gori.svg`, `focus_gold` in the `goridark` theme, and the last stop of the site's wordmark gradient: one value, three places |
+| Brand gold | `#d9c28b` | The mark, and the focus ring around whatever has your attention | The fill in `gori.svg`, `focus_gold` in the `goridark` theme, and the last stop of the site's wordmark gradient |
 | Gold highlight | `#f7ecd0` | The lit edge of the gradient mark | First stop of `gori_white.svg` |
 | Leaf gold | `#c8a860` | Links, rules and accents on this site | The site's `--accent` |
 | Deep gold | `#8a6a28` | The same role on a light canvas, dark enough to stay readable | `focus_gold` in `goriday`; this site uses `#a8791f` |
@@ -76,8 +76,8 @@ homes:
 | Cloud indigo | `#6c7eb2` | The cloud and wave line-work in the wallpapers | The site's `--cloud-rgb` |
 | Paper | `#faf9f7` | The light canvas, on both surfaces | `bg` in `goriday`, and the site's light `--bg` |
 
-Only HTTP status keeps functional colour in the TUI, and that is a theme
-decision rather than a brand one. The [Themes guide](/guide/themes/) covers all
+Only HTTP status keeps functional colour in the TUI, and the theme decides
+that. The [Themes guide](/guide/themes/) covers all
 thirty-two built-in palettes.
 
 ## Wallpaper {#wallpaper}
@@ -100,7 +100,7 @@ sampled from. Two cuts, both at the 1920 × 1080 desktop size.
 
 ## Using these {#usage}
 
-gori is Apache-2.0, and that licence covers the code only. The mark is not under it. Use these
+gori's Apache-2.0 licence covers the code only, not the mark. Use these
 files to refer to gori: a post, a talk, a comparison table, a badge on something
 that integrates with it.
 

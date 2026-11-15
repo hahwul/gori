@@ -7,25 +7,25 @@ weight = 50
 group = "수동 루프"
 +++
 
-인증된 테스트는 로그인 한 번과, 그 뒤로 계속 들고 다니는 토큰으로 이루어집니다. 이 플레이북은 로그인을 캡처하고, 회전하는 토큰을 이름에 바인딩하고, 그 이름을 이후의 모든 요청에 써 넣은 뒤, 같은 일을 헤드리스에서 명령 하나로 해내고, 여러 세션을 나란히 들고 다니고, 마지막으로 앱이 일회용 토큰을 내줄 때 요청마다 새 토큰을 가져옵니다. 약 10분을 잡으세요.
+이 플레이북은 로그인을 캡처하고, 회전하는 토큰을 이름에 바인딩하고, 그 이름을 이후의 모든 요청에 써 넣은 뒤, 같은 일을 헤드리스에서 명령 하나로 해내고, 여러 세션을 나란히 들고 다니고, 마지막으로 앱이 일회용 토큰을 내줄 때 요청마다 새 토큰을 가져옵니다. 약 10분을 잡으세요.
 
 > **시작하기 전에.** 먼저 [엔게이지먼트 준비](/ko/playbooks/set-up-an-engagement/)를 끝내고, 프록시를 거쳐 대상에 로그인할 수 있게 해 두세요. 그래야 인증 응답이 캡처됩니다. 세션은 테스트 권한이 있는 대상에만 재전송하세요. 예시는 `api.example.com`을 대역으로 씁니다.
 
 ## 1. 로그인 캡처하기 {#1-capture-a-login}
 
-재사용하려면 먼저 인증시켜 주는 응답이 필요합니다. [Quick Start](/ko/getting-started/quick-start/)가 다루는 방식대로(**Open browser** 세션이나, `127.0.0.1:8070`을 가리키는 자체 클라이언트로) gori를 통해 대상에 로그인하세요. 찾는 플로우는 응답으로 세션을 건네주는 플로우입니다: `Set-Cookie: session=…`, 또는 `{"access_token": …}`처럼 JSON 본문 속 토큰. **History**에서 찾으세요:
+[Quick Start](/ko/getting-started/quick-start/)가 다루는 방식대로(**Open browser** 세션이나, `127.0.0.1:8070`을 가리키는 자체 클라이언트로) gori를 통해 대상에 로그인하세요. 찾는 플로우는 `Set-Cookie: session=…`이나 `{"access_token": …}` 같은 JSON 본문 속 토큰으로 세션을 건네주는 응답입니다. **History**에서 찾으세요:
 
 ```bash
 gori run history -q 'path:/login status:200'
 ```
 
-플로우 id를 적어 두세요. 마지막 헤드리스 단계가 바로 이 플로우를 재전송합니다.
+플로우 id를 적어 두세요. 뒤의 헤드리스 단계가 이 플로우를 재전송합니다.
 
 **체크포인트.** 로그인 응답이 History에 있고, `Set-Cookie` 헤더로든 본문 속 필드로든 토큰을 담고 있습니다.
 
 ## 2. 토큰을 변수로 추출하기 {#2-extract-the-token-into-a-variable}
 
-회전하는 토큰은 미리 값을 박아 둬야 하는 규칙에는 쓸모가 없으므로, gori는 이를 전송 시점에 채워 넣는 이름에 바인딩합니다. **Rewriter** 탭의 `extract` 서브탭을 열고, 로그인 응답에서 토큰을 읽어 `$BIND.SESSION`에 바인딩하는 규칙을 추가하세요. **디스크립터**가 값이 어디에 있는지를 고릅니다(쿠키, 응답 헤더, 본문 정규식, JSON 경로, 또는 바이트 범위). 여기에 조건(`path:/login AND status:200`)과 선택적 호스트 glob이 함께 붙어, 규칙이 의도한 응답만 읽게 합니다.
+회전하는 토큰은 규칙에 미리 적어 둘 수 없으므로, gori는 토큰을 이름에 바인딩하고 전송 시점에 그 이름을 채웁니다. **Rewriter** 탭의 `extract` 서브탭을 열고, 로그인 응답에서 토큰을 읽어 `$BIND.SESSION`에 바인딩하는 규칙을 추가하세요. **디스크립터**가 값이 어디에 있는지를 고릅니다(쿠키, 응답 헤더, 본문 정규식, JSON 경로, 또는 바이트 범위). 여기에 조건(`path:/login AND status:200`)과 선택적 호스트 glob이 함께 붙어, 규칙이 의도한 응답만 읽게 합니다.
 
 ```bash
 gori run rewriter extract add --name SESSION --kind cookie --selector session \
@@ -34,24 +34,24 @@ gori run rewriter extract add --name SESSION --kind cookie --selector session \
 
 토큰이 JSON 본문에 있다면 대신 `--kind jsonpath --selector '$.access_token'`을 쓰세요(또는 본문에 캡처 그룹을 둔 `--kind regex`).
 
-**체크포인트.** `gori run rewriter bindings`에 `$BIND.SESSION`이 나열됩니다. 추출은 프록시 트래픽과 손으로 한 전송(Repeater 전송)에서 돌고, 스윕에서는 **돌지 않습니다**. 그러니 로그인을 한 번 재전송하면 `bindings` 서브탭에 이름이 바인딩된 것이 보입니다. 값은 메모리에만 존재하며, `settings.json`이나 프로젝트 데이터베이스에 절대 쓰이지 않습니다.
+**체크포인트.** `gori run rewriter bindings`에 `$BIND.SESSION`이 나열됩니다. 추출은 프록시 트래픽과 손으로 한 전송(Repeater 전송)에서 돌고, 스윕에서는 **돌지 않습니다**. 로그인을 한 번 재전송하면 `bindings` 서브탭에 이름이 바인딩된 것이 보입니다. 값은 메모리에만 있고 `settings.json`이나 프로젝트 데이터베이스에 쓰이지 않습니다.
 
 ## 3. 모든 요청에 되써 넣기 {#3-write-it-back-on-every-request}
 
-이름을 바인딩한 것만으로는 값을 캡처했을 뿐입니다. 값을 다시 와이어에 올려야 하고, 방법은 누가 보내느냐에 달려 있습니다. 프록시를 지나는 트래픽(브라우저나 클라이언트)은 **Match & Replace** 규칙이 맡습니다. **Rewriter** 탭에서 **요청** 쪽에 `Authorization`(또는 `Cookie`)을 `$BIND.SESSION`으로 설정하는 **set header** 규칙을 추가하세요. `$BIND.SESSION`은 규칙을 저장한 때가 아니라 각 요청이 나갈 때 해석되므로, 이후 프록시를 지나는 모든 요청은 인증된 채로 나갑니다.
+다음으로 값을 다시 와이어에 올립니다. 방법은 누가 보내느냐에 따라 다릅니다. 프록시를 지나는 트래픽(브라우저나 클라이언트)에는 **Match & Replace** 규칙을 씁니다. **Rewriter** 탭에서 **요청** 쪽에 `Authorization`(또는 `Cookie`)을 `$BIND.SESSION`으로 설정하는 **set header** 규칙을 추가하세요. `$BIND.SESSION`은 각 요청이 나갈 때 해석되므로, 이후 프록시를 지나는 모든 요청은 인증된 채로 나갑니다.
 
 ```bash
 gori run rewriter add --op set_header --target request \
   --find Authorization --value 'Bearer $BIND.SESSION' --host '*.example.com'
 ```
 
-Match & Replace 규칙은 프록시를 지나는 트래픽에만 적용됩니다. Repeater나 Fuzzer 전송은 쓴 그대로 나갑니다. 그러니 이쪽은 요청 자체에 이름을 적으세요. Repeater 에디터나 퍼즈 템플릿의 `Authorization: Bearer $BIND.SESSION` 줄도 전송 시점에 똑같이 해석되며, 세션 슬롯(5단계)을 쓰면 요청마다 고치지 않아도 헤더를 더해 줍니다.
+Match & Replace 규칙은 프록시를 지나는 트래픽에만 적용됩니다. Repeater나 Fuzzer 전송은 쓴 대로 나가므로, 요청 자체에 이름을 적으세요. Repeater 에디터나 퍼즈 템플릿의 `Authorization: Bearer $BIND.SESSION` 줄도 전송 시점에 똑같이 해석되며, 세션 슬롯(5단계)을 쓰면 요청마다 고치지 않아도 헤더를 더해 줍니다.
 
-**체크포인트.** 전에 `401`을 돌려주던 보호된 엔드포인트로 프록시를 거쳐 보낸 요청이 이제 `200`을 돌려주고, `Authorization` 줄이 `Bearer $BIND.SESSION`인 Repeater 전송도 마찬가지입니다. 규칙이 대신 건너뛰어졌다면, 이벤트 피드가 그 이름이 아무 값으로도 해석되지 않았다고 알려 줍니다. 로그인을 다시 캡처해 재바인딩하세요.
+**체크포인트.** 전에 `401`을 돌려주던 보호된 엔드포인트로 프록시를 거쳐 보낸 요청이 이제 `200`을 돌려주고, `Authorization` 줄이 `Bearer $BIND.SESSION`인 Repeater 전송도 마찬가지입니다. 규칙이 건너뛰어졌다면 이벤트 피드가 그 이름이 아무 값으로도 해석되지 않았다고 알려 줍니다. 로그인을 다시 캡처해 재바인딩하세요.
 
 ## 4. 헤드리스로 하기 {#4-do-it-headless}
 
-`gori run`은 호출마다 프로세스 하나이고, 바인딩은 로그인을 관측한 그 프로세스의 메모리에만 존재합니다. 그래서 새로 뜬 `fuzz`나 `mine`은 `$BIND.SESSION`을 해석할 값이 없어, 토큰이 글자 그대로 나갑니다. 스윕은 의도적으로 추출 소스도 아닙니다: 공격 페이로드를 되비추는 응답이 자칫 세션을 페이로드에서 유래한 값으로 재바인딩할 수 있기 때문입니다. `--bind-from`이 그 틈을 메웁니다. 캡처한 플로우 하나(로그인)를 먼저 재전송해, 그 응답이 같은 프로세스 안에서 이후 실행 동안 바인딩 표를 채웁니다. 템플릿에 토큰 이름이 적혀 있어야 하므로, `Authorization` 줄이 `Bearer $BIND.SESSION`인 요청 파일을 퍼징하세요(캡처한 플로우의 바이트에는 그 이름이 없습니다. 그런 플로우에는 5단계의 `--slot`이 헤더를 더해 줍니다):
+`gori run`은 호출마다 프로세스 하나이고, 바인딩은 로그인을 관측한 그 프로세스의 메모리에만 존재합니다. 새로 뜬 `fuzz`나 `mine`은 `$BIND.SESSION`을 해석할 값이 없어 토큰이 글자 그대로 나갑니다. 스윕도 추출 소스가 아니므로, 공격 페이로드를 되비추는 응답이 세션을 재바인딩하지 않습니다. `--bind-from`은 캡처한 플로우 하나(로그인)를 먼저 재전송해, 그 응답이 같은 프로세스 안에서 이후 실행 동안 바인딩 표를 채우게 합니다. 템플릿에 토큰 이름이 적혀 있어야 하므로, `Authorization` 줄이 `Bearer $BIND.SESSION`인 요청 파일을 퍼징하세요. 캡처한 플로우의 바이트에는 그 이름이 없으며, 그런 플로우에는 5단계의 `--slot`이 헤더를 더해 줍니다:
 
 ```bash
 gori run fuzz --request req.http --target https://api.example.com --bind-from 17 --wordlist ids.txt
@@ -60,13 +60,13 @@ gori run fuzz --request req.http --target https://api.example.com --bind-from 17
 
 같은 플래그가 `mine`, `sequence`, `discover`에도 통합니다.
 
-**체크포인트.** 실행이 `bind-from: flow #… replayed → bound $…` 줄을 찍고, 응답이 `401` 벽 대신 인증된 채로 돌아옵니다.
+**체크포인트.** 실행이 `bind-from: flow #… replayed → bound $…` 줄을 찍고, 응답이 `401` 대신 인증된 채로 돌아옵니다.
 
 ## 5. 세션을 여러 개 들고 다니기 {#5-carry-more-than-one-session}
 
-2~4단계는 세션 *하나*를 들고 다닙니다. 실제 엔게이지먼트는 보통 여러 개(관리자, 저권한 사용자, 익명 클라이언트)를 동시에 필요로 하는데, `$BIND.SESSION`은 한 번에 하나만 뜻할 수 있습니다. **세션 슬롯**이 그 이름입니다. 자기 헤더 오버레이와 자기 바인딩 테이블을 가진 아이덴티티이고, **활성**인 슬롯이 곧 전송이 나가는 신원입니다.
+2~4단계는 세션 하나를 들고 다닙니다. 엔게이지먼트에는 보통 여러 세션(관리자, 저권한 사용자, 익명 클라이언트)이 동시에 필요한데, `$BIND.SESSION`은 한 번에 값 하나만 담습니다. **세션 슬롯**은 자기 헤더 오버레이와 자기 바인딩 테이블을 가진 아이덴티티입니다. 전송은 **활성** 슬롯으로 나갑니다.
 
-슬롯은 [Authorize](/ko/guide/authorize/) 탭의 identities 카드가 편집하는 바로 그 행이라, 거기서 이미 구성해 둔 집합이 여기에도 그대로 있습니다. 헤드리스로 추가하려면:
+슬롯은 [Authorize](/ko/guide/authorize/) 탭의 identities 카드가 편집하는 것과 같은 행이라, 거기서 구성한 슬롯이 여기에도 보입니다. 헤드리스로 추가하려면:
 
 ```bash
 gori run session add --name admin    --set 'Authorization: Bearer $BIND.SESSION' --rule SESSION
@@ -74,9 +74,9 @@ gori run session add --name low-priv --set 'Authorization: Bearer $BIND.SESSION'
 gori run session list
 ```
 
-두 슬롯이 같은 `$BIND.SESSION`에서 같은 헤더를 쓰는데도 서로 다른 토큰을 뜻합니다. extract 규칙의 소유권을 **주장한**(`--rule SESSION`) 슬롯은 그 규칙이 관찰한 값을 전역 테이블이 아니라 자기 테이블로 가져가기 때문입니다. 각자 어떤 토큰을 들게 되는지는 그 슬롯이 활성인 동안 어떤 로그인을 재생했는지가 결정합니다.
+두 슬롯은 같은 `$BIND.SESSION`에서 같은 헤더를 쓰지만 서로 다른 토큰을 담습니다. extract 규칙의 소유권을 주장한(`--rule SESSION`) 슬롯은 그 규칙이 관찰한 값을 전역 테이블 대신 자기 테이블에 넣습니다. 각 슬롯은 자신이 활성인 동안 재생한 로그인의 토큰을 담습니다.
 
-그다음 전송에 신원을 지정합니다. TUI에서는 `Ctrl-P` → **Session slot**(또는 상단 바의 `session:NAME` 칩)이고, 이후 모든 전송이 누구로 나가는지 밝힙니다. 헤드리스에서는 `--slot`입니다.
+그다음 전송에 신원을 지정합니다. TUI에서는 `Ctrl-P` → **Session slot**(또는 상단 바의 `session:NAME` 칩)이고, 이후 모든 전송이 어느 슬롯으로 나가는지 보여 줍니다. 헤드리스에서는 `--slot`입니다.
 
 ```bash
 gori run fuzz 42 --slot low-priv --bind-from 17 --wordlist ids.txt
@@ -84,11 +84,11 @@ gori run fuzz 42 --slot low-priv --bind-from 17 --wordlist ids.txt
 # bind-from: flow #17 replayed → bound $BIND.SESSION
 ```
 
-`--slot`은 `--bind-from` **보다 먼저** 적용되므로, 로그인 재생이 활성 슬롯의 테이블을 채우고 스윕은 같은 테이블에서 `$BIND.SESSION`을 해소합니다. 똑같은 명령을 `--slot admin`과 다른 로그인 플로우로 돌리면, 두 실행은 같은 대상의 두 세션이 됩니다.
+`--slot`은 `--bind-from`보다 먼저 적용되므로, 로그인 재생이 활성 슬롯의 테이블을 채우고 스윕은 같은 테이블에서 `$BIND.SESSION`을 해소합니다. 같은 명령을 `--slot admin`과 다른 로그인 플로우로 돌리면, 두 번째 실행은 같은 대상을 두 번째 세션으로 테스트합니다.
 
 오버레이는 헤더 전용이라 `Content-Length`는 움직이지 않고 본문은 바이트 그대로입니다. 그래서 직접 작성하지 않은 바이트(캡처된 재전송, 페이로드가 이미 끼워진 퍼즈 템플릿) 위에서도 슬롯은 안전합니다.
 
-본격적으로 쓰기 전에 알아 둘 한계가 둘 있습니다. 활성 슬롯은 **절대 저장되지 않습니다.** 프로젝트를 다시 열면 캡처된 그대로에서 시작하는데, 슬롯의 값이 메모리 전용이라 포인터만 복원해 빈 테이블을 가리키게 하면 `$BIND.SESSION`이 리터럴인 오버레이를 보내게 되기 때문입니다. 그리고 쿠키 저장소(cookie jar)는 없습니다. 슬롯은 직접 쓴 헤더와 gori가 관찰한 값을 들고 있고, `--bind-from`이 "다시 로그인한다"의 명시적인 버전입니다.
+한계가 둘 있습니다. 활성 슬롯은 **저장되지 않습니다.** 프로젝트를 다시 열면 캡처된 상태에서 시작합니다. 슬롯의 값은 메모리 전용이라, 빈 테이블 위의 오버레이는 `$BIND.SESSION`을 글자 그대로 보내게 되기 때문입니다. 쿠키 저장소(cookie jar)는 없습니다. 슬롯은 직접 쓴 헤더와 gori가 관찰한 값을 들고 있고, 다시 로그인하려면 `--bind-from`을 씁니다.
 
 토큰보다 오래 가는 실행이라면 슬롯에 **갱신 단계**(refresh steps)를 주세요. 순서대로 로그인하는 Repeater 세션들입니다. `gori run session edit admin --refresh 12,14 --refresh-before jwt-exp`를 하면 `--slot admin` 전송은 바인딩된 JWT가 곧 만료될 때마다 먼저 슬롯을 갱신하고, `gori run session refresh admin`은 그 단계를 손으로 돌려 확인합니다. TUI에서는 Repeater 서브탭에서 `Ctrl-P` → **Use as refresh for slot…**으로 그 서브탭을 슬롯의 단계에 덧붙입니다. 갱신은 전송 전에 동작하며 `401` 뒤에 재시도하지 않습니다. [갱신 단계](/ko/reference/cli/#refresh-steps)를 참고하세요.
 
@@ -96,7 +96,7 @@ gori run fuzz 42 --slot low-priv --bind-from 17 --wordlist ids.txt
 
 ## 6. 요청마다 새 토큰 가져오기 {#6-fetch-a-fresh-token-for-every-request}
 
-세션보다 훨씬 먼저 죽는 값이 있습니다. 페이지를 열 때마다 앱이 내주고 한 번만 받아 주는 폼의 CSRF 토큰이나 nonce가 그렇습니다. 갱신 단계는 값이 *만료되기* 전에 새로 받아 오지만, 스윕은 여전히 후보마다 값 하나를 써 버리므로 첫 후보만 `200`을 받고 그 뒤로는 전부 `403`입니다. **요청 시점 매크로**는 매번 새 값을 가져옵니다. 후보마다 **앞서** 실행되는 저장된 Repeater 세션이라, 2단계의 extract 규칙이 제때 이름을 다시 바인딩합니다.
+페이지를 열 때마다 앱이 내주고 한 번만 받아 주는 폼의 CSRF 토큰이나 nonce처럼, 세션보다 훨씬 먼저 만료되는 값이 있습니다. 갱신 단계는 값이 *만료되기* 전에 새로 받아 오지만, 스윕은 여전히 후보마다 값 하나를 써 버리므로 첫 후보만 `200`을 받고 그 뒤로는 전부 `403`입니다. **요청 시점 매크로**는 후보마다 앞서 실행되는 저장된 Repeater 세션이라, 2단계의 extract 규칙이 이름을 새 값으로 다시 바인딩합니다.
 
 토큰을 내주는 요청(폼 페이지, 또는 nonce를 돌려주는 API 호출)을 Repeater 세션으로 저장하고, 그 값을 바인딩하는 extract 규칙을 둡니다:
 
@@ -111,9 +111,9 @@ gori run rewriter extract add --name CSRF --kind regex \
 gori run fuzz --repeater 12 --macro 15 --wordlist emails.txt
 ```
 
-기본 주기는 후보마다 매크로를 실행하므로 스윕은 후보를 하나씩 보냅니다. 앱이 허락한다면 `--macro-every 10`으로 열 개가 값 하나를 나눠 쓰게 할 수 있습니다. 실패한 매크로(오류, `4xx`/`5xx`, 또는 다시 바인딩된 값 없음)는 낡은 토큰으로 후보를 보내지 않으며, 세 번 연달아 실패하면 실행이 끝납니다. 캡처된 플로우는 캡처한 그대로 나가서 `$BIND.CSRF`를 담을 수 없으므로, 스윕은 Repeater 세션이나 초안에서 시작해야 합니다. 헤더로 오가는 토큰이라면 활성 슬롯의 오버레이에 실어도 됩니다. TUI에서 매크로는 Fuzzer **ADVANCED** 카드의 행과 Miner 팝업에 있고, MCP에서는 `fuzz_start` / `mine_start`의 `macro_steps`입니다. [매크로로 회전하는 토큰 다루기](/ko/guide/repeater-and-fuzzer/#rotating-tokens-with-a-macro)를 참고하세요.
+기본 주기는 후보마다 매크로를 실행하므로 스윕은 후보를 하나씩 보냅니다. 앱이 허락한다면 `--macro-every 10`으로 열 개가 값 하나를 나눠 쓰게 할 수 있습니다. 실패한 매크로(오류, `4xx`/`5xx`, 또는 다시 바인딩된 값 없음)는 낡은 토큰으로 후보를 보내지 않으며, 세 번 연달아 실패하면 실행이 끝납니다. 캡처된 플로우는 캡처한 대로 나가 `$BIND.CSRF`를 담을 수 없으므로, 스윕은 Repeater 세션이나 초안에서 시작하세요. 헤더로 오가는 토큰이라면 활성 슬롯의 오버레이에 실어도 됩니다. TUI에서 매크로는 Fuzzer **ADVANCED** 카드의 행과 Miner 팝업에 있고, MCP에서는 `fuzz_start` / `mine_start`의 `macro_steps`입니다. [매크로로 회전하는 토큰 다루기](/ko/guide/repeater-and-fuzzer/#rotating-tokens-with-a-macro)를 참고하세요.
 
-**체크포인트.** 첫 행 뒤의 행들이 `403` 벽 대신 제대로 된 응답으로 돌아오고, `gori run history -q 'src:macro'`가 매크로의 단계를 나열합니다.
+**체크포인트.** 첫 행 뒤의 행들이 `403` 대신 제대로 된 응답으로 돌아오고, `gori run history -q 'src:macro'`가 매크로의 단계를 나열합니다.
 
 ## 다음 단계 {#next-steps}
 

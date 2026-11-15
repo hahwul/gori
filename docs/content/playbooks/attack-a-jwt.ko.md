@@ -7,15 +7,15 @@ weight = 70
 group = "워크벤치"
 +++
 
-JWT는 서버가 서명을 검사하는 만큼만 믿을 수 있습니다. 이 플레이북은 캡처한 요청에서 토큰을 떼어 내 클레임을 읽고, 하나를 바꾸고, 다시 서명하고, 고전적인 검증 우회 페이로드(alg:none, 약한 비밀키 추측, 헤더 인젝션)를 쏘아 서버가 어느 것을 받아들이는지 알아냅니다. 약 10분을 잡으세요.
+이 플레이북은 캡처한 요청에서 토큰을 떼어 내 클레임을 읽고, 하나를 바꾸고, 다시 서명하고, 고전적인 검증 우회 페이로드(alg:none, 약한 비밀키 추측, 헤더 인젝션)를 쏘아 서버가 어느 것을 받아들이는지 알아냅니다. 약 10분을 잡으세요.
 
 > **시작하기 전에.** 테스트 권한이 있는 호스트에 대해 프로젝트와 스코프를 준비하고([엔게이지먼트 준비](/ko/playbooks/set-up-an-engagement/)), JWT를 담은 플로우를 캡처하세요. `Authorization: Bearer eyJ…` 헤더가 흔한 출처입니다. 예시는 `api.example.com`을 대상으로 합니다.
 
 ## 1. JWT 탭으로 토큰 보내기 {#1-send-a-token-to-the-jwt-tab}
 
-**JWT** 탭은 기본적으로 바 밖에 있습니다. **`0`**을 누르고 "jwt"를 입력하거나 `Ctrl-P` → **Go to JWT**를 쓰세요. 토큰을 자주 다룬다면 Preferences에서 아홉 슬롯 중 하나를 내주면 됩니다. 토큰을 찾습니다. 캡처한 플로우를 **History**에서 열고, 요청 상세에서 `Bearer ` 뒤의 토큰 텍스트를 선택한 뒤 `Space` `S`(**Send selection to…**) → `j` **JWT**를 누르세요. 그러면 새 JWT 서브탭이 시드되고, Decode 렌즈에서 토큰이 **header**, **payload**, **signature**로 라이브 디코드됩니다.
+**JWT** 탭은 기본적으로 바 밖에 있습니다. **`0`**을 누르고 "jwt"를 입력하거나 `Ctrl-P` → **Go to JWT**를 쓰세요. 토큰을 자주 다룬다면 Preferences에서 아홉 슬롯 중 하나를 내주면 됩니다. 토큰을 찾으려면 캡처한 플로우를 **History**에서 열고, 요청 상세에서 `Bearer ` 뒤의 토큰 텍스트를 선택한 뒤 `Space` `S`(**Send selection to…**) → `j` **JWT**를 누르세요. 그러면 새 JWT 서브탭이 시드되고, Decode 렌즈에서 토큰이 **header**, **payload**, **signature**로 라이브 디코드됩니다.
 
-디코드는 토큰이 *주장하는* 바를 보여 줄 뿐, 서명을 검사하지는 않습니다. 그래서 깔끔하게 디코드되는 토큰이라고 서버가 반드시 믿는 토큰은 아닙니다. 이 플레이북의 나머지 부분이 바로 이 질문에 답합니다.
+디코드는 토큰이 *주장하는* 바를 보여 줄 뿐 서명을 검사하지는 않으므로, 깔끔하게 디코드되는 토큰이라고 서버가 반드시 믿는 토큰은 아닙니다. 이 플레이북의 나머지 부분이 그 질문에 답합니다.
 
 <figure class="tui-shot">
   <img src="/images/tui/jwt.svg" alt="디코드된 HS256 토큰이 있는 gori JWT 탭: →ENCODE 렌즈 칩 아래의 INPUT 토큰, 디코드된 header JSON, 그리고 alg=none 대소문자 변형과 서명 제거를 포함한 생성된 페이로드의 ATTACKS 목록" width="1206" height="520">
@@ -26,7 +26,7 @@ JWT는 서버가 서명을 검사하는 만큼만 믿을 수 있습니다. 이 �
 
 ## 2. 클레임 변조 {#2-tamper-a-claim}
 
-`Ctrl-T`로 Encode 렌즈로 전환하거나, `Space` → **Load decoded claims**로 디코드된 토큰을 곧장 Encode 편집기로 불러오세요. **PAYLOAD** JSON을 편집합니다. `role`을 올리고, `sub`를 바꾸고, `exp`를 늘리세요. `Ctrl-A`로 알고리즘을 고르고(HMAC 계열 → `RS`/`PS`/`ES`의 256/384/512 → `EdDSA` → `none` 순환), HMAC 알고리즘이면 **SECRET**을 설정하거나 비대칭 알고리즘이면 **KEY** 카드에 PEM 개인키 경로를 지정하면, 다시 서명된 토큰이 OUTPUT에 라이브로 나타납니다. `y`로 복사하세요.
+`Ctrl-T`로 Encode 렌즈로 전환하거나, `Space` → **Load decoded claims**로 디코드된 토큰을 곧장 Encode 편집기로 불러오세요. **PAYLOAD** JSON을 편집합니다. `role`을 올리고, `sub`를 바꾸고, `exp`를 늘리세요. `Ctrl-A`로 알고리즘을 고르고(HMAC 계열 → `RS`/`PS`/`ES`의 256/384/512 → `EdDSA` → `none` 순환), HMAC 알고리즘이면 **SECRET**을, 비대칭 알고리즘이면 **KEY** 카드에 PEM 개인키 경로를 지정하면, 다시 서명된 토큰이 OUTPUT에 라이브로 나타납니다. `y`로 복사하세요.
 
 같은 클레임 편집이 헤드리스로도 실행되며, 토큰은 인수나 stdin에서 받습니다. `--set KEY=VALUE`는 클레임 하나를 패치하고(반복 가능), `--payload`는 클레임을 통째로 교체합니다:
 
@@ -35,7 +35,7 @@ gori run jwt eyJhbGci... --encode --set role=admin --secret s3cret       # 클�
 gori run jwt eyJhbGci... --encode --payload '{"sub":"1","admin":true}' --secret s3cret
 ```
 
-`--set`의 값은 JSON으로 파싱되면 그 타입을 유지하므로 `admin=true`는 불리언, `role=admin`은 문자열입니다. MCP에서도 `jwt_encode`가 같은 `set` / `payload` 편집을 받습니다.
+`--set` 값은 JSON으로 파싱될 수 있으면 그렇게 파싱되므로 `admin=true`는 불리언, `role=admin`은 문자열입니다. MCP에서도 `jwt_encode`가 같은 `set` / `payload` 편집을 받습니다.
 
 토큰이 `ES256` / `RS256` / `EdDSA`이고 서명 키를 가지고 있다면 `--key`로 넘기고(PEM 본문 또는 경로), `--verify`가 디코드로는 답할 수 없는 질문에 답합니다:
 
@@ -48,7 +48,7 @@ gori run jwt eyJhbGci... --verify --key ./public.pem                # verified: 
 
 ## 3. 공격 프리셋 실행 {#3-run-the-attack-presets}
 
-비밀키를 아는 경우는 드무니, 대신 gori가 우회 시도를 생성하게 하세요. Decode 렌즈에서 디코드된 부분 아래에, 토큰으로부터 만들어진 선택 가능한 **공격 페이로드** 목록이 있습니다:
+비밀키를 아는 경우는 드무니, gori가 우회 시도를 생성하게 하세요. Decode 렌즈에서 디코드된 부분 아래에, 토큰으로부터 만들어진 선택 가능한 **공격 페이로드** 목록이 있습니다:
 
 | 공격 | 무엇을 시험하는가 |
 |--------|---------------|
@@ -73,9 +73,9 @@ gori run jwt --encode --header '{"jku":"https://you/jwks.json"}' --payload '{"su
 
 공개키는 대상이 공개하는 것이면 무엇이든 됩니다. JWKS의 `x5c` 인증서도 순수 `PUBLIC KEY` 블록과 똑같이 동작하며, gori가 어느 쪽이든 서버가 들고 있을 SPKI PEM으로 변환합니다.
 
-MCP에서는 `jwt_attacks` 도구가 같은 키를 `public_key`로 받아 동일한 목록을 반환합니다(`jwt_decode` / `jwt_verify` / `jwt_encode`가 1·2단계를 담당. 직접 만든 헤더는 `jwt_encode`의 `header`에 헤더 JSON 전체로 넘깁니다. 필드 단위의 `--set-header`에 해당하는 인자는 없습니다). 모두 `--read-only`에서도 쓸 수 있는 읽기 도구로, 네트워크를 건드리지 않고 아무것도 쓰지 않습니다. 다만 `key` / `public_key`를 경로로 주면 디스크에서 파일을 읽습니다.
+MCP에서는 `jwt_attacks` 도구가 같은 키를 `public_key`로 받아 같은 목록을 반환합니다(`jwt_decode` / `jwt_verify` / `jwt_encode`가 1·2단계를 담당합니다. 직접 만든 헤더는 `jwt_encode`의 `header`에 헤더 JSON 전체로 넘깁니다. 필드 단위의 `--set-header`에 해당하는 인자는 없습니다). 모두 `--read-only`에서도 쓸 수 있는 읽기 도구로, 네트워크를 건드리지 않고 아무것도 쓰지 않습니다. 다만 `key` / `public_key`를 경로로 주면 디스크에서 파일을 읽습니다.
 
-세그먼트가 셋이 아니라 다섯인 **암호화된** 토큰은 JWE이며, 위 내용은 하나도 적용되지 않습니다. gori는 무엇을 보고 있는지 알 수 있도록 보호 헤더(`alg`, `enc`, `kid`)를 보여주고, 페이로드는 생성하지 않습니다. 조작할 클레임 세그먼트도, 제거할 서명도 없기 때문입니다.
+세그먼트가 셋이 아니라 다섯인 **암호화된** 토큰은 JWE이며, 위 내용은 적용되지 않습니다. gori는 보호 헤더(`alg`, `enc`, `kid`)를 보여주고 페이로드는 생성하지 않습니다. 조작할 클레임 세그먼트도, 제거할 서명도 없기 때문입니다.
 
 **체크포인트.** ATTACKS 목록이 바로 보낼 수 있는 토큰 변형들로 채워집니다.
 

@@ -4,7 +4,7 @@ description = "gori가 데이터를 저장하는 위치, 네트워크 설정 방
 weight = 40
 +++
 
-gori는 전역 환경설정을 JSON 설정 파일에 보관하고, 각 프로젝트를 자체 SQLite 데이터베이스로 저장합니다. 이 페이지는 첫날 필요한 핵심만 다룹니다. 무엇이 어디에 있는지, 프록시가 어떻게 바인딩되는지, 클라이언트가 gori의 CA를 어떻게 신뢰하는지를 설명합니다. 키 단위 전체 설명은 [설정 레퍼런스](/ko/reference/config/)를 참고하세요.
+gori는 전역 환경설정을 JSON 설정 파일에 보관하고, 각 프로젝트를 자체 SQLite 데이터베이스로 저장합니다. 이 페이지는 첫날 필요한 내용을 다룹니다. 무엇이 어디에 있는지, 프록시가 어떻게 바인딩되는지, 클라이언트가 gori의 CA를 어떻게 신뢰하는지를 설명합니다. 모든 키는 [설정 레퍼런스](/ko/reference/config/)를 참고하세요.
 
 ## gori 홈 디렉터리 {#the-gori-home-directory}
 
@@ -40,10 +40,10 @@ gori settings --edit   # 에디터에서 열기
 업스트림 설정이나 프로세스 프록시 환경변수가 없으면 프록시는 `127.0.0.1:8070`에서 수신하며 대상에 직접 연결합니다. gori 쪽 경로를 바꿀 수 있는 곳은 세 군데이며, 우선순위가 높은 순서대로:
 
 1. **프로젝트별**: **Project** 탭이나 헤드리스로 [`gori run project network`](/ko/reference/cli/#project-network)를 써서 한 프로젝트의 바인드 주소, 포트, 업스트림을 고정합니다. 해당 프로젝트에 한해 우선합니다.
-2. **CLI 플래그**: `--listen` / `--port`는 현재 프로세스에 한해 전역 기본값을 재정의하며 디스크에 기록되지 않습니다.
+2. **CLI 플래그**: `--listen` / `--port`는 현재 프로세스에서만 전역 기본값을 재정의하며 디스크에 기록되지 않습니다.
 3. **`settings.json`의 `network`**: 공유되는 기본값으로, 첫 실행 마법사와 Preferences → **Network**가 편집합니다.
 
-아무것도 설정되지 않으면 공장 기본값은 `127.0.0.1:8070`, 직접 연결입니다. `network.upstream_proxy`가 비어 있으면 gori는 일반적인 `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` 환경변수(소문자 표기도 지원)와 `NO_PROXY` / `no_proxy` 예외도 사용하며, `localhost`와 루프백 목적지는 항상 직접 연결합니다. 프로젝트 업스트림, 업스트림 규칙, 비어 있지 않은 `network.upstream_proxy`는 이 환경변수보다 우선합니다. 모든 키는 [network](/ko/reference/config/#network)를, 정확한 우선순위는 [프로젝트별 재정의](/ko/reference/config/#per-project-overrides)를 참고하세요.
+아무것도 설정되지 않으면 공장 기본값은 `127.0.0.1:8070`, 직접 연결입니다. `network.upstream_proxy`가 비어 있으면 gori는 일반적인 `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` 환경변수(소문자 표기도 지원)와 `NO_PROXY` / `no_proxy` 예외도 사용합니다. `localhost`와 루프백 목적지는 항상 직접 연결합니다. 프로젝트 업스트림, 업스트림 규칙, 비어 있지 않은 `network.upstream_proxy`는 이 환경변수보다 우선합니다. 모든 키는 [network](/ko/reference/config/#network)를, 우선순위는 [프로젝트별 재정의](/ko/reference/config/#per-project-overrides)를 참고하세요.
 
 ## 루트 CA {#the-root-ca}
 
@@ -56,11 +56,11 @@ gori ca --ca-dir /path        # 다른 CA 디렉터리 사용
 gori ca regenerate --yes      # 루트 CA 교체 (스크립트/CI용, 이전 신뢰 무효화)
 ```
 
-TUI 커맨드 팔레트(**Regenerate CA certificate**)에서, 또는 대화식으로 `gori ca regenerate`(`regenerate`를 입력해 확인)로 CA를 교체할 수도 있습니다. 두 경로 모두 확인 절차를 거치는데, 교체하면 이전에 발급된 모든 신뢰가 무효화되기 때문입니다. 이미 실행 중인 gori는 재시작 전까지 기존 CA를 유지합니다.
+TUI 커맨드 팔레트(**Regenerate CA certificate**)에서, 또는 대화식으로 `gori ca regenerate`(`regenerate`를 입력해 확인)로 CA를 교체할 수도 있습니다. 교체하면 이전에 발급된 모든 신뢰가 무효화되므로 두 경로 모두 확인을 거칩니다. 이미 실행 중인 gori는 재시작 전까지 기존 CA를 유지합니다.
 
 ### 자체 CA 사용하기 {#bring-your-own-ca}
 
-CA 하나를 팀이나 여러 머신에서 재사용하려면, 루트를 외부에서 생성한 뒤 가져오세요(인증서 **및** 키: gori는 키로 리프 인증서에 서명하고, 클라이언트는 인증서만 신뢰합니다):
+CA 하나를 팀이나 여러 머신에서 재사용하려면, 루트를 외부에서 생성한 뒤 인증서와 키를 함께 가져오세요. gori는 키로 리프 인증서에 서명하고, 클라이언트는 인증서만 신뢰합니다.
 
 ```bash
 openssl ecparam -genkey -name prime256v1 -out root.key.pem
@@ -68,11 +68,11 @@ openssl req -x509 -new -key root.key.pem -days 3650 -subj "/CN=my ca" -out root.
 gori ca import --cert root.crt.pem --key root.key.pem --yes
 ```
 
-같은 동작을 팔레트(**Import CA certificate**)에서도 할 수 있습니다. gori는 가져오기 전에 키가 인증서와 일치하는지, 그 인증서가 CA인지, 그리고 그 키로 실제로 리프 인증서를 서명할 수 있는지 확인합니다. 리프는 SHA-256으로 서명하므로 Ed25519 · Ed448 루트는 거부됩니다. 신뢰용으로는 `root.crt.pem`만 배포하고, `root.key.pem`은 비밀로 유지하세요. [`gori ca import`](/ko/reference/cli/#gori-ca-import)를 참고하세요.
+같은 동작을 팔레트(**Import CA certificate**)에서도 할 수 있습니다. gori는 가져오기 전에 키가 인증서와 일치하는지, 그 인증서가 CA인지, 그리고 그 키로 리프 인증서를 서명할 수 있는지 확인합니다. 리프는 SHA-256으로 서명하므로 Ed25519 · Ed448 루트는 거부됩니다. 신뢰용으로는 `root.crt.pem`만 배포하고, `root.key.pem`은 비밀로 유지하세요. [`gori ca import`](/ko/reference/cli/#gori-ca-import)를 참고하세요.
 
 팔레트의 **Open browser** 동작은 이미 CA를 신뢰하고 프록시를 경유하는 격리된 프로파일로 설치된 브라우저를 실행합니다([빠른 시작](/ko/getting-started/quick-start/) 참조).
 
-커맨드라인 도구에는 팔레트의 **Open shell** 동작이 같은 일을 터미널에 해줍니다. **Open shell here**는 프록시와 CA 번들이 설정된 `$SHELL`에 이 터미널을 넘겨주고(그동안 gori는 계속 캡처하며, 셸을 나가면 돌아옵니다. 셸이 화면을 쓰는 동안에는 붙잡힌 요청을 넘길 수 없으므로 캡처는 켜져 있고 인터셉트는 꺼져 있어야 합니다), **Copy env**는 다른 창에 붙여 넣을 한 줄 명령(`eval "$(gori run shell --print ...)"`)을 클립보드에 복사합니다. 어느 터미널에서든 `gori run shell`로도 같은 일을 할 수 있습니다([`gori run shell`](/ko/reference/cli/#run-shell) 참조).
+커맨드라인 도구에는 팔레트의 **Open shell** 동작이 같은 일을 터미널에 해줍니다. **Open shell here**는 프록시와 CA 번들이 설정된 `$SHELL`에 이 터미널을 넘겨줍니다. 그동안 gori는 계속 캡처하며, 셸을 나가면 돌아옵니다. 셸이 화면을 쓰는 동안에는 붙잡힌 요청을 넘길 수 없으므로 캡처는 켜져 있고 인터셉트는 꺼져 있어야 합니다. **Copy env**는 다른 창에 붙여 넣을 한 줄 명령(`eval "$(gori run shell --print ...)"`)을 클립보드에 복사합니다. 어느 터미널에서든 `gori run shell`로도 같은 일을 할 수 있습니다([`gori run shell`](/ko/reference/cli/#run-shell) 참조).
 
 ## 전체 레퍼런스 {#full-reference}
 

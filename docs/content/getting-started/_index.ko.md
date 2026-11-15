@@ -4,7 +4,7 @@ description = "gori를 설치하고 CA를 신뢰한 뒤 터미널 프록시로 �
 weight = 10
 +++
 
-gori에 오신 것을 환영합니다. 이 섹션은 아무것도 없는 상태에서 실제 동작하는 프록시 세션까지 안내합니다. History에 흐르는 트래픽, 손끝에 익힌 Day-1 단축키 몇 개, 그리고 첫 Repeater까지 다룹니다.
+gori를 설치하고, 실제 트래픽을 History에 쌓고, Day-1 단축키 몇 개를 익힌 뒤 첫 Repeater 요청을 보냅니다.
 
 ## 배울 내용 {#what-youll-learn}
 
@@ -20,7 +20,7 @@ gori에 오신 것을 환영합니다. 이 섹션은 아무것도 없는 상태�
 
 gori(고리, 영어로 *ring, link, loop*)는 터미널 안에서 동작하는 키보드 중심 HTTP/HTTPS **인터셉트 프록시**이자 웹 해킹 툴킷입니다. 클라이언트와 대상 사이에 자리 잡고, 모든 요청/응답을 *플로우*로 기록하며, 셸을 벗어나지 않고도 그 트래픽을 살펴보고, Repeater로 재전송하고, 퍼징하고, 스캔할 수 있는 펜테스트 워크벤치를 제공합니다.
 
-gori는 **HTTP/1.1, HTTP/2, WebSocket, gRPC, Server-Sent Events**를 이해하며, JWT, SAML, GraphQL, protobuf, MessagePack, CBOR 같은 일반적인 형식을 인라인으로 디코드합니다. 핵심 프로젝트·테스트 워크플로는 TUI, `gori run`, 내장 [MCP 서버](/ko/guide/mcp/)에서 같은 엔진을 사용하므로 에이전트와 스크립트도 같은 프로젝트를 다룰 수 있습니다. TUI 탐색 동작은 여기에 포함되지 않으며, 정확한 경계는 [기능 매트릭스](/ko/reference/capabilities/)에 정리되어 있습니다.
+gori는 **HTTP/1.1, HTTP/2, WebSocket, gRPC, Server-Sent Events**를 이해하며, JWT, SAML, GraphQL, protobuf, MessagePack, CBOR 같은 일반적인 형식을 인라인으로 디코드합니다. 핵심 프로젝트·테스트 워크플로는 TUI, `gori run`, 내장 [MCP 서버](/ko/guide/mcp/)에서 같은 엔진을 사용하므로 에이전트와 스크립트도 같은 프로젝트를 다룰 수 있습니다. TUI 탐색 동작은 여기에 포함되지 않습니다. 경계는 [기능 매트릭스](/ko/reference/capabilities/)에 정리되어 있습니다.
 
 ## 다음 단계 {#next-steps}
 

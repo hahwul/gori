@@ -26,7 +26,7 @@ shot = "decoder"
 | **PIPELINE** | 각 단계당 한 줄과 그 중간 출력 |
 | **OUTPUT** | 최종 결과(text / hex / base64 표시 모드) |
 
-여러 변환을 **서브탭**으로 열어둘 수 있습니다(space 메뉴에서 생성, 이름 변경, 복제, 닫기). 열린 서브탭은 **프로젝트**에 저장되므로 그 프로젝트를 다시 열면 그대로 복원되고, 다른 프로젝트로는 넘어가지 않습니다.
+여러 변환을 **서브탭**으로 열어둘 수 있습니다(space 메뉴에서 생성, 이름 변경, 복제, 닫기). 열린 서브탭은 **프로젝트**에 저장되므로 그 프로젝트를 다시 열면 복원되고, 다른 프로젝트에는 나타나지 않습니다.
 
 ## 체인 구성 {#building-a-chain}
 
@@ -40,19 +40,19 @@ gzip-decompress | json-unescape
 
 별칭은 기본 이름과 동일하게 동작합니다(`b64` → `base64-encode`, `url` → `url-encode` 등). 이름이 모호할 때 자동완성이 도와줍니다.
 
-체인을 이름으로 저장하고(`Ctrl-S` 또는 팔레트의 **Save chain by name**) 나중에 다시 불러올 수 있습니다. 저장 입력창은 서브탭 이름으로 채워져 열리고, 이미 있는 이름으로 저장하면 그 항목을 갱신합니다. **Load a saved chain**(`Ctrl-O`)은 저장해 둔 목록을 피커로 열어 이름 옆에 체인 내용을 함께 보여 주므로, 무슨 이름으로 저장했는지 외우고 있을 필요가 없습니다. 타이핑으로 걸러 볼 수 있고, `Ctrl-X`는 선택한 항목을 라이브러리에서 지웁니다. 두 키 모두 탭 안 어디서든 동작합니다: 서브탭 스트립, 탭 바, 각 패널 안 전부.
+체인을 이름으로 저장하고(`Ctrl-S` 또는 팔레트의 **Save chain by name**) 나중에 다시 불러올 수 있습니다. 저장 입력창은 서브탭 이름으로 채워져 열리고, 이미 있는 이름으로 저장하면 그 항목을 갱신합니다. **Load a saved chain**(`Ctrl-O`)은 저장해 둔 목록을 피커로 열어 이름 옆에 체인 내용을 함께 보여 줍니다. 타이핑으로 걸러 볼 수 있고, `Ctrl-X`는 선택한 항목을 라이브러리에서 지웁니다. 두 키는 서브탭 스트립, 탭 바, 각 패널 안 등 탭 안 어디서든 동작합니다.
 
-이름을 붙인 체인은 설정의 `decoder` 섹션에 저장되어 모든 프로젝트에서 공유됩니다. 체인은 조리법이고, 거기에 통과시킨 내용은 프로젝트에 남습니다. Rewriter는 같은 경계를 다르게 긋습니다. 규칙 자체가 [전역이거나 프로젝트 범위](/ko/guide/proxy/#global-and-project-rules)입니다.
+이름을 붙인 체인은 설정의 `decoder` 섹션에 저장되어 모든 프로젝트에서 공유됩니다. 체인에 통과시킨 데이터는 프로젝트에 남습니다. Rewriter는 다르게 동작해서, 규칙마다 [전역이거나 프로젝트 범위](/ko/guide/proxy/#global-and-project-rules)입니다.
 
-저장한 이름은 그 자체로 **변환기**이기도 합니다. 체인의 한 단계로 이름을 적으면 저장해 둔 체인 전체가 그 자리에서 실행됩니다.
+저장한 이름은 **변환기**이기도 합니다. 체인의 한 단계로 이름을 적으면 저장해 둔 체인이 그 자리에서 실행됩니다.
 
 ```
 myenc > url-encode
 ```
 
-이 탭에서만이 아니라 gori가 체인을 받는 모든 곳에서 동작합니다. Repeater나 Fuzzer의 `§…§` 마커에서 여는 `Ctrl-Q` 체인 편집기, `gori run decoder`, MCP의 `decode` 도구 전부 해당합니다. 자동완성은 저장한 이름을 기본 변환기와 나란히 보여 주고, `gori run decoder list`에는 `saved` 범주로 나옵니다.
+gori가 체인을 받는 곳이면 어디서든 동작합니다. Repeater나 Fuzzer의 `§…§` 마커에서 여는 `Ctrl-Q` 체인 편집기, `gori run decoder`, MCP의 `decode` 도구가 해당합니다. 자동완성은 저장한 이름을 기본 변환기와 나란히 보여 주고, `gori run decoder list`에는 `saved` 범주로 나옵니다.
 
-저장한 체인끼리 서로 부를 수도 있습니다. 순환 정의는 멈추지 않고 그 단계가 이유와 함께 실패하며, 기본 변환기가 이미 쓰고 있는 이름(별칭 포함)은 저장 단계에서 거부됩니다. 기본 변환기가 계속 이겨야 하기 때문입니다. 라이브러리가 `base64-decode`를 가릴 수 있게 되면 모든 프로젝트에 이미 있는 체인의 의미가 바뀝니다.
+저장한 체인끼리 서로 부를 수도 있습니다. 순환 정의는 멈추지 않고 그 단계가 이유와 함께 실패하며, 기본 변환기가 이미 쓰고 있는 이름(별칭 포함)은 저장 단계에서 거부됩니다. 따라서 저장한 체인이 `base64-decode`를 가려 기존 체인의 의미를 바꾸는 일은 없습니다.
 
 ## 변환기 {#converters}
 
@@ -67,15 +67,15 @@ myenc > url-encode
 | **Escape** | `html-escape` / `html-unescape`, `html-encode-all`, `json-escape` / `json-unescape`, `unicode-escape` / `unicode-unescape`, `xml-escape` / `xml-unescape`, `c-string-escape` / `c-string-unescape`, `shell-escape`, `powershell-escape` |
 | **Text** | `rot13`, `rot47`, `upper`, `lower`, `reverse`, `homoglyph`, `typo` |
 
-`brotli-decompress`와 `zstd-decompress`는 압축 해제 전용이며, 이는 빠뜨린 것이 아니라 의존성의 모양 그대로입니다. gori는 brotli의 *디코더* 라이브러리를 링크하고 libzstd의 압축 해제기만 감쌉니다. 프록시에게 필요한 것은 원 서버가 보낸 것을 읽는 일이기 때문입니다. 둘 다 `Content-Encoding`이 쓰는 `br`, `zstd` 별칭을 받고, 잘린 스트림도 견딥니다(캡처 상한에 걸린 플로우에서 본문을 복사해 오면 흔한 경우입니다). `-Dwithout_native_codecs`로 빌드한 gori도 이름은 그대로 알고 있으며, 오타라고 답하는 대신 그런 빌드라는 사실을 알려 줍니다.
+`brotli-decompress`와 `zstd-decompress`는 압축 해제 전용입니다. gori는 brotli의 디코더 라이브러리를 링크하고 libzstd의 압축 해제기만 감싸는데, 원 서버의 응답을 읽기에는 이것으로 충분합니다. 둘 다 `Content-Encoding`이 쓰는 `br`, `zstd` 별칭을 받고, 캡처 상한에 걸린 플로우에서 복사한 본문처럼 잘린 스트림도 처리합니다. `-Dwithout_native_codecs`로 빌드한 gori도 이 이름을 알고 있으며, 이 빌드에 해당 기능이 없다고 알려 주므로 오타와 헷갈리지 않습니다.
 
-세션 쿠키 리더 네 개는 봉투를 디코드해 쿠키가 무엇을 싣고 있는지 보여 줄 뿐, 서명은 검증하지 않습니다. 서명 키 크래킹, 쿠키 위조, 라이브 검증은 [Cookie 워크벤치](/ko/guide/cookie/)의 몫이고, 이 탭은 체인 안에서 부를 수 있는 읽기 전용 절반입니다.
+세션 쿠키 리더 네 개는 봉투를 디코드해 쿠키가 무엇을 싣고 있는지 보여 줍니다. 서명은 검증하지 않습니다. 서명 키 크래킹, 쿠키 위조, 라이브 검증은 [Cookie 워크벤치](/ko/guide/cookie/)에서 합니다. 이 탭은 그 읽기 전용 절반이며 체인 안에서 쓸 수 있습니다.
 
-`msgpack-decode`와 `cbor-decode`는 남이 쓴 바이너리 문서를 읽어 JSON으로 렌더합니다. 한 방향이고, 그 방향이 필요한 쪽입니다. 여기서 JSON은 *투영*이지 재인코딩이 아닙니다. JSON에 담을 자리가 없는 것은 접어 없애지 않고 이름을 달아 돌려줍니다(바이트 문자열은 `{"$bin": …}`, CBOR 태그는 `{"$tag": …}`, MessagePack 확장은 `{"$ext": …}`, JSON 숫자로는 정확하지 않은 정수는 10진 문자열). 입력이 도중에 끊긴 문서는 읽은 데까지 렌더하고 멈춘 자리를 `{"$partial": …}`로 표시합니다. 캡처 상한에 잘린 본문에서 흔한 경우입니다. 투영에는 모호함이 하나 따라옵니다. 문서 자신의 맵 키가 문자 그대로 `$bin`이나 `$tag`이면 래퍼와 같은 모양으로 렌더됩니다. 그런 본문 하나를 막자고 모든 본문의 모든 키를 이스케이프하면 흔한 본문이 오히려 읽기 어려워집니다.
+`msgpack-decode`와 `cbor-decode`는 바이너리 문서를 JSON으로 디코드하며, 인코딩 방향은 없습니다. JSON에 담을 수 없는 값은 이름을 단 래퍼로 돌려줍니다. 바이트 문자열은 `{"$bin": …}`, CBOR 태그는 `{"$tag": …}`, MessagePack 확장은 `{"$ext": …}`, JSON 숫자로는 정확하지 않은 정수는 10진 문자열입니다. 입력이 도중에 끊긴 문서는 읽은 데까지 렌더하고 멈춘 자리를 `{"$partial": …}`로 표시합니다. 캡처 상한에 잘린 본문이 이런 경우입니다. 문서 자신의 맵 키가 문자 그대로 `$bin`이나 `$tag`이면 래퍼와 같은 모양으로 렌더됩니다. 둘을 구분하려고 키를 이스케이프하지는 않습니다.
 
-네 개의 **네이티브 직렬화** 리더는 `serialized_object`가 열어 놓고 답하지 못하던 질문에 답합니다. gori가 쿠키나 파라미터 속의 Java·ViewState·PHP blob을 찾아내면, 이 리더들이 그 blob을 읽습니다. `java-deserialize`는 `ObjectOutputStream` 문법을 따라가며 인스턴스마다 `{"$object": …}`와 선언된 필드, `writeObject` annotation을 냅니다. `dotnet-viewstate`는 `ObjectStateFormatter` 토큰 트리를 읽고 MAC이 있는지 말합니다(`"mac": false`가 곧 발견입니다). `php-unserialize`는 `\0Class\0prop`의 망글링을 풀어 `prop`으로 돌리고 가시성은 `$private` / `$protected`에 남깁니다. `pickle-disasm`은 실행하지 않고 **디스어셈블**만 하며, 스트림이 이름을 대는 모든 호출 대상을 `globals`에, 호출 횟수를 `reduce`에 모읍니다. 넷 다 읽기 전용입니다. 역참조는 펼치지 않고 `{"$ref": n}`으로 돌아오고, 어떤 것도 다시 인코딩하지 않습니다(가젯 체인 *생성*은 여전히 `ysoserial` 같은 도구 밖의 단계입니다). 입력은 바이트라서 `base64-decode > java-deserialize`가 쿠키에서 꺼낸 blob이 지나가는 모양입니다. 컨버터는 상세 패널의 마커 스니핑보다 관대한데, 이름을 직접 친다는 것이 스니핑은 결코 할 수 없는 판단이기 때문입니다. 헤더가 없어 패널이 거절하는 protocol 0 pickle도 `pickle-disasm`은 읽습니다.
+네 개의 **네이티브 직렬화** 리더는 `serialized_object`가 쿠키나 파라미터에서 찾아낸 Java·ViewState·PHP blob을 디코드합니다. `java-deserialize`는 `ObjectOutputStream` 문법을 따라가며 인스턴스마다 `{"$object": …}`와 선언된 필드, `writeObject` annotation을 냅니다. `dotnet-viewstate`는 `ObjectStateFormatter` 토큰 트리를 읽고 MAC이 있는지 말합니다(`"mac": false`가 곧 발견입니다). `php-unserialize`는 `\0Class\0prop`의 망글링을 풀어 `prop`으로 돌리고 가시성은 `$private` / `$protected`에 남깁니다. `pickle-disasm`은 실행하지 않고 디스어셈블만 하며, 스트림이 이름을 대는 모든 호출 대상을 `globals`에, 호출 횟수를 `reduce`에 모읍니다. 넷 다 읽기 전용입니다. 역참조는 펼치지 않고 `{"$ref": n}`으로 돌아오고, 어떤 것도 다시 인코딩하지 않습니다(가젯 체인 생성은 `ysoserial` 같은 도구 밖의 단계입니다). 입력은 바이트라서 쿠키에서 꺼낸 blob은 `base64-decode > java-deserialize`를 거칩니다. 컨버터는 이름으로 직접 고른 것이라 상세 패널의 마커 스니핑보다 관대합니다. 헤더가 없어 패널이 거절하는 protocol 0 pickle도 `pickle-disasm`은 읽습니다.
 
-몇 가지는 한 방향으로만 동작하며 체인으로 되돌릴 수 없습니다. `shell-escape`와 `powershell-escape`는 값을 따옴표 리터럴로 감싸고, `homoglyph`는 ASCII 글자를 시각적으로 닮은 유니코드 문자로 바꿉니다(굳어진 대응 문자가 없는 글자는 그대로 둡니다). `typo`는 변환이 아니라 생성기입니다. 글자 누락, 인접 글자 자리바꿈, QWERTY 이웃 키로 만든 오타 변형을 한 줄에 하나씩 내놓습니다. 유니코드 정규화 단계도 한 방향입니다. NFKC/NFKD는 `ﬁ` → `fi`, `⁵` → `5`, 전각 `／` → `/` 같은 호환 문자 접기를 보여 줍니다. 모양이 비슷한 U+2044 `⁄` FRACTION SLASH는 호환 정규화 대상이 아니지만, Windows Best-Fit 표에서는 CP 1250, 1252, 1254가 `/`로 바꿉니다. RFC 2047 인코더는 UTF-8 Q 또는 Base64 인코드 워드를 만들고 75옥텟 제한에 맞춰 접으며, 디코더는 UTF-8, US-ASCII, ISO-8859-1, Windows-1252를 읽고, 인접한 워드를 문자셋 디코딩 전에 이어 붙여 두 워드에 걸쳐 나뉜 문자도 살리며, 형식이 틀린 워드는 문자 그대로 둡니다. `codepoint-overflow`는 원시 바이트를 냅니다(U+0140 문자 → `0x40`). 텍스트가 아닌 결과는 뒤에 `hex-encode`를 붙여 확인하세요. `windows-bestfit-<codepage>`는 CP 874, 932, 936, 949, 950, 1250-1258의 Microsoft Best-Fit 표를 미리 봅니다. 표에 없는 문자는 해당 코드페이지의 기본값인 `?`가 되는데, `WideCharToMultiByte`처럼 UTF-16 코드 유닛마다 하나씩이라 BMP 밖의 이모지는 `??`가 됩니다. 표는 Unicode License v3로 재배포되며, 출처와 라이선스 세부 사항은 `src/gori/decoder/bestfit/README.md`에 있습니다.
+몇 가지는 한 방향으로만 동작하며 체인으로 되돌릴 수 없습니다. `shell-escape`와 `powershell-escape`는 값을 따옴표 리터럴로 감싸고, `homoglyph`는 ASCII 글자를 시각적으로 닮은 유니코드 문자로 바꿉니다(굳어진 대응 문자가 없는 글자는 그대로 둡니다). `typo`는 생성기입니다. 글자 누락, 인접 글자 자리바꿈, QWERTY 이웃 키로 만든 오타 변형을 한 줄에 하나씩 내놓습니다. 유니코드 정규화 단계도 한 방향입니다. NFKC/NFKD는 `ﬁ` → `fi`, `⁵` → `5`, 전각 `／` → `/` 같은 호환 문자 접기를 보여 줍니다. 모양이 비슷한 U+2044 `⁄` FRACTION SLASH는 호환 정규화 대상이 아니지만, Windows Best-Fit 표에서는 CP 1250, 1252, 1254가 `/`로 바꿉니다. RFC 2047 인코더는 UTF-8 Q 또는 Base64 인코드 워드를 만들고 75옥텟 제한에 맞춰 접습니다. 디코더는 UTF-8, US-ASCII, ISO-8859-1, Windows-1252를 읽고, 인접한 워드를 문자셋 디코딩 전에 이어 붙여 두 워드에 걸쳐 나뉜 문자도 살리며, 형식이 틀린 워드는 문자 그대로 둡니다. `codepoint-overflow`는 원시 바이트를 냅니다(U+0140 문자 → `0x40`). 텍스트가 아닌 결과는 뒤에 `hex-encode`를 붙여 확인하세요. `windows-bestfit-<codepage>`는 CP 874, 932, 936, 949, 950, 1250-1258의 Microsoft Best-Fit 표를 미리 봅니다. 표에 없는 문자는 해당 코드페이지의 기본값인 `?`가 되는데, `WideCharToMultiByte`처럼 UTF-16 코드 유닛마다 하나씩이라 BMP 밖의 이모지는 `??`가 됩니다. 표는 Unicode License v3로 재배포되며, 출처와 라이선스 세부 사항은 `src/gori/decoder/bestfit/README.md`에 있습니다.
 
 `html-unescape`(MCP `decode`도 같음)는 `;`이 빠진 named entity를 브라우저처럼 HTML5 legacy 이름일 때만 디코딩합니다. 그래서 `&amp=`와 `&copy`는 여전히 디코딩되지만, 쿼리 문자열의 `&lang=en`은 쓴 그대로 남습니다.
 
@@ -87,7 +87,7 @@ myenc > url-encode
 - Fuzzer 페이로드 프로세서에 쓸 변환을 미리 구성합니다
 - Repeater 요청을 작성하면서 값을 해시하거나 URL 인코드합니다
 
-Decoder는 네트워크 트래픽을 보내지 않습니다. 순수한 로컬 변환입니다.
+Decoder는 네트워크 트래픽을 보내지 않습니다. 모든 단계가 로컬에서 실행됩니다.
 
 ## 다음 단계 {#next-steps}
 

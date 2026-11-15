@@ -15,13 +15,13 @@ gori has hundreds of actions, and you do not need to learn their keys up front. 
 | `Space` | The **space menu**: what you do most in the pane you are in, one letter per action | You know roughly what you want to do *here* |
 | `Ctrl-P` | The **command palette**: every action, found by typing its name | You don't know where something lives, or you rarely need it |
 
-Both show each action's own key beside it, so every visit teaches you the shortcut, and you need them less the more you use them. `?` opens the full key sheet as a popup, starting at the tab you are on.
+Both show each action's key beside it, so you pick up the shortcuts as you use them. `?` opens the full key sheet as a popup, starting at the tab you are on.
 
 > **Learn it hands-on.** `gori tutorial` (or `Ctrl-P` → **Guided tour** from inside a session) has a lesson on each, on a mock UI where nothing you press is real.
 
 ## The space menu {#space-menu}
 
-Press `Space` in any list or pane. A card opens with the actions for **where you are standing**: a History row, a flow's detail, the Repeater editor, a rule list. The same key on a different pane gives a different card.
+Press `Space` in any list or pane. A card opens with the actions for where you are: a History row, a flow's detail, the Repeater editor, a rule list. The same key on a different pane gives a different card.
 
 <figure class="tui-shot">
   <img src="/images/tui/space-menu.svg" alt="gori space menu open over the History tab, its rows grouped under VIEW, SEND, TRIAGE, COPY, SCOPE, COMMON, DANGER and WIPE, each with a letter on the left and, for some, a shortcut on the right" width="1206" height="520">
@@ -32,7 +32,7 @@ How to read the card:
 
 - **The letter on the left runs the row.** Press `y` and the flow is copied; the menu closes.
 - **The key on the right is the row's shortcut.** `r Send to Repeater ^R` means `Ctrl-R` sends to the Repeater from the list, with no menu at all. A row without one is reached through the menu (or the palette).
-- **A `›` row opens a second card** instead of running. See [Second cards](#cards).
+- **A `›` row opens a second card.** See [Second cards](#cards).
 - **Rows are grouped by purpose**: VIEW, SEND, TRIAGE, COPY, and so on. Delete sits under DANGER and a whole-tab wipe under WIPE, always last, and a wipe asks before it acts.
 
 ### Moving inside the menu {#menu-keys}
@@ -45,7 +45,7 @@ How to read the card:
 | `↵` | run the selected row |
 | `Esc` | close the menu, or go back one level from a second card |
 
-`h`, `j`, `k` and `l` are never a row's letter, so they always move and a reflex `j` never runs anything. Any key the card does not list closes it.
+`h`, `j`, `k` and `l` are never a row's letter, so they always move the selection. Any key the card does not list closes it.
 
 ## Second cards {#cards}
 
@@ -67,13 +67,13 @@ Three things make them quick:
 
 - **Same letters on every tab.** Inside a card, a tool or a toggle keeps its letter wherever the card appears: `Space` `>` `c` sends to the Comparer from History, the Sitemap or a Repeater tab alike.
 - **`>`, `⇧Z` and `⇧P` open their card directly**, without `Space`: `>` `f` sends the selected flow to the Fuzzer.
-- **Display… and Protocol… stay open.** After you flip a toggle the card comes back at the same row, so you can flip two or three in one visit, and each row shows its state: `●` on, `○` off, or a value such as the TLS preset's name. `Esc` closes it.
+- **Display… and Protocol… stay open.** After you flip a toggle the card comes back at the same row, so you can flip several in one visit. Each row shows its state: `●` on, `○` off, or a value such as the TLS preset's name. `Esc` closes it.
 
 On a tab with a sub-tab strip, focus the strip itself (or the tab bar) and `Space` lists the sub-tab actions directly, with no `T` in front. `Ctrl-N` and `Ctrl-W` (new and close sub-tab) work from any pane.
 
 ## Letters you can guess {#letters}
 
-An action that appears on many tabs has **the same letter on all of them**, so a letter you learn on one tab works on the next. The ones worth knowing first:
+An action that appears on many tabs has the same letter on all of them. The ones worth knowing first:
 
 | Letter | Action |
 |--------|--------|
@@ -89,7 +89,7 @@ An action that appears on many tabs has **the same letter on all of them**, so a
 
 The whole table, with the reasoning behind it, is in [Hotkeys → One intent, one letter](/guide/hotkeys/#one-intent-one-letter).
 
-A missed `Space` is unlikely to surprise you. gori checks at startup that a menu letter does not mean a different action as a bare key in the same pane, apart from a few documented cases, and it keeps `c` (capture) and `i` (intercept) off the menu on every tab that does not use those letters itself.
+gori checks at startup that a menu letter does not mean a different action as a bare key in the same pane, apart from a few documented cases, so a forgotten `Space` rarely does anything unexpected. It also keeps `c` (capture) and `i` (intercept) off the menu on every tab that does not use those letters itself.
 
 ## The command palette {#palette}
 
@@ -102,9 +102,9 @@ Press `Ctrl-P` on any tab and start typing the name of what you want.
 
 - **With nothing typed**, the palette lists the app-wide commands: settings, **Open browser**, **Go to** a tab, **Guided tour**, and the like.
 - **Once you type**, it also searches the actions of the pane you opened it from. Those come first under `THIS TAB`, and app-wide matches follow under `APP`.
-- **The right-hand column tells you the short route for next time.** `shift-i` is a key; `␣ > c` is a menu path: `Space`, then `>`, then `c`.
+- **The right-hand column shows the shorter route.** `shift-i` is a key; `␣ > c` is a menu path: `Space`, then `>`, then `c`.
 - `↑` / `↓` select, `↵` runs, `Esc` closes. Opened over a flow's detail, it searches the detail's actions, and `Esc` returns you to it.
-- If you have rows marked, the title reads `COMMANDS · 3 MARKED`: an action you pick will apply to all of them.
+- If you have rows marked, the title reads `COMMANDS · 3 MARKED`, and the action you pick applies to all of them.
 
 ### Actions only the palette lists {#palette-only}
 
@@ -120,9 +120,9 @@ You need a project with a few captured flows. The [Quick Start](/getting-started
 
    **Checkpoint.** You can say, without opening the menu, which key sends the selected flow to the Repeater.
 
-2. Press `Space`, then `>`. The card title reads `SPACE › SEND FLOW TO`. Press `Esc` once, and you are back on the first card; press it again, and the menu closes.
+2. Press `Space`, then `>`. The card title reads `SPACE › SEND FLOW TO`. `Esc` returns to the first card, and a second `Esc` closes the menu.
 
-3. Press `Space`, then `Z`. The **Display…** card shows `●` or `○` beside each toggle. Press `f` to flip **follow**: the card stays open and the dot changes. Press `f` again to put it back, then `Esc`.
+3. Press `Space`, then `Z`. The **Display…** card shows `●` or `○` beside each toggle. Press `f` to flip **follow**. The card stays open and the dot changes. Press `f` again to put it back, then `Esc`.
 
    **Checkpoint.** You have used a second card, stepped back out of one, and flipped a toggle without the card closing.
 

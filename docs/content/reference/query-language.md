@@ -30,7 +30,7 @@ Match a field with `field:value` (substring or exact, depending on the field):
 | `ws` | A WebSocket flow whose socket carried a TEXT or BINARY message containing the value, in either direction ([below](#websocket-messages)) |
 | `rpc` | A flow whose request body is a JSON-RPC call (MCP included) whose method starts with the value ([below](#json-rpc-methods)) |
 | `stub` | `true` / `false`. Flows gori answered itself from a [short-circuit rule](/guide/proxy/#short-circuit), with no origin involved |
-| `rewritten` | `true` / `false`, or one rule as `project/4` / `global/3`. Flows a [Match & Replace rule](/guide/proxy/#match-replace) changed; a rule that matched and changed nothing is not recorded, and a flow captured before gori recorded rules matches neither `true` nor a rule |
+| `rewritten` | `true` / `false`, or one rule as `project/4` / `global/3`. Flows a [Match & Replace rule](/guide/proxy/#match-replace) changed. A rule that matched and changed nothing is not recorded, and a flow captured before gori recorded rules matches neither `true` nor a rule |
 | `static` | `true` / `false`. Images, fonts and audio/video, by response Content-Type (by path extension when there is none). Not SVG, CSS, JS or an image proxy (`?url=`), and only a successful fetch (2xx or 304). `-static:true` is the [hide-static lens](/guide/proxy/#hide-static) |
 | `scope` | `in` / `out`. The project's scope rules ([below](#scope-in-scope-out)) |
 | `cache` | `hit` / `miss` / `dynamic` / `none`: the cache verdict read from the response's cache headers (`Age`, `X-Cache`, `CF-Cache-Status`, `Cache-Status`, …). `none` is a real value (no verdict, which includes a pending flow). A `cache:` query adds a CACHE column to History |
@@ -43,10 +43,10 @@ status:404
 
 ### One side only: `req.` / `resp.`
 
-`header:` and `body:` search **both the request and the response**. Prefix either with `req.` or
+`header:` and `body:` search both the request and the response. Prefix either with `req.` or
 `resp.` to search one side. Both are a substring of the head, so `header:authorization` also
-matches a request whose only such header is `X-Authorization-Debug`; to test one header's
-**name**, anchor it as a regex at a line start: `req.header~(?im)^authorization:`.
+matches a request whose only such header is `X-Authorization-Debug`. To test one header's
+name, anchor it as a regex at a line start: `req.header~(?im)^authorization:`.
 
 | Field | Meaning |
 | --- | --- |
@@ -67,8 +67,8 @@ NOT (req.body:token OR resp.body:token)
 
 ## Source: `src:` {#src-provenance}
 
-`src:` matches flows by **who put the request on the wire**. `src:proxy` is traffic a client
-sent through gori; every other value is a request gori itself made, and `src:import` is a
+`src:` matches flows by who put the request on the wire. `src:proxy` is traffic a client
+sent through gori. Every other value is a request gori made itself, and `src:import` is a
 capture read out of somebody else's file.
 
 | Value | Matches |
@@ -77,7 +77,7 @@ capture read out of somebody else's file.
 | `repeater` | A Repeater send (the TUI, `gori run repeater send --record-history`, MCP `send_request`) |
 | `fuzzer` | A fuzz result recorded with `--record-history` / `record_history` |
 | `discover` | A crawl fetch (Discover persists by default) |
-| `retest` | One step of an Issue's retest (`gori run retest run`, MCP `run_retest`, the TUI's RETEST card). Its own value, not `repeater`: a request an operator drove by hand and a step of a check gori ran are different facts about the same bytes |
+| `retest` | One step of an Issue's retest (`gori run retest run`, MCP `run_retest`, the TUI's RETEST card). Kept apart from `repeater`, which is a request an operator sent by hand |
 | `refresh` | One step of a session slot's [refresh](/guide/authorize/#refreshing-a-slot), by hand or before a send (`source_ref` names `slot NAME step N`). Shown as `RFRSH` |
 | `macro` | One step of a Fuzzer or Miner run's [request-time macro](/guide/repeater-and-fuzzer/#rotating-tokens-with-a-macro), replayed before a candidate (`source_ref` names `macro step N`). Shown as `MACRO` |
 | `miner`, `sequencer`, `authorize`, `probe` | Reserved. Those tools do not record flows yet |
@@ -96,24 +96,23 @@ The History **SRC** column prints a short tag for each of these (`PROXY`, `RPTR`
 `CRAWL`, `IMPRT`, …) and `src:` accepts those tags too, so `src:rptr` and `src:repeater` are the
 same query. `source:` is accepted as a long spelling of `src:`.
 
-Two things about it are deliberate:
+Two edge cases:
 
-- **An imported flow is not `src:gori`.** gori never put it on a wire; it describes a real
+- **An imported flow is not `src:gori`.** gori never sent it. It describes a real
   endpoint somebody else captured. `-src:proxy` keeps it, `src:gori` does not.
-- **A flow captured before gori recorded provenance matches NEITHER direction.** Those rows
-  hold no source at all: gori was already writing repeater sends, crawls and imports into
-  History before the column existed, so filling them in as `proxy` would have invented a fact
-  no capture produced. They show `—` in the SRC column, and both `src:proxy` and `-src:proxy`
-  skip them, the way a Pending flow falls out of `status:` and `-status:`. Only flows captured
-  after the upgrade carry it.
+- **A flow captured before gori recorded provenance matches neither direction.** Those rows
+  hold no source. gori already wrote repeater sends, crawls and imports into History before
+  the column existed, so old rows are not backfilled as `proxy`. They show `—` in the SRC
+  column, and both `src:proxy` and `-src:proxy` skip them, the way a Pending flow falls out
+  of `status:` and `-status:`. Only flows captured after the upgrade carry a source.
 
-The two common `src:` scopings are also **views**; press `v` in History to pick `History`
+The two common `src:` scopings are also **views**. Press `v` in History to pick `History`
 (`src:proxy`) or `History + Repeater`, and the list stays narrowed while you type other filters.
 `History + Repeater` is what a project opens on. See [Views](/guide/proxy/#views).
 
 ## Surface: `via:` {#via-surface}
 
-`src:` says which tool sent a flow; `via:` says which gori entry point drove it: `tui`, `cli`
+`src:` says which tool sent a flow. `via:` says which gori entry point drove it: `tui`, `cli`
 (`gori run`) or `mcp` (an agent). MCP `send_request` records `src:repeater`, the same as a send
 from the Repeater tab, so `via:` is how the two are told apart.
 
@@ -138,24 +137,23 @@ scope:out -host:cdn                   traffic that leaked out of scope, minus th
 (scope:in OR host:staging.example.com) method:POST
 ```
 
-Three things about it are deliberate:
+Three rules:
 
-- **It ignores whether the `s` lens is switched on.** A filter term is a question, not a mode,
-  so `scope:in` means the same thing either way. (With the lens ON, it is redundant, since the lens
-  already ANDs the same predicate over your query, and `scope:out` then matches nothing, since
-  the lens has already dropped every out-of-scope row.)
-- **With no scope rules configured, both spellings match nothing.** Nothing is in scope, so the
-  question has no answer and is not asked. In particular `scope:out` does *not* mean "everything"
-  in that state, which is also why `-scope:in`, a negated never-match, is *not* the same as
-  `scope:out` on a project with no scope rules. `ql_explain` reports
-  `scope_rules_configured: false` and warns, and `gori run history delete` refuses a scope query
-  outright rather than risk deleting a project's history over a term that had nothing to answer.
+- **It ignores whether the `s` lens is switched on.** `scope:in` means the same thing either
+  way. With the lens on, it is redundant, since the lens already ANDs the same predicate over
+  your query, and `scope:out` matches nothing, since the lens has already dropped every
+  out-of-scope row.
+- **With no scope rules configured, both spellings match nothing.** In that state `scope:out`
+  does not mean "everything", and `-scope:in`, a negated never-match, is not the same as
+  `scope:out`. `ql_explain` reports `scope_rules_configured: false` and warns, and
+  `gori run history delete` refuses a scope query, so a term with no answer cannot delete a
+  project's history.
 - **`scope:` is per-FLOW.** On the Sitemap that makes it different from `gori run sitemap
   --in-scope`, which selects whole HOSTS (a host is kept if any of its traffic is in scope), so a
   `scope:in` query can keep a host and drop some of its endpoints.
 
-Capture is untouched by any of this: gori records everything either way, and this only narrows
-what a query returns.
+None of this affects capture. gori records everything, and `scope:` only narrows what a query
+returns.
 
 ## Status Classes
 
@@ -189,12 +187,12 @@ header~set-cookie
 method~^P(OST|UT|ATCH)$                every write verb in one term
 ```
 
-A `~` on any other field (`status`, `size`, `dur`, `proto`, …) has no regex form: the term is
-dropped and reported, the same way a bad numeric value is, rather than searched as text.
+A `~` on any other field (`status`, `size`, `dur`, `proto`, …) has no regex form. The term is
+dropped and reported, like a bad numeric value, and is not searched as text.
 
 ## WebSocket Messages {#websocket-messages}
 
-`ws:needle` matches a flow whose socket carried a message containing `needle` (case-insensitive);
+`ws:needle` matches a flow whose socket carried a message containing `needle` (case-insensitive).
 `ws~regex` matches by regex. Both directions are searched, TEXT and BINARY payloads alike, as the
 stored bytes: a NUL earlier in a payload does not hide a later hit. Ping, pong and close frames are
 not messages and never match, and neither do the `[gori] ` notice rows gori writes about a socket. Notices are told apart by that prefix, so a peer message that starts with `[gori] ` is skipped too.
@@ -206,19 +204,19 @@ proto:ws ws~(?i)token=[a-f0-9]{32}     a token in any frame
 ```
 
 There is no index behind `ws:`, so it scans the transcript of every socket in the project. Capture
-stays as fast as before; the cost is paid by the query that uses the term.
+is not slowed. Only a query that uses the term pays the cost.
 
-To narrow **one** flow's transcript instead: in History's MESSAGES pane, search with `^F` and pick
-**Narrow messages to ^F query** from the space menu (again to show all); `gori run show <id>
---ws-match=QUERY`; or MCP `get_flow` with `ws_query`. Each takes `ws:needle`, `ws~regex` or a bare
-needle, matches exactly as the QL term does, and reaches messages older than the window those
+To narrow one flow's transcript, use History's MESSAGES pane (search with `^F` and pick
+**Narrow messages to ^F query** from the space menu, again to show all), `gori run show <id>
+--ws-match=QUERY`, or MCP `get_flow` with `ws_query`. Each takes `ws:needle`, `ws~regex` or a bare
+needle, matches as the QL term does, and reaches messages older than the window those
 surfaces otherwise load.
 
 ## JSON-RPC Methods {#json-rpc-methods}
 
-`rpc:method` matches a flow whose **request** body is a JSON-RPC call naming that method. The
+`rpc:method` matches a flow whose request body is a JSON-RPC call naming that method. The
 value is a case-sensitive prefix, so `rpc:tools/` is every MCP tool method and `rpc:tools/call`
-is just the calls. Like `body~`, it scans the stored request bytes with no index, so a compressed
+is only the calls. Like `body~`, it scans the stored request bytes with no index, so a compressed
 request body is not read, and a `"method"` key nested inside `params` counts too. The body must
 carry `"jsonrpc":"2.0"`, and a `/` in the value also matches JSON's escaped `\/`.
 
@@ -237,7 +235,7 @@ History's detail view, a `json_rpc` key in `gori run show --format json` and MCP
 - Parentheses group. Precedence is `NOT` then `AND` then `OR`.
 - A bare word (no `field:`) is free text over method, host, and target.
 - A bare word shaped like a comparison typed without its colon (`status>=400`, `host=api`) stays free text, so it usually matches nothing. The History and Sitemap empty states, `gori run history` and MCP `ql_explain` then name the colon form (`status:>=400`). A quoted or negated word is taken as intended.
-- An unknown `field:` name is read as a typo, not as free text: `gori run history`, `gori run sitemap` (and its `params`, `js` and `export` verbs), `gori run probe`, `gori run diff` and `gori run authorize` **refuse** it, name the nearest real field, and exit non-zero; the MCP query tools refuse it as `QUERY_SYNTAX`. `--lenient` (MCP `lenient:true`) searches the token as text instead (what every surface used to do silently: `methd:GET` matched nothing, which reads as an empty project). The TUI filter bar still accepts a half-typed name as you type it.
+- An unknown `field:` name is read as a typo, not as free text: `gori run history`, `gori run sitemap` (and its `params`, `js` and `export` verbs), `gori run probe`, `gori run diff` and `gori run authorize` **refuse** it, name the nearest real field, and exit non-zero. The MCP query tools refuse it as `QUERY_SYNTAX`. `--lenient` (MCP `lenient:true`) searches the token as text instead, as every surface used to do silently (`methd:GET` then matches nothing and looks like an empty project). The TUI filter bar still accepts a half-typed name as you type it.
 
 ```text
 host:example.com status:5xx           both must match
@@ -269,12 +267,12 @@ only opens a group at the start of a term, and `)` only closes one at the end.
 
 ## Where It Applies
 
-Every filter bar shares the boolean grammar above (`AND`/`OR`/`NOT`, `-`, parentheses, quoting). The flow bars (History, Sitemap, colour rules, Intercept) also share the comparisons and `~` regex; the other bars compare only `severity` and `cvss` (below), and have no `~` at all (a `~` term there is free text). Otherwise what differs is the field set, and only because the surfaces filter different kinds of row.
+Every filter bar shares the boolean grammar above (`AND`/`OR`/`NOT`, `-`, parentheses, quoting). The flow bars (History, Sitemap, colour rules, Intercept) also share the comparisons and `~` regex. The other bars compare only `severity` and `cvss` (below), and have no `~` (a `~` term there is free text). Otherwise the bars differ only in their field set, since each filters a different kind of row.
 
 | Surface | Fields |
 |---------|--------|
 | History, `gori run history`, MCP | The full table above |
-| Sitemap, `gori run sitemap`, MCP `list_sitemap` | The same, plus `tag:` for per-node path memos: a case-insensitive substring of the memo, matching the tagged path, everything under it and the paths leading to it; `-tag:` drops that subtree, and every `tag:` term is ANDed with the rest of the query |
+| Sitemap, `gori run sitemap`, MCP `list_sitemap` | The same, plus `tag:` for per-node path memos: a case-insensitive substring of the memo, matching the tagged path, everything under it and the paths leading to it. `-tag:` drops that subtree, and every `tag:` term is ANDed with the rest of the query |
 | Colour rules (Colormarker) | The same. A colour rule takes the query the History bar takes |
 | Intercept catch condition, extract-rule condition | `host`, `port`, `path`, `url`, `method`, `scheme`, `status`, `proto`, `header`, `body`. **Every other field is refused** (see below). `proto` answers only `ws` or `http` here: gRPC and SSE are read off a captured response's Content-Type, so `proto:grpc`, `proto:sse` and the TLS spellings never match |
 | Probe | `severity` (`sev`), `status` (`st`), `category` (`cat`), `host`, `code` |
@@ -283,7 +281,7 @@ Every filter bar shares the boolean grammar above (`AND`/`OR`/`NOT`, `-`, parent
 | Evidence tab | `issue`, `host`, `method`, `status`, `confirmation` (`confirm`), `source` (`src`), `date` |
 
 A hold gate and an extract-rule condition evaluate one live message, before it is captured, so
-they refuse every History field that message cannot answer rather than guess: `scope:` (a
+they refuse every History field that message cannot answer: `scope:` (a
 project's scope rules are not part of a message), `size:`, `reqsize:`, `respsize:` and `dur:`
 (the exchange has not finished), `stub:`, `rewritten:`, `static:`, `src:`, `via:`, `cache:`, `rpc:` and `ws:` (a gate holds
 one message, not a transcript; its `body:` already means that message), and the one-sided
@@ -305,17 +303,17 @@ Both the Intercept and colour-rule bars Tab-complete field names and known value
 
 ### Matching Request and Response Content
 
-`header:` and `body:` search the bytes of a message, so where they work is decided by which bytes exist at the moment the filter is asked:
+`header:` and `body:` search the bytes of a message, so they work only where those bytes exist when the filter runs:
 
 - **History, Sitemap and colour rules** search a captured flow, so both fields always work, on both sides of the exchange.
-- **Intercept and extract-rule conditions** search the message in flight. `header:` works at the HTTP request and response gates and in an extract-rule condition, but not for a held WebSocket message, which has no head of its own. `body:` works for a held **WebSocket message** and for an **extract-rule** condition, where the payload is in hand, but not at an HTTP hold gate, because that gate is what decides whether the body gets buffered in the first place.
+- **Intercept and extract-rule conditions** search the message in flight. `header:` works at the HTTP request and response gates and in an extract-rule condition, but not for a held WebSocket message, which has no head of its own. `body:` works for a held WebSocket message and for an extract-rule condition, where the payload is in hand, but not at an HTTP hold gate, because that gate decides whether the body is buffered.
 
-One deliberate difference between the two, worth knowing before you write a rule:
+Queries and colour rules read `body:` differently:
 
 - In a **query**, `body:` reads a trigram index: fast, but bounded to the first 8 KiB of each side and skipping binary and compressed bodies. `body~regex` scans the stored bytes instead, with no bound.
-- In a **colour rule**, `body:` always scans, and reads the first 64 KiB of each side. Indexing happens after capture and a rule has to paint the row that just arrived, so scanning is the only way to be right; the 64 KiB bound is what keeps a screenful of large bodies from stalling the list. A colour rule therefore paints rows the identical query does not list, but a match past 64 KiB is not painted.
+- In a **colour rule**, `body:` always scans, and reads the first 64 KiB of each side. Indexing happens after capture, and a rule paints the row as it arrives, so it has to scan. The 64 KiB bound keeps a screenful of large bodies from stalling the list. A colour rule therefore paints rows the identical query does not list, but a match past 64 KiB is not painted.
 
-Every `body:` term, on every surface, reads the bytes **as they went over the wire**, so none of them finds a string inside a gzipped body. That includes an extract rule's condition, which is evaluated before the response is decoded; only the extraction that follows sees decompressed text. To match on compressed content, match something outside it: a header, the path, or the response size.
+Every `body:` term, on every surface, reads the bytes **as they went over the wire**, so none of them finds a string inside a gzipped body. That includes an extract rule's condition, which is evaluated before the response is decoded. Only the extraction that follows sees decompressed text. To match on compressed content, match something outside it: a header, the path, or the response size.
 
 ## Caveats
 

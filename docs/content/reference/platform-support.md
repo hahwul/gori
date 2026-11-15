@@ -4,7 +4,7 @@ description = "Which operating systems and architectures gori supports, what eac
 weight = 7
 +++
 
-gori ships as one binary for macOS, Linux and Windows, but not every platform gets the same guarantees. They are sorted into two tiers. A platform is named by its OS and CPU architecture, the way release assets are named (`linux-arm64`, `osx-x86_64`). gori is built with Crystal, so each platform also depends on the compiler's own [platform support](https://crystal-lang.org/reference/1.21/syntax_and_semantics/platform_support.html).
+gori ships as one binary for macOS, Linux and Windows. Platforms are sorted into two tiers with different guarantees. A platform is named by its OS and CPU architecture, the way release assets are named (`linux-arm64`, `osx-x86_64`). gori is built with Crystal, so each platform also depends on the compiler's own [platform support](https://crystal-lang.org/reference/1.21/syntax_and_semantics/platform_support.html).
 
 ## Tier 1 {#tier-1}
 
@@ -22,7 +22,7 @@ Tier 1 platforms are "the whole of gori". Each one:
 | Linux x86_64 | `gori-v*-linux-x86_64` (static, musl) | AUR, Snap, Nix, Docker | The specs mirroring a change on every pull request, the full suite on every push to `main`; the release binary is checked to be static and run |
 | Linux arm64 | `gori-v*-linux-arm64` (static, musl) | Nix, Docker | The Docker image is built natively on every push to `main`; the release binary is checked to be static and run |
 
-The spec suite does not run on macOS or Linux arm64 in CI, so a regression specific to one of those targets is found in use, not by CI.
+The spec suite does not run on macOS or Linux arm64 in CI, so CI does not catch a regression specific to one of those targets.
 
 ## Tier 2 {#tier-2}
 
@@ -39,10 +39,10 @@ Release binaries for Windows start with v0.8.0.
 | Area | On Windows |
 |------|------------|
 | Console | The TUI needs a console that speaks VT sequences (Windows 10 1809+). Use Windows Terminal: the classic console window, which a double-clicked `.exe` or `cmd.exe` opens, can drop border lines and overlap a few symbols, depending on its font. |
-| Signals | There are no POSIX signals. Ctrl-C and Ctrl-Break act as `INT`; closing the console window, logging off or shutting down act as `TERM`, but Windows ends the process soon after, so cleanup on those gets little time. |
+| Signals | There are no POSIX signals. Ctrl-C and Ctrl-Break act as `INT`. Closing the console window, logging off or shutting down act as `TERM`, but Windows ends the process soon after, so cleanup on those gets little time. |
 | [`gori run shell`](/reference/cli/#run-shell) | The CA bundle it writes starts from the system roots, which gori looks for only at Unix paths. On Windows it holds gori's root alone unless `SSL_CERT_FILE` already names a bundle, so a tool in that shell fails TLS verification for any host gori does not intercept (a passthrough host, anything in `NO_PROXY`). Export a full bundle as `SSL_CERT_FILE` first to avoid it. The default `--print` syntax there is PowerShell. |
 | File permissions | POSIX modes such as `0600` on the root CA key do not apply. Files under `GORI_HOME` (`%USERPROFILE%\.gori`) get whatever access that folder grants. |
-| `gori update` | Windows will not overwrite a running `.exe`, so the old one is renamed aside and the new one takes its place; if the old one is still running, the leftover `.gori-update.old.*` file is removed by the next `gori update`. A Chocolatey install is never updated in place: `gori update` prints `choco upgrade gori -y`, to run from an elevated shell with gori closed. |
+| `gori update` | Windows will not overwrite a running `.exe`, so the old one is renamed aside and the new one takes its place. If the old one is still running, the leftover `.gori-update.old.*` file is removed by the next `gori update`. A Chocolatey install is never updated in place: `gori update` prints `choco upgrade gori -y`, to run from an elevated shell with gori closed. |
 | Installer | The curl installer is macOS and Linux only. Use [Chocolatey](/getting-started/installation/#chocolatey-windows) or the [direct download](/getting-started/installation/#windows). |
 | [Messages from gori](/guide/mcp/#messages-from-gori) | Claude Code's inbox socket is a Unix socket, so it is never found on Windows. Operator messages reach Claude Code with the next tool result or through `operator_messages` instead. |
 | Statusline command | `statusline.command` runs through `cmd.exe /d /s /c`, not `/bin/sh -c`, so a POSIX shell script needs a Windows-native equivalent (or an `sh` on `PATH`). |
@@ -50,7 +50,7 @@ Release binaries for Windows start with v0.8.0.
 
 ## Not supported {#not-supported}
 
-No release binary, no package and no CI. Some may [build from source](/getting-started/installation/#build-from-source), but nothing checks that they do.
+These platforms have no release binary, package or CI. Some may [build from source](/getting-started/installation/#build-from-source), but nothing checks that they do.
 
 | Platform | Note |
 |----------|------|

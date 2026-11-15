@@ -14,9 +14,9 @@ gori ships thirty-two built-in colour themes: `goridark` (the default), `goriday
 
 Open Preferences with `Ctrl-,` (or the `⚙` chip in the top bar), go to **Appearance**, and press `↵` on the **Theme** row. The row previews the current theme inline: its name and a small swatch of its palette. `Ctrl-P` → **Settings: Theme** opens the same picker in one step.
 
-The picker is a vertical, scrollable list; each row shows a small swatch of the theme's own palette, and selecting a row previews it live. `Enter` applies and persists the choice, `Esc` reverts.
+The picker is a vertical, scrollable list. Each row shows a small swatch of the theme's palette, and selecting a row previews it live. `Enter` applies and persists the choice, `Esc` reverts.
 
-`Ctrl-,` works in the project picker too, so you can set your theme on first launch before opening a project. Every form section is editable there, and Theme is the one opener that works; the other openers (Tabs, Env, Hotkeys, the Keyset playground, hostname overrides, and User-Agents) need a project open.
+`Ctrl-,` works in the project picker too, so you can set your theme on first launch before opening a project. Every form section is editable there, but Theme is the only opener that works. The other openers (Tabs, Env, Hotkeys, the Keyset playground, hostname overrides, and User-Agents) need a project open.
 
 The same History view across six of the built-ins:
 
@@ -59,7 +59,7 @@ You can add your own themes as JSON files, dropped into:
 
 ### Format
 
-A theme is a JSON object mapping palette fields to `#rrggbb` hex colours. Use the optional `"base"` key to inherit every colour you don't override from a built-in theme, so a theme can be as small as one accent tweak:
+A theme is a JSON object mapping palette fields to `#rrggbb` hex colours. Use the optional `"base"` key to inherit every colour you don't override from a built-in theme, so a theme can override a single colour:
 
 ```json
 {
@@ -134,8 +134,8 @@ Every field, all inheriting from `base` when omitted:
 - `"base"` must name a built-in theme. A custom theme can't be the base of another, and an unknown base falls back to `goridark`.
 - The file name is normalised to lower-case `a-z 0-9 - _`; other characters are dropped (`My Theme!.json` → `mytheme`).
 - A file whose name collides with a built-in (e.g. `goridark.json`) is ignored. The built-ins can't be redefined.
-- Loading is tolerant: an unreadable file, invalid JSON, or a non-object is skipped, and a single malformed colour falls back to the `base` value rather than discarding the whole theme. A broken theme file never crashes the TUI.
-- For readability, keep your functional colours (text, status, syntax) well-contrasted against `bg`; the built-ins target WCAG AA (≥ 4.5:1).
+- An unreadable file, invalid JSON, or a non-object is skipped. A malformed colour falls back to the `base` value, and the rest of the theme still loads. A broken theme file never crashes the TUI.
+- For readability, keep your functional colours (text, status, syntax) well-contrasted against `bg`. The built-ins target WCAG AA (≥ 4.5:1).
 
 ## Next Steps
 
