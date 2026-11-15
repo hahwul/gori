@@ -2,88 +2,21 @@
 
 ## Unreleased
 
-- Probe: speed up passive checks, analyze XHTML as a document, and lower wildcard CORS to an informational signal, including stored findings (#1895).
+## v0.9.4
 
-- TUI: IME composition previews clear when input mode or focus changes and render once beside the caret, including wrapped or highlighted editors (#1892, #1893).
-
-- TUI: single-line fields move, select and delete complete combining characters and emoji, while preserving the order of streamed or pasted text (#1891).
-
-- TUI: leaving a project or quitting stops Android setup and undo before their next ADB command; an already running command can finish (#1890).
-
-- TUI: hidden modal actions cannot commit while the terminal is smaller than 40×8, including deletion confirmations opened before or after shrinking the window (#1889).
-
-- TUI: single-line form fields support Ctrl-A/E/U/W like filters, with selection and undo preserved (#1888).
-
-- TUI: Decoder chain save failures keep the entered name and show the error in the prompt so it can be corrected or retried (#1887).
-
-- TUI: a failed save during quit or project switching keeps pending edits open for retry or copying and asks before discarding them; inactive tool sub-tabs are saved too (#1886).
-
-- TUI: the Fuzzer names session removal as deletion in menus, the palette and confirmation dialogs, explicitly including its saved runs (#1885).
-
-- TUI: failed Notes, Issues, Sequencer and Params exports remain in notifications so their errors can be read again after typing (#1884).
-
-- TUI: closing a Decoder, JWT, Cookie or Comparer session asks before discarding its contents; empty sessions still close immediately (#1883).
-
-- TUI: confirmation dialogs scroll long warnings with ↑/↓ or the mouse wheel and require the last line to be visible before confirming (#1882).
-
-- Help: `?` from a tab without its own Shortcuts section opens on that tab's row instead of the top of OTHER TABS, `?` works in the Sequencer's body, and Shortcuts explains History's `⌁follow +N` and that a tab's own `c`, `i` or `s` wins over the Global toggle in its body (#1878)
-- TUI: rule forms (Scope, Rewriter, Colormarker, Extract, custom probe rule, custom colour, column, OAST provider) say `↵ next` on a row where Enter moves to the next field, `↵ save` only where it saves and `↵ fix` while a required field is missing, where Enter moves to that field and says what it needs; when intercept starts holding traffic while another tab is open a toast says so once, until Intercept is opened or turned off (#1878, #1879)
-- Fuzzer: the template's `no chain yet` hint sits on the pane border instead of over the line below the caret, and the results footer lists direct keys before `space →` menu paths (#1878)
-- Settings: the upstream protocol row is `Upstream proxy`, so it no longer reads as gori's own listen port, `Capture body limit (MiB)` and `Host overrides` are spelled the same in Project settings, Preferences and the palette, and Project settings and Preferences show the port or address this run listens on beside the stored Bind Port or Bind IP when `-p` or `--listen` moved it (#1877, #1878)
-- TUI: turning capture off says `proxy stopped` and back on `proxy listening`, a lens that is on reads `scope:on(N)` as `intercept:on(N)` does, dismissing a Probe finding says how to get it back, and a new scope rule says what the lens does, with the Scope pane explaining lens and sandbox under its rules (#1877, #1878)
-- TUI: footers name the command palette `^P palette`, apart from a tab's `space cmds` menu, and Probe and Evidence title their Repeater send `Send to Repeater` as every other tab does (#1877)
-- Issues: `esc` in the notes editor of an issue you just filed saves the note instead of jumping back to the tab it was filed from and discarding it; the way back waits for the `esc` that leaves the issue (#1876)
-- MCP: every offset-paged list returns `next_offset`, the `offset` that continues it (null at the end), and a tool that only touches the project's own store says `openWorldHint:false`, a purely additive one `destructiveHint:false` and an on/off setter `idempotentHint:true`; `fuzz_start`, `mine_start` and `sequence_start` refused for a missing `url` say that a template's `Host` header does not choose the target, and a wrong-shaped `payloads` or `processors` shows an example of the right one (#1876, #1878, #1879)
-- CLI: `gori run` answers an MCP tool name with the command it means (`gori run list_history` names `gori run history`), and under `--json` a reader given an id that does not exist (`show`, `issues show`, `repeater show`, `evidence show`, `fuzz show`, …), a reader keyed by one (`links --issue`, `evidence list --issue`) or a resend of one (`repeater`, `repeater send`, `fuzz`, `mine`, `sequence`, `authorize`) prints `{"ok":false,"error_code":"NOT_FOUND",…}` on stdout as `send` does, still exiting 1; `send` and `repeater` refusing `--format raw` name the `--record-history` then `show --format raw` route (#1876, #1878)
-- TUI: `/` on the tab bar enters the tab and opens its filter (the list's, or the sub-tab strip's where a tab draws one) instead of answering with directions, so a query typed from the bar no longer runs as the bar's keys: `/cdn` stopped the proxy on its `c` (#1880)
-- CLI: under `--json`, a duplicate refused by `gori run project scope add`/`update` or `host-override add`/`update` prints the failed-call object with the row already there as `existing_id`, deletes take `--json` and answer `{"ok":true,"deleted":true,…}` or the NOT_FOUND object (scope rule, host override, env var, evidence, saved fuzz run, colour rule, custom colour, rewrite rule, retest step and run, session slot, custom probe rule, note, saved view, wordlist, OAST provider, redaction profile, probe finding, gRPC schema; `issues delete` and `history delete` answer with `ids`, `history clear` with `count`), and a failed `send` or `repeater send` also prints its error on stderr (#1879, #1881)
-- CLI: under `--json`, a write that did not commit prints the failed-call object on stdout as MCP codes it (`PROJECT_BUSY`, retryable), and so does a project that will not open or a `--project`/`--db` that names nothing (`NO_PROJECT`, `NOT_FOUND`), still exiting 1 with the same stderr line; an unknown flag after the name in `redact use`/`set`/`rm`/`default` or `repeater move` is named as unknown instead of counted as a second argument (#1881)
-- Miner: a run that finishes with nothing found says that names were tested with a random value, so a switch like `debug=1` does not show, and points to the Fuzzer (`gori run mine`, MCP `mine_status`/`mine_results`, the Miner tab) (#1879)
-- TUI: a long paste into a rule form's field (Rewriter, Colormarker, column) no longer freezes the screen while the preview recomputes after every character, and the Extract rule form saves a `position` rule instead of refusing every byte range (#1879)
-- Sequencer: fewer than 20 tokens rate INCONCLUSIVE (`only N usable tokens — need ≥ 20`) in `gori run sequence`, MCP and the Sequencer tab, instead of a CRITICAL or WEAK that the sample size alone produced; a repeated or sequential token still rates CRITICAL, and the tab will not file an inconclusive report as an issue (#1875)
-- Authorize: `gori run authorize` and MCP `authorize_start` count only the requests that go on the wire, so an identity that changes nothing about a request is no longer counted as a send (#1875)
-- JWT, Cookie: `gori run jwt` and `gori run cookie` decode the token in a value pasted straight from an `Authorization`, `Cookie` or `Set-Cookie` header (`Bearer …`, `session=…`, `…; Path=/`) instead of decoding the whole value as garbage, and `gori run cookie` exits 1 when no payload in it decodes (#1875)
-- Redaction: `gori run redact rm` refuses the profile a safe export is set to use, a configured profile that no longer exists names `redact use` as the way out, and `gori run redact --help` lists the other subcommands (#1875)
-- Issues: `gori run issues --export -` writes the report to stdout, with the count on stderr, instead of a file named `-` (#1875)
-- Decoder: `gori run decoder` says on stderr when a result that is not text is printed re-encoded as base64 or hex, so a decode that prints its own input no longer passes for one that did nothing (#1875)
-- Probe: a repeated promote names the Issue the finding already became, and `gori run probe rules delete` and MCP `delete_probe_rule` say an unknown rule id is no rule instead of advising to disable it (#1875)
-- Fuzzer: `gori run fuzz --fail-if-no-matches` exits 1, not 3, when every send errored, so a dead target no longer reads as a run that matched nothing (#1875)
-- TUI: hints name the key that is true where they are shown (Sitemap's `↵` on a folder, Project settings' proxy rows, the project picker's delete dialog, Evidence's issue picker, an empty Activity feed, the Sequencer's empty card), and turning on request-beside-response in a pane too narrow to split says so (#1874)
-- TUI: Preferences keeps a one-row section's row on screen (Reset, Hotkeys, Tabs), the hotkey editor asks once before `esc` discards a rebind, opening a Repeater row from Activity lands on that sub-tab, a project's Created no longer moves each time it is opened, and Cookie's decode reads verified once the secret checks out (#1874)
-- TUI: a new note no longer shows the previous note's links, `↵` on a notification with nowhere to jump opens its full text, the flow detail's pane chips stay inside a narrow pane, and what gori says about a flow there wraps instead of being cut (#1873)
-- TUI: a paused crawl reads `paused` in the status row instead of spinning, the Fuzzer refuses a run that would send nothing, a mine stopped by hand says how far it got, the Sequencer's analysis names the sample count it rests on mid-run, and turning Intercept off over an open edit asks first (#1873)
-- TUI: a 1xx status no longer wears the 5xx red (a WebSocket's 101, the 1xx bar on Project's At a glance), and the Fuzzer's results colour a 3xx as the DIST panel beside them does (#1871)
-- TUI: a filter picker (Go to tab, Find sub-tab, Link to, Pick flow, the libraries) names its keys in the status row only, its bar and the find and replace bars read `filter ›`, `find ›` and `replace ›`, and the Shortcuts popup at its widest no longer shows a sliver of the pane underneath (#1871)
-- CLI: `gori ca info` prints the root's subject, validity, SHA-256 fingerprint, SPKI pin and Android file name (`--json` too), `gori ca --der` writes the certificate in DER (`-o FILE` writes either form to a file), `gori update --check` compares with the latest release and exits 10 when an update is available, and `gori settings --edit` offers to reopen a file that will not load (#1866, #1867)
-- TUI: an empty `^P` opens on Open browser, Copy CA certificate path and Guided tour, then the tab jumps, with one Settings row; type a section's name to reach it (#1843)
-- Fuzzer: the idle results card lists what a run still needs (a marked position, then a payload set) and marks the next step, with no session open `Space` offers New fuzz session instead of Run and Stop, and a run with no match rule says so instead of counting every response as a hit (#1843, #1844, #1856)
-- Proxy: the CA page at `http://gori.proxy/` shows the certificate's SHA-256 fingerprint in the hex form certificate viewers print, and adds the trust steps for Linux, iOS and Android (#1862)
-- Probe: `gori run probe promote --format json` prints the new Issue id as MCP `probe_promote` does (#1784)
-- Themes: the dim columns on the row under the cursor (time, protocol, type, size) clear 3:1 against the selection band in every built-in theme; the secondary tone moved slightly in goridark, tokyonight, monokai, everforest, onedark, kanagawa, zenburn, gruvbox_light and ayu_light (#1872)
-- CLI: `gori run sitemap tag --list --format json` (or `--json`) prints the `[{host, path, tag}]` array MCP `list_sitemap_tags` returns (#1783)
-- Help: Shortcuts names the header chips, History's view chip, the Fuzzer's `§N`, MATCH and DIST chips and Mode formula, the Probe band's chips, Discover's suppression counters, the Params `R` column, the `:` a filter bar puts before an applied filter and the Intercept editor's `CL` chip (#1845, #1847, #1850, #1855)
-- Project: the empty Description card says it holds free-text notes, the overview shows a short proxy or created value instead of clipping it, Project settings name their units, the scope rule form shows an example pattern for each match type, and AT A GLANCE counts a dropped or failed flow as `ABT` or `ERR`, as History does, instead of `PEND` (#1845, #1850, #1856, #1859)
-- First run: the wizard asks for the listen address only when the default is taken and counts its steps from the screen it opens on, its tour offer lands on Skip, and the first project opens on its name's `Enter` (#1846, #1853)
-- Discover: with no run yet, `Space` lists only Run, which says where to start one, and the empty card names both places (#1847)
-- Comparer: the footer names the two picks until both sides are set (#1847)
-- Sitemap: `Enter` on a path opens its flow, as it does on a History or Params row (#1856)
-- Decoder, JWT, Cookie: the first selection sent to the tab fills its blank sub-tab instead of leaving `empty` beside it, and a Decoder sub-tab with no chain is named by its input (#1856)
-- Repeater: `Space` now opens the menu with no request open, without Send request, Past sends or Run active scan, and New repeater request is a first-level row there and in every pane. Auto-mark's notice names the key that sets how a marked value is encoded (#1848, #1860)
-- TUI: the empty Authorize, Miner and Sequencer cards spell the whole menu path to their Send row, none of them offers a run key before there is something to run, and an empty OAST says to add or enable a provider on the Providers sub-tab (#1849)
-- Colormarker: the custom colours pane and its `Space` menu spell colour as the rest of the tab does, and a short `Space` menu no longer clips its own title (#1850)
-- TUI: Miss Ring no longer covers what a tab draws: she stands in the body's corner while it is empty and sits in the status row once a list or a pane fills it (#1851, #1863)
-- TUI: Repeater, Fuzzer, Miner, Sequencer, Decoder, JWT, Cookie, OAST, Rewriter and Colormarker draw their cards without an outer frame, and the idle sub-tab filter no longer takes a row: `/ filter · f find` sits on the line under the chips. An 80×24 Repeater shows 11 rows of request and response instead of 7 (#1863)
-- TUI: a filter that is not being typed in takes no row anywhere: `/ filter`, or `: query` once one is applied, sits on the border above the list in Issues, OAST, Evidence, Project's Activity, Discover, Miner, Authorize, Probe Rules, Rewriter and Colormarker, on the line under the sub-tabs for a sub-tab filter, and Help's `/ search` joins it. A strip with one sub-tab names `f find` there, and the Repeater offers the sub-tab filter from the second session like every other tab (#1864)
-- TUI: a flow's status, sizes, latency and type sit on the History detail's bottom border instead of taking two rows under it, the line above an open History, Issues or Probe detail no longer repeats its title, Preferences says the strip's keys once, the Params summary and the Host overrides and Env format lines line up with their rows, Help's search prompt reads `search ›`, and `^P` marks its system rows with a plain dot instead of a red cross (#1864)
-- TUI: an empty Intercept queue's footer names the keys that set up a catch, a Miner that has not run shows no empty progress bar or tally, the Rewriter's sub-tabs look like every other strip, the Fuzzer's CONFIG text no longer touches its border, a narrow header keeps a `·` between the project name and the chips, and Probe's closed toggle follows the severity counts as `+CLOSED` (#1863)
-- TUI: an empty note's card says how to start writing, Target's Diff shows a card like the other tabs until a baseline is picked, an empty Rewriter names its presets, an empty Issues list no longer offers Open, and the two labels on an empty card line up (#1854)
-- Help: `?` opens the shortcuts as a popup over the pane you are in, starting at that tab's section, and `?` again inside it opens the Help tab (#1852)
-- TUI: `^P` and the `0` tab picker find a tab by what other tools call it, such as intruder, scanner, collaborator or param miner, and `^P` finds everyday words and several-word queries (`proxy`, `port`, `diff`, `copy as curl`, `dark mode`). It drops scattered-letter matches once a command contains what you typed, so `cert` opens on Copy CA certificate path rather than Clear history, and writes shortcuts as `^R` and `⇧X` (#1852, #1876)
-- TUI: pressing `c` or `i` by accident now shows which key turns capture back on or intercept off, and the menus read Send to Repeater and Send request and spell sub-tab one way (#1852, #1855)
-- TUI: on a narrow terminal the Intercept queue footer keeps forward, drop and edit ahead of mark and range, and the flow detail, Params, empty Discover, JWT, Cookie and Fuzzer CONFIG footers keep the menu and the key that leaves the pane (#1853, #1857, #1860)
-- History: with no flows yet, `Space` offers Open browser instead of Mark all and Clear history, the footer names the way to it, and the card adds the Import route (#1853)
-- TUI: the wizard, Help and the tour say that `^P` means Ctrl+P, and the project picker spells its keys the same way, keeps Settings and Quit on an 80-column footer, and opens Settings on a plain `,` where the terminal cannot send `Ctrl+,` (#1853, #1858)
-- Settings: a setting's description wraps onto as many rows as it needs instead of stopping at the edge of the card (#1861)
+- TUI: quieter screens: cards drop their outer frame, a filter not being typed in takes no row, a flow's status and sizes sit on the detail's border, and Miss Ring stays out of the content; an 80×24 Repeater shows 11 rows instead of 7 (#1851, #1863, #1864)
+- TUI: clearer first steps: empty cards and `Space` menus offer only what can run next, hints and footers name keys that work and keep the important ones on a narrow terminal, and the first-run wizard is shorter (#1843–#1860, #1871, #1873, #1874, #1877, #1878)
+- TUI: closing a workbench session, quitting after a failed save, discarding a hotkey rebind or turning Intercept off over an edit asks first; confirmations scroll long warnings, hidden dialogs cannot commit on a tiny terminal, and quitting stops Android setup before its next ADB command (#1873, #1874, #1882–#1887, #1889, #1890)
+- TUI: text fields take Ctrl-A/E/U/W, move and delete whole emoji and combining characters, and IME previews render once beside the caret (#1888, #1891, #1892, #1893)
+- TUI: `^P` finds tabs by other tools' names (intruder, scanner, collaborator) and everyday words, `?` opens the shortcuts as a popup on the current tab, and `/` on the tab bar opens that tab's filter (#1852, #1876, #1878, #1880)
+- CLI: under `--json`, a failed call (not found, busy, no project, duplicate) prints the MCP error object on stdout, deletes answer `{"ok":true,"deleted":true,…}`, and an MCP tool name is answered with its `gori run` command (#1876, #1878, #1879, #1881)
+- CLI: `gori ca info`, `gori ca --der`, `gori update --check` (exits 10 when an update is available), and JSON output for `probe promote` and `sitemap tag --list` (#1783, #1784, #1866, #1867)
+- MCP: paged lists return `next_offset`, tool annotations mark read-only, additive and idempotent tools, and a refused `fuzz_start`, `mine_start` or `sequence_start` shows the right argument shape (#1876, #1878, #1879)
+- Workbench: the Sequencer rates fewer than 20 tokens INCONCLUSIVE, JWT and Cookie decode a value pasted straight from a header, Authorize counts only requests on the wire, and `fuzz --fail-if-no-matches` exits 1 when every send errored (#1875)
+- Probe: faster passive checks, XHTML read as a document, and wildcard CORS lowered to informational (#1895)
+- Proxy: the CA page at `http://gori.proxy/` shows the SHA-256 fingerprint and trust steps for Linux, iOS and Android (#1862)
+- Settings: names match across Project settings, Preferences and the palette, the live listen port shows when `-p` or `--listen` moved it, and dim columns stay readable on the selection band in every theme (#1861, #1872, #1877)
+- Docs: a tighter README (#1894)
 
 ## v0.9.3
 
