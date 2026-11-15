@@ -146,6 +146,21 @@ module Gori
         essence(v) == "multipart/x-mixed-replace"
     end
 
+    # Content types whose body is a stream of messages rather than one entity: SSE, gRPC (and
+    # gRPC-Web), Connect streaming, newline-delimited JSON, a `multipart/x-mixed-replace` push.
+    # Matched as lowercase PREFIXES, so `application/grpc` covers `application/grpc-web+proto`
+    # and `application/connect+` every codec. The one list both transports ask (#1901): two
+    # copies is how a third caller came to be missed.
+    MESSAGE_STREAMS = {"text/event-stream", "application/grpc", "application/connect+",
+                       "application/x-ndjson", "application/ndjson", "multipart/x-mixed-replace"}
+
+    # Whether `value` names one of `MESSAGE_STREAMS`. Allocates (`downcase`), so it belongs
+    # behind a rule or a hold and never on the path every response takes (P6).
+    def message_stream?(value : String?) : Bool
+      type = value.try(&.downcase) || return false
+      MESSAGE_STREAMS.any? { |prefix| type.starts_with?(prefix) }
+    end
+
     # `boundary=…` off a multipart Content-Type, quoted or bare. The parameter NAME is
     # case-insensitive; its VALUE is not.
     BOUNDARY_RE = /boundary\s*=\s*(?:"([^"]*)"|([^;\s]+))/i

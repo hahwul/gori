@@ -227,6 +227,34 @@ describe Gori::MediaType do
     end
   end
 
+  describe ".message_stream?" do
+    # The table both transports read. A type that changes its answer here changes whether a
+    # body rule buffers it, on HTTP/1.1 and HTTP/2 alike.
+    it "answers for each type the proxy asks about" do
+      {
+        "text/event-stream"                         => true,
+        "Text/Event-Stream; charset=utf-8"          => true,
+        "application/grpc"                          => true,
+        "application/grpc+proto"                    => true,
+        "application/grpc-web+proto"                => true,
+        "application/grpc-web-text+proto"           => true,
+        "application/connect+json"                  => true,
+        "application/connect+proto"                 => true,
+        "application/x-ndjson"                      => true,
+        "application/ndjson; charset=utf-8"         => true,
+        "multipart/x-mixed-replace; boundary=frame" => true,
+        "application/json"                          => false,
+        "application/proto"                         => false,
+        "multipart/mixed; boundary=x"               => false,
+        "text/plain; note=text/event-stream"        => false,
+        "application/octet-stream"                  => false,
+      }.each do |type, expected|
+        {type, Gori::MediaType.message_stream?(type)}.should eq({type, expected})
+      end
+      Gori::MediaType.message_stream?(nil).should be_false
+    end
+  end
+
   describe ".binary_document?" do
     it "matches the spellings a msgpack or CBOR body actually carries" do
       %w[application/msgpack application/x-msgpack application/vnd.msgpack

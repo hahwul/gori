@@ -323,14 +323,8 @@ class Gori::Proxy::H2::StreamGate
   # its client only sends after reading the reply, so native gRPC is owned one message at a
   # time instead (`grpc_progress_locked`); gRPC-Web stays here.
   private def streaming?(fields : Array(HPACK::Field)) : Bool
-    type = HeadCodec.pseudo_of(fields, "content-type").try(&.downcase) || return false
-    STREAMING_TYPES.any? { |prefix| type.starts_with?(prefix) }
+    MediaType.message_stream?(HeadCodec.pseudo_of(fields, "content-type"))
   end
-
-  # Content types whose body is a stream of messages rather than one entity: SSE, gRPC (and
-  # gRPC-Web), Connect streaming, newline-delimited JSON, a `multipart/x-mixed-replace` push.
-  STREAMING_TYPES = {"text/event-stream", "application/grpc", "application/connect+",
-                     "application/x-ndjson", "application/ndjson", "multipart/x-mixed-replace"}
 
   private def skip_body(stream_id : UInt32, why : String) : Nil
     @assembler.note_advisory(stream_id,
