@@ -1551,14 +1551,13 @@ module Gori::Tui
         elsif @xscroll > 0 # unwrapped editors only — `wrap=` pins @xscroll at 0
           draw_scrolled(screen, cx0, rect.y + i, li, line, styled, cw)
         elsif @reveal
-          Highlight.draw(screen, cx0, rect.y + i, Reveal.styled(seg, false, cw), width: cw)
+          shown = composing && !wrapping? ? "#{line[0, @cx]}#{@preedit}#{line[@cx..]}" : seg
+          Highlight.draw(screen, cx0, rect.y + i, Reveal.styled(shown, false, cw), width: cw)
         elsif composing && wrapping?
-          # The styled overlay is built from the BUFFER and so cannot describe the
-          # composing text; under wrap it is part of the laid-out line, so it is drawn
-          # from spans instead. (Unwrapped editors keep the legacy order below, where a
-          # highlighted line wins and the preedit shows only through the caret glyph.)
+          # Buffer highlighting cannot describe composing text. Draw the preview itself,
+          # including in the unwrapped branch below.
           Highlight.draw(screen, cx0, rect.y + i, preedit_spans(line, a, b), width: cw)
-        elsif styled && (sl = styled_line(styled, li))
+        elsif !composing && styled && (sl = styled_line(styled, li))
           Highlight.draw(screen, cx0, rect.y + i, Highlight.slice_chars(sl, a, b), width: cw)
         else
           if composing
@@ -1629,14 +1628,13 @@ module Gori::Tui
           caret_cell = {cxs, rect.y + i}
           if cursor
             screen.cursor(cxs, rect.y + i)
-            # The cell under the block caret is the first VISIBLE glyph at/after @cx: on a
-            # concealed line the raw char there may be a hidden `¦chain` byte, so skip past
-            # any concealed run to the glyph the user actually sees (the closing §).
-            r = @cx
+            # Use the drawn caret index, past any composing text under wrap. On a concealed
+            # line skip hidden `¦chain` bytes to the glyph the user sees (the closing §).
+            r = ci
             cr.each { |(ra, rb)| r = rb if r >= ra && r < rb } if cr && !cr.empty?
             # The whole CLUSTER at `r`, not `line[r]`: parking on `é` (e + U+0301) or a ZWJ
             # family has to invert the glyph the user sees, not its leading codepoint.
-            ch = @preedit.empty? ? Screen.caret_glyph(line, r) : Screen.caret_glyph(@preedit, 0)
+            ch = Screen.caret_glyph(line, r)
             # ONE write, never two. The accent still spans both columns of a width-2 glyph,
             # though NOT because the continuation carries the lead's colors — it doesn't;
             # Cell.continuation is a default-colored singleton. It works because termisu's
@@ -2313,9 +2311,8 @@ module Gori::Tui
     private def draw_scrolled(screen : Screen, cx0 : Int32, y : Int32, li : Int32,
                               line : String, styled : Highlight::Windowed?, cw : Int32) : Nil
       if @reveal
+        line = "#{line[0, @cx]}#{@preedit}#{line[@cx..]}" if li == @cy && !@preedit.empty?
         Highlight.draw(screen, cx0, y, Highlight.slice_left(Reveal.styled(line, false, cw + @xscroll), @xscroll), width: cw)
-      elsif styled && (sl = styled_line(styled, li))
-        Highlight.draw(screen, cx0, y, Highlight.slice_left(sl, @xscroll), width: cw)
       elsif li == @cy && !@preedit.empty?
         cx = @cx.clamp(0, line.size)
         spans = Highlight::Line.new
@@ -2324,6 +2321,8 @@ module Gori::Tui
         suffix = line[cx..]
         spans << Highlight::Span.new(suffix, Theme.text) unless suffix.empty?
         Highlight.draw(screen, cx0, y, Highlight.slice_left(spans, @xscroll), width: cw)
+      elsif styled && (sl = styled_line(styled, li))
+        Highlight.draw(screen, cx0, y, Highlight.slice_left(sl, @xscroll), width: cw)
       else
         screen.text(cx0, y, Highlight.slice_left_text(line, @xscroll), Theme.text, width: cw)
       end
