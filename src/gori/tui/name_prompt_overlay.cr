@@ -19,6 +19,8 @@ module Gori::Tui
   # which reads `name`. Blank is allowed THROUGH — the open-site owns the "a name is
   # required" message, because only it knows what is being named.
   class NamePromptOverlay < Overlay
+    property error : String? = nil
+
     getter title : String
     getter subject : String # one dim line describing what gets saved (a chain spec, a rule summary)
     getter action : String  # the ↵ verb, so the card hint and the shell's bottom row agree
@@ -58,7 +60,9 @@ module Gori::Tui
       key = ev.key
       return :cancel if key.escape?
       return :commit if key.enter?
+      before = @field.value
       @field.handle_edit_key(ev)
+      @error = nil if @field.value != before
       :stay
     end
 
@@ -105,7 +109,8 @@ module Gori::Tui
       # is silent, and this is the only place it is stated before it happens.
       # …and only for a NAME: a message prompt reuses this card and overwrites nothing.
       tail = @noun == "name" ? " · an existing name is overwritten" : ""
-      screen.text(box.x + 2, box.bottom - 2, "#{hint}#{tail}", Theme.muted, Theme.bg, width: iw)
+      screen.text(box.x + 2, box.bottom - 2, @error.try { |error| oneline(error) } || "#{hint}#{tail}",
+        @error ? Theme.red : Theme.muted, Theme.bg, width: iw)
     end
 
     private def oneline(s : String) : String

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- TUI: Decoder chain save failures keep the entered name and show the error in the prompt so it can be corrected or retried (#1887).
+
 - TUI: a failed save during quit or project switching keeps pending edits open for retry or copying and asks before discarding them; inactive tool sub-tabs are saved too (#1886).
 
 - TUI: the Fuzzer names session removal as deletion in menus, the palette and confirmation dialogs, explicitly including its saved runs (#1885).

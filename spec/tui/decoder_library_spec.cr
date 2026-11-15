@@ -37,7 +37,7 @@ describe Gori::Tui::DecoderController do
         Gori::Settings.decoder_chains = [] of {String, String}
         dc = DecoderController.new(host)
         dc.load_chain("seed", "base64-encode")
-        dc.save_chain("  peel  ")
+        dc.save_chain("  peel  ").should be_true
         Gori::Settings.decoder_chains.map(&.[0]).should eq ["peel"]
       ensure
         Gori::Settings.decoder_chains = [] of {String, String}
@@ -51,11 +51,48 @@ describe Gori::Tui::DecoderController do
         Gori::Settings.decoder_chains = [] of {String, String}
         dc = DecoderController.new(host)
         dc.load_chain("seed", "base64-encode")
-        dc.save_chain("   ")
+        dc.save_chain("   ").should be_false
         Gori::Settings.decoder_chains.should be_empty
         host.statuses.last.should contain("chain name required")
       ensure
         Gori::Settings.decoder_chains = [] of {String, String}
+      end
+    end
+  end
+
+  describe "#save_chain failure" do
+    it "refuses a built-in name without changing the library" do
+      with_decoder_host do |host|
+        Gori::Settings.decoder_chains = [] of {String, String}
+        dc = DecoderController.new(host)
+        dc.load_chain("seed", "sha256")
+        dc.save_chain("base64-decode").should be_false
+        Gori::Settings.decoder_chains.should be_empty
+        host.statuses.last.should contain("built-in converter")
+      ensure
+        Gori::Settings.decoder_chains = [] of {String, String}
+      end
+    end
+
+    it "reports a rejected settings write and lets the same save be retried" do
+      with_decoder_host do |host|
+        before_path = Gori::Settings.path_override
+        root = File.tempname("gori-chain-save")
+        Dir.mkdir_p(root)
+        Gori::Settings.path_override = root # a directory cannot be replaced by settings.json
+        Gori::Settings.decoder_chains = [{"kept", "upper"}]
+        dc = DecoderController.new(host)
+        dc.load_chain("seed", "sha256")
+        dc.save_chain("retry").should be_false
+        Gori::Settings.decoder_chains.should eq [{"kept", "upper"}]
+        host.statuses.last.should eq("could not save chain")
+        Gori::Settings.path_override = File.join(root, "settings.json")
+        dc.save_chain("retry").should be_true
+        Gori::Settings.decoder_chains.should contain({"retry", "sha256"})
+      ensure
+        Gori::Settings.path_override = before_path
+        Gori::Settings.decoder_chains = [] of {String, String}
+        FileUtils.rm_rf(root) if root
       end
     end
   end
@@ -170,7 +207,7 @@ describe Gori::Tui::DecoderController do
         Gori::Settings.decoder_chains = [] of {String, String}
         dc = DecoderController.new(host)
         dc.load_chain("seed", "upper")
-        dc.save_chain("exec:mytool")
+        dc.save_chain("exec:mytool").should be_false
         Gori::Settings.decoder_chains.should be_empty
         host.statuses.last.should contain("exec:")
       ensure
@@ -182,7 +219,7 @@ describe Gori::Tui::DecoderController do
       with_decoder_host do |host|
         Gori::Settings.decoder_chains = [] of {String, String}
         dc = DecoderController.new(host)
-        dc.save_chain("blank")
+        dc.save_chain("blank").should be_false
         Gori::Settings.decoder_chains.should be_empty
         host.statuses.last.should contain("empty")
       ensure

@@ -60,8 +60,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     ov = NamePromptOverlay.new("SAVE CHAIN", spec.strip.empty? ? "(empty chain)" : spec,
       c.subtab_name)
     ov.on_commit = -> {
-      c.save_chain(ov.name)
-      true
+      saved = c.save_chain(ov.name)
+      ov.error = @toast unless saved
+      saved
     }
     open_overlay(ov)
   end
