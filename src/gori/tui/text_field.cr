@@ -14,7 +14,13 @@ module Gori::Tui
     record UndoState, value : String, caret : Int32
 
     property value : String
-    getter caret : Int32
+
+    # Successive chars keep their exact insertion offset, even if they join the suffix.
+    # Painting and discrete edit keys resolve that offset to the whole glyph's far edge.
+    def caret : Int32
+      Screen.cluster_end(@value, @caret)
+    end
+
     getter preedit : String = ""
 
     def initialize(@value : String = "")
@@ -53,7 +59,7 @@ module Gori::Tui
     # leave the caret after what it inserted rather than at the end of the line.
     def set(v : String, caret : Int32? = nil) : Nil
       @value = v
-      @caret = (caret || v.size).clamp(0, v.size)
+      @caret = Screen.cluster_start(v, (caret || v.size).clamp(0, v.size))
       @preedit = ""
       @sel.clear_selection # the old anchor indexes a string that no longer exists
       @undo_stack.clear
@@ -65,10 +71,13 @@ module Gori::Tui
 
     def insert(ch : Char) : Nil
       push_undo
-      delete_selection # typing over a selection REPLACES it, as in every other editor
-      c = @caret.clamp(0, @value.size)
+      # Keep the splice position: cutting a selection may join the surrounding clusters.
+      at = @sel.selection_span(@caret).try(&.[0]) || @caret
+      delete_selection
+      c = at.clamp(0, @value.size)
       @value = "#{@value[0, c]}#{ch}#{@value[c..]}"
       @caret = c + 1
+      @sel.clear_selection
       @preedit = ""
     end
 
@@ -76,6 +85,7 @@ module Gori::Tui
     # runs BEFORE the cut, so ^Z restores the selected run rather than the buffer that is
     # already missing it.
     def backspace : Nil
+      @caret = caret
       if selection?
         push_undo
         delete_selection
@@ -84,11 +94,13 @@ module Gori::Tui
       return if @caret == 0
       push_undo
       c = @caret.clamp(0, @value.size)
-      @value = "#{@value[0, c - 1]}#{@value[c..]}"
-      @caret = c - 1
+      from = Screen.cluster_start(@value, c - 1)
+      @value = "#{@value[0, from]}#{@value[c..]}"
+      @caret = Screen.cluster_end(@value, from)
     end
 
     def delete : Nil
+      @caret = caret
       if selection?
         push_undo
         delete_selection
@@ -97,8 +109,9 @@ module Gori::Tui
       c = @caret.clamp(0, @value.size)
       return if c >= @value.size
       push_undo
-      @value = "#{@value[0, c]}#{@value[c + 1..]}"
-      @caret = c
+      to = Screen.cluster_end(@value, c + 1)
+      @value = "#{@value[0, c]}#{@value[to..]}"
+      @caret = Screen.cluster_end(@value, c)
     end
 
     # --- selection ------------------------------------------------------------
@@ -124,8 +137,8 @@ module Gori::Tui
       # leaves `x1 > @value.size`, and `@value[x1..]` raises IndexError. `undo` was that
       # path; clamping here keeps the next one from reaching the render loop.
       x0, x1 = span
-      x0 = x0.clamp(0, @value.size)
-      x1 = x1.clamp(x0, @value.size)
+      x0 = Screen.cluster_start(@value, x0.clamp(0, @value.size))
+      x1 = Screen.cluster_end(@value, x1.clamp(x0, @value.size))
       # `selection_span` never reports an empty span, so the two can only meet here when the
       # whole selection sat past the end of the current value — a fully stale anchor with
       # nothing left to cut. Drop it and report "took nothing" so the caller falls back to
@@ -135,40 +148,48 @@ module Gori::Tui
         return false
       end
       @value = "#{@value[0, x0]}#{@value[x1..]}"
-      @caret = x0
+      @caret = Screen.cluster_end(@value, x0)
       @sel.clear_selection
       @preedit = ""
       true
     end
 
     def move(d : Int32, selecting : Bool = false) : Nil
-      @caret = @sel.move_cx(@caret, d, @value.size, selecting: selecting)
+      @caret = caret
+      to = (@caret + d).clamp(0, @value.size)
+      to = d > 0 ? Screen.cluster_end(@value, to) : Screen.cluster_start(@value, to)
+      @caret = @sel.move_cx(@caret, to - @caret, @value.size, selecting: selecting)
     end
 
     def home(selecting : Bool = false) : Nil
-      @caret = @sel.move_cx(@caret, -@caret, @value.size, selecting: selecting)
+      @caret = caret
+      move(-@caret, selecting: selecting)
     end
 
     def end_of_line(selecting : Bool = false) : Nil
-      @caret = @sel.move_cx(@caret, @value.size - @caret, @value.size, selecting: selecting)
+      @caret = caret
+      move(@value.size - @caret, selecting: selecting)
     end
 
     # ⌥←/⌥→ — the same word rule `TextArea#word_left`/`#word_right` walk, so a field and a
     # buffer break at the same places: `-` is inside a run and `.`/`/`/`?`/`=`/`&`/`:` are
     # not, which makes a URL step token by token instead of end to end.
     def word_left(selecting : Bool = false) : Nil
+      @caret = caret
       i = LineEdit.word_left(@value, @caret)
-      @caret = @sel.move_cx(@caret, i - @caret, @value.size, selecting: selecting)
+      move(i - @caret, selecting: selecting)
     end
 
     def word_right(selecting : Bool = false) : Nil
+      @caret = caret
       i = LineEdit.word_right(@value, @caret)
-      @caret = @sel.move_cx(@caret, i - @caret, @value.size, selecting: selecting)
+      move(i - @caret, selecting: selecting)
     end
 
     # ⌥⌫ — delete back to the previous word boundary as one step. Returns whether anything
     # went, like `backspace`'s guard.
     def delete_word_left : Bool
+      @caret = caret
       if selection?
         push_undo
         return delete_selection
@@ -178,11 +199,13 @@ module Gori::Tui
       from = @caret
       word_left
       @value = "#{@value[0, @caret]}#{@value[from..]}"
+      @caret = Screen.cluster_end(@value, @caret)
       true
     end
 
     # ^U — delete from the caret back to the start of the line as one undo step.
     def delete_to_start : Bool
+      @caret = caret
       return false if @caret == 0
       push_undo
       @sel.clear_selection
@@ -263,6 +286,7 @@ module Gori::Tui
     # so the fix is here rather than in each form.
     def click_to_cursor(mx : Int32, my : Int32, selecting : Bool = false) : Bool
       return false unless hit?(mx, my)
+      @caret = caret
       to = Screen.input_click(@value, @last_start, mx - @last_x)
       @caret = @sel.move_cx(@caret, to.clamp(0, @value.size) - @caret, @value.size, selecting: selecting)
       true
@@ -272,8 +296,11 @@ module Gori::Tui
     # landed on whitespace / past the value, leaving the caret where the click put it.
     def select_word_at(mx : Int32, my : Int32) : Bool
       return false unless click_to_cursor(mx, my)
-      return false unless cx = @sel.select_word_at_cursor(@value, @caret)
-      @caret = cx
+      return false unless span = LineEdit.word_span(@value, @caret)
+      from = Screen.cluster_start(@value, span[0])
+      to = Screen.cluster_end(@value, span[1])
+      @sel.clear_selection
+      @caret = @sel.move_cx(from, to - from, @value.size, selecting: true)
       true
     end
 
@@ -306,7 +333,7 @@ module Gori::Tui
       # The band rides along inside `input_line` (see there): it has to land between the
       # value and the block caret, and only that method sits between them. It windows the
       # value, the caret and the band by the same offset, and says which.
-      @last_start = screen.input_line(x, y, @value, @caret, @preedit, fg, bg, width: width,
+      @last_start = screen.input_line(x, y, @value, caret, @preedit, fg, bg, width: width,
         sel: @sel.selection_span(@caret))
     end
 

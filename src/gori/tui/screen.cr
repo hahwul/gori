@@ -748,7 +748,7 @@ module Gori::Tui
       # cluster, which is the duplicate-glyph bug the collapse to draw_width fixes.
       #
       # `cx` here is NOT guaranteed to sit on a cluster boundary: the single-line cursors
-      # (TextField#@caret, ReadCursor#@cx, the views' own @tcx/@scx/@qcx, the decoder's
+      # (ReadCursor#@cx, the views' own @tcx/@scx/@qcx, the decoder's
       # chain_cx) still step per codepoint, unlike TextArea#@cx which now snaps. The
       # residual on those, stated honestly: for "caféx", cx 4 and cx 5 both resolve
       # to column 4, so one → is a dead keypress — but at cx 4 `caret_glyph` returns the
@@ -758,9 +758,8 @@ module Gori::Tui
       # and stamped a DUPLICATE character past it; and it is unreachable by click, since
       # column_for only ever returns cluster starts.
       #
-      # Relatedly, TextField#backspace still deletes one codepoint ("café" → "cafe"),
-      # inconsistent with TextArea's whole-cluster delete. Converting these cursors is
-      # three more edit-path audits and is deliberately out of scope here.
+      # TextField now resolves its presentation and discrete edit keys to cluster edges.
+      # Converting the remaining custom cursors needs their own edit-path audits.
       caret_x = x + Screen.draw_width(prefix) + Screen.draw_width(preedit)
       caret_ch = preedit.empty? ? Screen.caret_glyph(value, cx) : ' '
       if caret_x < right

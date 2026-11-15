@@ -145,3 +145,131 @@ describe "TextField shell editing" do
     field.value.should be_empty
   end
 end
+
+describe "TextField grapheme boundaries" do
+  it "moves and deletes whole committed glyphs in either direction" do
+    {"e\u0301", "한", "👩‍💻", "👨‍👩‍👧‍👦", "🇰🇷"}.each do |glyph|
+      field = TextField.new("a#{glyph}b")
+      field.home
+      field.move(1)
+      field.move(1)
+      field.caret.should eq(1 + glyph.size)
+      field.move(-1)
+      field.caret.should eq(1)
+      field.delete
+      field.value.should eq("ab")
+      field.undo
+      field.end_of_line
+      field.move(-1)
+      field.backspace
+      field.value.should eq("ab")
+      field.undo
+      field.value.should eq("a#{glyph}b")
+    end
+  end
+
+  it "selects and replaces a whole glyph with shifted arrows" do
+    field = TextField.new("a👩‍💻b")
+    field.home
+    field.move(1)
+    field.move(1, selecting: true)
+    field.selection_text.should eq("👩‍💻")
+    field.insert('Z')
+    field.value.should eq("aZb")
+    field.undo
+    field.value.should eq("a👩‍💻b")
+    field.set("🇦X🇧")
+    field.home
+    field.move(1)
+    field.move(1, selecting: true)
+    field.insert('Y')
+    field.value.should eq("🇦Y🇧")
+    field.selection?.should be_false
+  end
+
+  it "does not leave an accent behind after a word deletion" do
+    field = TextField.new("cafe\u0301")
+    field.delete_word_left.should be_true
+    field.value.should eq("caf")
+    field.undo
+    field.value.should eq("cafe\u0301")
+  end
+
+  it "snaps a supplied caret and follows a cluster formed by insertion" do
+    field = TextField.new
+    field.set("e\u0301", caret: 1)
+    field.caret.should eq(0)
+    field.set("\u0301x")
+    field.home
+    field.insert('e')
+    field.caret.should eq(2)
+    field.insert('Z')
+    field.value.should eq("eZ\u0301x")
+  end
+
+  it "keeps the caret outside clusters joined by deletion" do
+    field = TextField.new("🇦X🇧")
+    field.home
+    field.move(1)
+    field.delete
+    field.value.should eq("🇦🇧")
+    field.caret.should eq(2)
+    field.undo
+    field.move(1)
+    field.backspace
+    field.value.should eq("🇦🇧")
+    field.caret.should eq(2)
+  end
+
+  it "includes a word's combining marks in a double-click selection" do
+    field = TextField.new("cafe\u0301")
+    field.home
+    field.render(Screen.new(MemoryBackend.new(20, 2)), 0, 0, 20, true, Theme.text, Theme.bg)
+    field.select_word_at(0, 0).should be_true
+    field.selection_text.should eq("cafe\u0301")
+  end
+end
+
+describe "TextField streamed insertion" do
+  it "keeps consecutive inserted characters before an untouched combining suffix" do
+    field = TextField.new("🇧")
+    field.home
+    "🇦X".each_char { |char| field.insert(char) }
+    field.value.should eq("🇦X🇧")
+    field.undo
+    field.insert('Y')
+    field.value.should eq("🇦Y🇧")
+    field.set("\u0301")
+    field.home
+    "eX".each_char { |char| field.insert(char) }
+    field.value.should eq("eX\u0301")
+    field.caret.should eq(3)
+    field.backspace
+    field.value.should eq("e")
+    field.undo
+    field.value.should eq("eX\u0301")
+    field.home
+    field.caret.should eq(0)
+  end
+end
+
+describe "TextField resolved caret" do
+  it "resolves Home and pointer selection before using an insertion offset" do
+    field = TextField.new("long 🇧x")
+    field.home
+    field.move(5)
+    field.insert('🇦')
+    field.caret.should eq(7)
+    field.home
+    field.caret.should eq(0)
+
+    field.set("🇧")
+    field.home
+    field.insert('🇦')
+    backend = MemoryBackend.new(20, 2)
+    field.render(Screen.new(backend), 0, 0, 20, true, Theme.text, Theme.bg)
+    backend.cluster_row(0).should contain("🇦🇧")
+    field.click_to_cursor(0, 0, selecting: true).should be_true
+    field.selection_text.should eq("🇦🇧")
+  end
+end
