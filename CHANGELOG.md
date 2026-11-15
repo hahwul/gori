@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- TUI: changing input mode or focus clears the IME composition preview before leaving its field, so cancelled characters do not reappear on return (#1892).
+
 - TUI: single-line fields move, select and delete complete combining characters and emoji, while preserving the order of streamed or pasted text (#1891).
 
 - TUI: leaving a project or quitting stops Android setup and undo before their next ADB command; an already running command can finish (#1890).

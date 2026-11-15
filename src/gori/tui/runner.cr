@@ -1447,6 +1447,7 @@ module Gori::Tui
     @batch_card = nil.as(Overlay?)
     # Bounds a paste whose end marker never comes — the decision lives there, not here.
     @paste_stall = PasteStall.new
+    @preedit_live = false
 
     #
     # Returns false only for an event a paste IN PROGRESS absorbed without touching anything on
@@ -1466,6 +1467,12 @@ module Gori::Tui
       # A click between the two presses of `dd` / `yy` may have moved the caret or the focus;
       # the second press must not act on a line the first one never saw.
       @editor_op = nil if ev.is_a?(Termisu::Event::Mouse)
+      # Retire the preview while its original field still owns the input. A later empty
+      # preedit can arrive after Escape/Tab/click changed mode or focus and be ignored.
+      if @preedit_live && (ev.is_a?(Termisu::Event::Key) ||
+         (ev.is_a?(Termisu::Event::Mouse) && ev.press? && !ev.wheel? && !@paste_newline.pasting?))
+        apply_preedit("")
+      end
       # A PasteStart arriving while a paste is ALREADY open means the previous one was abandoned
       # (its marker lost) and a new one is beginning. Close the old one first, or there is no
       # start transition for the new one and it silently inherits the abandoned paste's
@@ -1539,6 +1546,7 @@ module Gori::Tui
     end
 
     private def apply_preedit(text : String) : Nil
+      @preedit_live = !text.empty?
       return if preedit_swallowed?
       if @search_open # ^F find — IME composing text
         @search_preedit = text
