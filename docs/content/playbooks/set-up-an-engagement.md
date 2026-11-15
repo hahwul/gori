@@ -7,13 +7,13 @@ weight = 10
 group = "Foundations"
 +++
 
-Before you capture a single request, you set the boundaries of the test: which project holds the traffic, which hosts are in scope, and whether gori is allowed to touch anything else at all. This playbook walks all three. It takes about five minutes, and it is what makes every later step safe: headless and agent sends refuse a target you haven't scoped, and the sandbox stops every surface, the TUI included.
+Before you capture a single request, you set the boundaries of the test: which project holds the traffic, which hosts are in scope, and whether gori is allowed to touch anything else. This playbook walks all three and takes about five minutes. Headless and agent sends refuse a target you haven't scoped, and the sandbox stops every surface, the TUI included.
 
 > **Before you begin.** Work through the [Quick Start](/getting-started/quick-start/) first, so gori is running and you can move between tabs. Have the host you're authorized to test in mind; the examples use `api.example.com` as a stand-in.
 
 ## 1. Create a project
 
-A project is one SQLite database: its own history, scope, issues, and notes, isolated from every other engagement. Keeping each target in its own project is what lets scope and the sandbox mean anything.
+A project is one SQLite database: its own history, scope, issues, and notes, isolated from every other engagement. Keep one target per project, since scope and the sandbox are set per project.
 
 In the TUI, open the project picker from the command palette (`Ctrl-P`, then type *project*) and start a new one. Or create it from the shell before the proxy ever starts, so a script can lay down scope and env first:
 
@@ -21,7 +21,7 @@ In the TUI, open the project picker from the command palette (`Ctrl-P`, then typ
 gori run project create "Acme API" --description="staging engagement" --tag=web --tag=acme
 ```
 
-Creating a name that already exists just reopens it, so this is safe to re-run.
+Creating a name that already exists reopens it, so the command is safe to re-run.
 
 **Checkpoint.** The **Project** tab header shows your project name, and **History** (tab `3`) is empty.
 
@@ -36,17 +36,17 @@ gori run project scope add --kind=exclude --type=regex --pattern='\.(css|js|png|
 
 Scope is evaluated as an **allowlist**: a flow is in scope when at least one include rule matches and no exclude rule does. That definition drives the next two steps.
 
-**Checkpoint.** `gori run project scope` (or the Scope sub-tab) lists both rules. Nothing is filtered in the TUI yet; you've only described the boundary. One thing does change: `gori run` now refuses an active send to a host outside this scope.
+**Checkpoint.** `gori run project scope` (or the Scope sub-tab) lists both rules. Nothing is filtered in the TUI yet. `gori run` now refuses an active send to a host outside this scope.
 
 ## 3. Focus your view with the scope lens
 
-Press `s` anywhere to toggle the **scope lens**. It filters History, the Sitemap, and the other views down to in-scope traffic, so a busy capture collapses to just your target, and it narrows what Intercept holds to in-scope requests. It is a *lens*, not a gate: out-of-scope flows are still captured and reappear the moment you toggle it back off.
+Press `s` anywhere to toggle the **scope lens**. It filters History, the Sitemap, and the other views down to in-scope traffic, and it narrows what Intercept holds to in-scope requests. The lens only hides traffic. Out-of-scope flows are still captured and reappear when you toggle it off.
 
 **Checkpoint.** With the lens on, History shows only `api.example.com` rows. Press `s` again and the rest of the traffic returns.
 
 ## 4. Contain the test with the sandbox
 
-The scope lens hides traffic; the **sandbox** stops it. Turn it on from the **Project → Project settings** pane, or from anywhere with `Ctrl-P` → **Toggle sandbox**:
+The **sandbox** blocks out-of-scope traffic. Turn it on from the **Project → Project settings** pane, or from anywhere with `Ctrl-P` → **Toggle sandbox**:
 
 ```bash
 gori run project sandbox on
@@ -54,9 +54,9 @@ gori run project sandbox on
 
 While it's on, the proxy forwards only the requests your scope allows and blocks everything else before it reaches the origin. A blocked request comes back as a `403` carrying an `X-Gori-Sandbox: blocked` header (on HTTP/2 the stream is cancelled instead), and the attempt is still recorded as an aborted flow, so you can see what tried to leave.
 
-Because scope is an allowlist, **a sandbox with no include rule blocks everything**, which is exactly why you drew scope first. A red `sandbox` chip stays lit in the top bar the whole time it's on.
+Because scope is an allowlist, **a sandbox with no include rule blocks everything**. A red `sandbox` chip stays lit in the top bar while it's on.
 
-**Checkpoint.** The `sandbox` chip is lit. A request to an out-of-scope site fails; a request to `api.example.com` goes through. To try both from a terminal, `gori run shell` opens one whose curl, git, Python, Go and Node traffic goes through the running gori and trusts its CA. Toggle the sandbox off to roam freely again.
+**Checkpoint.** The `sandbox` chip is lit. A request to an out-of-scope site fails; a request to `api.example.com` goes through. To try both from a terminal, `gori run shell` opens one whose curl, git, Python, Go and Node traffic goes through the running gori and trusts its CA. Toggle the sandbox off to lift the block.
 
 ## 5. Redirect a host without touching DNS (optional)
 
@@ -72,7 +72,7 @@ If the engagement has to leave through a client's proxy or a SOCKS jump host, gi
 
 ## Why scope comes first
 
-Scope isn't only a filter. The headless and agent surfaces enforce it on their own, whether or not the sandbox is on: `gori run` refuses an active send to a host outside a configured scope, and every MCP action tool refuses one that is not in scope with a `SCOPE_BLOCKED` error, even before any scope exists. In the TUI you typed the target yourself, so Repeater and the sweeps skip that check and the sandbox is what holds them in. Together that is the guardrail that stops a stray replay or a fuzzing run from reaching a host you never meant to touch. Set scope once, here, and every later playbook inherits it.
+The headless and agent surfaces enforce scope whether or not the sandbox is on. `gori run` refuses an active send to a host outside a configured scope, and every MCP action tool refuses one that is not in scope with a `SCOPE_BLOCKED` error, even before any scope exists. In the TUI you typed the target yourself, so Repeater and the sweeps skip that check and only the sandbox holds them in. Together they stop a stray replay or fuzzing run from reaching a host you never meant to touch. Every later playbook inherits the scope you set here.
 
 ## Next Steps
 

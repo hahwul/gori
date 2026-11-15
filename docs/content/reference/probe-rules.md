@@ -10,7 +10,7 @@ The list here matches `gori run probe rules` on a fresh project. That command, t
 
 ## Turning a rule on or off {#managing}
 
-The switch is per project. Disabling a built-in stops new detections; findings it already produced stay in the Probe list.
+The switch is per project. Disabling a built-in stops new detections. Findings it already produced stay in the Probe list.
 
 | Surface | How |
 |---------|-----|
@@ -63,18 +63,18 @@ Passive rules read traffic you have already captured (History flows and Repeater
 | `session_id_in_url` | Session identifier in URL | `infoleak` | Flags a known framework session identifier (PHPSESSID, JSESSIONID, ASP.NET_SessionId, …) carried in the request URL, where it leaks via logs, history, and Referer. |
 | `open_cross_domain_policy` | Permissive cross-domain policy | `cors` | Flags a Flash/Silverlight cross-domain policy that grants access to all origins (`domain="*"`). |
 | `bare_lf_response` | Bare-LF response head | `headers` | Flags a response head that ends lines with a bare LF instead of CRLF, where parsers can disagree on the message's framing (a response desync / splitting precondition). |
-| `oauth` | Weak OAuth/OIDC authorization request | `headers` | Flags an OAuth 2.0 / OIDC authorization request using the implicit grant, the PKCE plain method, no PKCE, or no CSRF protection at all (no PKCE, state or nonce), per RFC 9700. |
-| `llm_prompt_injection` | Prompt injection aimed at an LLM agent | `client` | Flags a response body carrying instructions aimed at an LLM: an override phrase (ignore previous instructions, NOTE TO SYSTEM) or an imperative naming one of gori's action tools. Detect only; the body is never altered. |
+| `oauth` | Weak OAuth/OIDC authorization request | `headers` | Flags an OAuth 2.0 / OIDC authorization request using the implicit grant, the PKCE plain method, no PKCE, or no CSRF protection (no PKCE, state or nonce), per RFC 9700. |
+| `llm_prompt_injection` | Prompt injection aimed at an LLM agent | `client` | Flags a response body carrying instructions aimed at an LLM: an override phrase (ignore previous instructions, NOTE TO SYSTEM) or an imperative naming one of gori's action tools. Detect only. The body is never altered. |
 
 ## Active rules {#active}
 
-Active rules send requests of their own. The automatic pipeline runs them only once the project's scan mode is `active` or `aggressive`. A per-flow **Run active scan** and `gori run probe --active` run them in any mode. By default they re-send only safe methods (`GET` / `HEAD`), and each unique surface is tested once. Two rules step outside that on purpose: `graphql_introspection_active` keeps a `POST` endpoint a `POST` (a read-only query), and `insecure_http_methods` sends its own `OPTIONS` and `TRACE`.
+Active rules send requests of their own. The automatic pipeline runs them only once the project's scan mode is `active` or `aggressive`. A per-flow **Run active scan** and `gori run probe --active` run them in any mode. By default they re-send only safe methods (`GET` / `HEAD`), and each unique surface is tested once. Two rules are exceptions: `graphql_introspection_active` keeps a `POST` endpoint a `POST` (a read-only query), and `insecure_http_methods` sends its own `OPTIONS` and `TRACE`.
 
 **Cost** is the number of requests the rule sends for one flow, the same figure the Rules sub-tab shows beside the row. **Notes** marks the rules that do not run on the defaults alone:
 
-- **off by default**: the rule ships disabled; enable it deliberately (see [above](#managing)).
+- **off by default**: the rule ships disabled. Enable it yourself (see [above](#managing)).
 - **needs unsafe**: every probe the rule sends uses an unsafe method, so it builds nothing until unsafe methods are allowed (the popup's **unsafe methods** box, `--unsafe`, or AGGRESSIVE mode).
-- **needs OAST**: the rule is enabled but inert until the project has a registered [OAST](/guide/oast/) listener to mint a payload from; its cost stays out of the estimate until then.
+- **needs OAST**: the rule is enabled but inert until the project has a registered [OAST](/guide/oast/) listener to mint a payload from. Its cost stays out of the estimate until then.
 
 | ID | Name | Category | Cost | Notes | What it checks |
 |----|------|----------|------|-------|----------------|
@@ -85,7 +85,7 @@ Active rules send requests of their own. The automatic pipeline runs them only o
 | `backslash_powered` | Backslash-powered scanning | `active` | 4-8 |  | Appends `\` and `\\` to each query, form or JSON parameter; flags a parameter where the lone backslash perturbs the response but the doubled one does not (server-side string interpretation). |
 | `sqli_error_based` | Error-based SQL injection | `active` | 3-5 |  | Appends a SQL-syntax-breaking payload to each query, form or JSON parameter; flags a parameter where a database-error signature appears in the probe response but not in the clean baseline. |
 | `sqli_boolean_based` | Boolean-based blind SQL injection | `active` | 4-8 |  | Appends an always-true and an always-false SQL predicate to each parameter; flags a parameter whose true leg matches the baseline while its false leg diverges (blind injection with no error and no reflection). |
-| `sqli_time_based` | Time-based blind SQL injection | `active` | 6-10 | off by default | Injects a server-side delay (SLEEP/pg_sleep/WAITFOR) into each parameter and confirms it in the response latency across a baseline and two increasing delays. Ships off by default because it deliberately waits. |
+| `sqli_time_based` | Time-based blind SQL injection | `active` | 6-10 | off by default | Injects a server-side delay (SLEEP/pg_sleep/WAITFOR) into each parameter and confirms it in the response latency across a baseline and two increasing delays. Ships off by default because every probe waits for its delay. |
 | `graphql_introspection_active` | GraphQL introspection (active) | `infoleak` | 1 |  | Sends an introspection query to a GraphQL endpoint and confirms the schema is exposed. |
 | `lfi_param_traversal` | Parameter path traversal | `active` | 3 |  | Re-fetches a file parameter through a folded `..` (file=x/../doc) and flags a byte-identical hit. |
 | `open_redirect` | Open redirect | `active` | 1 |  | Replaces a redirect parameter with an external host and flags a Location that follows it. |

@@ -7,9 +7,9 @@ weight = 80
 group = "Workbenches"
 +++
 
-A signed session cookie stops the server from trusting a value the client can change, as long as the signing secret stays secret. This playbook reads a captured Flask, Rack, or Django cookie, tries candidate secrets against it, brute-forces the one that signs it, and re-signs a cookie carrying claims of your choosing, then replays it to see whether the server accepts the forgery. Budget about ten minutes, plus however long a wordlist takes to run.
+A signed session cookie lets the server reject a value the client tampered with, as long as the signing secret stays secret. This playbook reads a captured Flask, Rack, or Django cookie, tries candidate secrets against it, brute-forces the one that signs it, and re-signs a cookie carrying claims of your choosing, then replays it to see whether the server accepts the forgery. Budget about ten minutes, plus however long a wordlist takes to run.
 
-The **Cookie** tab does all of this interactively (it is off the bar by default: press **`0`** and type "cookie", or `Ctrl-P` → **Go to Cookie**; see the [Cookie guide](/guide/cookie/)). This playbook drives the same engine from the shell instead, so every step is scriptable: the `gori run cookie` subcommand (store-free local compute, with the cookie taken from the argument or stdin) and its four MCP tools.
+The **Cookie** tab does all of this interactively (it is off the bar by default: press **`0`** and type "cookie", or `Ctrl-P` → **Go to Cookie**; see the [Cookie guide](/guide/cookie/)). This playbook drives the same engine from the shell, so every step is scriptable: the `gori run cookie` subcommand (store-free local compute, with the cookie taken from the argument or stdin) and its four MCP tools.
 
 > **Before you begin.** Have gori running as a proxy and capture a response that sets a signed session cookie; the `Set-Cookie` header on a login response is the usual source. The crack step also needs a wordlist of candidate secrets, one per line. Only test cookies from a host you're authorized to attack; the examples target `api.example.com`.
 
@@ -22,7 +22,7 @@ gori run cookie 'eyJ1c2VyIjoi...'                 # decode is the default; frame
 gori run cookie 'eyJ1c2VyIjoi...' --type flask    # force the format
 ```
 
-Over MCP this is the `cookie_decode` tool. A decode reveals what the cookie *claims* but never checks the signature. It tells you the session's contents, not whether the server would trust them.
+Over MCP this is the `cookie_decode` tool. A decode reveals what the cookie *claims* but never checks the signature, so it tells you the session's contents, not whether the server would trust them.
 
 **Checkpoint.** The decoded payload, its timestamp, and the signature print.
 
@@ -34,7 +34,7 @@ If you have a hunch about the secret (a framework default, a reused key, a value
 gori run cookie 'eyJ1c2VyIjoi...' --verify --secret hunter2
 ```
 
-Over MCP this is `cookie_verify`. It answers a single question: does this secret produce this signature?
+Over MCP this is `cookie_verify`. It answers whether this secret produces this signature.
 
 **Checkpoint.** Verify reports whether the candidate secret signs the cookie.
 
@@ -49,13 +49,13 @@ gori run cookie 'eyJ1c2VyIjoi...' --crack --wordlist secrets.txt
 gori run cookie 'eyJ1c2VyIjoi...' --crack --secrets 'dev,changeme,secret'
 ```
 
-Over MCP this is `cookie_crack`. It is the same primitive as verify, run across a list, so the quality of the wordlist is the whole game. For a Django cookie you need not know whether the app signs with SHA-256 or the older SHA-1: with no `--algorithm`, verify and crack read it off the signature's byte length, so the correct secret is not missed just because the app is on SHA-1.
+Over MCP this is `cookie_crack`. It is verify run across a list, so the quality of the wordlist decides the result. For a Django cookie you need not know whether the app signs with SHA-256 or the older SHA-1. With no `--algorithm`, verify and crack read it off the signature's byte length.
 
 **Checkpoint.** The recovered secret is printed, or the run reports that the secret was not in the list.
 
 ## 4. Forge your own
 
-With the secret in hand, mint a cookie that carries claims of your choosing and a valid signature the server will accept. Forge re-signs a payload with the secret; the shape depends on the framework:
+With the secret in hand, mint a cookie that carries claims of your choosing and a valid signature. Forge re-signs a payload with the secret, and the shape depends on the framework:
 
 ```bash
 gori run cookie --forge --type flask  --secret s3cret --payload '{"user":"admin"}'
@@ -63,7 +63,7 @@ gori run cookie --forge --type django --secret s3cret --payload '{"user":"admin"
 gori run cookie --forge --type rack   --secret s3cret --value <base64-marshal>
 ```
 
-For Flask and Django, `--payload` is the session JSON to sign; Django also takes `--salt` and an `--algorithm` (`sha256` default, or `sha1`). Rack signs an opaque Base64 Marshal blob you pass as `--value` instead of `--payload`. Add `--timestamp=UNIX` to stamp a specific second rather than now. Over MCP this is `cookie_forge`.
+For Flask and Django, `--payload` is the session JSON to sign. Django also takes `--salt` and an `--algorithm` (`sha256` default, or `sha1`). Rack signs an opaque Base64 Marshal blob you pass as `--value` instead of `--payload`. Add `--timestamp=UNIX` to stamp a specific second rather than now. Over MCP this is `cookie_forge`.
 
 Take the forged cookie into **Repeater**: set it as the request's `Cookie` header on an authenticated endpoint and re-send with `Ctrl-R`. If the server returns the session you forged (the admin view, another user's data), it trusted your signature.
 

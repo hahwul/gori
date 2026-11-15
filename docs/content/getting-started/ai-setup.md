@@ -6,13 +6,13 @@ weight = 30
 
 gori has three entry points over one project and one engine: `gori` (the TUI, for you), `gori run` (the headless CLI, for [scripts](/guide/scripting/)), and `gori mcp` (the [MCP server](/guide/mcp/), for AI agents). This page is the AI path. It gets an agent connected to a gori project and running its first request.
 
-There is no chat window inside the TUI. You bring your own model and client; gori exposes the project over a clean tool interface, and the agent reads your traffic and drives the same tools you do. For the full tool catalog and deeper topics (live intercept, the design rationale), see the [MCP Server guide](/guide/mcp/).
+There is no chat window inside the TUI. You bring your own model and client. gori exposes the project as tools, and the agent reads your traffic and drives the same tools you do. For the full tool catalog and deeper topics (live intercept, the design rationale), see the [MCP Server guide](/guide/mcp/).
 
 > **Before you begin.** [Install gori](/getting-started/installation/) and have an MCP-capable client ready (Claude Code, Claude Desktop, OpenAI Codex, Antigravity, Grok, Hermes, and others).
 
 ## 1. Install the server into your client
 
-`gori mcp` speaks JSON-RPC 2.0 over stdio: an AI client spawns it, sends requests on STDIN, and reads results on STDOUT (STDERR carries logs). Rather than hand-editing each client's config, let gori write it for you:
+`gori mcp` speaks JSON-RPC 2.0 over stdio. An AI client spawns it, sends requests on STDIN, and reads results on STDOUT. STDERR carries logs. gori can write each client's config for you:
 
 ```bash
 gori mcp --install-claude-code   # Claude Code
@@ -36,11 +36,11 @@ gori mcp --install-pi            # Pi
 
 Pi requires an MCP adapter such as [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter). Install it with `pi install npm:pi-mcp-adapter`, then restart Pi. `--install-pi` writes the MCP server configuration.
 
-Each command prints the file it wrote and the exact launch command it recorded. Codex and Grok use a TOML `[mcp_servers.gori]` table, and Hermes a YAML `mcp_servers:` entry, rather than JSON. Restart the client (or reopen the session) afterward so it reloads its MCP servers.
+Each command prints the file it wrote and the launch command it recorded. Codex and Grok use a TOML `[mcp_servers.gori]` table and Hermes a YAML `mcp_servers:` entry. The other clients use JSON. Restart the client (or reopen the session) afterward so it reloads its MCP servers.
 
-Only Claude Desktop and Hermes vary per platform. Hermes reads `$HERMES_HOME` when it is set, and otherwise `~/.hermes` (`%LOCALAPPDATA%\hermes` on Windows). Claude Desktop's location follows Electron's app-data directory: `~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows, and `$XDG_CONFIG_HOME/Claude/` (default `~/.config/Claude/`) on Linux, which gori reads so a Nix or home-manager session that moves it is followed too. A Flatpak build is the exception: it reads that variable inside its own sandbox, so copy the printed file into `~/.var/app/<app-id>/config/Claude/` yourself.
+Only Claude Desktop and Hermes vary per platform. Hermes reads `$HERMES_HOME` when it is set, and otherwise `~/.hermes` (`%LOCALAPPDATA%\hermes` on Windows). Claude Desktop's location follows Electron's app-data directory: `~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows, and `$XDG_CONFIG_HOME/Claude/` (default `~/.config/Claude/`) on Linux, which gori reads so a Nix or home-manager session that moves it is followed too. A Flatpak build reads that variable inside its own sandbox, so copy the printed file into `~/.var/app/<app-id>/config/Claude/` yourself.
 
-Wiring it up by hand instead? The server is just the `gori mcp` command over stdio. Point any MCP client at that command with no extra arguments.
+To wire it up by hand, point any MCP client at the `gori mcp` command over stdio, with no extra arguments.
 
 **Checkpoint.** Your client lists gori's tools (`list_history`, `send_request`, `project_info`, and the rest). If they do not appear, confirm the client was restarted and that `gori` is on the `PATH` the client uses.
 
@@ -51,7 +51,7 @@ Each gori project is its own database. After install, `gori mcp` always connects
 | How the client starts MCP | What happens |
 |---------------------------|--------------|
 | Inside a Git repository | Path-binds that workspace to its own gori project |
-| Outside a Git repository (common for Desktop / global agents) | Starts **unbound**. Handshake succeeds; the agent calls `list_projects` / `create_project` / `switch_project` before traffic tools |
+| Outside a Git repository (common for Desktop / global agents) | Starts **unbound**. Handshake succeeds, and the agent calls `list_projects` / `create_project` / `switch_project` before traffic tools |
 | Installed with `--project` / `--db` | Serves that project from the first tool call |
 
 Have the agent call `project_info` first. When `bound` is false, it should list or create a project (create auto-binds when unbound), then switch if needed. When bound, confirm the name, database path, and selection source before mutating data.
@@ -73,9 +73,9 @@ By default the server also exposes action tools that send live requests and writ
 gori mcp --read-only --install-claude-code
 ```
 
-Read-only keeps `list_history`, `get_flow`, `list_sitemap`, and the other inspection tools while disabling `send_request`, issue writes, and the intercept mutators. Pure-compute helpers like `decode` and `jwt_decode` stay available because they never touch the network or your data. To decide from gori itself instead, **Settings → AI → MCP permissions** turns each group of tools (sending traffic, intercept control, editing project data, scope, projects) **on**, **ask** or **off** for the next `gori mcp` start; **ask** puts each call in front of you as an approval card ([Permissions from Preferences](/guide/mcp/#permissions-from-preferences)).
+Read-only keeps `list_history`, `get_flow`, `list_sitemap`, and the other inspection tools while disabling `send_request`, issue writes, and the intercept mutators. Pure-compute helpers like `decode` and `jwt_decode` stay available because they never touch the network or your data. To set this from gori itself, **Settings → AI → MCP permissions** turns each group of tools (sending traffic, intercept control, editing project data, scope, projects) **on**, **ask** or **off** for the next `gori mcp` start. **ask** puts each call in front of you as an approval card ([Permissions from Preferences](/guide/mcp/#permissions-from-preferences)).
 
-The full catalogue also costs context: a client loads every tool's schema before the first question and keeps it for the session. `--tools=@recon` (read and map the capture, replay a request, record issues and notes) or `--tools=@minimal` (read History and flows, talk to you) serves a small named set instead, and combines with `--read-only`; [Choosing Which Tools Are Exposed](/guide/mcp/#choosing-which-tools-are-exposed) compares their sizes.
+The full catalogue also costs context. A client loads every tool's schema before the first question and keeps it for the session. `--tools=@recon` (read and map the capture, replay a request, record issues and notes) or `--tools=@minimal` (read History and flows, talk to you) serves a small named set, and combines with `--read-only`. [Choosing Which Tools Are Exposed](/guide/mcp/#choosing-which-tools-are-exposed) compares their sizes.
 
 ## 4. Drive your first request
 
@@ -92,7 +92,7 @@ A capable agent turns that into a short tool sequence:
 → create_issue   "Auth bypass on /login" severity:high
 ```
 
-Agent actions are not silent. Each one lands in gori's notification center tagged as agent-driven and rendered differently from your own actions, so you can see what an agent did to the project while you were on another tab.
+Each agent action lands in gori's notification center tagged as agent-driven and rendered differently from your own actions, so you can see what an agent did to the project while you were on another tab.
 
 ## Next Steps
 

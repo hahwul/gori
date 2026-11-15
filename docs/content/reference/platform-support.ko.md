@@ -4,7 +4,7 @@ description = "gori가 지원하는 운영체제와 아키텍처, 지원 등급�
 weight = 7
 +++
 
-gori는 macOS, Linux, Windows용 단일 바이너리로 배포되지만, 모든 플랫폼이 같은 수준으로 보장되지는 않습니다. 플랫폼은 두 등급(tier)으로 나뉩니다. 플랫폼 이름은 릴리스 자산 이름(`linux-arm64`, `osx-x86_64`)처럼 OS와 CPU 아키텍처로 부릅니다. gori는 Crystal로 빌드되므로 각 플랫폼은 컴파일러 자체의 [플랫폼 지원](https://crystal-lang.org/reference/1.21/syntax_and_semantics/platform_support.html) 수준에도 영향을 받습니다.
+gori는 macOS, Linux, Windows용 단일 바이너리로 배포됩니다. 플랫폼은 보장 수준이 다른 두 등급(tier)으로 나뉩니다. 플랫폼 이름은 릴리스 자산 이름(`linux-arm64`, `osx-x86_64`)처럼 OS와 CPU 아키텍처로 부릅니다. gori는 Crystal로 빌드되므로 각 플랫폼은 컴파일러 자체의 [플랫폼 지원](https://crystal-lang.org/reference/1.21/syntax_and_semantics/platform_support.html) 수준에도 영향을 받습니다.
 
 ## Tier 1 {#tier-1}
 
@@ -22,7 +22,7 @@ Tier 1은 "gori 전부가 그대로 동작하는" 플랫폼입니다. 각 플랫
 | Linux x86_64 | `gori-v*-linux-x86_64` (정적, musl) | AUR, Snap, Nix, Docker | PR마다 변경에 대응하는 스펙, `main` 푸시마다 전체 스펙 스위트. 릴리스 바이너리는 정적 링크 여부 확인 후 실행 |
 | Linux arm64 | `gori-v*-linux-arm64` (정적, musl) | Nix, Docker | `main` 푸시마다 Docker 이미지를 네이티브로 빌드. 릴리스 바이너리는 정적 링크 여부 확인 후 실행 |
 
-macOS와 Linux arm64에서는 CI가 스펙 스위트를 돌리지 않습니다. 그래서 이 대상에서만 나타나는 회귀는 CI가 아니라 실사용에서 발견됩니다.
+macOS와 Linux arm64에서는 CI가 스펙 스위트를 돌리지 않으므로, 이 대상에서만 나타나는 회귀는 CI가 잡지 못합니다.
 
 ## Tier 2 {#tier-2}
 
@@ -50,7 +50,7 @@ Windows 릴리스 바이너리는 v0.8.0부터 제공됩니다.
 
 ## 지원하지 않는 플랫폼 {#not-supported}
 
-릴리스 바이너리도, 패키지도, CI도 없습니다. 일부는 [소스에서 빌드](/ko/getting-started/installation/#build-from-source)할 수 있을지 모르지만 그렇다는 걸 확인하는 절차는 없습니다.
+이 플랫폼에는 릴리스 바이너리, 패키지, CI가 없습니다. 일부는 [소스에서 빌드](/ko/getting-started/installation/#build-from-source)할 수 있을지 모르지만 그렇다는 걸 확인하는 절차는 없습니다.
 
 | 플랫폼 | 비고 |
 |--------|------|

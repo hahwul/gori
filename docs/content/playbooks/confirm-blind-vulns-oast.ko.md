@@ -7,13 +7,13 @@ weight = 100
 group = "워크벤치"
 +++
 
-블라인드 SSRF, 블라인드 XXE, 원격 파일 포함, 대역 외(out-of-band) 인젝션. 그 어느 것도 응답으로 답하지 않습니다. 대신 *다른* 서버로 연결을 뻗습니다. **OAST**는 그 서버를 내 손에 쥐여 줍니다. gori가 리스너에 묶인 페이로드 URL을 발급하고, 그 URL을 요청에 심으면, 대상이 그리로 보내는 모든 DNS·HTTP 콜백이 증거로 내밀 수 있는 히트로 도착합니다. 이 플레이북은 확인 과정 하나를 약 10분 동안 처음부터 끝까지 진행합니다.
+블라인드 SSRF, 블라인드 XXE, 원격 파일 포함, 대역 외(out-of-band) 인젝션은 응답으로 답하지 않습니다. 대신 *다른* 서버로 연결을 뻗습니다. **OAST**는 그 서버를 내 손에 쥐여 줍니다. gori가 리스너에 묶인 페이로드 URL을 발급하고, 그 URL을 요청에 심으면, 대상이 그리로 보내는 모든 DNS·HTTP 콜백이 증거로 내밀 수 있는 히트로 도착합니다. 이 플레이북은 확인 과정 하나를 약 10분 동안 처음부터 끝까지 진행합니다.
 
 > **시작하기 전에.** 먼저 [엔게이지먼트 준비](/ko/playbooks/set-up-an-engagement/)를 마치고, 후보 인젝션 지점을 하나 준비하세요. 서버가 URL을 가져오거나 원격 파일을 포함하거나 호스트명을 해석하게 만들 수 있는 파라미터, 헤더, 필드입니다. 콜백은 그 메타데이터를 보는 공개 인터랙션 서버에 도달하므로, OAST는 테스트 권한이 있는 시스템에만 실행하고, 민감한 작업에는 가급적 self-hosted 프로바이더를 쓰세요.
 
 ## 1. 리스너를 시작하고 페이로드 받기 {#1-start-a-listener-and-grab-a-payload}
 
-**OAST** 탭(기본적으로 탭 바 밖에 있으니 **`0`**을 누르고 "oast"를 입력하거나 `Ctrl-P` → **Go to OAST**)을 열고 `Ctrl-R`(또는 `Space` `r`, **Start listening**)을 눌러 리스닝을 시작합니다. gori가 선택한 프로바이더에 등록하고 폴링을 시작합니다. 새 프로젝트에는 프로바이더가 없으니 먼저 **Providers** 서브탭에서 하나를 추가하세요(`a`, 공개 `interactsh`가 미리 채워져 있습니다). 그런 다음 `g`(get payload)를 눌러 **payload**를 발급받아 복사합니다. 이 세션 동안 나에게만 속하는 고유한 호스트명/URL입니다. `Ctrl-R`을 건너뛰었다면 `g`가 리스너를 직접 시작합니다.
+**OAST** 탭(기본적으로 탭 바 밖에 있으니 **`0`**을 누르고 "oast"를 입력하거나 `Ctrl-P` → **Go to OAST**)을 열고 `Ctrl-R`(또는 `Space` `r`, **Start listening**)을 눌러 리스닝을 시작합니다. gori가 선택한 프로바이더에 등록하고 폴링을 시작합니다. 새 프로젝트에는 프로바이더가 없으니 먼저 **Providers** 서브탭에서 하나를 추가하세요(`a`, 공개 `interactsh`가 미리 채워져 있습니다). 그런 다음 `g`(get payload)를 눌러 이 세션 동안 나에게만 속하는 고유한 호스트명/URL인 **payload**를 발급받아 복사합니다. `Ctrl-R`을 건너뛰었다면 `g`가 리스너를 직접 시작합니다.
 
 리스너를 스크립트나 에이전트 루프에 두고 싶다면 헤드리스로:
 
@@ -22,7 +22,7 @@ gori run oast listen         # 임시: 등록이 프로세스와 함께 사라�
 gori run oast listen --save  # …프로젝트 세션으로 저장
 ```
 
-그냥 `listen`은 저장소를 쓰지 않아 등록이 프로세스와 함께 사라집니다. 몇 시간 뒤에 도착하는 콜백이라면 그때는 페이로드가 이미 죽어 있다는 뜻입니다. `--save`는 이를 프로젝트에 기록합니다. `gori run oast list`에 보이고, 나중 프로세스에서 `gori run oast resume ID`로 이어받고, 정리는 `gori run oast release ID`입니다. MCP에서는 `oast_start`의 `persist: true`가 같은 스위치이고, 목록·재개·해제는 `list_oast_sessions`, `oast_resume`, `oast_release`입니다. TUI의 `Ctrl-R`은 원래부터 세션을 저장하며, `Shift-R`(`Space` `R`, **Resume listener…**)로 재개합니다.
+그냥 `listen`은 저장소를 쓰지 않아 등록이 프로세스와 함께 사라지므로, 몇 시간 뒤에 도착하는 콜백은 이미 죽은 페이로드를 만납니다. `--save`는 이를 프로젝트에 기록합니다. `gori run oast list`에 보이고, 나중 프로세스에서 `gori run oast resume ID`로 이어받고, 정리는 `gori run oast release ID`입니다. MCP에서는 `oast_start`의 `persist: true`가 같은 스위치이고, 목록·재개·해제는 `list_oast_sessions`, `oast_resume`, `oast_release`입니다. TUI의 `Ctrl-R`은 세션을 저장합니다. `Shift-R`(`Space` `R`, **Resume listener…**)로 재개합니다.
 
 **체크포인트.** OAST 탭에 살아 있는 payload URL이 보이고, **Callbacks** 표는 비어 대기 중입니다.
 
@@ -30,11 +30,11 @@ gori run oast listen --save  # …프로젝트 세션으로 저장
 
 그 payload URL을 가져다 대상이 역참조할 만한 곳에 넣습니다. 후보 요청을 **Repeater**(History에서 `Ctrl-R`)나 **Fuzzer**(`Shift-I`)로 보낸 뒤, `Space` `O`(**Insert OAST payload**)로 URL을 커서 위치에 삽입합니다. 서버 측 페치나 원격 포함을 유발할 만한 곳이라면 어디든 심으세요: URL 파라미터, 파일·페이지·템플릿 필드, `Host`나 `X-Forwarded-For` 헤더, XXE용 XML 엔티티, 웹훅 필드. 요청을 전송합니다.
 
-**체크포인트.** 페이로드를 실은 요청이 대상에 도달했습니다. 여기서 응답은 평범해도 괜찮습니다. 핵심은 *서버*가 그다음 대역 밖에서 하는 일입니다.
+**체크포인트.** 페이로드를 실은 요청이 대상에 도달했습니다. 여기서 응답은 평범해도 괜찮습니다. 중요한 것은 *서버*가 그다음 대역 밖에서 하는 일입니다.
 
 ## 3. 콜백 지켜보기 {#3-watch-for-a-callback}
 
-다시 **OAST** 탭으로 오면, 대상 인프라가 이름을 해석하거나 다시 연결하면서 콜백이 **Callbacks** 표에 도착합니다. 각각 프로토콜(`dns` / `http` / `smtp`), 소스 IP, 타임스탬프, 그리고 어느 페이로드가 발동했는지 알려 주는 하위 식별자를 담습니다. `Ctrl-X`는 폴링을 멈추지만 등록은 유지하므로, 이미 심어 둔 페이로드는 계속 해석됩니다. `Shift-R`을 눌러 나중에 재개하면, 자리를 비운 동안 프로바이더가 버퍼링한 것들을 받아 올 수 있습니다.
+다시 **OAST** 탭으로 오면, 대상 인프라가 이름을 해석하거나 다시 연결하면서 콜백이 **Callbacks** 표에 도착합니다. 각각 프로토콜(`dns` / `http` / `smtp`), 소스 IP, 타임스탬프, 그리고 어느 페이로드가 발동했는지 알려 주는 하위 식별자를 담습니다. `Ctrl-X`는 폴링을 멈추지만 등록은 유지하므로, 이미 심어 둔 페이로드는 계속 해석됩니다. `Shift-R`로 나중에 재개하면, 자리를 비운 동안 프로바이더가 버퍼링한 것들을 받아 옵니다.
 
 <figure class="tui-shot">
   <img src="/images/tui/oast.svg" alt="interactsh 페이로드에 대한 복호화된 히트 네 건의 Callbacks 표가 있는 gori OAST 탭으로, DNS A 조회 두 건과 HTTP GET 요청 두 건이 각각 소스 IP와 목적지로서의 페이로드와 함께 나열된 모습" width="1206" height="520">
@@ -47,7 +47,7 @@ gori run oast listen --save  # …프로젝트 세션으로 저장
 
 ## 4. 히트를 Issue로 바꾸기 {#4-turn-a-hit-into-an-issue}
 
-콜백은 이 도구가 만들어 내는 가장 강한 증거이므로 기록하세요. 히트를 선택하고 `Shift-F`(또는 `Space` → **Add issue**)를 눌러 **Issue**로 정리합니다. 프로토콜과 소스가 미리 채워지고, 원본 인터랙션이 notes로 딸려 들어갑니다. **HIGH**로 열리며, 확정 전에 `Tab`으로 severity 행으로 옮겨 `←` / `→`로 등급을 다시 매깁니다.
+콜백은 이 도구가 만들어 내는 가장 강한 증거이므로 기록하세요. 히트를 선택하고 `Shift-F`(또는 `Space` → **Add issue**)를 눌러 **Issue**로 정리합니다. 프로토콜과 소스가 미리 채워지고, 원본 인터랙션이 notes로 딸려 들어갑니다. **HIGH**로 열립니다. 확정 전에 `Tab`으로 severity 행으로 옮겨 `←` / `→`로 등급을 다시 매깁니다.
 
 **체크포인트.** 확인된 콜백이 원본 인터랙션을 notes에 담은 Issue로 **Issues** 탭에 기록됩니다.
 

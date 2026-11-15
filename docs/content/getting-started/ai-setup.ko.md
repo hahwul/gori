@@ -6,13 +6,13 @@ weight = 30
 
 gori는 하나의 프로젝트와 하나의 엔진 위에 세 가지 진입점을 둡니다. `gori`(사람이 쓰는 TUI), `gori run`([스크립트](/ko/guide/scripting/)용 헤드리스 CLI), `gori mcp`(AI 에이전트용 [MCP 서버](/ko/guide/mcp/))입니다. 이 페이지는 AI 경로를 다룹니다. 에이전트를 gori 프로젝트에 연결하고 첫 요청을 보내기까지 안내합니다.
 
-TUI 안에는 채팅 창이 없습니다. 모델과 클라이언트는 직접 골라 가져오고, gori는 프로젝트를 깔끔한 도구 인터페이스로 노출합니다. 에이전트는 트래픽을 읽고 사용자가 쓰는 것과 같은 도구를 다룹니다. 전체 도구 목록과 더 깊은 주제(라이브 인터셉트, 설계 근거)는 [MCP 서버 가이드](/ko/guide/mcp/)를 참고하세요.
+TUI 안에는 채팅 창이 없습니다. 모델과 클라이언트는 직접 골라 가져오고, gori는 프로젝트를 도구로 노출합니다. 에이전트는 트래픽을 읽고 사용자가 쓰는 것과 같은 도구를 다룹니다. 전체 도구 목록과 더 깊은 주제(라이브 인터셉트, 설계 근거)는 [MCP 서버 가이드](/ko/guide/mcp/)를 참고하세요.
 
 > **시작하기 전에.** [gori를 설치](/ko/getting-started/installation/)하고 MCP를 지원하는 클라이언트(Claude Code, Claude Desktop, OpenAI Codex, Antigravity, Grok, Hermes 등)를 준비하세요.
 
 ## 1. 클라이언트에 서버 설치하기 {#1-install-the-server-into-your-client}
 
-`gori mcp`는 stdio 위에서 JSON-RPC 2.0으로 통신합니다. AI 클라이언트가 이 프로세스를 띄워 STDIN으로 요청을 보내고 STDOUT으로 결과를 읽습니다(STDERR은 로그를 전달합니다). 클라이언트마다 설정을 손으로 편집하는 대신, gori가 대신 작성하게 하세요.
+`gori mcp`는 stdio 위에서 JSON-RPC 2.0으로 통신합니다. AI 클라이언트가 이 프로세스를 띄워 STDIN으로 요청을 보내고 STDOUT으로 결과를 읽습니다. STDERR에는 로그가 나옵니다. 클라이언트별 설정은 gori가 작성해 줍니다.
 
 ```bash
 gori mcp --install-claude-code   # Claude Code
@@ -36,9 +36,9 @@ gori mcp --install-pi            # Pi
 
 Pi는 [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter) 같은 MCP 어댑터가 필요합니다. `pi install npm:pi-mcp-adapter`로 어댑터를 설치한 다음 Pi를 다시 시작하세요. `--install-pi`는 MCP 서버 설정을 기록합니다.
 
-각 명령은 작성한 파일과 기록한 정확한 실행 명령을 출력합니다. Codex와 Grok은 TOML `[mcp_servers.gori]` 테이블을, Hermes는 YAML `mcp_servers:` 항목을 사용합니다(JSON이 아닙니다). 설치 후에는 클라이언트를 재시작하거나 세션을 다시 열어 MCP 서버를 다시 로드하세요.
+각 명령은 작성한 파일과 기록한 실행 명령을 출력합니다. Codex와 Grok은 TOML `[mcp_servers.gori]` 테이블을, Hermes는 YAML `mcp_servers:` 항목을 사용합니다. 나머지 클라이언트는 JSON을 씁니다. 설치 후에는 클라이언트를 재시작하거나 세션을 다시 열어 MCP 서버를 다시 로드하세요.
 
-플랫폼마다 위치가 달라지는 건 Claude Desktop과 Hermes뿐입니다. Hermes는 `$HERMES_HOME`이 설정돼 있으면 그 값을, 없으면 `~/.hermes`(Windows는 `%LOCALAPPDATA%\hermes`)를 읽습니다. Claude Desktop은 Electron의 앱 데이터 디렉터리를 따라 macOS는 `~/Library/Application Support/Claude/`, Windows는 `%APPDATA%\Claude\`, Linux는 `$XDG_CONFIG_HOME/Claude/`(기본값 `~/.config/Claude/`)에 씁니다. gori가 이 변수를 읽으므로 Nix나 home-manager처럼 값을 옮겨 둔 세션도 따라갑니다. Flatpak 빌드는 예외로, 샌드박스 안쪽의 값을 읽기 때문에 출력된 파일을 `~/.var/app/<app-id>/config/Claude/`로 직접 복사해야 합니다.
+플랫폼마다 위치가 달라지는 건 Claude Desktop과 Hermes뿐입니다. Hermes는 `$HERMES_HOME`이 설정돼 있으면 그 값을, 없으면 `~/.hermes`(Windows는 `%LOCALAPPDATA%\hermes`)를 읽습니다. Claude Desktop은 Electron의 앱 데이터 디렉터리를 따라 macOS는 `~/Library/Application Support/Claude/`, Windows는 `%APPDATA%\Claude\`, Linux는 `$XDG_CONFIG_HOME/Claude/`(기본값 `~/.config/Claude/`)에 씁니다. gori가 이 변수를 읽으므로 Nix나 home-manager처럼 값을 옮겨 둔 세션도 따라갑니다. Flatpak 빌드는 샌드박스 안쪽의 값을 읽기 때문에 출력된 파일을 `~/.var/app/<app-id>/config/Claude/`로 직접 복사해야 합니다.
 
 직접 연결하려면 MCP 클라이언트가 `gori mcp` 명령을 추가 인자 없이 stdio로 실행하게 하면 됩니다.
 
@@ -51,7 +51,7 @@ Pi는 [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter) 같은 MCP 
 | 클라이언트가 MCP를 띄우는 방식 | 동작 |
 |-------------------------------|------|
 | Git 리포지토리 안 | 그 워크스페이스를 전용 gori 프로젝트에 경로 기준으로 바인딩 |
-| Git 밖 (Desktop / 전역 에이전트에서 흔함) | **unbound**로 시작. 핸드셰이크는 성공하고, 에이전트가 트래픽 도구보다 먼저 `list_projects` / `create_project` / `switch_project` 호출 |
+| Git 밖 (Desktop / 전역 에이전트에서 흔함) | **unbound**로 시작. 핸드셰이크는 성공하며, 에이전트가 트래픽 도구보다 먼저 `list_projects` / `create_project` / `switch_project` 호출 |
 | `--project` / `--db`로 설치 | 첫 도구 호출부터 그 프로젝트 제공 |
 
 에이전트가 먼저 `project_info`를 호출하게 하세요. `bound`가 false이면 프로젝트를 나열하거나 생성한 뒤(unbound일 때 create는 자동 바인딩), 필요하면 다른 프로젝트로 전환합니다. bound이면 데이터를 변경하기 전에 이름·데이터베이스 경로·선택 출처를 확인합니다.
@@ -73,7 +73,7 @@ gori mcp --db /path/to/project.db --install-claude-code   # 특정 데이터베�
 gori mcp --read-only --install-claude-code
 ```
 
-읽기 전용은 `list_history`, `get_flow`, `list_sitemap` 등 검사 도구를 유지하면서 `send_request`, 이슈 쓰기, 인터셉트 변경 도구를 비활성화합니다. `decode`, `jwt_decode` 같은 순수 계산 헬퍼는 네트워크나 데이터를 절대 건드리지 않으므로 그대로 사용할 수 있습니다. gori 안에서 정하려면 **Settings → AI → MCP permissions**에서 도구 묶음(트래픽 전송, 인터셉트 제어, 프로젝트 데이터 편집, 스코프, 프로젝트)마다 **on**, **ask**, **off**를 고르면 다음 `gori mcp` 시작부터 적용됩니다. **ask**는 호출마다 승인 카드로 먼저 물어봅니다([Preferences에서 권한 정하기](/ko/guide/mcp/#permissions-from-preferences)).
+읽기 전용은 `list_history`, `get_flow`, `list_sitemap` 등 검사 도구를 유지하면서 `send_request`, 이슈 쓰기, 인터셉트 변경 도구를 비활성화합니다. `decode`, `jwt_decode` 같은 순수 계산 헬퍼는 네트워크나 데이터를 건드리지 않으므로 계속 사용할 수 있습니다. gori 안에서 정하려면 **Settings → AI → MCP permissions**에서 도구 묶음(트래픽 전송, 인터셉트 제어, 프로젝트 데이터 편집, 스코프, 프로젝트)마다 **on**, **ask**, **off**를 고르면 다음 `gori mcp` 시작부터 적용됩니다. **ask**는 호출마다 승인 카드로 먼저 물어봅니다([Preferences에서 권한 정하기](/ko/guide/mcp/#permissions-from-preferences)).
 
 전체 카탈로그는 컨텍스트도 차지합니다. 클라이언트는 첫 질문 전에 모든 도구의 스키마를 읽어 세션 내내 들고 있습니다. `--tools=@recon`(캡처 읽기와 매핑, 요청 재전송, 이슈·노트 기록)이나 `--tools=@minimal`(History와 플로우 읽기, 운영자와 대화)은 이름이 붙은 작은 묶음만 제공하며 `--read-only`와 함께 쓸 수 있습니다. 크기 비교는 [노출할 도구 고르기](/ko/guide/mcp/#choosing-which-tools-are-exposed)에 있습니다.
 
@@ -92,7 +92,7 @@ gori mcp --read-only --install-claude-code
 → create_issue   "Auth bypass on /login" severity:high
 ```
 
-에이전트의 행동은 조용히 지나가지 않습니다. 각 행동은 에이전트에서 온 것으로 표시되어 gori의 알림 센터에 남고 사용자 본인의 행동과 다르게 렌더링되므로, 다른 탭을 보는 동안 에이전트가 프로젝트에 무엇을 했는지 확인할 수 있습니다.
+에이전트의 각 행동은 에이전트에서 온 것으로 표시되어 gori의 알림 센터에 남고 사용자 본인의 행동과 다르게 렌더링되므로, 다른 탭을 보는 동안 에이전트가 프로젝트에 무엇을 했는지 확인할 수 있습니다.
 
 ## 다음 단계 {#next-steps}
 

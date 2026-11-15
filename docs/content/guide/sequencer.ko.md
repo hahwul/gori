@@ -8,7 +8,7 @@ group = "워크벤치"
 shot = "sequencer"
 +++
 
-session cookie, CSRF token, 비밀번호 리셋 코드, API key가 예측 가능하다면 공격자는 그것을 위조하거나 추측할 수 있습니다. **Sequencer**는 token 샘플을 수집해 실제로 얼마나 무작위한지 등급을 매깁니다. Burp Sequencer나 Caido Sequencer에 대응하는 gori의 도구입니다.
+session cookie, CSRF token, 비밀번호 리셋 코드, API key가 예측 가능하다면 공격자는 그것을 위조하거나 추측할 수 있습니다. **Sequencer**는 token 샘플을 수집해 무작위성 등급을 매깁니다. Burp Sequencer나 Caido Sequencer에 대응하는 gori의 도구입니다.
 
 <figure class="tui-shot">
   <img src="/images/tui/sequencer.svg" alt="History 탭 위에 뜬 gori Send to Sequencer 설정 카드: 자동 감지된 session cookie 토큰과 샘플 수, 최대 요청 수, concurrency, 알림 설정 행" width="1206" height="520">
@@ -21,7 +21,7 @@ session cookie, CSRF token, 비밀번호 리셋 코드, API key가 예측 가능
 
 **라이브.** 새 token을 발급하는 요청을 지정하면, gori가 그 요청을 여러 번 재전송하면서 각 응답에서 token을 뽑아냅니다. **History**에서 token을 설정하는 플로우를 선택하고 `Space` `>` `s`(**Send flow to…** → **Send to Sequencer**)를 누르면, 유력한 session cookie를 자동 감지한 **SEND TO SEQUENCER** 카드가 현재 탭 위에 열립니다. 거기서 token 위치, 샘플 목표, 동시성을 정하고 **Start**를 누르면 탭을 떠나지 않은 채 백그라운드에서 수집합니다. Sequencer 탭에서는 `c`로 세션을 재설정하고, `Ctrl-R`로 다시 수집하고, `Ctrl-X`로 멈춥니다.
 
-**수동.** 이미 token 목록이 있나요? 텍스트 패널에서 선택하고(한 줄에 하나씩) `Space` `S`(**Send selection to…**) → `s` **Sequencer**를 누르면 네트워크 트래픽 없이 순수하게 통계 분석만 수행합니다. 다른 탭에서 보낼 때마다 새 수동 세션이 열리고, Sequencer 탭 안에서 대기 중인 수동 세션을 보고 있을 때 보내면 그 세션에 덧붙여 다시 분석합니다. 헤드리스에서는 `gori run sequence --tokens FILE`이 같은 일을 합니다.
+**수동.** 이미 token 목록이 있나요? 텍스트 패널에서 선택하고(한 줄에 하나씩) `Space` `S`(**Send selection to…**) → `s` **Sequencer**를 누르면 네트워크 트래픽 없이 통계 분석만 수행합니다. 다른 탭에서 보낼 때마다 새 수동 세션이 열립니다. Sequencer 탭 안에서 대기 중인 수동 세션을 보고 있을 때 보내면 그 세션에 덧붙여 다시 분석합니다. 헤드리스에서는 `gori run sequence --tokens FILE`이 같은 일을 합니다.
 
 다음 위치 중 어디에서든 token을 추출할 수 있습니다:
 
@@ -37,7 +37,7 @@ session cookie, CSRF token, 비밀번호 리셋 코드, API key가 예측 가능
 
 ## 등급 읽기 {#reading-the-grade}
 
-핵심 지표는 bit 단위의 **effective entropy**입니다. 각 token이 실제로 지닌 예측 불가능성의 양을 샘플 전체에 걸쳐 측정한 보수적인 추정치입니다. 이것이 기본 등급을 정하고, 아래 통계 테스트 중 실패한 것 하나마다 한 단계씩 내려갑니다:
+핵심 지표는 bit 단위의 **effective entropy**입니다. 각 token이 지닌 예측 불가능성을 샘플 전체에 걸쳐 측정한 보수적인 추정치입니다. 이것이 기본 등급을 정하고, 아래 통계 테스트 중 실패한 것 하나마다 한 단계씩 내려갑니다:
 
 | Rating | Effective entropy |
 |--------|-------------------|
@@ -46,15 +46,15 @@ session cookie, CSRF token, 비밀번호 리셋 코드, API key가 예측 가능
 | **Weak** | >= 30 bits |
 | **Critical** | 30 bits 미만 |
 
-**중복**되거나 **순차적인** token이 하나라도 있으면 entropy가 아무리 높아 보여도 판정이 곧바로 Critical로 떨어집니다. 내부적으로 gori는 token의 심볼 bitstream에 대해 일련의 통계 테스트(monobit, poker, runs, longest-run, per-bit 편향, cumulative sums, approximate entropy, spectral)를 실행하고, byte 빈도에 대한 chi-square, lag-1 serial correlation, 알파벳의 entropy 하한과 대조하는 압축 검사를 함께 수행합니다. p-value로 판정하는 테스트들은 Bonferroni 보정된 임계값을 공유하므로, 테스트가 늘어나도 정상적인 token이 잘못 걸릴 확률은 올라가지 않습니다.
+**중복**되거나 **순차적인** token이 하나라도 있으면 entropy와 상관없이 판정이 Critical로 떨어집니다. 내부적으로 gori는 token의 심볼 bitstream에 대해 일련의 통계 테스트(monobit, poker, runs, longest-run, per-bit 편향, cumulative sums, approximate entropy, spectral)를 실행하고, byte 빈도에 대한 chi-square, lag-1 serial correlation, 알파벳의 entropy 하한과 대조하는 압축 검사를 함께 수행합니다. p-value로 판정하는 테스트들은 Bonferroni 보정된 임계값을 공유하므로, 테스트가 늘어나도 정상적인 token이 잘못 걸릴 확률은 올라가지 않습니다.
 
-샘플이 작으면(사용 가능한 token이 20개 미만) 강한 실패를 경고로 완화하고, 등급을 추측하지 않고 **Inconclusive**로 둡니다. 이 크기에서는 token이 아니라 샘플 크기가 entropy 수치를 정하기 때문입니다. 중복 token이나 순차적인 token이 있으면 여전히 Critical입니다.
+샘플이 작으면(사용 가능한 token이 20개 미만) 강한 실패를 경고로 완화하고, 등급을 **Inconclusive**로 둡니다. 샘플이 이만큼 작으면 entropy 수치가 샘플 크기에 묶이기 때문입니다. 중복 token이나 순차적인 token이 있으면 여전히 Critical입니다.
 
 ### 구조는 비밀이 아닙니다 {#structure-is-not-secret}
 
 실제 token에는 대개 뼈대가 있습니다. `sess_v1_` 같은 접두사, 버전 byte, base64 padding 같은 것들입니다. **Structure** 행은 샘플 전체에서 한 번도 변하지 않는 위치가 몇 개인지 보여주고, 모든 byte 단위 테스트는 그 다음부터 *변하는* 영역만 측정합니다. UUIDv4의 variant nibble(`8`/`9`/`a`/`b`)처럼 알파벳의 일부 값만 오가는 위치는 부분 고정으로 보아 테스트에서 함께 제외하고, 추정치에는 그 위치에서 실제로 측정한 entropy만 더합니다.
 
-이 구분이 등급을 좌우합니다. `sess_v1_` 뒤에 무작위 hex 24자가 붙은 token은 접두사까지 세면 알파벳 크기가 19가 되는데, 이는 2의 거듭제곱이 아니므로 비트 테스트 전체가 "해당 없음"으로 꺼집니다. 그러면 chi-square와 압축 검사는 순전히 접두사 때문에 치우친 분포를 보고 실패합니다. 변하는 영역만 측정하면 같은 샘플이 원래 모습대로 나옵니다. lower-hex 알파벳에 전체 비트 테스트가 활성화되고 모든 행이 통과합니다.
+`sess_v1_` 뒤에 무작위 hex 24자가 붙은 token은 접두사까지 세면 알파벳 크기가 19가 됩니다. 2의 거듭제곱이 아니므로 비트 테스트가 "해당 없음"으로 꺼지고, chi-square와 압축 검사는 접두사 때문에 치우친 분포를 보고 실패합니다. 변하는 영역만 측정하면 같은 샘플이 lower-hex 알파벳으로 나오고, 비트 테스트가 모두 활성화되며 모든 행이 통과합니다.
 
 무작위 부분이 가변 길이 머리 뒤의 *접미사*인 token(`123-<random>`)이라면, gori는 per-position 창을 entropy가 더 많은 쪽 끝에 맞추므로 머리 부분이 추정치를 끌어내리지 않습니다.
 
@@ -62,7 +62,7 @@ session cookie, CSRF token, 비밀번호 리셋 코드, API key가 예측 가능
 
 ## 판정 결과 내보내기 {#getting-the-verdict-out}
 
-수집된 token은 살아 있는 자격 증명이므로 디스크에 절대 기록되지 않고 세션과 함께 사라집니다. 판정 결과까지 사라져서는 안 됩니다.
+수집된 token은 살아 있는 자격 증명이므로 디스크에 기록되지 않고 세션과 함께 사라집니다. 판정 결과는 다음 방법으로 남기세요.
 
 | 동작 | 키 | 기록 대상 |
 |------|-----|-----------|
@@ -70,7 +70,7 @@ session cookie, CSRF token, 비밀번호 리셋 코드, API key가 예측 가능
 | Export report (JSON) | 팔레트 (`Ctrl-P`) | 동일한 리포트의 JSON |
 | File as issue | `Space` → `a` | Issues 탭의 Issue |
 
-**File as issue**는 등급을 Issues 리포트에 기록하며 Critical은 `critical`, Weak은 `high`, Moderate는 `medium`, Secure는 `info`로 매핑합니다. Issue 본문에는 대상, token 디스크립터, entropy 수치, 전체 테스트 표가 담기고 근거로 시드가 된 플로우가 연결됩니다. 내보낸 파일과 Issue 어느 쪽에도 token 값은 들어가지 않습니다. 리포트는 빈도표와 판정만으로 만들어지므로 애초에 유출될 샘플이 들어 있지 않습니다.
+**File as issue**는 등급을 Issues 리포트에 기록하며 Critical은 `critical`, Weak은 `high`, Moderate는 `medium`, Secure는 `info`로 매핑합니다. Issue 본문에는 대상, token 디스크립터, entropy 수치, 전체 테스트 표가 담기고 근거로 시드가 된 플로우가 연결됩니다. 내보낸 파일과 Issue 어느 쪽에도 token 값은 들어가지 않습니다. 리포트는 빈도표와 판정만으로 만들어집니다.
 
 ## 헤드리스 {#headless}
 
@@ -85,7 +85,7 @@ cat tokens.txt | gori run sequence --tokens -
 
 token 위치는 정확히 하나만 고르고(`--cookie` / `--header` / `--regex` / `--position` / `--jsonpath`), 요청은 `--flow`, `--request FILE`, 또는 stdin에서 가져옵니다. 속도 및 전송 관련 플래그는 Fuzzer와 동일합니다(`--concurrency`, `--rate`, `--throttle`, `--timeout`, `--target`, `--http2`, …). 출력 형식은 `text`, `json`, `jsonl`, `markdown`입니다(`markdown`은 TUI의 **Export report**가 쓰는 문서와 동일합니다). 전체 플래그는 [CLI Reference](/ko/reference/cli/#run-sequence)에 있습니다.
 
-MCP에서는 `sequence_analyze`가 token 목록을 인라인으로 등급 매기고, `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop`이 라이브 수집을 백그라운드 작업으로 구동합니다. 결과는 항상 **리포트**를 반환하며 raw token은 절대 반환하지 않습니다.
+MCP에서는 `sequence_analyze`가 token 목록을 인라인으로 등급 매기고, `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop`이 라이브 수집을 백그라운드 작업으로 구동합니다. 결과는 리포트만 반환하며 raw token은 반환하지 않습니다.
 
 ## 다음 단계 {#next-steps}
 

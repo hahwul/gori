@@ -4,9 +4,9 @@ description = "A hands-on walkthrough: trust the CA, capture a real request, ins
 weight = 20
 +++
 
-This is a follow-along tutorial. Work through it top to bottom and you'll go from a fresh install to a captured HTTPS request that you have inspected, sent to **Repeater**, edited, and re-sent, all without leaving the terminal. Set aside about ten minutes.
+This is a follow-along tutorial. Starting from a fresh install, you capture an HTTPS request, inspect it, send it to **Repeater**, edit it, and re-send it, all in the terminal. It takes about ten minutes.
 
-Each step ends with a **Checkpoint**: what you should see before moving on. If something looks different, that line is where to stop and fix it.
+Each step ends with a **Checkpoint**, what you should see before moving on. If something looks different, stop and fix it there.
 
 > **Before you begin.** [Install gori](/getting-started/installation/) and have a browser installed. You'll capture your own browsing, so pick a site you are authorized to test (your own app, a staging box, or a deliberately vulnerable practice target). The examples use a stable throwaway target, `example.com`, for the parts that need an exact result.
 
@@ -18,9 +18,9 @@ With no subcommand, gori opens the project picker. The proxy starts when you ope
 gori
 ```
 
-The first launch runs a short [setup wizard](#first-run-wizard) (theme and the Miss Ring mascot, plus the global bind when the default port is taken), then offers a [guided UI tour](#guided-ui-tour). The offer lands on **Skip**; pick the tour there, or run it later from the palette; this page covers the same ground against live traffic.
+The first launch runs a short [setup wizard](#first-run-wizard) (theme and the Miss Ring mascot, plus the global bind when the default port is taken), then offers a [guided UI tour](#guided-ui-tour). The offer lands on **Skip**. Pick the tour there, or run it later from the palette. This page covers the same ground against live traffic.
 
-At the picker, select **New project**, enter a name and press `Enter`. Your first project opens at once; for a later one `Enter` moves on to the optional description and tags (three `Enter` in all), and `↓` reaches those fields on the first one too. On the tags row, `,` or `Enter` adds a tag and `Tab` completes one of the tags your other projects already use; type `#tag` in the picker's search to find the projects carrying it. The guided tour returns you to this picker when it finishes on first launch.
+At the picker, select **New project**, enter a name and press `Enter`. Your first project opens at once. For a later one `Enter` moves on to the optional description and tags (three `Enter` in all), and `↓` reaches those fields on the first one too. On the tags row, `,` or `Enter` adds a tag and `Tab` completes one of the tags your other projects already use. Type `#tag` in the picker's search to find the projects carrying it. The guided tour returns you to this picker when it finishes on first launch.
 
 To find which project captured something (a token, a host, an endpoint), press `Ctrl-F` at the picker and type it. gori searches the flows of every project by host and path, and by body text once you have typed three characters, then lists the hits under each project. `Enter` opens that project with the flow's detail showing. `Esc` stops a search that is still running, and closes the search once it has finished.
 
@@ -64,13 +64,13 @@ curl -x http://127.0.0.1:8070 https://example.com
 
 gori mints per-host leaf certificates from the root on demand, so you trust the root only once.
 
-For command-line tools there is a shortcut: `gori run shell` (or **Open shell** in the palette) starts a shell whose curl, git, Python, Go and Node traffic already goes through the running gori and trusts its CA, without touching OS settings. `gori run shell -- curl https://example.com` runs one command that way. See [`gori run shell`](/reference/cli/#run-shell).
+For command-line tools, `gori run shell` (or **Open shell** in the palette) starts a shell whose curl, git, Python, Go and Node traffic already goes through the running gori and trusts its CA, without touching OS settings. `gori run shell -- curl https://example.com` runs one command that way. See [`gori run shell`](/reference/cli/#run-shell).
 
-> gori's private key is a secret for this machine only: it is written with `0600` permissions and never leaves the machine. Rotate it from the palette (**Regenerate CA certificate**) only when you mean to invalidate every prior trust.
+> gori's private key is written with `0600` permissions and never leaves this machine. Rotate it from the palette (**Regenerate CA certificate**) only when you mean to invalidate every prior trust.
 
 ### Option C: Install the CA on a phone or tablet
 
-A phone can't read the CA off your filesystem, so gori serves it over the network instead.
+A phone can't read the CA off your filesystem, so gori serves it over the network.
 
 1. Bind the proxy so the device can reach it, and note your machine's LAN IP:
 
@@ -82,11 +82,11 @@ A phone can't read the CA off your filesystem, so gori serves it over the networ
 3. Open a browser there and go to **`http://gori.proxy/`** (`http://gori/` works too).
 4. Download the certificate and trust it. On iOS that is two steps: install the profile, then enable it under **Settings → General → About → Certificate Trust Settings**. On Android, install it under **Settings → Security → Encryption & credentials → Install a certificate → CA certificate**.
 
-`gori.proxy` is a reserved name gori answers for itself, so it works once the proxy is configured and never reaches the network. If you'd rather not configure the proxy first, browse straight to `http://<your-LAN-IP>:8070/` instead and you'll get the same page.
+`gori.proxy` is a reserved name gori answers for itself, so it works once the proxy is configured and never reaches the network. To skip configuring the proxy first, browse to `http://<your-LAN-IP>:8070/` for the same page.
 
 ### Option D: Set up an Android emulator over adb
 
-With `adb` on `PATH` (or `ANDROID_HOME` set) and an emulator running or a device plugged in with USB debugging on, gori does the setup for you. The proxy stays on loopback: `adb reverse` carries the device's traffic to it.
+With `adb` on `PATH` (or `ANDROID_HOME` set) and an emulator running or a device plugged in with USB debugging on, gori does the setup for you. The proxy stays on loopback, and `adb reverse` carries the device's traffic to it.
 
 ```bash
 gori run android setup --dry-run   # print the adb commands first
@@ -96,7 +96,7 @@ gori run android undo              # clear the proxy and the mapping
 
 `--system` puts gori's root in the system store as root, so apps trust it without a network security config. It lasts until the device reboots. It needs root, and Android 14+ (API 34) is not supported yet. The default, `--user`, pushes the certificate to `/sdcard/Download/gori-ca.crt` and opens Security settings to install it as a **CA certificate**. Apps targeting API 24+ only trust a user CA if their network security config opts in. In the TUI, the palette's **Set up Android device** runs the same steps. See [`gori run android`](/reference/cli/#run-android).
 
-**Checkpoint.** Switch to **History** (press `3`). You should see at least one row: your `GET https://example.com/` request with a `200` status. If History is empty, capture isn't reaching gori: recheck the proxy setting (Option B) or use **Open browser** (Option A).
+**Checkpoint.** Switch to **History** (press `3`). You should see at least one row: your `GET https://example.com/` request with a `200` status. If History is empty, capture isn't reaching gori. Recheck the proxy setting (Option B) or use **Open browser** (Option A).
 
 ## 3. Learn the two discovery surfaces
 
@@ -109,7 +109,7 @@ You don't need to memorize tab-specific keys. Two keys reach every action:
 
 Both show each action's shortcut beside it, so opening them is also how you learn the keys. Try it now on the flow you just captured:
 
-1. In **History**, press `↓` to select your flow, then `Space`. The letter on the left of a row runs it; the key on the right (`^R` beside **Send to Repeater**) does the same without the menu. A row marked `›`, such as `>` **Send flow to…**, opens a second card; `Esc` steps back. Press `Esc` until the menu closes.
+1. In **History**, press `↓` to select your flow, then `Space`. The letter on the left of a row runs it. The key on the right (`^R` beside **Send to Repeater**) does the same without the menu. A row marked `›`, such as `>` **Send flow to…**, opens a second card, and `Esc` steps back. Press `Esc` until the menu closes.
 2. Press `Ctrl-P` and type `send`. The History actions come first under `THIS TAB`, each with the key or menu path that reaches it (`␣ > c` means `Space`, `>`, `c`). Press `Esc`.
 
 <figure class="tui-shot">
@@ -119,7 +119,7 @@ Both show each action's shortcut beside it, so opening them is also how you lear
 
 [Space Menu & Palette](/guide/space-menu-and-palette/) covers both in depth, including the `Z` **Display…** and `P` **Protocol…** cards and the actions that only the palette lists.
 
-Three global toggles are worth knowing from the start:
+Three global toggles:
 
 | Key | Action |
 |-----|--------|
@@ -139,7 +139,7 @@ gori is a row of tabs. The default order starts Project → Target → **History
 | `Esc` | Pop focus back toward the tab bar |
 | `Tab` / `Shift-Tab` | Move focus between the tab bar and panes |
 
-Mouse works when enabled (Preferences → **Editor & Keys** → **Mouse**): click a tab, click a row to select, click again to open. `?` opens the full key cheatsheet as a popup, starting at the tab you are on.
+Mouse works when enabled (Preferences → **Editor & Keys** → **Mouse**): click a tab, click a row to select, click again to open. `?` opens the key cheatsheet as a popup, starting at the tab you are on.
 
 ## 5. Read a flow in History
 
@@ -175,11 +175,11 @@ method:POST body:password
 
 Now select your `example.com` flow and press `Enter`. In the detail view, scroll with `↑` / `↓`, copy with `y`, and toggle `Ctrl-X` / `b` / `p` for hex / whitespace / pretty bodies. `Esc` returns to the list.
 
-**Checkpoint.** You can filter History down to one host and open a flow to read its full request and response.
+**Checkpoint.** You can filter History down to one host and open a flow to read its request and response.
 
 ## 6. Send it to Repeater and re-send (the core loop)
 
-This is the loop you'll spend most of your time in: take a captured request, change something, send it again, and compare.
+Most of your time goes into this loop. Take a captured request, change something, send it again, and compare.
 
 1. In **History**, select your `example.com` flow.
 2. Press `Ctrl-R`. gori copies it into the **Repeater** tab and switches you there.
@@ -189,7 +189,7 @@ This is the loop you'll spend most of your time in: take a captured request, cha
    ```
 4. Press `Esc` to leave edit mode, then `Ctrl-R` to **send**.
 
-   Copying while you edit: `Shift`+arrows select in both modes, but the copy key differs. In READ it is `y`; in INS `y` is a literal character, and typing it over a selection *replaces* the selection, so use **`Ctrl-Y`**. `Esc` also carries the selection out of INS, so `Esc` then `y` works too. If a keystroke does eat a selection, `Ctrl-Z` puts it back in one step.
+   Copying while you edit: `Shift`+arrows select in both modes, but the copy key differs. In READ it is `y`. In INS `y` is a literal character, and typing it over a selection replaces the selection, so use `Ctrl-Y`. `Esc` also carries the selection out of INS, so `Esc` then `y` works too. If a keystroke replaces a selection, `Ctrl-Z` puts it back in one step.
 5. The response, its timing, and a diff against the previous reply appear on the right. `Tab` cycles target → request → response.
 
 <figure class="tui-shot">
@@ -197,19 +197,17 @@ This is the loop you'll spend most of your time in: take a captured request, cha
   <figcaption><strong>Repeater</strong> edits any part of a request and re-sends it; the response, timing, and a diff against the last reply sit side by side.</figcaption>
 </figure>
 
-**Checkpoint.** The Repeater status line reads something like `sent → 200 in … ms`, and you can re-send with `Ctrl-R` as many times as you like. That is the full capture → inspect → replay loop.
+**Checkpoint.** The Repeater status line reads something like `sent → 200 in … ms`, and you can re-send with `Ctrl-R` as many times as you like.
 
 ## 7. Where to go next
 
-You now have the core loop. From here, the [Playbooks](/playbooks/) walk one workflow at a time (scope, map, intercept, fuzz, and report), each run end to end with checkpoints. A few first directions, also covered in depth in the [Guide](/guide/):
+The [Playbooks](/playbooks/) walk one workflow at a time (scope, map, intercept, fuzz, and report), each run end to end with checkpoints. Some next steps, each covered in depth in the [Guide](/guide/):
 
 - **Fuzz a parameter.** Select a flow, press `Shift-I` to send it to the **Fuzzer**, mark a position (`Ctrl-A` auto-marks common params), attach a wordlist, and `Ctrl-R` to run. See [Repeater & Fuzzer](/guide/repeater-and-fuzzer/).
 - **Intercept and edit in flight.** Press `i` to hold matching requests and forward, drop, or modify them before they continue. See [Proxy & History](/guide/proxy/#intercept).
 - **Track what you find.** Turn anything worth reporting into an **Issue** with `Shift-F`, and read passive findings on the **Probe** tab as you browse. See [Scanning & Issues](/guide/scanning/).
 
 ## Day-1 key map
-
-Keep this table nearby until the chords stick:
 
 | Key | Where | Action |
 |-----|--------|--------|
@@ -235,13 +233,13 @@ Re-run the guided setup (global proxy bind default, then theme, then Miss Ring) 
 gori wizard
 ```
 
-On the first launch the wizard opens on the theme step when the default address (`127.0.0.1:8070`) is free, and `Shift-Tab` steps back to the bind step; `gori wizard` always starts there. The listen IP defaults to `127.0.0.1` (this computer only); `0.0.0.0` lets other devices reach the proxy. The first `Enter` moves from IP to port, and the next continues. The choice becomes the shared default in `settings.json`; a project can pin a different address from its Project tab. If the port is busy, `Enter` again keeps it. `Esc` twice skips the wizard.
+On the first launch the wizard opens on the theme step when the default address (`127.0.0.1:8070`) is free, and `Shift-Tab` steps back to the bind step. `gori wizard` always starts there. The listen IP defaults to `127.0.0.1` (this computer only), and `0.0.0.0` lets other devices reach the proxy. The first `Enter` moves from IP to port, and the next continues. The choice becomes the shared default in `settings.json`. A project can pin a different address from its Project tab. If the port is busy, `Enter` again keeps it. `Esc` twice skips the wizard.
 
-The final **Review** step recaps what you picked, names your [editor keyset](/guide/hotkeys/#editor-keysets) and where to change it (the wizard never sets it), and carries one editable row: **Shortcuts**, which `←`/`→` flips between `Ctrl` and `Option (⌥)` for gori's built-in chord family (`^P` `^N` `^W` `^1-9`). Choosing Option *adds* `⌥` aliases rather than replacing Ctrl, which is useful when your terminal or multiplexer never delivers the Ctrl form. See [Command modifier](/guide/hotkeys/#command-modifier) for the macOS Option-as-Meta requirement.
+The final **Review** step recaps what you picked, names your [editor keyset](/guide/hotkeys/#editor-keysets) and where to change it (the wizard never sets it), and carries one editable row: **Shortcuts**, which `←`/`→` flips between `Ctrl` and `Option (⌥)` for gori's built-in chord family (`^P` `^N` `^W` `^1-9`). Choosing Option adds `⌥` aliases and keeps Ctrl. Use it when your terminal or multiplexer never delivers the Ctrl form. See [Command modifier](/guide/hotkeys/#command-modifier) for the macOS Option-as-Meta requirement.
 
 ## Guided UI tour
 
-A mock-UI walkthrough of tab/pane navigation, the space menu (including its second cards), the command palette's search, READ/INS edit mode, then the traffic itself: where to point a client and how to trust the CA, the capture switch, and intercept. It is safe to run without a live proxy session. Each lesson shows a short demo and asks you to try the real key; a hands-on sandbox covers the first four moves, and the tour ends with Help and quitting, then a first-session checklist. The mock menus use the same letters and keys as your install, rebinds included.
+A mock-UI walkthrough of tab/pane navigation, the space menu (including its second cards), the command palette's search, READ/INS edit mode, then the traffic itself: where to point a client and how to trust the CA, the capture switch, and intercept. It is safe to run without a live proxy session. Each lesson shows a short demo and asks you to try the real key. A hands-on sandbox covers the first four moves, and the tour ends with Help and quitting, then a first-session checklist. The mock menus use the same letters and keys as your install, rebinds included.
 
 ```bash
 gori tutorial

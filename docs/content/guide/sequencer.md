@@ -8,7 +8,7 @@ group = "Workbenches"
 shot = "sequencer"
 +++
 
-If a session cookie, CSRF token, password-reset code, or API key is predictable, an attacker can forge or guess it. The **Sequencer** collects a sample of tokens and grades how random they really are, the gori counterpart of Burp Sequencer or the Caido Sequencer.
+If a session cookie, CSRF token, password-reset code, or API key is predictable, an attacker can forge or guess it. The **Sequencer** collects a sample of tokens and grades their randomness, the gori counterpart of Burp Sequencer or the Caido Sequencer.
 
 <figure class="tui-shot">
   <img src="/images/tui/sequencer.svg" alt="gori Send to Sequencer config card over the History tab, showing an auto-detected session cookie as the token, with rows for sample count, max requests, concurrency and notification" width="1206" height="520">
@@ -19,9 +19,9 @@ The **Sequencer** tab is off the bar by default. Press **`0`** and type "seq", o
 
 ## Two Ways to Feed It
 
-**Live.** Point it at a request that hands out a fresh token, and gori replays that request many times, pulling the token out of each response. From **History**, select the flow that sets the token and `Space` `>` `s` (**Send flow to…** → **Send to Sequencer**). A **SEND TO SEQUENCER** card opens over the current tab with the likely session cookie auto-detected; set the token location, sample goal and concurrency there, and **Start** collects in the background without leaving the tab. On the Sequencer tab, `c` reconfigures a session, `Ctrl-R` collects again, and `Ctrl-X` stops.
+**Live.** Point it at a request that hands out a fresh token, and gori replays that request many times, pulling the token out of each response. From **History**, select the flow that sets the token and `Space` `>` `s` (**Send flow to…** → **Send to Sequencer**). A **SEND TO SEQUENCER** card opens over the current tab with the likely session cookie auto-detected. Set the token location, sample goal and concurrency there, and **Start** collects in the background without leaving the tab. On the Sequencer tab, `c` reconfigures a session, `Ctrl-R` collects again, and `Ctrl-X` stops.
 
-**Manual.** Already have a list of tokens? Select them in a text pane (one per line) and `Space` `S` (**Send selection to…**) → `s` **Sequencer** for a pure statistical analysis with no network traffic. Each send from another tab opens a new manual session; a send made on the Sequencer tab itself, while an idle manual session is focused, appends to it and re-analyzes. Headless, the same is `gori run sequence --tokens FILE`.
+**Manual.** Already have a list of tokens? Select them in a text pane (one per line) and `Space` `S` (**Send selection to…**) → `s` **Sequencer** for a pure statistical analysis with no network traffic. Each send from another tab opens a new manual session. A send made on the Sequencer tab itself, while an idle manual session is focused, appends to it and re-analyzes. Headless, the same is `gori run sequence --tokens FILE`.
 
 Extract the token from any of these locations:
 
@@ -37,7 +37,7 @@ Live collection defaults to **concurrency 1**, because session tokens are often 
 
 ## Reading the Grade
 
-The headline is **effective entropy** in bits: a conservative estimate of how much real unpredictability each token carries, measured across the sample. It sets the base rating, and every statistical test below that fails drops it one tier:
+The headline is **effective entropy** in bits: a conservative estimate of the unpredictability each token carries, measured across the sample. It sets the base rating, and every statistical test below that fails drops it one tier:
 
 | Rating | Effective entropy |
 |--------|-------------------|
@@ -46,15 +46,15 @@ The headline is **effective entropy** in bits: a conservative estimate of how mu
 | **Weak** | >= 30 bits |
 | **Critical** | below 30 bits |
 
-Any **duplicate** or **sequential** token drops the verdict straight to Critical, however high the entropy looks. Underneath, gori runs a battery of statistical tests over the token's symbol bitstream (monobit, poker, runs, longest-run, per-bit bias, cumulative sums, approximate entropy, and a spectral test), a chi-square on byte frequencies, a lag-1 serial correlation, and a compression check against the alphabet's entropy floor. The tests judged on a p-value share a Bonferroni-corrected threshold, so a clean token is no likelier to be flagged as the battery grows.
+Any **duplicate** or **sequential** token drops the verdict to Critical, whatever the entropy. Underneath, gori runs a battery of statistical tests over the token's symbol bitstream (monobit, poker, runs, longest-run, per-bit bias, cumulative sums, approximate entropy, and a spectral test), a chi-square on byte frequencies, a lag-1 serial correlation, and a compression check against the alphabet's entropy floor. The tests judged on a p-value share a Bonferroni-corrected threshold, so a clean token is no likelier to be flagged as the battery grows.
 
-A small sample (fewer than 20 usable tokens) softens hard failures to warnings and rates the run **Inconclusive** rather than guessing, since below that size the sample, not the token, sets the entropy figure. A duplicate or a sequential run still rates it Critical.
+A small sample (fewer than 20 usable tokens) softens hard failures to warnings and rates the run **Inconclusive**, since a sample that small caps the entropy figure. A duplicate or a sequential run still rates it Critical.
 
 ### Structure Is Not Secret
 
 Real tokens usually carry a skeleton: a `sess_v1_` prefix, a version byte, base64 padding. The **Structure** row reports how many positions never vary across the sample, and every byte-level test then measures the *varying* region only. A position that varies over only a small slice of the alphabet, like a UUIDv4's variant nibble (`8`/`9`/`a`/`b`), counts as partially fixed: the tests skip it too, and it adds only its own measured entropy to the estimate.
 
-That distinction decides the grade. A token of `sess_v1_` plus 24 random hex characters looks like a 19-character alphabet if you count the prefix, which is not a power of two, which switches off the entire bit-test battery as not-applicable; chi-square and compression then fail on a distribution skewed purely by the prefix. Measured against the varying region instead, the same sample is what it actually is: lower-hex, full battery active, every row passing.
+A token of `sess_v1_` plus 24 random hex characters looks like a 19-character alphabet if you count the prefix. That is not a power of two, so the bit-test battery is switched off as not-applicable, and chi-square and compression fail on a distribution skewed only by the prefix. Measured over the varying region, the same sample is lower-hex, with the full battery active and every row passing.
 
 For a token whose random part is a *suffix* behind a variable-length head (`123-<random>`), gori anchors the per-position window to whichever end carries more entropy, so the head does not drag the estimate down.
 
@@ -62,7 +62,7 @@ The panes are an untitled config card (source and token location, with the `^R` 
 
 ## Getting the Verdict Out
 
-Collected tokens are live credentials, so they are never written to disk and vanish with the session. The verdict should not.
+Collected tokens are live credentials, so they are never written to disk and are discarded with the session. Keep the verdict with one of these:
 
 | Action | Key | Writes |
 |--------|-----|--------|
@@ -70,7 +70,7 @@ Collected tokens are live credentials, so they are never written to disk and van
 | Export report (JSON) | the palette (`Ctrl-P`) | The same report as JSON |
 | File as issue | `Space` → `a` | An Issue in the Issues tab |
 
-**File as issue** records the grade in the Issues report, mapping Critical to `critical`, Weak to `high`, Moderate to `medium`, and Secure to `info`. The Issue carries the target, the token descriptor, the entropy figures, and the full test table as its body, plus the seeding flow as evidence. Neither the export nor the Issue contains a token value: the report is built from frequency tables and verdicts, so there is no sample in it to leak.
+**File as issue** records the grade in the Issues report, mapping Critical to `critical`, Weak to `high`, Moderate to `medium`, and Secure to `info`. The Issue carries the target, the token descriptor, the entropy figures, and the full test table as its body, plus the seeding flow as evidence. Neither the export nor the Issue contains a token value. The report is built from frequency tables and verdicts only.
 
 ## Headless
 
@@ -85,7 +85,7 @@ cat tokens.txt | gori run sequence --tokens -
 
 Pick exactly one token location (`--cookie` / `--header` / `--regex` / `--position` / `--jsonpath`), and source the request from `--flow`, `--request FILE`, or stdin. Rate and transport flags mirror the Fuzzer (`--concurrency`, `--rate`, `--throttle`, `--timeout`, `--target`, `--http2`, …). Output is `text`, `json`, `jsonl`, or `markdown` (the same document the TUI's **Export report** writes). Full flags are in the [CLI Reference](/reference/cli/#run-sequence).
 
-Over MCP, `sequence_analyze` grades a token list inline, and `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop` drive a live collection as a background job. Results return the **report**, never the raw tokens.
+Over MCP, `sequence_analyze` grades a token list inline, and `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop` drive a live collection as a background job. Results return the report, never the raw tokens.
 
 ## Next Steps
 

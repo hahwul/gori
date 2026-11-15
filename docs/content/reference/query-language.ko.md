@@ -43,8 +43,8 @@ status:404
 
 ### 한쪽 방향만 보기: `req.` / `resp.` {#one-side-only-req-resp}
 
-`header:`와 `body:`는 **요청과 응답을 모두** 뒤집니다. 한쪽만 보려면 `req.` 또는 `resp.`를 앞에 붙입니다. 둘 다 헤더 영역의 부분 문자열이라 `header:authorization`은
-`X-Authorization-Debug`만 있는 요청에도 걸립니다. 헤더 **이름**을 확인하려면 줄 시작에 고정한 정규식으로
+`header:`와 `body:`는 요청과 응답을 모두 검색합니다. 한쪽만 보려면 `req.` 또는 `resp.`를 앞에 붙입니다. 둘 다 헤더 영역의 부분 문자열이라 `header:authorization`은
+`X-Authorization-Debug`만 있는 요청에도 걸립니다. 헤더 이름을 확인하려면 줄 시작에 고정한 정규식으로
 `req.header~(?im)^authorization:`처럼 씁니다.
 
 | 필드 | 뜻 |
@@ -65,7 +65,7 @@ NOT (req.body:token OR resp.body:token)
 
 ## 출처: `src:` {#src-provenance}
 
-`src:`는 **요청을 실제로 보낸 주체**로 플로우를 고릅니다. `src:proxy`는 클라이언트가 gori를
+`src:`는 요청을 와이어에 실어 보낸 주체로 플로우를 고릅니다. `src:proxy`는 클라이언트가 gori를
 거쳐 보낸 트래픽이고, 나머지 값은 gori 자신이 만든 요청입니다. `src:import`는 다른 도구가
 남긴 캡처를 읽어 들인 것입니다.
 
@@ -75,7 +75,7 @@ NOT (req.body:token OR resp.body:token)
 | `repeater` | Repeater 전송(TUI, `gori run repeater send --record-history`, MCP `send_request`) |
 | `fuzzer` | `--record-history` / `record_history`로 기록된 퍼즈 결과 |
 | `discover` | 크롤러가 가져온 것(Discover는 기본으로 저장합니다) |
-| `retest` | Issue 리테스트의 한 단계(`gori run retest run`, MCP `run_retest`, TUI의 RETEST 카드). `repeater`와 별도 값입니다. 사람이 직접 보낸 요청과 gori가 실행한 검사의 한 단계는 같은 바이트에 대한 다른 사실이기 때문입니다 |
+| `retest` | Issue 리테스트의 한 단계(`gori run retest run`, MCP `run_retest`, TUI의 RETEST 카드). 사람이 직접 보낸 요청인 `repeater`와 구분됩니다 |
 | `refresh` | 세션 슬롯 [갱신](/ko/guide/authorize/#refreshing-a-slot)의 한 단계. 수동이든 전송 직전 자동이든 같습니다(`source_ref`에 `slot NAME step N`). `RFRSH`로 표시됩니다 |
 | `macro` | Fuzzer나 Miner 실행의 [요청 시점 매크로](/ko/guide/repeater-and-fuzzer/#rotating-tokens-with-a-macro)가 후보 앞에서 실행한 한 단계(`source_ref`에 `macro step N`). `MACRO`로 표시됩니다 |
 | `miner`, `sequencer`, `authorize`, `probe` | 예약됨. 아직 플로우를 기록하지 않는 도구들 |
@@ -94,17 +94,16 @@ History의 **SRC** 열은 이 값들을 짧은 태그로 찍습니다(`PROXY`, `
 `IMPRT` …). `src:`는 그 태그도 받으므로 `src:rptr`과 `src:repeater`는 같은 쿼리입니다.
 `source:`는 `src:`의 긴 철자로 함께 받습니다.
 
-두 가지는 의도된 동작입니다:
+알아 둘 경우가 두 가지 있습니다.
 
-- **가져온(import) 플로우는 `src:gori`가 아닙니다.** gori가 그것을 전송한 적이 없고, 다른
-  사람이 캡처한 실제 엔드포인트를 설명할 뿐입니다. `-src:proxy`에는 걸리고 `src:gori`에는
+- **가져온(import) 플로우는 `src:gori`가 아닙니다.** gori가 전송한 적이 없고, 다른
+  사람이 캡처한 실제 엔드포인트를 설명합니다. `-src:proxy`에는 걸리고 `src:gori`에는
   걸리지 않습니다.
-- **출처를 기록하기 전에 캡처된 플로우는 양쪽 어디에도 걸리지 않습니다.** 그 행들은 출처를
-  전혀 갖고 있지 않습니다. 컬럼이 생기기 전에도 gori는 이미 Repeater 전송·크롤·import를
-  History에 쓰고 있었으므로, 그것들을 `proxy`로 채우는 것은 어떤 캡처도 만들지 않은 사실을
-  지어내는 일이 됩니다. SRC 열에는 `—`가 뜨고 `src:proxy`와 `-src:proxy` 양쪽 모두 이 행을
-  건너뜁니다. Pending 플로우가 `status:`와 `-status:` 양쪽에서 빠지는 것과 같습니다. 업그레이드
-  이후에 캡처된 플로우만 이 값을 가집니다.
+- **출처를 기록하기 전에 캡처된 플로우는 양쪽 어디에도 걸리지 않습니다.** 그 행들에는 출처가
+  없습니다. 컬럼이 생기기 전에도 gori는 Repeater 전송·크롤·import를 History에 썼으므로,
+  예전 행을 `proxy`로 채우지 않습니다. SRC 열에는 `—`가 뜨고 `src:proxy`와 `-src:proxy` 양쪽
+  모두 이 행을 건너뜁니다. Pending 플로우가 `status:`와 `-status:` 양쪽에서 빠지는 것과
+  같습니다. 업그레이드 이후에 캡처된 플로우만 출처를 가집니다.
 
 `src:`로 흔히 하는 두 가지 좁히기는 **뷰**로도 준비돼 있습니다. History에서 `v`를 눌러
 `History`(`src:proxy`)나 `History + Repeater`를 고르면, 다른 필터를 입력하는 동안에도 목록이
@@ -113,8 +112,8 @@ History의 **SRC** 열은 이 값들을 짧은 태그로 찍습니다(`PROXY`, `
 
 ## 진입점: `via:` {#via-surface}
 
-`src:`는 어떤 도구가 보냈는지를, `via:`는 어느 gori 진입점이 움직였는지를 말합니다: `tui`, `cli`
-(`gori run`), `mcp`(에이전트). MCP `send_request`는 Repeater 탭에서 보낸 것과 똑같이
+`src:`는 어떤 도구가 보냈는지를 말합니다. `via:`는 어느 gori 진입점이 움직였는지를 말합니다: `tui`, `cli`
+(`gori run`), `mcp`(에이전트). MCP `send_request`는 Repeater 탭에서 보낸 것과 같이
 `src:repeater`로 기록되므로, 둘을 가르는 것이 `via:`입니다.
 
 ```text
@@ -129,7 +128,7 @@ gori가 진입점을 기록하기 전에 보낸 플로우도 마찬가지입니�
 ## 스코프: `scope:in` / `scope:out` {#scope-in-scope-out}
 
 `scope:in`은 프로젝트 스코프 안쪽의 플로우를 고릅니다. TUI의 `s` 렌즈와
-`gori run history --in-scope`가 적용하는 그 include/exclude 경계와 완전히 같은 것입니다.
+`gori run history --in-scope`가 적용하는 include/exclude 경계와 같습니다.
 `scope:out`은 그 바깥을 고릅니다. 보통 항목이므로 부정할 수도, 괄호로 묶을 수도 있습니다:
 
 ```text
@@ -138,23 +137,21 @@ scope:out -host:cdn                   스코프 밖으로 새어 나간 트래�
 (scope:in OR host:staging.example.com) method:POST
 ```
 
-의도된 성질이 세 가지 있습니다.
+규칙이 세 가지 있습니다.
 
-- **`s` 렌즈가 켜졌는지와 무관합니다.** 필터 항목은 모드가 아니라 질문이므로 `scope:in`은 어느
-  쪽이든 같은 뜻입니다. (렌즈가 켜져 있으면 렌즈가 이미 같은 조건을 AND로 걸기 때문에
-  `scope:in`은 중복이 되고, `scope:out`은 아무것도 매치하지 않습니다. 렌즈가 스코프 밖의 행을
-  이미 모두 걸러냈기 때문입니다.)
-- **스코프 규칙이 하나도 없으면 두 표기 모두 아무것도 매치하지 않습니다.** 스코프 안에 든 것이
-  없으니 질문에 답이 없고, 그래서 묻지 않습니다. 특히 그 상태에서 `scope:out`은 "전체"를 뜻하지
-  **않습니다**. 같은 이유로, never-match를 부정한 `-scope:in`은 그 상태에서 `scope:out`과 같지
+- **`s` 렌즈가 켜졌는지와 무관합니다.** `scope:in`은 어느 쪽이든 같은 뜻입니다. 렌즈가 켜져
+  있으면 렌즈가 이미 같은 조건을 AND로 걸기 때문에 `scope:in`은 중복이 되고, 렌즈가 스코프 밖의
+  행을 이미 모두 걸러냈으므로 `scope:out`은 아무것도 매치하지 않습니다.
+- **스코프 규칙이 하나도 없으면 두 표기 모두 아무것도 매치하지 않습니다.** 그 상태에서
+  `scope:out`은 "전체"를 뜻하지 않고, never-match를 부정한 `-scope:in`도 `scope:out`과 같지
   않습니다. `ql_explain`은 `scope_rules_configured: false`와 경고를 함께 돌려주고,
-  `gori run history delete`는 답할 스코프가 없는 항목 하나로 프로젝트 히스토리를 지우지 않도록
-  스코프 쿼리를 아예 거부합니다.
+  `gori run history delete`는 스코프 쿼리를 거부하므로 답이 없는 항목 하나로 프로젝트 히스토리가
+  지워지지 않습니다.
 - **`scope:`는 플로우 단위입니다.** 그래서 Sitemap에서는 `gori run sitemap --in-scope`와 다릅니다.
   그쪽은 호스트 단위(트래픽 중 하나라도 스코프 안이면 그 호스트를 남김)이므로, `scope:in` 쿼리는
   호스트는 남기면서 그 호스트의 일부 엔드포인트만 떨어뜨릴 수 있습니다.
 
-캡처는 어느 쪽으로도 영향을 받지 않습니다. gori는 언제나 전부 기록하고, 이것은 쿼리가 돌려주는
+캡처에는 영향이 없습니다. gori는 전부 기록하고, `scope:`는 쿼리가 돌려주는
 범위만 좁힙니다.
 
 ## 상태 클래스 {#status-classes}
@@ -190,7 +187,7 @@ method~^P(OST|UT|ATCH)$                쓰기 메서드 전부를 한 항목으�
 ```
 
 그 외 필드(`status`, `size`, `dur`, `proto` 등)에는 정규식 형태가 없습니다. 그런 `~` 항목은
-텍스트로 검색되는 대신, 잘못된 숫자 값과 같은 방식으로 버려지고 보고됩니다.
+잘못된 숫자 값처럼 버려지고 보고되며, 텍스트로 검색되지 않습니다.
 
 
 ## WebSocket 메시지 {#websocket-messages}
@@ -206,18 +203,18 @@ ws:admin                               admin을 언급한 소켓은?
 proto:ws ws~(?i)token=[a-f0-9]{32}     아무 프레임에나 실린 토큰
 ```
 
-`ws:` 뒤에는 인덱스가 없어서 프로젝트의 모든 소켓 트랜스크립트를 훑습니다. 캡처 속도는 그대로이고,
-비용은 이 필드를 쓰는 쿼리가 치릅니다.
+`ws:` 뒤에는 인덱스가 없어서 프로젝트의 모든 소켓 트랜스크립트를 훑습니다. 캡처는 느려지지 않습니다.
+비용은 이 필드를 쓰는 쿼리만 치릅니다.
 
-플로우 **하나**의 트랜스크립트만 좁히려면, History의 MESSAGES 패널에서 `^F`로 검색한 뒤 스페이스
+플로우 하나의 트랜스크립트만 좁히려면, History의 MESSAGES 패널에서 `^F`로 검색한 뒤 스페이스
 메뉴의 **Narrow messages to ^F query**를 고르거나(다시 고르면 전체 표시), `gori run show <id>
 --ws-match=QUERY`, 또는 MCP `get_flow`의 `ws_query`를 씁니다. 모두 `ws:needle`, `ws~regex` 또는
-접두어 없는 needle을 받고, QL 필드와 똑같이 매칭하며, 각 표면이 평소 불러오는 범위보다 오래된
+접두어 없는 needle을 받고, QL 필드와 같이 매칭하며, 각 표면이 평소 불러오는 범위보다 오래된
 메시지까지 닿습니다.
 
 ## JSON-RPC 메서드 {#json-rpc-methods}
 
-`rpc:method`는 **요청** 본문이 그 메서드를 부르는 JSON-RPC 호출인 플로우와 매칭합니다. 값은
+`rpc:method`는 요청 본문이 그 메서드를 부르는 JSON-RPC 호출인 플로우와 매칭합니다. 값은
 대소문자를 구분하는 접두사라서 `rpc:tools/`는 MCP 도구 메서드 전부, `rpc:tools/call`은 호출만
 고릅니다. `body~`처럼 저장된 요청 바이트를 인덱스 없이 훑으므로, 압축된 요청 본문은 읽지 않고
 `params` 안에 중첩된 `"method"` 키도 걸립니다. 본문에 `"jsonrpc":"2.0"`이 있어야 하며, 값의 `/`는
@@ -238,7 +235,7 @@ show --format json`과 MCP `get_flow`의 `json_rpc` 키에서 봅니다.
 - 괄호로 묶을 수 있습니다. 우선순위는 `NOT`, `AND`, `OR` 순입니다.
 - `field:`가 없는 단순 단어는 method, host, target을 대상으로 하는 자유 텍스트 검색입니다.
 - 콜론을 빼먹은 비교 모양의 단어(`status>=400`, `host=api`)도 자유 텍스트로 남기 때문에 대개 아무것도 매치하지 않습니다. 이때 History·Sitemap의 빈 화면, `gori run history`, MCP `ql_explain`이 콜론 형태(`status:>=400`)를 알려 줍니다. 따옴표로 묶거나 부정한 단어는 의도한 것으로 봅니다.
-- 존재하지 않는 `field:` 이름은 자유 텍스트가 아니라 오타로 봅니다. `gori run history`, `gori run sitemap`(과 그 `params`, `js`, `export` 동사), `gori run probe`, `gori run diff`, `gori run authorize`는 이를 **거절**하고 가장 가까운 실제 필드를 알려준 뒤 0이 아닌 코드로 종료하며, MCP 쿼리 툴은 `QUERY_SYNTAX`로 거절합니다. `--lenient`(MCP `lenient:true`)를 주면 그 토큰을 텍스트로 검색합니다(예전에 모든 표면이 조용히 하던 동작으로, `methd:GET`은 아무것도 매칭하지 않아 프로젝트가 비어 보였습니다). TUI 필터 바는 타이핑 중인 이름을 그대로 받습니다.
+- 존재하지 않는 `field:` 이름은 자유 텍스트가 아니라 오타로 봅니다. `gori run history`, `gori run sitemap`(과 그 `params`, `js`, `export` 동사), `gori run probe`, `gori run diff`, `gori run authorize`는 이를 **거절**하고 가장 가까운 실제 필드를 알려준 뒤 0이 아닌 코드로 종료합니다. MCP 쿼리 툴은 `QUERY_SYNTAX`로 거절합니다. `--lenient`(MCP `lenient:true`)를 주면 그 토큰을 텍스트로 검색합니다(예전에 모든 표면이 조용히 하던 동작으로, `methd:GET`은 아무것도 매칭하지 않아 프로젝트가 비어 보였습니다). TUI 필터 바는 타이핑 중인 이름을 그대로 받습니다.
 
 ```text
 host:example.com status:5xx           둘 다 매칭되어야 함
@@ -270,7 +267,7 @@ host:"my host"                        공백까지 포함한 하나의 host 값
 
 ## 적용 범위 {#where-it-applies}
 
-모든 필터 바가 위 불리언 문법(`AND`/`OR`/`NOT`, `-`, 괄호, 따옴표)을 공유합니다. 플로우 바(History, Sitemap, 컬러 규칙, Intercept)는 비교와 `~` 정규식도 공유합니다. 나머지 바는 `severity`와 `cvss`(아래)만 비교하고 `~`는 아예 없습니다(거기서 `~` 항목은 자유 텍스트입니다). 그 밖에 다른 것은 필드 집합뿐이고, 그것도 각 화면이 서로 다른 종류의 행을 거르기 때문입니다.
+모든 필터 바가 위 불리언 문법(`AND`/`OR`/`NOT`, `-`, 괄호, 따옴표)을 공유합니다. 플로우 바(History, Sitemap, 컬러 규칙, Intercept)는 비교와 `~` 정규식도 공유합니다. 나머지 바는 `severity`와 `cvss`(아래)만 비교하고 `~`는 없습니다(거기서 `~` 항목은 자유 텍스트입니다). 그 밖에는 각 화면이 서로 다른 종류의 행을 거르므로 필드 집합만 다릅니다.
 
 | 화면 | 필드 |
 |------|------|
@@ -284,7 +281,7 @@ host:"my host"                        공백까지 포함한 하나의 host 값
 | Evidence 탭 | `issue`, `host`, `method`, `status`, `confirmation`(`confirm`), `source`(`src`), `date` |
 
 홀드 게이트와 Extract 규칙 조건은 캡처되기 전의 흐르는 메시지 하나를 평가하므로, 그 메시지가
-답할 수 없는 History 필드는 추측하지 않고 거부합니다. `scope:`(프로젝트의 스코프 규칙은 메시지의
+답할 수 없는 History 필드는 거부합니다. `scope:`(프로젝트의 스코프 규칙은 메시지의
 일부가 아님), `size:`·`reqsize:`·`respsize:`·`dur:`(교환이 아직 끝나지 않음), `stub:`·`rewritten:`·`static:`·
 `src:`·`via:`·`cache:`·`rpc:`·`ws:`(게이트가 쥔 것은 트랜스크립트가 아니라 메시지 하나이고, 그 `body:`가 이미
 그 메시지를 뜻함), 그리고 한쪽 방향만 보는 `req.`/`resp.` 표기가 그렇습니다. 거부된 필드를 대신
@@ -306,15 +303,15 @@ Intercept 바와 컬러 규칙 바 모두 입력하는 동안 필드 이름과 �
 
 ### 요청·응답 본문 문자열 매칭 {#matching-request-and-response-content}
 
-`header:`와 `body:`는 메시지의 바이트를 뒤집니다. 따라서 어디서 동작하는지는 필터를 물어보는 그 시점에 **어떤 바이트가 존재하는가**로 정해집니다.
+`header:`와 `body:`는 메시지의 바이트를 검색하므로, 필터가 실행되는 시점에 그 바이트가 있는 곳에서만 동작합니다.
 
 - **History, Sitemap, 컬러 규칙**은 이미 캡처된 플로우를 봅니다. 그래서 두 필드 모두 요청·응답 양쪽에서 항상 동작합니다.
-- **Intercept와 Extract 규칙 조건**은 흐르는 중인 메시지를 봅니다. `header:`는 HTTP 요청·응답 게이트와 Extract 규칙 조건에서 동작하고, 홀드된 WebSocket 메시지에서는 동작하지 않습니다. WebSocket 메시지에는 자기 헤드가 없기 때문입니다. `body:`는 페이로드가 손에 있는 경우(홀드된 **WebSocket 메시지**와 **Extract 규칙** 조건)에서 동작하고, HTTP 홀드 게이트에서는 동작하지 않습니다. 그 게이트가 바로 본문을 버퍼링할지 말지를 결정하는 지점이기 때문입니다.
+- **Intercept와 Extract 규칙 조건**은 흐르는 중인 메시지를 봅니다. `header:`는 HTTP 요청·응답 게이트와 Extract 규칙 조건에서 동작하고, 홀드된 WebSocket 메시지에서는 동작하지 않습니다. WebSocket 메시지에는 자기 헤드가 없기 때문입니다. `body:`는 페이로드가 손에 있는 경우(홀드된 WebSocket 메시지와 Extract 규칙 조건)에서 동작하고, HTTP 홀드 게이트에서는 동작하지 않습니다. 그 게이트가 본문을 버퍼링할지 결정하기 때문입니다.
 
-규칙을 쓰기 전에 알아둘, 의도된 차이가 하나 있습니다.
+쿼리와 컬러 규칙은 `body:`를 다르게 읽습니다.
 
 - **쿼리**에서 `body:`는 트라이그램 인덱스를 읽습니다. 빠르지만 각 방향 첫 8 KiB로 제한되고 바이너리·압축 본문은 건너뜁니다. `body~정규식`은 대신 저장된 바이트를 그대로 훑고 제한이 없습니다.
-- **컬러 규칙**에서 `body:`는 항상 훑고, 각 방향 첫 64 KiB를 읽습니다. 인덱싱은 캡처 이후에 일어나는데 규칙은 방금 도착한 행을 칠해야 하니 훑는 것 말고는 정답이 없고, 64 KiB 한계는 큰 본문 한 화면이 목록을 멈춰 세우지 않게 하는 장치입니다. 그래서 컬러 규칙은 똑같은 쿼리가 목록에 못 띄우는 행도 칠하지만, 64 KiB를 넘어가는 매치는 칠하지 않습니다.
+- **컬러 규칙**에서 `body:`는 항상 훑고, 각 방향 첫 64 KiB를 읽습니다. 인덱싱은 캡처 이후에 일어나고 규칙은 행이 도착할 때 칠하므로 훑어야 합니다. 64 KiB 한계는 큰 본문이 가득한 화면에서 목록이 멈추지 않게 합니다. 그래서 컬러 규칙은 똑같은 쿼리가 목록에 못 띄우는 행도 칠하지만, 64 KiB를 넘어가는 매치는 칠하지 않습니다.
 
 모든 화면의 `body:`는 **와이어에 흐른 그대로의 바이트**를 읽습니다. 그래서 어느 것도 gzip 본문 안의 문자열은 찾지 못합니다. Extract 규칙 조건도 마찬가지입니다. 조건은 응답을 디코드하기 *전에* 평가되고, 압축 해제된 텍스트를 보는 것은 그 뒤에 이어지는 추출뿐입니다. 압축된 내용을 걸러야 한다면 그 바깥을 거세요: 헤더, 경로, 또는 응답 크기.
 

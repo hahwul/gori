@@ -28,7 +28,7 @@ gori mark itself, a ring, painted in whatever the
 live theme calls its brand gold.
 
 Getting her into a terminal meant giving all of that up except the ring and five
-glyphs. This is the whole sprite, and what your terminal actually paints:
+glyphs. This is the whole sprite, as your terminal paints it:
 
 <pre class="sprite"><code class="nohighlight"> ▄▀▀▀▄
 ▐´●u●`▌
@@ -59,7 +59,7 @@ profile lands on 6.0 / 5.0 / 3.0.
 but a stub in the column beside it ends at that column's edge, half a cell
 short, with nothing able to bridge the gap. Closing it would mean making the
 wall a full block, which pushes the equator back out to seven cells and loses
-the circle. So Miss Ring has no arms, and the badge column carries mood instead.
+the circle. Miss Ring has no arms, and the badge column carries mood instead.
 
 | Glyph | Codepoint | Job |
 |-------|-----------|-----|
@@ -71,8 +71,8 @@ the circle. So Miss Ring has no arms, and the badge column carries mood instead.
 | `` ` `` | U+0060 GRAVE ACCENT | A lash rising to the left |
 
 The mouth is spelled with `u`, `o`, `_`, `·` or `n`, and never with a cup like
-`˘` or `ᴗ`. A combining-style mark is drawn at cap height, which is exactly
-where the lashes are, so it would put the mouth *above* the eyes; and `ᴗ`, which
+`˘` or `ᴗ`. A combining-style mark is drawn at cap height, which is
+where the lashes are, so it would put the mouth *above* the eyes. `ᴗ`, which
 sits at the right height, is missing from most monospace fonts and falls through
 to a proportional face or a box. `u` is the same cup, at the same height, in
 every monospace font there is.
@@ -95,10 +95,9 @@ read the bar before it read the ring.
 ## Poses {#poses}
 
 The five cells inside the ring are the whole of an expression: two brows, two
-eyes and a mouth. The eyes say what she is doing; the brows say how she feels
+eyes and a mouth. The eyes say what she is doing. The brows say how she feels
 about it. Both lashes lean inward for the open resting face, both turn over for
-the furrowed one, and one at a time for the quizzical one: same two glyphs,
-opposite character.
+the furrowed one, and one at a time for the quizzical one.
 
 | Pose | Face | When it plays |
 |------|------|---------------|
@@ -150,7 +149,7 @@ could not fit into a face:
 </figure>
 
 Two placements. `body` puts the full 8 × 3 sprite in the bottom-right corner of
-the tab body, with room above her for a speech bubble; clicking her opens the
+the tab body, with room above her for a speech bubble. Clicking her opens the
 notification ring. `bar` folds her into an eight-cell chip in the status row:
 the middle row plus the badge borrowed from the cell above it, which is why
 every idle gesture lives in the face and not in the glint. Resting, a failure,
@@ -160,4 +159,4 @@ and dozing:
 ▐`×_×´▌×
 ▐´~·~`▌z</code></pre>
 
-When she blinks, how often she moves and whether she speaks at all are in the [Settings guide](/guide/settings/).
+When she blinks, how often she moves and whether she speaks are in the [Settings guide](/guide/settings/).

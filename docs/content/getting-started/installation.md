@@ -20,7 +20,7 @@ Installs under `/usr/local` when writable, otherwise `~/.local`. Override with `
 
 The installer asks the GitHub API which release is latest, and that API allows only **60 unauthenticated requests per hour per IP**, so behind shared CI or NAT egress it can answer `403`. Both the installer and `gori update` fall back to the rate-limit-free release redirect automatically, so they keep working; you should see a line like `resolved v0.9.3 via ... (no API call)`.
 
-To use the authenticated 5000/hour limit instead, export a token first. It has to be exported rather than prefixed onto `curl`, because the script runs in the piped `bash`, which would not inherit a `curl`-scoped variable:
+To use the authenticated 5000/hour limit, export a token first. Prefixing it onto `curl` does not work, because the script runs in the piped `bash`, which does not inherit a `curl`-scoped variable:
 
 ```bash
 export GITHUB_TOKEN=<personal access token>
@@ -62,7 +62,7 @@ Works on **macOS** (Apple Silicon & Intel) and **Linux** (x86_64 & arm64):
 brew install hahwul/gori/gori
 ```
 
-That is shorthand for tapping first, which you can also do explicitly:
+It is shorthand for tapping first:
 
 ```bash
 brew tap hahwul/gori
@@ -131,7 +131,7 @@ Or pin it as an input to a NixOS / home-manager configuration:
 }
 ```
 
-Unlike the other channels this one **builds from source**. nixpkgs is still a Crystal release behind what gori needs, so the flake pins its own compiler and a cold build compiles that too: several minutes, cached from then on. Brotli and Zstd decoding are included, and nothing else is needed on the host.
+Unlike the other channels this one builds from source. nixpkgs is still a Crystal release behind what gori needs, so the flake pins its own compiler and a cold build compiles that too. That takes several minutes and is cached from then on. Brotli and Zstd decoding are included, and nothing else is needed on the host.
 
 Covers Linux (x86_64 and arm64) and Apple Silicon macOS. nixpkgs has dropped Intel macOS, so on those machines use [Homebrew](#homebrew) or a [pre-built binary](#pre-built-binary).
 
@@ -177,7 +177,7 @@ container run --rm -it \
   ghcr.io/hahwul/gori --listen 0.0.0.0
 ```
 
-Every container also gets its own IP on the host's `vmnet` network, so publishing a port is optional: `container ls` prints the address, and pointing your client's proxy straight at `<ip>:8070` works just as well.
+Every container also gets its own IP on the host's `vmnet` network, so publishing a port is optional. `container ls` prints the address, and you can point your client's proxy at `<ip>:8070`.
 
 `container build -f packaging/docker/Dockerfile -t gori:dev .` builds the image from source, and reads `packaging/docker/Dockerfile.dockerignore`. It only looks for an ignore list next to the Dockerfile, so unlike BuildKit it never falls back to a `.dockerignore` at the context root. The builder runs in its own VM, which does not inherit the host's `HTTP_PROXY` and defaults to 2 CPUs and 2 GB (`container builder status`). A `--release` build of gori runs well over an hour at that size, so give it more first:
 
@@ -265,7 +265,7 @@ cp bin/gori /usr/local/bin/
 
 ### Building without Brotli / Zstd
 
-If those libraries are unavailable, build without them. Gzip and deflate decoding (from the Crystal standard library) keep working; Brotli and Zstd bodies show a "decoder not built in" note instead of decoded text:
+If those libraries are unavailable, build without them. Gzip and deflate decoding (from the Crystal standard library) keep working. Brotli and Zstd bodies show a "decoder not built in" note:
 
 ```bash
 shards build --release -Dwithout_native_codecs
@@ -302,4 +302,4 @@ shards run gori
 
 ## Next Steps
 
-You're ready to capture traffic. Head to the [Quick Start](/getting-started/quick-start/).
+Capture your first traffic in the [Quick Start](/getting-started/quick-start/).

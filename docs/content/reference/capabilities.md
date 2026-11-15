@@ -12,10 +12,10 @@ MCP tool, though.
 ## Protocols and operations
 
 Where support is partial, the cell names the boundary. Replay and fuzz are gori-originated
-requests and pass through the same outbound gate on every surface: the Sandbox stops both, an
-explicit exclude rule stops a fuzz sweep but not a hand-made replay (as on the proxy path), and
-only the up-front scope check differs by surface (MCP refuses an out-of-scope target, `gori run`
-does once the project has a scope, and the TUI does not ask).
+requests and pass through the same outbound gate on every surface. The Sandbox stops both. An
+explicit exclude rule stops a fuzz sweep but not a hand-made replay, as on the proxy path. Only the
+up-front scope check differs by surface: MCP refuses an out-of-scope target, `gori run` does
+once the project has a scope, and the TUI does not ask.
 
 | Protocol | Capture | Intercept | Replay | Fuzz |
 |----------|---------|-----------|--------|------|
@@ -47,8 +47,7 @@ byte-exact after the cap and the flow reports both captured and wire sizes.
 
 The exact command and tool inventories live in the [CLI reference](/reference/cli/) and
 [MCP guide](/guide/mcp/). MCP starts without a listener and normally attaches to an existing
-project; `--read-only` removes mutation and live-request tools as another deliberate surface
-difference.
+project. `--read-only` removes mutation and live-request tools.
 
 ## Current boundaries
 
@@ -61,15 +60,15 @@ difference.
   messages are HTTP/1.1 only: both would have to reframe a DATA payload to a different length,
   which deadlocks against the peer's flow-control window. Replay dials h2, waits for the
   origin's `SETTINGS_ENABLE_CONNECT_PROTOCOL`, and treats the `2xx` (not a `101`) as the
-  socket opening; an origin that does not advertise the setting is a refusal naming it rather
-  than an empty transcript.
+  socket opening. An origin that does not advertise the setting gets a refusal that names it,
+  not an empty transcript.
 - **HTTP/3 is outside the proxy.** `network.strip_alt_svc` can remove response fields advertising
   h3, but cannot intercept QUIC or a route learned from DNS.
 - **An upstream `https://` spelling is legacy, not TLS to the proxy.** Bare `host:port`,
   `http://…`, and `https://…` currently all mean a plaintext HTTP CONNECT proxy in
   `network.upstream_proxy` and a project pin (only in `HTTPS_PROXY` and its siblings does
   `https://` mean TLS to the proxy). Origin HTTPS still runs inside that tunnel. `http+tls://…` is the spelling that wraps the hop to the proxy
-  itself in TLS; `socks5://` and `socks5h://` select SOCKS instead.
+  itself in TLS. `socks5://` and `socks5h://` select SOCKS.
 - **TLS fingerprint presets are approximations.** They control the value-level ClientHello
   fields OpenSSL exposes, but not extension order or GREASE placement, so they do not promise a
   byte-exact browser JA3/JA4 match.

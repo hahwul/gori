@@ -7,13 +7,13 @@ weight = 55
 group = "Workbenches"
 +++
 
-You browsed the app as one user, and every page worked. That proves very little. The real question is what happens when someone *else* asks for the same thing: a user with fewer rights, a user from another account, or someone who is not logged in at all. This playbook sets up those people as identities, replays your captured requests as each of them, and reads which requests came back the same when they should not have. Budget about fifteen minutes.
+Browsing the app as one user shows that the pages work. Access-control bugs show up when someone *else* asks for the same thing: a user with fewer rights, a user from another account, or someone who is not logged in. This playbook sets up those people as identities, replays your captured requests as each of them, and reads which requests came back the same when they should not have. Budget about fifteen minutes.
 
 > **Before you begin.** [Set up an engagement](/playbooks/set-up-an-engagement/) so your target is scoped, and get two test accounts from whoever authorized the test: one with more rights than the other. [Carry a session](/playbooks/carry-a-session/) explains session slots in more depth, but you do not need it first. Only test a target you are authorized to test; the examples use `api.example.com` as a stand-in.
 
 ## 1. Browse as the stronger user
 
-Log in as the account with more rights (an admin, or the owner of some data) and use the app normally through gori. Open the pages, list the records, view a single record, change a setting. Every request you make now is one you can replay later as someone else, so the more of the app you touch, the more you get to test.
+Log in as the account with more rights (an admin, or the owner of some data) and use the app normally through gori. Open the pages, list the records, view a single record, change a setting. Every request you make now can be replayed later as someone else, so touch as much of the app as you can.
 
 Watch for requests that carry an id or name a resource: `/orders/1042`, `/api/users/7/profile`, `?account=acme`. Those are where access-control bugs usually live.
 
@@ -21,7 +21,7 @@ Watch for requests that carry an id or name a resource: `/orders/1042`, `/api/us
 
 ## 2. Make an identity for the weaker user
 
-An identity is a set of header changes gori applies before it replays a request. A new project already has two: **as-captured**, which sends the request exactly as you captured it, and **anonymous**, which removes `Cookie` and `Authorization`. You only need to add the weaker user.
+An identity is a set of header changes gori applies before it replays a request. A new project already has two: **as-captured**, which sends the request as you captured it, and **anonymous**, which removes `Cookie` and `Authorization`. You only need to add the weaker user.
 
 The quickest way is to let gori read a login. Log in as the weaker account through gori in a second browser or a private window, find that login in History, and build a slot from it. Do not log the admin out to do this: on most apps that kills the session cookie your captured requests carry, and every replay would start from a dead session.
 
@@ -49,7 +49,7 @@ gori run authorize 12 13 14
 gori run authorize --query 'host:api.example.com method:GET status:200' --limit 20
 ```
 
-By default only `GET`, `HEAD` and `OPTIONS` are replayed headless. A replayed `POST` or `DELETE` does its job again, once for every identity, so gori skips those unless you pass `--unsafe-methods`. Only do that on a test account where running the action again is harmless. In the TUI, a request you queued by hand is replayed whatever its method, because you chose it.
+By default only `GET`, `HEAD` and `OPTIONS` are replayed headless. A replayed `POST` or `DELETE` does its job again, once for every identity, so gori skips those unless you pass `--unsafe-methods`. Only do that on a test account where running the action again is harmless. In the TUI, a request you queued by hand is replayed whatever its method.
 
 **Checkpoint.** Every queued row has a verdict, and `⇥` shows how each identity answered.
 
@@ -64,7 +64,7 @@ Each identity's answer is compared with the baseline on status, size and content
 | `review` | Close but not the same. Look at it yourself |
 | `error` | The request failed. Nothing was compared |
 
-A request row reads **BYPASS** when any identity came back `same`. That is a lead, not a finding yet. `same` for `anonymous` on `/admin/users` is a real problem. `same` for `low-priv` on a page every user is allowed to see is fine. gori can compare the answers, but only you know who is supposed to see what.
+A request row reads **BYPASS** when any identity came back `same`. Treat it as a lead. `same` for `anonymous` on `/admin/users` is a real problem. `same` for `low-priv` on a page every user is allowed to see is fine. gori compares the answers. Deciding who is supposed to see what is up to you.
 
 If almost every row reads `review`, check the baseline first. When the admin's own replay comes back `401` or `403`, the captured session has expired and there is nothing to compare against. Log in as the admin again, capture fresh requests, and rerun.
 
@@ -89,7 +89,7 @@ Before you write anything up, prove it once by hand. Send the request to the **R
 gori run repeater <flow-id> --slot low-priv
 ```
 
-Check that the response really holds the admin's data, not an empty shell or a cached page. For an id in the path, try a record that belongs to another user, too. A bug that lets user A read user B's order is worth more than one that shows A their own.
+Check that the response holds the admin's data and is not an empty shell or a cached page. For an id in the path, try a record that belongs to another user, too. A bug that lets user A read user B's order is worth more than one that shows A their own.
 
 **Checkpoint.** A Repeater send as `low-priv` returns data that user should not see.
 
@@ -106,13 +106,13 @@ gori run issues create --title "Low-privilege user can list all users" \
 
 ## When nothing comes back
 
-An empty result is not always good news. gori tells you when it skipped a request instead of quietly sending less:
+An empty result is not always good news. gori tells you which requests it skipped and why:
 
 - **no identity changes them**: the request carries no header any identity changes, so every identity would send the same bytes. The endpoint probably authenticates in a header you did not cover (`X-Api-Key`, for example). Add an identity that sets or removes it.
 - **not a safe method to repeat**: see step 3.
 - **outside project scope**: add the host to the scope.
 
-If every send was refused or failed, the run says nothing was sent. It never reports that as "access control held". And `enforced` only covers the identities and requests you tried. An endpoint you never browsed is untested, not safe.
+If every send was refused or failed, the run says nothing was sent. That is never reported as "access control held". `enforced` covers only the identities and requests you tried. An endpoint you never browsed is untested, not safe.
 
 ## Next Steps
 

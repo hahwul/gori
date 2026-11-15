@@ -6,11 +6,11 @@ weight = 20
 
 ## Choose a path {#topics}
 
-New to gori? Run the [Quick Start](/getting-started/quick-start/) first. When you want a task-led walkthrough that crosses several tools, open the [field guide](/playbooks/); use the guides here to understand one part of the workbench in depth.
+New to gori? Run the [Quick Start](/getting-started/quick-start/) first. When you want a task-led walkthrough that crosses several tools, open the [field guide](/playbooks/). The guides here cover one part of the workbench in depth.
 
 ## The Interface at a Glance
 
-gori is organized into tabs; move between them with `[` / `]` or jump with number keys. Two keys reach every action: `Space` opens the **space menu** (what you do most in the focused pane, one letter each), and `Ctrl-P` opens the **command palette** (any action, by typing its name). [Space Menu & Palette](/guide/space-menu-and-palette/) teaches both; Day-1 chords live in the [Quick Start](/getting-started/quick-start/).
+gori is organized into tabs; move between them with `[` / `]` or jump with number keys. Two keys reach every action: `Space` opens the **space menu** (what you do most in the focused pane, one letter each), and `Ctrl-P` opens the **command palette** (any action, by typing its name). [Space Menu & Palette](/guide/space-menu-and-palette/) teaches both. Day-1 chords are in the [Quick Start](/getting-started/quick-start/).
 
 | Tab | Purpose |
 |-----|---------|
@@ -36,26 +36,26 @@ gori is organized into tabs; move between them with `[` / `]` or jump with numbe
 | **Notes** | Per-project Markdown notes |
 | **Help** | Key bindings and links (behind `0`; `?` from anywhere opens its key sheet as a popup) |
 
-The tab bar is **nine numbered slots**, and a fresh install fills them with the loop you
-actually work in:
+The tab bar has nine numbered slots. A fresh install fills them with the tabs you work in
+most:
 
 ```text
 1:Project  2:Target  3:History  4:Intercept  5:Repeater  6:Fuzzer  7:Probe  8:Issues  9:Notes   0:Tabs
 ```
 
 Press `1`-`9` to jump to a slot and **`0`** to reach any of the other twelve through a
-type-to-filter list of the whole catalog. The tabs behind `0` are the ones you reach *for* rather than live
-in (OAST, Decoder, JWT, Comparer, Rewriter) plus the specialised workbenches (Miner,
+type-to-filter list of the catalog. Behind `0` are the tabs you open now and then
+(OAST, Decoder, JWT, Comparer, Rewriter), plus the specialised workbenches (Miner,
 Sequencer, Cookie, Colormarker, Authorize) and Help, whose key sheet `?` opens as a popup from anywhere.
 **Evidence** is behind `0` as well and is only offered once the project holds its first frozen
-snapshot, since there is nothing to archive before that.
+snapshot.
 
 Rearrange the nine in Preferences (`Ctrl-,`) → **Network & Tabs** → **Tabs**, or
-`settings:tabs` in the palette. **The list is the bar**: the rows above the seam are the nine
+`settings:tabs` in the palette. The rows above the seam are the nine
 slots in order, everything below it is what `0` reaches, and the slot numbers renumber as you
 go. `⇧K`/`⇧J` move a row. Moving one up across the seam puts that tab on the bar and pushes the
-last slot off, so rearranging *is* choosing. `space` sends a row straight across. (If you would rather have the old
-unbounded bar, turn off **Display → Tab bar slots**; `0` keeps working either way.)
+last slot off. `space` sends a row straight across. For the old
+unbounded bar, turn off **Display → Tab bar slots**. `0` keeps working either way.
 
 Global lenses that are not tabs: **capture** (`c`), **intercept** (`i`), and the **scope
 lens** (`s`) toggle from anywhere.
