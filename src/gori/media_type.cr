@@ -130,6 +130,16 @@ module Gori
       !!essence(value).try(&.starts_with?("multipart/"))
     end
 
+    # A server push that replaces its own previous part and never ends (an MJPEG feed). Exact,
+    # because the proxy reads this to decide a response must not be buffered. The byte test
+    # comes first because the proxy asks this of every chunked response it streams, and
+    # `essence` builds three strings (P6, the same reason `Sse.sse?` has one).
+    def mixed_replace?(value : String?) : Bool
+      v = value || return false
+      AsciiBytes.contains_ci?(v.to_slice, "mixed-replace".to_slice) &&
+        essence(v) == "multipart/x-mixed-replace"
+    end
+
     # `boundary=…` off a multipart Content-Type, quoted or bare. The parameter NAME is
     # case-insensitive; its VALUE is not.
     BOUNDARY_RE = /boundary\s*=\s*(?:"([^"]*)"|([^;\s]+))/i

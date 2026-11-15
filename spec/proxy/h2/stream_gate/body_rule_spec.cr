@@ -349,6 +349,22 @@ describe "H2::StreamGate body rules (#1628)" do
     end
   end
 
+  it "leaves a multipart/x-mixed-replace push streaming" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "SECRET", "", host: "127.0.0.1")
+      rig = BodyRig.new(rules, ic) do |_, _|
+        {ok(type: "multipart/x-mixed-replace; boundary=frame"), "SECRET".to_slice, nil}
+      end
+      begin
+        rig.client.send(1_u32, post("/x", 1), "q".to_slice)
+        rig.client.wait_done(1_u32).should be_true
+        rig.client.body_of(1_u32).should eq("SECRET")
+      ensure
+        rig.close
+      end
+    end
+  end
+
   it "leaves a compressed body alone and says so on the flow" do
     with_rules do |rules, ic|
       rules.add(REQ, BODY, "a", "b", host: "127.0.0.1")
