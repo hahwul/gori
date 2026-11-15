@@ -28,7 +28,7 @@ module Gori
           return unless ctx.response
           # An introspection result is JSON (some servers label it application/graphql-response
           # +json); gate on a JSON-ish content type to skip HTML/text bodies. Unknown → allow.
-          ct = ctx.content_type.try(&.downcase)
+          ct = ctx.ct_low
           return unless ct.nil? || ct.includes?("json") || ct.includes?("graphql")
           text = ctx.body_text
           return if text.nil? || text.empty?

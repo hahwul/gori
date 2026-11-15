@@ -444,13 +444,28 @@ describe "Gori::Probe::Passive (FP reduction)" do
     end
   end
 
-  it "rates a wildcard CORS with credentials Medium (the combination is browser-rejected, not High)" do
+  it "keeps wildcard CORS informational with or without credentials" do
     with_store do |store|
+      [nil, "Access-Control-Allow-Credentials: true\r\n"].each do |credentials|
+        response = "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\n#{credentials}\r\n"
+        dets = probe_analyze(store, resp_head: response, content_type: nil)
+        hit = dets.find(&.code.==("cors_wildcard")).not_nil!
+        hit.severity.should eq(Gori::Store::Severity::Info)
+      end
+    end
+  end
+
+  it "applies document checks to XHTML and extracts its inline scripts" do
+    with_store do |store|
+      body = "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><script>" \
+             "document.body.innerHTML = location.hash;" \
+             "</script></body></html>"
       dets = probe_analyze(store,
-        resp_head: "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\n" \
-                   "Access-Control-Allow-Credentials: true\r\n\r\n", content_type: nil)
-      hit = dets.find(&.code.==("cors_wildcard")).not_nil!
-      hit.severity.should eq(Gori::Store::Severity::Medium)
+        resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/xhtml+xml; charset=utf-8\r\n\r\n",
+        content_type: "application/xhtml+xml; charset=utf-8", body: body)
+      codes = probe_codes_of(dets)
+      codes.should contain("missing_csp")
+      codes.should contain("dom_xss")
     end
   end
 

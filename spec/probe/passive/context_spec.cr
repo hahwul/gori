@@ -30,6 +30,18 @@ private DOC = <<-HTML
   HTML
 
 describe Gori::Probe::Passive::Context do
+  describe "#html?" do
+    it "recognizes exact HTML and XHTML media types, including parameters" do
+      ctx_for("<html/>".to_slice, "text/html; charset=utf-8", HTML_HEAD).html?.should be_true
+      ctx_for("<html/>".to_slice, "application/xhtml+xml; charset=utf-8",
+        "HTTP/1.1 200 OK\r\nContent-Type: application/xhtml+xml; charset=utf-8\r\n\r\n").html?.should be_true
+    end
+
+    it "does not treat an unrelated media type containing an HTML substring as a document" do
+      ctx_for("<html/>".to_slice, "application/example; note=text/html", HTML_HEAD).html?.should be_false
+    end
+  end
+
   describe "#body_text" do
     # The repair moved from a bare `String#scrub` to `Utf8.text`, which asks the cheap
     # `valid_encoding?` question first and only scrubs what actually needs it. Every rule then

@@ -22,11 +22,11 @@ module Gori
           acao = acao_all.first.strip
           creds = allows_credentials?(resp)
           if acao == "*"
-            # `*` + Allow-Credentials is REJECTED by browsers (the credentialed request fails),
-            # so the combination is a non-functional misconfiguration — NOT more exploitable than
-            # a bare wildcard. Keep it Medium and say so, rather than inflating to High.
+            # `*` shares data only with requests that omit credentials; with credentials it is
+            # rejected. That is useful policy context, but by itself does not show exposure of
+            # user-specific data, so keep it informational until a sensitive response is proven.
             acc << cors(ctx, "cors_wildcard", "Permissive CORS (Access-Control-Allow-Origin: *)",
-              Store::Severity::Medium, creds ? "with credentials (browser-rejected combination)" : nil)
+              Store::Severity::Info, creds ? "with credentials (browser-rejected combination)" : nil)
           elsif acao == "null"
             sev = creds ? Store::Severity::High : Store::Severity::Medium
             acc << cors(ctx, "cors_null_origin", "CORS allows the null origin",
