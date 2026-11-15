@@ -824,7 +824,7 @@ gori는 직접 접속하는 대신 다른 프록시를 거쳐 나갈 수 있습�
 
 gori는 가능한 곳에서는 커널에서 목적지를 복구합니다(Linux는 `SO_ORIGINAL_DST`, macOS는 root가 필요한 `pf` 조회). 그 답이 어느 기계에 연결될지를 정합니다. 인증서에 쓰이고, 스코프가 매칭하고, History에 보이는 이름은 여전히 클라이언트의 `Host` 헤더나 TLS SNI에서 옵니다. 커널이 답하지 못하는 곳에서는 그 이름이 목적지 역할까지 합니다. 어느 출처가 정했는지는 로그에 남습니다.
 
-`settings.json`의 `listeners`에 추가하고 `iptables` / `pf`를 그쪽으로 향하게 하면 됩니다. 설정 키와 리다이렉트 규칙은 [`listeners` 레퍼런스](/ko/reference/config/#listeners)를 참고하세요. 캡처되는 플로우, 스코프, 샌드박스, passthrough 목록 모두 일반 프록시 경로와 같이 동작합니다.
+`settings.json`의 `listeners`에 추가하고 `iptables` / `pf`를 그쪽으로 향하게 하면 됩니다. 설정 키와 리다이렉트 규칙은 [`listeners` 레퍼런스](/ko/reference/config/#listeners)를 참고하세요. 리다이렉트는 TCP만 잡으므로 UDP 443도 함께 막아야 합니다. 그러지 않으면 HTTP/3 클라이언트가 gori를 비켜 갑니다. 캡처되는 플로우, 스코프, 샌드박스, passthrough 목록 모두 일반 프록시 경로와 같이 동작합니다.
 
 인증서는 여전히 클라이언트에서 신뢰해야 합니다. 투명 모드가 없애 주는 것은 프록시 *설정*이지 gori CA의 필요성이 아닙니다.
 

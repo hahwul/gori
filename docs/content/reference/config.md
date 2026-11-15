@@ -203,6 +203,14 @@ iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-port 8443
 
 On macOS, an equivalent `pf` `rdr` rule.
 
+**These rules catch TCP only, and HTTP/3 is UDP.** A client that speaks HTTP/3 sends QUIC to UDP port 443. No rule above redirects it and no gori listener reads it, so those requests reach the origin and never appear in History. Reject UDP 443 for the same traffic and the client falls back to TCP:
+
+```bash
+iptables -A OUTPUT -p udp --dport 443 -j REJECT
+```
+
+On macOS, `block return out proto udp from any to any port 443` in `pf`. [`strip_alt_svc`](#strip-alt-svc) removes the header that advertises HTTP/3. This rule covers a client that already has a route, from a cached `Alt-Svc` or a DNS `HTTPS` record.
+
 **Why `target_port` is still here.** The kernel lookup does not always answer. There is no mechanism outside Linux and macOS, macOS needs root, and a connection made straight to the listener with no redirect in front of it has nothing to recover. `target_port` is the fallback for those cases. Set it to the port the redirect rule caught, so the listener taking redirected `:443` traffic sets `target_port: 443`. When the kernel does answer, `target_port` is not consulted.
 
 **When the kernel does not answer.** The name is resolved through DNS, so a client that lies in `Host` (or offers a misleading SNI) steers the upstream dial to a host of its choosing, and `target_port` decides the port. That is the case on any platform without a mechanism, on macOS without root, and for a connection that reached the listener without a redirect in front of it. The log line says which source decided. If the client must not influence the destination, use [reverse mode](#reverse-mode). It declares the destination and consults nothing the client sent, on every platform and without root.

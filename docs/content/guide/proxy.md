@@ -825,7 +825,7 @@ Some clients ignore proxy settings: embedded devices, statically-linked binaries
 
 gori recovers the destination from the kernel where it can (`SO_ORIGINAL_DST` on Linux, a `pf` lookup on macOS, which needs root). That answer decides which machine the connection reaches. The client's `Host` header or TLS SNI still supplies the name the certificate is minted for, that scope matches, and that History shows. Where the kernel cannot answer, the name is resolved as the destination too. The log says which source decided.
 
-Add it under `listeners` in `settings.json` and point `iptables` / `pf` at it. See the [`listeners` reference](/reference/config/#listeners) for the config keys and the redirect rules. Captured flows, scope, the Sandbox and the passthrough list all behave as on the normal proxy path.
+Add it under `listeners` in `settings.json` and point `iptables` / `pf` at it. See the [`listeners` reference](/reference/config/#listeners) for the config keys and the redirect rules. The redirect catches TCP only, so block UDP 443 as well, or an HTTP/3 client goes around gori. Captured flows, scope, the Sandbox and the passthrough list all behave as on the normal proxy path.
 
 The certificate still has to be trusted on the client: transparent mode removes the proxy *setting*, not the need for gori's CA.
 
