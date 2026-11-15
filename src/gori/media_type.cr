@@ -99,7 +99,7 @@ module Gori
       !!value.try(&.downcase.includes?("x-www-form-urlencoded"))
     end
 
-    # A binary DOCUMENT format gori can render — MessagePack or CBOR. Precise, not permissive,
+    # A binary DOCUMENT format gori can render — MessagePack, CBOR or a DNS message. Precise, not permissive,
     # and that split is the same one `json?` documents: a permissive test is right for "is this
     # worth trying" (a failed JSON parse costs one parse) and wrong for DISPATCH, which is what
     # this is. Handing an arbitrary body to a binary reader because its content-type contained
@@ -119,15 +119,31 @@ module Gori
       e == "application/cbor" || e.ends_with?("+cbor")
     end
 
-    # :ditto: — either of them, for a caller that only has to decide whether the body is one.
+    # A DNS wire-format message, the body of a DNS-over-HTTPS exchange (RFC 8484). Not
+    # `application/dns-json`, which is JSON already.
+    def dns_message?(value : String?) : Bool
+      essence(value) == "application/dns-message"
+    end
+
+    # :ditto: — any of them, for a caller that only has to decide whether the body is one.
     def binary_document?(value : String?) : Bool
-      msgpack?(value) || cbor?(value)
+      msgpack?(value) || cbor?(value) || dns_message?(value)
     end
 
     # Any `multipart/*` (the GraphQL upload spec and every ordinary file upload are
     # `multipart/form-data`; `multipart/mixed` carries an incremental-delivery response).
     def multipart?(value : String?) : Bool
       !!essence(value).try(&.starts_with?("multipart/"))
+    end
+
+    # A server push that replaces its own previous part and never ends (an MJPEG feed). Exact,
+    # because the proxy reads this to decide a response must not be buffered. The byte test
+    # comes first because the proxy asks this of every chunked response it streams, and
+    # `essence` builds three strings (P6, the same reason `Sse.sse?` has one).
+    def mixed_replace?(value : String?) : Bool
+      v = value || return false
+      AsciiBytes.contains_ci?(v.to_slice, "mixed-replace".to_slice) &&
+        essence(v) == "multipart/x-mixed-replace"
     end
 
     # `boundary=…` off a multipart Content-Type, quoted or bare. The parameter NAME is

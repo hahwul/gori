@@ -328,9 +328,9 @@ class Gori::Proxy::H2::StreamGate
   end
 
   # Content types whose body is a stream of messages rather than one entity: SSE, gRPC (and
-  # gRPC-Web), Connect streaming, newline-delimited JSON.
+  # gRPC-Web), Connect streaming, newline-delimited JSON, a `multipart/x-mixed-replace` push.
   STREAMING_TYPES = {"text/event-stream", "application/grpc", "application/connect+",
-                     "application/x-ndjson", "application/ndjson"}
+                     "application/x-ndjson", "application/ndjson", "multipart/x-mixed-replace"}
 
   private def skip_body(stream_id : UInt32, why : String) : Nil
     @assembler.note_advisory(stream_id,

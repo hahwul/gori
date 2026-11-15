@@ -219,6 +219,14 @@ describe Gori::MediaType do
       MT.boundary("multipart/form-data; boundary=graphql-9").should eq("graphql-9")
     end
   end
+  describe ".mixed_replace?" do
+    it "matches the push type exactly, parameters aside" do
+      Gori::MediaType.mixed_replace?("multipart/x-mixed-replace; boundary=frame").should be_true
+      Gori::MediaType.mixed_replace?("multipart/mixed; boundary=x").should be_false
+      Gori::MediaType.mixed_replace?(nil).should be_false
+    end
+  end
+
   describe ".binary_document?" do
     it "matches the spellings a msgpack or CBOR body actually carries" do
       %w[application/msgpack application/x-msgpack application/vnd.msgpack
@@ -236,6 +244,11 @@ describe Gori::MediaType do
         Gori::MediaType.binary_document?(ct).should be_false
       end
       Gori::MediaType.binary_document?(nil).should be_false
+    end
+
+    it "matches a DNS-over-HTTPS wire message, and not the JSON form" do
+      Gori::MediaType.binary_document?("application/dns-message").should be_true
+      Gori::MediaType.dns_message?("application/dns-json").should be_false
     end
 
     it "declines a CBOR SEQUENCE, which is several documents and not one" do

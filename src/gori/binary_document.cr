@@ -57,20 +57,29 @@ module Gori
       end
     end
 
-    # Render `body` as the format its `content_type` claims, or nil when it claims neither —
+    # Render `body` as the format its `content_type` claims (MessagePack, CBOR, or a DNS
+    # message, which is not schema-less but shares the dispatch), or nil when it claims none —
     # and nil, too, when the rendering turns out not to be about this body (`describes?`).
     #
     # The dispatch is the content type ALONE and never a sniff: `MediaType.binary_document?` is
     # deliberately precise where `MediaType.json?` is permissive, because a failed JSON parse
     # costs one parse while a wrong binary rendering costs the operator the truth about a body.
     # An unlabelled body belongs in the Decoder tab, where the operator is the one deciding.
-    def self.render(body : Bytes?, content_type : String?, *, indent : String? = nil) : {String, Rendering}?
-      return nil unless body && !body.empty?
-      msgpack = MediaType.msgpack?(content_type)
-      return nil unless msgpack || MediaType.cbor?(content_type)
-      r = msgpack ? Msgpack.render(body, indent: indent) : Cbor.render(body, indent: indent)
-      return nil unless r.describes?(body.size)
-      {msgpack ? "msgpack" : "cbor", r}
+    def self.render(body : Bytes, content_type : String?, *, indent : String? = nil) : {String, Rendering}?
+      return nil if body.empty?
+      found =
+        if MediaType.msgpack?(content_type)
+          {"msgpack", Msgpack.render(body, indent: indent)}
+        elsif MediaType.cbor?(content_type)
+          {"cbor", Cbor.render(body, indent: indent)}
+        elsif MediaType.dns_message?(content_type)
+          {"dns", DnsMessage.render(body, indent: indent)}
+        end
+      found if found && found[1].describes?(body.size)
+    end
+
+    # :ditto: for a flow with no body on that side.
+    def self.render(body : Nil, content_type : String?, *, indent : String? = nil) : Nil
     end
   end
 end

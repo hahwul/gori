@@ -203,6 +203,14 @@ iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-port 8443
 
 macOS는 `pf`의 `rdr` 규칙을 사용합니다.
 
+**이 규칙들은 TCP만 잡고, HTTP/3은 UDP입니다.** HTTP/3을 쓰는 클라이언트는 UDP 443 포트로 QUIC을 보냅니다. 위 규칙은 이것을 리다이렉트하지 않고 gori 리스너도 읽지 못하므로, 그 요청은 원 서버에 그대로 도달하고 History에는 나타나지 않습니다. 같은 트래픽의 UDP 443을 거부하면 클라이언트가 TCP로 되돌아옵니다:
+
+```bash
+iptables -A OUTPUT -p udp --dport 443 -j REJECT
+```
+
+macOS에서는 `pf`에 `block return out proto udp from any to any port 443`을 넣습니다. [`strip_alt_svc`](#strip-alt-svc)는 HTTP/3을 광고하는 헤더를 제거합니다. 이 규칙은 캐시된 `Alt-Svc`나 DNS `HTTPS` 레코드로 이미 경로를 알고 있는 클라이언트까지 막습니다.
+
 **`target_port`가 아직 있는 이유.** 커널 조회가 항상 답하지는 않습니다. Linux와 macOS 밖에는 수단이 없고, macOS는 root가 필요하며, 리다이렉트 없이 리스너에 직접 들어온 연결은 복구할 이전 목적지가 없습니다. `target_port`는 그런 경우의 폴백입니다. 리다이렉트 규칙이 잡는 포트를 지정하므로, 리다이렉트된 `:443` 트래픽을 받는 리스너는 `target_port: 443`을 지정합니다. 커널이 답한 경우에는 이 값을 보지 않습니다.
 
 **커널이 답하지 않을 때.** 이름을 DNS로 해석하므로 `Host`로 거짓말하는(또는 오해를 부르는 SNI를 보내는) 클라이언트가 업스트림 dial을 원하는 호스트로 돌릴 수 있고, 포트는 `target_port`가 정합니다. 수단이 없는 플랫폼, root가 아닌 macOS, 그리고 리다이렉트 없이 리스너에 직접 들어온 연결이 여기에 해당합니다. 어느 출처가 정했는지는 로그에 남습니다. 클라이언트가 목적지에 영향을 주면 안 된다면 [reverse 모드](#reverse-mode)를 쓰세요. 목적지를 선언하고 클라이언트가 보낸 것은 아무것도 보지 않으며, 플랫폼도 root도 가리지 않습니다.

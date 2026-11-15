@@ -1249,7 +1249,7 @@ module Gori::Proxy
       if (ic = @interceptor) && ic.intercepts_response?(
            method: sent_req.method, host: host, target: Codec::Http1.gate_target(sent_req),
            scheme: scheme, port: port, status: resp.status, head: sent_resp_head) &&
-         !resp_framing.close_delimited? && !sse?(resp) && resp.status != 101 &&
+         !resp_framing.close_delimited? && !unbounded_stream?(resp, resp_framing) && resp.status != 101 &&
          holdable_body_size?(resp_framing, resp_len, "response")
         return handle_held_response(ic, upstream, req, sent_req, flow_id, host, port, scheme,
           resp, sent_resp_head, resp_framing, resp_len, ttfb, started)
@@ -1337,7 +1337,7 @@ module Gori::Proxy
         release_upstream
         return false
       end
-      # A relaxed (close-delimited/SSE) stream ran a concurrent client-abort watcher that
+      # A relaxed (close-delimited/SSE/mixed-replace) stream ran a concurrent client-abort watcher that
       # may still be parked on @io.read (see stream_response_body). Do NOT keep this client
       # connection alive: closing it (return false) is what lets `run`'s ensure unblock and
       # end that watcher, and it keeps a lingering @io read from colliding with a next reused
@@ -1660,7 +1660,7 @@ module Gori::Proxy
     end
 
     # Copies the response body upstream→@io. For a normal (timed) response this is just
-    # `Codec::Body.stream`. For a RELAXED (close-delimited/SSE) stream both legs' timeouts
+    # `Codec::Body.stream`. For a RELAXED (close-delimited/SSE/mixed-replace) stream both legs' timeouts
     # were cleared, so the copy can block on an idle-origin read indefinitely — and would
     # only notice the CLIENT already went away on its NEXT write to @io, which an idle origin
     # never triggers. That leaks this fiber + both sockets for every aborted SSE/long-poll
@@ -1727,7 +1727,7 @@ module Gori::Proxy
 
     # The streaming path's capture. An event stream gets the live one (#1631), which appends
     # its events to the flow while it is still open; everything else keeps the plain buffer,
-    # untouched (P6). `resp` is what the origin sent, as the other `sse?` gates read it; the
+    # untouched (P6). `resp` is what the origin sent, as the `unbounded_stream?` gates read it; the
     # head the flow shows meanwhile is `sent_resp`, as `record_streamed_response` writes it.
     private def response_capture(sent_resp : Codec::RawResponse, resp : Codec::RawResponse,
                                  resp_framing : Codec::BodyFraming, resp_len : Int64,
@@ -2094,7 +2094,7 @@ module Gori::Proxy
       release_upstream unless origin_keep_alive
     end
 
-    # A close-delimited or SSE (event-stream) response streams for an unbounded, idle-prone time;
+    # A close-delimited, SSE or chunked mixed-replace response (`unbounded_stream?`) streams for an unbounded, idle-prone time;
     # relax BOTH legs' read/write timeouts so a legitimately-idle stream isn't torn down mid-flight
     # (keepalive reaps a genuinely dead peer). A normal Length/chunked response keeps the baseline
     # timeout, and the `run`/`acquire_and_send` re-arm restores it for any later keep-alive request.
@@ -2106,9 +2106,9 @@ module Gori::Proxy
       # stream's client-abort watcher — which the guard below relies on `run`'s close to end
       # (see the comment at the `if relaxed` exit) — would stay parked on `@io.read` and eat the
       # tunnel's client→server bytes into its scratch buffer. The 101 branch relaxes both legs
-      # itself. Mirrors the `status != 101` the two other `sse?` gates already carry.
+      # itself. Mirrors the `status != 101` the two other `unbounded_stream?` gates already carry.
       return false if resp.status == 101
-      return false unless resp_framing.close_delimited? || sse?(resp)
+      return false unless resp_framing.close_delimited? || unbounded_stream?(resp, resp_framing)
       SocketTuning.relax(@io)
       SocketTuning.relax(upstream)
       true
@@ -3417,7 +3417,7 @@ module Gori::Proxy
                                       host : String) : Bool
       return false unless @rewriter.try(&.rewrites_response_body_for_host?(host)) ||
                           @extractor.try(&.extracts_body_for_host?(host))
-      (framing.length? || framing.chunked?) && !sse?(resp) && resp.status != 101 &&
+      (framing.length? || framing.chunked?) && !unbounded_stream?(resp, framing) && resp.status != 101 &&
         rewritable_body_size?(framing, len)
     end
 
@@ -3683,6 +3683,17 @@ module Gori::Proxy
     # every display and query surface reported an ordinary JSON flow.
     private def sse?(resp : Codec::RawResponse) : Bool
       Gori::Sse.sse?(resp.headers.get?("Content-Type"))
+    end
+
+    # A body that never ends by its TYPE: an event stream, or a CHUNKED
+    # `multipart/x-mixed-replace` push (an MJPEG feed). Nothing may wait for its end, so the
+    # intercept hold, the Match&Replace / extract buffer and the idle timeout all step aside;
+    # under a body rule such a push used to reach the client only once 16 MiB had been
+    # buffered. One that declares a Content-Length does end, and is held and rewritten like
+    # any other body.
+    private def unbounded_stream?(resp : Codec::RawResponse, framing : Codec::BodyFraming) : Bool
+      type = resp.headers.get?("Content-Type")
+      Gori::Sse.sse?(type) || (framing.chunked? && Gori::MediaType.mixed_replace?(type))
     end
 
     private def write_gateway_error : Nil

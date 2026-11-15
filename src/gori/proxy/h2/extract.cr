@@ -100,8 +100,8 @@ module Gori::Proxy::H2
                              fields : Array({String, String})) : Bool
       return false if @block_ends_stream || ref.method == "CONNECT"
       host, _ = Upstream.split_host_port(ref.authority, @port)
-      @extractor.extracts_body_for_host?(host) &&
-        !Sse.sse?(HeadCodec.pseudo(fields, "content-type"))
+      type = HeadCodec.pseudo(fields, "content-type")
+      @extractor.extracts_body_for_host?(host) && !Sse.sse?(type) && !MediaType.mixed_replace?(type)
     end
 
     # One delivered frame of a response whose body is being copied.

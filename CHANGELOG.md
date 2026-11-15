@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- History: a DNS-over-HTTPS body (`application/dns-message`) renders as JSON in the detail pane, `gori run show --format json` and MCP `get_flow` (#1899)
+- Proxy: a chunked `multipart/x-mixed-replace` stream (an MJPEG feed) reaches the client while a Match & Replace body rule, a body extract rule or the response intercept is on for its host (#1899)
+- Docs: transparent mode says to block UDP 443 so an HTTP/3 client falls back to TCP (#1899)
+
 ## v0.9.4
 
 - TUI: quieter screens: cards drop their outer frame, a filter not being typed in takes no row, a flow's status and sizes sit on the detail's border, and Miss Ring stays out of the content; an 80×24 Repeater shows 11 rows instead of 7 (#1851, #1863, #1864)
