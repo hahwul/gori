@@ -102,12 +102,14 @@ module Gori
 
     # `try_su` only where root is used (a system CA, an undo): on a Magisk phone each su try is
     # a superuser prompt that blocks up to its timeout.
-    def self.probe(adb : String, serial : String, try_su : Bool = true) : Probe
+    def self.probe(adb : String, serial : String, try_su : Bool = true, *, cancelled : Proc(Bool)? = nil) : Probe
+      raise Gori::Error.new("Android operation stopped") if cancelled.try(&.call)
       ok, text, err = capture(adb, ["-s", serial, "shell", PROBE_SCRIPT])
       raise Gori::Error.new("cannot read #{serial}: #{last_line(err, text)}") unless ok
       found = parse_probe(text)
       return found if found.root || !try_su
       su = {Root::Su0, Root::SuC}.find do |r|
+        raise Gori::Error.new("Android operation stopped") if cancelled.try(&.call)
         got, uid, _ = capture(adb, ["-s", serial, "shell", as_root(r, "id -u")])
         got && last_line(uid) == "0"
       end
@@ -219,9 +221,10 @@ module Gori
 
     # Run `steps` in order, stopping after the first fatal failure. Yields each outcome as it
     # lands, so a CLI can print it live.
-    def self.run(adb : String, steps : Array(Step), & : Outcome ->) : Array(Outcome)
+    def self.run(adb : String, steps : Array(Step), *, cancelled : Proc(Bool)? = nil, & : Outcome ->) : Array(Outcome)
       outcomes = [] of Outcome
       steps.each do |step|
+        raise Gori::Error.new("Android operation stopped") if cancelled.try(&.call)
         ok, text, err = capture(adb, step.args)
         last = last_line(text)
         detail = ok ? last : (last_line(err, text).presence || "failed")

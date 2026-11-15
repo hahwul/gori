@@ -6,6 +6,7 @@ require "../../android"
 class Gori::Tui::Runner < Gori::Verb::ExecContext
   # {job, toast, ok} from the worker fiber, drained on the tick.
   @android_events = Channel({Int32, String, Bool}).new(4)
+  @android_cancel = nil.as(Array(Bool)?)
 
   def open_android_picker : Nil
     # One at a time: two system setups on one device would unmount each other's store.
@@ -45,11 +46,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     off = @session.capturing? ? "" : " (capture is off — start it with c)"
     job = @jobs.start(:android, "android #{serial}")
     events = @android_events
+    cancel = [false]
+    @android_cancel = cancel
     status("android #{serial}: running adb…", :busy)
     spawn(name: "gori-android") do
       text, ok =
         begin
-          Runner.android_task(adb, serial, mode, port, ca)
+          Runner.android_task(adb, serial, mode, port, ca, cancelled: -> { cancel[0] })
         rescue ex
           {"android #{serial}: #{ex.message}", false}
         end
@@ -59,13 +62,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   # Probe, plan and run a setup in `mode` (nil: undo) on the worker fiber; the toast and
   # whether it worked.
-  def self.android_task(adb : String, serial : String, mode : Android::Mode?, port : Int32, ca : String) : {String, Bool}
-    probe = Android.probe(adb, serial, try_su: mode.nil? || mode.system?)
+  def self.android_task(adb : String, serial : String, mode : Android::Mode?, port : Int32, ca : String,
+                        *, cancelled : Proc(Bool)? = nil) : {String, Bool}
+    probe = Android.probe(adb, serial, try_su: mode.nil? || mode.system?, cancelled: cancelled)
     unless mode
       # The TUI's setup maps gori's own port, so that is the one to remove when the device's
       # proxy no longer names it. The rest is best-effort; only the proxy reset has to land.
       steps = Android.plan_undo(serial, Android.mapped_port(probe.http_proxy) || port, probe.root)
-      outcomes = Android.run(adb, steps) { }
+      outcomes = Android.run(adb, steps, cancelled: cancelled) { }
       cleared = outcomes.first
       return {"android #{serial}: could not #{cleared.step.what} — #{cleared.detail}", false} unless cleared.ok
       # Name a best-effort step that failed rather than claim it, as `gori run android undo` lists each.
@@ -76,11 +80,19 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     hash = Proxy::Tls::Cert.read_pem(ca).subject_hash_old
     plan = Android.plan_setup(serial, port, port, ca, hash, mode, probe)
     return {"android #{serial}: #{plan}", false} if plan.is_a?(String)
-    if bad = Android.run(adb, plan) { }.find(&.fatal_failure?)
+    if bad = Android.run(adb, plan, cancelled: cancelled) { }.find(&.fatal_failure?)
       return {"android #{serial}: could not #{bad.step.what} — #{bad.detail} (UNDO reverts what ran)", false}
     end
     done = mode.system? ? "gori's CA is a system CA until reboot" : "install #{Android::USER_CA_PATH} as a CA certificate in Settings"
     {"android #{serial}: proxied via 127.0.0.1:#{port} · #{done}", true}
+  end
+
+  # Like other background senders, stop at the next command boundary, not mid-command.
+  private def stop_android : Nil
+    @android_cancel.try { |cancel| cancel[0] = true }
+    @jobs.active.each do |job|
+      @jobs.finish(job.id, :stopped, "project closed") if job.kind == :android
+    end
   end
 
   # Land the worker's outcome. True when one arrived (→ a frame).
@@ -88,6 +100,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     select
     when ev = @android_events.receive
       job, text, ok = ev
+      @android_cancel = nil
       @jobs.finish(job, ok ? :done : :error, ok ? "done" : "failed")
       status(text, ok ? :done : :error)
       true
