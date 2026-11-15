@@ -41,7 +41,7 @@
   <section class="home-ch" id="home-loop" aria-labelledby="home-loop-h"><div>
     <p class="home-k" data-decode>{{ "home.loop_k" | t }}</p>
     <h2 id="home-loop-h">{{ "home.loop_pre" | t }}<em class="gild">{{ "home.loop_em" | t }}</em>{{ "home.loop_post" | t }}</h2>
-    <p class="home-lede">{{ "home.loop_lede" | t }}</p>
+    <p class="home-lede">{{ "home.loop_lede" | t | safe }}</p>
   </div></section>
 
   {# The figures are the ones AGENTS.md states: one binary, three surfaces,
@@ -49,11 +49,11 @@
   <section class="home-ch" id="home-numbers" aria-label="{{ "home.numbers_k" | t }}"><div style="max-width: 72rem">
     <p class="home-k" data-decode>{{ "home.numbers_k" | t }}</p>
     <div class="home-nums">
-      <div><b>1</b><span>{{ "home.n1" | t }}</span></div>
-      <div><b>3</b><span>{{ "home.n2" | t }}</span></div>
-      <div><b>5</b><span>{{ "home.n3" | t }}</span></div>
-      <div><b>25<small>µs</small></b><span>{{ "home.n4" | t }}</span></div>
-      <div><b>675</b><span>{{ "home.n5" | t }}</span></div>
+      <div><b>1</b><span>{{ "home.n1" | t | safe }}</span></div>
+      <div><b>3</b><span>{{ "home.n2" | t | safe }}</span></div>
+      <div><b>5</b><span>{{ "home.n3" | t | safe }}</span></div>
+      <div><b>25<small>µs</small></b><span>{{ "home.n4" | t | safe }}</span></div>
+      <div><b>675</b><span>{{ "home.n5" | t | safe }}</span></div>
     </div>
   </div></section>
 
