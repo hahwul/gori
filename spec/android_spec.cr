@@ -136,6 +136,12 @@ describe Gori::Android do
     Gori::Android.reverse_reaches?("192.168.1.5").should be_false
   end
 
+  it "does not start a probe after cancellation" do
+    expect_raises(Gori::Error, "Android operation stopped") do
+      Gori::Android.probe("missing-adb", "fixture", cancelled: -> { true })
+    end
+  end
+
   it "runs steps in order and stops at the first fatal failure" do
     posix_only!("a stand-in adb is a shell script")
     dir = File.tempname("gori-android-adb")
@@ -165,6 +171,22 @@ describe Gori::Android do
     outcomes.map(&.ok).should eq([true, false, false])
     outcomes[1].detail.should eq("error: boom")
     outcomes[2].detail.should eq(%(got "other"))
+
+    seen.clear
+    cancelled = false
+    expect_raises(Gori::Error, "Android operation stopped") do
+      Gori::Android.run(adb, steps, cancelled: -> { cancelled }) do |outcome|
+        seen << outcome.step.what
+        cancelled = true
+      end
+    end
+    seen.should eq(["check"])
+
+    checks = 0
+    expect_raises(Gori::Error, "Android operation stopped") do
+      Gori::Android.probe(adb, "fixture", cancelled: -> { checks += 1; checks > 2 })
+    end
+    checks.should eq(3) # initial probe, first su, then refuse the second su
   ensure
     dir.try { |d| FileUtils.rm_rf(d) }
   end

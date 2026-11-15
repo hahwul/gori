@@ -3748,6 +3748,7 @@ module Gori::Tui
     # sequencer / repeater(minimize) / oast / authorize.
     private def stop_all_jobs : Nil
       @import_cancel = true # the worker stops after its chunk; the store outlives this tick
+      stop_android
       discover_controller.stop_all
       fuzzer_controller.stop_all
       miner_controller.stop_all
