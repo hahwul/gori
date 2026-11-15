@@ -1,4 +1,4 @@
-require "../spec_helper"
+require "../../spec_helper"
 require "socket"
 
 # `multipart/x-mixed-replace` (an MJPEG camera feed, a server-push page) is a chunked response

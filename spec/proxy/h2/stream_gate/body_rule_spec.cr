@@ -365,6 +365,76 @@ describe "H2::StreamGate body rules (#1628)" do
     end
   end
 
+  # #1901. As on h1, where one that is not chunked is buffered and rewritten.
+  it "rewrites a multipart/x-mixed-replace body that declares its length" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "SECRET", "", host: "127.0.0.1")
+      rig = BodyRig.new(rules, ic) do |_, _|
+        {ok(10, type: "multipart/x-mixed-replace; boundary=frame"), "SECRETtail".to_slice, nil}
+      end
+      begin
+        rig.client.send(1_u32, post("/x", 1), "q".to_slice)
+        rig.client.wait_done(1_u32).should be_true
+        rig.client.body_of(1_u32).should eq("tail")
+      ensure
+        rig.close
+      end
+    end
+  end
+
+  # #1901. NDJSON is plain lines, so one that declares its length is a document that ends.
+  it "rewrites an NDJSON body that declares its length" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "SECRET", "", host: "127.0.0.1")
+      body = %({"a":"SECRET"}\n{"b":"SECRET"}\n)
+      rig = BodyRig.new(rules, ic) { |_, _| {ok(body.bytesize, type: "application/x-ndjson"), body.to_slice, nil} }
+      begin
+        rig.client.send(1_u32, post("/x", 1), "q".to_slice)
+        rig.client.wait_done(1_u32).should be_true
+        rig.client.body_of(1_u32).should eq(%({"a":""}\n{"b":""}\n))
+        field(rig.client.heads[1_u32], "content-length").should eq("18")
+        (rig.client.errors + rig.wait_origin.errors).should be_empty
+      ensure
+        rig.close
+      end
+    end
+  end
+
+  it "leaves a message stream with no declared length streaming, and says the rule did not run" do
+    {"application/x-ndjson", "application/grpc-web+proto", "text/event-stream"}.each do |type|
+      with_rules do |rules, ic|
+        rules.add(RESP, BODY, "SECRET", "", host: "127.0.0.1")
+        rig = BodyRig.new(rules, ic) { |_, _| {ok(type: type), "SECRET".to_slice, nil} }
+        begin
+          rig.client.send(1_u32, post("/x", 1), "q".to_slice)
+          rig.client.wait_done(1_u32).should be_true
+          rig.client.body_of(1_u32).should eq("SECRET")
+          20.times { rig.sink.responses.empty? ? sleep(10.milliseconds) : break }
+          advisory = rig.sink.responses.first.advisory.to_s
+          advisory.should contain("Match&Replace was NOT applied to this response body")
+          advisory.should contain(type)
+        ensure
+          rig.close
+        end
+      end
+    end
+  end
+
+  # A length does not make these rewritable: each message carries its own length prefix.
+  it "leaves gRPC-Web streaming even when it declares its length" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "SECRET", "", host: "127.0.0.1")
+      rig = BodyRig.new(rules, ic) { |_, _| {ok(6, type: "application/grpc-web+proto"), "SECRET".to_slice, nil} }
+      begin
+        rig.client.send(1_u32, post("/x", 1), "q".to_slice)
+        rig.client.wait_done(1_u32).should be_true
+        rig.client.body_of(1_u32).should eq("SECRET")
+      ensure
+        rig.close
+      end
+    end
+  end
+
   it "leaves a compressed body alone and says so on the flow" do
     with_rules do |rules, ic|
       rules.add(REQ, BODY, "a", "b", host: "127.0.0.1")

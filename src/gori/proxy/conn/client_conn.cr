@@ -249,6 +249,7 @@ module Gori::Proxy
       # One-shot: has this connection already logged an intercept hold that failed open because
       # the declared body was over the ceiling? See `warn_hold_oversize`.
       @warned_hold_oversize = false
+      @warned_hold_released = false
       # Which compressed-body Match&Replace refusals this connection has already written to
       # `gori.log` — see `log_compressed_skip` for the key and the cap.
       @compressed_skips = Set(String).new
@@ -1280,7 +1281,7 @@ module Gori::Proxy
       resp_capture = response_capture(sent_resp, resp, resp_framing, resp_len, flow_id, ttfb)
       completed = stream_nonhold_response(upstream, sent_resp, sent_resp_head,
         resp_framing, resp_len, resp_capture, flow_id, ttfb, started, relaxed: relaxed,
-        extract_ref: extract_ref)
+        extract_ref: extract_ref, advisory: stream_rule_note(resp, resp_framing, host))
 
       if completed && resp.status == 101
         # A 101 Switching Protocols turns the connection into a bidirectional tunnel of the
@@ -1638,7 +1639,8 @@ module Gori::Proxy
                                         resp_len : Int64, resp_capture : Codec::CaptureBuffer,
                                         flow_id : Int64, ttfb : Int64, started : Time::Instant,
                                         relaxed : Bool = false,
-                                        extract_ref : ExtractRef? = nil) : Bool
+                                        extract_ref : ExtractRef? = nil,
+                                        advisory : String? = nil) : Bool
       begin
         @io.write(sent_resp_head)
         @io.flush
@@ -1650,13 +1652,24 @@ module Gori::Proxy
         @lf_residue_note = lf_residue_note(upstream) if resp_complete
       rescue
         record_streamed_response(sent_resp, resp_framing, resp_capture, flow_id, ttfb, started,
-          state: Store::FlowState::Aborted, error: "connection closed mid-response")
+          state: Store::FlowState::Aborted, error: "connection closed mid-response", advisory: advisory)
         return false
       end
       record_streamed_response(sent_resp, resp_framing, resp_capture, flow_id, ttfb, started,
         state: resp_complete ? Store::FlowState::Complete : Store::FlowState::Aborted,
-        error: resp_complete ? nil : "upstream closed before response body complete")
+        error: resp_complete ? nil : "upstream closed before response body complete", advisory: advisory)
       resp_complete
+    end
+
+    # The sentence for a response-body rule that did not run because the body is a stream with
+    # no end to wait for (SSE, a chunked mixed-replace push), or nil. The words HTTP/2 writes
+    # for the same skip (`H2::StreamGate#left_streaming?`), so History reads the same on both.
+    private def stream_rule_note(resp : Codec::RawResponse, framing : Codec::BodyFraming, host : String) : String?
+      return nil unless unbounded_stream?(resp, framing)
+      return nil unless @rewriter.try(&.rewrites_response_body_for_host?(host))
+      type = Gori::MediaType.essence(resp.headers.get?("Content-Type"))
+      "Match&Replace was NOT applied to this response body: it is a message stream (#{type}), " \
+      "which gori leaves streaming. It went through unmodified"
     end
 
     # Copies the response body upstream→@io. For a normal (timed) response this is just
@@ -1749,27 +1762,82 @@ module Gori::Proxy
     # byte go straight to the client, teed into a capped capture. `Body.stream` keeps running over
     # the same framing state, so the client gets exactly the bytes the origin sent (P7), as it
     # would on the streaming path, and gori holds no more than the ceiling (P6).
+    #
+    # A message stream has a WAIT beside the ceiling (`release_after`, #1901): a chunked NDJSON,
+    # Connect or gRPC-Web body that ends in time is buffered and rewritten like any other, and
+    # one that has not ended spills the same way, on a clock. The clock runs on a second fiber
+    # because a quiet stream produces no write to hang the check on, so `write` and `release`
+    # share a lock: a spill writes to the client, and a blocked write there yields.
     private class SpillBuffer < IO
       getter? spilled = false
+      getter? released = false  # spilled by the wait, not by the ceiling
       property? aborted = false # a raise after the spill (see `buffer_response_body`)
       getter capture = Codec::CaptureBuffer.new(0)
+      @lock = Mutex.new
+      @settled : Channel(Nil)?
+      @broken = false # the release could not reach the client (see `release_after`)
 
       def initialize(@mem : IO::Memory, @client : IO, @head : Bytes)
       end
 
       def write(slice : Bytes) : Nil
-        unless @spilled
-          return @mem.write(slice) if @mem.bytesize + slice.size <= MAX_REWRITE_BODY
-          @spilled = true
-          prefix = @mem.to_slice
-          @mem = IO::Memory.new(0)
-          @capture = Codec::CaptureBuffer.new(Settings.capture_max)
-          @client.write(@head)
-          @client.write(prefix)
-          @capture.write(prefix)
+        @lock.synchronize do
+          unless @spilled
+            return @mem.write(slice) if @mem.bytesize + slice.size <= MAX_REWRITE_BODY
+            spill
+          end
+          @capture.write(slice)
+          raise IO::Error.new("client write failed while the buffer was released") if @broken
+          @client.write(slice)
         end
-        @client.write(slice)
-        @capture.write(slice)
+      end
+
+      # Spill once `wait` has passed, unless `settle` came first. `on_release` runs once the
+      # head and the buffered bytes are with the client, which for a stream that never ends is
+      # the only moment there is: the caller's own reckoning comes when the copy returns.
+      def release_after(wait : Time::Span, on_release : Proc(Nil)? = nil) : Nil
+        settled = @settled = Channel(Nil).new
+        spawn do
+          select
+          when settled.receive?
+          when timeout(wait)
+            release(on_release)
+          end
+        rescue
+          # The head or the buffered bytes did not all reach the client, so nothing written
+          # after them can be the response. The copy raises on its next write and the caller
+          # records the flow Aborted, as a failed spill on the copy's own fiber always did.
+          @broken = true
+        end
+      end
+
+      # The body is in (or the copy gave up): the wait no longer applies. Taking the lock lets a
+      # release already under way finish, so the caller reads `spilled?` once and for all.
+      def settle : Nil
+        @settled.try(&.close)
+        @lock.synchronize { }
+      end
+
+      private def release(on_release : Proc(Nil)?) : Nil
+        @lock.synchronize do
+          next if @spilled || @settled.try(&.closed?)
+          @released = true
+          spill
+          @client.flush
+          on_release.try(&.call)
+        end
+      end
+
+      private def spill : Nil
+        @spilled = true
+        prefix = @mem.to_slice
+        @mem = IO::Memory.new(0)
+        @capture = Codec::CaptureBuffer.new(Settings.capture_max)
+        # The capture first: what gori received belongs in History even when the client that
+        # was waiting for it has already gone.
+        @capture.write(prefix)
+        @client.write(@head)
+        @client.write(prefix)
       end
 
       def read(slice : Bytes) : Int32
@@ -1789,19 +1857,45 @@ module Gori::Proxy
     # spilled, a raise is the client leaving (or the origin resetting) mid-response, which the
     # streaming path records as Aborted rather than unwinding, so it is reported incomplete here.
     private def buffer_response_body(upstream : IO, sent_resp_head : Bytes,
-                                     framing : Codec::BodyFraming, len : Int64) : {SpillBuffer, Bool}
+                                     framing : Codec::BodyFraming, len : Int64,
+                                     wait : Time::Span? = nil,
+                                     on_release : Proc(Nil)? = nil) : {SpillBuffer, Bool}
       buf = SpillBuffer.new(Codec::Body.presized_capture(framing, len), @io, sent_resp_head)
+      buf.release_after(wait, on_release) if wait
       # tee into a discard sink, not a second IO::Memory — the body is already buffered in
       # `buf`; a throwaway IO::Memory would hold the whole response a second time.
       complete = begin
         stream_body(upstream, buf, framing, len, Codec::DiscardIO.new)
       rescue ex
+        # Settled first: a release under way has to finish before `spilled?` means anything.
+        buf.settle
         raise ex unless buf.spilled?
         buf.aborted = true
         false
       end
+      buf.settle
       @lf_residue_note = lf_residue_note(upstream) if complete
       {buf, complete}
+    end
+
+    # How long a chunked message stream is buffered for a body rule, an extract rule or a hold
+    # before it is given up as one that will not end (#1901). The number HTTP/2 already uses for
+    # a held body that is still arriving (`H2::StreamGate::HOLD_WAIT_DEADLINE`), and the same
+    # trade: how much of a slow stream the rule gets to see, against how long the client waits
+    # for its first byte. A wall from the head, not an idle timeout, because a feed that never
+    # pauses must not hold the client for ever.
+    STREAM_BODY_WAIT = 5.seconds
+
+    # `STREAM_BODY_WAIT` on every connection; settable only so a spec costs milliseconds.
+    class_property stream_body_wait : Time::Span = STREAM_BODY_WAIT
+
+    # The wait a buffered response gets, or nil for a body that ends on its own framing. Only a
+    # CHUNKED message stream: one that declares its length says where it ends. Asked on the
+    # buffered path alone, behind a rule or a hold, so the allocation in `message_stream?`
+    # never reaches a response nothing is waiting on (P6).
+    private def stream_body_wait(resp : Codec::RawResponse, framing : Codec::BodyFraming) : Time::Span?
+      return nil unless framing.chunked?
+      ClientConn.stream_body_wait if Gori::MediaType.message_stream?(resp.headers.get?("Content-Type"))
     end
 
     # The tail of a response whose buffer spilled: it went out under the origin's own head, so
@@ -1814,8 +1908,15 @@ module Gori::Proxy
                                         flow_id : Int64, host : String, ttfb : Int64,
                                         started : Time::Instant, extract_ref : ExtractRef?) : Bool
       sent_resp = Codec::Http1.parse_response_head(sent_resp_head)
-      observe_delivered(extract_ref, sent_resp_head, nil, status: sent_resp.status)
-      advisory = if @rewriter.try(&.rewrites_response_body_for_host?(host))
+      # A released buffer observed its head when it went out (`SpillBuffer#release_after`).
+      observe_delivered(extract_ref, sent_resp_head, nil, status: sent_resp.status) unless buf.released?
+      advisory = if !@rewriter.try(&.rewrites_response_body_for_host?(host))
+                   nil
+                 elsif buf.released?
+                   "Match&Replace was NOT applied to this response body: it is a message stream " \
+                   "that had not ended after #{stream_wait_text}, so gori stopped buffering it and " \
+                   "forwarded it byte-exact as the origin sent it."
+                 else
                    "Match&Replace was NOT applied to this response body: it ran past the " \
                    "#{MAX_REWRITE_BODY}-byte ceiling gori buffers a body to rewrite, so it was " \
                    "forwarded byte-exact as the origin sent it."
@@ -1855,7 +1956,11 @@ module Gori::Proxy
                                                 resp_framing : Codec::BodyFraming, resp_len : Int64,
                                                 ttfb : Int64, started : Time::Instant,
                                                 extract_ref : ExtractRef? = nil) : Bool
-      buf, resp_complete = buffer_response_body(upstream, sent_resp_head, resp_framing, resp_len)
+      # A released stream's head is on the wire while its body still runs, so a head-scoped
+      # extract rule binds then, as on the streaming path, and not when the stream ends.
+      on_release = -> { observe_delivered(extract_ref, sent_resp_head, nil) }
+      buf, resp_complete = buffer_response_body(upstream, sent_resp_head, resp_framing, resp_len,
+        stream_body_wait(resp, resp_framing), on_release)
       if buf.spilled?
         return finish_spilled_response(buf, resp_complete, req, sent_req, resp, sent_resp_head,
           resp_framing, flow_id, host, ttfb, started, extract_ref)
@@ -1994,11 +2099,19 @@ module Gori::Proxy
       # Buffer the body, tracking completeness (Codec::Body.read drops it). A
       # truncated/misframed body must NOT leave the upstream parked — its stray
       # unread bytes would become the next reused request's response (desync).
-      buf, resp_complete = buffer_response_body(upstream, sent_resp_head, resp_framing, resp_len)
+      # A message stream past its wait tells the operator as it is released, not when it ends,
+      # and a head-scoped extract rule binds off the head then, as on the streaming path.
+      on_release = -> do
+        warn_hold_released
+        observe_delivered(extract_ref_for(sent_req, host, port, scheme, resp.status, flow_id), sent_resp_head, nil)
+      end
+      buf, resp_complete = buffer_response_body(upstream, sent_resp_head, resp_framing, resp_len,
+        stream_body_wait(resp, resp_framing), on_release)
       if buf.spilled?
-        # Past the hold ceiling mid-read (a chunked body declares no size up front): the hold
-        # fails open exactly as a declared-length one does, and the response already went out.
-        warn_hold_oversize("response", nil)
+        # Past the hold ceiling mid-read (a chunked body declares no size up front), or a
+        # message stream past its wait: the hold fails open exactly as a declared-length one
+        # does, and the response already went out.
+        warn_hold_oversize("response", nil) unless buf.released?
         return finish_spilled_response(buf, resp_complete, req, sent_req, resp, sent_resp_head,
           resp_framing, flow_id, host, ttfb, started,
           extract_ref_for(sent_req, host, port, scheme, resp.status, flow_id))
@@ -3401,6 +3514,21 @@ module Gori::Proxy
             "#{MAX_REWRITE_BODY}-byte hold ceiling — forwarded UNHELD"
       ::Log.warn { msg }
       @interceptor.try(&.note_unheld(msg))
+    end
+
+    # The same notice for a chunked message stream that outlasted its wait (`STREAM_BODY_WAIT`),
+    # once per connection for the same reason.
+    private def warn_hold_released : Nil
+      return if @warned_hold_released
+      @warned_hold_released = true
+      msg = "intercept: a response is a message stream that had not ended after " \
+            "#{stream_wait_text} — forwarded UNHELD"
+      ::Log.warn { msg }
+      @interceptor.try(&.note_unheld(msg))
+    end
+
+    private def stream_wait_text : String
+      "#{ClientConn.stream_body_wait.total_seconds.format(decimal_places: 1, only_significant: true)} s"
     end
 
     # Whether the buffered response-body path applies: SOMETHING needs the whole entity, the

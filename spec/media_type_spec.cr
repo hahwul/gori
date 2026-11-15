@@ -253,6 +253,13 @@ describe Gori::MediaType do
       end
       Gori::MediaType.message_stream?(nil).should be_false
     end
+
+    it "names NDJSON apart, the one a declared length turns into a document" do
+      Gori::MediaType.ndjson?("application/x-ndjson; charset=utf-8").should be_true
+      Gori::MediaType.ndjson?("application/ndjson").should be_true
+      Gori::MediaType.ndjson?("application/grpc-web+proto").should be_false
+      Gori::MediaType.ndjson?(nil).should be_false
+    end
   end
 
   describe ".binary_document?" do
