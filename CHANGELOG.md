@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- TUI: single-line fields move, select and delete complete combining characters and emoji, while preserving the order of streamed or pasted text (#1891).
+
 - TUI: leaving a project or quitting stops Android setup and undo before their next ADB command; an already running command can finish (#1890).
 
 - TUI: hidden modal actions cannot commit while the terminal is smaller than 40×8, including deletion confirmations opened before or after shrinking the window (#1889).
