@@ -149,7 +149,8 @@ module Gori
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.response
-          return unless texty?(ctx.content_type)
+          content_type = ctx.ct_low
+          return unless texty?(content_type)
           text = ctx.body_text
           return if text.nil? || text.empty?
           # Private-IP scan skips script/style payloads, where dotted version strings dominate
@@ -157,7 +158,7 @@ module Gori
           # (e.g. "File version 10.0.1.2", {"version":"10.0.0.0"}) also collides with 10.0.0.0/8,
           # so skip a candidate immediately preceded by a version-context word and report the
           # first genuine (non-version) private IP instead.
-          if !scripty?(ctx.content_type)
+          if !scripty?(content_type)
             text.scan(PRIVATE_IP) do |m|
               # Only the few bytes BEFORE the match decide version-context; slice a bounded window
               # off the match's BYTE index rather than m.pre_match (which allocates the whole
@@ -268,16 +269,14 @@ module Gori
           Detection.new(code, Category::INFOLEAK, ctx.host, ctx.url, title, sev, evidence, ctx.fid)
         end
 
-        private def texty?(ctype : String?) : Bool
-          return true if ctype.nil? # unknown — be permissive (the scan is cheap)
-          low = ctype.downcase
+        private def texty?(low : String?) : Bool
+          return true if low.nil? # unknown — be permissive (the scan is cheap)
           low.includes?("text/") || low.includes?("json") || low.includes?("xml") ||
             low.includes?("javascript") || low.includes?("html") || low.includes?("urlencoded")
         end
 
-        private def scripty?(ctype : String?) : Bool
-          return false if ctype.nil?
-          low = ctype.downcase
+        private def scripty?(low : String?) : Bool
+          return false if low.nil?
           low.includes?("javascript") || low.includes?("ecmascript") || low.includes?("css")
         end
 

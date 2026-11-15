@@ -120,7 +120,22 @@ module Gori
         def html? : Bool
           h = @html
           return h unless h.nil?
-          @html = !!ct_low.try(&.includes?("text/html"))
+          low = ct_low
+          @html = if low
+                    media_type?(low, "text/html") || media_type?(low, "application/xhtml+xml")
+                  else
+                    false
+                  end
+        end
+
+        private def media_type?(low : String, expected : String) : Bool
+          return false unless low.starts_with?(expected)
+          bytes = low.to_slice
+          i = expected.bytesize
+          while i < bytes.size && bytes[i].unsafe_chr.ascii_whitespace?
+            i += 1
+          end
+          i == bytes.size || bytes[i] == ';'.ord
         end
 
         # Media types whose body is binary by design: raster images, audio, video, fonts, wasm,

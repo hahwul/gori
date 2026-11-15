@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Probe: speed up passive checks, analyze XHTML as a document, and lower wildcard CORS to an informational signal, including stored findings (#1895).
+
 - TUI: IME composition previews clear when input mode or focus changes and render once beside the caret, including wrapped or highlighted editors (#1892, #1893).
 
 - TUI: single-line fields move, select and delete complete combining characters and emoji, while preserving the order of streamed or pasted text (#1891).

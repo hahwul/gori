@@ -51,7 +51,7 @@ module Gori
 
         # application/json, application/*+json (problem+json, ld+json, …), text/json.
         private def json_api?(ctx : Context) : Bool
-          ct = ctx.content_type.try(&.downcase) || return false
+          ct = ctx.ct_low || return false
           semi = ct.index(';')
           media = (semi ? ct[0...semi] : ct).strip
           media == "application/json" || media == "text/json" ||
