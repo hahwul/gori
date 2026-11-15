@@ -146,6 +146,29 @@ module Gori
         essence(v) == "multipart/x-mixed-replace"
     end
 
+    # Content types whose body is a stream of messages rather than one entity: SSE, gRPC (and
+    # gRPC-Web), Connect streaming, newline-delimited JSON, a `multipart/x-mixed-replace` push.
+    # Matched as lowercase PREFIXES, so `application/grpc` covers `application/grpc-web+proto`
+    # and `application/connect+` every codec. The list the body-rule and hold paths of both
+    # transports ask (#1901). `H2::Extract#copies_body?` deliberately asks a narrower question:
+    # it copies frames as they pass and stalls nothing, so it gives up only on SSE and
+    # mixed-replace and still reads an NDJSON body that ends.
+    MESSAGE_STREAMS = {"text/event-stream", "application/grpc", "application/connect+",
+                       "application/x-ndjson", "application/ndjson", "multipart/x-mixed-replace"}
+
+    # Newline-delimited JSON: the message stream with no envelope, so the one a declared length
+    # turns back into an ordinary document.
+    def ndjson?(value : String?) : Bool
+      essence(value).in?("application/x-ndjson", "application/ndjson")
+    end
+
+    # Whether `value` names one of `MESSAGE_STREAMS`. Allocates (`downcase`), so it belongs
+    # behind a rule or a hold and never on the path every response takes (P6).
+    def message_stream?(value : String?) : Bool
+      type = value.try(&.downcase) || return false
+      MESSAGE_STREAMS.any? { |prefix| type.starts_with?(prefix) }
+    end
+
     # `boundary=…` off a multipart Content-Type, quoted or bare. The parameter NAME is
     # case-insensitive; its VALUE is not.
     BOUNDARY_RE = /boundary\s*=\s*(?:"([^"]*)"|([^;\s]+))/i

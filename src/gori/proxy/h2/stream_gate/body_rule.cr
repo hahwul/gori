@@ -160,7 +160,7 @@ class Gori::Proxy::H2::StreamGate
     host = @heads.host_of(block)
     return nil unless body_rule_for?(rw, block.fields, host, block.stream_id)
     grpc = grpc?(block.fields)
-    return nil if (!grpc && streaming?(block.fields)) || unbufferable?(block, head)
+    return nil if (!grpc && left_streaming?(block)) || unbufferable?(block, head)
     len = declared_body_length(block.fields)
     return nil if @ordered && unholdable_request?(block, len, grpc)
     Owned.new(block.stream_id, host, @ordered, head, !len.nil?, fc.initial + pre_credit, grpc)
@@ -319,18 +319,23 @@ class Gori::Proxy::H2::StreamGate
   end
 
   # SSE and streaming gRPC never end on a schedule gori can wait for: a body rule leaves them
-  # streaming, as h1 leaves SSE. A bidirectional gRPC call would wait forever for an END_STREAM
-  # its client only sends after reading the reply, so native gRPC is owned one message at a
-  # time instead (`grpc_progress_locked`); gRPC-Web stays here.
-  private def streaming?(fields : Array(HPACK::Field)) : Bool
-    type = HeadCodec.pseudo_of(fields, "content-type").try(&.downcase) || return false
-    STREAMING_TYPES.any? { |prefix| type.starts_with?(prefix) }
+  # streaming, as h1 leaves SSE, and the flow says the rule did not run. A bidirectional gRPC
+  # call would wait forever for an END_STREAM its client only sends after reading the reply, so
+  # native gRPC is owned one message at a time instead (`grpc_progress_locked`).
+  #
+  # NDJSON and a mixed-replace push can say they end (#1901): with a declared length either is a
+  # document, owned and rewritten like any other body, which is what h1 does with one that is
+  # not chunked. gRPC-Web and Connect stay here whatever they declare, because each message
+  # carries a length prefix and nothing on this path re-frames it the way `run_grpc_rule` does
+  # for native gRPC. SSE stays too, as it does on h1 under any framing.
+  private def left_streaming?(block : HeadRewrite::Block) : Bool
+    type = HeadCodec.pseudo_of(block.fields, "content-type")
+    return false unless MediaType.message_stream?(type)
+    plain = MediaType.ndjson?(type) || MediaType.mixed_replace?(type)
+    return false if plain && declared_body_length(block.fields)
+    skip_body(block.stream_id, "it is a message stream (#{MediaType.essence(type)}), which gori leaves streaming")
+    true
   end
-
-  # Content types whose body is a stream of messages rather than one entity: SSE, gRPC (and
-  # gRPC-Web), Connect streaming, newline-delimited JSON, a `multipart/x-mixed-replace` push.
-  STREAMING_TYPES = {"text/event-stream", "application/grpc", "application/connect+",
-                     "application/x-ndjson", "application/ndjson", "multipart/x-mixed-replace"}
 
   private def skip_body(stream_id : UInt32, why : String) : Nil
     @assembler.note_advisory(stream_id,

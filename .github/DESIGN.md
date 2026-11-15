@@ -5646,3 +5646,52 @@ directions were on screen; the hand had typed the query before the eye read them
 ### 2026-11-15: exiting requires successful editor writes or explicit discard (#1886)
 
 `TabController#commit` reports whether the editor writes committed. A project exit collects every outcome, including inactive Repeater, Fuzzer, Miner and Sequencer sessions; failed writes leave their buffers and Project settings baselines intact. The shared `ExitGuard` keeps the project open and offers a danger confirmation naming the failed editors before discarding them. Jobs stop only after saving succeeds or that discard is accepted: Fuzzer teardown closes its temporary spool, so it cannot precede a save attempt the operator may cancel. The existing explicit Issues peer-conflict warning and READ-mode writeup policy remain in effect.
+
+### 2026-11-16: a message stream is buffered against a clock as well as a ceiling (#1901)
+
+Refines: [P6](#p6). Extends "a declared length is not a deadline" (2026-08-17) to HTTP/1.1.
+
+With a body rule, a body extract rule or the response intercept live for a host, the two
+transports disagreed about a body that is a stream of messages. HTTP/2 left NDJSON, Connect
+and gRPC-Web streaming by type and never ran the rule, silently. HTTP/1.1 buffered them like
+any chunked body, so one that ended was rewritten and one that did not reached the client
+only after 16 MiB.
+
+Making them agree by type alone would have taken a working rewrite away from HTTP/1.1, and
+the measure here is whether testing stays accurate and unobstructed. So the decisions are:
+
+- **HTTP/1.1 keeps buffering, with a wait.** `SpillBuffer` spills a chunked message stream
+  that has not ended after `STREAM_BODY_WAIT` exactly as it spills one past the ceiling: the
+  origin's head and bytes, unmodified, and an advisory. Five seconds, the number
+  `H2::StreamGate::HOLD_WAIT_DEADLINE` already is, and a wall from the head for the same
+  reason that one is: a feed that never pauses would never trip an idle timer.
+- **Only the buffer and the hold change.** `relax_for_streaming_response` is asked of every
+  response the proxy streams, and a relaxed response gives up keep-alive. Its list stays SSE
+  and a chunked `multipart/x-mixed-replace`, so a host with no rule sees no difference and a
+  chunked gRPC-Web unary call does not cost a connection.
+- **On HTTP/2, a declared length makes NDJSON or a mixed-replace push a document.** It is
+  owned and rewritten like any other body, which is what HTTP/1.1 does with one that is not
+  chunked. gRPC-Web and Connect stay streaming whatever they declare: each message carries a
+  length prefix and only native gRPC has a path that re-frames it (`run_grpc_rule`). SSE
+  stays streaming under any framing, on both.
+- **A skip is said, in the same words on both.** `H2::StreamGate#left_streaming?` and
+  `ClientConn#stream_rule_note` write one sentence, and a release writes its own.
+- **A release is an event, not the end of the copy.** A stream that never ends has no other
+  moment, so the intercept notice and a head-scoped extract rule's binding happen as the
+  buffer goes out (`SpillBuffer#release_after`), as they would on the streaming path.
+- **One list.** `MediaType::MESSAGE_STREAMS`, asked by the body-rule and hold paths of both
+  transports. `H2::Extract#copies_body?` keeps its narrower test on purpose: it copies frames
+  as they pass and stalls nothing, so it still reads an NDJSON body that ends.
+
+Not done, and known:
+
+- HTTP/1.1 still runs a body rule over a gRPC-Web or Connect body as raw bytes when it ends
+  in time, prefix included. That is what it did before, and the rule is the operator's.
+- An HTTP/2 message stream with no declared length gets no wait: it streams and the rule
+  does not run. Owning it against a clock means a third deadline in `StreamGate`.
+- A chunked stream of a type outside the list (a JSON watch feed) still waits for the ceiling.
+- The outcome is timing-dependent for a stream that ends near the wait, and a stream that
+  ends later than it is no longer rewritten or held on HTTP/1.1. The advisory is what makes
+  that legible, which is why it is not optional. The wait is a constant: a setting for it
+  is the next step if five seconds turns out wrong for real streams.
+

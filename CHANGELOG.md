@@ -3,7 +3,7 @@
 ## Unreleased
 
 - History: a DNS-over-HTTPS body (`application/dns-message`) renders as JSON in the detail pane, `gori run show --format json` and MCP `get_flow` (#1899)
-- Proxy: a chunked `multipart/x-mixed-replace` stream (an MJPEG feed) reaches the client while a Match & Replace body rule, a body extract rule or the response intercept is on for its host (#1899)
+- Proxy: with a Match & Replace body rule, a body extract rule or the response intercept on its host, a chunked `multipart/x-mixed-replace` stream reaches the client at once, and a chunked NDJSON, Connect or gRPC-Web stream that has not ended after 5 seconds is released instead of stalling. On HTTP/2 an NDJSON body that declares its length is rewritten, and a stream a rule skipped says so on the flow (#1899, #1901, #1902)
 - Docs: transparent mode says to block UDP 443 so an HTTP/3 client falls back to TCP (#1899)
 
 ## v0.9.4

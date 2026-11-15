@@ -1023,8 +1023,9 @@ module Gori
       @store.insert_event("bindings", "extract_no_body", "warn",
         "#{Env.spell(rule.name, Env::Namespace::Bind)}: #{rule.token_loc.label} needs the response " \
         "body, and this response was " \
-        "streamed rather than buffered (a server-sent-event / close-delimited / 101 body, or " \
-        "one over the buffering ceiling) — the rule did not run", flow_id: flow_id)
+        "streamed rather than buffered (a server-sent-event / close-delimited / 101 body, a " \
+        "message stream that had not ended in time, or one over the buffering ceiling) — the " \
+        "rule did not run", flow_id: flow_id)
     end
 
     # ── helpers ───────────────────────────────────────────────────────────────
