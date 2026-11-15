@@ -210,17 +210,22 @@ module Gori::Tui
       key = ev.key
       shift = ev.shift?
       word = ev.ctrl? || ev.alt?
+      shell = LineEdit.shell_action(ev)
       case
-      when ev.ctrl? && key.lower_z? then undo
-      when word_delete_key?(ev)     then delete_word_left
-      when word && key.left?        then word_left(shift)
-      when word && key.right?       then word_right(shift)
-      when key.left?                then move(-1, selecting: shift)
-      when key.right?               then move(1, selecting: shift)
-      when key.home?                then home(shift)
-      when key.end?                 then end_of_line(shift)
-      when key.backspace?           then backspace
-      when key.delete?              then delete
+      when shell == :home            then home(shift)
+      when shell == :end             then end_of_line(shift)
+      when shell == :delete_to_start then delete_to_start
+      when shell == :delete_word     then delete_word_left
+      when ev.ctrl? && key.lower_z?  then undo
+      when word_delete_key?(ev)      then delete_word_left
+      when word && key.left?         then word_left(shift)
+      when word && key.right?        then word_right(shift)
+      when key.left?                 then move(-1, selecting: shift)
+      when key.right?                then move(1, selecting: shift)
+      when key.home?                 then home(shift)
+      when key.end?                  then end_of_line(shift)
+      when key.backspace?            then backspace
+      when key.delete?               then delete
       else
         # ⇥/⇧⇥ are never text here: `Key::Tab.to_char` is '\t', so a name prompt that handed
         # every printable to this field typed a tab into a project name. Refused (false), so

@@ -81,3 +81,67 @@ describe Gori::Tui::TextField do
     TextField.new.caret.should eq(0)
   end
 end
+
+private def shell_key(key : Termisu::Input::Key, shift : Bool = false, alt : Bool = false) : Termisu::Event::Key
+  mods = Termisu::Input::Modifier::Ctrl
+  mods |= Termisu::Input::Modifier::Shift if shift
+  mods |= Termisu::Input::Modifier::Alt if alt
+  Termisu::Event::Key.new(key, mods)
+end
+
+describe "TextField shell editing" do
+  it "moves to either end with Ctrl-A and Ctrl-E" do
+    field = TextField.new("한글 /tmp/file.har")
+    field.handle_edit_key(shell_key(Termisu::Input::Key::LowerA)).should be_true
+    field.caret.should eq(0)
+    field.handle_edit_key(shell_key(Termisu::Input::Key::LowerE)).should be_true
+    field.caret.should eq(field.value.size)
+  end
+
+  it "deletes the prefix at the caret as one undo step, preserving the suffix" do
+    field = TextField.new("한글 /tmp/file.har")
+    field.move(-4)
+    caret = field.caret
+    field.handle_edit_key(shell_key(Termisu::Input::Key::LowerU)).should be_true
+    field.value.should eq(".har")
+    field.caret.should eq(0)
+    field.handle_edit_key(shell_key(Termisu::Input::Key::LowerZ))
+    field.value.should eq("한글 /tmp/file.har")
+    field.caret.should eq(caret)
+  end
+
+  it "deletes the previous word or selection and can undo either" do
+    field = TextField.new("alpha beta")
+    field.handle_edit_key(shell_key(Termisu::Input::Key::LowerW)).should be_true
+    field.value.should eq("alpha ")
+    field.undo
+    field.home
+    field.move(5, selecting: true)
+    field.handle_edit_key(shell_key(Termisu::Input::Key::LowerW)).should be_true
+    field.value.should eq(" beta")
+    field.undo
+    field.value.should eq("alpha beta")
+  end
+
+  it "extends the selection for shifted shell motions" do
+    field = TextField.new("alpha")
+    field.move(-2)
+    field.handle_edit_key(shell_key(Termisu::Input::Key::LowerA, shift: true)).should be_true
+    field.delete_selection.should be_true
+    field.value.should eq("ha")
+    field.handle_edit_key(shell_key(Termisu::Input::Key::LowerE, shift: true)).should be_true
+    field.delete_selection.should be_true
+    field.value.should be_empty
+  end
+
+  it "consumes shell keys even on an empty field and leaves other chords alone" do
+    field = TextField.new
+    {Termisu::Input::Key::LowerA, Termisu::Input::Key::LowerE,
+     Termisu::Input::Key::LowerU, Termisu::Input::Key::LowerW}.each do |key|
+      field.handle_edit_key(shell_key(key)).should be_true
+      field.handle_edit_key(shell_key(key, alt: true)).should be_false
+    end
+    field.handle_edit_key(shell_key(Termisu::Input::Key::LowerP)).should be_false
+    field.value.should be_empty
+  end
+end
