@@ -313,7 +313,7 @@ module Gori::Tui
       refresh_link_preview
     end
 
-    def commit : Nil
+    def commit : Bool
       save_notes
     end
 

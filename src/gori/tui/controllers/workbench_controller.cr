@@ -735,7 +735,8 @@ module Gori::Tui
     # commit is a no-op, and entering the tab recomputes nothing — caches stay valid across
     # tab switches. Kept for the TabController contract + the runner's commit call sites
     # (focus-leave, quit) so a future persistence add has a single seam.
-    def commit : Nil
+    def commit : Bool
+      true
     end
   end
 end

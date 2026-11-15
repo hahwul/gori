@@ -128,20 +128,29 @@ module Gori::Tui
       true
     end
 
-    def commit : Nil
+    def commit : Bool
       save_current
     end
 
-    def save_current : Nil
-      return unless tab = current_tab_obj
-      return unless (id = tab.db_id) && tab.view.dirty?
+    def save_current : Bool
+      (tab = current_tab_obj) ? save_tab(tab) : true
+    end
+
+    def save_all : Bool
+      @sessions.map { |tab| save_tab(tab) }.all?
+    end
+
+    private def save_tab(tab) : Bool
+      return true unless (id = tab.db_id) && tab.view.dirty?
       v = tab.view
       cfg = v.config_json
       unless update_session_row(id, v, cfg)
-        return @host.status("session NOT saved (project busy, or closed in another gori) — the tab stays dirty")
+        @host.status("session NOT saved (project busy, or closed in another gori) — the tab stays dirty")
+        return false
       end
       v.mark_config_synced(cfg)
       v.clear_dirty
+      true
     end
 
     # --- focus ring ---

@@ -213,7 +213,8 @@ module Gori::Tui
         @desc_mode = InputMode::Read
         @desc_read.sync_from(@desc_area)
       end
-      load_settings_values
+      refresh_settings unless settings_dirty?
+      refresh_protos unless protos_dirty?
       # Tab entry is the other moment a peer's write reaches these lists: the external-change
       # tick refreshes only the ACTIVE tab, so a rule deleted while the operator was on History
       # shifted the list with nothing here to follow the selected row.
@@ -1925,9 +1926,11 @@ module Gori::Tui
     # flag stays up now, so the next exit path retries, and `reload` leaves a dirty buffer
     # alone. Two siblings already read this Bool (`RewriterController#persist_sample`,
     # `DecoderController#restore_sessions`); this was the one that did not.
-    def save(store : Store) : Nil
-      return unless @desc_dirty
-      @desc_dirty = false if store.set_setting(DESC_KEY, @desc_area.text)
+    def save(store : Store) : Bool
+      return true unless @desc_dirty
+      return false unless store.set_setting(DESC_KEY, @desc_area.text)
+      @desc_dirty = false
+      true
     end
 
     # --- live description editing (delegated when Project tab body is focused) ---

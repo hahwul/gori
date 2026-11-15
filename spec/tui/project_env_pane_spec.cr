@@ -273,11 +273,16 @@ end
 # rolled-back batch produces (see project_desc_persist_spec, which uses it for the same reason).
 
 private class NetworkHost < FakeHost
+  property? persisted = true
   getter applied_config : Gori::Settings::ProjectNetworkConfig? = nil
 
-  def apply_project_network(config : Gori::Settings::ProjectNetworkConfig) : String
+  def apply_project_network(config : Gori::Settings::ProjectNetworkConfig) : {String, Bool}
     @applied_config = config
-    "project network captured"
+    {"project network captured", @persisted}
+  end
+
+  def apply_project_protos(spec : String) : {String, Bool}
+    {"proto captured", @persisted}
   end
 end
 
@@ -488,6 +493,32 @@ describe Gori::Tui::ProjectController do
       c.view.env_adding?.should be_true # the row (and the line in it) survived
       c.handle_body_key(key(Termisu::Input::Key::Enter))
       c.view.env_vars.should eq([{"TOKEN", "abc123"}])
+    end
+  end
+end
+
+describe "Project editor save outcomes" do
+  it "keeps both settings halves dirty after a failed save and a tab reload, then retries" do
+    with_env_controller do |c, host, session|
+      c.view.select_setting(Gori::Tui::ProjectView::SETTINGS_FIELD_BASE)
+      while c.view.set_backspace
+      end
+      "127.0.0.2".each_char { |ch| c.view.set_input(ch) }
+      c.view.select_setting(Gori::Tui::ProjectView::SETTINGS_FIELD_BASE + Gori::Tui::ProjectView::SETTINGS_PROTOS_FIELD)
+      while c.view.set_backspace
+      end
+      "/tmp/exit-retry.desc".each_char { |ch| c.view.set_input(ch) }
+      host.persisted = false
+      c.commit.should be_false
+      c.view.reload(session.project, session.store)
+      c.view.settings_dirty?.should be_true
+      c.view.protos_dirty?.should be_true
+      c.view.settings_values[0].should eq("127.0.0.2")
+      c.view.protos_value.should eq("/tmp/exit-retry.desc")
+      host.persisted = true
+      c.commit.should be_true
+      c.view.settings_dirty?.should be_false
+      c.view.protos_dirty?.should be_false
     end
   end
 end

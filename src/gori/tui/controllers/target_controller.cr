@@ -263,7 +263,7 @@ module Gori::Tui
       active_child.on_external_change
     end
 
-    def commit : Nil
+    def commit : Bool
       active_child.commit
     end
 

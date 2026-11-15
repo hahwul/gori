@@ -218,10 +218,12 @@ module Gori::Tui
     # funnels through this one TextArea, so the comparison cannot miss a site — and an
     # untouched sample never writes a row. A failed write leaves @saved_sample alone, so the
     # next leave retries.
-    def commit : Nil
+    def commit : Bool
       text = @preview_input.text
-      return if text == @saved_sample
-      @saved_sample = text if @host.session.store.set_setting(Store::REWRITER_SAMPLE_KEY, text)
+      return true if text == @saved_sample
+      return false unless @host.session.store.set_setting(Store::REWRITER_SAMPLE_KEY, text)
+      @saved_sample = text
+      true
     end
 
     def selected_rule : Store::MatchRule?

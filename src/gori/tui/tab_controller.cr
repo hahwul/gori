@@ -196,21 +196,21 @@ module Gori::Tui
     abstract def notifications : Notifications # shared notification store (center + badge)
     abstract def toggle_scope_lens : Nil       # flip the scope display lens (Project settings pane row/click)
     abstract def toggle_sandbox : Nil          # flip the scope sandbox — hard block gate (Project NETWORK pane row/click)
-    # Persist + apply the Project settings pane's per-project network config; returns a toast.
+    # Persist + apply project network config; returns the toast and whether it committed.
     abstract def apply_project_network(bind_host : String, bind_port : Int32, upstream : String,
-                                       connect_secs : Int32, io_secs : Int32, capture_mib : Int32) : String
+                                       connect_secs : Int32, io_secs : Int32, capture_mib : Int32) : {String, Bool}
 
     # Secret-bearing extension used by the real Runner. The positional overload stays as the
     # compatibility contract for the small controller Host doubles; their tests do not own a
     # project DB and deliberately exercise controller routing rather than persistence.
-    def apply_project_network(config : Settings::ProjectNetworkConfig) : String
+    def apply_project_network(config : Settings::ProjectNetworkConfig) : {String, Bool}
       apply_project_network(config.bind_host, config.bind_port, config.upstream,
         config.connect_secs, config.io_secs, config.capture_mib)
     end
 
     # Persist + load this project's gRPC `.proto` descriptor set path (#823); returns a toast
-    # naming what loaded (or why nothing did). Blank = the `~/.gori/protos` convention dir.
-    abstract def apply_project_protos(spec : String) : String
+    # naming what loaded and the write outcome. Blank = the `~/.gori/protos` convention dir.
+    abstract def apply_project_protos(spec : String) : {String, Bool}
   end
 
   # Shared, state-free body chrome used by BOTH Runner and the per-tab
@@ -1843,7 +1843,8 @@ module Gori::Tui
     def on_external_change : Nil # another connection committed to the project DB
     end
 
-    def commit : Nil # flush any in-progress edit before leave/quit
+    def commit : Bool # true for a successful flush or deliberate no-op; false on write failure
+      true
     end
 
     # Focus a specific session/sub-tab by its persisted id (notification "jump to

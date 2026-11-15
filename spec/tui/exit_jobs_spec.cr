@@ -188,11 +188,11 @@ describe "Runner.quit_decision" do
   end
 end
 
-# A miniature of the Runner's exit wiring — the confirm state machine (copied from
-# runner.cr#confirm, as NestShell does) plus the `stop_all_jobs` / `commit_pending_edits`
-# / `@outcome` ordering of `leave_project` and `quit!`. Keep it in step with runner.cr: an
-# example that passes against a drifted double proves nothing about the real shell.
+# The real exit guard, driven through the same confirm wiring as the Runner.
 private class ExitShell
+  include Gori::Tui::ExitGuard
+
+  @quit_armed = false
   getter jobs = Jobs.new
   getter outcome = :running
   getter stopped = [] of Symbol  # which controllers had stop_all called, in order
@@ -209,18 +209,20 @@ private class ExitShell
     end
   end
 
-  private def commit_pending_edits : Nil
+  private def commit_pending_edits : Array(String)
     @committed = true
+    [] of String
+  end
+
+  def status(message : String, kind : Symbol) : Nil
   end
 
   # Mirror of Runner#leave_project.
   def leave_project : Nil
     active = @jobs.active_summary
     @message = Runner.leave_confirm_message(active, @jobs.active.size)
-    confirm(@message, danger: !active.nil?) do
-      stop_all_jobs
-      commit_pending_edits
-      @outcome = :back
+    confirm("LEAVE PROJECT", @message, confirm_label: "leave", danger: !active.nil?) do
+      finish_exit(:back)
     end
   end
 
@@ -233,24 +235,22 @@ private class ExitShell
   def quit! : Nil
     if Runner.quit_decision(Gori::Settings.confirm_quit?, chord: false, armed: false).confirm?
       @message = Runner.quit_confirm_message(@jobs.active_summary, @jobs.active.size)
-      confirm(@message, danger: true, title: "QUIT GORI", label: "quit") { finish_quit }
+      confirm("QUIT GORI", @message, confirm_label: "quit", danger: true) { finish_quit }
     else
       finish_quit
     end
   end
 
   private def finish_quit : Nil
-    stop_all_jobs
-    commit_pending_edits
-    @outcome = :quit
+    finish_exit(:quit)
   end
 
   getter? danger = false
 
-  private def confirm(message : String, *, danger : Bool, title : String = "LEAVE PROJECT",
-                      label : String = "leave", &action : -> Nil) : Nil
+  private def confirm(title : String, message : String, *, danger : Bool,
+                      confirm_label : String, &action : -> Nil) : Nil
     @danger = danger
-    ov = ConfirmDialog.new(title, message, confirm_label: label,
+    ov = ConfirmDialog.new(title, message, confirm_label: confirm_label,
       danger: danger)
     accepted = false
     ov.on_commit = -> { accepted = true; true }
