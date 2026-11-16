@@ -265,6 +265,41 @@ describe SettingsView do
     end
   end
 
+  # The same for the row after it (#1898), which shifted the passthrough field down by one.
+  it "toggles Strip dictionary offer on, then resets it to the default on save" do
+    dir = File.tempname("gori-settings-dictionary")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev = Gori::Settings.strip_available_dictionary?
+    prev_ext = Gori::Settings.strip_extended_connect?
+    prev_pass = Gori::Settings.tls_passthrough
+    row = SettingsView::NETWORK_FIELDS.index! { |f| f.label == "Strip dictionary offer" }
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.strip_available_dictionary = false
+      Gori::Settings.strip_extended_connect = false
+      Gori::Settings.tls_passthrough = ["pinned.test"]
+      v = SettingsView.new
+      v.reload(:network)
+      row.times { v.move_field(1) }
+      v.toggle_or_move(-1)
+      v.save
+      Gori::Settings.strip_available_dictionary?.should be_true
+      Gori::Settings.strip_extended_connect?.should be_false
+      Gori::Settings.tls_passthrough.should eq(["pinned.test"])
+
+      v.reset_to_defaults
+      v.save
+      Gori::Settings.strip_available_dictionary?.should eq(Gori::Settings::DEFAULT_STRIP_AVAILABLE_DICTIONARY)
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      Gori::Settings.strip_available_dictionary = prev
+      Gori::Settings.strip_extended_connect = prev_ext
+      Gori::Settings.tls_passthrough = prev_pass
+      FileUtils.rm_rf(dir)
+    end
+  end
+
   # A save can shorten the value under the caret (`editor` is stripped); the next ⌫ must
   # clamp first rather than slice `v[0, -1]` and raise.
   it "survives a backspace after a save shortened the focused value" do
