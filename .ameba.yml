@@ -1,3 +1,8 @@
+# Dependencies and generated eval output are not maintained source.
+Excluded:
+  - lib
+  - eval/out
+
 # Short block parameter names (rs, p, c, i) are idiomatic Crystal; the few
 # inherently-branchy parsers/dispatchers sit just over the default complexity
 # bar. Everything else is linted normally.

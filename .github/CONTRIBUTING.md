@@ -36,9 +36,11 @@ work via stdlib) with `crystal build -Dwithout_native_codecs`.
 - **`crystal tool format --check src spec bench scripts eval`** must pass, and no file you
   changed may gain ameba findings (`just lint-gate`, the diff gate CI runs; a full ameba
   run carries a pre-existing backlog). `just check` runs the format check, the
-  `shards.nix` drift check and the full ameba. Format only the
-  files you changed (`crystal tool format <files>`); never run a whole-tree format (it
-  reformats dozens of unrelated files due to Crystal version drift).
+  `shards.nix` drift check and that diff gate. Both `just check REF` and `just lint-gate REF`
+  accept a base ref (default `origin/main`). `just lint-all` reports the full backlog and
+  exits nonzero while findings remain; dependencies and generated `eval/out/` are excluded.
+  Format only the files you changed (`crystal tool format <files>`); never run a whole-tree
+  format (it reformats dozens of unrelated files due to Crystal version drift).
 - CI also type-checks `bench/`, `scripts/` and `eval/`: run `just benchmark-check` and
   `just scripts-check`.
 - **`just test`** must be green. Add or update specs under `spec/` mirroring the source
