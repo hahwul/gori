@@ -181,6 +181,20 @@ describe Gori::Proxy::Codec::ContentDecode do
     note.not_nil!.should contain("unsupported")
   end
 
+  # RFC 9842: the body needs a dictionary only the client held, so the note names that cause
+  # and the setting that avoids it (#1898), and still reads as a failed decode.
+  it "names the client's dictionary and the setting for a dcb/dcz body" do
+    {"dcb", "dcz"}.each do |enc|
+      decoded, note = decode(head("HTTP/1.1 200 OK", "Content-Encoding: #{enc}"), "\xffDCB-opaque".to_slice)
+      decoded.should eq("\xffDCB-opaque".to_slice)
+      note.should eq("compressed: #{enc} — unsupported without the client's dictionary (RFC 9842); " \
+                     "settings network.strip_available_dictionary")
+      Gori::Proxy::Codec::ContentDecode.decode_failed?(note).should be_true
+    end
+    _, other = decode(head("HTTP/1.1 200 OK", "Content-Encoding: dcx"), "raw".to_slice)
+    other.should eq("compressed: dcx — decode unsupported")
+  end
+
   it "tolerates a truncated gzip body (partial output, never raises)" do
     full = gzip("a much longer body cut in half to simulate capture-cap truncation, repeated " * 4)
     truncated = full[0, full.size // 2]

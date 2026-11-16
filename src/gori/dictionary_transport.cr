@@ -89,5 +89,14 @@ module Gori
       "this request — a response compressed against a dictionary gori does not hold (RFC 9842 " \
       "dcb/dcz) cannot be decoded (settings network.strip_available_dictionary)."
     end
+
+    # The decode note for a `dcb`/`dcz` body. Static, not branched on the switch: the note is a
+    # view of a stored flow that may predate any setting. `compressed: ` is the prefix
+    # `ContentDecode.decode_failed?` reads, and `unsupported` is what the History pane colours
+    # as an incomplete read.
+    def self.decode_note(enc : String) : String
+      "compressed: #{enc} — unsupported without the client's dictionary (RFC 9842); " \
+      "settings network.strip_available_dictionary"
+    end
   end
 end
