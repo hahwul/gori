@@ -49,7 +49,7 @@ A few tool families never need a project and work unbound: project management (`
 
 **If the selected project cannot be opened** (a database that is missing, corrupt, or unreadable, a project name that no longer exists), the server still completes the handshake and starts unbound rather than exiting. The reason is written to stderr, repeated in the handshake `instructions`, returned with every `NO_PROJECT` tool error, and reported as `bind_error` by `project_info`, so the agent can call `list_projects` and `switch_project` to recover without a restart.
 
-Call `project_info` before using data. It reports `bound`, the selected project, database path, workspace root, selection source, the project `description` (the operator's note on what this engagement is for, stored by `create_project`), and the project's `tags`.
+When the profile exposes `project_info`, call it before using data. It reports `bound`, the selected project, database path, workspace root, selection source, the project `description` (the operator's note on what this engagement is for, stored by `create_project`), and the project's `tags`.
 
 **The project named in `instructions` is the one bound at the handshake.** That text is sent once and nothing pushes an update to it, so after a `switch_project` it still describes the binding as it was then while every later call reads and writes the new project. `project_info` is the live answer. `switch_project` (and `create_project` when it auto-binds) returns the same correction in their result, alongside `previous_project`, the binding they moved off.
 
@@ -94,16 +94,28 @@ By default `gori mcp` advertises every tool, so an agent can reach the workbench
 | --- | ---: | ---: | ---: | --- |
 | `gori mcp` | 199 | ~182 KB | ~47k | Everything (the default) |
 | `--read-only` | 65 | ~57 KB | ~15k | Read tools and pure compute; no live requests |
+| `--tools=@analysis` | 5 | ~8 KB | ~2k | Analyze one bound capture; no project switching or TUI mailbox |
 | `--tools=@recon` | 39 | ~41 KB | ~11k | Read and map the capture, scan it passively, replay a request, record issues and notes |
 | `--tools=@recon --read-only` | 29 | ~30 KB | ~8k | `@recon` minus what `--read-only` disables |
 | `--tools=@minimal` | 18 | ~19 KB | ~5k | Read History, flows and the current TUI context; talk to the operator |
 
 Tokens are bytes ÷ 4, a rough rule for JSON; your client's tokenizer has the final word.
 
+For headless capture analysis, use `gori mcp --db capture.db --tools=@analysis`.
+This five-tool profile needs a project bound at startup; it has no project picker or operator
+mailbox. `@minimal` also supports interactive TUI context and operator messages.
+
+For bulk extraction, ask `list_history` for `columns` (for example
+`["rid=header:X-Request-Id", "body=jsonpath:$"]`) instead of fetching every flow separately.
+Add `fields: []` for context and columns only, or `fields: ["url", "status"]` for selected
+metadata. Identity, state, provenance, advisories, errors and requested columns always remain;
+`has_more` and cursors retain their usual meaning. Omit `fields` for the full row shape.
+
 **Which one to start from.** The agent eval in [`eval/`](https://github.com/hahwul/gori/tree/main/eval) measures the profiles against each other on capture-analysis tasks: read, filter, count and correlate captured flows. Across Sonnet and Haiku the profile did not measurably change whether a task was answered, but it set the cost: the full catalogue took a median 3.5–4× the input tokens of `@minimal` for the same answer (1.7–5.5× by task; `--read-only` about 1.6×, `@recon` about 1.4×). The catalogue is re-sent on every turn, so the absolute gap grows with every call, and a smaller model makes more of them. For an agent that reads and maps a capture, start from `--tools=@recon --read-only`, or `@minimal` when it only reads History and flows; `@recon` alone adds a replay and issue and note writes. Keep the full catalogue for an agent that drives the workbench (fuzz, discover, authorize, sequence), which the eval does not measure yet.
 
 | Profile | Tools |
 | --- | --- |
+| `@analysis` | `ql_reference`, `ql_explain`, `list_history`, `get_flow`, `get_response_body_chunk` |
 | `@minimal` | `project_info`, `list_projects`, `switch_project`, `create_project`, `ql_reference`, `ql_explain`, `list_history`, `get_flow`, `get_response_body_chunk`, `get_current_context`, `get_repeater_context`, `get_issue`, `list_sitemap`, `intercept_get`, `intercept_list`, `operator_messages`, `reply_to_operator`, `ask_operator` |
 | `@recon` | `@minimal`, plus `list_scope`, `list_params`, `list_js_endpoints`, `scan_js_endpoints`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `jwt_verify`, `probe_scan` (passive only), `probe_issues`, `probe_promote`, `probe_dismiss`, `list_issues`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
 

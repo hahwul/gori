@@ -60,18 +60,22 @@ end
 # "member -> named"; each entry must still occur (see the example), so the list cannot outlive
 # the text it excuses.
 private INCIDENTAL = {
-  "ql_explain -> probe_scan"                => "lists every tool that would refuse the query",
-  "list_history -> list_views"              => "`view` takes a saved view's name; the operator can give it",
-  "get_response_body_chunk -> send_request" => "names a producer of truncated output, not a step",
-  "list_sitemap -> set_sitemap_tag"         => "says where an operator's tag comes from",
-  "intercept_get -> intercept_forward_edit" => "editing is an optional branch; redacted detail is useful on its own",
-  "probe_issues -> probe_delete"            => "the third triage verb, left out of @recon on purpose: it erases the record",
-  "list_env -> send_websocket"              => "names where env tokens are substituted",
-  "send_request -> send_websocket"          => "only for a WebSocket repeater id; @recon replays HTTP",
-  "list_params -> mine_start"               => "says where the names can feed; @recon maps a target, it does not mine",
-  "list_sitemap -> scan_js_endpoints"       => "says where the optional unrequested block comes from; @minimal only reads",
-  "get_issue -> list_links"                 => "names where a capped issue's full link set pages; the capped preview stands alone",
-  "get_issue -> list_evidence"              => "names where a capped issue's full evidence set pages; the capped preview stands alone",
+  "list_history -> get_current_context"             => "names an optional producer of selected ids, not a required step",
+  "get_response_body_chunk -> get_repeater_context" => "names a producer of truncated output, not a required step",
+  "ql_reference -> list_sitemap"                    => "names another surface using the same query syntax",
+  "ql_explain -> list_sitemap"                      => "describes which query surfaces the diagnostic covers",
+  "ql_explain -> probe_scan"                        => "lists every tool that would refuse the query",
+  "list_history -> list_views"                      => "`view` takes a saved view's name; the operator can give it",
+  "get_response_body_chunk -> send_request"         => "names a producer of truncated output, not a step",
+  "list_sitemap -> set_sitemap_tag"                 => "says where an operator's tag comes from",
+  "intercept_get -> intercept_forward_edit"         => "editing is an optional branch; redacted detail is useful on its own",
+  "probe_issues -> probe_delete"                    => "the third triage verb, left out of @recon on purpose: it erases the record",
+  "list_env -> send_websocket"                      => "names where env tokens are substituted",
+  "send_request -> send_websocket"                  => "only for a WebSocket repeater id; @recon replays HTTP",
+  "list_params -> mine_start"                       => "says where the names can feed; @recon maps a target, it does not mine",
+  "list_sitemap -> scan_js_endpoints"               => "says where the optional unrequested block comes from; @minimal only reads",
+  "get_issue -> list_links"                         => "names where a capped issue's full link set pages; the capped preview stands alone",
+  "get_issue -> list_evidence"                      => "names where a capped issue's full evidence set pages; the capped preview stands alone",
 }
 
 private def table_cells(line : String) : Array(String)
