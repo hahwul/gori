@@ -218,6 +218,10 @@ module Gori::Proxy
       # request (#1898), or nil. Reset at the top of `handle_request`, ahead of every record site,
       # and attached by `capture_request`, so whichever path records the request carries it.
       @dictionary_note = nil.as(String?)
+      # The advisory THIS exchange's request record carried, assigned by every `capture_request`.
+      # A response record that writes an advisory replaces the column (`Store#update_one`), so
+      # `capture_response` puts this in front of it (#1905).
+      @req_advisory = nil.as(String?)
       # What gori removed from THIS response's head on its own account — today only an h3
       # `Alt-Svc` (see `settle_alt_svc`) — carried to whichever record site the response takes
       # so the flow says so (`Store::FlowRow#advisory`). Assigned unconditionally at the seam,
@@ -2527,10 +2531,8 @@ module Gori::Proxy
       # Almost every response has nothing to say: skip the two Arrays that answer nil.
       return nil if body.nil? && @alt_svc_note.nil? && @status_line_note.nil? &&
                     @lf_rules_note.nil? && @lf_residue_note.nil? && @withheld_offer_note.nil?
-      # `@dictionary_note` rides along but never makes this non-nil on its own: the request record
-      # already carries it, and a nil here is what keeps the request side's column (`update_one`).
       [body, @alt_svc_note, @status_line_note, @lf_rules_note, @lf_residue_note,
-       @withheld_offer_note, @dictionary_note].compact.join("\n")
+       @withheld_offer_note].compact.join("\n")
     end
 
     # A WebSocket 101 from an origin whose HTTP/2 extended CONNECT offer the h2 relay withheld
@@ -3163,10 +3165,14 @@ module Gori::Proxy
         req.rewrite = Store::Rewrite.new(@req_hits.dup, @req_orig_head, capped(@req_orig_body)[0])
       end
       forget_request_rewrite
+      @req_advisory = req.advisory
       @sink.on_request(req)
     end
 
     private def capture_response(resp : Store::CapturedResponse) : Nil
+      if (mine = resp.advisory) && (kept = @req_advisory)
+        resp.advisory = "#{kept}\n#{mine}"
+      end
       unless @resp_hits.empty?
         resp.rewrite = Store::Rewrite.new(@resp_hits.dup, @resp_orig_head, capped(@resp_orig_body)[0])
       end

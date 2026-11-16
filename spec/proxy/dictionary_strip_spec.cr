@@ -124,7 +124,7 @@ describe "proxy — the dictionary offer strip (HTTP/1.1)" do
       through_proxy(on: true, extra: OFFER, response_extra: %(Alt-Svc: h3=":443"\r\n)) do |_, sink, _|
         advisory = sink.responses.first.advisory.to_s
         advisory.should contain(%(Alt-Svc HTTP/3 advertisement (h3=":443")))
-        advisory.should contain(sink.requests.first.advisory.not_nil!)
+        advisory.scan(sink.requests.first.advisory.not_nil!).size.should eq(1)
       end
     ensure
       Gori::Settings.strip_alt_svc = before
