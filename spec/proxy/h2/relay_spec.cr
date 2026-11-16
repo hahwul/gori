@@ -69,8 +69,8 @@ private def relay_exchange(strip : Bool, gated : Bool) : Exchange
   Gori::Settings.reset_extended_connect_withheld
   result = nil
   with_store do |store|
-    browser, client_side = UNIXSocket.pair
-    origin, upstream_side = UNIXSocket.pair
+    browser, client_side = stream_pair
+    origin, upstream_side = stream_pair
     sink = FrameLogSink.new
     ic = gated ? Gori::Interceptor.new(Gori::Scope.load(store)) : nil
     done = Channel(Nil).new(1)
