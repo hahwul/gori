@@ -75,6 +75,7 @@ gori는 전역 환경설정을 `settings.json`에, 각 프로젝트를 자체 SQ
 | `http2` | string | `"auto"` | `auto`는 원 서버의 ALPN을 반영하고, `off`는 모든 터널 연결을 HTTP/1.1로 강제합니다. 아래 [http2](#http2)를 참고하세요 |
 | `strip_alt_svc` | bool | `false` | HTTP/3을 광고하는 `Alt-Svc` 응답 필드를 클라이언트에 도달하기 전에 제거하므로, 브라우저가 gori가 나르지 않는 전송으로 넘어갈 수 없습니다. 아래 [strip_alt_svc](#strip-alt-svc)를 참고하세요 |
 | `strip_extended_connect` | bool | `false` | 원 서버의 HTTP/2 `SETTINGS_ENABLE_CONNECT_PROTOCOL`을 클라이언트에 넘기지 않으므로, 브라우저가 메시지 단위 인터셉트와 Match & Replace가 동작하는 HTTP/1.1 `Upgrade`로 WebSocket을 엽니다. 아래 [strip_extended_connect](#strip-extended-connect)를 참고하세요 |
+| `strip_available_dictionary` | bool | `false` | 요청이 원 서버에 닿기 전에 `Available-Dictionary`와 `Dictionary-ID`를 제거하므로, 원 서버가 gori가 해독할 수 없는 `dcb`/`dcz` 본문으로 응답하지 못합니다. 아래 [strip_available_dictionary](#strip-available-dictionary)를 참고하세요 |
 | `tls_passthrough` | array | `[]` | 복호화하지 않고 그대로 중계할 호스트 목록. 아래 [tls_passthrough](#tls-passthrough)를 참고하세요 |
 
 CLI `--listen` / `--port`는 현재 프로세스에 한해서만 이 값들을 오버라이드합니다(디스크에 기록되지 않음). [프로젝트별 오버라이드](#per-project-overrides)를 참고하세요.
@@ -152,6 +153,24 @@ HTTP/2에서 필드를 하나 제거하면 gori는 그 응답의 헤더 블록�
 **gori는 한 일을 밝힙니다.** SETTINGS 프레임에는 플로우가 없으므로 기록은 세 곳에 남습니다. raw 프레임 로그에는 gori가 실제로 보낸, 파라미터가 빠진 프레임이 남습니다. `gori.log`에는 원 서버마다 한 번 이름이 적힙니다. 설정이 켜진 동안 그 원 서버로 가는 HTTP/1.1 WebSocket 업그레이드마다 다음 안내가 남습니다: *"gori withheld `<host>:<port>`'s SETTINGS_ENABLE_CONNECT_PROTOCOL from the client on HTTP/2 (settings network.strip_extended_connect), so a client that would have opened this WebSocket there used the HTTP/1.1 Upgrade instead."*
 
 이 파라미터는 모든 확장 `CONNECT` 프로토콜이 함께 쓰는 비트 하나이므로, `connect-udp`(RFC 9298)와 `connect-ip`(RFC 9484)도 함께 막힙니다. 값이 `0`인 항목은 아무것도 바꾸지 않으므로 그대로 둡니다. 그래도 확장 `CONNECT`를 보내는 클라이언트는 거부하지 않고 중계합니다. 영향을 받는 것은 프록시 경로뿐입니다. Repeater나 Fuzzer의 재전송은 원 서버에 직접 접속하므로 여전히 제안을 받습니다. 이 설정은 Preferences → **Network & Tabs** → **Network** → **Strip HTTP/2 ext. CONNECT**에서 켜고 끕니다.
+
+#### strip_available_dictionary {#strip-available-dictionary}
+
+Compression Dictionary Transport(RFC 9842)에서 클라이언트는 자신이 가진 사전을 `Available-Dictionary`(사전의 SHA-256)와 `Dictionary-ID`로 원 서버에 알립니다. 그러면 원 서버는 `Content-Encoding: dcb`(Brotli)나 `dcz`(Zstandard)로 응답할 수 있는데, 이 본문은 그 사전으로만 풀립니다. 사전은 클라이언트가 앞서 캐시한 응답이고, gori가 경로에 들어오기 전에 받은 것인 경우가 많습니다.
+
+이 설정이 꺼져 있으면 본문은 바이트 그대로 캡처되지만 내용은 읽을 수 없습니다. 상세 뷰, 패시브 프로브 규칙, extract 규칙, Match & Replace 본문 규칙이 모두 압축된 바이트를 보며, 디코드 안내는 *"compressed: dcb — unsupported without the client's dictionary (RFC 9842); settings network.strip_available_dictionary"*로 나옵니다.
+
+켜면 gori는 HTTP/1.1과 HTTP/2 모두에서 요청이 원 서버로 나가기 전에 `Available-Dictionary`와 `Dictionary-ID` 필드를 모두 제거합니다. 사전의 해시가 없으면 원 서버는 `dcb`나 `dcz`를 만들 수 없으므로 gori가 해독하는 코딩으로 응답합니다. `Accept-Encoding`은 클라이언트가 보낸 그대로 둡니다. 해시가 사라지면 그 안의 `dcb`/`dcz` 토큰은 아무 효과가 없고, gori는 필드의 일부를 고쳐 쓰지 않고 필드를 통으로 지웁니다. History에는 gori가 보낸 요청이 기록됩니다.
+
+기본값은 꺼짐입니다. 이유는 [`strip_alt_svc`](#strip-alt-svc)와 같습니다. 읽을 수 없는 본문이라도 gori가 기록하는 것을 망가뜨리지는 않고, 디코드 안내가 이유를 밝힙니다. 켜면 클라이언트가 gori를 거치는 동안 사전으로 아끼던 만큼 원 서버의 응답이 커집니다.
+
+제거는 Match & Replace보다 *먼저* 실행되므로, 특정 호스트에서 요청 head 규칙으로 필드를 되돌려 놓으면 그 규칙이 이기고, 플로우는 그 필드를 제거했다고 말하지 않습니다.
+
+HTTP/2에서 필드를 하나 제거하면 gori는 그 요청의 헤더 블록을 다시 인코딩합니다. HPACK은 연결 단위로 상태를 가지므로 이 전환은 되돌릴 수 없습니다. 처음 제거한 시점부터 gori는 그 연결의 모든 요청 헤드를 다시 인코딩하고, 그 방향에서 클라이언트의 HPACK 압축을 포기합니다. raw 프레임 로그에도 gori의 HPACK이 남습니다. 트레일러 블록은 건드리지 않습니다.
+
+**gori는 한 일을 밝힙니다.** 요청에서 필드를 제거한 플로우마다 다음 안내가 남습니다: *"removed 2 dictionary fields (`Available-Dictionary: :…:`, `Dictionary-ID: "…"`) from this request — a response compressed against a dictionary gori does not hold (RFC 9842 dcb/dcz) cannot be decoded (settings network.strip_available_dictionary)."* HTTP/2에서는 그 연결의 요청 헤드를 이후 다시 인코딩한다는 문장이 덧붙고, `gori.log`에는 연결마다 첫 제거가 한 번 적힙니다.
+
+영향을 받는 것은 프록시 경로뿐입니다. Repeater, Fuzzer, Miner의 전송은 운영자의 바이트를 그대로 보내므로, 그 필드를 담은 캡처 요청을 재전송하면 여전히 `dcb` 응답을 받을 수 있고, 그 디코드 안내가 이유를 밝힙니다. 이 설정은 Preferences → **Network & Tabs** → **Network** → **Strip dictionary offer**에서 켜고 끕니다.
 
 ### listeners {#listeners}
 
