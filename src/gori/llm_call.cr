@@ -72,6 +72,61 @@ module Gori
       acc.raw_reply if acc.shaped?
     end
 
+    # The call as a Markdown transcript for a report (#1912): each request message under its
+    # role, then the reply. nil wherever `from_flow` is. Built for a copy menu or an export, so
+    # the pane's `from_flow` carries no message text.
+    def transcript(req_head : Bytes?, req_body : Bytes?, resp_head : Bytes?, resp_body : Bytes?) : String?
+      req = request(req_head, req_body) || return nil
+      c = call(req, resp_head, resp_body) || return nil
+      String.build do |io|
+        io << "# LLM call: " << summary(c)
+        messages(req).each { |(role, text)| io << "\n\n## " << role << "\n\n" << text }
+        io << "\n\n## assistant" unless c.text.empty? && c.tool_calls.empty?
+        io << "\n\n" << c.text unless c.text.empty?
+        c.tool_calls.each { |t| io << "\n\n### tool call: " << t.name << "\n\n```json\n" << t.arguments << "\n```" }
+        io << '\n'
+      end
+    end
+
+    # The request's messages as `{role, text}`, the system prompt first: Anthropic's top-level
+    # `system`, or the Responses API's `instructions`.
+    private def messages(req : Obj) : Array({String, String})
+      list = [] of {String, String}
+      system = content(req["system"]?)
+      system = str(req["instructions"]?) || "" if system.empty?
+      list << {"system", system} unless system.empty?
+      input = req["messages"]? || req["input"]?
+      if text = str(input)
+        list << {"user", text}
+      else
+        objs(input).each { |m| list << message(m) }
+      end
+      list
+    end
+
+    private def message(m : Obj) : {String, String}
+      parts = [content(m["content"]?)]
+      objs(m["tool_calls"]?).each do |tc|
+        obj(tc["function"]?).try { |f| parts << "[tool call #{str(f["name"]?)}] #{str(f["arguments"]?)}" }
+      end
+      # A Responses item that is a call or its output, not a message.
+      parts << "[tool call #{str(m["name"]?)}] #{str(m["arguments"]?)}" if m["type"]? == "function_call"
+      str(m["output"]?).try { |o| parts << o }
+      {str(m["role"]?) || str(m["type"]?) || "?", parts.reject(&.empty?).join('\n')}
+    end
+
+    # A message's `content`: a string, or blocks. A block with no text (an image, a document)
+    # is named by its type, not dropped.
+    private def content(a : JSON::Any?) : String
+      str(a) || objs(a).join('\n') do |b|
+        case type = str(b["type"]?)
+        when "tool_use"    then "[tool call #{str(b["name"]?)}] #{b["input"]?.try(&.to_json)}"
+        when "tool_result" then "[tool result] #{content(b["content"]?)}"
+        else                    str(b["text"]?) || "[#{type || "?"}]"
+        end
+      end
+    end
+
     private def json(bytes : Bytes?, needle : String) : JSON::Any?
       return nil unless bytes && bytes.size <= MAX_BODY
       JsonRpc.json?(String.new(bytes), needle)

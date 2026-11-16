@@ -510,6 +510,7 @@ gori run ls --format json --column 'T=regex:tok=(\w+)'
 | CSRF PoC | 요청을 교차 출처로 재현하는 자동 제출 HTML 폼 |
 | wscat | WebSocket Repeater 탭 전용. 핸드셰이크와 out-프레임을 `wscat` 세션으로 |
 | Raw request / Raw response / Req + Res pair | 와이어 바이트 그대로 |
+| LLM transcript | LLM API 호출에만 나옵니다. 요청 메시지를 역할별로, 이어서 응답과 도구 호출을 보고서용 Markdown으로 복사합니다. LLM 패널에서도 되고, `gori run show --format transcript`도 같습니다 |
 
 언어 항목은 모두 요청을 복사합니다. 응답 패널에는 더 짧은 자체 메뉴(status + headers / body / raw)가 있습니다. 출력은 `gori run show --format curl|python|fetch|go|httpie|csrf`([run show](/ko/reference/cli/#run-show))와 바이트 단위로 같습니다. Repeater 탭에서는 이 메뉴가 `¦chain`의 [`exec:` 훅](/ko/guide/scripting/)도 *실행*하므로, 복사한 명령이 그 전송을 재현합니다. 다른 패널은 요청을 그리기만 합니다.
 

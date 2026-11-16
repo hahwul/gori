@@ -18,11 +18,12 @@ end
 
 private def flow_detail(scheme : String, host : String, port : Int32, request_head : String,
                         http_version = "HTTP/1.1",
-                        response_head : String? = nil, response_body : String? = nil)
+                        response_head : String? = nil, response_body : String? = nil,
+                        request_body : String? = nil)
   row = Gori::Store::FlowRow.new(
     id: 7_i64, created_at: 0_i64, scheme: scheme, method: "GET", host: host, port: port,
     target: "/", status: 200, size: 0_i64, state: Gori::Store::FlowState::Complete)
-  Gori::Store::FlowDetail.new(row, http_version, request_head.to_slice, nil,
+  Gori::Store::FlowDetail.new(row, http_version, request_head.to_slice, request_body.try(&.to_slice),
     response_head.try(&.to_slice), response_body.try(&.to_slice))
 end
 
@@ -54,6 +55,14 @@ module Gori::CLI::Run
                               ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage,
                               interims : Store::Interims? = nil) : String
     show_json(detail, req, resp, ws_msgs, interims: interims)
+  end
+
+  def self.show_transcript_for_spec(detail : Store::FlowDetail) : String
+    String.build { |io| show_transcript(detail, io) }
+  end
+
+  def self.show_side_error_for_spec(format : Symbol, req_only : Bool, resp_only : Bool) : String?
+    show_side_error(format, req_only, resp_only)
   end
 
   def self.raw_truncation_notes_for_spec(detail : Store::FlowDetail, req : Bool, resp : Bool,
@@ -478,6 +487,20 @@ describe "gori run show --format json" do
     resp_only = JSON.parse(Gori::CLI::Run.show_json_for_spec(detail, false, true)).as_h
     resp_only.has_key?("request").should be_false
     resp_only.has_key?("response").should be_true
+  end
+
+  # #1912: `--format transcript`, the headless twin of the copy menu's "LLM transcript" row.
+  it "writes an LLM call as a Markdown transcript, the whole exchange or nothing" do
+    detail = flow_detail("http", "ai.test", 80, "POST /v1/chat/completions HTTP/1.1\r\nHost: ai.test\r\n\r\n",
+      request_body: %({"model":"gpt-4o","messages":[{"role":"user","content":"hi\\tthere"}]}),
+      response_head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
+      response_body: %({"choices":[{"index":0,"message":{"content":"hello"},"finish_reason":"stop"}]}))
+    # Into a pipe or a file the text is as written: a report keeps the tab of a code block.
+    Gori::CLI::Run.show_transcript_for_spec(detail).should eq(
+      "# LLM call: openai-chat · gpt-4o · stop\n\n## user\n\nhi\tthere\n\n## assistant\n\nhello\n")
+    Gori::CLI::Run.show_side_error_for_spec(:transcript, true, false).not_nil!.should contain("whole exchange")
+    Gori::CLI::Run.show_side_error_for_spec(:transcript, false, true).not_nil!.should contain("whole exchange")
+    Gori::CLI::Run.show_side_error_for_spec(:transcript, false, false).should be_nil
   end
 
   # Regression for the `sse_events.truncated` field: it used to be hardcoded `false`

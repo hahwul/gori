@@ -511,6 +511,7 @@ Marks survive a filter change, a re-sort, and leaving the tab and coming back; t
 | CSRF PoC | A self-submitting HTML form reproducing the request cross-origin |
 | wscat | WebSocket Repeater tabs only: the handshake plus the out-frames as a `wscat` session |
 | Raw request / Raw response / Req + Res pair | The wire bytes, unchanged |
+| LLM transcript | An LLM API call only: each request message under its role, then the reply and its tool calls, as Markdown for a report. Also on the LLM pane, and `gori run show --format transcript` |
 
 Every language row copies the request. A response pane has its own shorter menu (status + headers / body / raw). The output is byte-identical to `gori run show --format curl|python|fetch|go|httpie|csrf` ([run show](/reference/cli/#run-show)). On a Repeater tab the menu also *runs* a `¦chain` [`exec:` hook](/guide/scripting/), so the copied command reproduces the send. Other panes only draw the request.
 

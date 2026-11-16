@@ -2286,6 +2286,7 @@ module Gori
               when "go"                           then :go
               when "httpie"                       then :httpie
               when "csrf", "csrf-poc", "csrf_poc" then :csrf
+              when "transcript"                   then :transcript
               when "paths"                        then :paths
               when "markdown", "md"               then :markdown
               when "sarif"                        then :sarif
