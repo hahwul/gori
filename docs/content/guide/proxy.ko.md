@@ -212,12 +212,14 @@ MCP의 `ws_inject`도 같은 `flow_id`, `direction`, `opcode`와 페이로드(`p
 
 ### HTTP/2 위의 WebSocket {#websocket-http2}
 
-오리진이 `SETTINGS_ENABLE_CONNECT_PROTOCOL`을 광고하면 요즘 브라우저는 HTTP/1.1 `Upgrade:` 핸드셰이크 대신 RFC 8441의 확장 `CONNECT`로 WebSocket을 엽니다. gori는 그 광고를 바꾸지 않고 중계하므로 클라이언트는 이 경로를 쓸 수 있고, 쓰면 gori가 그 소켓을 읽습니다. RFC 8441은 핸드셰이크만 대체하므로 프레임은 같은 RFC 6455 프레임이며 같은 코덱이 읽습니다.
+오리진이 `SETTINGS_ENABLE_CONNECT_PROTOCOL`을 광고하면 요즘 브라우저는 HTTP/1.1 `Upgrade:` 핸드셰이크 대신 RFC 8441의 확장 `CONNECT`로 WebSocket을 엽니다. 기본값에서 gori는 그 광고를 바꾸지 않고 중계하므로 클라이언트는 이 경로를 쓸 수 있고, 쓰면 gori가 그 소켓을 읽습니다. RFC 8441은 핸드셰이크만 대체하므로 프레임은 같은 RFC 6455 프레임이며 같은 코덱이 읽습니다.
 
 **캡처와 재전송은 HTTP/1.1과 같습니다.** 트랜스크립트는 History의 MESSAGES 패널, `gori run history show`, MCP `get_flow` 도구, HAR export에 HTTP/1.1 소켓과 같이 나타나며, Repeater의 `^R`·`gori run repeater send`·MCP `send_websocket`·Fuzzer 스윕 모두 소켓을 다시 열고 프레임을 주고받습니다. 다음 두 가지는 HTTP/1.1 전용입니다.
 
 - **메시지 단위 인터셉트, 메시지 Match & Replace, [프레임 주입](#websocket-inject).** 둘 다 DATA 프레임을 **다른 길이로** 다시 써야 하는데, HTTP/2에서 그것은 상대 피어의 흐름 제어 윈도우와 교착을 일으킵니다. gori는 프레임이 이미 와이어에 나간 뒤 사본에서 읽으므로, 여기서는 프레임 크기를 바꾸지도 소켓에 쓰지도 않습니다. 플로우에는 어느 쪽 지원을 받았는지 밝히는 `[gori]` 안내가 남습니다.
 - **연결당 상한.** gori는 하나의 HTTP/2 연결에서 확장 `CONNECT` 스트림을 동시에 최대 8개까지 읽습니다. 그 이상은 트랜스크립트 없이 바이트 단위로만 중계되고, 해당 안내에 그 사실이 남습니다. 브라우저는 오리진당 소켓을 몇 개만 열므로 평소 작업에서는 이 상한에 닿지 않습니다.
+
+**이 기능들이 필요하면 소켓을 HTTP/2 밖으로 옮기세요.** [`network.strip_extended_connect`](/ko/reference/config/#strip-extended-connect)를 켜면 gori는 오리진의 `SETTINGS_ENABLE_CONNECT_PROTOCOL`을 클라이언트에 넘기지 않습니다. 확장 `CONNECT`를 제안받은 적 없는 브라우저는 HTTP/1.1 `Upgrade`로 WebSocket을 열고, 거기서는 메시지 단위 인터셉트, Match & Replace, 프레임 주입이 모두 동작합니다. 나머지 트래픽은 계속 HTTP/2입니다. 켠 뒤에 열린 연결부터 적용되며, gori가 제안을 넘기지 않은 오리진으로 가는 HTTP/1.1 업그레이드에는 설정 이름을 밝히는 안내가 남습니다.
 
 **재전송은 캡처와 같은 방식으로 소켓을 다시 엽니다.** RFC 8441 플로우로 Repeater를 시드하면 WebSocket 탭이 열립니다. gori는 HTTP/2로 다이얼하고(ALPN `h2`, 평문 대상이면 h2c prior knowledge), 오리진의 `SETTINGS_ENABLE_CONNECT_PROTOCOL`을 기다린 뒤, `:protocol websocket`과 캡처 자신의 `:path`·`:authority`·헤더를 실은 `:method CONNECT`를 보내고, HTTP/2에는 존재하지 않는 `101`이 아니라 `2xx`를 소켓이 열린 신호로 판정합니다. 그 뒤부터는 HTTP/1.1 경로와 같은 엔진이 같은 메시지 스크립트, 마스킹, 프레임 모양, 상한, 트랜스크립트로 동작합니다. 핸드셰이크는 캡처와 바이트 단위로 같습니다. 요청 패널에 보이는 `X-Gori-Protocol: websocket` 줄이 그 `:protocol` 유사 헤더이고, 다른 헤더처럼 편집할 수 있습니다.
 

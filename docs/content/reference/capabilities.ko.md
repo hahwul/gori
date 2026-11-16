@@ -61,7 +61,8 @@ gori에는 같은 프로젝트 데이터와 엔진 모듈을 쓰는 세 진입�
   상대 피어의 흐름 제어 윈도우와 교착을 일으킵니다. 재전송은 h2로 다이얼해 오리진의
   `SETTINGS_ENABLE_CONNECT_PROTOCOL`을 기다린 뒤 `101`이 아니라 `2xx`를 소켓이 열린 신호로
   판정합니다. 그 설정을 광고하지 않는 오리진이면 빈 트랜스크립트 대신 설정 이름을 담은
-  거부를 돌려줍니다.
+  거부를 돌려줍니다. 브라우저의 소켓을 HTTP/1.1 경로로 옮기려면
+  [`network.strip_extended_connect`](/ko/reference/config/#strip-extended-connect)를 켜세요.
 - **HTTP/3은 프록시 범위 밖입니다.** `network.strip_alt_svc`로 h3를 광고하는 응답 필드를
   제거할 수는 있지만 QUIC이나 DNS로 알아낸 경로를 인터셉트할 수는 없습니다.
 - **upstream `https://` 표기는 레거시이며 프록시까지 TLS를 뜻하지 않습니다.** 현재

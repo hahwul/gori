@@ -61,7 +61,8 @@ project. `--read-only` removes mutation and live-request tools.
   which deadlocks against the peer's flow-control window. Replay dials h2, waits for the
   origin's `SETTINGS_ENABLE_CONNECT_PROTOCOL`, and treats the `2xx` (not a `101`) as the
   socket opening. An origin that does not advertise the setting gets a refusal that names it,
-  not an empty transcript.
+  not an empty transcript. To move a browser's sockets to the HTTP/1.1 path, turn on
+  [`network.strip_extended_connect`](/reference/config/#strip-extended-connect).
 - **HTTP/3 is outside the proxy.** `network.strip_alt_svc` can remove response fields advertising
   h3, but cannot intercept QUIC or a route learned from DNS.
 - **An upstream `https://` spelling is legacy, not TLS to the proxy.** Bare `host:port`,

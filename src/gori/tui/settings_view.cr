@@ -63,7 +63,8 @@ module Gori::Tui
     NETWORK_CAPTURE_MAX      = 11
     NETWORK_HTTP2            = 12
     NETWORK_STRIP_ALT_SVC    = 13
-    NETWORK_TLS_PASSTHROUGH  = 14
+    NETWORK_STRIP_H2_CONNECT = 14
+    NETWORK_TLS_PASSTHROUGH  = 15
 
     NETWORK_FIELDS = [
       Field.new("Bind IP", "global default listen address — projects may pin their own"),
@@ -85,6 +86,7 @@ module Gori::Tui
       Field.new("HTTP/2", "auto follows the origin's ALPN; off forces HTTP/1.1 on every tunnelled connection (for reproducing a finding on h1) — ←/→ cycles",
         choices: Settings::HTTP2_MODES),
       Field.new("Strip HTTP/3 Alt-Svc", "remove Alt-Svc alternatives advertising h3 from the response the client gets, so a browser cannot switch to QUIC/UDP where gori sees nothing — Alt-Svc: clear and non-h3 alternatives are left alone; ←/→/space toggles", bool: true),
+      Field.new("Strip HTTP/2 ext. CONNECT", "remove SETTINGS_ENABLE_CONNECT_PROTOCOL from the origin's HTTP/2 SETTINGS, so a browser opens WebSockets with an HTTP/1.1 Upgrade, where per-message intercept and Match&Replace run — applies to connections opened after it is on; ←/→/space toggles", bool: true),
       Field.new("TLS passthrough", "comma-separated hosts to relay WITHOUT decrypting (for certificate-pinned apps) — acme.test covers subdomains, *.acme.test globs; nothing is captured for them"),
       Field.new("Upstream rules",
         "per-host routing / proxy auth — edit with `gori settings --edit` (upstream_rules)",
@@ -461,6 +463,7 @@ module Gori::Tui
                       Settings::DEFAULT_CAPTURE_MAX_MIB.to_s,
                       Settings::DEFAULT_HTTP2,
                       Settings::DEFAULT_STRIP_ALT_SVC ? "on" : "off",
+                      Settings::DEFAULT_STRIP_EXTENDED_CONNECT ? "on" : "off",
                       passthrough_label(Settings::DEFAULT_TLS_PASSTHROUGH),
                       rule_count_label(Settings.upstream_rules.size, "rule"),
                       environment_proxy_summary,
@@ -498,6 +501,7 @@ module Gori::Tui
         Settings.capture_max_mib.to_s,
         Settings.http2,
         Settings.strip_alt_svc? ? "on" : "off",
+        Settings.strip_extended_connect? ? "on" : "off",
         passthrough_label(Settings.tls_passthrough),
         rule_count_label(Settings.upstream_rules.size, "rule"),
         environment_proxy_summary,
@@ -1024,6 +1028,7 @@ module Gori::Tui
       Settings.capture_max_mib = cap
       Settings.http2 = @values[NETWORK_HTTP2]
       Settings.strip_alt_svc = @values[NETWORK_STRIP_ALT_SVC] == "on"
+      Settings.strip_extended_connect = @values[NETWORK_STRIP_H2_CONNECT] == "on"
       Settings.tls_passthrough = passthrough
       @values = network_values
       persist

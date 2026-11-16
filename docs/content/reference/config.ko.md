@@ -74,6 +74,7 @@ gori는 전역 환경설정을 `settings.json`에, 각 프로젝트를 자체 SQ
 | `capture_max_mib` | integer | `2` | 메시지당 저장하는 본문의 최대 크기(MiB, 1-2047). 더 큰 본문도 바이트 그대로 전달되며, 잘리는 것은 저장본뿐이고 실제 전송 크기는 기록됩니다 |
 | `http2` | string | `"auto"` | `auto`는 원 서버의 ALPN을 반영하고, `off`는 모든 터널 연결을 HTTP/1.1로 강제합니다. 아래 [http2](#http2)를 참고하세요 |
 | `strip_alt_svc` | bool | `false` | HTTP/3을 광고하는 `Alt-Svc` 응답 필드를 클라이언트에 도달하기 전에 제거하므로, 브라우저가 gori가 나르지 않는 전송으로 넘어갈 수 없습니다. 아래 [strip_alt_svc](#strip-alt-svc)를 참고하세요 |
+| `strip_extended_connect` | bool | `false` | 원 서버의 HTTP/2 `SETTINGS_ENABLE_CONNECT_PROTOCOL`을 클라이언트에 넘기지 않으므로, 브라우저가 메시지 단위 인터셉트와 Match & Replace가 동작하는 HTTP/1.1 `Upgrade`로 WebSocket을 엽니다. 아래 [strip_extended_connect](#strip-extended-connect)를 참고하세요 |
 | `tls_passthrough` | array | `[]` | 복호화하지 않고 그대로 중계할 호스트 목록. 아래 [tls_passthrough](#tls-passthrough)를 참고하세요 |
 
 CLI `--listen` / `--port`는 현재 프로세스에 한해서만 이 값들을 오버라이드합니다(디스크에 기록되지 않음). [프로젝트별 오버라이드](#per-project-overrides)를 참고하세요.
@@ -139,6 +140,18 @@ HTTP/2에서 필드를 하나 제거하면 gori는 그 응답의 헤더 블록�
 응답이 제거된 플로우에는 무엇을 지웠는지 밝히고 지운 값을 인용한 안내가 남습니다. History 상세 패널, `gori run history --format json`, MCP `get_flow` 도구에서 볼 수 있습니다. 패시브 프로브는 *저장된* 응답, 곧 gori가 전달한 응답을 읽으므로, 제거를 켜고 나면 캡처된 플로우에서는 `tech_http3` 핑거프린트와 그 `Alt-Svc: <host> advertised HTTP/3` 이벤트 줄이 뜨지 않습니다. 그 사실은 플로우별 안내에 기록됩니다. 영향을 받는 것은 캡처된 트래픽뿐입니다. gori가 스스로 유발한 응답(Repeater 전송, Fuzz 스윕, Discover 크롤, MCP `send_request`, import)은 프록시 경로를 지나지 않으므로 원 서버의 `Alt-Svc`가 남고 핑거프린트도 뜹니다. 광고를 보려면 Repeater로 다시 보내세요.
 
 메울 수 없는 것이 셋 있습니다. [`tls_passthrough`](#tls-passthrough)에 등록된 호스트는 복호화되지 않으므로 gori가 편집할 응답이 없습니다. 클라이언트는 DNS `HTTPS` 레코드로도 h3 경로를 알아낼 수 있고, 응답 쪽 제거로는 거기에 닿지 못합니다. 콜론 앞에 공백이 있는 필드명(`Alt-Svc : h3=…`)은 이 설정도, gori 자신의 헤더 투영도 인식하지 않습니다. 규격을 지키는 클라이언트도 그 필드는 거부합니다(RFC 9112 §5.1). 이 설정은 Preferences → **Network & Tabs** → **Network** → **Strip HTTP/3 Alt-Svc**에서 켜고 끕니다.
+
+#### strip_extended_connect {#strip-extended-connect}
+
+원 서버가 `SETTINGS_ENABLE_CONNECT_PROTOCOL`(RFC 8441)을 제안하면 브라우저는 WebSocket을 HTTP/2 위에서 엽니다. gori는 그런 소켓도 빠짐없이 캡처하지만, 메시지 단위 인터셉트와 Match & Replace는 그 위에서 동작하지 않습니다. 이 설정을 켜면 gori는 HTTP/2 연결에서 원 서버가 보내는 모든 SETTINGS 프레임에서 그 파라미터를 지운 뒤 클라이언트에 넘깁니다. 확장 `CONNECT`를 제안받은 적 없는 클라이언트는 새 연결에서 HTTP/1.1 `Upgrade`로 WebSocket을 열고, 거기서는 둘 다 동작합니다. 그 연결의 나머지는 계속 HTTP/2입니다. TLS 터널, `CONNECT` 안의 `h2c`, 리버스·트랜스페어런트 리스너 모두에 적용됩니다.
+
+기본값은 꺼짐입니다. 이유는 [`strip_alt_svc`](#strip-alt-svc)와 같습니다. HTTP/2 소켓이라고 캡처가 덜 정확해지지는 않으므로, 소켓을 옮길지는 시험에 따라 정하세요. [`http2`](#http2)를 `off`로 두어도 소켓은 HTTP/1.1로 옮겨 가지만, 연결 전체가 함께 옮겨 갑니다.
+
+켠 뒤에 열린 연결부터 적용됩니다. 원 서버는 보통 첫 SETTINGS 프레임에서 이 파라미터를 한 번만 보내므로, 클라이언트가 이미 붙들고 있는 연결은 받은 제안을 그대로 유지하고, 이미 HTTP/2 위에서 돌고 있는 소켓도 그대로 남습니다. gori가 새 연결을 강제하려고 연결을 끊지는 않습니다. 설정이 켜진 동안 HTTP/2로 열린 WebSocket에는 설정이 그 소켓을 막지 못했다는 안내가 남습니다.
+
+**gori는 한 일을 밝힙니다.** SETTINGS 프레임에는 플로우가 없으므로 기록은 세 곳에 남습니다. raw 프레임 로그에는 gori가 실제로 보낸, 파라미터가 빠진 프레임이 남습니다. `gori.log`에는 원 서버마다 한 번 이름이 적힙니다. 설정이 켜진 동안 그 원 서버로 가는 HTTP/1.1 WebSocket 업그레이드마다 다음 안내가 남습니다: *"gori withheld `<host>:<port>`'s SETTINGS_ENABLE_CONNECT_PROTOCOL from the client on HTTP/2 (settings network.strip_extended_connect), so a client that would have opened this WebSocket there used the HTTP/1.1 Upgrade instead."*
+
+이 파라미터는 모든 확장 `CONNECT` 프로토콜이 함께 쓰는 비트 하나이므로, `connect-udp`(RFC 9298)와 `connect-ip`(RFC 9484)도 함께 막힙니다. 값이 `0`인 항목은 아무것도 바꾸지 않으므로 그대로 둡니다. 그래도 확장 `CONNECT`를 보내는 클라이언트는 거부하지 않고 중계합니다. 영향을 받는 것은 프록시 경로뿐입니다. Repeater나 Fuzzer의 재전송은 원 서버에 직접 접속하므로 여전히 제안을 받습니다. 이 설정은 Preferences → **Network & Tabs** → **Network** → **Strip HTTP/2 ext. CONNECT**에서 켜고 끕니다.
 
 ### listeners {#listeners}
 

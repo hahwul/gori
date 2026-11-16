@@ -1,6 +1,7 @@
 require "../proxy/h2/frame"
 require "../proxy/h2/hpack"
 require "../proxy/h2/head_codec"
+require "../proxy/h2/connect_offer"
 require "../proxy/ws/frame"
 require "./h2_engine"
 require "../plural"
@@ -65,7 +66,7 @@ module Gori
       # RFC 8441 §3. A server advertises this to say extended CONNECT may be used; a client
       # that has not seen it MUST NOT send one, which is why the absence is a refusal here and
       # not something to try anyway and see.
-      SETTINGS_ENABLE_CONNECT_PROTOCOL = 0x8_u16
+      SETTINGS_ENABLE_CONNECT_PROTOCOL = Proxy::H2::ConnectOffer::PARAMETER
 
       # Frames read while waiting for the response to the extended CONNECT. The same ceiling
       # `H2Engine::MAX_FRAMES` is for a response read: PING/SETTINGS/WINDOW_UPDATE are not

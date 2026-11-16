@@ -668,8 +668,9 @@ describe Gori::Proxy::H2::Assembler do
     sink.requests.first.advisory.should be_nil
   end
 
-  # R5-F4. gori relays an RFC 8441 extended CONNECT byte-for-byte (it also relays the origin's
-  # SETTINGS verbatim, so a client facing an 8441 origin is entitled to send one) — but it
+  # R5-F4. gori relays an RFC 8441 extended CONNECT byte-for-byte (with settings
+  # `network.strip_extended_connect` off it also relays the origin's SETTINGS verbatim, so a
+  # client facing an 8441 origin is entitled to send one) — but it
   # decodes nothing on it: the WS transcript, the message gate, intercept and Match&Replace all
   # live on the h1 Upgrade path. The flow used to end as a bare "h2 connection closed", which
   # describes the symptom and not the fact.

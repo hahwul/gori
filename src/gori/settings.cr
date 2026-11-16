@@ -430,6 +430,7 @@ module Gori
         parse_tls_passthrough(net)
         net["http2"]?.try(&.as_s?).try { |v| self.http2 = v if HTTP2_MODES.includes?(v) }
         self.strip_alt_svc = load_bool(net, "strip_alt_svc", strip_alt_svc?)
+        self.strip_extended_connect = load_bool(net, "strip_extended_connect", strip_extended_connect?)
       end
       self.theme = root["theme"]?.try(&.as_s?) || theme # validated against the known themes by Theme.apply
       self.mouse = load_bool(root, "mouse", mouse)

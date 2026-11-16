@@ -3,6 +3,7 @@ require "./assembler"
 require "./head_rewrite"
 require "./stream_gate"
 require "./extract"
+require "./connect_offer"
 require "../head_rewriter"
 require "../extractor"
 require "../sink"
@@ -25,6 +26,9 @@ module Gori::Proxy::H2
   # An `interceptor` adds a `StreamGate` per direction, which holds streams INDIVIDUALLY: the
   # pump never blocks on a human, so a held stream does not freeze the connection (#492 step 3).
   # The same gates carry Match&Replace BODY rules (#1628) when one is live for this host.
+  #
+  # One connection-level frame is not relayed as read when the operator asks: the origin's
+  # SETTINGS frame, minus its extended CONNECT offer (`next_frame`, #1896).
   class Relay
     def self.run(client : IO, upstream : IO, host : String, port : Int32, sink : FlowSink,
                  rewriter : Proxy::HeadRewriter? = nil, interceptor : Gori::Interceptor? = nil,
@@ -86,18 +90,19 @@ module Gori::Proxy::H2
 
     private def pump(src : IO, dst : IO, conn_id : Int64, direction : String,
                      assembler : Assembler, gate : StreamGate?) : Nil
+      origin = direction == "in"
       if gate
-        pump_gated(src, gate)
+        pump_gated(src, gate, origin)
       else
-        pump_plain(src, dst, conn_id, direction, assembler)
+        pump_plain(src, dst, conn_id, direction, assembler, origin)
       end
     ensure
       dst.close rescue nil # propagate close so the opposite pump unblocks
     end
 
-    private def pump_gated(src : IO, gate : StreamGate) : Nil
+    private def pump_gated(src : IO, gate : StreamGate, origin : Bool) : Nil
       loop do
-        frame = Frame.read(src)
+        frame = next_frame(src, origin)
         break if frame.nil? # clean EOF at a frame boundary
         gate.accept(frame)
       end
@@ -117,7 +122,7 @@ module Gori::Proxy::H2
     end
 
     private def pump_plain(src : IO, dst : IO, conn_id : Int64, direction : String,
-                           assembler : Assembler) : Nil
+                           assembler : Assembler, origin : Bool) : Nil
       rw = @rewriter
       # The RESPONSE direction always gets the pipeline, rewriter or not. Everything gori has to
       # say about `Alt-Svc` — the strip when the switch is on, the kept-notice when it is off
@@ -141,7 +146,7 @@ module Gori::Proxy::H2
       extract = direction == "in" ? extract_for(assembler) : nil
       begin
         loop do
-          frame = Frame.read(src)
+          frame = next_frame(src, origin)
           break if frame.nil? # clean EOF at a frame boundary
           if heads
             heads.accept(frame) { |f, pre| emit(dst, conn_id, direction, assembler, f, pre, extract) }
@@ -160,6 +165,29 @@ module Gori::Proxy::H2
           h.drain { |f, pre| emit(dst, conn_id, direction, assembler, f, pre, extract) rescue nil }
         end
       end
+    end
+
+    # The next frame off `src`, as gori will write it. On the origin's leg, with settings
+    # `network.strip_extended_connect` on, a SETTINGS frame loses its extended CONNECT offer
+    # (`ConnectOffer`), so a client opens its WebSockets with an HTTP/1.1 Upgrade. Everything
+    # downstream (the head pipeline, the gates, the frame log, the assembler) sees the frame
+    # gori writes, not the one it read: P7 logs what gori actually wrote.
+    #
+    # The switch is read per frame, before any parsing, so with it off a frame costs one
+    # class-var read more than before, and one thrown mid-connection is honoured from the
+    # origin's next SETTINGS frame.
+    private def next_frame(src : IO, origin : Bool) : Frame::Header?
+      frame = Frame.read(src)
+      return frame unless frame && origin && Settings.strip_extended_connect?
+      withheld = ConnectOffer.withhold(frame) || return frame
+      if Settings.first_extended_connect_withheld?(@host, @port)
+        ::Log.info do
+          "h2 #{@host}:#{@port}: withheld SETTINGS_ENABLE_CONNECT_PROTOCOL from the client " \
+          "(settings network.strip_extended_connect), so it opens WebSockets to this origin " \
+          "with an HTTP/1.1 Upgrade"
+        end
+      end
+      withheld
     end
 
     # Forward one frame, then capture it, then project it. Order is deliberate for every

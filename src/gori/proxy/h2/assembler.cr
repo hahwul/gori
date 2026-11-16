@@ -1108,12 +1108,16 @@ module Gori::Proxy::H2
     # `:method CONNECT` plus a `:protocol` pseudo-header, which is how a WebSocket is opened
     # over HTTP/2.
     #
-    # Deliberately an advisory and NOT a refusal. gori relays the ORIGIN's SETTINGS frame
-    # verbatim (`StreamGate#write` / `Relay#emit` on stream 0), so a client facing an origin
-    # that advertises SETTINGS_ENABLE_CONNECT_PROTOCOL sees that advertisement and is entitled
-    # to use it — and the CONNECT stream's DATA frames then relay byte-for-byte like any
-    # others. RST-ing it (RFC 9113 §8.5 would allow that for a setting gori itself never sent)
-    # would break a path that works end to end.
+    # Deliberately an advisory and NOT a refusal. With settings `network.strip_extended_connect`
+    # off (the default) gori relays the ORIGIN's SETTINGS frame verbatim, so a client facing an
+    # origin that advertises SETTINGS_ENABLE_CONNECT_PROTOCOL sees that advertisement and is
+    # entitled to use it — and the CONNECT stream's DATA frames then relay byte-for-byte like
+    # any others. RST-ing it (RFC 9113 §8.5 would allow that for a setting gori itself never
+    # sent) would break a path that works end to end. That holds with the switch on as well
+    # (`Relay#next_frame` withholds the offer): the client that still sends one was offered it
+    # before the switch was thrown, refusing would fail its every reconnect until that
+    # connection dies, and the bytes a client chooses to send are the payload (P7). The
+    # sentence names the switch instead (DESIGN.md §7, 2026-11-16).
     #
     # What gori adds is now SPLIT, and the sentence has to say which half this stream got:
     # `WsCapture` reads the frames, so the transcript is there (#733) — but the message gate,
@@ -1180,7 +1184,20 @@ module Gori::Proxy::H2
       "below is this socket's own. Per-message intercept and Match&Replace are NOT available " \
       "here: both would have to re-frame a DATA payload to a different length, which " \
       "deadlocks against the peer's flow-control window — they run on the HTTP/1.1 Upgrade " \
-      "path only"
+      "path only. #{extended_connect_lever}"
+    end
+
+    # The switch that moves a client's sockets to that path, read live: with it on, this stream
+    # exists anyway, and the sentence says why rather than pointing at a switch already thrown.
+    private def extended_connect_lever : String
+      if Settings.strip_extended_connect?
+        "Settings network.strip_extended_connect is on but did not prevent this stream: the " \
+        "origin's offer reached the client before it was switched on, or the client did not " \
+        "wait for one. It applies from the next connection"
+      else
+        "Settings network.strip_extended_connect withholds the origin's offer, so a client " \
+        "opens its sockets on that path"
+      end
     end
 
     # Called by the relay when the connection closes, to flush any streams still in
