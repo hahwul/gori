@@ -3,6 +3,7 @@
 ## Unreleased
 
 - LLM targets: QL `llm:true` finds LLM API calls and `llm:claude` narrows by model name, and the Fuzzer's body regex also matches a streamed reply as reassembled text, so a word split across SSE deltas is found (#1912)
+- Probe: `llm_prompt_injection` also flags an MCP `tools/list` result whose tool description hides itself from the user (#1912)
 
 - MCP: project binding replies include engagement guidance, capped at 2,000 characters with the full text in `project_info`; handshake instructions point agents to it before acting (#1911).
 
