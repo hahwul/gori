@@ -77,11 +77,11 @@ def build_shop(path : String) : Hash(String, JSON::Any)
   no_httponly << add_flow(store, tick.call, host: "shop.test", target: "/locale",
     resp_headers: [{"Set-Cookie", "lang_sig=a1; Path=/; HttpOnly"}, {"Set-Cookie", "lang=ko; Path=/"}])
 
-  # t0-deep-body: the answer sits ~100 KB into one response, past get_flow's default inline
-  # cut and past body_mode:"full"'s 64 KB too.
-  features = (1..1500).map { |i| %({"key":"feature_#{i}","enabled":#{i.odd?}}) }.join(',')
-  config = add_flow(store, tick.call, host: api, target: "/api/v1/config",
-    body: %({"features":[#{features}],"build_id":"b-7f3a91c2e4"}))
+  # t1-deep-body: past both the 64 KiB inline view and columns' 512 KiB read.
+  features = (1..20000).map { |i| %({"key":"feature_#{i}","enabled":#{i.odd?}}) }.join(',')
+  config_body = %({"features":[#{features}],"build_id":"b-7f3a91c2e4"})
+  raise "build_id must be beyond the columns read cap" unless features.bytesize > Gori::DisplayColumns::BODY_CAP
+  config = add_flow(store, tick.call, host: api, target: "/api/v1/config", body: config_body)
 
   20.times do |i|
     add_flow(store, tick.call, host: api, target: "/api/v1/products?page=#{i + 1}",
@@ -91,7 +91,7 @@ def build_shop(path : String) : Hash(String, JSON::Any)
   store.close
   {
     "t0-cookie-httponly"  => JSON::Any.new(no_httponly.map { |id| JSON::Any.new(id) }),
-    "t0-deep-body"        => JSON::Any.new("b-7f3a91c2e4"),
+    "t1-deep-body"        => JSON::Any.new("b-7f3a91c2e4"),
     "t1-pagination-count" => JSON::Any.new(orders.size.to_i64),
     "_config_flow"        => JSON::Any.new(config),
   }
@@ -108,10 +108,16 @@ def build_events(path : String) : Hash(String, JSON::Any)
 
   # t1-deep-paging: 620 matches, past list_history's 500-row maximum, so one call cannot
   # see them all and an answer of 500 means has_more was ignored.
+  values = [] of JSON::Any
+  rng = Random.new(1916)
   events = Array.new(620) do |i|
+    value = rng.rand(0..Int32::MAX).to_s(16).rjust(8, '0')
+    values << JSON::Any.new(value)
     add_flow(store, tick.call, host: "telemetry.shop.test", target: "/v1/events/#{i}",
-      method: "POST", status: 204, body: "")
+      method: "POST", status: 204, body: "", resp_headers: [{"X-Eval-Value", value}])
   end
+
+  raise "cursor task must exceed the maximum page" unless events.size > Gori::MCP::Tools::HISTORY_LIMIT.max
 
   # t0-shape-outlier: forty profile reads whose bodies differ only in their values, and one
   # with two extra fields — a few hundred bytes larger, not an obvious size outlier.
@@ -132,6 +138,7 @@ def build_events(path : String) : Hash(String, JSON::Any)
   store.close
   {
     "t1-deep-paging"    => JSON::Any.new(events.size.to_i64),
+    "t1-cursor-values"  => JSON::Any.new(values),
     "t0-shape-outlier"  => JSON::Any.new([JSON::Any.new(outlier)]),
     "t1-host-near-miss" => JSON::Any.new([] of JSON::Any),
   }

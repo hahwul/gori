@@ -105,12 +105,10 @@ describe Gori::MCP::ToolFilter do
       (Gori::MCP::ToolFilter::MINIMAL - recon.tools).should be_empty
     end
 
-    # A profile has to survive every start it can be handed: unbound (#1136 — and BOTH
-    # pickers, because `switch_project` has nothing to switch to on a host with no project yet,
-    # where only `create_project` gets the agent out) and `--read-only` (a profile of gated
-    # tools would abort).
+    # Interactive profiles keep both project pickers for unbound recovery. Analysis
+    # deliberately requires a binding at startup and is checked separately below.
     it "works unbound and under --read-only" do
-      profiles.each do |profile|
+      profiles.reject { |p| p.name == "analysis" }.each do |profile|
         (Gori::MCP::Tools::PROJECT_PICKERS - profile.tools).should be_empty,
           "@#{profile.name} leaves out a project picker"
         filter = Gori::MCP::ToolFilter.parse("@#{profile.name}", Gori::MCP::Tools::TOOL_NAMES,
@@ -121,10 +119,21 @@ describe Gori::MCP::ToolFilter do
       end
     end
 
+    it "keeps analysis bound-only, with no project movers, actions or mailbox" do
+      names_for("@analysis").should eq(Gori::MCP::ToolFilter::ANALYSIS.sort)
+      filter = Gori::MCP::ToolFilter.parse("@analysis", Gori::MCP::Tools::TOOL_NAMES,
+        Gori::MCP::Tools::TOOL_DEPENDENCIES).as(Gori::MCP::ToolFilter)
+      Gori::MCP::Tools.served_names(filter, false).sort.should eq(names_for("@analysis"))
+      tools = Gori::MCP::Tools.new(nil, true, false, tool_filter: filter)
+      result = tools.call("list_history", JSON.parse("{}"))
+      result.error_code.should eq("NO_PROJECT")
+      result.text.should contain("--db")
+    end
+
     it "refuses an unknown profile, and a profile named without its sigil" do
       refusal_for("@recn").should contain("did you mean @recon")
       refusal_for("@nope").should contain("unknown profile")
-      refusal_for("@nope").should contain("@minimal, @recon")
+      refusal_for("@nope").should contain("@analysis, @minimal, @recon")
       refusal_for("-@nope").should contain("unknown profile")
       refusal_for("recon").should contain("did you mean @recon")
     end

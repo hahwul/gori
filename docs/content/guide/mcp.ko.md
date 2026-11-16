@@ -49,7 +49,7 @@ gori mcp --no-project              # force unbound even inside a Git workspace
 
 **선택된 프로젝트를 열 수 없으면**(데이터베이스가 없거나 깨졌거나 읽을 수 없을 때, 프로젝트 이름이 더 이상 존재하지 않을 때) 서버는 종료하지 않고 핸드셰이크를 마친 뒤 unbound로 시작합니다. 실패 이유는 stderr에 기록되고, 핸드셰이크 `instructions`에 실리며, 모든 `NO_PROJECT` 도구 오류에 함께 반환되고, `project_info`의 `bind_error` 필드로도 보고됩니다. 에이전트는 재시작 없이 `list_projects`와 `switch_project`로 복구할 수 있습니다.
 
-데이터를 사용하기 전에 `project_info`를 호출하세요. `bound`, 선택된 프로젝트, 데이터베이스 경로, 워크스페이스 루트, 선택 출처, 프로젝트 `description`(이 작업의 목적을 적은 운영자 메모, `create_project`가 저장), 그리고 프로젝트 `tags`를 보고합니다. 그 설명을 되읽어 주는 호출은 이것뿐입니다.
+`project_info`를 제공하는 프로필에서는 데이터를 사용하기 전에 이 도구를 호출하세요. `bound`, 선택된 프로젝트, 데이터베이스 경로, 워크스페이스 루트, 선택 출처, 프로젝트 `description`(이 작업의 목적을 적은 운영자 메모, `create_project`가 저장), 그리고 프로젝트 `tags`를 보고합니다. 그 설명을 되읽어 주는 호출은 이것뿐입니다.
 
 **`instructions`에 적힌 프로젝트는 핸드셰이크 시점의 바인딩입니다.** 이 텍스트는 한 번만 전달되고 갱신을 밀어주는 수단이 없어서, `switch_project` 이후에도 그때의 바인딩을 계속 설명합니다. 실제 읽기와 쓰기는 새 프로젝트로 갑니다. 현재 값은 `project_info`가 답합니다. `switch_project`(그리고 자동 바인딩하는 `create_project`)는 같은 정정을 결과에 담아, 직전 바인딩을 `previous_project`로 함께 돌려줍니다.
 
@@ -94,6 +94,7 @@ gori mcp --read-only
 | --- | ---: | ---: | ---: | --- |
 | `gori mcp` | 199 | ~182 KB | ~47k | 전부 (기본값) |
 | `--read-only` | 65 | ~57 KB | ~15k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
+| `--tools=@analysis` | 5 | ~8 KB | ~2k | 시작할 때 바인딩한 캡처 분석; 프로젝트 전환·TUI 메시지 없음 |
 | `--tools=@recon` | 39 | ~41 KB | ~11k | 캡처를 읽고 파악, 패시브 스캔, 요청 재전송, 이슈·노트 기록 |
 | `--tools=@recon --read-only` | 29 | ~30 KB | ~8k | `--read-only`가 끄는 도구를 뺀 `@recon` |
 | `--tools=@minimal` | 18 | ~19 KB | ~5k | History와 flow, 현재 TUI 컨텍스트를 읽고 오퍼레이터와 대화 |
@@ -104,8 +105,18 @@ gori mcp --read-only
 
 | 프로필 | 도구 |
 | --- | --- |
+| `@analysis` | `ql_reference`, `ql_explain`, `list_history`, `get_flow`, `get_response_body_chunk` |
 | `@minimal` | `project_info`, `list_projects`, `switch_project`, `create_project`, `ql_reference`, `ql_explain`, `list_history`, `get_flow`, `get_response_body_chunk`, `get_current_context`, `get_repeater_context`, `get_issue`, `list_sitemap`, `intercept_get`, `intercept_list`, `operator_messages`, `reply_to_operator`, `ask_operator` |
 | `@recon` | `@minimal`에 더해 `list_scope`, `list_params`, `list_js_endpoints`, `scan_js_endpoints`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `jwt_verify`, `probe_scan`(패시브만), `probe_issues`, `probe_promote`, `probe_dismiss`, `list_issues`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
+
+헤드리스 캡처 분석은 `gori mcp --db capture.db --tools=@analysis`로 시작할 수 있습니다.
+시작할 때 프로젝트가 바인딩되어 있어야 하며, 프로젝트 선택·전환이나 TUI 메시지 도구는 제공하지 않습니다.
+
+여러 흐름에서 값을 추출할 때는 개별 `get_flow` 대신 `list_history`의 `columns`를 사용하세요.
+예를 들어 `["rid=header:X-Request-Id", "body=jsonpath:$"]`로 헤더와 본문을 함께 추출할 수 있습니다.
+`fields: []`는 필수 문맥과 추출 컬럼만, `fields: ["url", "status"]`는 선택한 메타데이터도 반환합니다.
+ID·상태·출처·조작 이력·권고·오류·요청한 컬럼과 페이지 커서는 유지되며, `fields`를 생략하면 전체 행을 반환합니다.
+
 
 프로필은 고정된 이름 목록이므로, 이후 버전이 `list_*` 도구를 추가해도 `@recon`은 커지지 않습니다. 둘 다 `switch_project`와 `create_project`를 포함하므로, 프로젝트가 하나도 없는 머신에서 바인딩 없이 시작해도 동작합니다.
 

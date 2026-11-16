@@ -1,5 +1,5 @@
 fixture: shop
-tier: 0
+tier: 1
 grade: exact
 prompt: |
   What is the value of the "build_id" field in the response to

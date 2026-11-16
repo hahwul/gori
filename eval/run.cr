@@ -27,10 +27,11 @@ EVAL     = File.join(ROOT, "eval")
 GORI_BIN = File.join(ROOT, "bin", "gori")
 
 PROFILES = {
-  "minimal" => ["--tools=@minimal"],
-  "recon"   => ["--tools=@recon"],
-  "full"    => [] of String,
-  "full-ro" => ["--read-only"],
+  "analysis" => ["--tools=@analysis"],
+  "minimal"  => ["--tools=@minimal"],
+  "recon"    => ["--tools=@recon"],
+  "full"     => [] of String,
+  "full-ro"  => ["--read-only"],
   # The full catalogue the way Claude Code serves it by default: tool search on, so only the
   # tool NAMES load and the agent fetches each schema with ToolSearch before calling it. The
   # other gori profiles pass `--tools ""`, which drops ToolSearch and loads every schema upfront.
@@ -153,6 +154,10 @@ def summarize_group(results : Array(Hash(String, JSON::Any)), baseline : Array(H
       line += "   (#{shared.size} shared tasks: #{cur.count(&.["pass"].as_bool)}/#{cur.size} " \
               "vs base #{b.count(&.["pass"].as_bool)}/#{b.size}, in_tok #{pct(ctok, btok)})"
     end
+    line += "   total_in=%.0fk max_calls=%d" % {
+      rs.sum { |r| num(r, "input_tokens") } / 1000,
+      rs.max_of(&.["calls"].as_a.size),
+    }
     puts line
   end
 

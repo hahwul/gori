@@ -5795,3 +5795,12 @@ Refines: P4, P6, P7. Issue #1897.
 Scripted Repeater and Fuzzer sends may offer `permessage-deflate` with both no-context-takeover parameters. The server must accept `server_no_context_takeover`; omitting `client_no_context_takeover` is allowed because the client can still reset its compressor per message. Unsupported negotiation is reported with the answered handshake retained, never accepted with guessed state. A declined offer sends plain messages.
 
 Only plain TEXT/BINARY messages are automatically compressed. Explicit frame shapes, including explicitly zero RSV bits, retain operator bytes. Transcript payloads are derived decoded views with wire RSV1 and compressed octets retained on the engine message. Inflation consumes the existing session receive-byte budget and has a per-message DEFLATE-stream work cap; it cannot turn a small reply into unbounded memory or empty-block work. This does not enable extensions on the proxy or persistent-session paths. The TUI Repeater exposes the per-tab scripted option; the TUI Fuzzer has no framed WebSocket script editor, while CLI and MCP use the shared Fuzzer plan.
+
+### 2026-11-17 — Bound capture analysis keeps its catalogue small (#1916)
+
+`@analysis` serves five capture readers and requires a project bound at startup. Unlike the
+interactive profiles, it has no project movers or operator mailbox: a headless, fixed-capture
+question should not pay those round-trips. Existing profiles keep their recovery workflow.
+`list_history.fields` removes only opt-in metadata before the reply budget is applied; identity,
+state, provenance, advisories, errors and requested columns always remain. New non-metadata
+fields remain by default too, so a future advisory cannot disappear from a projected row.

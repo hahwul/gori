@@ -12,7 +12,7 @@ format-checks and type-checks `eval/*.cr`
 just build
 just eval-fixtures          # eval/out/fixtures/<name>.db + <name>.truth.json
 just eval --n=3 --jobs=4    # Claude Code (default), all tasks × all profiles
-just eval --agent=codex --n=1 --jobs=1 --tasks=t0-request-ref --profiles=minimal,script
+just eval --agent=codex --n=1 --jobs=1 --tasks=t0-request-ref --profiles=analysis,minimal,script
 # --model=M selects the agent's model; --tasks=GLOB and --profiles=LIST narrow the run
 # re-summarize a run, and compare it with an older one (no build or agent calls):
 crystal run eval/run.cr -- --report=eval/out/runs/<stamp> --baseline=eval/out/runs/<older>
@@ -55,7 +55,7 @@ plugins, tool search and subagents are disabled. The catalogue loads upfront. Na
 without an off switch (such as patching) can still be advertised; the read-only sandbox
 restricts writes, and foreign action events void the run.
 
-Default profiles are `minimal,recon,full,full-ro,script`. `deferred` is Claude Code's
+Default profiles are `analysis,minimal,recon,full,full-ro,script`. `deferred` is Claude Code's
 `ToolSearch` experiment, so explicitly selecting it with Codex is rejected.
 `script` uses Codex's shell with a read-only sandbox and no MCP server. Unlike Claude's
 init event, Codex JSONL does not expose a tool inventory: the summary detects foreign
@@ -105,3 +105,13 @@ actually holds.
 
 To add a task: plant its fact in a fixture builder, return the answer under the task's id,
 write the yml, rerun `just eval-fixtures`.
+
+`analysis` uses `--tools=@analysis`: five readers for a capture already bound by the harness,
+without project switching or operator messages. It is available to both agent CLIs.
+The profile rollup prints total input tokens and maximum calls as well as medians, so an
+improved median cannot hide a costly task.
+
+`t1-deep-body` replaces `t0-deep-body`: its answer is after the 512 KiB column read cap and
+the 64 KiB full-body view. `t1-cursor-values` asks for 620 unpredictable header values in
+order, beyond the 500-row page maximum; a count cannot answer it. The fixture builder
+checks those size boundaries. Existing count tasks remain as count-only controls.

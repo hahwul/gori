@@ -18,10 +18,19 @@ module Gori
 
       # --- read tools ---------------------------------------------------------
 
-      HISTORY_LIMIT = PageLimit.new(50, 500)
+      HISTORY_LIMIT           = PageLimit.new(50, 500)
+      HISTORY_METADATA_FIELDS = %w[created_at created_at_iso scheme method host port target url status
+        size response_size duration_us content_type]
+      HISTORY_CONTEXT_FIELDS = %w[id state short_circuited intercept_edited rewritten rewritten_by
+        source source_surface source_ref advisory error columns]
+      HISTORY_FIELDS = HISTORY_METADATA_FIELDS + HISTORY_CONTEXT_FIELDS
 
       @[Tool("list_history", requires: ["get_flow", "ql_reference"])]
       private def list_history(h) : Result
+        fields = present?(h, "fields") ? str_list(h, "fields").to_set : nil
+        if fields && !(unknown = fields - HISTORY_FIELDS.to_set).empty?
+          return err("unknown row fields: #{unknown.to_a.join(", ")}", "INVALID_ARGUMENT", field: "fields")
+        end
         req_lim = optional_int_arg(h, "limit")
         limit = clamp(req_lim, HISTORY_LIMIT)
         before_id = optional_int_arg(h, "before_id")
@@ -68,7 +77,7 @@ module Gori
         # something other than "all flows the filters match". Above the FTS drain, as `ids` is.
         count_only = bool_arg(h, "count_only", false)
         if count_only
-          clash = ids ? "ids" : before_id ? "before_id" : since_id ? "since" : describes?(h, "columns") ? "columns" : nil
+          clash = ids ? "ids" : before_id ? "before_id" : since_id ? "since" : describes?(h, "columns") ? "columns" : describes?(h, "fields") ? "fields" : nil
           if clash
             return err("'count_only' counts every flow the filters match and returns no rows, so '#{clash}' " \
                        "does not apply — drop it", "INVALID_ARGUMENT", field: clash)
@@ -172,7 +181,7 @@ module Gori
         # name themselves. Branches here rather than earlier so `query`,
         # `view` and `in_scope` are already compiled — they still narrow WITHIN the set.
         return emit_history_ids(ids, filter, query, view_filter, in_scope || hide_static,
-          scope_unconfigured, prepared, h, dropped) if ids
+          scope_unconfigured, prepared, h, dropped, fields) if ids
         # One row OVER the page, then dropped. The pagination contract was documented and
         # correct ("a page shorter than `limit` means no older rows") but it was an INFERENCE
         # the caller had to make and then act on with a second call: a query matching 51 flows
@@ -235,7 +244,7 @@ module Gori
         # Under REPLY_ROWS_BUDGET (#1649): a cut page is a short page with `has_more`, and its
         # cursor is the last row it carried, so paging resumes exactly there.
         rows = store.with_errors(rows)
-        parts = fit_rows(rows) { |rj, r, _| Serialize.flow_row(rj, r, row_columns(r, prepared, include_sensitive, matcher)) }
+        parts = fit_rows(rows) { |rj, r, _| history_row(rj, r, row_columns(r, prepared, include_sensitive, matcher), fields) }
         cut = parts.size < rows.size
         if cut
           rows = rows.first(parts.size)
@@ -263,6 +272,19 @@ module Gori
             j.field("flows") { raw_rows(j, parts) }
           end
         end)
+      end
+
+      # Project before fit_rows budgets the reply; the existing serializer owns redaction
+      # and provenance, so selection cannot change either or lose a cursor to hidden bytes.
+      private def history_row(j : JSON::Builder, row : Store::FlowRow,
+                              columns : Array({String, String})?, fields : Set(String)?) : Nil
+        return Serialize.flow_row(j, row, columns) unless fields
+        full = JSON.parse(JSON.build { |builder| Serialize.flow_row(builder, row, columns) }).as_h
+        j.object do
+          full.each do |key, value|
+            j.field key, value if fields.includes?(key) || !HISTORY_METADATA_FIELDS.includes?(key)
+          end
+        end
       end
 
       # `list_history{sort}`'s values, `Store::Rank`'s members spelled for the schema.
@@ -358,7 +380,7 @@ module Gori
                                    view_filter : QL::Filter, lensed : Bool,
                                    scope_unconfigured : Bool,
                                    prepared : Gori::DisplayColumns::Prepared, h,
-                                   ignored : Array(String)) : Result
+                                   ignored : Array(String), fields : Set(String)?) : Result
         narrowed = (query && !query.strip.empty?) || lensed || view_filter != QL::EMPTY
         include_sensitive = bool_arg(h, "include_sensitive", false)
         matcher = columns_matcher(prepared, include_sensitive)
@@ -380,7 +402,7 @@ module Gori
         # Under REPLY_ROWS_BUDGET (#1649). A set has no cursor, so a cut names the rows it did
         # not carry, in the order asked: passing `remaining_ids` back as `ids` fetches the rest.
         rows = store.with_errors(rows)
-        parts = fit_rows(rows) { |rj, r, _| Serialize.flow_row(rj, r, row_columns(r, prepared, include_sensitive, matcher)) }
+        parts = fit_rows(rows) { |rj, r, _| history_row(rj, r, row_columns(r, prepared, include_sensitive, matcher), fields) }
         remaining = rows[parts.size..].map(&.id)
 
         Result.new(JSON.build do |j|
@@ -404,8 +426,7 @@ module Gori
               j.field "missing_ids", missing
               j.field "missing_ids_note",
                 "#{missing.size} of the #{ids.size} ids have no flow — deleted, or lost to retention. " \
-                "A flow id is never reissued, so a missing id stays missing: re-read the set from " \
-                "get_current_context rather than replaying a remembered one"
+                "A flow id is never reissued, so a missing id stays missing: #{history_ids_recovery}"
             end
             unless filtered_out.empty?
               j.field "filtered_out_ids", filtered_out
@@ -417,6 +438,10 @@ module Gori
             j.field("flows") { raw_rows(j, parts) }
           end
         end)
+      end
+
+      private def history_ids_recovery : String
+        advertises?("get_current_context") ? "re-read the set from get_current_context rather than replaying a remembered one" : "verify the ids against a fresh list_history page"
       end
 
       # Split the ids that DO have a row into {kept, excluded-by-the-filter}, or the Result that
@@ -982,9 +1007,10 @@ module Gori
           s.field "hide_static", boolprop("omit static assets (images, fonts, audio/video; never svg/css/js or status >= 400); = QL `-static:true`")
           s.field "strict", boolprop("refuse a query with an invalid term (else it is dropped, BROADENING the result, and named in `ignored_terms`; ql_explain previews which would drop)")
           s.field "lenient", boolprop("free-text an unknown `field:` instead of refusing (a typo then matches nothing, like an empty project)")
+          s.field "fields", strarrprop("only these row metadata fields (#{HISTORY_FIELDS.join(", ")}); id, state, provenance, advisories, error and requested columns always remain. Empty array = context and columns only; omitted = full rows. Use with columns for bulk extraction instead of get_flow per row")
           s.field "columns", strarrprop("extract a value from each flow onto the row's `columns`. Spec [LABEL=][req|res:]kind:selector, kind header|cookie (the head; header = its last value) or regex|position|jsonpath (the BODY only), e.g. \"req:header:authorization\", \"RID=jsonpath:data.id\"; side defaults to response. \"\" is a MISS, not an empty value. Sensitive header/cookie columns read \"[REDACTED]\" unless include_sensitive (a set-cookie header keeps its attributes). Each costs a read per row (body kinds up to 512 KiB)")
           s.field "include_sensitive", boolprop("unredact sensitive `columns`")
-          s.field "count_only", boolprop("return only {count} of matching flows; refuses `ids`/`before_id`/`since`/`columns`")
+          s.field "count_only", boolprop("return only {count} of matching flows; refuses `ids`/`before_id`/`since`/`columns`/`fields`")
           s.field "sort", enumprop("rank instead of newest-first: the top `limit` matches by duration or response size, no cursor", HISTORY_SORTS)
         end
 

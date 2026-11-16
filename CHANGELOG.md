@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- MCP: `--tools=@analysis` serves five capture readers, and `list_history` can select row metadata with `fields` while retaining provenance and pagination context (#1916).
+
 - Eval: run capture-analysis tasks with Codex as well as Claude Code, with shared grading and separate agent/model reports (#1914).
 
 - Repeater/Fuzzer: scripted WebSocket sends can opt into permessage-deflate with independent messages; transcripts and Fuzzer matching use bounded decoded replies, while explicitly shaped frames, including saved Repeater seeds, stay verbatim. CLI text transcripts retain received frames on decode errors (#1897)

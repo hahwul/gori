@@ -56,6 +56,9 @@ module Gori
       record Profile, name : String, summary : String, tools : Array(String),
         withheld : Hash(String, Array(String)) = {} of String => Array(String)
 
+      # A bound, headless capture: no project movers or TUI mailbox to poll.
+      ANALYSIS = %w[ql_reference ql_explain list_history get_flow get_response_body_chunk]
+
       # What an agent attached to a capture reads with, and the channel back to the operator.
       #
       # All three project binders are here on purpose: a profile has to work on an UNBOUND
@@ -99,6 +102,7 @@ module Gori
       # (spec/mcp/tool_filter_spec.cr), and the guide's table reports each profile's count
       # and weight (spec/mcp/catalogue_size_spec.cr).
       PROFILES = [
+        Profile.new("analysis", "read one bound capture; no project switching or operator mailbox", ANALYSIS),
         Profile.new("minimal", "read History, flows and current TUI context; talk to the operator", MINIMAL),
         Profile.new("recon", "@minimal + scope, findings, passive probe_scan, decoders, " \
                              "send_request, issue and note writes", RECON, RECON_WITHHELD),
