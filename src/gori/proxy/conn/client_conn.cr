@@ -223,6 +223,9 @@ module Gori::Proxy
       # folded into the record by `response_advisory`, exactly like `@alt_svc_note` above —
       # and reset the same way, by being assigned unconditionally at that seam.
       @status_line_note = nil.as(String?)
+      # Why THIS WebSocket upgrade may be here instead of on HTTP/2 (`withheld_offer_note`).
+      # Per response, assigned and reset beside `@status_line_note`.
+      @withheld_offer_note = nil.as(String?)
       # Did a head on the CURRENT upstream connection end on a bare-LF blank line — the final
       # head or an interim one? Set by `safe_read_head`, which every response head passes
       # through, and cleared only with the connection (`release_upstream`): such a connection
@@ -1187,6 +1190,7 @@ module Gori::Proxy
       # Judged HERE — on the peer's final head, before Match&Replace or the Alt-Svc seam get
       # to it — because it is a fact about what the ORIGIN sent, not about what a rule made.
       @status_line_note = status_line_note(resp)
+      @withheld_offer_note = withheld_offer_note(resp, host, port)
       @lf_rules_note = nil
       @lf_residue_note = nil
       ttfb = (Time.instant - started).total_microseconds.to_i64
@@ -2489,8 +2493,21 @@ module Gori::Proxy
     private def response_advisory(body : String?) : String?
       # Almost every response has nothing to say: skip the two Arrays that answer nil.
       return nil if body.nil? && @alt_svc_note.nil? && @status_line_note.nil? &&
-                    @lf_rules_note.nil? && @lf_residue_note.nil?
-      [body, @alt_svc_note, @status_line_note, @lf_rules_note, @lf_residue_note].compact.join("\n")
+                    @lf_rules_note.nil? && @lf_residue_note.nil? && @withheld_offer_note.nil?
+      [body, @alt_svc_note, @status_line_note, @lf_rules_note, @lf_residue_note,
+       @withheld_offer_note].compact.join("\n")
+    end
+
+    # A WebSocket 101 from an origin whose HTTP/2 extended CONNECT offer the h2 relay withheld
+    # (settings `network.strip_extended_connect`, #1896). There is no flow for a SETTINGS frame,
+    # so this upgrade is where the operator learns the switch is why the socket is here. It does
+    # not claim to know the client's motive: a client may use HTTP/1.1 for reasons of its own.
+    private def withheld_offer_note(resp : Codec::RawResponse, host : String, port : Int32) : String?
+      return nil unless Settings.strip_extended_connect? && websocket_upgrade?(resp) &&
+                        Settings.extended_connect_withheld?(host, port)
+      "gori withheld #{host}:#{port}'s SETTINGS_ENABLE_CONNECT_PROTOCOL from the client on " \
+      "HTTP/2 (settings network.strip_extended_connect), so a client that would have opened " \
+      "this WebSocket there used the HTTP/1.1 Upgrade instead"
     end
 
     # The sentence for a response whose start-line is not a status line, or nil for one that

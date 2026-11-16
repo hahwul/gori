@@ -3,8 +3,9 @@ require "../../spec_helper"
 # RFC 8441 extended CONNECT — a WebSocket opened over HTTP/2 (#733).
 #
 # The relay always worked: the CONNECT stream's DATA frames go out byte-for-byte, and gori
-# relays the origin's SETTINGS (SETTINGS_ENABLE_CONNECT_PROTOCOL included) verbatim, so a
-# browser facing an 8441 origin is entitled to take this path. What did not work is everything
+# relays the origin's SETTINGS (SETTINGS_ENABLE_CONNECT_PROTOCOL included) verbatim unless
+# settings `network.strip_extended_connect` is on, so a browser facing an 8441 origin is
+# entitled to take this path. What did not work is everything
 # above the wire — the socket landed as one opaque DATA blob capped at `Settings.capture_max`,
 # so there were no `ws_messages` rows at all. These cover the transcript that replaces it.
 #
@@ -314,6 +315,37 @@ describe Gori::Proxy::H2::WsCapture do
     advisory.should contain("gori read its frames")
     advisory.should contain("Match&Replace are NOT available")
     advisory.should_not contain("no message transcript")
+  end
+
+  # #1896: the advisory names the lever that moves a client's sockets to the HTTP/1.1 path,
+  # and with the lever already thrown says why this stream exists anyway.
+  it "names network.strip_extended_connect as the way to the HTTP/1.1 path while it is off" do
+    before = Gori::Settings.strip_extended_connect?
+    begin
+      Gori::Settings.strip_extended_connect = false
+      sink = WsSink.new
+      open_socket(sink)
+      advisory = sink.requests.first.advisory.not_nil!
+      advisory.should contain("network.strip_extended_connect withholds the origin's offer")
+      advisory.should_not contain("did not prevent this stream")
+    ensure
+      Gori::Settings.strip_extended_connect = before
+    end
+  end
+
+  it "says network.strip_extended_connect is on but did not prevent the stream while it is on" do
+    before = Gori::Settings.strip_extended_connect?
+    begin
+      Gori::Settings.strip_extended_connect = true
+      sink = WsSink.new
+      open_socket(sink)
+      advisory = sink.requests.first.advisory.not_nil!
+      advisory.should contain("network.strip_extended_connect is on but did not prevent this stream")
+      advisory.should contain("It applies from the next connection")
+      advisory.should_not contain("withholds the origin's offer")
+    ensure
+      Gori::Settings.strip_extended_connect = before
+    end
   end
 
   # A reassembler holds up to one frame plus one message per direction, and h2 lets ONE
