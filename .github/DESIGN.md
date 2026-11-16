@@ -5770,3 +5770,19 @@ request recorded without a response from the origin (dial failure, sandbox block
 reject, intercept drop) carries it too. A response that writes its own advisory replaces the
 request's (`Store#update_one`), so `response_advisory` repeats the sentence there; it never
 writes one on its own account, which would erase a request-side body-rule advisory.
+
+### 2026-11-16: an HTTP/1.1 response write carries the request's advisory (#1905)
+
+`Store#update_one` writes `advisory = COALESCE(?, advisory)`, so a response record that carries
+an advisory replaces what the request record wrote. On HTTP/1.1 that erased every request-side
+sentence, a skipped body rule included, whenever the response had one of its own. HTTP/2 was
+never affected: `Assembler#advisory_of` hands the accumulated set to both writes.
+
+`ClientConn#capture_request` now remembers the advisory it recorded and
+`ClientConn#capture_response` puts it in front of a non-nil response advisory. Those two are
+the funnels every record site on the connection uses, including the ones that never call
+`response_advisory`. A nil response advisory stays nil and leaves the column alone.
+
+This supersedes the last paragraph of the #1898 entry above: `response_advisory` no longer
+repeats the dictionary sentence. The store is unchanged, because appending there would
+duplicate on HTTP/2.
