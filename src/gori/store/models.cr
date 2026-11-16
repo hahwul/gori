@@ -122,7 +122,7 @@ module Gori
       # See `FlowRow#advisory`. nil means "nothing new to say", which is NOT the same as ""
       # — a response-side advisory has to be able to leave the request side's alone, so
       # `Store#update_one` only writes the column when this is non-nil.
-      getter advisory : String?
+      property advisory : String?
       # The interim 1xx responses the origin sent before `head`, or nil when it sent none —
       # which is nearly every exchange. See `Interims`.
       getter interims : Interims?
