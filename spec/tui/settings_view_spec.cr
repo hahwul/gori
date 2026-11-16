@@ -233,6 +233,38 @@ describe SettingsView do
     end
   end
 
+  # The same shape for its neighbour (#1896), which sits between the Alt-Svc bool and the
+  # passthrough text field: a misaligned index would flip one or mangle the other.
+  it "toggles Strip HTTP/2 ext. CONNECT on, then resets it to the default on save" do
+    dir = File.tempname("gori-settings-extconnect")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev = Gori::Settings.strip_extended_connect?
+    prev_alt = Gori::Settings.strip_alt_svc?
+    row = SettingsView::NETWORK_FIELDS.index! { |f| f.label == "Strip HTTP/2 ext. CONNECT" }
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.strip_extended_connect = false
+      Gori::Settings.strip_alt_svc = false
+      v = SettingsView.new
+      v.reload(:network)
+      row.times { v.move_field(1) }
+      v.toggle_or_move(-1)
+      v.save
+      Gori::Settings.strip_extended_connect?.should be_true
+      Gori::Settings.strip_alt_svc?.should be_false
+
+      v.reset_to_defaults
+      v.save
+      Gori::Settings.strip_extended_connect?.should eq(Gori::Settings::DEFAULT_STRIP_EXTENDED_CONNECT)
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      Gori::Settings.strip_extended_connect = prev
+      Gori::Settings.strip_alt_svc = prev_alt
+      FileUtils.rm_rf(dir)
+    end
+  end
+
   # A save can shorten the value under the caret (`editor` is stripped); the next ⌫ must
   # clamp first rather than slice `v[0, -1]` and raise.
   it "survives a backspace after a save shortened the focused value" do
