@@ -184,4 +184,45 @@ describe "a --mr / --fr regex over a response body" do
     (Time.instant - t).should be < 1.second
     m.match_regex.try(&.source).should eq("(?:(?:[\\s\\S]|[\\s\\S]){16}(?!))?[\\x01-\\x02]")
   end
+
+  # #1912: a streamed completion is SSE deltas, so the word a tester matches on can sit in two
+  # events and never in the body.
+  describe "a streamed LLM reply" do
+    stream = %(data: {"choices":[{"index":0,"delta":{"content":"PW"}}]}\n\n) +
+             %(data: {"choices":[{"index":0,"delta":{"content":"NED"}}]}\n\ndata: [DONE]\n\n)
+    matched = ->(ct : String, body : String, re : Regex) do
+      m = F::Matcher.new(keep_bodies: :none)
+      m.match_regex = re
+      raw = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\nContent-Type: #{ct}\r\n\r\n".to_slice, body.to_slice, nil, 1000_i64, nil)
+      m.build(F::Job.new(0_i64, ["p"], 0, "POST / HTTP/1.1\r\n\r\n".to_slice), raw).matched?
+    end
+
+    it "matches a word split across two deltas, and still matches the body as sent" do
+      matched.call("text/event-stream", stream, /PWNED/).should be_true
+      matched.call("text/event-stream", stream, /"content":"PW"/).should be_true
+      matched.call("text/event-stream", stream, /HACKED/).should be_false
+    end
+
+    it "asks the reply on its own, so a pattern anchored on the body reads what it always did" do
+      matched.call("text/event-stream", stream, /\[DONE\]\n\n\z/).should be_true
+      matched.call("text/event-stream", stream, /\APWNED\z/).should be_true
+      matched.call("text/event-stream", stream, /\Adata:/).should be_true
+    end
+
+    it "reads a tool call's arguments as the model wrote them, and filters on the reply too" do
+      tool = %(data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"mail","arguments":"{\\"to\\":\\"evil"}}]}}]}\n\n) +
+             %(data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"@x.test\\"}"}}]}}]}\n\n)
+      matched.call("text/event-stream", tool, /"to":"evil@x\.test"/).should be_true
+      matched.call("text/event-stream", tool, /tool call/).should be_false # no gori-authored heading to hit
+
+      m = F::Matcher.new(keep_bodies: :none)
+      m.filter_regex = /PWNED/
+      raw = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n".to_slice, stream.to_slice, nil, 1000_i64, nil)
+      m.build(F::Job.new(0_i64, ["p"], 0, "POST / HTTP/1.1\r\n\r\n".to_slice), raw).matched?.should be_false
+    end
+
+    it "reads nothing extra from a response that is not an event stream" do
+      matched.call("application/json", stream, /PWNED/).should be_false
+    end
+  end
 end

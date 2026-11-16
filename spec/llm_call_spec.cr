@@ -147,4 +147,20 @@ describe Gori::LlmCall do
     ]), "text/event-stream").not_nil!
     c.text.should eq("A")
   end
+
+  it "reassembles a streamed reply from the response alone, tool calls included" do
+    head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n".to_slice
+    body = sse([
+      %({"choices":[{"index":0,"delta":{"content":"PW"}}]}),
+      %({"choices":[{"index":0,"delta":{"content":"NED","tool_calls":[{"index":0,"function":{"name":"send_mail","arguments":"{\\"to\\":\\"evil"}}]}}]}),
+      %({"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"@x.test\\"}"}}]}}]}),
+    ]).to_slice
+    # The model's own bytes: arguments are not re-indented and no heading is added.
+    Gori::LlmCall.stream_reply(head, body).should eq(%(PWNED\nsend_mail\n{"to":"evil@x.test"}))
+    # Not a stream, and a stream that is not an LLM reply.
+    json = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n".to_slice
+    Gori::LlmCall.stream_reply(json, %({"choices":[{"index":0,"message":{"content":"x"}}]}).to_slice).should be_nil
+    Gori::LlmCall.stream_reply(head, "data: {\"tick\":1}\n\n".to_slice).should be_nil
+    Gori::LlmCall.stream_reply(nil, Bytes.empty).should be_nil
+  end
 end

@@ -33,7 +33,14 @@ module Gori
       streamed : Bool, text : String, tool_calls : Array(ToolCall), stop : String?, usage : JSON::Any?
 
     def from_flow(req_head : Bytes?, req_body : Bytes?, resp_head : Bytes?, resp_body : Bytes?) : Call?
-      req = obj(json(Entity.bytes(req_head, req_body, MAX_BODY), %("model"))) || return nil
+      request(req_head, req_body).try { |req| call(req, resp_head, resp_body) }
+    end
+
+    private def request(req_head : Bytes?, req_body : Bytes?) : Obj?
+      obj(json(Entity.bytes(req_head, req_body, MAX_BODY), %("model")))
+    end
+
+    private def call(req : Obj, resp_head : Bytes?, resp_body : Bytes?) : Call?
       model = str(req["model"]?) || return nil
       msgs = req["messages"]?.try(&.as_a?)
       input = req["input"]?
@@ -51,6 +58,18 @@ module Gori
       # reply (or none yet) makes it an LLM call.
       return nil if msgs.nil? && !acc.shaped? && resp_body.try(&.empty?) == false
       acc.call(roles(req, msgs, input), tools(req), !events.empty?)
+    end
+
+    # A STREAMED reply reassembled from the response alone, for a matcher: a word the model wrote
+    # can be split across two deltas and never appear in the body (#1912). The text, then each
+    # tool call's name and arguments on their own lines, all as the model wrote them — none of it
+    # is gori's formatting. `decoded` is the content-decoded body the caller already holds. nil
+    # for anything but an event stream carrying one of the three shapes.
+    def stream_reply(resp_head : Bytes?, decoded : Bytes) : String?
+      return nil unless Sse.event_stream?(resp_head) && decoded.size <= MAX_BODY
+      acc = Acc.new(CHAT, nil)
+      Sse.events(decoded).each { |e| obj(JsonRpc.json?(e.data, "{")).try { |r| acc.feed(r) } }
+      acc.raw_reply if acc.shaped?
     end
 
     private def json(bytes : Bytes?, needle : String) : JSON::Any?
@@ -107,6 +126,14 @@ module Gori
       getter? shaped = false
 
       def initialize(@dialect : String, @model : String?)
+      end
+
+      # See `LlmCall.stream_reply`.
+      def raw_reply : String
+        String.build do |io|
+          io << @text.to_s
+          @tools.to_a.sort_by!(&.[0]).each { |(_, (name, args))| io << '\n' << name << '\n' << args.to_s }
+        end
       end
 
       def call(roles : String, tools : Array(String), streamed : Bool) : Call
