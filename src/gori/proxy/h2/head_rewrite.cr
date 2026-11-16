@@ -4,6 +4,7 @@ require "./head_codec"
 require "./assembler"
 require "../head_rewriter"
 require "../../alt_svc"
+require "../../dictionary_transport"
 require "../upstream"
 
 module Gori::Proxy::H2
@@ -113,6 +114,7 @@ module Gori::Proxy::H2
       @warned = false
       @warned_unfaithful = false
       @warned_alt_svc = false
+      @warned_dictionary = false
       @warned_coalesced = false
       @warned_live_rule = false
       @buf = [] of Frame::Header
@@ -382,11 +384,21 @@ module Gori::Proxy::H2
       # client acts on an `Alt-Svc` in. Stripping one would spend the connection's HPACK
       # passthrough (the latch below is one-way) on a field nothing reads — and a hostile
       # origin could close that latch at will by putting `alt-svc` in a trailer.
-      alt_svc_stripped = false
-      peer_fields = fields # what the origin sent, for a rule's record (#1589), as h1 keeps it
+      stripped = false
+      peer_fields = fields # what the peer sent, for a rule's record (#1589), as h1 keeps it
       if !request && final_response_head?(fields) && (pruned = strip_alt_svc(fields, stream_id))
         fields = pruned
-        alt_svc_stripped = true
+        stripped = true
+      end
+      # The request direction's twin (settings `network.strip_available_dictionary`, #1898), placed
+      # before `head_text` and `rewrite` for the same reasons, so a head rule runs after it. A
+      # request head only: a trailer block carries no `:method`, and stripping one would spend the
+      # latch on a field nothing reads. Production relays always build this pipeline: `Session`
+      # wires an Interceptor, so `Relay#gates` runs every request block through here.
+      dictionary_removed = nil.as(Array(String)?)
+      if request && message_head?(fields, request) && (dict = strip_dictionary(fields))
+        fields, dictionary_removed = dict
+        stripped = true
       end
       # `head_text` synthesizes the whole h1-equivalent head, and nothing reads it unless a rule
       # seam or the intercept gate will: `Block#head` is the text a human
@@ -418,9 +430,10 @@ module Gori::Proxy::H2
       if !request && !Settings.strip_alt_svc? && final_response_head?(emit_fields)
         note_alt_svc_kept(emit_fields, stream_id)
       end
-      # `alt_svc_stripped` forces the re-encode branch: the passthrough one forwards `snapshot`,
-      # the frames exactly as they ARRIVED, which still carry the field this just removed.
-      built = if rewritten.nil? && !alt_svc_stripped && !@engaged
+      note_dictionary_strip(dictionary_removed, emit_fields, stream_id) if dictionary_removed
+      # `stripped` forces the re-encode branch: the passthrough one forwards `snapshot`, the
+      # frames exactly as they ARRIVED, which still carry the field a strip just removed.
+      built = if rewritten.nil? && !stripped && !@engaged
                 # Unchanged, and this direction has never re-encoded: byte-exact passthrough,
                 # which is also what keeps the peer's HPACK table driven by the original encoder.
                 # `snapshot`, not `@buf` — `@buf` was cleared above.
@@ -461,6 +474,10 @@ module Gori::Proxy::H2
     private def head_text(fields : Array(HPACK::Field), first : Frame::Header, request : Bool) : Bytes?
       return nil if first.frame_type == Frame::Type::PushPromise
       return nil unless message_head?(fields, request)
+      synth(fields, request)
+    end
+
+    private def synth(fields : Array(HPACK::Field), request : Bool) : Bytes
       tuples = pairs(fields)
       # A request's synthetic Host comes from the stream's own `:authority`, so request-head
       # rules and intercepts stay scoped on a coalesced connection. This helper only builds the
@@ -513,7 +530,7 @@ module Gori::Proxy::H2
         (request ? HeadCodec.parse_request(h, fields) : HeadCodec.parse_response(h, fields))
           .try { |p| without_content_length(p) }
       end
-      original = peer_fields.same?(fields) ? head : HeadCodec.synth_response(pairs(peer_fields))
+      original = peer_fields.same?(fields) ? head : synth(peer_fields, request)
       note_rewrite(stream_id, request, original)
       restored
     end
@@ -524,7 +541,7 @@ module Gori::Proxy::H2
 
     # The flow keeps which rules fired and the head they replaced (#1589) — in the h1-shaped form
     # the rules read, as Intercept keeps its held head. `head` is the peer's own, before the
-    # `Alt-Svc` strip, as `ClientConn` keeps the origin's.
+    # `Alt-Svc` or dictionary strip, as `ClientConn` keeps the peer's.
     private def note_rewrite(stream_id : UInt32, request : Bool, head : Bytes) : Nil
       return if @hits.empty?
       @assembler.note_rewrite(stream_id, request, Store::Rewrite.new(@hits.dup, head))
@@ -576,6 +593,41 @@ module Gori::Proxy::H2
         "#{Gori::AltSvc.removal_note(removed)} This connection re-encodes its response heads " \
         "from here on, so the raw frame log holds gori's HPACK, not the origin's.")
       kept
+    end
+
+    # The request fields without the client's Compression Dictionary Transport offer, and what
+    # was removed, or nil when the switch is off or there was nothing to remove. The same cost
+    # as `strip_alt_svc` above, in the request direction: a non-nil answer engages the latch.
+    private def strip_dictionary(fields : Array(HPACK::Field)) : {Array(HPACK::Field), Array(String)}?
+      return nil unless Settings.strip_available_dictionary?
+      removed = nil.as(Array(String)?)
+      kept = fields.reject do |f|
+        next false unless Gori::DictionaryTransport.field?(f.name)
+        (removed ||= [] of String) << Gori::DictionaryTransport.evidence(f.name, f.value)
+        true
+      end
+      removed ? {kept, removed} : nil
+    end
+
+    # The advisory for that strip, decided from the fields going out, as the HTTP/1.1 half is
+    # from the head it sent: a field a rule put back is on the wire again, and the flow must not
+    # say it is gone. Logged once per connection, like `strip_alt_svc`.
+    private def note_dictionary_strip(removed : Array(String), emit_fields : Array(HPACK::Field),
+                                      stream_id : UInt32) : Nil
+      present = emit_fields.compact_map { |f| f.name.downcase if Gori::DictionaryTransport.field?(f.name) }
+      removed = Gori::DictionaryTransport.unrestored(removed, present)
+      return if removed.empty?
+      unless @warned_dictionary
+        @warned_dictionary = true
+        ::Log.info do
+          "h2 #{@host}: removed a dictionary field (#{removed.first}) from a request " \
+          "(settings network.strip_available_dictionary). Request heads on this connection are " \
+          "re-encoded from here on"
+        end
+      end
+      @assembler.note_advisory(stream_id,
+        "#{Gori::DictionaryTransport.removal_note(removed)} This connection re-encodes its request " \
+        "heads from here on, so the raw frame log holds gori's HPACK, not the client's.")
     end
 
     # The advisory for the switch's OTHER position: this response advertised h3, gori did not

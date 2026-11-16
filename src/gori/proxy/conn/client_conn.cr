@@ -23,6 +23,7 @@ require "../ws/relay"
 require "../ws/handshake"
 require "../../flow_mapper"
 require "../../alt_svc"
+require "../../dictionary_transport"
 require "../../sse"
 require "./self_page"
 
@@ -213,6 +214,10 @@ module Gori::Proxy
       # request by `strip_ws_extension_offer`, read by the 101 path: an acceptance is only
       # gori's to remove when gori is the reason nothing was offered. See `WS::Handshake`.
       @ws_offer_stripped = false
+      # The sentence for what settings `network.strip_available_dictionary` removed from THIS
+      # request (#1898), or nil. Reset at the top of `handle_request`, ahead of every record site,
+      # and attached by `capture_request`, so whichever path records the request carries it.
+      @dictionary_note = nil.as(String?)
       # What gori removed from THIS response's head on its own account — today only an h3
       # `Alt-Svc` (see `settle_alt_svc`) — carried to whichever record site the response takes
       # so the flow says so (`Store::FlowRow#advisory`). Assigned unconditionally at the seam,
@@ -402,6 +407,7 @@ module Gori::Proxy
       # Before the read: an oversized head is recorded from inside `read_client_head`.
       forget_request_rewrite
       forget_response_rewrite
+      @dictionary_note = nil
       head = read_client_head
       # nil = the client closed, a keep-alive connection went idle to its end, or the read timed
       # out (`read_client_head` has already recorded the one shape of that worth recording).
@@ -492,6 +498,8 @@ module Gori::Proxy
       # handshake leaves for the origin (#518). `client_head` is the client's own bytes
       # with the same removal applied, for the History record. See the helper.
       client_head, forward_head, record_req = strip_ws_extension_offer(req, forward_head)
+      client_head, forward_head, record_req, dictionary_removed =
+        strip_dictionary_offer(client_head, forward_head, record_req)
 
       # Match&Replace (request head): rewrite the bytes sent upstream. Only when
       # a rule actually changes something do we capture the modified bytes (the
@@ -527,6 +535,7 @@ module Gori::Proxy
         # Guarded here, not inside: `unframed` rebuilds a head, and no rule fired on most (P6).
         rw.settle_hits(@req_hits, 0, forward_head, unframed(sent_head)) { |h| unframed(h) } unless @req_hits.empty?
       end
+      @dictionary_note = dictionary_note(dictionary_removed, forward_head, sent_head) if dictionary_removed
 
       # The target every SCOPE/INTERCEPT gate below reads, from the ACTUALLY-SENT head (post
       # Match&Replace). `Codec::Http1.gate_target` is `sent_req.target` on the common path and
@@ -733,6 +742,30 @@ module Gori::Proxy
       return {req.raw_head, forward_head, req} unless @ws_offer_stripped
       client_head = WS::Handshake.strip_extensions(req.raw_head)
       {client_head, WS::Handshake.strip_extensions(forward_head), Codec::Http1.parse_request_head(client_head)}
+    end
+
+    # Removes the client's Compression Dictionary Transport offer from both heads (settings
+    # `network.strip_available_dictionary`, #1898), returning them with the recorded request and
+    # what was removed (nil when nothing was). Same seam as `strip_ws_extension_offer` and for its
+    # reasons: History records the head gori sent, and a Match&Replace rule running after it may
+    # put a field back for one host. Body framing keeps reading the client's `req`: neither field
+    # frames anything.
+    private def strip_dictionary_offer(client_head : Bytes, forward_head : Bytes,
+                                       record_req : Codec::RawRequest) : {Bytes, Bytes, Codec::RawRequest, Array(String)?}
+      unchanged = {client_head, forward_head, record_req, nil}
+      return unchanged unless Settings.strip_available_dictionary? &&
+                              DictionaryTransport::FIELDS.each_key.any? { |n| record_req.headers.has?(n) }
+      wire, removed = DictionaryTransport.strip_request(forward_head)
+      return unchanged if removed.empty?
+      recorded, _ = DictionaryTransport.strip_request(client_head)
+      {recorded, wire, Codec::Http1.parse_request_head(recorded), removed}
+    end
+
+    # The flow's sentence for the removal, decided from the head actually sent: a field a
+    # Match&Replace rule put back is on the wire again, and the flow must not say it is gone.
+    private def dictionary_note(removed : Array(String), stripped : Bytes, sent : Bytes) : String?
+      removed = DictionaryTransport.unrestored(removed, sent) unless sent == stripped
+      DictionaryTransport.removal_note(removed) unless removed.empty?
     end
 
     # The whole request body, for the two paths that must hold it before anything goes upstream
@@ -2494,8 +2527,10 @@ module Gori::Proxy
       # Almost every response has nothing to say: skip the two Arrays that answer nil.
       return nil if body.nil? && @alt_svc_note.nil? && @status_line_note.nil? &&
                     @lf_rules_note.nil? && @lf_residue_note.nil? && @withheld_offer_note.nil?
+      # `@dictionary_note` rides along but never makes this non-nil on its own: the request record
+      # already carries it, and a nil here is what keeps the request side's column (`update_one`).
       [body, @alt_svc_note, @status_line_note, @lf_rules_note, @lf_residue_note,
-       @withheld_offer_note].compact.join("\n")
+       @withheld_offer_note, @dictionary_note].compact.join("\n")
     end
 
     # A WebSocket 101 from an origin whose HTTP/2 extended CONNECT offer the h2 relay withheld
@@ -3121,6 +3156,9 @@ module Gori::Proxy
     # Every flow this connection records goes through these two, so what Match&Replace changed
     # (#1589) rides on whichever record site the exchange ends at.
     private def capture_request(req : Store::CapturedRequest) : Int64
+      if note = @dictionary_note
+        req.advisory = req.advisory.try { |a| "#{a}\n#{note}" } || note
+      end
       unless @req_hits.empty?
         req.rewrite = Store::Rewrite.new(@req_hits.dup, @req_orig_head, capped(@req_orig_body)[0])
       end

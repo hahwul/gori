@@ -94,6 +94,13 @@ module Gori::Settings
   # Global-only, read live per frame, but an origin normally sends the parameter once, in its
   # first SETTINGS frame, so in practice it takes effect on connections opened after it is on.
   DEFAULT_STRIP_EXTENDED_CONNECT = false
+  # Whether the proxy removes `Available-Dictionary` / `Dictionary-ID` from requests (#1898), so
+  # an origin cannot answer with an RFC 9842 `dcb`/`dcz` body only the client's dictionary
+  # decodes (`DictionaryTransport`). OFF by default for the reason DEFAULT_STRIP_ALT_SVC is (P4):
+  # an opaque body costs no wire fidelity and its decode note says why. The cost of ON is larger
+  # responses from the origin and, on HTTP/2, request heads re-encoded from the first strip on
+  # that connection. Global-only, read live per request.
+  DEFAULT_STRIP_AVAILABLE_DICTIONARY = false
   # Cap on the once-per-host passthrough notice (see tls_passthrough?). A bypassed host is
   # otherwise INVISIBLE — nothing is captured — so "why is this host missing from History?"
   # has no answer anywhere; one gori.log line per distinct host gives it one, without a log
@@ -157,6 +164,9 @@ module Gori::Settings
   # Whether to withhold the origin's extended CONNECT offer (see DEFAULT_STRIP_EXTENDED_CONNECT).
   # Read live by the h2 relay on every frame from the origin. Global-only.
   class_property? strip_extended_connect : Bool = DEFAULT_STRIP_EXTENDED_CONNECT
+  # Whether to strip the dictionary offer (see DEFAULT_STRIP_AVAILABLE_DICTIONARY). Read live
+  # per request on both transports. Global-only.
+  class_property? strip_available_dictionary : Bool = DEFAULT_STRIP_AVAILABLE_DICTIONARY
 
   # True when HTTP/2 must not be used. The proxy asks this rather than comparing strings, so
   # an out-of-range hand-edited value reads as "auto" (only an explicit "off" disables h2)
@@ -762,6 +772,7 @@ module Gori::Settings
     self.http2 = DEFAULT_HTTP2
     self.strip_alt_svc = DEFAULT_STRIP_ALT_SVC
     self.strip_extended_connect = DEFAULT_STRIP_EXTENDED_CONNECT
+    self.strip_available_dictionary = DEFAULT_STRIP_AVAILABLE_DICTIONARY
   end
 
   private def self.serialize_network(j : JSON::Builder) : Nil
@@ -791,6 +802,7 @@ module Gori::Settings
         j.field "http2", http2
         j.field "strip_alt_svc", strip_alt_svc?
         j.field "strip_extended_connect", strip_extended_connect?
+        j.field "strip_available_dictionary", strip_available_dictionary?
       end
     end
   end

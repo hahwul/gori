@@ -583,6 +583,7 @@ describe Gori::Settings do
       Gori::Settings.serve_landing = false
       Gori::Settings.strip_alt_svc = true
       Gori::Settings.strip_extended_connect = true
+      Gori::Settings.strip_available_dictionary = true
       Gori::Settings.save.should be_true
 
       Gori::Settings.bind_host = "x"
@@ -591,6 +592,7 @@ describe Gori::Settings do
       Gori::Settings.serve_landing = true
       Gori::Settings.strip_alt_svc = false
       Gori::Settings.strip_extended_connect = false
+      Gori::Settings.strip_available_dictionary = false
       Gori::Settings.load
       Gori::Settings.bind_host.should eq("0.0.0.0")
       Gori::Settings.bind_port.should eq(9999)
@@ -601,6 +603,7 @@ describe Gori::Settings do
       # in-memory value, so a clobber-then-load is what tells the two apart).
       Gori::Settings.strip_alt_svc?.should be_true
       Gori::Settings.strip_extended_connect?.should be_true
+      Gori::Settings.strip_available_dictionary?.should be_true
     ensure
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
@@ -610,6 +613,7 @@ describe Gori::Settings do
       Gori::Settings.serve_landing = true
       Gori::Settings.strip_alt_svc = false
       Gori::Settings.strip_extended_connect = false
+      Gori::Settings.strip_available_dictionary = false
     end
   end
 
