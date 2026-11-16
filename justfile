@@ -257,7 +257,7 @@ seed-demo:
 eval-fixtures:
     GORI_HOME="$(mktemp -d)" crystal run eval/fixtures.cr
 
-# Run the agent eval: `claude -p` + gori MCP per catalogue profile (see eval/README.md).
+# Run the agent eval with Claude Code or --agent=codex (see eval/README.md).
 [group('eval')]
 eval *ARGS: build
     crystal run eval/run.cr -- {{ARGS}}

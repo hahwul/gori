@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Eval: run capture-analysis tasks with Codex as well as Claude Code, with shared grading and separate agent/model reports (#1914).
+
 - Repeater/Fuzzer: scripted WebSocket sends can opt into permessage-deflate with independent messages; transcripts and Fuzzer matching use bounded decoded replies, while explicitly shaped frames stay verbatim (#1897)
 
 - History: a DNS-over-HTTPS body (`application/dns-message`) renders as JSON in the detail pane, `gori run show --format json` and MCP `get_flow` (#1899)
