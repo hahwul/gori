@@ -4,7 +4,7 @@
 
 - Eval: run capture-analysis tasks with Codex as well as Claude Code, with shared grading and separate agent/model reports (#1914).
 
-- Repeater/Fuzzer: scripted WebSocket sends can opt into permessage-deflate with independent messages; transcripts and Fuzzer matching use bounded decoded replies, while explicitly shaped frames stay verbatim (#1897)
+- Repeater/Fuzzer: scripted WebSocket sends can opt into permessage-deflate with independent messages; transcripts and Fuzzer matching use bounded decoded replies, while explicitly shaped frames, including saved Repeater seeds, stay verbatim. CLI text transcripts retain received frames on decode errors (#1897)
 
 - History: a DNS-over-HTTPS body (`application/dns-message`) renders as JSON in the detail pane, `gori run show --format json` and MCP `get_flow` (#1899)
 - Proxy: with a Match & Replace body rule, a body extract rule or the response intercept on its host, a chunked `multipart/x-mixed-replace` stream reaches the client at once, and a chunked NDJSON, Connect or gRPC-Web stream that has not ended after 5 seconds is released instead of stalling. On HTTP/2 an NDJSON body that declares its length is rewritten, and a stream a rule skipped says so on the flow (#1899, #1901, #1902)

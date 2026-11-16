@@ -1041,11 +1041,10 @@ module Gori
             false
           end
         kept.map do |m|
-          # `seed_shape` drops the captured mask key and declared length — see the CLI seed's
-          # comment; a nonce pinned across a whole sweep is the defect it prevents.
+          # Normalize raw captures only; a saved Repeater may hold authored shape overrides.
           Fuzz::WsMessageSource.new(m.opcode,
             String.new(Fuzz::Template.escape_literal_markers(m.payload)),
-            CLI::Run.seed_shape(m.shape), seeded)
+            CLI::Run.seed_shape(m.shape, captured: !flow_id.nil?), seeded)
         end
       end
 
