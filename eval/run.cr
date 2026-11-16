@@ -1,4 +1,4 @@
-# Runs every eval task against `claude -p` with gori MCP attached, once per catalogue
+# Runs every eval task against Claude Code or Codex with gori MCP, once per catalogue
 # profile, and grades the answers against the fixture's answer key:
 #
 #   crystal run eval/run.cr -- [--model sonnet] [--n 3] [--jobs 4]
@@ -20,6 +20,7 @@ require "file_utils"
 require "json"
 require "option_parser"
 require "yaml"
+require "./codex"
 
 ROOT     = File.expand_path("..", __DIR__)
 EVAL     = File.join(ROOT, "eval")
@@ -53,7 +54,10 @@ SCRIPT_RULE = "The HTTP capture is ./capture.har, a HAR 1.2 export from an inter
 record Task, id : String, fixture : String, tier : Int32, grade : String, prompt : String
 record Job, task : Task, profile : String, rep : Int32
 
-model = "sonnet"
+agent = "claude"
+model = nil
+budget_set = false
+profiles_set = false
 reps = 3
 jobs = 4
 budget = "2"
@@ -62,14 +66,16 @@ task_glob = "*"
 report_dir = nil
 baseline_dir = nil
 OptionParser.parse do |p|
-  p.on("--model=M", "claude model alias or id (default sonnet)") { |v| model = v }
+  p.on("--agent=NAME", "claude (default) or codex") { |v| agent = v }
+  p.on("--model=M", "model id (Claude: sonnet; Codex: CLI default)") { |v| model = v }
   p.on("--n=N", "repetitions per task × profile (default 3)") { |v| reps = v.to_i }
   p.on("--jobs=N", "runs in parallel (default 4)") { |v| jobs = v.to_i }
-  p.on("--budget=USD", "--max-budget-usd per run (default 2)") { |v| budget = v }
-  p.on("--profiles=LIST", "comma-separated: #{PROFILES.keys.join(',')}") { |v| profiles = v.split(',') }
+  p.on("--budget=USD", "Claude-only --max-budget-usd per run (default 2)") { |v| budget = v; budget_set = true }
+  p.on("--profiles=LIST", "comma-separated: #{PROFILES.keys.join(',')}") { |v| profiles = v.split(','); profiles_set = true }
   p.on("--tasks=GLOB", "task id glob (default *)") { |v| task_glob = v }
   p.on("--report=DIR", "summarize an earlier run's results.jsonl instead of running") { |v| report_dir = v }
   p.on("--baseline=DIR", "compare the summary against an earlier run") { |v| baseline_dir = v }
+  p.on("--help", "show options") { puts p; exit }
 end
 
 def load_results(dir : String) : Array(Hash(String, JSON::Any))
@@ -97,7 +103,19 @@ def pct(now : Float64, base : Float64) : String
   base.zero? ? "" : "%+.0f%%" % ((now / base - 1) * 100)
 end
 
+# Old reports predate agent/model metadata; do not mix them with a named model.
+def identity(r : Hash(String, JSON::Any)) : {String, String}
+  {r["agent"]?.try(&.as_s) || "claude", r["model"]?.try(&.as_s) || "unknown"}
+end
+
 def summarize(results : Array(Hash(String, JSON::Any)), baseline : Array(Hash(String, JSON::Any))?)
+  results.group_by { |r| identity(r) }.each do |(agent, model), rows|
+    puts "agent=#{agent} model=#{model}"
+    summarize_group(rows, baseline.try(&.select { |r| identity(r) == {agent, model} }))
+  end
+end
+
+def summarize_group(results : Array(Hash(String, JSON::Any)), baseline : Array(Hash(String, JSON::Any))?)
   ok = results.reject { |r| void?(r) }
   # The baseline delta covers only the tasks both runs have, or the medians weigh different
   # questions (a run that adds tasks would read as a token change).
@@ -105,9 +123,10 @@ def summarize(results : Array(Hash(String, JSON::Any)), baseline : Array(Hash(St
   shared = base_ok.try { |b| ok.map(&.["task"].as_s).to_set & b.map(&.["task"].as_s).to_set }
   puts "%-22s %-8s %5s %6s %9s %7s %6s" % %w[task profile pass calls in_tok cost secs]
   ok.group_by { |r| {r["task"].as_s, r["profile"].as_s} }.to_a.sort_by(&.first).each do |(task, pr), rs|
-    puts "%-22s %-8s %2d/%-2d %6.1f %8.0fk %7.3f %6.1f" % {
+    costs = rs.reject { |r| r["cost_usd"].raw.nil? }.map { |r| num(r, "cost_usd") }
+    puts "%-22s %-8s %2d/%-2d %6.1f %8.0fk %7s %6.1f" % {
       task, pr, rs.count(&.["pass"].as_bool), rs.size, median(rs.map(&.["calls"].as_a.size.to_f)),
-      median(rs.map { |r| num(r, "input_tokens") }) / 1000, median(rs.map { |r| num(r, "cost_usd") }),
+      median(rs.map { |r| num(r, "input_tokens") }) / 1000, costs.empty? ? "-" : "%.3f" % median(costs),
       median(rs.map { |r| num(r, "seconds") }),
     }
   end
@@ -156,7 +175,19 @@ if dir = report_dir
   summarize(load_results(dir), baseline)
   exit
 end
-abort "unknown profile in #{profiles}" unless profiles.all? { |pr| PROFILES.has_key?(pr) }
+abort "unknown agent #{agent}: choose claude or codex" unless {"claude", "codex"}.includes?(agent)
+abort "--n and --jobs must be positive" unless reps > 0 && jobs > 0
+if agent == "codex"
+  abort "--budget is Claude-only; Codex exec has no USD budget flag" if budget_set
+  profiles = profiles.reject { |pr| pr == DEFERRED } unless profiles_set
+  abort "deferred is Claude-only (ToolSearch); use full for Codex" if profiles.includes?(DEFERRED)
+  if path = EvalCodex.instructions_file
+    abort "#{path} would leak global instructions: use a separately logged-in CODEX_HOME without AGENTS files"
+  end
+end
+model ||= "sonnet" if agent == "claude"
+abort "#{agent} missing from PATH" unless Process.find_executable(agent)
+abort "unknown profile in #{profiles}" unless !profiles.empty? && profiles.all? { |pr| PROFILES.has_key?(pr) }
 abort "#{GORI_BIN} missing: run `just build`" unless File.exists?(GORI_BIN)
 
 tasks = Dir.glob(File.join(EVAL, "tasks", "#{task_glob}.yml")).sort.map do |f|
@@ -171,7 +202,7 @@ truths = tasks.map(&.fixture).uniq!.to_h do |fx|
   {fx, JSON.parse(File.read(path))}
 end
 
-stamp = Time.local.to_s("%Y%m%d-%H%M%S")
+stamp = "#{Time.local.to_s("%Y%m%d-%H%M%S-%L")}-#{agent}"
 run_dir = File.join(EVAL, "out", "runs", stamp)
 FileUtils.mkdir_p(run_dir)
 
@@ -260,52 +291,83 @@ def read_stream(path : String, profile : String) : {Array(String), Int32, Bool, 
   {calls, foreign, peeked, result}
 end
 
-def run_one(job : Job, run_dir : String, model : String, budget : String, truth : JSON::Any,
+def claude_args(job : Job, model : String?, budget : String, db : String, home : String) : Array(String)
+  common = ["-p", job.task.prompt, "--model", model || "sonnet", "--output-format", "stream-json", "--verbose",
+            "--setting-sources", "", "--strict-mcp-config",
+            "--max-budget-usd", budget, "--no-session-persistence"]
+  if job.profile == SCRIPT
+    common + ["--tools", SCRIPT_TOOLS.join(','), "--allowedTools", SCRIPT_TOOLS.join(','),
+              "--append-system-prompt", SCRIPT_RULE]
+  else
+    mcp = {mcpServers: {gori: {command: GORI_BIN, args: ["mcp", "--db", db] + PROFILES[job.profile],
+                               env: {GORI_HOME: home}}}}.to_json
+    tools = job.profile == DEFERRED ? "ToolSearch" : ""
+    common + ["--mcp-config", mcp, "--tools", tools, "--allowedTools", "mcp__gori,ToolSearch",
+              "--append-system-prompt", ANSWER_RULE]
+  end
+end
+
+# Normalize Codex into the usage/result shape the existing Claude grader consumes.
+def read_agent_stream(agent : String, path : String, profile : String)
+  return read_stream(path, profile) if agent == "claude"
+  stream = EvalCodex.read_stream(path, profile == SCRIPT, EVAL)
+  result = JSON.parse({
+    result: stream.text, is_error: stream.error, num_turns: stream.turns,
+    usage: {input_tokens: stream.input_tokens, output_tokens: stream.output_tokens},
+  }.to_json)
+  {stream.calls, stream.foreign, stream.peeked, result}
+end
+
+def parse_answer(text : String) : JSON::Any?
+  text.lines.reverse_each.find(&.starts_with?("ANSWER:")).try do |l|
+    raw = l.lchop("ANSWER:").strip.strip('`').strip
+    JSON.parse(raw) rescue JSON::Any.new(raw)
+  end
+end
+
+def input_tokens(usage : JSON::Any?) : Int64
+  %w[input_tokens cache_read_input_tokens cache_creation_input_tokens].sum do |k|
+    usage.try(&.[k]?).try(&.as_i64?) || 0_i64
+  end
+end
+
+def run_one(job : Job, run_dir : String, agent : String, model : String?, budget : String, truth : JSON::Any,
             har : String?) : Hash(String, JSON::Any)
   name = "#{job.task.id}.#{job.profile}.#{job.rep}"
   dir = File.join(run_dir, name)
-  common = ["-p", job.task.prompt, "--model", model, "--output-format", "stream-json", "--verbose",
-            "--setting-sources", "", "--strict-mcp-config",
-            "--max-budget-usd", budget, "--no-session-persistence"]
   # Outside the repo: under it, Claude Code reads the repo's AGENTS.md and project memory into
   # every run, and a `ls ..` from the script profile's shell lands beside the answer key.
   cwd = File.join(Dir.tempdir, "gori-eval-#{File.basename(run_dir)}", name)
   FileUtils.mkdir_p([dir, cwd])
+  home = File.join(dir, "gori_home")
+  db = File.join(dir, "fixture.db")
   if har
     FileUtils.cp(har, File.join(cwd, "capture.har"))
-    args = common + ["--tools", SCRIPT_TOOLS.join(','), "--allowedTools", SCRIPT_TOOLS.join(','),
-                     "--append-system-prompt", SCRIPT_RULE]
   else
-    home = File.join(dir, "gori_home")
     FileUtils.mkdir_p(home)
-    db = File.join(dir, "fixture.db")
     FileUtils.cp(File.join(EVAL, "out", "fixtures", "#{job.task.fixture}.db"), db)
-    mcp = {mcpServers: {gori: {command: GORI_BIN, args: ["mcp", "--db", db] + PROFILES[job.profile],
-                               env: {GORI_HOME: home}}}}.to_json
-    tools = job.profile == DEFERRED ? "ToolSearch" : ""
-    args = common + ["--mcp-config", mcp, "--tools", tools, "--allowedTools", "mcp__gori,ToolSearch",
-                     "--append-system-prompt", ANSWER_RULE]
+  end
+  args = claude_args(job, model, budget, db, home)
+  if agent == "codex"
+    args = EvalCodex.args(job.task.prompt, model, !!har, har ? SCRIPT_RULE : ANSWER_RULE,
+      GORI_BIN, db, home, PROFILES[job.profile])
   end
   stream = File.join(dir, "stream.jsonl")
   started = Time.instant
-  File.open(stream, "w") do |sout|
+  status = File.open(stream, "w") do |sout|
     File.open(File.join(dir, "stderr.txt"), "w") do |err|
-      Process.run("claude", args, chdir: cwd, output: sout, error: err)
+      Process.run(agent, args, chdir: cwd, output: sout, error: err)
     end
   end
   elapsed = (Time.instant - started).total_seconds
 
-  calls, foreign, peeked, result = read_stream(stream, job.profile)
+  calls, foreign, peeked, result = read_agent_stream(agent, stream, job.profile)
   text = result.try(&.["result"]?).try(&.as_s?) || ""
-  answer = text.lines.reverse_each.find(&.starts_with?("ANSWER:")).try do |l|
-    raw = l.lchop("ANSWER:").strip.strip('`').strip
-    JSON.parse(raw) rescue JSON::Any.new(raw)
-  end
+  answer = parse_answer(text)
   usage = result.try(&.["usage"]?)
-  tokens = %w[input_tokens cache_read_input_tokens cache_creation_input_tokens].sum do |k|
-    usage.try(&.[k]?).try(&.as_i64?) || 0_i64
-  end
   {
+    "agent"         => JSON::Any.new(agent),
+    "model"         => JSON::Any.new(model || "default"),
     "task"          => JSON::Any.new(job.task.id),
     "tier"          => JSON::Any.new(job.task.tier.to_i64),
     "profile"       => JSON::Any.new(job.profile),
@@ -314,12 +376,12 @@ def run_one(job : Job, run_dir : String, model : String, budget : String, truth 
     "answer"        => answer || JSON::Any.new(nil),
     "want"          => truth,
     "calls"         => JSON::Any.new(calls.map { |c| JSON::Any.new(c) }),
-    "input_tokens"  => JSON::Any.new(tokens),
+    "input_tokens"  => JSON::Any.new(input_tokens(usage)),
     "output_tokens" => JSON::Any.new(usage.try(&.["output_tokens"]?).try(&.as_i64?) || 0_i64),
-    "cost_usd"      => JSON::Any.new(result.try(&.["total_cost_usd"]?).try(&.as_f?) || 0.0),
+    "cost_usd"      => JSON::Any.new(result.try(&.["total_cost_usd"]?).try(&.as_f?)),
     "turns"         => JSON::Any.new(result.try(&.["num_turns"]?).try(&.as_i64?) || 0_i64),
     "seconds"       => JSON::Any.new(elapsed.round(1)),
-    "error"         => JSON::Any.new(result.nil? || result.try(&.["is_error"]?).try(&.as_bool?) == true),
+    "error"         => JSON::Any.new(!status.success? || (result.nil? || result.try(&.["is_error"]?).try(&.as_bool?) == true)),
     "foreign_tools" => JSON::Any.new(foreign.to_i64),
     "peeked"        => JSON::Any.new(peeked),
   }
@@ -336,7 +398,7 @@ jobs.times do
     while job = queue.receive?
       truth = truths[job.task.fixture][job.task.id]
       har = job.profile == SCRIPT ? hars[job.task.fixture] : nil
-      rows.send(run_one(job, run_dir, model, budget, truth, har))
+      rows.send(run_one(job, run_dir, agent, model, budget, truth, har))
     end
   end
 end
@@ -354,5 +416,5 @@ File.open(File.join(run_dir, "results.jsonl"), "w") do |log|
 end
 
 puts
-puts "model=#{model} n=#{reps} → #{run_dir}"
+puts "agent=#{agent} model=#{model || "default"} n=#{reps} → #{run_dir}"
 summarize(results, baseline)
