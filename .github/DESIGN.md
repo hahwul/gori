@@ -5695,3 +5695,35 @@ Not done, and known:
   that legible, which is why it is not optional. The wait is a constant: a setting for it
   is the next step if five seconds turns out wrong for real streams.
 
+### 2026-11-16: an extended CONNECT offer is withheld only because the operator said so (#1896)
+
+Refines: [P4](#p4), [P7](#p7). #1896.
+
+A WebSocket over HTTP/2 is captured, but per-message intercept and Match & Replace cannot run
+on it (#492 step 5). Which transport a browser picks is the origin's choice, made by offering
+SETTINGS_ENABLE_CONNECT_PROTOCOL, and the only lever was `network.http2 = "off"`, which takes
+the whole connection to HTTP/1.1. `network.strip_extended_connect` withholds just the offer. It
+is off by default for the reason `strip_alt_svc` is (2026-08-22): an h2 socket costs no capture
+fidelity, so moving it is the operator's call. The decisions:
+
+1. **One seam, on the origin's leg.** `Relay#next_frame` is the one place gori rewrites a
+   stream-0 frame, before the head pipeline, the gates, the frame log and the assembler see it,
+   so all of them hold the frame gori wrote. A SETTINGS frame is not flow-controlled and
+   removing a 6-octet entry changes only its own length, so the #492 step 5 objection (a
+   length-changing DATA rewrite deadlocks against the peer's window) does not apply.
+2. **Every SETTINGS frame, and only a non-zero value.** An origin may offer in a later frame.
+   An entry carrying 0 is the initial value and changes nothing, so it stays, and a malformed
+   frame goes out as read for the client's own error handling (`H2::ConnectOffer`).
+3. **A client that sends an extended CONNECT anyway is relayed, not refused.** RFC 9113 §8.5
+   would allow a stream error, but the bytes a client chooses to send are the payload (P7); the
+   only real client that gets here is a browser offered the parameter before the switch was
+   thrown, and refusing would fail its every reconnect until that connection dies; and the flow
+   already says what gori could not do, now naming the switch.
+4. **Never in silence.** A SETTINGS frame has no flow. The record is the raw frame log, one
+   `gori.log` line per origin, and an advisory on each HTTP/1.1 WebSocket upgrade to that origin
+   while the switch is on (`Settings.extended_connect_withheld?`).
+5. **From the next connection.** gori sends no GOAWAY to recycle a connection, and RFC 8441 §3
+   forbids sending 0 after 1, so there is no retraction inside one.
+6. **Every extended CONNECT protocol goes, not only `websocket`.** The parameter is one bit for
+   all of them, so `connect-udp` and `connect-ip` are withheld too.
+

@@ -74,6 +74,7 @@ Its location resolves as `--config PATH` → `$GORI_CONFIG` → `$GORI_HOME/sett
 | `capture_max_mib` | integer | `2` | Largest body stored per message, in MiB (1-2047). Larger bodies still forward byte-exact; only the stored copy is truncated, and the true wire size is recorded |
 | `http2` | string | `"auto"` | `auto` reflects the origin's ALPN; `off` forces HTTP/1.1 on every tunnelled connection. See [http2](#http2) below |
 | `strip_alt_svc` | bool | `false` | Remove the `Alt-Svc` response fields advertising HTTP/3 before the client sees them, so a browser cannot switch to a transport gori does not carry. See [strip_alt_svc](#strip-alt-svc) below |
+| `strip_extended_connect` | bool | `false` | Withhold the origin's HTTP/2 `SETTINGS_ENABLE_CONNECT_PROTOCOL` from the client, so a browser opens its WebSockets with an HTTP/1.1 `Upgrade`, where per-message intercept and Match & Replace run. See [strip_extended_connect](#strip-extended-connect) below |
 | `tls_passthrough` | array | `[]` | Hosts to relay without decrypting. See [tls_passthrough](#tls-passthrough) below |
 
 CLI `--listen` / `--port` override these for the current process only (not written to disk). See [Per-Project Overrides](#per-project-overrides).
@@ -139,6 +140,18 @@ On HTTP/2, removing a field means gori re-encodes that response's header block. 
 Every flow whose response was stripped carries an advisory naming what was removed and quoting the removed value, in the History detail pane, `gori run history --format json` and the MCP `get_flow` tool. The passive probe reads the *stored* response, which is the one gori delivered, so once the strip is on a captured flow stops raising the `tech_http3` fingerprint and its `Alt-Svc: <host> advertised HTTP/3` event line. The per-flow advisory records it instead. Only captured traffic is affected. A response gori elicited itself (a Repeater send, a Fuzz sweep, a Discover crawl, MCP `send_request`, an import) never goes through the proxy path, so it keeps the origin's `Alt-Svc` and still fingerprints. Resend the request from the Repeater to see the advertisement.
 
 Three things it cannot cover. A host on [`tls_passthrough`](#tls-passthrough) is never decrypted, so there is no response for gori to edit. A client can learn an h3 route from a DNS `HTTPS` record, which no response-side strip reaches. A field-name spelled with whitespace before the colon (`Alt-Svc : h3=…`) is not recognised, by this setting or by gori's own header projection. A conforming client rejects that field too (RFC 9112 §5.1). Toggle the setting from Preferences → **Network & Tabs** → **Network** → **Strip HTTP/3 Alt-Svc**.
+
+#### strip_extended_connect {#strip-extended-connect}
+
+A browser opens a WebSocket over HTTP/2 when the origin offers `SETTINGS_ENABLE_CONNECT_PROTOCOL` (RFC 8441). gori captures such a socket in full, but per-message intercept and Match & Replace do not run on it. Turn this on and gori removes that parameter from every SETTINGS frame the origin sends on an HTTP/2 connection, before the client sees it. A client that was never offered extended `CONNECT` opens its WebSockets with an HTTP/1.1 `Upgrade` on a new connection, where both run. Everything else on the connection stays on HTTP/2. It covers TLS tunnels, `h2c` inside `CONNECT`, and the reverse and transparent listeners.
+
+It is off by default, for the reason [`strip_alt_svc`](#strip-alt-svc) is: an HTTP/2 socket costs no capture fidelity, so whether to move it depends on your test. Setting [`http2`](#http2) to `off` also moves sockets to HTTP/1.1, but it takes the whole connection with them.
+
+It applies to connections opened after it is on. An origin normally sends the parameter once, in its first SETTINGS frame, so a connection the client already holds keeps the offer it was given, and a socket already running over HTTP/2 stays there. gori does not close connections to force a new one. A WebSocket opened over HTTP/2 while the switch is on carries an advisory saying the switch did not prevent it.
+
+**gori says what it did.** A SETTINGS frame has no flow, so the record is in three places. The raw frame log holds the frame gori wrote, without the parameter. `gori.log` names each origin once. Each HTTP/1.1 WebSocket upgrade to that origin carries an advisory while the switch is on: *"gori withheld `<host>:<port>`'s SETTINGS_ENABLE_CONNECT_PROTOCOL from the client on HTTP/2 (settings network.strip_extended_connect), so a client that would have opened this WebSocket there used the HTTP/1.1 Upgrade instead."*
+
+The parameter is one bit for every extended `CONNECT` protocol, so this also withholds `connect-udp` (RFC 9298) and `connect-ip` (RFC 9484). An entry carrying `0` changes nothing and is left in place. A client that sends an extended `CONNECT` anyway is relayed, not refused. Only the proxy path is affected. A Repeater or Fuzzer replay dials the origin itself and still sees the offer. Toggle the setting from Preferences → **Network & Tabs** → **Network** → **Strip HTTP/2 ext. CONNECT**.
 
 ### listeners
 
