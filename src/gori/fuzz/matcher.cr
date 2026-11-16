@@ -4,6 +4,7 @@ require "../intercept_filter"
 require "../repeater/engine"
 require "../ascii_bytes"
 require "../utf8"
+require "../llm_call"
 require "./shape"
 require "./extractor"
 
@@ -616,13 +617,13 @@ module Gori::Fuzz
       # an invalid byte rather than not matching) but `String#scrub` charges every VALID body a
       # full character-by-character decode to be told there was nothing to repair — 681µs against
       # 81µs on a 216 KB body, once per response, on every run that sets `--mr`/`--fr`/`--extract`/`--extractor`.
-      text = need_text ? Gori::Utf8.text(body) : ""
+      text, reply = need_text ? {Gori::Utf8.text(body), Gori::LlmCall.stream_reply(raw.head, body)} : {"", nil}
       # `text` is "" only when no extractor reads text (`needs_text?` counts the ones that do).
       extracts = extract_values(raw, body, text)
-      matched = decide(raw, status, grpc_status, length, words, lines, elapsed, text)
+      matched = decide(raw, status, grpc_status, length, words, lines, elapsed, text, reply)
       # The SEPARATE stop condition, on the very metrics/text just computed (never a second
       # decode). nil for every run without `stop_on`, so the common path is unchanged.
-      stop_hit = @stop_condition.try(&.decide(raw, status, grpc_status, length, words, lines, elapsed, text)) || false
+      stop_hit = @stop_condition.try(&.decide(raw, status, grpc_status, length, words, lines, elapsed, text, reply)) || false
       # A stop row's bytes are retained even under `keep_bodies: :matched`: it is the row that
       # ended the run, and dropping its request/response would leave the operator the verdict
       # with no evidence for it.
@@ -679,11 +680,11 @@ module Gori::Fuzz
     # decoding again.
     protected def decide(raw : Repeater::Result, status : Int32?, grpc_status : Int32?,
                          length : Int64, words : Int32, lines : Int32, elapsed_ms : Int64,
-                         text : String) : Bool
+                         text : String, reply : String? = nil) : Bool
       return false unless eligible?(raw)
       return false if calibrated_out?(status, length, words, lines)
-      matchers_pass?(raw, status, grpc_status, length, words, lines, elapsed_ms, text) &&
-        !filtered?(raw, status, grpc_status, length, words, lines, elapsed_ms, text)
+      matchers_pass?(raw, status, grpc_status, length, words, lines, elapsed_ms, text, reply) &&
+        !filtered?(raw, status, grpc_status, length, words, lines, elapsed_ms, text, reply)
     end
 
     # A failed send has nothing to match on — no status, no body, no header — so it is not a
@@ -815,7 +816,7 @@ module Gori::Fuzz
     # Every active matcher dimension must pass.
     private def matchers_pass?(raw : Repeater::Result, status : Int32?, grpc_status : Int32?,
                                length : Int64, words : Int32, lines : Int32, elapsed_ms : Int64,
-                               text : String) : Bool
+                               text : String, reply : String?) : Bool
       status_pass?(@match_status_c, status, default: true) &&
         grpc_pass?(@match_grpc_c, grpc_status, default: true) &&
         num_pass?(@match_size_c, length, default: true) &&
@@ -826,13 +827,13 @@ module Gori::Fuzz
         # (a PCRE match over the whole body): both are pure predicates, so `&&` short-circuits
         # identically either way, but this order lets a failing --mh skip the body match.
         header_pass?(@match_header_lc, raw, default: true) &&
-        regex_pass?(@match_budgeted, text, default: true)
+        regex_pass?(@match_budgeted, text, reply, default: true)
     end
 
     # Any filter dimension that passes removes the result.
     private def filtered?(raw : Repeater::Result, status : Int32?, grpc_status : Int32?,
                           length : Int64, words : Int32, lines : Int32, elapsed_ms : Int64,
-                          text : String) : Bool
+                          text : String, reply : String?) : Bool
       status_pass?(@filter_status_c, status, default: false) ||
         grpc_pass?(@filter_grpc_c, grpc_status, default: false) ||
         num_pass?(@filter_size_c, length, default: false) ||
@@ -843,7 +844,7 @@ module Gori::Fuzz
         # scan over the short head is cheaper than a PCRE match over the whole body, and `||`
         # short-circuits identically either way.
         header_pass?(@filter_header_lc, raw, default: false) ||
-        regex_pass?(@filter_budgeted, text, default: false)
+        regex_pass?(@filter_budgeted, text, reply, default: false)
     end
 
     # `matches_at_byte_index?(text, 0)`, not `matches?(text)`. The two run the same PCRE2 match
@@ -853,8 +854,18 @@ module Gori::Fuzz
     # conversion cannot produce anything but 0, and it measured 593 profile samples against 263
     # for the match itself: more than twice the response's regex cost spent deciding that byte 0
     # is byte 0. Same answer, on an empty body too (`char_index_to_byte_index(0)` is 0 there).
-    private def regex_pass?(re : Regex?, text : String, default : Bool) : Bool
+    #
+    # `reply` is a streamed LLM reply reassembled (#1912): SSE deltas split a word across two
+    # events, so it may never appear in the body. The regex is asked of the body, then of the
+    # reply on its own, so a pattern anchored on the body (`\z` after `[DONE]`) reads what it
+    # always did. nil for every response that is not such a stream, which pays one
+    # Content-Type check (bench/fuzz_llm_stream_bench).
+    private def regex_pass?(re : Regex?, text : String, reply : String?, default : Bool) : Bool
       return default unless re
+      regex_hit?(re, text) || (!reply.nil? && regex_hit?(re, reply))
+    end
+
+    private def regex_hit?(re : Regex, text : String) : Bool
       Gori::SafeRegexp.within_budget(re.source, text.bytesize) { re.matches_at_byte_index?(text, 0) }
     rescue Regex::Error
       # A catastrophic-backtracking user regex (--mr / --fr) raises "match limit exceeded" on a

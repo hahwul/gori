@@ -147,4 +147,77 @@ describe Gori::LlmCall do
     ]), "text/event-stream").not_nil!
     c.text.should eq("A")
   end
+
+  it "reassembles a streamed reply from the response alone, tool calls included" do
+    head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n".to_slice
+    body = sse([
+      %({"choices":[{"index":0,"delta":{"content":"PW"}}]}),
+      %({"choices":[{"index":0,"delta":{"content":"NED","tool_calls":[{"index":0,"function":{"name":"send_mail","arguments":"{\\"to\\":\\"evil"}}]}}]}),
+      %({"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"@x.test\\"}"}}]}}]}),
+    ]).to_slice
+    # The model's own bytes: arguments are not re-indented and no heading is added.
+    Gori::LlmCall.stream_reply(head, body).should eq(%(PWNED\nsend_mail\n{"to":"evil@x.test"}))
+    # Not a stream, and a stream that is not an LLM reply.
+    json = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n".to_slice
+    Gori::LlmCall.stream_reply(json, %({"choices":[{"index":0,"message":{"content":"x"}}]}).to_slice).should be_nil
+    Gori::LlmCall.stream_reply(head, "data: {\"tick\":1}\n\n".to_slice).should be_nil
+    Gori::LlmCall.stream_reply(nil, Bytes.empty).should be_nil
+  end
+
+  it "writes a call as a Markdown transcript: each request message, then the reply" do
+    head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n".to_slice
+    req = %({"model":"claude-x","system":[{"type":"text","text":"Be brief."}],"messages":[) +
+          %({"role":"user","content":"weather?"},) +
+          %({"role":"assistant","content":[{"type":"tool_use","name":"get_weather","input":{"city":"Seoul"}}]},) +
+          %({"role":"user","content":[{"type":"tool_result","content":[{"type":"text","text":"12C"}]},{"type":"image"}]}]})
+    resp = %({"type":"message","model":"claude-x","content":[{"type":"text","text":"12C in Seoul."},) +
+           %({"type":"tool_use","name":"log","input":{}}],"stop_reason":"tool_use"})
+    Gori::LlmCall.transcript(REQ_HEAD, req.to_slice, head, resp.to_slice).should eq(<<-MD)
+      # LLM call: anthropic · claude-x · 1 tool call · tool_use
+
+      ## system
+
+      Be brief.
+
+      ## user
+
+      weather?
+
+      ## assistant
+
+      [tool call get_weather] {"city":"Seoul"}
+
+      ## user
+
+      [tool result] 12C
+      [image]
+
+      ## assistant
+
+      12C in Seoul.
+
+      ### tool call: log
+
+      ```json
+      {}
+      ```
+
+      MD
+  end
+
+  it "reads chat tool calls and a Responses input into the transcript, and nothing from a REST body" do
+    chat = %({"model":"gpt-4o","messages":[{"role":"assistant","content":null,"tool_calls":[{"function":) +
+           %({"name":"f","arguments":"{}"}}]},{"role":"tool","content":"ok"}]})
+    Gori::LlmCall.transcript(REQ_HEAD, chat.to_slice, nil, nil).should eq(
+      "# LLM call: openai-chat · gpt-4o\n\n## assistant\n\n[tool call f] {}\n\n## tool\n\nok\n")
+    responses = %({"model":"gpt-5","instructions":"Be brief.","input":[{"role":"user","content":) +
+                %([{"type":"input_text","text":"hi"}]},{"type":"function_call","name":"f","arguments":"{}"},) +
+                %({"type":"function_call_output","output":"ok"},7]})
+    Gori::LlmCall.transcript(REQ_HEAD, responses.to_slice, nil, nil).should eq(
+      "# LLM call: openai-responses · gpt-5\n\n## system\n\nBe brief.\n\n## user\n\nhi\n\n" \
+      "## function_call\n\n[tool call f] {}\n\n## function_call_output\n\nok\n")
+    Gori::LlmCall.transcript(REQ_HEAD, %({"model":"gpt-5","input":"hi"}).to_slice, nil, nil).should eq(
+      "# LLM call: openai-responses · gpt-5\n\n## user\n\nhi\n")
+    Gori::LlmCall.transcript(REQ_HEAD, %({"model":"sedan","year":2020}).to_slice, nil, nil).should be_nil
+  end
 end

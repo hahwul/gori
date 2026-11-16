@@ -29,6 +29,7 @@ Match a field with `field:value` (substring or exact, depending on the field):
 | `body` | Full-text match over bodies (trigram FTS index) |
 | `ws` | A WebSocket flow whose socket carried a TEXT or BINARY message containing the value, in either direction ([below](#websocket-messages)) |
 | `rpc` | A flow whose request body is a JSON-RPC call (MCP included) whose method starts with the value ([below](#json-rpc-methods)) |
+| `llm` | `true` / `false`, or part of a model name. A flow whose request body is an LLM API call ([below](#llm-calls)) |
 | `stub` | `true` / `false`. Flows gori answered itself from a [short-circuit rule](/guide/proxy/#short-circuit), with no origin involved |
 | `rewritten` | `true` / `false`, or one rule as `project/4` / `global/3`. Flows a [Match & Replace rule](/guide/proxy/#match-replace) changed. A rule that matched and changed nothing is not recorded, and a flow captured before gori recorded rules matches neither `true` nor a rule |
 | `static` | `true` / `false`. Images, fonts and audio/video, by response Content-Type (by path extension when there is none). Not SVG, CSS, JS or an image proxy (`?url=`), and only a successful fetch (2xx or 304). `-static:true` is the [hide-static lens](/guide/proxy/#hide-static) |
@@ -228,6 +229,23 @@ rpc:initialize host:mcp.example        an MCP handshake against one server
 The decoded call, paired with its reply, is the RPC pane (named `MCP` for an MCP server) in
 History's detail view, a `json_rpc` key in `gori run show --format json` and MCP `get_flow`.
 
+## LLM API Calls {#llm-calls}
+
+`llm:true` matches a flow whose request body has the shape of an LLM API call: a `"model"` beside
+`"messages"` or `"input"`, which covers OpenAI chat completions, OpenAI responses and Anthropic
+messages. The host is not read, so a self-hosted or proxied gateway counts. Any value other than
+`true` or `false` is a case-insensitive substring of the model name.
+
+```text
+llm:true                               every LLM API call
+llm:claude status:>=400                failed calls to any Claude model
+-llm:true host:api.example             the rest of that host's traffic
+```
+
+Like `rpc:`, it scans the stored request bytes with no index, and a compressed request body is
+not read. It reads the request only, so an embeddings request (`model` and `input`) matches too.
+The LLM pane in History's detail view reads the reply as well and leaves that one out.
+
 ## Combining Terms
 
 - Terms separated by spaces are **AND**-ed together. `AND` may also be written out.
@@ -283,7 +301,7 @@ Every filter bar shares the boolean grammar above (`AND`/`OR`/`NOT`, `-`, parent
 A hold gate and an extract-rule condition evaluate one live message, before it is captured, so
 they refuse every History field that message cannot answer: `scope:` (a
 project's scope rules are not part of a message), `size:`, `reqsize:`, `respsize:` and `dur:`
-(the exchange has not finished), `stub:`, `rewritten:`, `static:`, `src:`, `via:`, `cache:`, `rpc:` and `ws:` (a gate holds
+(the exchange has not finished), `stub:`, `rewritten:`, `static:`, `src:`, `via:`, `cache:`, `rpc:`, `llm:` and `ws:` (a gate holds
 one message, not a transcript; its `body:` already means that message), and the one-sided
 `req.`/`resp.` spellings. A refused field is never searched as free text instead. The
 condition rows say so where you type them, an extract rule carrying one will not save, and MCP

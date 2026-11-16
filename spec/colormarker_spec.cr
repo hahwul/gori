@@ -243,6 +243,9 @@ describe Gori::Colormarker do
           cm.match(far).should be_nil # past the bound — the documented miss
           Gori::Colormarker.advise("body:needle-here").first
             .should contain("first #{Gori::Colormarker::BODY_SCAN_MAX // 1024} KiB")
+          # The same bound applies to the two request-body terms built on `body~` (#1912).
+          Gori::Colormarker.advise("llm:true").first.should contain("\"model\" key comes later")
+          Gori::Colormarker.advise("rpc:tools/call").size.should eq(1)
         end
       end
     end

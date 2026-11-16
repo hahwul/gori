@@ -33,7 +33,14 @@ module Gori
       streamed : Bool, text : String, tool_calls : Array(ToolCall), stop : String?, usage : JSON::Any?
 
     def from_flow(req_head : Bytes?, req_body : Bytes?, resp_head : Bytes?, resp_body : Bytes?) : Call?
-      req = obj(json(Entity.bytes(req_head, req_body, MAX_BODY), %("model"))) || return nil
+      request(req_head, req_body).try { |req| call(req, resp_head, resp_body) }
+    end
+
+    private def request(req_head : Bytes?, req_body : Bytes?) : Obj?
+      obj(json(Entity.bytes(req_head, req_body, MAX_BODY), %("model")))
+    end
+
+    private def call(req : Obj, resp_head : Bytes?, resp_body : Bytes?) : Call?
       model = str(req["model"]?) || return nil
       msgs = req["messages"]?.try(&.as_a?)
       input = req["input"]?
@@ -51,6 +58,73 @@ module Gori
       # reply (or none yet) makes it an LLM call.
       return nil if msgs.nil? && !acc.shaped? && resp_body.try(&.empty?) == false
       acc.call(roles(req, msgs, input), tools(req), !events.empty?)
+    end
+
+    # A STREAMED reply reassembled from the response alone, for a matcher: a word the model wrote
+    # can be split across two deltas and never appear in the body (#1912). The text, then each
+    # tool call's name and arguments on their own lines, all as the model wrote them — none of it
+    # is gori's formatting. `decoded` is the content-decoded body the caller already holds. nil
+    # for anything but an event stream carrying one of the three shapes.
+    def stream_reply(resp_head : Bytes?, decoded : Bytes) : String?
+      return nil unless Sse.event_stream?(resp_head) && decoded.size <= MAX_BODY
+      acc = Acc.new(CHAT, nil)
+      Sse.events(decoded).each { |e| obj(JsonRpc.json?(e.data, "{")).try { |r| acc.feed(r) } }
+      acc.raw_reply if acc.shaped?
+    end
+
+    # The call as a Markdown transcript for a report (#1912): each request message under its
+    # role, then the reply. nil wherever `from_flow` is. Built for a copy menu or an export, so
+    # the pane's `from_flow` carries no message text.
+    def transcript(req_head : Bytes?, req_body : Bytes?, resp_head : Bytes?, resp_body : Bytes?) : String?
+      req = request(req_head, req_body) || return nil
+      c = call(req, resp_head, resp_body) || return nil
+      String.build do |io|
+        io << "# LLM call: " << summary(c)
+        messages(req).each { |(role, text)| io << "\n\n## " << role << "\n\n" << text }
+        io << "\n\n## assistant" unless c.text.empty? && c.tool_calls.empty?
+        io << "\n\n" << c.text unless c.text.empty?
+        c.tool_calls.each { |t| io << "\n\n### tool call: " << t.name << "\n\n```json\n" << t.arguments << "\n```" }
+        io << '\n'
+      end
+    end
+
+    # The request's messages as `{role, text}`, the system prompt first: Anthropic's top-level
+    # `system`, or the Responses API's `instructions`.
+    private def messages(req : Obj) : Array({String, String})
+      list = [] of {String, String}
+      system = content(req["system"]?)
+      system = str(req["instructions"]?) || "" if system.empty?
+      list << {"system", system} unless system.empty?
+      input = req["messages"]? || req["input"]?
+      if text = str(input)
+        list << {"user", text}
+      else
+        objs(input).each { |m| list << message(m) }
+      end
+      list
+    end
+
+    private def message(m : Obj) : {String, String}
+      parts = [content(m["content"]?)]
+      objs(m["tool_calls"]?).each do |tc|
+        obj(tc["function"]?).try { |f| parts << "[tool call #{str(f["name"]?)}] #{str(f["arguments"]?)}" }
+      end
+      # A Responses item that is a call or its output, not a message.
+      parts << "[tool call #{str(m["name"]?)}] #{str(m["arguments"]?)}" if m["type"]? == "function_call"
+      str(m["output"]?).try { |o| parts << o }
+      {str(m["role"]?) || str(m["type"]?) || "?", parts.reject(&.empty?).join('\n')}
+    end
+
+    # A message's `content`: a string, or blocks. A block with no text (an image, a document)
+    # is named by its type, not dropped.
+    private def content(a : JSON::Any?) : String
+      str(a) || objs(a).join('\n') do |b|
+        case type = str(b["type"]?)
+        when "tool_use"    then "[tool call #{str(b["name"]?)}] #{b["input"]?.try(&.to_json)}"
+        when "tool_result" then "[tool result] #{content(b["content"]?)}"
+        else                    str(b["text"]?) || "[#{type || "?"}]"
+        end
+      end
     end
 
     private def json(bytes : Bytes?, needle : String) : JSON::Any?
@@ -107,6 +181,14 @@ module Gori
       getter? shaped = false
 
       def initialize(@dialect : String, @model : String?)
+      end
+
+      # See `LlmCall.stream_reply`.
+      def raw_reply : String
+        String.build do |io|
+          io << @text.to_s
+          @tools.to_a.sort_by!(&.[0]).each { |(_, (name, args))| io << '\n' << name << '\n' << args.to_s }
+        end
       end
 
       def call(roles : String, tools : Array(String), streamed : Bool) : Call

@@ -5813,3 +5813,35 @@ emitter. A fixed note calls it engagement guidance from whoever set the project 
 authorization: scope, the Sandbox and server permissions remain the send gates. The handshake
 points at `project_info` only when a description exists and that tool is advertised, without
 caching the description itself. No author tracking or enforcement is inferred from free text.
+
+### 2026-11-17: an LLM or MCP target is tested with the workbenches it already had (#1912)
+
+Refines: P6, P7. gori reads LLM API calls and MCP traffic (`LlmCall`, `JsonRpc`); these are the
+first steps toward testing such a target. None of them calls a model, and none touches the
+bytes on the proxy path.
+
+- **`llm:` reads the request only.** It is `rpc:`'s shape: a body regex at query time, no
+  capture-time parse, no column (P6). `LlmCall` reads the reply to tell an embeddings request
+  from a Responses call; the term does not, because a compressed reply would then hide a real
+  call from a finder, and that is the worse miss. A value that is not a flag is a substring of
+  the model name, the way `rewritten:` takes a flag or a rule.
+- **The Fuzzer's regex reads a streamed reply automatically, and in addition.** A matcher
+  dimension would have asked the operator to know, per target, that the reply streams, on three
+  surfaces. The regex is put to the body and then to the reassembled reply on its own, so a
+  pattern that matched the body before still does, an end anchor included. The reply is the
+  model's bytes: tool-call arguments are not re-indented and no heading is added. Extractors
+  read the body only. Only an event-stream response pays: 42 ns for the check elsewhere, about
+  0.9 ms for a 400-delta stream (`bench/fuzz_llm_stream_bench.cr`). A reply that did not stream
+  is not parsed; the issue kept that off the per-result path (P6), so its text is matched
+  JSON-escaped, as it arrived.
+- **A hit rate needed no code.** A null-payload sweep with a matcher already reports matched
+  against sent on every surface. The guide says so.
+- **A poisoned tool description is a third signal of `llm_prompt_injection`, not a rule.** It
+  fires only inside a body carrying `inputSchema`, on text that hides itself from the user. A
+  description naming another tool to call first, or one that says to ask the user or to keep a
+  secret from them, is how honest servers write, so none of those is a signal. A definition
+  that CHANGED between two captures needs state across flows that a passive rule does not have
+  (`Probe::Passive::Context` is one flow); it is not built.
+- **The transcript is a copy format, not part of the pane.** `LlmCall.transcript` is built for
+  the copy menu or an export, so the pane's `from_flow` carries no message text on the History
+  fiber. MCP gets no twin: `get_flow` already returns the body and the `llm` projection.

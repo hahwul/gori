@@ -3366,6 +3366,33 @@ describe "Gori::Tui::HistoryView marks" do
     end
   end
 
+  # #1912: a conversation for a report, beside the raw bytes.
+  it "offers an LLM call's transcript from the list and the detail, and not on another flow" do
+    with_store do |store|
+      plain = add_flow(store, "GET", "/a", 200)
+      llm = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 2_i64, scheme: "http", host: "ai.test", port: 80,
+        method: "POST", target: "/v1/chat/completions", http_version: "HTTP/1.1",
+        head: "POST /v1/chat/completions HTTP/1.1\r\nHost: ai.test\r\n\r\n".to_slice,
+        body: %({"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}).to_slice,
+        source: Gori::FlowSource::Kind::Proxy))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: llm, status: 200, head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n".to_slice,
+        body: %({"choices":[{"index":0,"message":{"content":"hello"},"finish_reason":"stop"}]}).to_slice,
+        content_type: "application/json"))
+      view = HistoryView.new
+      view.reload(store)
+
+      view.list_copy_as_menu(store, [plain])[1].map(&.key).should_not contain('t')
+      row = view.list_copy_as_menu(store, [llm])[1].find { |o| o.key == 't' }.not_nil!
+      row.label.should eq("LLM transcript")
+      row.text.should eq("# LLM call: openai-chat · gpt-4o · stop\n\n## user\n\nhi\n\n## assistant\n\nhello\n")
+
+      view.open_detail(store).should be_true # newest first: the LLM flow
+      view.detail_copy_as_menu[1].map(&.key).should contain('t')
+    end
+  end
+
   # The drill-in offers the pair from BOTH panes. The pane-local format list says what that
   # pane shows; it is not a rule that the exchange must be reassembled by hand.
   it "offers the req+res pair from both detail panes" do

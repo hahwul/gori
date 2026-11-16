@@ -944,7 +944,7 @@ module Gori
         positional = parse_args(args, "gori run show") do |p|
           p.banner = "Usage: gori run show <flow-id> [options]"
           project_options(p, proj, "read")
-          format_flag(p, [:text, :json, :raw, :har, :curl, :python, :fetch, :go, :httpie, :csrf], "Output: text (default) | json | raw (exact bytes) | har (a one-entry HAR 1.2 log) | curl | python | fetch | go | httpie (the request as runnable client code) | csrf (a self-submitting HTML CSRF PoC)") { |f| format = f }
+          format_flag(p, [:text, :json, :raw, :har, :curl, :python, :fetch, :go, :httpie, :csrf, :transcript], "Output: text (default) | json | raw (exact bytes) | har (a one-entry HAR 1.2 log) | curl | python | fetch | go | httpie (the request as runnable client code) | csrf (a self-submitting HTML CSRF PoC) | transcript (an LLM API call as Markdown: each message, then the reply)") { |f| format = f }
           p.on("--request-only", "Only the request side") { req_only = true }
           p.on("--response-only", "Only the response side") { resp_only = true }
           p.on("--headers-only", "text/json: print the request line/status line and headers only — each body is replaced by a line naming its size, and the sections derived from bodies (decoded views, gRPC messages, WebSocket frames, SSE events) are left out, named with their counts where they have one") { headers_only = true }
@@ -1181,16 +1181,13 @@ module Gori
                                    ws_msgs : Array(Store::WsMessage),
                                    cap : BodyCap = BodyCap.new, interims : Store::Interims? = nil) : Nil
         case format
-        when :raw    then show_raw(detail, show_request, show_response, interims)
-        when :har    then show_har(detail, ws_msgs)
-        when :curl   then show_curl(detail, ws_msgs)
-        when :python then show_code(detail, ws_msgs, :python)
-        when :fetch  then show_code(detail, ws_msgs, :fetch)
-        when :go     then show_code(detail, ws_msgs, :go)
-        when :httpie then show_code(detail, ws_msgs, :httpie)
-        when :csrf   then show_code(detail, ws_msgs, :csrf)
-        when :json   then puts show_json(detail, show_request, show_response, ws_msgs, cap, interims)
-        else              show_text(detail, show_request, show_response, ws_msgs, cap, interims)
+        when :raw                                 then show_raw(detail, show_request, show_response, interims)
+        when :har                                 then show_har(detail, ws_msgs)
+        when :curl                                then show_curl(detail, ws_msgs)
+        when :python, :fetch, :go, :httpie, :csrf then show_code(detail, ws_msgs, format)
+        when :transcript                          then show_transcript(detail)
+        when :json                                then puts show_json(detail, show_request, show_response, ws_msgs, cap, interims)
+        else                                           show_text(detail, show_request, show_response, ws_msgs, cap, interims)
         end
       end
 
@@ -1254,6 +1251,18 @@ module Gori
                       "this command sends the SHORT body"
         end
         omitted_body_note(detail, :curl).try { |n| STDERR.puts "gori run show: #{n}" }
+      end
+
+      # An LLM API call as a Markdown transcript (#1912), the headless twin of the TUI's
+      # "Copy as → LLM transcript" row. Model-authored text: badged on a live terminal, as
+      # written into a file or a pipe, where a report wants the tabs of a code block kept.
+      private def self.show_transcript(detail : Store::FlowDetail, io : IO = STDOUT) : Nil
+        text = LlmCall.transcript(detail.request_head, detail.request_body, detail.response_head, detail.response_body)
+        unless text
+          abort "gori run show: flow ##{detail.row.id} has no LLM transcript — gori reads no LLM API call from it " \
+                "(not one, an embeddings request, or a request body cut short or past #{LlmCall::MAX_BODY // (1024 * 1024)} MiB)"
+        end
+        io.puts io.tty? ? CLI::Output.term_safe_multiline(text) : text
       end
 
       # The flow's REQUEST serialized as client code — the headless twin of the TUI's
@@ -1380,6 +1389,9 @@ module Gori
         # A HAR entry is a request AND its response; there is no half-entry shape to emit.
         if format == :har && (req_only || resp_only)
           return "--format har writes a whole entry — --request-only/--response-only don't apply"
+        end
+        if format == :transcript && (req_only || resp_only)
+          return "--format transcript writes the whole exchange — --request-only/--response-only don't apply"
         end
         # `--format curl` (and the code/PoC serializers) are the REQUEST, always: there is no
         # curl command — nor Python/fetch/Go/httpie snippet, nor CSRF PoC — for a response.

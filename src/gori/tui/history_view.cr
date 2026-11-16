@@ -2245,6 +2245,7 @@ module Gori::Tui
         if pair = pair_option(d, req)
           opts << pair
         end
+        llm_option(d).try { |o| opts << o }
         title = CopyMenu.sanitized_title("COPY REQUEST AS", redactor && redacted_count)
         return {CopyMenu.truncated_title(title, d.request_body_truncated?), opts}
       end
@@ -2336,6 +2337,14 @@ module Gori::Tui
       CopyMenu::Option.new("Req + Res pair", 'p', "#{request}\n\n#{String.new(res)}")
     end
 
+    # An LLM API call as a Markdown transcript (#1912), offered wherever `pair_option` is and on
+    # the LLM pane itself. `gori run show --format transcript` prints the same text.
+    private def llm_option(d : Store::FlowDetail) : CopyMenu::Option?
+      LlmCall.transcript(d.request_head, d.request_body, d.response_head, d.response_body).try do |text|
+        CopyMenu::Option.new("LLM transcript", 't', text)
+      end
+    end
+
     private def request_wire(d : Store::FlowDetail) : String
       String.new(combine_bytes(d.request_head, d.request_body) || Bytes.empty)
     end
@@ -2368,6 +2377,7 @@ module Gori::Tui
         if pair = pair_option(detail, wire)
           opts << pair
         end
+        llm_option(detail).try { |o| opts << o }
         {CopyMenu.truncated_title(CopyMenu.sanitized_title("COPY REQUEST AS", marked),
           detail.request_body_truncated?), opts}
       when :response
@@ -2383,7 +2393,10 @@ module Gori::Tui
         if pair = pair_option(detail)
           opts << pair
         end
+        llm_option(detail).try { |o| opts << o }
         {CopyMenu.sanitized_title("COPY RESPONSE AS", marked), opts}
+      when :llm
+        {CopyMenu.sanitized_title("COPY AS", marked), [llm_option(detail)].compact}
       else
         {"COPY AS", [] of CopyMenu::Option}
       end
@@ -4543,17 +4556,17 @@ module Gori::Tui
     private def suggest_values(field : String, prefix : String) : Array(String)
       p = prefix.downcase
       values = case field
-               when "scheme"                      then ["http", "https"]
-               when "proto"                       then QL::PROTO_VALUES
-               when "method"                      then METHOD_VAL
-               when "status"                      then ["2xx", "3xx", "4xx", "5xx", ">=400", ">=500", "200", "301", "302", "401", "403", "404", "500", "502", "503"]
-               when "host"                        then host_values_for(prefix)
-               when "size"                        then [">10000", ">100000", "<1000"]
-               when "scope", "src", "via"         then QL::CLOSED_VALUES[field]
-               when "stub", "rewritten", "static" then QL::FLAG_VALUES
-               when "cache"                       then QL::CACHE_VALUES
-               when "dur"                         then [">500", ">1s", ">=200", "<100"]
-               else                                    return [] of String
+               when "scheme"                             then ["http", "https"]
+               when "proto"                              then QL::PROTO_VALUES
+               when "method"                             then METHOD_VAL
+               when "status"                             then ["2xx", "3xx", "4xx", "5xx", ">=400", ">=500", "200", "301", "302", "401", "403", "404", "500", "502", "503"]
+               when "host"                               then host_values_for(prefix)
+               when "size"                               then [">10000", ">100000", "<1000"]
+               when "scope", "src", "via"                then QL::CLOSED_VALUES[field]
+               when "stub", "rewritten", "static", "llm" then QL::FLAG_VALUES
+               when "cache"                              then QL::CACHE_VALUES
+               when "dur"                                then [">500", ">1s", ">=200", "<100"]
+               else                                           return [] of String
                end
       # host_values_for is already prefix-filtered by SQL; still apply starts_with so a
       # stale cache entry can't surface a non-matching host if the key ever drifts.
