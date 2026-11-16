@@ -206,7 +206,8 @@ key grammar, the 2026-09-25 #1274 entries and the 2026-09-26 #1295 entries).
 | Specs mirroring your change | `just test-changed` (`scripts/spec_for_changes.sh`, against `origin/main`; `just test-changed HEAD` for uncommitted edits only) — the 3–9 s pre-flight before the ~35 s suite compile |
 | One file or dir | `just test-file spec/store_spec.cr` |
 | One area | `just test-tui`, `test-store`, `test-proxy`, `test-verb`, `test-repeater`, `test-discover`, `test-miner`, `test-oast`, `test-sequencer`, `test-import`, `test-mcp`, `test-settings` |
-| Format + lint check | `just check` (`crystal tool format --check src spec bench scripts eval`, `scripts/nix_shards_check.cr`, then ameba) |
+| Format + lint check | `just check` (`crystal tool format --check src spec bench scripts eval`, `scripts/nix_shards_check.cr`, then the ameba diff gate; `just check REF` selects the base) |
+| Full lint report (includes existing findings) | `just lint-all` |
 | Lint diff gate | `just lint-gate` (`scripts/ameba_gate.sh`, fails when a changed file gained ameba findings) |
 | Format + autofix | `just fix` |
 | Type-check `bench/` | `just benchmark-check` (`scripts/bench_check.sh`) |
@@ -235,8 +236,10 @@ What CI gates, and what it does not:
   large pre-existing backlog, mostly `Metrics/CyclomaticComplexity` in the TUI (the
   reasoning is in `.ameba.yml` and above the `lint-gate` job in `ci.yml`) — but
   `scripts/ameba_gate.sh` fails when any file you changed has MORE findings than it had on
-  `main`, and a new file starts from zero. `just lint-gate` runs it locally; judge the full
-  `just check` output on the files *you* touched.
+  `main`, and a new file starts from zero. `just check` includes that gate; `just lint-gate`
+  runs it alone. Both default to `origin/main` and accept a base ref. `just lint-all` reports
+  the full backlog and exits nonzero while findings remain; dependencies and generated
+  `eval/out/` files are excluded.
 - On `pull_request` CI checks out `refs/pull/N/merge`, so it tests the merge result (the
   `merge_group` trigger is what stays inert until a merge queue is enabled). A local run on your
   branch is not that: re-run the build and the suite after every rebase.

@@ -184,10 +184,16 @@ test-settings:
 # Paths are explicit and must stay in step with ci.yml's `format` job: bare
 # `crystal tool format` walks the whole working directory, so once `shards install`
 # has run it reformats `lib/` too — third-party code that is not ours to change.
+# Lint follows CI's diff gate; pass the target ref when it is not origin/main.
 [group('development')]
-check:
+check base="origin/main":
     crystal tool format --check src spec bench scripts eval
     crystal run scripts/nix_shards_check.cr
+    scripts/ameba_gate.sh {{quote(base)}}
+
+# Full lint report, including existing findings; exits nonzero while any remain.
+[group('development')]
+lint-all:
     lib/ameba/bin/ameba.cr
 
 # ameba as a diff gate: fail if any Crystal file changed against BASE gained findings.
