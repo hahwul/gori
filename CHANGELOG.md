@@ -6,6 +6,7 @@
 - Proxy: with a Match & Replace body rule, a body extract rule or the response intercept on its host, a chunked `multipart/x-mixed-replace` stream reaches the client at once, and a chunked NDJSON, Connect or gRPC-Web stream that has not ended after 5 seconds is released instead of stalling. On HTTP/2 an NDJSON body that declares its length is rewritten, and a stream a rule skipped says so on the flow (#1899, #1901, #1902)
 - Proxy: `network.strip_extended_connect` keeps a browser's WebSockets off HTTP/2, so per-message intercept and Match & Replace apply to them (#1896, #1903)
 - Proxy: `network.strip_available_dictionary` removes a request's `Available-Dictionary` so the origin answers in a coding gori decodes, and a `dcb`/`dcz` body's decode note names the dictionary and the setting (#1898, #1904)
+- Proxy: an HTTP/2 body still gets its Match & Replace rule when its empty final DATA frame arrives while another stream's spill waits for the client to read it (#1906)
 - Proxy: an HTTP/1.1 flow keeps its request advisory, such as a Match & Replace body rule skipped on a compressed request, when the response adds one of its own (#1905, #1907)
 - Docs: transparent mode says to block UDP 443 so an HTTP/3 client falls back to TCP (#1899)
 
