@@ -2680,17 +2680,19 @@ module Gori
       end
 
       private def self.emit_ws_result(id : Int64, result : Repeater::WsEngine::Result, format : Symbol,
-                                      response_write : WriteOutcome? = nil) : Nil
+                                      response_write : WriteOutcome? = nil,
+                                      *, stdout : IO = STDOUT, stderr : IO = STDERR) : Nil
         # A failure is said on STDERR in both formats: JSON keeps stdout to its one object.
-        puts ws_result_json(id, result, response_write) if format == :json
+        stdout.puts ws_result_json(id, result, response_write) if format == :json
         if !result.ok?
-          STDERR.puts send_failed_line("gori run repeater send", result.error)
-        elsif format != :json
-          STDERR.puts "→ WebSocket upgraded=#{result.upgraded?} in #{CLI::Output.human_us(result.duration_us)}#{result.close_code ? " (close #{result.close_code})" : ""}"
-          STDERR.puts "note: #{result.note}" if result.note
-          STDERR.puts "truncated: #{result.truncated}" if result.truncated
+          stderr.puts send_failed_line("gori run repeater send", result.error)
+        end
+        if format != :json && (result.ok? || !result.messages.empty?)
+          stderr.puts "→ WebSocket upgraded=#{result.upgraded?} in #{CLI::Output.human_us(result.duration_us)}#{result.close_code ? " (close #{result.close_code})" : ""}"
+          stderr.puts "note: #{result.note}" if result.note
+          stderr.puts "truncated: #{result.truncated}" if result.truncated
           # A server frame's text is the remote's choice of bytes: named, never replayed raw.
-          result.messages.each { |m| puts CLI::Output.term_safe(ws_transcript_line(m)) }
+          result.messages.each { |m| stdout.puts CLI::Output.term_safe(ws_transcript_line(m)) }
         end
       end
 

@@ -30,6 +30,13 @@ module Gori::CLI::Run
     ws_result_json(id, result, response_write)
   end
 
+  def self.emit_ws_result_for_spec(result : Repeater::WsEngine::Result, format : Symbol)
+    stdout = IO::Memory.new
+    stderr = IO::Memory.new
+    emit_ws_result(3_i64, result, format, stdout: stdout, stderr: stderr)
+    {stdout.to_s, stderr.to_s}
+  end
+
   def self.incomplete_reason_for_spec(result : Repeater::Result) : String
     incomplete_reason(result)
   end
@@ -199,7 +206,7 @@ describe "gori run repeater send --format json — did the post-send writes land
     json_branch = emit[/if format == :json\n.*?\n        elsif/m].not_nil!
     json_branch.should contain("STDERR.puts send_failed_line(prefix, result.error) unless result.ok?")
     ws = src[/private def self\.emit_ws_result\(.*?\n      end\n/m].not_nil!
-    ws.should contain("if !result.ok?\n          STDERR.puts send_failed_line(")
+    ws.should contain("if !result.ok?\n          stderr.puts send_failed_line(")
   end
 end
 
@@ -329,5 +336,38 @@ describe "gori run send/repeater --format json — a scope refusal" do
     j["error"].as_s.should contain("out of the project scope")
     j["retryable"].as_bool.should be_false
     j["delivered"].as_bool.should be_false
+  end
+end
+
+describe "gori run repeater send WebSocket error output" do
+  it "retains received evidence in text and JSON after a decode failure" do
+    messages = [
+      Gori::Repeater::WsEngine::Message.new("in", 1, "valid evidence".to_slice),
+      Gori::Repeater::WsEngine::Message.new("in", 1, Bytes[0xff, 0xff],
+        Gori::Store::WsShape.new(rsv: 4)),
+    ]
+    result = Gori::Repeater::WsEngine::Result.new(
+      "HTTP/1.1 101 Switching Protocols\r\n\r\n".to_slice, messages, 10_i64,
+      "invalid permessage-deflate reply", upgraded: true, truncated: "decode failed")
+    text, diagnostic = Gori::CLI::Run.emit_ws_result_for_spec(result, :text)
+    text.should contain("valid evidence")
+    diagnostic.should contain("send failed: invalid permessage-deflate reply")
+    diagnostic.should contain("truncated: decode failed")
+    json, diagnostic = Gori::CLI::Run.emit_ws_result_for_spec(result, :json)
+    j = JSON.parse(json)
+    j["error"].as_s.should eq("invalid permessage-deflate reply")
+    j["messages"].as_a.size.should eq(2)
+    json.should contain("valid evidence")
+    diagnostic.should contain("send failed:")
+    diagnostic.should_not contain("→ WebSocket")
+  end
+
+  it "keeps a handshake failure with no transcript to its error diagnostic" do
+    result = Gori::Repeater::WsEngine::Result.new(Bytes.empty,
+      [] of Gori::Repeater::WsEngine::Message, 10_i64, "no upgrade")
+    text, diagnostic = Gori::CLI::Run.emit_ws_result_for_spec(result, :text)
+    text.should be_empty
+    diagnostic.should contain("send failed: no upgrade")
+    diagnostic.should_not contain("→ WebSocket")
   end
 end
