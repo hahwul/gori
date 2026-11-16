@@ -122,6 +122,10 @@ class Gori::MCP::Tools
     fuzz_template_source(JSON.parse(args))
   end
 
+  def fuzz_ws_seed_for_spec(args : String)
+    fuzz_ws_seed(JSON.parse(args).as_h)
+  end
+
   def fuzz_plan_error_for_spec(reason : Gori::Fuzz::PlanError::Reason, template : String?) : String
     fuzz_plan_error(Gori::Fuzz::PlanError.new(reason, ""), template)
   end
@@ -424,5 +428,52 @@ describe "the NoPositions refusal names a literal § instead of re-recommending 
     tools = Gori::MCP::Tools.new(Gori::Store.open(":memory:"), allow_actions: false, verify_upstream: false)
     tools.fuzz_plan_error_for_spec(r, none)
       .should eq("template has no §…§ positions (add markers, name a token with 'marks', or pass auto:true)")
+  end
+end
+
+describe "saved Repeater WebSocket fuzz seeds" do
+  it "still normalizes raw flow captures on both surfaces" do
+    handshake = "GET /ws HTTP/1.1\r\nHost: h.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+    with_seed_store(Bytes.empty, handshake) do |(path, flow_id, _wire)|
+      store = Gori::Store.open(path)
+      store.insert_ws_message(flow_id, "out", 1, "ordinary".to_slice,
+        shape: Gori::Store::WsShape.new(masked: true, mask_key: Bytes[1, 2, 3, 4], declared_len: 99))
+      mcp = tools_for(store).fuzz_ws_seed_for_spec(%({"flow_id":#{flow_id}}))
+      store.close
+      cli = Gori::CLI::Run.fuzz_source_for_spec(flow_id, nil, path).ws
+      [cli, mcp].each do |sources|
+        frame = (sources.should_not be_nil).first
+        frame.shape.default?.should be_true
+        frame.shape.mask_key.should be_nil
+        frame.shape.declared_len.should be_nil
+      end
+    end
+  end
+
+  [false, true].each do |from_flow|
+    it "preserves authored shapes when the session has flow provenance=#{from_flow}" do
+      handshake = "GET /ws HTTP/1.1\r\nHost: h.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+      with_seed_store(Bytes.empty, handshake) do |(path, flow_id, _wire)|
+        frames = ["rsv=0,text=neutral", "fin=1,text=complete", "mask=1,text=masked",
+                  "mask_key=01020304,len=99,text=pinned"].map do |spec|
+          Gori::Repeater::WsFrameSpec.parse(spec)[0].should_not be_nil
+        end
+        frames << Gori::Store::WsOutMessage.text("ordinary")
+        store = Gori::Store.open(path)
+        id = store.insert_repeater("http://h.test", handshake.to_slice, false, true,
+          from_flow ? flow_id : nil, 0)
+        store.update_repeater_ws_messages(id, frames)
+        mcp = tools_for(store).fuzz_ws_seed_for_spec(%({"repeater_id":#{id}}))
+        store.close
+        cli = Gori::CLI::Run.fuzz_source_repeater_for_spec(id, path).ws.should_not be_nil
+        [cli, mcp].each do |sources|
+          sources = sources.should_not be_nil
+          sources.map(&.shape).should eq(frames.map(&.shape))
+          sources[0].shape.default?.should be_false
+          sources[-1].shape.default?.should be_true
+          sources.map(&.evidence).should eq(Array.new(frames.size, from_flow))
+        end
+      end
+    end
   end
 end

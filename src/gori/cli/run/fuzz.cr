@@ -818,7 +818,7 @@ module Gori
         # flow holds the client's recorded frames (evidence), while one built from
         # `--request-raw` or MCP `ws_out_messages` holds the operator's draft (not).
         seeded = !rec.flow_id.nil?
-        ws = ws_rows.try { |stored| fuzz_ws_seed_rows(stored, seeded) }
+        ws = ws_rows.try { |stored| fuzz_ws_seed_rows(stored, seeded, captured: false) }
         # Markers are escaped, exactly as the `--flow` seed does: `§` is U+00A7 ordinary text a
         # stored request may carry, and the fuzz POSITIONS are what `--auto`/`--mark` define
         # here — an un-escaped `§` in the session would become a live position nobody marked.
@@ -862,21 +862,15 @@ module Gori
       # `--message-frame` text is a DRAFT and is deliberately not escaped: the operator typed
       # that `§` and means it.
       private def self.fuzz_ws_seed_rows(rows : Array(Store::WsMessage),
-                                         evidence : Bool) : Array(Fuzz::WsMessageSource)
+                                         evidence : Bool, *, captured : Bool = true) : Array(Fuzz::WsMessageSource)
         kept, dropped = Run.ws_seed_rows(rows)
         STDERR.puts "gori run fuzz: #{Run.ws_notice_dropped_note(dropped)}" if dropped > 0
         kept.map do |m|
-          # `Run.seed_shape`, not `m.shape` — the same filter every other seed path uses (the
-          # repeater CLI, MCP, the TUI). It carries `fin`/`rsv` across, because replaying an
-          # RSV1 frame as RSV1 is why it was recorded, and DROPS the captured `mask_key`: a
-          # masking key is a §5.3 nonce, so pinning the recorded one onto every frame of every
-          # variation would put one fixed nonce on a ten-thousand-request sweep. It drops the
-          # captured `declared_len` for the same reason it cannot survive a splice — the payload
-          # length is about to change per payload, and a stale declaration would be a framing
-          # test nobody asked for rather than the one the operator marked.
+          # Only raw flow captures need fresh nonces/lengths. Saved Repeater shapes already
+          # passed that step and may carry explicit overrides, even on a flow-seeded session.
           Fuzz::WsMessageSource.new(m.opcode,
             String.new(Fuzz::Template.escape_literal_markers(m.payload)),
-            Run.seed_shape(m.shape), evidence)
+            Run.seed_shape(m.shape, captured: captured), evidence)
         end
       end
 

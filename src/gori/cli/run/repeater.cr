@@ -2626,7 +2626,9 @@ module Gori
       # TUI is what showed that: `+7 not shown: TEXT, TEXT rsv=4, …` over an empty pane. A
       # client frame that arrived UNMASKED is a real §5.1 violation and replaying it IS the
       # test, so that one is stated.
-      def self.seed_shape(shape : Store::WsShape) : Store::WsShape
+      def self.seed_shape(shape : Store::WsShape, *, captured : Bool = true) : Store::WsShape
+        # Saved Repeater frames were normalized on capture import and may now be authored.
+        return shape unless captured
         Store::WsShape.new(fin: shape.fin, rsv: shape.rsv,
           masked: shape.masked == false ? false : nil)
       end
