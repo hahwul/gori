@@ -151,6 +151,8 @@ module Gori::Repeater
     property target : String?
     # The origin the seeding flow or saved session implies, when there is one.
     property default_target : String?
+    # Offer the independent-message permessage-deflate profile for scripted WebSocket sends.
+    property? ws_deflate : Bool
     # Dial over HTTP/2. Ignored on the WebSocket path: `WsEngine` reads the transport off the
     # handshake bytes themselves (an `Upgrade:` head is h1, an extended CONNECT is h2), because
     # a flag beside the bytes could disagree with them.
@@ -299,7 +301,8 @@ module Gori::Repeater
                    @tls_preset : String? = nil,
                    @refresh_slot : String? = nil,
                    @refresh_layer : Gori::Bindings? = nil,
-                   @sse : StreamBound? = nil)
+                   @sse : StreamBound? = nil,
+                   @ws_deflate : Bool = false)
     end
   end
 
@@ -328,6 +331,7 @@ module Gori::Repeater
     getter scheme : String
     getter host : String
     getter port : Int32
+    getter? ws_deflate : Bool
     getter? http2 : Bool
     # The request is a WebSocket handshake — an RFC 6455 upgrade or an RFC 8441 extended
     # CONNECT — so it must go out through `send_ws` (a plain one-shot would re-issue the
@@ -372,7 +376,8 @@ module Gori::Repeater
                    @host : String, @port : Int32, @http2 : Bool,
                    @websocket : Bool, @sni : String?, @preserve_field_case : Bool = false,
                    @h2_fields : Array({String, String})? = nil, @h2_body : Bytes? = nil,
-                   @reframe_grpc : Bool = false, @tls_preset : String? = nil)
+                   @reframe_grpc : Bool = false, @tls_preset : String? = nil,
+                   @ws_deflate : Bool = false)
     end
 
     # The single request's wire bytes (the first, for a group).
@@ -468,7 +473,7 @@ module Gori::Repeater
                 idle : Time::Span = WsEngine::DEFAULT_IDLE,
                 keep_key : Bool = false,
                 cancel : Proc(Bool)? = nil) : WsEngine::Result
-      @sender.send_ws(bytes, messages, idle, keep_key, cancel)
+      @sender.send_ws(bytes, messages, idle, keep_key, cancel, deflate: @ws_deflate)
     end
 
     # The persistent counterpart of `send_ws` (#1630): one gated connect, then a `WsSession`
@@ -514,7 +519,7 @@ module Gori::Repeater
         port: @port, http2: @http2,
         websocket: WsEngine.replayable?(String.new(requests.first)), sni: @sni,
         preserve_field_case: @preserve_field_case, h2_fields: @h2_fields, h2_body: @h2_body,
-        reframe_grpc: @reframe_grpc, tls_preset: @tls_preset)
+        reframe_grpc: @reframe_grpc, tls_preset: @tls_preset, ws_deflate: @ws_deflate)
     end
 
     def self.build(options : PlanOptions, outbound : Gori::Outbound) : Plan
@@ -625,7 +630,7 @@ module Gori::Repeater
         raise PlanError.new(PlanError::Reason::UnresolvedEnv, why, token)
       end
       new(sender: sender, requests: wires, scheme: scheme, host: host, port: port,
-        http2: options.http2?, websocket: websocket, sni: sni,
+        http2: options.http2?, websocket: websocket, sni: sni, ws_deflate: options.ws_deflate?,
         preserve_field_case: options.preserve_field_case?,
         reframe_grpc: options.reframe_grpc?, tls_preset: tls_preset)
     end

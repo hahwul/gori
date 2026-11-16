@@ -52,7 +52,11 @@ WebSocket에서는 이 "하나씩" 순서가 중요합니다. 세 번째 메시�
 - **상대가 멈추면 gori도 멈춥니다.** 서버가 `CLOSE`를 보내거나 연결이 끊기면, 남은 스크립트는 보내지 않습니다. RFC 6455는 `CLOSE` 이후의 데이터 프레임을 금지합니다. 결과에는 몇 개가 나갔는지가 적힙니다.
 - **직접 쓴 `CLOSE`는 멈추지 않습니다.** 자신의 `CLOSE` 뒤에 데이터를 보내는 것은 프로토콜 테스트이고, Repeater는 마스킹하지 않은 프레임, 홀로 있는 continuation, 페이로드와 어긋나는 길이 헤더처럼 이것도 보내게 해 줍니다.
 
-WebSocket Repeater는 `permessage-deflate`를 협상하지 않고, 캡처 프록시도 기본적으로 이를 끕니다. Match & Replace head 규칙으로 확장 제안을 복원할 수 있지만, 그렇게 캡처한 세션은 확장으로 인코딩된 바이트를 담고 있어 재생할 수 없습니다. 해당 규칙을 끄거나 클라이언트에서 압축을 끈 뒤 다시 캡처하세요.
+스크립트 송신에서는 `permessage-deflate`를 선택할 수 있습니다. TUI Repeater의 **Protocol…**에서 **Toggle WebSocket compression**을 켜거나(현재 탭에만 적용), CLI에서 `gori run repeater send ID --ws-deflate` / `gori run fuzz … --ws-deflate`를 사용하세요. MCP에서는 `send_websocket` 또는 `fuzz_start`에 `ws_deflate:true`를 전달합니다. 서버가 `server_no_context_takeover`에 동의해야 하며, 메시지마다 독립적으로 압축합니다. 서버가 압축을 거절하면 평문으로 보냅니다. 지속 연결인 Live session에는 적용되지 않습니다. TUI Fuzzer에는 현재 WebSocket 메시지 스크립트 편집 UI가 없습니다.
+
+일반 TEXT/BINARY 메시지만 자동 압축합니다. RSV 비트(`rsv=0` 포함), FIN, 선언 길이 등 프레임 모양을 직접 지정한 메시지와 제어 프레임은 그대로 보냅니다. 수신 메시지는 조각을 합친 뒤 압축을 해제해 transcript와 Fuzzer 매칭에 사용합니다. 와이어의 RSV1은 유지하고, 압축을 해제한 JSON transcript 행에는 `compressed:true`를 표시합니다. 협상 결과는 핸드셰이크 note에 나옵니다. 압축 해제는 기존 WebSocket 수신 예산인 8 MiB를 공유하고, 메시지당 DEFLATE 스트림도 64개로 제한합니다.
+
+캡처 프록시는 여전히 기본적으로 압축을 끕니다. Match & Replace head 규칙으로 확장 제안을 복원할 수 있지만, 그 경우 캡처에는 확장으로 인코딩된 바이트가 저장됩니다. 해당 프레임은 자동으로 다시 압축하지 않고 기록된 모양 그대로 재생합니다.
 
 #### 라이브 세션 {#websocket-live-session}
 

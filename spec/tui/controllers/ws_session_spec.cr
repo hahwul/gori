@@ -616,3 +616,17 @@ describe "RepeaterController WebSocket live session (#1630)" do
     end
   end
 end
+
+describe "scripted WebSocket compression toggle (#1897)" do
+  it "is opt-in and reports the same state in Protocol" do
+    with_ws_controller do |ctl, _host|
+      view = open_ws_tab(ctl, 1, ["plain"])
+      view.ws_deflate?.should be_false
+      ctl.repeater_toggle_ws_deflate
+      view.ws_deflate?.should be_true
+      ctl.menu_state("repeater.toggle-ws-deflate").should eq(SpaceMenu.on_off(true))
+      ctl.repeater_toggle_ws_deflate
+      view.ws_deflate?.should be_false
+    end
+  end
+end

@@ -573,6 +573,9 @@ module Gori::Fuzz
       # after this point is work the operator does not want done for a run that cannot start.
       tls_preset = validate_tls_preset(options.config.tls_preset)
       ws_script = build_ws_script(options, template, ws_texts)
+      if options.config.ws_deflate? && ws_script.nil?
+        raise WsError.new("ws_deflate requires a framed WebSocket script, not an HTTP-only run")
+      end
       # …and the gRPC field positions, when the run named any. Same seam and the same argument:
       # a composite that concatenates its parts' position lists into one vector (see
       # `Fuzz::GrpcFieldTemplate`), so `marked` stays the one thing the rest of the builder reads.
@@ -679,7 +682,7 @@ module Gori::Fuzz
         keep_alive: config.keep_alive? && ws_script.nil?,
         idle_conns: config.concurrency.clamp(1, Engine::MAX_CONCURRENCY),
         evidence: options.evidence?, expand_bindings: !options.verbatim?,
-        ws_idle: config.ws_idle, ws_keep_key: config.ws_keep_key?,
+        ws_idle: config.ws_idle, ws_keep_key: config.ws_keep_key?, ws_deflate: config.ws_deflate?,
         # The run's fingerprint override (#844), validated just above so an unknown name is
         # refused before the first dial rather than applying nothing and dialling with gori's
         # bare hello. `config` — not `options` — is the carrier, because a finished run has to

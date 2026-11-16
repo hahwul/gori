@@ -597,3 +597,14 @@ describe "Gori::Repeater::Plan.target_error" do
     R::Plan.target_error("http://\xFFh").should be_nil
   end
 end
+
+describe "WebSocket compression plan (#1897)" do
+  it "keeps the opt-in across a post-assembly request rewrite" do
+    request = "GET /ws HTTP/1.1\r\nHost: t.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n".to_slice
+    options = R::PlanOptions.new([request], target: "http://t.test", ws_deflate: true)
+    plan = R::Plan.build(options, ungated_outbound)
+    plan.ws_deflate?.should be_true
+    plan.with_requests([request]).ws_deflate?.should be_true
+    R::Plan.build(R::PlanOptions.new([request], target: "http://t.test"), ungated_outbound).ws_deflate?.should be_false
+  end
+end

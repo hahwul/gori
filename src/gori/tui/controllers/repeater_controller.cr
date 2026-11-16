@@ -209,11 +209,12 @@ module Gori::Tui
       end
     end
 
-    # The live-session Protocol… toggles (#1630), split out of `protocol_state` so the WS arms
-    # do not push it over the complexity gate. Both read on a WS tab only.
+    # The WebSocket-specific Protocol… toggles, split out of `protocol_state` so the WS arms
+    # do not push it over the complexity gate. They read on a WS tab only.
     private def ws_live_protocol_state(v : RepeaterView, verb_id : String) : String?
       return nil unless v.ws_mode?
       case verb_id
+      when "repeater.toggle-ws-deflate"   then SpaceMenu.on_off(v.ws_deflate?)
       when "repeater.toggle-ws-session"   then SpaceMenu.on_off(v.ws_keep_open?)
       when "repeater.toggle-ws-heartbeat" then SpaceMenu.on_off(v.ws_heartbeat?)
       end
@@ -892,6 +893,13 @@ module Gori::Tui
     # block, so the key on the wire was never the key in the pane, header order was not the
     # operator's, and an absent / short / duplicated / non-base64 key — the handshake tests —
     # could not be sent at all.
+    def repeater_toggle_ws_deflate : Nil
+      return unless view = current_view
+      return unless view.ws_mode?
+      view.ws_deflate = !view.ws_deflate?
+      @host.status("scripted WebSocket compression: #{view.ws_deflate? ? "on" : "off"} (this tab only)")
+    end
+
     def repeater_toggle_ws_key : Nil
       return unless view = current_view
       unless view.ws_mode?
@@ -3463,7 +3471,7 @@ module Gori::Tui
       Repeater::Plan.build(Repeater::PlanOptions.new(requests,
         expand_request: false, auto_content_length: false, evidence: view.evidence?,
         evidence_literals: view.evidence? ? (literals || view.evidence_send_literals) : nil,
-        target: view.target, http2: http2, sni: view.sni_override,
+        target: view.target, http2: http2, sni: view.sni_override, ws_deflate: view.ws_deflate?,
         # This tab's own TLS fingerprint (#844) — the thing that makes two tabs against one
         # host with different values dial two different SSL contexts.
         tls_preset: view.tls_preset,

@@ -52,7 +52,11 @@ On WebSocket the one-at-a-time order matters. A script whose third message depen
 - **gori stops when the peer does.** If the server sends a `CLOSE`, or the connection ends, the rest of your script is not sent. RFC 6455 forbids data frames after a `CLOSE`. The result says how many of your messages went out.
 - **A `CLOSE` *you* wrote does not stop it.** Sending data after your own `CLOSE` is a protocol test, and Repeater lets you run it, as it does an unmasked frame, a lone continuation, or a length header that disagrees with its payload.
 
-The WebSocket Repeater does not negotiate `permessage-deflate`, and the capture proxy disables it by default. A Match & Replace head rule can restore the extension offer, but a session captured that way holds the extension-encoded bytes and cannot be replayed. Re-capture it without that rule (or with compression disabled in the client).
+Scripted sends can opt into `permessage-deflate`: in the TUI Repeater, choose **Toggle WebSocket compression** under **Protocol…** (this tab only); on the CLI use `gori run repeater send ID --ws-deflate` or `gori run fuzz … --ws-deflate`; on MCP pass `ws_deflate:true` to `send_websocket` or `fuzz_start`. The server must accept `server_no_context_takeover`; each message is compressed independently. If it declines compression, messages remain plain. This option applies to scripted exchanges, not persistent live sessions. The TUI Fuzzer currently has no WebSocket message-script UI.
+
+Plain TEXT/BINARY messages are compressed when negotiated. Explicit frame shapes (including `rsv=0`, FIN or a declared length) remain verbatim; control frames are never compressed. Replies are reassembled and inflated for the transcript and Fuzzer matchers, with wire RSV1 retained and `compressed:true` on decoded JSON transcript rows. The handshake note reports negotiation. Decoding shares the 8 MiB WebSocket receive budget and stops after 64 DEFLATE streams per message to bound CPU as well as expanded size.
+
+The capture proxy still disables compression by default. A Match & Replace head rule can restore the extension offer, but a session captured that way holds the extension-encoded bytes. Such shaped frames are replayed as recorded rather than automatically recompressed.
 
 #### A live session {#websocket-live-session}
 

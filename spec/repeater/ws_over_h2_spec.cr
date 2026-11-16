@@ -42,6 +42,7 @@ private def start_h2_ws_origin(seen : Channel(H2WsSeen), *,
                                status : Int32 = 200,
                                initial_window : Int32? = nil,
                                ping_first : Bool = false,
+                               extension : String? = nil,
                                &handle : TCPSocket, Proc(Bytes, Nil), Array(WS::Frame) -> Nil) : Int32
   origin = TCPServer.new("127.0.0.1", 0)
   port = origin.local_address.port
@@ -85,7 +86,9 @@ private def start_h2_ws_origin(seen : Channel(H2WsSeen), *,
         end
       end
 
-      status_block = HPACK::Encoder.new.encode([{":status", status.to_s}, {"server", "gori-test"}])
+      response_fields = [{":status", status.to_s}, {"server", "gori-test"}]
+      response_fields << {"sec-websocket-extensions", extension} if extension
+      status_block = HPACK::Encoder.new.encode(response_fields)
       flags = status >= 200 && status < 300 ? Frame::END_HEADERS : (Frame::END_HEADERS | Frame::END_STREAM)
       conn.write(Frame::Header.new(Frame::Type::Headers.value, flags, stream, status_block).to_bytes)
       conn.flush
@@ -634,5 +637,25 @@ describe "WebSocket over HTTP/2 (RFC 8441) replay" do
       res.messages.select { |m| m.direction == "in" && m.opcode == WS::OP_TEXT.to_i }
         .map { |m| String.new(m.payload) }.should eq ["planned"]
     end
+  end
+end
+
+describe "permessage-deflate over RFC 8441 (#1897)" do
+  it "uses the same compression path after an extended CONNECT" do
+    seen = Channel(H2WsSeen).new(1)
+    port = start_h2_ws_origin(seen, extension: Gori::Repeater::WsDeflate::OFFER) do |conn, send_ws, frames|
+      read_ws_frames(conn, 1, frames)
+      send_ws.call(WS.encode(WS::OP_TEXT, Gori::Repeater::WsDeflate.compress("h2 reply".to_slice), rsv: 4, mask: false))
+      send_ws.call(WS.encode(WS::OP_CLOSE, Bytes[3, 232], mask: false))
+    end
+    result = WsEngine.send(connect_head(port), [WsEngine::OutMsg.new(1, "hello h2".to_slice)],
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false,
+      idle: 100.milliseconds, deflate: true)
+    result.ok?.should be_true
+    result.messages.find { |m| m.direction == "in" && m.opcode == 1 }.not_nil!.payload.should eq("h2 reply".to_slice)
+    got = seen.receive
+    got.fields.should contain({"sec-websocket-extensions", Gori::Repeater::WsDeflate::OFFER})
+    got.frames.first.rsv.should eq(4)
+    Gori::Repeater::WsDeflate.inflate(got.frames.first.payload, 100).should eq("hello h2".to_slice)
   end
 end

@@ -1325,12 +1325,13 @@ module Gori
                                             pinned_cl : Bool = false,
                                             sse : Repeater::StreamBound? = nil,
                                             evidence : Bool = false,
-                                            evidence_literals : Set(String)? = nil) : Repeater::PlanOptions
+                                            evidence_literals : Set(String)? = nil,
+                                            ws_deflate : Bool = false) : Repeater::PlanOptions
         Repeater::PlanOptions.new([request],
           # `Repeater::DraftMarkers.evidence?`: an unedited flow seed is a capture, not a draft.
           # `evidence_literals` narrows that to the capture's own names, for a send that adds its own.
           evidence: evidence, evidence_literals: evidence_literals,
-          reframe_grpc: reframe_grpc,
+          reframe_grpc: reframe_grpc, ws_deflate: ws_deflate,
           default_target: rec.target, http2: rec.http2?, sni: rec.sni,
           timeout: timeout, sse: sse,
           expand_request: !verbatim,
@@ -1799,6 +1800,7 @@ module Gori
         slot : String? = nil
         reframe_grpc = false
         ws_keep_key = false
+        ws_deflate = false
         record_history = false
         tls_preset : String? = nil
         # nil = use the session's stored setting; true = this send is plain HTTP whatever it says.
@@ -1833,6 +1835,7 @@ module Gori
           p.on("--reframe-grpc", "HTTP/2 only: recompute the gRPC 5-byte length prefix over the body actually being sent, for a message an edit changed the length of (default: send it as written)") { reframe_grpc = true }
           p.on("--message=TEXT", "WebSocket: outbound text message (repeatable; replaces the session's stored messages)") { |v| ws_messages << Store::WsOutMessage.text(v) }
           p.on("--message-frame=SPEC", "WebSocket: one outbound frame with an explicit shape (repeatable; mixes with --message in order). SPEC is comma-separated key=value: opcode=text|bin|cont|close|ping|pong|<0-15>, fin=0|1, rsv=0-7, mask=0|1, mask_key=<hex>, len=<declared length>, and one of hex=|b64=|text= (text= runs to the end of SPEC). Example: opcode=close,hex=03ea6279650a") { |v| ws_messages << parse_message_frame(v) }
+          p.on("--ws-deflate", "Offer permessage-deflate without context takeover for this scripted send") { ws_deflate = true }
           p.on("--ws-keep-key", "WebSocket: send the request's own Sec-WebSocket-Key instead of a fresh one (overrides the session's stored setting for this send)") { ws_keep_key = true }
           p.on("--idle-ms=N", "WebSocket: server-silence timeout after the first inbound frame (100-60000, default 3000)") { |v| idle_ms = parse_count(v, "--idle-ms").to_i64 }
           p.on("--http", "WebSocket: send the handshake as an ordinary HTTP request and print the response, instead of performing the framed exchange (overrides the session's stored setting for this send). The bytes are unchanged — this selects the engine, not a rewrite") { http_only = true }
@@ -1917,7 +1920,7 @@ module Gori
         plan = begin
           Repeater::Plan.build(session_plan_options(rec, insecure, host_overrides, verbatim, timeout, reframe_grpc,
             tls_preset, request: request, pinned_cl: pinned_cl, sse: sse.bound(Repeater::StreamBound::SEND),
-            evidence: seed_evidence, evidence_literals: seed_send_literals(rec, seed_evidence)), outbound)
+            evidence: seed_evidence, evidence_literals: seed_send_literals(rec, seed_evidence), ws_deflate: ws_deflate), outbound)
         rescue ex : Repeater::PlanError
           repeater_plan_abort("gori run repeater send", ex, "session ##{id}")
         end
@@ -1937,9 +1940,9 @@ module Gori
         # the 101 as a response. `Engine` already treats 101 as terminal and bodyless, and
         # `ConnPool` already refuses to park an upgraded socket, so nothing else has to change.
         use_ws = plan.websocket? && !(http_only.nil? ? rec.ws_http_only? : http_only)
-        if !use_ws && (!ws_messages.empty? || idle_ms)
+        if !use_ws && (!ws_messages.empty? || idle_ms || ws_deflate)
           outbound.close
-          abort "gori run repeater send: --message / --message-frame / --idle-ms apply to a WebSocket exchange — session ##{id} is being sent as HTTP"
+          abort "gori run repeater send: --message / --message-frame / --idle-ms / --ws-deflate apply to a WebSocket exchange — session ##{id} is being sent as HTTP"
         end
         # …and the other direction: a framed exchange prints a TRANSCRIPT, not a response body.
         if use_ws && do_diff
@@ -2734,6 +2737,7 @@ module Gori
                   j.object do
                     j.field "direction", m.direction
                     j.field "opcode", m.opcode
+                    j.field "compressed", true if m.wire_payload
                     j.field "frame", Store::WsOutMessage.new(m.opcode, m.payload, m.shape).shape_label(m.direction == "out")
                     # A CLOSE's §5.5.1 code and reason as FIELDS, not only inside the base64
                     # below. The text transcript beside this has printed them all along

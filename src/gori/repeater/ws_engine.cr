@@ -4,6 +4,7 @@ require "../proxy/upstream"
 require "../proxy/codec/http1"
 require "../proxy/ws/frame"
 require "./flow_request"
+require "./ws_deflate"
 require "./h2_ws_stream"
 require "./conn_pool" # `Result` scrubs its error with `ConnPool.transport_detail`
 
@@ -28,13 +29,7 @@ module Gori
     # a CLOSE) or went away, so it stops and reports how far it got instead of writing into a
     # socket nobody is reading.
     #
-    # One deliberate limitation remains:
-    #  - No permessage-deflate: the handshake omits the extension, AND the live
-    #    capture relay stores frame payloads verbatim without decompressing them. So
-    #    a session captured over a compressed connection holds COMPRESSED bytes;
-    #    replaying them to a server that isn't negotiating deflate sends undecodable
-    #    input (and compressed server frames likewise can't be read). To repeater such
-    #    a session, capture it with compression disabled in the browser.
+    # Compression is opt-in and limited to independent messages; captured proxy frames stay raw.
     module WsEngine
       GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11" # RFC 6455 §1.3 accept magic
 
@@ -109,8 +104,11 @@ module Gori
       # pinned, and a declared length that disagrees with the payload — so the transcript can
       # be read as evidence instead of being taken on trust. On an "in" row it is the first
       # frame's header as it arrived.
+      # With negotiated compression, payload is the logical transcript view; wire_payload
+      # retains the compressed octets and shape retains RSV1. Proxy captures are unchanged.
       record Message, direction : String, opcode : Int32, payload : Bytes,
-        shape : Proxy::WS::Shape = Proxy::WS::Shape::DEFAULT
+        shape : Proxy::WS::Shape = Proxy::WS::Shape::DEFAULT,
+        wire_payload : Bytes? = nil
 
       struct Result
         getter handshake_head : Bytes # the server's upgrade response head (empty on connect failure)
@@ -129,7 +127,7 @@ module Gori
         # surface without each serializer having to special-case it; this field is the summary.
         getter truncated : String?
         # The upgrade request AS WRITTEN to the socket: `build_handshake`'s bytes, which differ
-        # from the caller's (origin-form request line, no Sec-WebSocket-Extensions, a fresh
+        # from the caller's (origin-form request line, only an opted-in extension offer, a fresh
         # Sec-WebSocket-Key unless `keep_key`). A seam that records a send's wire reads this,
         # not the bytes it handed in: the server's Accept answers this key. Nil when nothing was
         # written, and on the RFC 8441 path, whose head goes out HPACK-encoded.
@@ -185,16 +183,17 @@ module Gori
                     keep_key : Bool = false,
                     deadline : Time::Span = DRAIN_DEADLINE,
                     tls_preset : String? = nil,
-                    cancel : Proc(Bool)? = nil) : Result
+                    cancel : Proc(Bool)? = nil,
+                    deflate : Bool = false) : Result
         if Proxy::WS.extended_connect_request?(String.new(upgrade_request))
           return send_over_h2(upgrade_request, out_messages, scheme: scheme, host: host,
             port: port, verify_upstream: verify_upstream, sni: sni, idle: idle,
             overrides: overrides, keep_key: keep_key, deadline: deadline, tls_preset: tls_preset,
-            cancel: cancel)
+            cancel: cancel, deflate: deflate)
         end
         send_over_h1(upgrade_request, out_messages, scheme: scheme, host: host, port: port,
           verify_upstream: verify_upstream, sni: sni, idle: idle, overrides: overrides,
-          keep_key: keep_key, deadline: deadline, tls_preset: tls_preset, cancel: cancel)
+          keep_key: keep_key, deadline: deadline, tls_preset: tls_preset, cancel: cancel, deflate: deflate)
       end
 
       # The HTTP/1.1 Upgrade transport — what `send` has always been, unchanged below the
@@ -207,14 +206,15 @@ module Gori
                                     keep_key : Bool = false,
                                     deadline : Time::Span = DRAIN_DEADLINE,
                                     tls_preset : String? = nil,
-                                    cancel : Proc(Bool)? = nil) : Result
+                                    cancel : Proc(Bool)? = nil,
+                                    deflate : Bool = false) : Result
         started = Time.instant
         opened = open_h1(upgrade_request, scheme: scheme, host: host, port: port,
           verify_upstream: verify_upstream, sni: sni, overrides: overrides, keep_key: keep_key,
-          tls_preset: tls_preset, cancel: cancel, started: started)
+          tls_preset: tls_preset, cancel: cancel, started: started, deflate: deflate)
         return opened if opened.is_a?(Result)
         begin
-          run_session(opened.io, opened.head, out_messages, idle, deadline, started, opened.note).with_sent_head(opened.sent_head)
+          run_session(opened.io, opened.head, out_messages, idle, deadline, started, opened.note, deflate: deflate).with_sent_head(opened.sent_head)
         rescue ex
           # Once upgraded, drain swallows mid-exchange IO errors itself, so reaching here is
           # the same "ws repeater error" the handshake's own rescue in `open_h1` reports.
@@ -237,7 +237,8 @@ module Gori
                        verify_upstream : Bool, sni : String? = nil,
                        overrides : Gori::HostOverrides? = nil, keep_key : Bool = false,
                        tls_preset : String? = nil, cancel : Proc(Bool)? = nil,
-                       started : Time::Instant = Time.instant) : H1Open | Result
+                       started : Time::Instant = Time.instant,
+                       deflate : Bool = false) : H1Open | Result
         # The connect + handshake reads get a generous io_timeout so a slow-but-valid
         # upgrade (cold start / auth / slow proxy) isn't mistaken for a dead origin;
         # the read_timeout is narrowed to `idle` only once we enter the drain, where a
@@ -261,7 +262,7 @@ module Gori
         watcher = Proxy::Upstream.watch_cancel(upstream, cancel)
         upgraded = false
         begin
-          handshake, keys = build_handshake(upgrade_request, keep_key)
+          handshake, keys = build_handshake(upgrade_request, keep_key, deflate)
           upstream.write(handshake)
           upstream.flush
           # Bounded like every other origin head read (`Engine.read_response_head`, and
@@ -325,7 +326,16 @@ module Gori
       # `io` is closed by the CALLER's `ensure`, which is where it has always been closed.
       private def self.run_session(io : IO, head : Bytes, out_messages : Array(OutMsg),
                                    idle : Time::Span, deadline : Time::Span,
-                                   started : Time::Instant, note : String?) : Result
+                                   started : Time::Instant, note : String?, deflate : Bool = false) : Result
+        compressed = begin
+          WsDeflate.negotiated?(head, deflate)
+        rescue ex : WsDeflate::Error
+          return Result.new(head, [] of Message, Engine.elapsed(started), error: ex.message, upgraded: true)
+        end
+        if compressed
+          compression_note = "permessage-deflate negotiated (no context takeover); transcript payloads are decoded, RSV1 marks compressed wire messages"
+          note = note ? "#{note}; #{compression_note}" : compression_note
+        end
         messages = [] of Message
         # ONE accounting object for the whole exchange, threaded through every per-message
         # drain: the caps (messages / bytes / frames / deadline / control rows) bound the
@@ -337,7 +347,7 @@ module Gori
         # `deadline / idle` messages is the regression this pairing exists to catch), and a
         # spec cannot assert that in a run it is willing to wait for. Nothing in the product
         # passes it; every surface takes DRAIN_DEADLINE.
-        st = DrainState.new(deadline)
+        st = DrainState.new(deadline, compressed)
         # Narrow the read bound to `idle` BEFORE the first message goes out. The handshake
         # bound is a PER-READ timeout, and an interleaved replay reads between every pair of
         # messages: left in place, an origin that simply does not answer message 1 would hold
@@ -376,7 +386,7 @@ module Gori
         note = with_delivery_note(note, sent, messages.size, st.close_code)
         note = with_unsent_note(note, sent, out_messages.size, st)
         note = with_transport_note(note, sent, out_messages.size, st)
-        Result.new(head, messages, Engine.elapsed(started), note: note,
+        Result.new(head, messages, Engine.elapsed(started), error: st.decode_error, note: note,
           close_code: st.close_code, upgraded: true, truncated: st.truncated)
       end
 
@@ -395,7 +405,8 @@ module Gori
                                     keep_key : Bool = false,
                                     deadline : Time::Span = DRAIN_DEADLINE,
                                     tls_preset : String? = nil,
-                                    cancel : Proc(Bool)? = nil) : Result
+                                    cancel : Proc(Bool)? = nil,
+                                    deflate : Bool = false) : Result
         started = Time.instant
         # `ws`/`wss` fold to the scheme the dial and the `:scheme` pseudo-header both need.
         # `Fuzz::Origin` folds at construction and `Repeater::Plan` on its tuple path; a WS
@@ -414,7 +425,7 @@ module Gori
         watcher = Proxy::Upstream.watch_cancel(conn.io, cancel)
         begin
           opened = H2WsStream.open(conn, request, scheme: dial_scheme, host: host, port: port,
-            stall: idle)
+            stall: idle, deflate: deflate)
           stream = opened.stream
           unless stream
             # A refusal gori can name is an ERROR with the origin's own head attached when
@@ -436,7 +447,7 @@ module Gori
             note = note ? "#{note}; #{kk}" : kk
           end
           begin
-            run_session(stream, opened.head, out_messages, idle, deadline, started, note)
+            run_session(stream, opened.head, out_messages, idle, deadline, started, note, deflate: deflate)
           ensure
             stream.close rescue nil
           end
@@ -478,7 +489,10 @@ module Gori
           # a lone CONT or an unmasked frame. Only the SERVER's close stops it.
           # Framed OUTSIDE the rescue below: that rescue means "the peer is gone", and a frame
           # the encoder could not build is not that.
-          bytes = Proxy::WS.encode(op, m.payload, m.shape, mask: true)
+          compressed_payload = st.deflate? && op.in?(Proxy::WS::OP_TEXT, Proxy::WS::OP_BIN) && m.shape.default? ? WsDeflate.compress(m.payload) : nil
+          payload = compressed_payload || m.payload
+          shape = compressed_payload ? m.shape.copy_with(rsv: 4) : m.shape
+          bytes = Proxy::WS.encode(op, payload, shape, mask: true)
           begin
             upstream.write(bytes)
             upstream.flush
@@ -491,7 +505,7 @@ module Gori
             st.gone_reason ||= transport_reason(ex)
             break
           end
-          messages << Message.new("out", op.to_i, m.payload, m.shape)
+          messages << Message.new("out", op.to_i, m.payload, shape, compressed_payload)
           sent += 1
           last_sent_op = op.to_i
           # Drain this message's answer before the next one leaves. `st` carries the caps,
@@ -583,7 +597,10 @@ module Gori
       class DrainState
         getter deadline : Time::Span # the DRAIN_DEADLINE this exchange runs under
 
-        def initialize(@deadline : Time::Span = DRAIN_DEADLINE)
+        getter? deflate : Bool
+        property decode_error : String? = nil
+
+        def initialize(@deadline : Time::Span = DRAIN_DEADLINE, @deflate : Bool = false)
         end
 
         property assembling = IO::Memory.new             # the fragments of the message being reassembled
@@ -814,12 +831,29 @@ module Gori
             end
             if frame.fin?
               payload = st.assembling.to_slice.dup
-              st.recv_bytes += payload.size
+              shape = st.shape.take
+              wire_payload = nil.as(Bytes?)
+              if st.deflate? && shape.rsv & 4 != 0
+                wire_payload = payload
+                begin
+                  payload = WsDeflate.inflate(payload, (MAX_RECV_BYTES - st.recv_bytes).to_i)
+                rescue ex : WsDeflate::Error
+                  messages << Message.new("in", st.msg_opcode.to_i, payload, shape)
+                  st.assembling = IO::Memory.new
+                  st.decode_error = ex.message
+                  st.truncated = "compressed server message was not decoded: #{ex.message}"
+                  st.capped = true
+                  break
+                end
+              end
+              # The transcript retains both views; incompressible/empty-block input must
+              # spend the session budget too, not only its expanded output (#1897).
+              st.recv_bytes += Math.max(payload.size, wire_payload.try(&.size) || 0)
               st.recv_count += 1
               # First frame's RSV/mask (§5.2 puts an extension's flags there), last frame's
               # FIN, and how many frames it took — the same accounting the capture relay does,
               # so the two agree about identical bytes.
-              messages << Message.new("in", st.msg_opcode.to_i, payload, st.shape.take)
+              messages << Message.new("in", st.msg_opcode.to_i, payload, shape, wire_payload)
               st.assembling = IO::Memory.new
               if reason = recv_caps_reason(st.recv_count, st.recv_bytes)
                 st.truncated = reason
@@ -956,7 +990,7 @@ module Gori
       end
 
       # Rebuilds the upgrade request for repeater: origin-form request line, Sec-WebSocket-
-      # Extensions stripped (no permessage-deflate → frames are plain), and — unless
+      # Extensions stripped unless deflate was opted in, and — unless
       # `keep_key` — a FRESH Sec-WebSocket-Key. Everything else (Host, Cookie,
       # Authorization, Origin, …) is kept so the repeater carries the original session.
       # Header VALUE bytes are copied verbatim (only the ASCII request line + header NAMES
@@ -979,7 +1013,7 @@ module Gori
       # Returns {request bytes, the Sec-WebSocket-Key VALUES actually on the wire}. That is a
       # list and not a String because zero and two are both shapes an operator can now send,
       # and the accept check has to be able to say which it saw.
-      private def self.build_handshake(head : Bytes, keep_key : Bool = false) : {Bytes, Array(String)}
+      private def self.build_handshake(head : Bytes, keep_key : Bool = false, deflate : Bool = false) : {Bytes, Array(String)}
         lines = head_lines(head)
         keys = [] of String
 
@@ -994,9 +1028,7 @@ module Gori
         lines.skip(1).each do |line|
           next if line.empty?
           name = header_name(line)
-          # Stripped even under `keep_key`, whose contract is the KEY (every surface's help says
-          # so): gori does not decode permessage-deflate, and a Fuzzer would match compressed
-          # bytes as if they were the messages.
+          # The offer is generated from the opt-in, never copied from a captured handshake.
           next if name == "sec-websocket-extensions"
           if name == "sec-websocket-key"
             next unless keep_key
@@ -1010,6 +1042,7 @@ module Gori
           keys << key
           io << "Sec-WebSocket-Key: " << key << "\r\n"
         end
+        io << "Sec-WebSocket-Extensions: " << WsDeflate::OFFER << "\r\n" if deflate
         io << "\r\n"
         {io.to_slice, keys}
       end

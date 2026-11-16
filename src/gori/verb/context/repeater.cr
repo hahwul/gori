@@ -30,15 +30,16 @@ abstract class Gori::Verb::ExecContext
   abstract def repeater_toggle_sni : Nil                 # toggle the SNI-override sub-field (target pane)
   abstract def repeater_toggle_auto_content_length : Nil # recompute Content-Length on send
   abstract def repeater_toggle_http2 : Nil               # flip the request transport h1↔h2 (override captured protocol)
-  abstract def repeater_toggle_ws_key : Nil              # WebSocket: send the typed Sec-WebSocket-Key instead of a fresh one
-  abstract def repeater_cycle_tls_preset : Nil           # cycle this tab's per-send TLS fingerprint override (#844)
-  abstract def repeater_toggle_grpc_reframe : Nil        # gRPC: recompute the 5-byte length prefix over the payload on send
-  abstract def repeater_toggle_grpc_fields : Nil         # gRPC: edit the request message by field through the loaded .proto
-  abstract def repeater_grpc_json_edit : Nil             # gRPC: edit the whole request message as proto3 JSON in $EDITOR
-  abstract def repeater_grpc_add_field : Nil             # gRPC: set or add one field from a path=value spec
-  abstract def repeater_toggle_resp_diff : Nil           # switch the response pane between raw and diff-vs-previous
-  abstract def repeater_toggle_resp_hex : Nil            # toggle a raw hex dump of the response bytes
-  abstract def repeater_toggle_unicode_escapes : Nil     # decode JSON Unicode escapes in the response display
+  abstract def repeater_toggle_ws_deflate : Nil
+  abstract def repeater_toggle_ws_key : Nil          # WebSocket: send the typed Sec-WebSocket-Key instead of a fresh one
+  abstract def repeater_cycle_tls_preset : Nil       # cycle this tab's per-send TLS fingerprint override (#844)
+  abstract def repeater_toggle_grpc_reframe : Nil    # gRPC: recompute the 5-byte length prefix over the payload on send
+  abstract def repeater_toggle_grpc_fields : Nil     # gRPC: edit the request message by field through the loaded .proto
+  abstract def repeater_grpc_json_edit : Nil         # gRPC: edit the whole request message as proto3 JSON in $EDITOR
+  abstract def repeater_grpc_add_field : Nil         # gRPC: set or add one field from a path=value spec
+  abstract def repeater_toggle_resp_diff : Nil       # switch the response pane between raw and diff-vs-previous
+  abstract def repeater_toggle_resp_hex : Nil        # toggle a raw hex dump of the response bytes
+  abstract def repeater_toggle_unicode_escapes : Nil # decode JSON Unicode escapes in the response display
   abstract def repeater_pretty_request : Nil
   # Rewrite the request as a POST of the (legacy) GraphQL introspection query.
   abstract def repeater_graphql_introspection(legacy : Bool) : Nil

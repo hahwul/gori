@@ -43,7 +43,7 @@ end
 
 # Minimal WebSocket origin for the MCP glue test: upgrade, echo one client frame,
 # then close normally so send_websocket returns without waiting for its idle timer.
-def start_mcp_ws_origin : Int32
+def start_mcp_ws_origin(deflate : Bool = false) : Int32
   origin = TCPServer.new("127.0.0.1", 0)
   port = origin.local_address.port
   spawn do
@@ -55,10 +55,12 @@ def start_mcp_ws_origin : Int32
       .try(&.split(':', 2).[1].strip) || ""
     accept = Base64.strict_encode(Digest::SHA1.digest(key + Gori::Repeater::WsEngine::GUID))
     conn << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n" \
-            "Connection: Upgrade\r\nSec-WebSocket-Accept: #{accept}\r\n\r\n"
+            "Connection: Upgrade\r\nSec-WebSocket-Accept: #{accept}\r\n"
+    conn << "Sec-WebSocket-Extensions: #{Gori::Repeater::WsDeflate::OFFER}\r\n" if deflate
+    conn << "\r\n"
     conn.flush
     if (frame = Gori::Proxy::WS.read_frame(conn)) && frame.data?
-      conn.write(Gori::Proxy::WS.encode(frame.opcode, frame.payload, mask: false))
+      conn.write(Gori::Proxy::WS.encode(frame.opcode, frame.payload, rsv: deflate ? 4 : 0, mask: false))
     end
     conn.write(Gori::Proxy::WS.encode(Gori::Proxy::WS::OP_CLOSE, Bytes[0x03, 0xE8], mask: false))
     conn.flush
