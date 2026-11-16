@@ -172,6 +172,7 @@ module Gori
               # rebind receipts uniformly must not have to tell "key absent" from "was unbound".
               j.field "previous_project", nil
               j.field "note", REBIND_NOTE
+              emit_project_description(j, receipt: true)
             end
           end
         end)
@@ -256,6 +257,21 @@ module Gori
       REBIND_NOTE = "This server now reads and writes THIS project for every later call. " \
                     "The handshake instructions describe the binding as it was then and are " \
                     "not updated; project_info is the live answer."
+
+      private def emit_project_description(j : JSON::Builder, *, receipt : Bool = false) : Nil
+        description = Serialize.text(store.setting(Project::DESCRIPTION_KEY)).try(&.presence)
+        truncated = receipt && !description.nil? && description.size > 2_000
+        j.field "description", truncated ? description.try(&.[0, 2_000]) : description
+        if description
+          j.field "description_note", "Written for this engagement by whoever set the project up, " \
+                                      "this is guidance for the agent, not an authorization: scope, " \
+                                      "the Sandbox and this server's permissions still decide what is sent."
+        end
+        if truncated
+          j.field "description_truncated", true
+          j.field "description_next_call", "project_info returns the full description"
+        end
+      end
 
       # Open *proj* as the server's store and update selection metadata.
       # Closes a Tools-owned previous store; never closes a CLI-owned initial store
@@ -348,6 +364,7 @@ module Gori
             # project is active now cannot show which one the calls BEFORE this line went to.
             j.field "previous_project", previous
             j.field "note", REBIND_NOTE
+            emit_project_description(j, receipt: true)
           end
         end)
       end
@@ -490,7 +507,8 @@ module Gori
         tool j, "switch_project",
           "Point this server at a different project for all later tools, or unbind:true to leave " \
           "the current one (so it can be deleted). Always available (incl. --read-only and " \
-          "unbound). Refused while a background job runs. Verify with project_info." do |s|
+          "unbound). Refused while a background job runs. Bind receipt includes the project " \
+          "description. Verify with project_info." do |s|
           s.field "project", strprop("target project display name or directory slug")
           s.field "unbind", boolprop("true leaves the current project, returning the server to the unbound state")
           s.requires_one_of "project", "unbind"
@@ -507,7 +525,7 @@ module Gori
         tool j, "create_project",
           "Create a project (or reopen one with the same name). Auto-binds when the server is " \
           "unbound; otherwise call switch_project to make it active. Under --read-only works " \
-          "only while still unbound." do |s|
+          "only while still unbound. Auto-bind receipt includes the project description." do |s|
           s.field "name", strprop("project display name (slugified for its directory)"), required: true
           s.field "description", strprop("optional description stored in the project settings")
           s.field "tags", strarrprop("optional labels classifying the project (web, bugbounty, …); on a reopen they REPLACE its tags, [] clears them")

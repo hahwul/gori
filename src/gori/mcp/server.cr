@@ -765,13 +765,18 @@ module Gori
       private def bound_note : String
         slug = @tools.project_slug
         name = @tools.project_name || slug
-        unless name
-          return " Project selection source: #{@tools.selection_source || "unknown"}." +
-            (@tools.advertises?("project_info") ? " Call project_info before using data." : "")
+        note = if name
+                 root = @tools.workspace_root
+                 " As of this call the server is bound to project #{name}#{" [#{slug}]" if slug}" \
+                 " via #{@tools.selection_source || "an explicit database"}#{", registered to workspace #{root}" if root}."
+               else
+                 " Project selection source: #{@tools.selection_source || "unknown"}." +
+                   (@tools.advertises?("project_info") ? " Call project_info before using data." : "")
+               end
+        if @tools.advertises?("project_info") && @tools.current_store.try(&.setting(Project::DESCRIPTION_KEY)).try(&.presence)
+          note += " This project has an engagement description; read it with project_info before acting."
         end
-        root = @tools.workspace_root
-        " As of this call the server is bound to project #{name}#{" [#{slug}]" if slug}" \
-        " via #{@tools.selection_source || "an explicit database"}#{", registered to workspace #{root}" if root}."
+        note
       end
 
       # "as of this call", not "at this handshake": the same text answers `server/discover`,

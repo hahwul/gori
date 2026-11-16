@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- MCP: project binding replies include engagement guidance, capped at 2,000 characters with the full text in `project_info`; handshake instructions point agents to it before acting (#1911).
+
 - MCP: `--tools=@analysis` serves five capture readers, and `list_history` can select row metadata with `fields` while retaining provenance and pagination context (#1916).
 
 - Eval: run capture-analysis tasks with Codex as well as Claude Code, with shared grading and separate agent/model reports (#1914).

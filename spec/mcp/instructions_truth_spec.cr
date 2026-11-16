@@ -19,7 +19,7 @@ private NAMEABLE = %w[
   project_info decode jwt_decode cache_deception_check compare_flows export_openapi
 ]
 
-private def instructions_under(store, spec : String?, allow_actions = true) : {String, Set(String)}
+private def instructions_under(store, spec : String?, allow_actions = true, project_name : String? = nil) : {String, Set(String)}
   filter = spec.try do |sp|
     Gori::MCP::ToolFilter.parse(sp, Gori::MCP::Tools::TOOL_NAMES,
       Gori::MCP::Tools::TOOL_DEPENDENCIES)
@@ -30,7 +30,7 @@ private def instructions_under(store, spec : String?, allow_actions = true) : {S
     %({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}) + "\n")
   output = IO::Memory.new
   Gori::MCP::Server.new(store, allow_actions: allow_actions, verify_upstream: false,
-    tool_filter: filter.as(Gori::MCP::ToolFilter?), input: input, output: output).run
+    tool_filter: filter.as(Gori::MCP::ToolFilter?), project_name: project_name, input: input, output: output).run
   lines = output.to_s.each_line.reject(&.strip.empty?).map { |l| JSON.parse(l) }.to_a
   text = lines.find { |l| l["id"]? == 1 }.not_nil!["result"]["instructions"].as_s
   names = lines.find { |l| l["id"]? == 2 }.not_nil!["result"]["tools"].as_a.map(&.["name"].as_s).to_set
@@ -44,6 +44,31 @@ private def named_in(text : String) : Set(String)
 end
 
 describe "MCP instructions truthfulness" do
+  it "points at an existing description only when project_info is advertised, including read-only" do
+    with_store do |store|
+      {nil, "Named"}.each do |name|
+        {true, false}.each do |actions|
+          {nil, "project_info", "list_*"}.each do |filter|
+            {nil, "", "Account guidance\nDo not inline this text"}.each do |description|
+              if description
+                store.set_setting(Gori::Project::DESCRIPTION_KEY, description)
+              else
+                store.delete_setting(Gori::Project::DESCRIPTION_KEY)
+              end
+              text, listed = instructions_under(store, filter, actions, name)
+              if description.presence && listed.includes?("project_info")
+                text.should contain("read it with project_info before acting")
+              else
+                text.should_not contain("engagement description")
+              end
+              text.should_not contain("Account guidance")
+            end
+          end
+        end
+      end
+    end
+  end
+
   it "never names a tool the server does not advertise, under any filter" do
     with_store do |store|
       # `list_*,operator_messages` is in the set because the operator-messages paragraph names

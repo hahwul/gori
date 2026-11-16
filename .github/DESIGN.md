@@ -5804,3 +5804,12 @@ question should not pay those round-trips. Existing profiles keep their recovery
 `list_history.fields` removes only opt-in metadata before the reply budget is applied; identity,
 state, provenance, advisories, errors and requested columns always remain. New non-metadata
 fields remain by default too, so a future advisory cannot disappear from a projected row.
+
+### 2026-11-17: a project description is delivered at bind and informs without gating (#1911)
+
+MCP `switch_project` and auto-binding `create_project` deliver up to 2,000 characters of the
+bound project's description; `project_info` returns the full text through the same UTF-8-safe
+emitter. A fixed note calls it engagement guidance from whoever set the project up, never an
+authorization: scope, the Sandbox and server permissions remain the send gates. The handshake
+points at `project_info` only when a description exists and that tool is advertised, without
+caching the description itself. No author tracking or enforcement is inferred from free text.

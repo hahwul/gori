@@ -270,6 +270,8 @@ describe "MCP agent ergonomics" do
         store.set_setting(Gori::Project::DESCRIPTION_KEY, "staging sweep, prod is out of scope")
         info = erg_json(tools_for(store), "project_info", "{}")
         info["description"].as_s.should eq("staging sweep, prod is out of scope")
+        info["description_note"].as_s.should contain("not an authorization")
+        info["description_truncated"]?.should be_nil
       end
     end
 
@@ -278,6 +280,29 @@ describe "MCP agent ergonomics" do
         info = erg_json(tools_for(store), "project_info", "{}")
         info.as_h.has_key?("description").should be_true # the field is always present
         info["description"].raw.should be_nil
+        info["description_note"]?.should be_nil
+      end
+    end
+
+    it "returns full multi-line guidance as UTF-8 without changing the stored bytes" do
+      with_store do |store|
+        description = "계정\n" + "가" * 2_001 + String.new(Bytes[0xff])
+        store.set_setting(Gori::Project::DESCRIPTION_KEY, description)
+        info = erg_json(tools_for(store), "project_info", "{}")
+        info["description"].as_s.should eq(description.scrub)
+        info["description_note"].as_s.should contain("whoever set the project up")
+        info["description_truncated"]?.should be_nil
+        info["description_next_call"]?.should be_nil
+        store.setting(Gori::Project::DESCRIPTION_KEY).should eq(description)
+      end
+    end
+
+    it "treats an empty stored description as absent" do
+      with_store do |store|
+        store.set_setting(Gori::Project::DESCRIPTION_KEY, "")
+        info = erg_json(tools_for(store), "project_info", "{}")
+        info["description"].raw.should be_nil
+        info["description_note"]?.should be_nil
       end
     end
   end
