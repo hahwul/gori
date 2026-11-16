@@ -1555,6 +1555,7 @@ module Gori
         # bound — which is why a WS run reports `timeout` as ignored rather than folding it here.
         optional_int_arg(h, "idle_ms").try { |v| cfg.ws_idle = v.clamp(100_i64, 60_000_i64).milliseconds }
         cfg.ws_keep_key = bool_arg(h, "keep_sec_websocket_key", cfg.ws_keep_key?)
+        cfg.ws_deflate = bool_arg(h, "ws_deflate", false)
         optional_int_arg(h, "throttle_ms").try { |v| cfg.throttle_ms = v.clamp(0_i64, 600_000_i64).to_i }
         # `gori run fuzz --verbatim` and `intercept_forward_edit{update_content_length:false}`
         # both reach this knob; fuzz_start could not, so the whole CL-desync probe class (a
@@ -1663,6 +1664,7 @@ module Gori
           s.field "messages", ws_out_messages_prop("WebSocket only: the outbound frames with §…§ positions, REPLACING a seed's frames. Each variation is a full session, so concurrency N means N sockets. A WebSocket seed with no frames and no messages is swept as plain HTTP")
           s.field "idle_ms", intprop("WebSocket only: per-session server-silence timeout, ms, after the first inbound frame (100-60000, default 3000; replaces timeout_ms)")
           s.field "keep_sec_websocket_key", boolprop("WebSocket only: send the template's own Sec-WebSocket-Key on every session, not a fresh one (default false)")
+          s.field "ws_deflate", boolprop("offer permessage-deflate without context takeover for WebSocket scripts; match inflated replies; explicit frame shapes stay verbatim")
           s.field "ws_http_only", boolprop("sweep a WebSocket template as plain HTTP (the handshake is the request, its 101/2xx the response). Needed for race_count / record_history on a WebSocket seed, and http2 on an `Upgrade:` one")
         end
 

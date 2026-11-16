@@ -40,6 +40,10 @@ canonical; parsed columns and pretty views are derived projections.
     `src/gori/fuzz/engine.cr` (redirect following).
 - The predicate has **one home**: `Codec::Http1.request_token_safe?`. Do not re-derive it next
   to a new caller; that exact shape has already recurred three times (#390, #394, #397).
+- Scripted WebSocket compression (`Repeater::WsDeflate`) is opt-in and never runs on the
+  proxy path. Compress only unshaped TEXT/BINARY messages; explicit neutral shapes such as
+  `rsv=0` still mean verbatim. Decoding charges the session budget for the larger of the decoded view
+  and retained wire bytes, and bounds empty-block work as well as output size (#1897).
 - Request framing rejects any obfuscation (`obfuscated_header?`); response framing is
   deliberately narrower (`framing_ambiguous?`, and read the comment above it). Do not
   "symmetrize" them: a request's peer is the operator's own browser, a response's peer is the

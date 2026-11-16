@@ -113,7 +113,8 @@ class Gori::Tui::RepeaterView
     @markers_declared = false
     @ws_mode = true
     @ws_http_only = false # a fresh capture starts on auto-detect; ^V is the operator's to press
-    @ws_keep_key = false  # a fresh capture: the regenerated key is the default (see the ivar)
+    @ws_deflate = false
+    @ws_keep_key = false # a fresh capture: the regenerated key is the default (see the ivar)
     # The TRANSPORT this capture's handshake belongs to, read off the handshake and not
     # assumed: an RFC 6455 `Upgrade:` head is HTTP/1.1, an RFC 8441 extended CONNECT is HTTP/2
     # (#733). `@http2` does not choose the WebSocket dial — `WsEngine` reads that off the bytes
@@ -197,6 +198,8 @@ class Gori::Tui::RepeaterView
   # session (`repeaters.ws_keep_key`) because it is a property of the handshake being
   # tested, not of one keystroke — and off by default, so every existing tab keeps the
   # regenerated key it has always sent.
+  property? ws_deflate = false
+
   getter? ws_keep_key : Bool
 
   def toggle_ws_keep_key : Bool

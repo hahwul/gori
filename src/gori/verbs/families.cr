@@ -70,6 +70,7 @@ module Gori
       {:sni, 's'},
       {:auto_content_length, 'c'},
       {:ws_key, 'w'},
+      {:ws_deflate, 'd'},
       {:grpc_reframe, 'r'},
       {:grpc_fields, 'f'},
       {:tls_fingerprint, 't'},

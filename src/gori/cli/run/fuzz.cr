@@ -91,6 +91,7 @@ module Gori
         ws_overrides = [] of Fuzz::WsMessageSource
         ws_idle_ms : Int64? = nil
         ws_keep_key = false
+        ws_deflate = false
         ws_http_only = false
 
         command = save_results ? "gori run fuzz save" : "gori run fuzz"
@@ -124,6 +125,7 @@ module Gori
           p.on("--message=TEXT", "WebSocket: outbound text frame (repeatable; may carry §…§ positions; replaces the seed's stored frames)") { |v| ws_overrides << Fuzz::WsMessageSource.new(1, v) }
           p.on("--message-frame=SPEC", "WebSocket: one outbound frame with an explicit shape (repeatable; mixes with --message in order). SPEC is comma-separated key=value: opcode=text|bin|cont|close|ping|pong|<0-15>, fin=0|1, rsv=0-7, mask=0|1, mask_key=<hex>, len=<declared length>, and one of hex=|b64=|text= (text= runs to the end of SPEC). Example: opcode=close,hex=03ea6279650a") { |v| ws_overrides << fuzz_message_frame(v) }
           p.on("--idle-ms=N", "WebSocket: per-session server-silence timeout after the first inbound frame (100-60000, default 3000)") { |v| ws_idle_ms = parse_count(v, "--idle-ms").to_i64 }
+          p.on("--ws-deflate", "Offer permessage-deflate without context takeover; match inflated replies") { ws_deflate = true }
           p.on("--ws-keep-key", "WebSocket: send the template's own Sec-WebSocket-Key instead of a fresh one per session (lets an absent/short/duplicate/non-base64 key be the thing under test)") { ws_keep_key = true }
           p.on("--ws-http-only", "Sweep a WebSocket template as plain HTTP: the handshake goes out as an ordinary request and its own answer (a 101, or the 2xx of an RFC 8441 extended CONNECT) is read as the response, instead of the framed exchange. The bytes are unchanged — this selects the engine, not a rewrite") { ws_http_only = true }
           p.on("--mode=MODE", "#{Fuzz::Mode.names.join(" | ")} (default sniper)") { |v| mode = parse_mode(v); mode_given = true }
@@ -358,8 +360,8 @@ module Gori
             abort "gori run fuzz: --message / --message-frame describe a WebSocket exchange, but " \
                   "#{ws_http_only ? "--ws-http-only sweeps this template as plain HTTP" : "this template declares no `Upgrade: websocket` handshake"}"
           end
-          if ws_idle_ms || ws_keep_key
-            abort "gori run fuzz: --idle-ms / --ws-keep-key apply to a WebSocket exchange, but " \
+          if ws_idle_ms || ws_keep_key || ws_deflate
+            abort "gori run fuzz: --idle-ms / --ws-keep-key / --ws-deflate apply to a WebSocket exchange, but " \
                   "#{ws_http_only ? "--ws-http-only sweeps this template as plain HTTP" : "this template declares no `Upgrade: websocket` handshake"}"
           end
         end
@@ -415,7 +417,7 @@ module Gori
             update_content_length: update_cl, reframe_grpc: reframe_grpc, race_count: race,
             race_warmup: race_warmup_file.try { |f| read_input_file(f, "gori run fuzz").to_slice },
             ws_idle: ws_idle,
-            ws_keep_key: ws_keep_key,
+            ws_keep_key: ws_keep_key, ws_deflate: ws_deflate,
             tls_preset: tls_preset,
             request_macro: request_macro),
           ws_messages: ws_messages,

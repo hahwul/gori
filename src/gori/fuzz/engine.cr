@@ -409,6 +409,7 @@ module Gori::Fuzz
                    @expand_bindings : Bool = true,
                    @ws_idle : Time::Span = Repeater::WsEngine::DEFAULT_IDLE,
                    @ws_keep_key : Bool = false, tls_preset : String? = nil,
+                   @ws_deflate : Bool = false,
                    @sse : Repeater::StreamBound? = Repeater::StreamBound::SWEEP)
       @sni = sni.presence
       @tls_preset = Settings.tls_preset_normalize(tls_preset)
@@ -603,7 +604,7 @@ module Gori::Fuzz
       res = Repeater::WsEngine.send(wire, msgs,
         scheme: @origin.scheme, host: @origin.host, port: @origin.port,
         verify_upstream: @verify, sni: @sni, idle: @ws_idle,
-        overrides: @overrides, keep_key: @ws_keep_key, tls_preset: @tls_preset)
+        overrides: @overrides, keep_key: @ws_keep_key, tls_preset: @tls_preset, deflate: @ws_deflate)
       if note = res.note || res.truncated
         @ws_notes += 1
         @ws_note_reason ||= note
@@ -640,7 +641,8 @@ module Gori::Fuzz
       head = res.handshake_head
       resp = head.empty? ? nil : (Proxy::Codec::Http1.parse_response_head(head) rescue nil)
       body = IO::Memory.new
-      res.messages.each { |m| body.write(m.payload) if inbound_data?(m) }
+      # An undecodable compressed frame remains in the transcript as evidence, not matchable text.
+      res.messages.each { |m| body.write(m.payload) if inbound_data?(m) } unless res.error
       Repeater::Result.new(head, body.to_slice, resp, res.duration_us, res.error,
         !res.truncated.nil?, delivered: res.upgraded?)
     end
@@ -653,7 +655,7 @@ module Gori::Fuzz
 
     # Is this transcript row inbound RESPONSE CONTENT?
     #
-    # Three exclusions, and each one is a body the matcher must not see:
+    # Exclusions: each is a body the matcher must not see:
     #
     # * OUTBOUND rows. The transcript interleaves both directions; concatenating `out` would put
     #   the payload gori just sent into the body it is matched against, so every `--mr` naming
@@ -669,6 +671,8 @@ module Gori::Fuzz
     #   the body would let `--mr` report a finding the origin never sent. Same predicate the
     #   seed side filters with (`CLI::Run.ws_seed_rows`).
     private def inbound_data?(m : Repeater::WsEngine::Message) : Bool
+      # An incomplete compressed message is wire evidence, not decoded response content.
+      return false if @ws_deflate && m.shape.rsv & 4 != 0 && m.wire_payload.nil?
       m.direction == "in" && m.opcode < Gori::Proxy::WS::OP_CLOSE && !Gori::Proxy::WS.notice?(m.payload)
     end
 

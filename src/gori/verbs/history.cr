@@ -528,6 +528,10 @@ module Gori
       # and the ctrl- space in Repeater is already dense. The HANDSHAKE REQUEST pane carries a
       # KEY badge either way, so the state is visible without opening the menu.
       r.register Verb::Definition.new(
+        "repeater.toggle-ws-deflate", "Toggle WebSocket compression",
+        "Offer permessage-deflate without context takeover for scripted sends in this tab. Plain messages are compressed, explicit frame shapes remain verbatim; decoded replies retain their wire RSV1 marker. Does not change an open persistent session or save a default",
+        Verb::Scope::Repeater, available: ws_tab, intent: :ws_deflate, section: :request) { |ctx| ctx.repeater_toggle_ws_deflate; nil }
+      r.register Verb::Definition.new(
         "repeater.toggle-ws-key", "Toggle Sec-WebSocket-Key reuse",
         "WebSocket: send the handshake's OWN Sec-WebSocket-Key instead of a fresh one — the only way to test an absent, short, duplicated or non-base64 key (off by default: a fresh key avoids a server's replay guard)",
         Verb::Scope::Repeater, available: ws_tab, intent: :ws_key, section: :request) { |ctx| ctx.repeater_toggle_ws_key; nil }

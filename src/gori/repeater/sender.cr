@@ -509,7 +509,7 @@ module Gori
       def send_ws(upgrade : Bytes, messages : Array(WsEngine::OutMsg),
                   idle : Time::Span = WsEngine::DEFAULT_IDLE,
                   keep_key : Bool = false,
-                  cancel : Proc(Bool)? = nil) : WsEngine::Result
+                  cancel : Proc(Bool)? = nil, deflate : Bool = false) : WsEngine::Result
         # Wired once, then gated on that slice — the HTTP path's discipline (see `send_group`).
         # This used to gate the draft and wire separately, so the handshake was passed through
         # the seam twice and the verdict could be taken on a URL the socket never got.
@@ -539,7 +539,7 @@ module Gori
         WsEngine.send(wired, expand_messages(messages),
           scheme: @scheme, host: @host, port: @port, verify_upstream: @verify, sni: @sni,
           idle: idle, overrides: @overrides, keep_key: keep_key, tls_preset: @tls_preset,
-          cancel: cancel)
+          cancel: cancel, deflate: deflate)
       end
 
       # A persistent session (#1630) through the same refusal/admit sequence as `send_ws`, taken

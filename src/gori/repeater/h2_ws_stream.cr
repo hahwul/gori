@@ -150,7 +150,7 @@ module Gori
       def self.open(conn : H2Engine::Conn, request_head : Bytes, *,
                     scheme : String, host : String, port : Int32,
                     preserve_field_case : Bool = false,
-                    stall : Time::Span) : Opened
+                    stall : Time::Span, deflate : Bool = false) : Opened
         io = conn.io
         flow = H2Engine::SendFlow.new
         flow.id = conn.take_stream
@@ -188,6 +188,8 @@ module Gori
         end
 
         fields, body = H2Engine.parse_request(request_head, scheme, host, port, preserve_field_case)
+        fields.reject! { |f| f[0] == "sec-websocket-extensions" }
+        fields << {"sec-websocket-extensions", WsDeflate::OFFER} if deflate
         unless HeadCodec.pseudo(fields, ":protocol")
           return refused(
             "this request head carries no #{HeadCodec::PROTOCOL_MARKER} line, so there is no " \

@@ -158,3 +158,14 @@ describe "Fuzz::Plan over a WebSocket script" do
     end
   end
 end
+
+describe "WebSocket compression plan refusal (#1897)" do
+  it "refuses compression on an HTTP-only run rather than silently ignoring it" do
+    options = Gori::Fuzz::PlanOptions.new("GET /§x§ HTTP/1.1\r\nHost: t.test\r\n\r\n",
+      target: "http://t.test", sources: [Gori::Fuzz::InlineList.new(["x"])] of Gori::Fuzz::PayloadSource,
+      config: Gori::Fuzz::Config.new(ws_deflate: true))
+    expect_raises(Gori::Fuzz::WsError, /framed WebSocket script/) do
+      Gori::Fuzz::Plan.build(options, ungated_outbound)
+    end
+  end
+end

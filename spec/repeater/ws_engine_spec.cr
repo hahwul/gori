@@ -49,14 +49,16 @@ private UPGRADE = ("GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\n" \
 # Complete the 101 upgrade on `conn`, deriving Sec-WebSocket-Accept from the key the engine
 # actually sent. Every fake origin below needs it and none of them needs it to differ, so it
 # lives once rather than as a copy per origin.
-private def ws_upgrade(conn : TCPSocket) : Nil
+private def ws_upgrade(conn : TCPSocket, extension : String? = nil) : Nil
   head = Gori::Proxy::Codec::Http1.read_head(conn).not_nil!
   key = String.new(head).each_line
     .find(&.downcase.starts_with?("sec-websocket-key:"))
     .try(&.split(':', 2)[1].strip) || ""
   accept = Base64.strict_encode(Digest::SHA1.digest(key + WsEngine::GUID))
   conn << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n" \
-          "Connection: Upgrade\r\nSec-WebSocket-Accept: #{accept}\r\n\r\n"
+          "Connection: Upgrade\r\nSec-WebSocket-Accept: #{accept}\r\n"
+  conn << "Sec-WebSocket-Extensions: #{extension}\r\n" if extension
+  conn << "\r\n"
   conn.flush
 end
 
@@ -877,5 +879,151 @@ describe "Gori::Repeater::WsEngine frame shapes" do
       (result.note || "(silence)").should contain("NOT verified")
       (result.note || "(silence)").should contain("2 Sec-WebSocket-Key headers")
     end
+  end
+end
+
+describe "WebSocket permessage-deflate (#1897)" do
+  it "compresses plain sends, decodes fragmented replies and preserves shaped probes" do
+    server = TCPServer.new("127.0.0.1", 0)
+    received = Channel(WS::Frame).new(3)
+    peer_error = Channel(String?).new(1)
+    spawn do
+      conn = server.accept
+      conn.read_timeout = 5.seconds
+      begin
+        ws_upgrade(conn, Gori::Repeater::WsDeflate::OFFER)
+        3.times do |i|
+          frame = WS.read_frame(conn).not_nil!
+          received.send(frame)
+          if i == 2
+            encoded = Gori::Repeater::WsDeflate.compress("decoded reply".to_slice)
+            conn.write(WS.encode(WS::OP_TEXT, encoded[0, 2], fin: false, rsv: 4, mask: false))
+            conn.write(WS.encode(WS::OP_PING, "ping".to_slice, mask: false))
+            conn.write(WS.encode(WS::OP_CONT, encoded[2..], mask: false))
+            conn.write(WS.encode(WS::OP_CLOSE, Bytes[3, 232], mask: false))
+            conn.flush
+          end
+        end
+        peer_error.send(nil)
+      rescue ex
+        peer_error.send(ex.message || "peer failed")
+      ensure
+        conn.close
+      end
+    end
+    shaped = Gori::Repeater::WsFrameSpec.parse("rsv=0,text=literal")[0].not_nil!
+    result = WsEngine.send(UPGRADE, [WsEngine::OutMsg.new(1, "Hello".to_slice),
+                                     WsEngine::OutMsg.new(1, shaped.payload, shaped.shape),
+                                     WsEngine::OutMsg.new(1, "raw".to_slice, WS::Shape.new(rsv: 4))],
+      scheme: "http", host: "127.0.0.1", port: server.local_address.port,
+      verify_upstream: false, idle: 20.milliseconds, deflate: true)
+    result.ok?.should be_true
+    result.note.not_nil!.should contain("permessage-deflate negotiated")
+    String.new(result.sent_head.not_nil!).should contain(Gori::Repeater::WsDeflate::OFFER)
+    first = received.receive
+    first.rsv.should eq(4)
+    Gori::Repeater::WsDeflate.inflate(first.payload, 100).should eq("Hello".to_slice)
+    second = received.receive
+    second.rsv.should eq(0)
+    second.payload.should eq("literal".to_slice)
+    third = received.receive
+    third.rsv.should eq(4)
+    third.payload.should eq("raw".to_slice)
+    reply = result.messages.find { |m| m.direction == "in" && m.opcode == 1 }.not_nil!
+    reply.payload.should eq("decoded reply".to_slice)
+    reply.shape.rsv.should eq(4)
+    reply.shape.frames.should eq(2)
+    reply.wire_payload.should_not be_nil
+    peer_error.receive.should be_nil
+  ensure
+    server.try(&.close)
+  end
+
+  it "falls back to plain messages when the server declines compression" do
+    port = start_ws_origin
+    result = WsEngine.send(UPGRADE, [WsEngine::OutMsg.new(1, "plain".to_slice)],
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false,
+      idle: 20.milliseconds, deflate: true)
+    result.ok?.should be_true
+    result.messages.find { |m| m.direction == "out" }.not_nil!.shape.rsv.should eq(0)
+    result.messages.find { |m| m.direction == "in" && m.opcode == 1 }.not_nil!.payload.should eq("plain".to_slice)
+  end
+end
+
+private def compressed_reply_origin(extension : String, payload : Bytes) : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    conn = origin.accept
+    begin
+      conn.read_timeout = 5.seconds
+      ws_upgrade(conn, extension)
+      conn.write(WS.encode(WS::OP_TEXT, payload, rsv: 4, mask: false))
+      conn.write(WS.encode(WS::OP_CLOSE, Bytes[3, 232], mask: false))
+      conn.flush
+    rescue IO::Error
+    ensure
+      conn.close
+      origin.close
+    end
+  end
+  port
+end
+
+describe "compressed WebSocket receive failures (#1897)" do
+  it "keeps the answered handshake when negotiation requires unsupported state" do
+    port = compressed_reply_origin("permessage-deflate", Bytes[0])
+    result = WsEngine.send(UPGRADE, [] of WsEngine::OutMsg,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false,
+      idle: 20.milliseconds, deflate: true)
+    result.ok?.should be_false
+    result.upgraded?.should be_true
+    result.answered?.should be_true
+    result.error.not_nil!.should contain("server_no_context_takeover")
+  end
+
+  it "reports a bomb as an incomplete exchange with the wire response retained" do
+    body = Gori::Repeater::WsDeflate.compress(Bytes.new(WsEngine::MAX_RECV_BYTES.to_i + 1, 65_u8))
+    port = compressed_reply_origin(Gori::Repeater::WsDeflate::OFFER, body)
+    result = WsEngine.send(UPGRADE, [] of WsEngine::OutMsg,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false,
+      idle: 20.milliseconds, deflate: true)
+    result.ok?.should be_false
+    result.answered?.should be_true
+    result.truncated.not_nil!.should contain("receive cap")
+    result.messages.find { |m| m.direction == "in" && m.opcode == 1 }.not_nil!.payload.should eq(body)
+  end
+end
+
+describe "compressed WebSocket wire budget (#1897)" do
+  it "charges retained wire bytes even when messages inflate to nothing" do
+    server = TCPServer.new("127.0.0.1", 0)
+    wire = IO::Memory.new
+    440_000.times { wire.write(Bytes[0, 0, 0, 255, 255]) }
+    wire.write_byte(0_u8)
+    payload = wire.to_slice
+    spawn do
+      conn = server.accept
+      begin
+        conn.read_timeout = 5.seconds
+        ws_upgrade(conn, Gori::Repeater::WsDeflate::OFFER)
+        5.times { conn.write(WS.encode(WS::OP_TEXT, payload, rsv: 4, mask: false)); conn.flush }
+        conn.write(WS.encode(WS::OP_CLOSE, Bytes[3, 232], mask: false))
+        conn.flush
+      rescue IO::Error
+      ensure
+        conn.close
+      end
+    end
+    result = WsEngine.send(UPGRADE, [] of WsEngine::OutMsg,
+      scheme: "http", host: "127.0.0.1", port: server.local_address.port,
+      verify_upstream: false, idle: 100.milliseconds, deflate: true)
+    result.truncated.not_nil!.should contain("server-payload cap")
+    data = result.messages.select { |m| !m.wire_payload.nil? }
+    data.size.should eq(4)
+    data.each(&.payload.should(be_empty))
+    data.sum(&.wire_payload.not_nil!.size).should eq(payload.size * 4)
+  ensure
+    server.try(&.close)
   end
 end

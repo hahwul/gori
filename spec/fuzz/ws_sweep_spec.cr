@@ -15,7 +15,7 @@ private alias WsEngine = Gori::Repeater::WsEngine
 # Returns {port, the payloads the origin RECEIVED}. The received list is what proves a payload
 # reached the frame it was marked in — asserting only on the echo would pass for an origin that
 # echoed the template.
-private def start_ws_sweep_origin(count : Int32, close_code : Int32 = 1000) : {Int32, Array(String)}
+private def start_ws_sweep_origin(count : Int32, close_code : Int32 = 1000, deflate : Bool = false, reply : Bytes? = nil, reply_fin : Bool = true) : {Int32, Array(String)}
   origin = TCPServer.new("127.0.0.1", 0)
   port = origin.local_address.port
   got = [] of String
@@ -30,11 +30,13 @@ private def start_ws_sweep_origin(count : Int32, close_code : Int32 = 1000) : {I
           .try { |l| l.split(':', 2)[1].strip } || ""
         accept = Base64.strict_encode(Digest::SHA1.digest(key + WsEngine::GUID))
         conn << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n" \
-                "Connection: Upgrade\r\nSec-WebSocket-Accept: #{accept}\r\n\r\n"
+                "Connection: Upgrade\r\nSec-WebSocket-Accept: #{accept}\r\n"
+        conn << "Sec-WebSocket-Extensions: #{Gori::Repeater::WsDeflate::OFFER}\r\n" if deflate
+        conn << "\r\n"
         conn.flush
         while (f = WS.read_frame(conn)) && f.data?
-          got << String.new(f.payload)
-          conn.write(WS.encode(f.opcode, f.payload, mask: false))
+          got << String.new(deflate ? Gori::Repeater::WsDeflate.inflate(f.payload, 100_000) : f.payload)
+          conn.write(WS.encode(f.opcode, reply || f.payload, fin: reply_fin, rsv: deflate ? 4 : 0, mask: false))
           conn.flush
           break
         end
@@ -181,5 +183,50 @@ describe "fuzz over WebSocket" do
     plan = ws_plan(port, [Fuzz::WsMessageSource.new(1, "§v§")], ["plain"], matcher)
     results, _ = run_plan(plan)
     results.select(&.matched?).should be_empty
+  end
+end
+
+describe "compressed WebSocket fuzzing (#1897)" do
+  it "matches the inflated response through the shared plan" do
+    port, got = start_ws_sweep_origin(1, deflate: true)
+    matcher = Fuzz::Matcher.new(keep_bodies: :all)
+    matcher.match_regex = /Hello compressed/
+    plan = ws_plan(port, [Fuzz::WsMessageSource.new(1, "§seed§")], ["Hello compressed"],
+      matcher,
+      Fuzz::Config.new(concurrency: 1, ws_deflate: true))
+    results, _ = run_plan(plan)
+    got.should eq(["Hello compressed"])
+    results.size.should eq(1)
+    results.first.matched?.should be_true
+    results.first.error.should be_nil
+  end
+end
+
+describe "malformed compressed WebSocket fuzz reply (#1897)" do
+  it "keeps undecodable wire data out of the matcher" do
+    port, _ = start_ws_sweep_origin(1, deflate: true, reply: Bytes[255, 255])
+    matcher = Fuzz::Matcher.new(keep_bodies: :all)
+    matcher.match_regex = /./
+    plan = ws_plan(port, [Fuzz::WsMessageSource.new(1, "§seed§")], ["hello"], matcher,
+      Fuzz::Config.new(concurrency: 1, ws_deflate: true))
+    results, _ = run_plan(plan)
+    results.size.should eq(1)
+    results.first.error.not_nil!.should contain("invalid permessage-deflate")
+    results.first.length.should eq(0)
+    results.first.matched?.should be_false
+  end
+end
+
+describe "incomplete compressed WebSocket reply (#1897)" do
+  it "does not match encoded fragments when the peer closes before FIN" do
+    port, _ = start_ws_sweep_origin(1, deflate: true, reply_fin: false)
+    matcher = Fuzz::Matcher.new(keep_bodies: :all)
+    matcher.match_regex = /./
+    plan = ws_plan(port, [Fuzz::WsMessageSource.new(1, "§seed§")], ["hello"], matcher,
+      Fuzz::Config.new(concurrency: 1, ws_deflate: true))
+    results, _ = run_plan(plan)
+    results.size.should eq(1)
+    results.first.length.should eq(0)
+    results.first.matched?.should be_false
   end
 end

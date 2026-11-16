@@ -43,6 +43,7 @@ module Gori
         property opcode : Int32? = nil
         property? fin = true
         property rsv = 0
+        # Pin the normal mask for explicit neutral FIN/RSV shapes so auto-compression skips them.
         property masked : Bool? = nil
         property mask_key : Bytes? = nil
         property declared : Int32? = nil
@@ -54,7 +55,7 @@ module Gori
         def set(key : String, value : String) : String?
           case key
           when "opcode"   then take_opcode(value)
-          when "fin"      then take_bool(value, "fin") { |b| @fin = b }
+          when "fin"      then take_bool(value, "fin") { |b| @fin = b; @masked = true if b && @masked.nil? }
           when "mask"     then take_bool(value, "mask") { |b| @masked = b }
           when "rsv"      then take_rsv(value)
           when "len"      then take_len(value)
@@ -88,6 +89,7 @@ module Gori
           r = value.strip.to_i?
           return "bad rsv #{value.inspect} (expected 0-7; RSV1=4, RSV2=2, RSV3=1)" unless r && 0 <= r <= 7
           @rsv = r
+          @masked = true if r == 0 && @masked.nil?
           nil
         end
 

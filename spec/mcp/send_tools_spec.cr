@@ -954,6 +954,22 @@ describe Gori::MCP::Server do
   end
 
   describe "send_websocket" do
+    it "offers compression through the shared plan and returns decoded messages" do
+      with_store do |store|
+        port = start_mcp_ws_origin(deflate: true)
+        request = "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+        id = store.insert_repeater("ws://127.0.0.1:#{port}", request.to_slice, false, true, nil, 0)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{id},"messages":["compressed MCP"],"ws_deflate":true,"idle_ms":100,"allow_unscoped":true}}})
+        result = mcp_drive(store, call, verify_upstream: false)[0]
+        result["result"]["isError"].as_bool.should be_false
+        payload = mcp_tool_payload(result)
+        payload["note"].as_s.should contain("permessage-deflate negotiated")
+        message = payload["messages"].as_a.find { |m| m["direction"].as_s == "in" && m["type"].as_s == "text" }.not_nil!
+        message["payload"].as_s.should eq("compressed MCP")
+        message["compressed"].as_bool.should be_true
+      end
+    end
+
     it "performs the upgrade and returns the inbound frame transcript" do
       with_store do |store|
         port = start_mcp_ws_origin

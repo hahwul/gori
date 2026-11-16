@@ -158,6 +158,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   forward repeater_toggle_auto_content_length : Nil,
     repeater_toggle_http2 : Nil,
+    repeater_toggle_ws_deflate : Nil,
     repeater_toggle_ws_key : Nil,
     repeater_toggle_grpc_fields : Nil,
     repeater_cycle_tls_preset : Nil,

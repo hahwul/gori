@@ -615,6 +615,7 @@ module Gori
       # test; without it every session dials with a fresh conforming key and that test is
       # unreachable. Same spelling and same default as `Repeater::Plan#send_ws`.
       property ws_idle : Time::Span
+      property? ws_deflate : Bool
       property? ws_keep_key : Bool
 
       # PER-RUN TLS fingerprint override (#844): the name of a `Settings::TLS_PRESETS` entry
@@ -662,6 +663,7 @@ module Gori
                      @race_warmup : Bytes? = nil,
                      @ws_idle : Time::Span = Repeater::WsEngine::DEFAULT_IDLE,
                      @ws_keep_key : Bool = false,
+                     @ws_deflate : Bool = false,
                      @tls_preset : String? = nil,
                      @request_macro : Gori::RequestMacro::Spec? = nil,
                      @sse : Repeater::StreamBound? = Repeater::StreamBound::SWEEP)

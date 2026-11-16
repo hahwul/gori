@@ -1404,6 +1404,7 @@ module Gori
         verify = !bool_arg(h, "insecure", false) && @verify_upstream
         plan = begin
           Repeater::Plan.build(Repeater::PlanOptions.new([repeater.request],
+            ws_deflate: bool_arg(h, "ws_deflate", false),
             # An untouched flow seed's handshake is evidence, as on `send_request` (#1670).
             evidence: Repeater::DraftMarkers.evidence?(store, repeater),
             default_target: repeater.target, sni: repeater.sni, verify: verify,
@@ -1931,6 +1932,7 @@ module Gori
           "repeater; stored messages are unchanged." do |s|
           s.field "repeater_id", intprop("WebSocket repeater database id"), required: true
           s.field "messages", ws_out_messages_prop("overrides the stored messages")
+          s.field "ws_deflate", boolprop("offer permessage-deflate without context takeover for this scripted send; default false. Plain messages are compressed; explicit frame shapes stay verbatim")
           s.field "keep_sec_websocket_key", boolprop("send the request's OWN Sec-WebSocket-Key, not a fresh one (default: stored setting). HTTP/1.1 handshakes only")
           s.field "tls_preset", strprop("ClientHello fingerprint: #{Settings::TLS_PRESET_NAMES.join(" | ")} (default: stored setting). Approximate, NOT byte-exact JA3; wss:// only")
           s.field "idle_ms", intprop("server-silence timeout after the first inbound frame (100-60000 ms; default 3000)")
