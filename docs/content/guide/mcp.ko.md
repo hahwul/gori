@@ -49,7 +49,9 @@ gori mcp --no-project              # force unbound even inside a Git workspace
 
 **선택된 프로젝트를 열 수 없으면**(데이터베이스가 없거나 깨졌거나 읽을 수 없을 때, 프로젝트 이름이 더 이상 존재하지 않을 때) 서버는 종료하지 않고 핸드셰이크를 마친 뒤 unbound로 시작합니다. 실패 이유는 stderr에 기록되고, 핸드셰이크 `instructions`에 실리며, 모든 `NO_PROJECT` 도구 오류에 함께 반환되고, `project_info`의 `bind_error` 필드로도 보고됩니다. 에이전트는 재시작 없이 `list_projects`와 `switch_project`로 복구할 수 있습니다.
 
-`project_info`를 제공하는 프로필에서는 데이터를 사용하기 전에 이 도구를 호출하세요. `bound`, 선택된 프로젝트, 데이터베이스 경로, 워크스페이스 루트, 선택 출처, 프로젝트 `description`(이 작업의 목적을 적은 운영자 메모, `create_project`가 저장), 그리고 프로젝트 `tags`를 보고합니다. 그 설명을 되읽어 주는 호출은 이것뿐입니다.
+`project_info`를 제공하는 프로필에서는 데이터를 사용하기 전에 이 도구를 호출하세요. `bound`, 선택된 프로젝트, 데이터베이스 경로, 워크스페이스 루트, 선택 출처, 프로젝트 `description` 전문(프로젝트를 설정하면서 저장한 작업 지침), 그리고 프로젝트 `tags`를 보고합니다. 설명이 있고 `project_info`를 제공하면 핸드셰이크 instructions가 행동 전에 읽으라고 안내합니다. 설명 본문은 instructions에 캐시하지 않고 호출할 때 읽습니다.
+
+`switch_project`와 자동 바인딩하는 `create_project`도 `description`을 돌려주며, 설명이 없으면 `null`입니다. 이 바인딩 응답에는 최대 2,000자만 담고, 잘리면 `description_truncated:true`와 `description_next_call`로 전문을 읽을 `project_info`를 안내합니다. 바인딩을 바꾸지 않는 `create_project`는 이 필드들을 생략합니다. 설명이 `null`이 아니면 `description_note`가 함께 붙습니다. 프로젝트를 설정한 사람이 이 작업을 위해 남긴 지침이며 권한을 부여하는 것은 아니라는 뜻입니다. 실제로 무엇을 보낼 수 있는지는 여전히 스코프, Sandbox, 서버 권한이 결정합니다.
 
 **`instructions`에 적힌 프로젝트는 핸드셰이크 시점의 바인딩입니다.** 이 텍스트는 한 번만 전달되고 갱신을 밀어주는 수단이 없어서, `switch_project` 이후에도 그때의 바인딩을 계속 설명합니다. 실제 읽기와 쓰기는 새 프로젝트로 갑니다. 현재 값은 `project_info`가 답합니다. `switch_project`(그리고 자동 바인딩하는 `create_project`)는 같은 정정을 결과에 담아, 직전 바인딩을 `previous_project`로 함께 돌려줍니다.
 

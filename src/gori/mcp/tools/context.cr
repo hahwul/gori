@@ -61,13 +61,7 @@ module Gori
             j.field "workspace_bound", !@workspace_root.nil?
             j.field "read_only", !@allow_actions
             if s = @store
-              # The one place a project's DESCRIPTION is readable headlessly. `create_project`
-              # takes it, `gori run project create --description` writes it and the TUI's
-              # Project tab edits it — and nothing outside that tab ever handed it back, so an
-              # agent could write the engagement's scope note and then never see it again, its
-              # own included. Reported here rather than in `list_projects`, which is a roster
-              # that deliberately opens no databases; this call already holds one open.
-              j.field "description", s.setting(Project::DESCRIPTION_KEY)
+              emit_project_description(j)
               # The registry's `.tags` sidecar; a `--db` database has no registry slug and no tags.
               if (db = @db_path) && @project_slug
                 j.field "tags", ProjectRegistry.new(Paths.projects_dir).tags_of(Project.new(@project_name || "", db))
@@ -794,7 +788,7 @@ module Gori
           "rule)." { }
 
         tool j, "project_info",
-          "Project totals (flows, issues, bytes, earliest capture), the operator's " \
+          "Project totals (flows, issues, bytes, earliest capture), the setup " \
           "`description` of the engagement, and which project/db is served and why. When " \
           "unbound (bound:false), #{project_recovery}. This LIVE binding overrides the server " \
           "instructions (no switch_project updates them): verify it before reading or mutating " \

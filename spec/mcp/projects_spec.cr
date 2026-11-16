@@ -71,6 +71,77 @@ describe "Gori::MCP::Tools project lifecycle" do
   end
 end
 
+describe "Gori::MCP::Tools project description receipts" do
+  it "shares capped guidance on auto-bind and switch, but omits it without a rebind" do
+    root = File.tempname("gori-description")
+    Dir.mkdir_p(root)
+    prev = ENV["GORI_HOME"]?
+    prev_layer = Gori::Env.layer
+    ENV["GORI_HOME"] = root
+    tools = Gori::MCP::Tools.new(nil, allow_actions: true, verify_upstream: false)
+    begin
+      description = "계정 안내\n" + "가" * 2_000
+      made = mcp_ok_json(tools, "create_project", {name: "Described", description: description}.to_json)
+      made["switched"].as_bool.should be_true
+      made["description"].as_s.should eq(description[0, 2_000])
+      made["description"].as_s.size.should eq(2_000)
+      made["description_truncated"].as_bool.should be_true
+      made["description_next_call"].as_s.should contain("project_info")
+      note = made["description_note"].as_s
+      note.should contain("not an authorization")
+      note.should contain("scope, the Sandbox and this server's permissions")
+
+      other = mcp_ok_json(tools, "create_project", {name: "Other", description: "Other guidance"}.to_json)
+      other["switched"].as_bool.should be_false
+      other.as_h.keys.select(&.starts_with?("description")).should be_empty
+      mcp_ok_json(tools, "project_info", "{}")["description"].as_s.should eq(description)
+
+      switched = mcp_ok_json(tools, "switch_project", {project: "Described"}.to_json)
+      %w[description description_note description_truncated description_next_call].each do |key|
+        switched[key].should eq(made[key])
+      end
+
+      # The limit counts characters, keeps line breaks and scrubs stored non-UTF-8 bytes.
+      boundary = "나" * 1_998 + "\n" + String.new(Bytes[0xff])
+      tools.current_store.not_nil!.set_setting(Gori::Project::DESCRIPTION_KEY, boundary)
+      switched = mcp_ok_json(tools, "switch_project", {project: "Described"}.to_json)
+      switched["description"].as_s.should eq(boundary.scrub)
+      switched["description_note"].as_s.should eq(note)
+      switched["description_truncated"]?.should be_nil
+      switched["description_next_call"]?.should be_nil
+
+      # Reopening while already bound must not expose the other project's description either.
+      reopened = mcp_ok_json(tools, "create_project", {name: "Other", description: "Updated"}.to_json)
+      reopened["created"].as_bool.should be_false
+      reopened.as_h.keys.select(&.starts_with?("description")).should be_empty
+
+      mcp_ok_json(tools, "create_project", {name: "Undescribed"}.to_json)
+      empty = mcp_ok_json(tools, "switch_project", {project: "Undescribed"}.to_json)
+      empty.as_h.has_key?("description").should be_true
+      empty["description"].raw.should be_nil
+      empty["description_note"]?.should be_nil
+
+      mcp_ok_json(tools, "switch_project", {unbind: true}.to_json)
+      reopened = mcp_ok_json(tools, "create_project", {name: "Other"}.to_json)
+      reopened["created"].as_bool.should be_false
+      reopened["switched"].as_bool.should be_true
+      reopened["description"].as_s.should eq("Updated")
+      reopened["description_note"].as_s.should eq(note)
+
+      mcp_ok_json(tools, "switch_project", {unbind: true}.to_json)
+      empty = mcp_ok_json(tools, "create_project", {name: "Undescribed"}.to_json)
+      empty["switched"].as_bool.should be_true
+      empty["description"].raw.should be_nil
+      empty["description_note"]?.should be_nil
+    ensure
+      tools.current_store.try(&.close)
+      Gori::Env.layer = prev_layer
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(root)
+    end
+  end
+end
+
 describe "Gori::MCP::Tools project tags" do
   it "stores create_project tags, lists them, narrows #tag, and reports them in project_info" do
     root = File.tempname("gori-projtags")
@@ -208,7 +279,7 @@ describe "Gori::MCP::Tools unbound mode" do
     ENV["GORI_HOME"] = root
     # Seed a project via registry so switch has a target without using create.
     reg = Gori::ProjectRegistry.new(Gori::Paths.projects_dir)
-    seeded = reg.create("Seeded")
+    seeded = reg.create("Seeded", "Read-only engagement guidance")
     Gori::Store.open(seeded.db_path).close
 
     tools = Gori::MCP::Tools.new(nil, allow_actions: false, verify_upstream: false,
@@ -221,6 +292,8 @@ describe "Gori::MCP::Tools unbound mode" do
 
       sw = JSON.parse(tools.call("switch_project", JSON.parse(%({"project":"Seeded"}))).text)
       sw["switched"].as_bool.should be_true
+      sw["description"].as_s.should eq("Read-only engagement guidance")
+      sw["description_note"].as_s.should contain("not an authorization")
 
       # after bind, send is still disabled by read-only
       send2 = tools.call("send_request", JSON.parse(%({"url":"http://example.test/"})))
