@@ -75,6 +75,7 @@ Its location resolves as `--config PATH` → `$GORI_CONFIG` → `$GORI_HOME/sett
 | `http2` | string | `"auto"` | `auto` reflects the origin's ALPN; `off` forces HTTP/1.1 on every tunnelled connection. See [http2](#http2) below |
 | `strip_alt_svc` | bool | `false` | Remove the `Alt-Svc` response fields advertising HTTP/3 before the client sees them, so a browser cannot switch to a transport gori does not carry. See [strip_alt_svc](#strip-alt-svc) below |
 | `strip_extended_connect` | bool | `false` | Withhold the origin's HTTP/2 `SETTINGS_ENABLE_CONNECT_PROTOCOL` from the client, so a browser opens its WebSockets with an HTTP/1.1 `Upgrade`, where per-message intercept and Match & Replace run. See [strip_extended_connect](#strip-extended-connect) below |
+| `strip_available_dictionary` | bool | `false` | Remove `Available-Dictionary` and `Dictionary-ID` from requests before the origin sees them, so it cannot answer with a `dcb`/`dcz` body gori cannot decode. See [strip_available_dictionary](#strip-available-dictionary) below |
 | `tls_passthrough` | array | `[]` | Hosts to relay without decrypting. See [tls_passthrough](#tls-passthrough) below |
 
 CLI `--listen` / `--port` override these for the current process only (not written to disk). See [Per-Project Overrides](#per-project-overrides).
@@ -152,6 +153,24 @@ It applies to connections opened after it is on. An origin normally sends the pa
 **gori says what it did.** A SETTINGS frame has no flow, so the record is in three places. The raw frame log holds the frame gori wrote, without the parameter. `gori.log` names each origin once. Each HTTP/1.1 WebSocket upgrade to that origin carries an advisory while the switch is on: *"gori withheld `<host>:<port>`'s SETTINGS_ENABLE_CONNECT_PROTOCOL from the client on HTTP/2 (settings network.strip_extended_connect), so a client that would have opened this WebSocket there used the HTTP/1.1 Upgrade instead."*
 
 The parameter is one bit for every extended `CONNECT` protocol, so this also withholds `connect-udp` (RFC 9298) and `connect-ip` (RFC 9484). An entry carrying `0` changes nothing and is left in place. A client that sends an extended `CONNECT` anyway is relayed, not refused. Only the proxy path is affected. A Repeater or Fuzzer replay dials the origin itself and still sees the offer. Toggle the setting from Preferences → **Network & Tabs** → **Network** → **Strip HTTP/2 ext. CONNECT**.
+
+#### strip_available_dictionary {#strip-available-dictionary}
+
+Compression Dictionary Transport (RFC 9842) lets a client tell the origin which dictionary it holds, in `Available-Dictionary` (the dictionary's SHA-256) and `Dictionary-ID`. The origin may then answer `Content-Encoding: dcb` (Brotli) or `dcz` (Zstandard), a body that only that dictionary decodes, and the dictionary is an earlier response the client cached, often before gori was in the path.
+
+Without this switch the body is captured byte-exact but stays opaque: the detail view, the passive probe rules, extract rules and Match & Replace body rules all see compressed bytes, and the decode note reads *"compressed: dcb — unsupported without the client's dictionary (RFC 9842); settings network.strip_available_dictionary"*.
+
+Turn it on and gori removes every `Available-Dictionary` and `Dictionary-ID` field from the request before it leaves for the origin, on HTTP/1.1 and HTTP/2. Without the dictionary's hash the origin cannot produce `dcb` or `dcz`, so it answers in a coding gori decodes. `Accept-Encoding` is left as the client sent it: the `dcb`/`dcz` tokens in it do nothing once the hash is gone, and gori removes whole fields rather than rewriting part of one. History records the request gori sent.
+
+It is off by default, for the reason [`strip_alt_svc`](#strip-alt-svc) is: an opaque body corrupts nothing gori records, and the note says why. With it on, the origin's responses are larger, since the client no longer gets the dictionary's savings through gori.
+
+The strip runs *before* Match & Replace, so a request head rule that puts a field back for one host wins, and the flow then does not claim that field was removed.
+
+On HTTP/2, removing a field means gori re-encodes that request's header block. HPACK's per-connection state makes that one-way: from the first strip onward gori re-encodes every request head on that connection and gives up the client's HPACK compression for it, and the raw frame log holds gori's HPACK. A trailer block is left alone.
+
+**gori says what it did.** Each flow whose request was stripped carries an advisory: *"removed 2 dictionary fields (`Available-Dictionary: :…:`, `Dictionary-ID: "…"`) from this request — a response compressed against a dictionary gori does not hold (RFC 9842 dcb/dcz) cannot be decoded (settings network.strip_available_dictionary)."* On HTTP/2 it adds that the connection's request heads are re-encoded from then on, and `gori.log` names the first strip once per connection.
+
+Only the proxy path is affected. A Repeater, Fuzzer or Miner send goes out with the operator's bytes, so a replay of a captured request that carries the field can still get a `dcb` answer, and its decode note says why. Toggle the setting from Preferences → **Network & Tabs** → **Network** → **Strip dictionary offer**.
 
 ### listeners
 

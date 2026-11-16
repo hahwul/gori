@@ -154,6 +154,18 @@ private def with_strip(value : String, on : Bool, direction = "in", &)
   end
 end
 
+# A pipeline with the dictionary offer strip in the state the example is about, restored after.
+private def with_dictionary_strip(on : Bool, rewriter = SubRewriter.new("nothing", "matches", on: false),
+                                  direction = "out", &)
+  before = Gori::Settings.strip_available_dictionary?
+  begin
+    Gori::Settings.strip_available_dictionary = on
+    yield pipeline(rewriter, direction: direction)
+  ensure
+    Gori::Settings.strip_available_dictionary = before
+  end
+end
+
 describe Gori::Proxy::H2::HeadRewrite do
   it "forwards a head no rule changes byte-exact, and stays unengaged" do
     pipe, assembler, _ = pipeline(SubRewriter.new("/secret", "/rewritten"))
@@ -681,6 +693,92 @@ describe Gori::Proxy::H2::HeadRewrite do
       with_strip(%(h3=":443"), on: true, direction: "out") do |pipe, emitted, block, _|
         emitted.first.payload.should eq(block)
         pipe.engaged?.should be_false
+      end
+    end
+  end
+
+  describe "the dictionary offer strip (settings network.strip_available_dictionary)" do
+    offer = [{"accept-encoding", "gzip, br, zstd, dcb, dcz"}, {"available-dictionary", ":aGFzaA==:"},
+             {"dictionary-id", %("app-v1")}]
+
+    it "removes both fields from the request the origin receives, and tells the flow" do
+      with_dictionary_strip(true) do |pipe, assembler, sink|
+        block = HPACK::Encoder.new.encode(req("/a") + offer)
+        sent = HPACK::Decoder.new.decode(push(pipe, assembler, headers(1_u32, block)).first.payload)
+        sent.map(&.[0]).should_not contain("available-dictionary")
+        sent.map(&.[0]).should_not contain("dictionary-id")
+        sent.should contain({"accept-encoding", "gzip, br, zstd, dcb, dcz"})
+        pipe.engaged?.should be_true
+        advisory = sink.requests.first.advisory.to_s
+        advisory.should start_with(Gori::DictionaryTransport.removal_note(
+          ["Available-Dictionary: :aGFzaA==:", %(Dictionary-ID: "app-v1")]))
+        advisory.should contain("re-encodes its request heads")
+      end
+    end
+
+    it "re-encodes every later request head on the connection, field or not" do
+      with_dictionary_strip(true) do |pipe, assembler, _|
+        sender = HPACK::Encoder.new(indexing: true) # so a re-encoded block cannot match its bytes
+        push(pipe, assembler, headers(1_u32, sender.encode(req("/a") + offer)))
+        plain = sender.encode(req("/b"))
+        push(pipe, assembler, headers(3_u32, plain)).first.payload.should_not eq(plain)
+      end
+    end
+
+    it "forwards the head byte-exact when the switch is off, which is the default" do
+      with_dictionary_strip(false) do |pipe, assembler, sink|
+        block = HPACK::Encoder.new.encode(req("/a") + offer)
+        push(pipe, assembler, headers(1_u32, block)).first.payload.should eq(block)
+        pipe.engaged?.should be_false
+        sink.requests.first.advisory.should be_nil
+      end
+    end
+
+    it "leaves a request TRAILER block alone and keeps the latch open" do
+      with_dictionary_strip(true) do |pipe, assembler, _|
+        sender = HPACK::Encoder.new
+        push(pipe, assembler, headers(1_u32, sender.encode(req("/a")), Frame::END_HEADERS))
+        trailer = sender.encode([{"available-dictionary", ":aGFzaA==:"}])
+        push(pipe, assembler, headers(1_u32, trailer)).first.payload.should eq(trailer)
+        pipe.engaged?.should be_false
+      end
+    end
+
+    it "never touches a RESPONSE head carrying the field name" do
+      with_dictionary_strip(true, direction: "in") do |pipe, assembler, _|
+        assembler.feed("out", headers(1_u32, HPACK::Encoder.new.encode(req("/a"))))
+        block = HPACK::Encoder.new.encode([{":status", "200"}, {"available-dictionary", ":aGFzaA==:"}])
+        emitted = [] of Frame::Header
+        pipe.accept(headers(1_u32, block)) { |f, pre| emitted << f; assembler.feed("in", f, pre) }
+        emitted.first.payload.should eq(block)
+        pipe.engaged?.should be_false
+      end
+    end
+
+    it "lets a head rule put a field back, and then does not claim it is gone" do
+      put_back = SubRewriter.new("accept-encoding:", "available-dictionary: :put-back=:\r\naccept-encoding:")
+      with_dictionary_strip(true, put_back) do |pipe, assembler, sink|
+        block = HPACK::Encoder.new.encode(req("/a") + offer)
+        sent = HPACK::Decoder.new.decode(push(pipe, assembler, headers(1_u32, block)).first.payload)
+        sent.should contain({"available-dictionary", ":put-back=:"})
+        advisory = sink.requests.first.advisory.to_s
+        advisory.should start_with(Gori::DictionaryTransport.removal_note([%(Dictionary-ID: "app-v1")]))
+        advisory.should_not contain("aGFzaA")
+      end
+    end
+
+    it "keeps the client's head, offer included, as a rule's original, as HTTP/1.1 does (#1589)" do
+      with_store do |store|
+        rules = Gori::Rules.new(store, store.match_rules)
+        rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "X-B", "1",
+          Gori::Store::RuleOp::AddHeader)
+        with_dictionary_strip(true, rules) do |pipe, assembler, sink|
+          push(pipe, assembler, headers(1_u32, HPACK::Encoder.new.encode(req("/a") + offer)))
+          original = String.new(sink.requests.first.rewrite.not_nil!.head.not_nil!)
+          original.should start_with("GET /a HTTP/2")
+          original.should contain("available-dictionary: :aGFzaA==:")
+          String.new(sink.requests.first.head).should_not contain("available-dictionary")
+        end
       end
     end
   end

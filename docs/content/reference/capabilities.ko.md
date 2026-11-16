@@ -63,6 +63,10 @@ gori에는 같은 프로젝트 데이터와 엔진 모듈을 쓰는 세 진입�
   판정합니다. 그 설정을 광고하지 않는 오리진이면 빈 트랜스크립트 대신 설정 이름을 담은
   거부를 돌려줍니다. 브라우저의 소켓을 HTTP/1.1 경로로 옮기려면
   [`network.strip_extended_connect`](/ko/reference/config/#strip-extended-connect)를 켜세요.
+- **사전으로 압축된 본문은 해독하지 않습니다.** `Content-Encoding: dcb`나 `dcz`(RFC 9842) 응답은
+  클라이언트가 캐시한 사전이 있어야 풀리므로, gori는 그대로 두고 디코드 안내에 원인을 밝힙니다.
+  [`network.strip_available_dictionary`](/ko/reference/config/#strip-available-dictionary)를 켜면
+  프록시를 거치는 클라이언트가 그런 응답을 요청하지 않습니다.
 - **HTTP/3은 프록시 범위 밖입니다.** `network.strip_alt_svc`로 h3를 광고하는 응답 필드를
   제거할 수는 있지만 QUIC이나 DNS로 알아낸 경로를 인터셉트할 수는 없습니다.
 - **upstream `https://` 표기는 레거시이며 프록시까지 TLS를 뜻하지 않습니다.** 현재

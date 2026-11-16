@@ -5727,3 +5727,46 @@ fidelity, so moving it is the operator's call. The decisions:
 6. **Every extended CONNECT protocol goes, not only `websocket`.** The parameter is one bit for
    all of them, so `connect-udp` and `connect-ip` are withheld too.
 
+
+### 2026-11-16: a dictionary offer is stripped, not a dictionary decoded (#1898)
+
+Refines: [P4](#p4), [P7](#p7). #1898.
+
+Compression Dictionary Transport (RFC 9842) lets a client name a dictionary it holds
+(`Available-Dictionary`, `Dictionary-ID`) and get back `Content-Encoding: dcb` or `dcz`, a body
+only that dictionary decodes. gori captured those bodies byte-exact and could read none of them,
+so the detail view, the passive probe, extract rules and body rules all saw compressed bytes.
+`network.strip_available_dictionary` removes the offer before the request leaves. It is off by
+default for the reason `strip_alt_svc` is (2026-08-22): an opaque body costs no capture
+fidelity, and what the switch costs (larger responses, and on HTTP/2 the request direction's
+HPACK passthrough) is the operator's to spend. The decisions:
+
+1. **A strip, not a decoder.** The dictionary is the body of an earlier response, possibly from
+   before the capture or another session. Decoding would carry cross-flow, cross-session state
+   for a derived view, and would still fail for a dictionary the browser cached before gori was
+   in the path.
+2. **Whole fields only; `Accept-Encoding` is untouched.** An origin cannot produce `dcb`/`dcz`
+   without the hash the removed field carried, so the tokens left behind do nothing. Rewriting
+   part of a field-value would put gori's spelling of a client-chosen field on the wire, which
+   `AltSvc.strip_h3` already refuses: the field goes whole or stays whole.
+3. **Before Match & Replace, and the advisory is decided from the head actually sent.** A head
+   rule may put a field back for one host. The flow then names only the fields still gone, on
+   both transports, so it never claims a removal the wire contradicts. An intercept edit lands
+   later and is not reflected, as for the `Alt-Svc` kept-notice.
+4. **On HTTP/2 the latch is the request direction's.** Removing a field re-encodes that request
+   block, and HPACK makes that one-way for the rest of the connection (`HeadRewrite`'s class
+   comment). Only a head carrying `:method` is stripped, so a trailer cannot close the latch.
+   Every production relay runs the request pipeline because `Session` always wires an
+   Interceptor (`Relay#gates`).
+5. **Proxy path only.** A Repeater, Fuzzer or Miner send goes out with the operator's bytes
+   (P7), so a replay of a captured request that carries the field can still get a `dcb` answer.
+6. **The decode note names the cause with the switch in either position.** A `dcb`/`dcz` body's
+   note says it needs the client's dictionary and names the setting. It is static, because the
+   note is a view of a stored flow that may predate any setting, and it keeps the
+   `compressed: ` prefix `ContentDecode.decode_failed?` reads.
+
+On HTTP/1.1 the advisory rides on the request record (`ClientConn#capture_request`), so a
+request recorded without a response from the origin (dial failure, sandbox block, framing
+reject, intercept drop) carries it too. A response that writes its own advisory replaces the
+request's (`Store#update_one`), so `response_advisory` repeats the sentence there; it never
+writes one on its own account, which would erase a request-side body-rule advisory.

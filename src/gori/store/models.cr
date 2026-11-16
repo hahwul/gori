@@ -58,7 +58,8 @@ module Gori
       # response exists; `Store#insert_one` persists it to `flows.short_circuited`.
       getter? short_circuited : Bool
       # What gori has to SAY about this flow that its bytes cannot — see `FlowRow#advisory`.
-      getter advisory : String?
+      # Settable for the proxy's record funnel, which adds what it removed from the head.
+      property advisory : String?
       # The RFC 8441 extended CONNECT's `:protocol` pseudo-header, verbatim (nil = this was not
       # one, or the capture path cannot know). Carried on the DTO rather than lifted off `head`
       # by the store the way `request_content_type` is: `:protocol` is a pseudo-header, so it

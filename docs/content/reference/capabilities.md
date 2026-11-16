@@ -63,6 +63,10 @@ project. `--read-only` removes mutation and live-request tools.
   socket opening. An origin that does not advertise the setting gets a refusal that names it,
   not an empty transcript. To move a browser's sockets to the HTTP/1.1 path, turn on
   [`network.strip_extended_connect`](/reference/config/#strip-extended-connect).
+- **Dictionary-compressed bodies are not decoded.** A response under `Content-Encoding: dcb` or
+  `dcz` (RFC 9842) needs a dictionary the client cached, so gori keeps it raw and its decode note
+  names the cause. [`network.strip_available_dictionary`](/reference/config/#strip-available-dictionary)
+  stops proxied clients asking for one.
 - **HTTP/3 is outside the proxy.** `network.strip_alt_svc` can remove response fields advertising
   h3, but cannot intercept QUIC or a route learned from DNS.
 - **An upstream `https://` spelling is legacy, not TLS to the proxy.** Bare `host:port`,

@@ -5,6 +5,7 @@ require "./brotli"
 require "./zstd"
 require "./http1" # Http1.obfuscated_header? — see content_encoded?
 require "../../ascii_bytes"
+require "../../dictionary_transport"
 
 module Gori::Proxy::Codec
   # Decodes a captured body for DISPLAY: de-chunks the h1 wire form (the stored
@@ -267,6 +268,7 @@ module Gori::Proxy::Codec
         return {nil, "compressed: zstd — decoder not built in", true} unless Zstd::AVAILABLE
         partial_note(bound_output(Zstd.decode_full(data, max_out), max_out), "zstd", max_out)
       else
+        return {nil, DictionaryTransport.decode_note(enc), true} if DictionaryTransport.coding?(enc)
         {nil, "compressed: #{enc} — decode unsupported", true}
       end
     rescue ex
