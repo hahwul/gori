@@ -150,7 +150,7 @@ module Gori
 
       Fields (: value match, a case-insensitive SUBSTRING on host path url header; ~ regex):
       path:/v1/ also hits /api/v1/x and host:shop.test hits cdn.shop.test — anchor: path~^/v1/ host~^shop\\.test$
-        host port path method scheme proto status size reqsize respsize dur header body ws rpc url stub rewritten static src via scope cache
+        host port path method scheme proto status size reqsize respsize dur header body ws rpc llm url stub rewritten static src via scope cache
 
       Sides: header: and body: search REQUEST AND RESPONSE; prefix req. or resp. (res.) for one side —
       req.body:token resp.header:set-cookie -resp.body:abcd. req.size/resp.size = reqsize/respsize.
@@ -194,6 +194,11 @@ module Gori
       JSON-RPC / MCP: rpc:tools/call  rpc:tools/ — REQUEST body is a JSON-RPC call whose method starts
       with the value (case-sensitive); unindexed, compressed bodies are not read, and a nested "method"
       key counts too.
+
+      LLM API calls: llm:true|false  llm:claude — REQUEST body has a "model" and "messages" or "input"
+      (OpenAI chat/responses, Anthropic messages, on any host). Any other value is a case-insensitive
+      SUBSTRING of the model name. Unindexed, compressed bodies are not read, and an embeddings
+      request (model + input) matches too.
 
       Regex (~): host~^api\\.  body~secret\\d+  path~/admin — on host path url method scheme header body
       ws (and req./resp. header/body). Case-sensitive; (?i) folds. `~` on another QL field is DROPPED;
@@ -331,7 +336,7 @@ module Gori
 
     private def self.content_or_prefix_reason(raw_field : String, field : String, value : String) : String?
       case field
-      when "body", "header", "ws", "rpc", "req.body", "resp.body", "req.header", "resp.header"
+      when "body", "header", "ws", "rpc", "llm", "req.body", "resp.body", "req.header", "resp.header"
         return "value contains control characters" if value.each_char.any?(&.control?)
       else
         if prefix = SIDE_PREFIXES.find { |p| raw_field.starts_with?(p) }
@@ -453,7 +458,7 @@ module Gori
     # History's and Colormarker's completion pools, Colormarker's unknown-field refusal and the
     # docs all read it, so a field added to `field_cond` becomes offerable everywhere at once
     # instead of in the four hand-kept copies that used to drift.
-    FIELDS = %w[host port path url method scheme proto status size reqsize respsize dur header body ws rpc stub rewritten static src via scope cache
+    FIELDS = %w[host port path url method scheme proto status size reqsize respsize dur header body ws rpc llm stub rewritten static src via scope cache
       req.header resp.header req.body resp.body]
 
     # The fields `~` compiles on. `method` and `scheme` are text columns like `host`, so a regex over
@@ -654,6 +659,7 @@ module Gori
       "body"        => "body via index: 8 KiB/side, no compressed",
       "ws"          => "WebSocket text/binary messages — ws~ regex",
       "rpc"         => "JSON-RPC/MCP method prefix — rpc:tools/call",
+      "llm"         => "LLM API call — true/false or model: llm:gpt",
       "stub"        => "true = gori answered it, origin never saw it",
       "rewritten"   => "a rule changed it — true/false or project/4",
       "static"      => "2xx image/font/media; not svg/css/js",
@@ -845,6 +851,7 @@ module Gori
       when "body", "req.body", "resp.body"       then body_cond(value, fts, body_max, side_of(field))
       when "ws"                                  then ws_cond(value, regex: false, body_max: body_max)
       when "rpc"                                 then rpc_cond(value, body_max)
+      when "llm"                                 then llm_cond(value, body_max)
       when "stub"                                then flag_cond("short_circuited", value)
       when "rewritten"                           then rewritten_cond(value)
       when "static"                              then flag_cond("static_asset", value)
@@ -890,9 +897,14 @@ module Gori
     # behaves exactly like `stub:false`. An unrecognised value drops the term rather than
     # guessing, same as a bad proto:/status:.
     private def self.flag_cond(column : String, value : String) : {String, Array(DB::Any)}?
+      flag?(value).try { |on| {"#{column} = #{on ? 1 : 0}", [] of DB::Any} }
+    end
+
+    # The spellings every flag term takes; nil for anything else.
+    private def self.flag?(value : String) : Bool?
       case value.downcase
-      when "true", "yes", "on", "1"  then {"#{column} = 1", [] of DB::Any}
-      when "false", "no", "off", "0" then {"#{column} = 0", [] of DB::Any}
+      when "true", "yes", "on", "1"  then true
+      when "false", "no", "off", "0" then false
       end
     end
 
@@ -1229,6 +1241,24 @@ module Gori
       method, margs = body_regex_cond(%q("method"\s*:\s*") + needle, body_max, :req)
       version, vargs = body_regex_cond(%q("jsonrpc"\s*:\s*"2\.0"), body_max, :req)
       {"(#{method} AND #{version})", margs + vargs}
+    end
+
+    # `llm:`: a flow whose request body has the shape `LlmCall.from_flow` reads — a `"model"`
+    # string beside `"messages"` or `"input"` — built like `rpc:` above: `body~` over the request,
+    # no capture-time parse, no migration (P6). A flag (`flag?`, so `llm:on` means what `stub:on`
+    # does) asks for the shape alone; any other value is a case-insensitive substring of the
+    # model name, so `llm:claude` also finds a gateway's `anthropic/claude-…`.
+    #
+    # Wider than the pane in one place: `LlmCall` reads the REPLY to tell an embeddings request
+    # (`model` + `input`) from a Responses call, and this does not — a gzip reply would hide a real
+    # call from a finder, which is the worse miss.
+    private def self.llm_cond(value : String, body_max : Int32?) : SqlTerm?
+      return nil if value.each_char.any?(&.control?)
+      flag = flag?(value)
+      needle = flag.nil? ? "(?i:[^\"]*#{value.split('/').join(%q(\\?/)) { |part| Regex.escape(part) }})" : ""
+      model, margs = body_regex_cond(%q("model"\s*:\s*") + needle, body_max, :req)
+      shape, sargs = body_regex_cond(%q("(?:messages|input)"\s*:), body_max, :req)
+      {"#{flag == false ? "NOT " : ""}(#{model} AND #{shape})", margs + sargs}
     end
 
     # `ws:` / `ws~`: a flow whose WebSocket transcript holds a matching MESSAGE. A subquery over

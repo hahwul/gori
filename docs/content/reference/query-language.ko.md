@@ -29,6 +29,7 @@ gori에는 플로우를 걸러내는 작은 쿼리 언어(QL)가 있습니다. �
 | `body` | 본문 전문 검색(trigram FTS 인덱스) |
 | `ws` | 소켓이 값을 담은 TEXT 또는 BINARY 메시지를 주고받은 WebSocket 플로우, 방향 무관([아래](#websocket-messages)) |
 | `rpc` | 요청 본문이 값으로 시작하는 메서드를 부르는 JSON-RPC 호출(MCP 포함)인 플로우([아래](#json-rpc-methods)) |
+| `llm` | `true` / `false`, 또는 모델 이름의 일부. 요청 본문이 LLM API 호출인 플로우([아래](#llm-calls)) |
 | `stub` | `true` / `false`. 원본 서버를 거치지 않고 gori가 [short-circuit 규칙](/ko/guide/proxy/#short-circuit)으로 직접 답한 플로우 |
 | `rewritten` | `true` / `false`, 또는 규칙 하나를 `project/4` / `global/3`로. [Match & Replace 규칙](/ko/guide/proxy/#match-replace)이 바꾼 플로우. 매칭됐지만 아무것도 바꾸지 않은 규칙은 기록되지 않고, gori가 규칙을 기록하기 전에 캡처한 플로우는 `true`에도 규칙에도 걸리지 않습니다 |
 | `static` | `true` / `false`. 이미지, 폰트, 오디오·비디오. 응답 Content-Type으로 판단하고, 없으면 경로 확장자를 봅니다. SVG·CSS·JS와 이미지 프록시(`?url=`)는 제외하고, 성공한 응답(2xx 또는 304)만 해당합니다. `-static:true`가 [정적 에셋 숨기기 렌즈](/ko/guide/proxy/#hide-static)입니다 |
@@ -228,6 +229,23 @@ rpc:initialize host:mcp.example        한 서버에 대한 MCP 핸드셰이크
 응답과 짝지어 디코드한 호출은 History 상세의 RPC 패널(MCP 서버라면 이름이 `MCP`), `gori run
 show --format json`과 MCP `get_flow`의 `json_rpc` 키에서 봅니다.
 
+## LLM API 호출 {#llm-calls}
+
+`llm:true`는 요청 본문이 LLM API 호출 모양인 플로우와 매칭합니다. `"model"`과 함께 `"messages"`나
+`"input"`이 있는 본문으로, OpenAI chat completions, OpenAI responses, Anthropic messages가
+해당합니다. 호스트는 보지 않으므로 자체 호스팅 게이트웨이나 프록시된 게이트웨이도 잡힙니다.
+`true`·`false`가 아닌 값은 모델 이름의 부분 문자열이며 대소문자를 구분하지 않습니다.
+
+```text
+llm:true                               LLM API 호출 전부
+llm:claude status:>=400                Claude 모델 호출 중 실패한 것
+-llm:true host:api.example             그 호스트의 나머지 트래픽
+```
+
+`rpc:`처럼 저장된 요청 바이트를 인덱스 없이 훑으며, 압축된 요청 본문은 읽지 않습니다. 요청만
+읽으므로 임베딩 요청(`model`과 `input`)도 걸립니다. History 상세의 LLM 패널은 응답까지 읽어서
+그런 요청은 제외합니다.
+
 ## 항목 결합 {#combining-terms}
 
 - 공백으로 구분된 항목들은 **AND**로 결합됩니다. `AND`를 직접 써도 됩니다.
@@ -283,7 +301,7 @@ host:"my host"                        공백까지 포함한 하나의 host 값
 홀드 게이트와 Extract 규칙 조건은 캡처되기 전의 흐르는 메시지 하나를 평가하므로, 그 메시지가
 답할 수 없는 History 필드는 거부합니다. `scope:`(프로젝트의 스코프 규칙은 메시지의
 일부가 아님), `size:`·`reqsize:`·`respsize:`·`dur:`(교환이 아직 끝나지 않음), `stub:`·`rewritten:`·`static:`·
-`src:`·`via:`·`cache:`·`rpc:`·`ws:`(게이트가 쥔 것은 트랜스크립트가 아니라 메시지 하나이고, 그 `body:`가 이미
+`src:`·`via:`·`cache:`·`rpc:`·`llm:`·`ws:`(게이트가 쥔 것은 트랜스크립트가 아니라 메시지 하나이고, 그 `body:`가 이미
 그 메시지를 뜻함), 그리고 한쪽 방향만 보는 `req.`/`resp.` 표기가 그렇습니다. 거부된 필드를 대신
 자유 텍스트로 검색하는 일도 없습니다. 입력하는 자리에서 그렇게 알려주고, 그런 필드를
 담은 Extract 규칙은 저장되지 않으며, MCP `intercept_set_filter`와 `gori run intercept filter`는

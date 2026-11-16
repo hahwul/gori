@@ -1372,6 +1372,34 @@ describe "Gori::Store#search (QL)" do
       Gori::QL.dropped_term_reason("rpc:a\u0001b").should eq("value contains control characters")
     end
 
+    it "finds LLM API calls by request shape, and by model name, with llm:" do
+      with_store do |store|
+        ids = %w[/v1/chat/completions /v1/messages /v1/responses /search /echo].map { |p| capture(store, "ai.test", "POST", p, 200) }
+        chat, anthropic, responses, rest, echo = ids
+        {chat      => %({"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}),
+         anthropic => %({"model" : "anthropic\\/Claude-Sonnet","system":"s","messages":[]}),
+         responses => %({"model":"o3","input":"hi"}),
+         rest      => %({"model":"sedan","year":2020})}.each do |id, body|
+          store.@db.exec("UPDATE flows SET request_body = ? WHERE id = ?", body.to_slice, id)
+        end
+        # The shape in a RESPONSE is not a call.
+        store.@db.exec("UPDATE flows SET response_body = ? WHERE id = ?",
+          %({"model":"gpt-4o","messages":[]}).to_slice, echo)
+        find = ->(q : String) { store.search(Gori::QL.parse(q), 10).map(&.id).sort! }
+        find.call("llm:true").should eq([chat, anthropic, responses])
+        find.call("llm:false").should eq([rest, echo]) # a bodyless flow is kept, as -body: keeps it
+        find.call("-llm:true").should eq([rest, echo])
+        find.call("llm:ON").should eq([chat, anthropic, responses]) # the flag spellings stub: takes, not "sONnet"
+        find.call("llm:no").should eq([rest, echo])
+        find.call("llm:gpt").should eq([chat])
+        find.call("llm:claude").should eq([anthropic]) # substring, case-insensitive
+        find.call("llm:anthropic/claude").should eq([anthropic])
+        find.call("llm:g.t").should be_empty # the value is literal
+        find.call("llm:hi").should be_empty  # the model's value, not the whole body
+      end
+      Gori::QL.dropped_term_reason("llm:a\u0001b").should eq("value contains control characters")
+    end
+
     it "compiles via: to the surface column with a NULL guard, and drops an unknown value" do
       f = Gori::QL.parse("via:MCP")
       f.sql.should eq("((source_surface IS NOT NULL AND source_surface = ?))")
