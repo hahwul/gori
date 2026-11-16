@@ -547,11 +547,12 @@ class Gori::Proxy::H2::StreamGate
     refund_locked(fc, own, f.payload.size, f.end_stream?)
     # A PADDED frame carries bytes only `Assembler#data_block` knows how to strip, so the body
     # is one gori will not rewrite — the same call `note_body_frame` makes for a hold.
+    # An empty frame adds no pressure even while a spill is queued above the budget (#1906).
     if f.padded?
       spill_locked(fc, own, "a DATA frame arrived padded")
     elsif own.size > MAX_RULE_BODY
       spill_locked(fc, own, "it ran past the #{MAX_RULE_BODY}-byte ceiling gori buffers a body to rewrite")
-    elsif fc.buffered > MAX_RULE_BUFFERED
+    elsif f.payload.size > 0 && fc.buffered > MAX_RULE_BUFFERED
       spill_locked(fc, own, "the bodies buffered on this connection passed #{MAX_RULE_BUFFERED} bytes")
     elsif f.end_stream?
       finish_owned_locked(fc, own)

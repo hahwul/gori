@@ -658,32 +658,54 @@ describe "H2::StreamGate body rules (#1628)" do
   end
 
   # Review #3: each owned stream is credited as it arrives, so without a budget across streams
-  # two 9 MiB responses would sit in memory at once. The one that crosses it spills.
+  # two bodies just over 8 MiB would sit in memory at once. The one that crosses it spills.
+  # #1906: keep its credited bytes queued across the other stream's empty END_STREAM;
+  # a frame that adds no bytes must not make that other stream spill too.
   it "spills the stream that crosses the connection's buffering budget" do
     with_rules do |rules, ic|
       rules.add(RESP, BODY, "b", "c", host: "127.0.0.1")
-      body = Bytes.new(9 * 1024 * 1024, 'b'.ord.to_u8)
-      # Both bodies are sent before either ends, so both are buffering at once.
+      body = Bytes.new(8 * 1024 * 1024 + 32_768, 'b'.ord.to_u8)
+      # Both bodies fit in the sender's credited window after the spill, even while
+      # the receiver's connection window stays shut.
       sent = Channel(Nil).new(2)
       go = Channel(Nil).new(2)
+      ended = Channel(Nil).new(2)
       rig = BodyRig.new(rules, ic) do |s, p|
+        next {ok(65_534), Bytes.new(65_534, 'w'.ord.to_u8), nil} if s == 1_u32
+        next {ok(0), Bytes.empty, nil} if s == 7_u32
         p.send_head(s, ok, false)
         p.send_body(s, body, false)
         sent.send(nil)
         go.receive
         p.send_raw_data(s, Bytes.empty, Frame::END_STREAM)
+        ended.send(nil)
         nil
       end
       begin
-        rig.client.send_head(1_u32, get("/one"), true)
-        rig.client.send_head(3_u32, get("/two"), true)
+        rig.client.hold_conn = true
+        rig.client.stream_ack = 1_000_000_000_i64
+        # Leave only one byte of connection window for the spilled body to drain into.
+        rig.client.send_head(1_u32, get("/prime"), true)
+        rig.client.wait_done(1_u32).should be_true
+        rig.client.recv_conn.should eq(1)
+        rig.client.send_head(3_u32, get("/one"), true)
+        rig.client.send_head(5_u32, get("/two"), true)
         2.times { sent.receive }
         2.times { go.send(nil) }
-        rig.client.wait_done(1_u32, 30.seconds).should be_true
+        2.times { ended.receive }
+        # A later response on the same origin socket proves both empty ends were handled
+        # before the client reopens its window; no delay stands in for that ordering.
+        rig.client.send_head(7_u32, get("/barrier"), true)
+        rig.client.wait_done(7_u32).should be_true
+        rig.client.stream_ack = 0_i64
+        [3_u32, 5_u32].each { |id| rig.client.bump(id, body.size) }
+        rig.client.release_conn
         rig.client.wait_done(3_u32, 30.seconds).should be_true
-        got = [1_u32, 3_u32].map { |id| rig.client.bodies[id].to_slice }
+        rig.client.wait_done(5_u32, 30.seconds).should be_true
+        got = [3_u32, 5_u32].map { |id| rig.client.bodies[id].to_slice }
         got.each(&.size.should(eq(body.size)))
         got.count(&.==(body)).should eq(1) # one spilled unmodified, the other was rewritten
+        got.count(&.==(Bytes.new(body.size, 'c'.ord.to_u8))).should eq(1)
         advisories = rig.sink.responses.compact_map(&.advisory)
         advisories.any?(&.includes?("buffered on this connection")).should be_true
         (rig.client.errors + rig.wait_origin.errors).should be_empty
