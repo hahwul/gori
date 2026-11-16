@@ -85,6 +85,15 @@ module Gori::Settings
   # records what was removed (`Store::FlowRow#advisory`), and the client stays on TCP where
   # gori can see it. Global-only, read live per response — a change applies to the next one.
   DEFAULT_STRIP_ALT_SVC = false
+  # Whether the proxy withholds SETTINGS_ENABLE_CONNECT_PROTOCOL from the origin's HTTP/2
+  # SETTINGS (#1896), so a browser opens its WebSockets with an HTTP/1.1 Upgrade instead of an
+  # RFC 8441 extended CONNECT. OFF by default for the reason DEFAULT_STRIP_ALT_SVC is (P4): a
+  # socket over HTTP/2 is captured in full, and what it lacks is per-message intercept and
+  # Match&Replace. The cost is a second connection per origin for its sockets, and every
+  # extended CONNECT protocol goes with it, since the parameter is one bit for all of them.
+  # Global-only, read live per frame, but an origin normally sends the parameter once, in its
+  # first SETTINGS frame, so in practice it takes effect on connections opened after it is on.
+  DEFAULT_STRIP_EXTENDED_CONNECT = false
   # Cap on the once-per-host passthrough notice (see tls_passthrough?). A bypassed host is
   # otherwise INVISIBLE — nothing is captured — so "why is this host missing from History?"
   # has no answer anywhere; one gori.log line per distinct host gives it one, without a log
@@ -98,6 +107,8 @@ module Gori::Settings
   PASSTHROUGH_INVENTORY_MAX = 1024
   # Cap on the once-per-host h3 kept-notice (#835), the twin of PASSTHROUGH_NOTICE_MAX above.
   H3_NOTICE_MAX = 1024
+  # Cap on the origins whose extended CONNECT offer was withheld (#1896), the twin of the two above.
+  EXTENDED_CONNECT_WITHHELD_MAX = 1024
 
   class_property bind_host : String = DEFAULT_BIND_HOST
   class_property bind_port : Int32 = DEFAULT_BIND_PORT
@@ -143,6 +154,9 @@ module Gori::Settings
   # Whether to strip h3 `Alt-Svc` (see DEFAULT_STRIP_ALT_SVC). Read live by the response path
   # on both transports, per response, so a change applies without a restart. Global-only.
   class_property? strip_alt_svc : Bool = DEFAULT_STRIP_ALT_SVC
+  # Whether to withhold the origin's extended CONNECT offer (see DEFAULT_STRIP_EXTENDED_CONNECT).
+  # Read live by the h2 relay on every frame from the origin. Global-only.
+  class_property? strip_extended_connect : Bool = DEFAULT_STRIP_EXTENDED_CONNECT
 
   # True when HTTP/2 must not be used. The proxy asks this rather than comparing strings, so
   # an out-of-range hand-edited value reads as "auto" (only an explicit "off" disables h2)
@@ -300,6 +314,31 @@ module Gori::Settings
   # on the log line would otherwise leak into each other through class state.
   def self.reset_alt_svc_h3_notices : Nil
     @@alt_svc_h3_noticed = Set(String).new
+  end
+
+  # Origins (`host:port`) whose extended CONNECT offer the h2 relay withheld this session.
+  # There is no flow for a SETTINGS frame, so this is what lets the HTTP/1.1 Upgrade that
+  # follows say why it took that path. Session-global and bounded like the two markers above;
+  # past the cap an origin goes unrecorded, which costs its log line and its advisory.
+  @@extended_connect_withheld : Set(String) = Set(String).new
+
+  # Records `host:port` as withheld, true only the first time (the relay logs once per origin).
+  def self.first_extended_connect_withheld?(host : String, port : Int32) : Bool
+    return false if @@extended_connect_withheld.size >= EXTENDED_CONNECT_WITHHELD_MAX
+    @@extended_connect_withheld.add?(withheld_key(host, port))
+  end
+
+  def self.extended_connect_withheld?(host : String, port : Int32) : Bool
+    @@extended_connect_withheld.includes?(withheld_key(host, port))
+  end
+
+  private def self.withheld_key(host : String, port : Int32) : String
+    "#{host.downcase}:#{port}"
+  end
+
+  # Test-only reset, for the reason `reset_alt_svc_h3_notices` exists.
+  def self.reset_extended_connect_withheld : Nil
+    @@extended_connect_withheld = Set(String).new
   end
 
   def self.effective_connect_timeout_secs : Int32
@@ -722,6 +761,7 @@ module Gori::Settings
     self.tls_passthrough = DEFAULT_TLS_PASSTHROUGH.dup
     self.http2 = DEFAULT_HTTP2
     self.strip_alt_svc = DEFAULT_STRIP_ALT_SVC
+    self.strip_extended_connect = DEFAULT_STRIP_EXTENDED_CONNECT
   end
 
   private def self.serialize_network(j : JSON::Builder) : Nil
@@ -750,6 +790,7 @@ module Gori::Settings
         j.field "tls_passthrough", tls_passthrough
         j.field "http2", http2
         j.field "strip_alt_svc", strip_alt_svc?
+        j.field "strip_extended_connect", strip_extended_connect?
       end
     end
   end
