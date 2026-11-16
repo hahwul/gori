@@ -766,6 +766,21 @@ describe Gori::Proxy::H2::HeadRewrite do
         advisory.should_not contain("aGFzaA")
       end
     end
+
+    it "keeps the client's head, offer included, as a rule's original, as HTTP/1.1 does (#1589)" do
+      with_store do |store|
+        rules = Gori::Rules.new(store, store.match_rules)
+        rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "X-B", "1",
+          Gori::Store::RuleOp::AddHeader)
+        with_dictionary_strip(true, rules) do |pipe, assembler, sink|
+          push(pipe, assembler, headers(1_u32, HPACK::Encoder.new.encode(req("/a") + offer)))
+          original = String.new(sink.requests.first.rewrite.not_nil!.head.not_nil!)
+          original.should start_with("GET /a HTTP/2")
+          original.should contain("available-dictionary: :aGFzaA==:")
+          String.new(sink.requests.first.head).should_not contain("available-dictionary")
+        end
+      end
+    end
   end
 
   it "keeps a head-block decode from happening twice (the projection comes from the relay)" do
