@@ -1973,7 +1973,7 @@ module Gori
     end
 
     # A persisted Fuzzer/Intruder session: the marked template (with §…§ positions)
-    # plus an opaque `config` JSON the TUI owns (mode / payload sets / matchers /
+    # plus `Fuzz::SessionConfig` JSON (mode / payload sets / matchers /
     # engine opts). Mirrors RepeaterRecord — survives reopen and syncs across sessions.
     struct FuzzSessionRecord
       getter id : Int64
@@ -1981,7 +1981,7 @@ module Gori
       getter template : String
       getter? http2 : Bool
       getter sni : String?
-      getter config : String # opaque JSON managed by the frontend
+      getter config : String # Fuzz::SessionConfig JSON
       getter flow_id : Int64?
       getter position : Int32
       getter name : String? # custom sub-tab label (nil = derive from the request line)

@@ -1,0 +1,1 @@
+{"mode":"Batteringram","sets":[{"kind":"list","value":"one,two"},{"kind":"future","value":"x"},false],"extract":"token=(.*)","extractors":[false,{"spec":"id=regex:id=(.*)","width":999999}],"grpc_fields":23,"macro_every":false}
