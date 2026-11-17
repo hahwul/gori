@@ -813,7 +813,8 @@ module Gori
             if missing = ex.detail
               "none of 'marks' occurs in the request (#{missing}), so the template has no §…§ positions"
             else
-              "template has no §…§ positions (add markers, name a token with 'marks', or pass auto:true)"
+              "template has no §…§ positions (add markers, name a token with 'marks', or pass auto:true; " \
+              "a {\"null\":N} set alone repeats the request as it is)"
             end
           end
         in Fuzz::PlanError::Reason::NoTarget

@@ -173,7 +173,7 @@ Fuzzer는 Intruder 스타일 엔진입니다. 요청에서 위치를 표시하�
 
 ### 위치와 페이로드 {#positions-and-payloads}
 
-요청에서 `§…§` 마커로 위치를 표시하거나, gori가 자동으로 배치하게 하세요. 페이로드 세트는 내장 프리셋(`sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`. 파일 없이 바로 시작), 워드리스트(파일, 또는 [카탈로그](#wordlist-catalog)에 있는 목록의 이름), 명시적 목록, 숫자 범위, N개의 빈(null) 페이로드, 또는 무차별 대입 문자 세트가 될 수 있습니다. 프리셋은 추가 파일을 병합(내장 우선, 중복 제거)할 수 있고 다른 세트와 조합됩니다. 프로세서를 사용하면 나가는 각 페이로드를 변환할 수 있습니다: prefix/suffix, URL/base64/hex 인코딩, 대소문자 변환, 해싱, 정규식 치환.
+요청에서 `§…§` 마커로 위치를 표시하거나, gori가 자동으로 배치하게 하세요. 페이로드 세트는 내장 프리셋(`sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`. 파일 없이 바로 시작), 워드리스트(파일, 또는 [카탈로그](#wordlist-catalog)에 있는 목록의 이름), 명시적 목록, 숫자 범위, N개의 빈(null) 페이로드, 또는 무차별 대입 문자 세트가 될 수 있습니다. 세트가 null 페이로드뿐인 실행은 위치가 필요 없습니다. 요청을 있는 그대로 N번 보내며, 응답이 매번 달라지는 대상에서 [비율을 읽는](#matching) 방법입니다. 프리셋은 추가 파일을 병합(내장 우선, 중복 제거)할 수 있고 다른 세트와 조합됩니다. 프로세서를 사용하면 나가는 각 페이로드를 변환할 수 있습니다: prefix/suffix, URL/base64/hex 인코딩, 대소문자 변환, 해싱, 정규식 치환.
 
 gRPC 메시지 안에서는 마커가 쓸모없습니다. 위치가 스키마가 아는 필드인 [gRPC 필드 스윕](#sweeping-a-grpc-field)을 보세요.
 
@@ -232,7 +232,7 @@ ffuf 스타일 matcher와 filter로 status, size, words, 왕복 시간(`--mt`/`-
 
 **스트리밍 LLM 응답은 다시 조립한 텍스트로 매칭합니다.** `text/event-stream`으로 스트리밍되는 completion은 SSE 델타로 오기 때문에, 단어 하나가 두 이벤트에 나뉘어 본문에는 한 번도 나타나지 않을 수 있습니다. 그래서 본문 정규식(match, filter, stop-on)은 다시 조립한 응답에도 적용됩니다. 텍스트가 먼저, 이어서 도구 호출의 이름과 인자이며, 모두 모델이 쓴 그대로입니다. 본문은 앵커를 포함해 도착한 그대로 계속 매칭됩니다. 추출기는 본문만 읽습니다.
 
-**응답이 매번 달라지는 대상은 비율로 판정합니다.** 모델은 같은 요청에도 매번 다르게 답할 수 있어서 한 번의 전송으로는 알 수 있는 게 적습니다. `X-Try: §x§` 같은 버리는 위치에 빈 페이로드 N개(`--null=20`, MCP `{"null": 20}`)를 걸어 같은 요청을 반복하고, matcher를 설정한 뒤 전송 수 대비 히트 수를 읽으세요. TUI RESULTS 헤더의 `7 hit`, `gori run fuzz`에서 `matched`로 표시된 행, MCP `fuzz_status`의 `sent` 옆 `matched`가 그 값입니다. **Group by shape**는 서로 다른 응답이 몇 가지였는지 보여 줍니다.
+**응답이 매번 달라지는 대상은 비율로 판정합니다.** 모델은 같은 요청에도 매번 다르게 답할 수 있어서 한 번의 전송으로는 알 수 있는 게 적습니다. 빈 페이로드 N개(`--null=20`, MCP `{"null": 20}`, TUI의 **Null** 세트)로 같은 요청을 반복하고, matcher를 설정한 뒤 전송 수 대비 히트 수를 읽으세요. TUI RESULTS 헤더의 `7 hit`, `gori run fuzz`에서 `matched`로 표시된 행, MCP `fuzz_status`의 `sent` 옆 `matched`가 그 값입니다. **Group by shape**는 서로 다른 응답이 몇 가지였는지 보여 줍니다.
 
 모든 응답에서 값을 뽑아 보려면 **추출기**를 추가하세요(RESULTS 패널의 **Display… › Extractors…**). 추출기 하나는 [History 컬럼](/ko/guide/proxy/#columns) 디스크립터 `[LABEL=]kind:selector`(응답의 헤더, 쿠키, JSON 경로, 정규식 캡처, 바이트 범위)이고, `time` 뒤에 자기 결과 컬럼을 하나씩 그립니다. 전체 값은 응답 상세 맨 위에 나옵니다. 저장된 실행은 추출기를 함께 보관하므로 다시 열어도 같은 컬럼이 보입니다. 헤드리스에서는 `--extractor=SPEC`(반복 가능), MCP에서는 `extractors`이며 최대 8개입니다. 기존의 단일 캡처 정규식(`--extract`, MCP `extract`)은 `extracted`라는 이름의 0번 추출기입니다. 요청 쪽(`req:`)은 거부합니다. fuzz 행의 요청은 템플릿에 페이로드를 넣은 것이기 때문입니다. MCP는 쿠키나 자격 증명 헤더 추출기를 `include_sensitive:true`가 없으면 `[REDACTED]`로 보여 줍니다.
 

@@ -276,6 +276,53 @@ describe Gori::Fuzz::Plan do
     end
   end
 
+  # A null payload fills nothing, so a run of only null sets may have no position: it repeats
+  # the request as it stands (#1912). A set that carries payloads, or a `marks` token that named
+  # nothing, is still refused, since either would be dropped without a word.
+  describe "null sets with no position" do
+    raw = "GET / HTTP/1.1\r\nHost: t.test\r\n\r\n"
+    nulls = [F::NullPayloads.new(3)] of F::PayloadSource
+
+    it "repeats the request unchanged, once per null payload, in every mode" do
+      F::Mode.each do |mode|
+        plan = F::Plan.build(F::PlanOptions.new(raw, target: "http://t.test", sources: nulls,
+          config: F::Config.new(mode: mode), verify: false), ungated_outbound)
+        plan.total.should eq(3)
+        plan.unused_payload_sets.should eq(0)
+        sent = [] of String
+        plan.generator.each { |job| sent << String.new(job.bytes) }
+        sent.should eq([raw, raw, raw])
+      end
+    end
+
+    it "still refuses whatever would be dropped: a set with payloads, a processor, a mark or --auto that made no position" do
+      mixed = [F::NullPayloads.new(3), F::InlineList.new(["1"])] of F::PayloadSource
+      [F::PlanOptions.new(raw, target: "http://t.test", sources: mixed),
+       F::PlanOptions.new(raw, target: "http://t.test", sources: nulls, marks: ["absent"]),
+       F::PlanOptions.new(raw, target: "http://t.test", sources: nulls, auto_mark: true),
+       F::PlanOptions.new(raw, target: "http://t.test", sources: nulls,
+         processors: [F::Prefix.new("PWN")] of F::Processor)].each do |options|
+        ex = expect_raises(F::PlanError) { F::Plan.build(options, ungated_outbound) }
+        ex.reason.should eq(F::PlanError::Reason::NoPositions)
+      end
+    end
+
+    # Calibration needs a position to put its nonce in; with none it sampled nothing and said so
+    # nowhere.
+    it "refuses auto-calibration, which has no position to sample" do
+      expect_raises(Gori::Error, /auto-calibration .* has none/) do
+        F::Plan.build(F::PlanOptions.new(raw, target: "http://t.test", sources: nulls,
+          config: F::Config.new(auto_calibrate: true)), ungated_outbound)
+      end
+    end
+
+    it "leaves a race's unused-set count as it was" do
+      plan = F::Plan.build(F::PlanOptions.new(raw, target: "http://t.test", sources: nulls,
+        config: F::Config.new(race_count: 2), verify: false), ungated_outbound)
+      plan.unused_payload_sets.should eq(1)
+    end
+  end
+
   # `Config#race_count` bypasses the NoPositions/NoPayloads guards entirely — a race group
   # is N copies of one request, not a §…§/payload-set sweep. See `Fuzz::Engine#run_race`.
   describe "race_count" do

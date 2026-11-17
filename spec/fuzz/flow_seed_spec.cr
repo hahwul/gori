@@ -423,11 +423,13 @@ describe "the NoPositions refusal names a literal § instead of re-recommending 
   # CONTROL: a template with NO § at all keeps the standing wording — that advice is correct
   # there, and `--auto` / `auto:true` really is the shortest way out of it.
   it "leaves the ordinary no-marker message alone on both surfaces" do
+    # Each also names the one run that needs no position: null payloads alone (#1912).
     Gori::CLI::Run.fuzz_plan_error_for_spec(r, none)
-      .should eq("no positions — add §…§ markers, --auto, or --mark TOKEN")
+      .should eq("no positions — add §…§ markers, --auto, or --mark TOKEN (or repeat the request as it is: --null=N alone)")
     tools = Gori::MCP::Tools.new(Gori::Store.open(":memory:"), allow_actions: false, verify_upstream: false)
     tools.fuzz_plan_error_for_spec(r, none)
-      .should eq("template has no §…§ positions (add markers, name a token with 'marks', or pass auto:true)")
+      .should eq("template has no §…§ positions (add markers, name a token with 'marks', or pass auto:true; " \
+                 "a {\"null\":N} set alone repeats the request as it is)")
   end
 end
 

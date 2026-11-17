@@ -1496,11 +1496,17 @@ module Gori::Tui
     def run_step : TrafficEmptyState::FuzzStep?
       return nil if @config.race_count
       grpc = @s_grpc_fields.each_char.any? { |c| c != ',' && !c.whitespace? }
-      return TrafficEmptyState::FuzzStep::Mark if position_count == 0 && !grpc
+      return TrafficEmptyState::FuzzStep::Mark if position_count == 0 && !grpc && !repeat_run?
       @sets.empty? ? TrafficEmptyState::FuzzStep::Payloads : TrafficEmptyState::FuzzStep::Run
     end
 
+    # Only null sets: `Fuzz::Plan` runs that with no position, repeating the request as it is.
+    private def repeat_run? : Bool
+      !@sets.empty? && @sets.all? { |s| s.kind == :null }
+    end
+
     private def compute_run_count : Int64?
+      return estimated_set_size(@sets[0]) if run_position_count == 0 && repeat_run?
       return nil if @sets.empty? || run_position_count == 0
       sizes = @sets.map { |s| estimated_set_size(s) }
       return nil if sizes.any?(Nil) # any unknown / overflowing size → unknown total

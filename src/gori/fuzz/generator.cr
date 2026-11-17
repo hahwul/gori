@@ -83,6 +83,7 @@ module Gori::Fuzz
     # in every frontend). Pitchfork's total is an UPPER bound (min of the KNOWN set
     # sizes; an unknown-length set could end the lockstep sooner).
     def total : Int64?
+      return set_size(0) if @marked.position_count == 0 # a repeat run, see `each`
       case @config.mode
       when .sniper?        then mul(@marked.position_count.to_i64, set_size(0))
       when .battering_ram? then set_size(0)
@@ -95,6 +96,9 @@ module Gori::Fuzz
     # Capture the caller's block as a Proc and thread it through the mode methods —
     # `yield` is illegal inside the captured recursion/iteration closures below.
     def each(&block : Job ->) : Nil
+      # No position: `Plan.build` admits only null sets, and the run repeats the request as it
+      # stands once per value of set 1, whatever the mode.
+      return battering(block) if @marked.position_count == 0
       case @config.mode
       when .sniper?        then sniper(block)
       when .battering_ram? then battering(block)

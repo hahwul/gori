@@ -4,6 +4,7 @@
 
 - LLM targets: QL `llm:true` finds LLM API calls and `llm:claude` narrows by model name, and the Fuzzer's body regex also matches a streamed reply as reassembled text, so a word split across SSE deltas is found. **Copy as… › LLM transcript** and `gori run show --format transcript` write a call as Markdown for a report (#1912)
 - Probe: `llm_prompt_injection` also flags an MCP `tools/list` result whose tool description hides itself from the user (#1912)
+- Fuzzer: a run whose only payload sets are null payloads needs no `§…§` position and sends the request as it stands N times (`--null=20`), to read a hit rate off a target whose answer varies (#1912)
 - Session bindings: an extract rule whose condition reads `header:` or `body:` fires on a Repeater send, a slot's refresh step and a macro step, not only on proxied traffic (#1912)
 
 - MCP: project binding replies include engagement guidance, capped at 2,000 characters with the full text in `project_info`; handshake instructions point agents to it before acting (#1911).
