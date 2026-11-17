@@ -28,10 +28,12 @@ module Gori
 
       @[Subcommand("fuzz", help: [
         {"fuzz [<id>]", "Fuzz/intrude a request: mark §…§ positions, sweep payloads"},
+        {"fuzz create", "Prepare a Fuzzer tab without sending (needs --project or --db)"},
         {"fuzz save/list/show", "Persist and inspect complete fuzz-run results (delete removes one)"},
       ])]
       private def self.cmd_fuzz(args : Array(String)) : Nil
         case args.first?
+        when "create" then cmd_fuzz_execute(args[1..], prepare: true)
         when "save"   then cmd_fuzz_execute(args[1..], save_results: true)
         when "list"   then cmd_fuzz_saved_list(args[1..])
         when "show"   then cmd_fuzz_saved_show(args[1..])
@@ -40,7 +42,9 @@ module Gori
         end
       end
 
-      private def self.cmd_fuzz_execute(args : Array(String), save_results : Bool = false) : Nil
+      private def self.cmd_fuzz_execute(args : Array(String), save_results : Bool = false, prepare : Bool = false) : Nil
+        run_only_flag : String? = nil
+        create_name : String? = nil
         proj = ProjectFlags.new
         flow_id : Int64? = nil
         repeater_id : Int64? = nil
@@ -94,12 +98,13 @@ module Gori
         ws_deflate = false
         ws_http_only = false
 
-        command = save_results ? "gori run fuzz save" : "gori run fuzz"
+        command = prepare ? "gori run fuzz create" : (save_results ? "gori run fuzz save" : "gori run fuzz")
         positional = parse_args(args, "gori run fuzz") do |p|
           p.banner = "Usage: #{command} [<flow-id>] [options]   (mark positions with §…§)"
           p.on("--flow=ID", "Seed the template from a captured flow") { |v| flow_id = parse_flow_id(v, "gori run fuzz") }
           p.on("--repeater=ID", "Seed the template from a saved repeater session (ids from `gori run repeater list`). A WebSocket session seeds its handshake AND its outbound frames — mark positions in the frames and each variation runs one full RFC 6455 session") { |v| repeater_id = parse_flow_id(v, "gori run fuzz --repeater") }
           p.on("--request=FILE", "Read a raw HTTP request (may contain §…§) as the template") { |v| request_file = v }
+          p.on("--name=NAME", "Fuzzer sub-tab name") { |v| create_name = v } if prepare
           project_options(p, proj, "read")
           p.on("--target=URL", "Send to this origin (scheme://host[:port]); required for --request/stdin") { |v| target_override = v }
           p.on("--http2", "Force HTTP/2") { force_h2 = true }
@@ -239,13 +244,14 @@ module Gori
           request_macro_flags(p, macro_flags, "candidate")
           p.on("--ac", "Auto-calibrate: sample the target's noise and drop matching responses") { auto_cal = true }
           format_flag(p, [:text, :json, :jsonl], "Output: text (default) | json | jsonl") { |f| format = f }
-          p.on("--force", "Run even when the request count is huge or unknown") { force = true }
-          p.on("--bind-from=FLOW-ID", "Replay this captured flow FIRST so its response fills session bindings ($BIND.NAME; bare syntax: $NAME)") { |v| bind_from = parse_flow_id(v, "gori run fuzz") }
-          p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens (bare syntax: $NAME)") { |v| slot = v.strip }
-          p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
-          p.on("--fail-if-no-matches", "Exit 3 when no result matched") { fail_if_no_matches = true }
-          p.on("--record-history=POLICY", "Also record sent request+response as History flows: none (default) | matched | all. Matched rows carry the flow_id; 'all' is capped at #{Fuzz::HistoryRecord::MAX} flows") { |v| record_policy = parse_record_history(v) }
+          p.on("--force", "Run even when the request count is huge or unknown") { force = true; run_only_flag = "--force" if prepare }
+          p.on("--bind-from=FLOW-ID", "Replay this captured flow FIRST so its response fills session bindings ($BIND.NAME; bare syntax: $NAME)") { |v| bind_from = parse_flow_id(v, "gori run fuzz"); run_only_flag = "--bind-from" if prepare }
+          p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens (bare syntax: $NAME)") { |v| slot = v.strip; run_only_flag = "--slot" if prepare }
+          p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true; run_only_flag = "--allow-unscoped" if prepare }
+          p.on("--fail-if-no-matches", "Exit 3 when no result matched") { fail_if_no_matches = true; run_only_flag = "--fail-if-no-matches" if prepare }
+          p.on("--record-history=POLICY", "Also record sent request+response as History flows: none (default) | matched | all. Matched rows carry the flow_id; 'all' is capped at #{Fuzz::HistoryRecord::MAX} flows") { |v| record_policy = parse_record_history(v); run_only_flag = "--record-history" if prepare }
         end
+        abort "gori run fuzz create: #{run_only_flag} is not accepted when preparing a tab" if run_only_flag
         refresh_verify_upstream(!insecure)
 
         # The run-wide `--payload-from-*` knobs, applied to every source now that argv is known,
@@ -269,8 +275,8 @@ module Gori
         # project: `optional_project_outbound` says so on STDERR and skips the scope gate. Writing
         # its results into the ambient default project anyway would put a sweep the operator kept
         # out of a project straight into that project's History. Name the project to record.
-        if (record_policy != :none || save_results) && !(flow_id || repeater_id || project_named?(proj.name, proj.db))
-          feature = save_results ? "fuzz save" : "--record-history"
+        if (record_policy != :none || save_results || prepare) && !(flow_id || repeater_id || project_named?(proj.name, proj.db))
+          feature = prepare ? "fuzz create" : (save_results ? "fuzz save" : "--record-history")
           abort "gori run fuzz: #{feature} needs a project — this run has none (--request/stdin " \
                 "without --project/--db or $#{DEFAULT_PROJECT_ENV}). Pass --project NAME or --db PATH to say where the results go."
         end
@@ -435,6 +441,29 @@ module Gori
         # BEFORE the bind-from seed and the plan: the slot decides which binding table the
         # replay fills and which one `$NAME` resolves out of, so a later activation would
         # seed one identity and send as another.
+        if prepare
+          begin
+            write_store = open_store(resolve_read_project(proj.name, proj.db))
+            prepared = Fuzz::PreparedSession.build(options,
+              Gori::Outbound.interactive(Gori::Scope.load(write_store)))
+            id = prepared.insert(write_store, create_name, flow_id)
+            abort "#{command}: Fuzzer tab was not saved" unless id > 0
+            warn_fuzz_marks(prepared.plan)
+            note_fuzz_unused_sets(prepared.plan)
+            note_payload_from(command, prepared.plan.payload_reports)
+            if format == :text
+              puts "created Fuzzer ##{id}#{create_name.try { |n| " (#{CLI::Output.term_safe(n)})" }} · #{prepared.plan.total || "?"} requests · not run"
+            else
+              puts({id: id, name: create_name, total: prepared.plan.total}.to_json)
+            end
+          rescue ex : Fuzz::PlanError
+            abort "#{command}: #{fuzz_plan_error(ex, text)}"
+          ensure
+            write_store.try(&.close)
+            payload_store.try(&.close)
+          end
+          return
+        end
         activate_slot(slot, "gori run fuzz")
         preflight_bind_from(bind_from, "gori run fuzz")
         outbound = optional_project_outbound(proj.name, proj.db, flow_id, allow_unscoped, repeater_id)

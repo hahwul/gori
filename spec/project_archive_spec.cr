@@ -1298,3 +1298,49 @@ describe Gori::ProjectArchive do
     end
   end
 end
+
+describe "ProjectArchive prepared Fuzzer tabs" do
+  it "keeps the request and shared config exactly as authored" do
+    with_archive_project do |registry, project, store, root|
+      args = JSON.parse({"template" => "GET /?q=§x§ HTTP/1.1\r\nHost: h\r\n\r\n",
+                         "url" => "http://h", "payloads" => [{"list" => ["a", "b"]}], "name" => "review"}.to_json)
+      created = tools_for(store).call("create_fuzzer", args)
+      created.is_error.should be_false, created.text
+      original = store.fuzz_sessions.first
+      archive = export_archive(project, File.join(root, "prepared.gori"))
+      prepared = Gori::ProjectArchive.prepare_import(archive)
+      begin
+        imported = prepared.import_into(registry, "Prepared copy")
+        copied = Gori::Store.open(imported.db_path)
+        begin
+          row = copied.fuzz_sessions.first
+          row.template.should eq(original.template)
+          row.target.should eq(original.target)
+          row.config.should eq(original.config)
+          row.name.should eq(original.name)
+        ensure
+          copied.close
+        end
+      ensure
+        prepared.close
+      end
+    end
+  end
+end
+
+describe "ProjectArchive prepared script disclosure" do
+  it "discloses an exec chain in a base64 WebSocket frame even after a malformed entry" do
+    with_archive_project do |_registry, project, store, root|
+      messages = [{"payload" => "%%%"}, {"payload" => Base64.strict_encode("§x¦exec:/usr/bin/id§")}]
+      config = {"plan_options" => {"messages" => messages}}.to_json
+      store.insert_fuzz_session("http://h", "GET / HTTP/1.1\r\n\r\n", false, nil, config, nil, 0)
+      archive = export_archive(project, File.join(root, "script.gori"))
+      prepared = Gori::ProjectArchive.prepare_import(archive)
+      begin
+        prepared.inventory.exec_fuzz_templates.should eq(1)
+      ensure
+        prepared.close
+      end
+    end
+  end
+end

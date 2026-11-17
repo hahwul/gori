@@ -26,7 +26,7 @@ module Gori::Tui
   # writes build_spec back into @sets; :stay otherwise. There is no cancel: every exit
   # applies, which is what the shell's apply_close_fuzz_set did on all three paths.
   class FuzzSetOverlay < Overlay
-    PTYPES = [:list, :numbers, :wordlist, :null, :brute, :preset, :project]
+    PTYPES = [:list, :numbers, :wordlist, :null, :brute, :preset, :project, :bytes]
 
     getter edit_index : Int32?
 
@@ -80,6 +80,9 @@ module Gori::Tui
 
     def seed(spec : SetSpec) : Nil
       case spec.kind
+      when :bytes
+        @ptype = :bytes
+        @values.set_text(spec.value)
       when :list
         @ptype = :list
         @values.set_text(SetSpec.list_values(spec.value).map(&.strip).reject(&.empty?).join('\n'))
@@ -115,11 +118,15 @@ module Gori::Tui
         @preset_name = spec.value if Gori::Fuzz::Presets.exists?(spec.value)
       when :project
         @ptype = :project
-        if ps = spec.project_spec
-          @fields[:project_query].set(ps.query)
-          @project_projection = ps.projection
-          @project_sensitive = ps.include_sensitive
-        end
+        seed_project(spec)
+      end
+    end
+
+    private def seed_project(spec : SetSpec) : Nil
+      if ps = spec.project_spec
+        @fields[:project_query].set(ps.query)
+        @project_projection = ps.projection
+        @project_sensitive = ps.include_sensitive
       end
     end
 
@@ -295,7 +302,7 @@ module Gori::Tui
         # into the values editor and is captured there. Without this the Type selector
         # silently swallowed it — losing the whole first line of a pasted wordlist (the
         # ^L quick-List path opens focused on this row). →/← still cycle the type.
-        if @ptype == :list && (ch = ev.char) && !ev.ctrl? && !ev.alt?
+        if list_editor? && (ch = ev.char) && !ev.ctrl? && !ev.alt?
           @sel = rows.index(:values) || @sel
           @values.insert(ch)
         end
@@ -450,9 +457,26 @@ module Gori::Tui
     # Charset) — the Runner then leaves @sets unchanged.
     def build_spec : SetSpec?
       case @ptype
+      when :bytes
+        vals = JSON.parse(@values.text).as_a
+        vals.each { |v| Base64.decode(v.as_s) }
+        SetSpec.new(:bytes, @values.text)
       when :list
         vals = list_values
         vals.empty? ? nil : SetSpec.list(vals)
+      when :preset
+        SetSpec.new(:preset, @preset_name)
+      when :project
+        SetSpec.project(@fields[:project_query].value.strip, @project_projection, @project_sensitive)
+      else
+        build_generated_spec
+      end
+    rescue Base64::Error | JSON::ParseException | TypeCastError
+      nil
+    end
+
+    private def build_generated_spec : SetSpec?
+      case @ptype
       when :numbers
         SetSpec.new(:numbers, "#{num64(:from)}-#{num64(:to)}:#{num64(:step, 1_i64)}")
       when :wordlist
@@ -463,11 +487,11 @@ module Gori::Tui
       when :brute
         cs = @fields[:charset].value.strip
         cs.empty? ? nil : SetSpec.new(:brute, "#{cs}:#{num(:min, 1)}-#{num(:max, 1)}")
-      when :preset
-        SetSpec.new(:preset, @preset_name)
-      when :project
-        SetSpec.project(@fields[:project_query].value.strip, @project_projection, @project_sensitive)
       end
+    end
+
+    private def list_editor? : Bool
+      @ptype == :list || @ptype == :bytes
     end
 
     private def list_values : Array(String)
@@ -487,6 +511,7 @@ module Gori::Tui
 
     private def ptype_label(t : Symbol) : String
       case t
+      when :bytes    then "Bytes (base64 JSON)"
       when :preset   then "Preset"
       when :numbers  then "Numbers"
       when :wordlist then "Wordlist"
@@ -541,10 +566,10 @@ module Gori::Tui
       render_type_row(screen, box)
       Frame.tee_divider(screen, box, box.y + 2, Theme.bg)
       case @ptype
-      when :list    then render_values(screen, box)
-      when :preset  then render_preset(screen, box)
-      when :project then render_project(screen, box)
-      else               render_fields(screen, box)
+      when :list, :bytes then render_values(screen, box)
+      when :preset       then render_preset(screen, box)
+      when :project      then render_project(screen, box)
+      else                    render_fields(screen, box)
       end
       render_save_prompt(screen, box)
       render_hint(screen, box)
@@ -554,7 +579,7 @@ module Gori::Tui
     # `title` is threaded in rather than re-derived: it is dynamic here (` · edit` / ` · new`),
     # and `Frame.border_meta` keeps the count clear of whichever one was drawn.
     private def render_meta(screen : Screen, box : Rect, title : String) : Nil
-      return unless @ptype == :list
+      return unless list_editor?
       n = list_values.size
       Frame.border_meta(screen, box, title, Gori.plural(n, "value"))
     end
@@ -690,7 +715,8 @@ module Gori::Tui
       editor = values_rect(box)
       foc = focused == :values
       if @values.line_count == 1 && @values.text.empty?
-        screen.text(editor.x, editor.y, "one value per line — paste a wordlist, it splits automatically", Theme.muted, Theme.bg, width: editor.w)
+        hint = @ptype == :bytes ? "JSON array of base64 payloads, e.g. [\"YQ==\",\"\"]" : "one value per line — paste a wordlist, it splits automatically"
+        screen.text(editor.x, editor.y, hint, Theme.muted, Theme.bg, width: editor.w)
         screen.cursor(editor.x, editor.y) if foc
       else
         @values.render(screen, editor, cursor: foc)
@@ -700,7 +726,7 @@ module Gori::Tui
     # The "Save as" row: a label and the name field, on the row above the hint. Only while
     # the prompt is open; `render_values` has already given up that row (`values_rect`).
     private def render_save_prompt(screen : Screen, box : Rect) : Nil
-      return unless (sv = @saving) && @ptype == :list
+      return unless (sv = @saving) && list_editor?
       y = box.bottom - 3
       screen.fill(Rect.new(box.x + 1, y, box.w - 2, 1), Theme.accent_bg)
       screen.text(box.x + 2, y, "Save as", Theme.text_bright, Theme.accent_bg)
@@ -740,7 +766,7 @@ module Gori::Tui
       if my == box.y + 1
         @sel = 0
         sync_path_complete
-      elsif @ptype == :list
+      elsif list_editor?
         @sel = rows.index(:values) || @sel
         @values.click_to_cursor(values_rect(box), mx, my)
       else
@@ -763,17 +789,17 @@ module Gori::Tui
     # buffer when it is showing and otherwise falls through to the base, which routes to
     # whichever listed field was drawn under the pointer.
     def supports_drag? : Bool
-      @ptype == :list || super
+      list_editor? || super
     end
 
     def handle_drag(area : Rect, mx : Int32, my : Int32) : Nil
-      return super unless @ptype == :list
+      return super unless list_editor?
       return unless box = overlay_box(area)
       @values.click_to_cursor(values_rect(box), mx, my, selecting: true)
     end
 
     def handle_double_click(area : Rect, mx : Int32, my : Int32) : Symbol
-      return super unless @ptype == :list
+      return super unless list_editor?
       return :pass unless box = overlay_box(area)
       @values.select_word_at(values_rect(box), mx, my) ? :stay : :pass
     end

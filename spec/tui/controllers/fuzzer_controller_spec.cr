@@ -275,3 +275,32 @@ describe "FuzzerController.done_line" do
       .should eq({:success, "Fuzzer: 2 hits / 2 sent on GET / (stopped) · macro: 1 failed"})
   end
 end
+
+describe "FuzzerController — prepared peer tab" do
+  it "picks up a tab authored through MCP and builds the same run as a hand-made tab" do
+    with_fuzzer_controller do |ctl, session|
+      args = JSON.parse({"template" => "GET /?q=§x§ HTTP/1.1\r\nHost: h\r\n\r\n",
+                         "url" => "http://h", "payloads" => [{"list" => ["a", "b"]}], "name" => "peer draft"}.to_json)
+      tools = Gori::MCP::Tools.new(session.store, allow_actions: true, verify_upstream: false,
+        denied_permissions: Set{"send"})
+      result = tools.call("create_fuzzer", args)
+      result.is_error.should be_false, result.text
+      ctl.reconcile
+      ctl.count.should eq(1)
+      view = ctl.view_at(0).not_nil!
+      view.name.should eq("peer draft")
+      host = ctl.@host.as(FakeHost)
+      host.notifications.latest.not_nil!.message.should eq("Fuzzer tab added: peer draft")
+      host.notifications.latest.not_nil!.goto.not_nil!.session_id.should eq(ctl.db_id_at(0))
+      prepared, error = view.build_engine(false, session.scope, project: session.store)
+      error.should be_nil
+      manual = FuzzerView.new
+      manual.load_request("http://h", args["template"].as_s, false, "")
+      manual.apply_set(nil, SetSpec.list(["a", "b"]))
+      handmade, error = manual.build_engine(false, session.scope, project: session.store)
+      error.should be_nil
+      prepared.not_nil!.total.should eq(handmade.not_nil!.total)
+      ctl.stop_all
+    end
+  end
+end

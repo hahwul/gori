@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fuzzer: agents can prepare a sub-tab with `create_fuzzer` while Send traffic is off, and scripts can use `gori run fuzz create`; the operator reviews and runs the saved request, payloads, processors and WebSocket script in the TUI (#1910).
+
 - LLM targets: QL `llm:true` finds LLM API calls and `llm:claude` narrows by model name, and the Fuzzer's body regex also matches a streamed reply as reassembled text, so a word split across SSE deltas is found. **Copy as… › LLM transcript** and `gori run show --format transcript` write a call as Markdown for a report (#1912)
 - Probe: `llm_prompt_injection` also flags an MCP `tools/list` result whose tool description hides itself from the user (#1912)
 - Fuzzer: a run whose only payload sets are null payloads needs no `§…§` position and sends the request as it stands N times (`--null=20`), to read a hit rate off a target whose answer varies (#1912)

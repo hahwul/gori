@@ -2,11 +2,16 @@ require "json"
 require "../settings"
 require "../display_columns"
 require "./set_spec"
+require "./session_options"
 
 module Gori::Fuzz
   # The persisted Fuzzer tab format. Raw text knobs remain authored text, including
   # values that no longer resolve; parsing them into a runnable plan is a separate step.
   class SessionConfig
+    property evidence : Bool? = nil
+    property options : SessionOptions? = nil
+    property options_error : String? = nil
+    @options_raw : JSON::Any? = nil
     property config : Config
     property matcher : Matcher
     property? http2 : Bool
@@ -34,6 +39,15 @@ module Gori::Fuzz
     def to_json : String
       JSON.build do |j|
         j.object do
+          if options = @options
+            j.field "plan_options", options
+          elsif raw = @options_raw
+            j.field "plan_options", raw
+          end
+          if (timeout = @config.timeout) && timeout.total_milliseconds % 1000 != 0
+            j.field "timeout_ms", timeout.total_milliseconds.to_i64
+          end
+          j.field "evidence", @evidence unless @evidence.nil?
           j.field "mode", @config.mode.to_s
           j.field "http2", @http2
           j.field "sni", @sni
@@ -66,6 +80,12 @@ module Gori::Fuzz
           j.field "filter_time", @matcher.filter_time
           j.field "match_regex", @matcher.match_regex.try(&.source)
           j.field "filter_regex", @matcher.filter_regex.try(&.source)
+          j.field "match_grpc", @matcher.match_grpc if @matcher.match_grpc
+          j.field "filter_grpc", @matcher.filter_grpc if @matcher.filter_grpc
+          j.field "match_lines", @matcher.match_lines if @matcher.match_lines
+          j.field "filter_lines", @matcher.filter_lines if @matcher.filter_lines
+          j.field "match_header", @matcher.match_header if @matcher.match_header
+          j.field "filter_header", @matcher.filter_header if @matcher.filter_header
           # The named extractors (#1592) as `--extractor` specs; the old single `extract` regex
           # is read back as extractor 0 and not written again.
           j.field("extractors") do
@@ -88,6 +108,8 @@ module Gori::Fuzz
     def apply_json(raw : String) : Bool
       return false if raw.strip.empty?
       obj = JSON.parse(raw).as_h? || return false
+      apply_options_json(obj)
+      @evidence = obj["evidence"]?.try(&.as_bool?)
       obj["mode"]?.try(&.as_s?).try { |m| Fuzz::Mode.parse?(m).try { |mode| @config.mode = mode } }
       @http2 = obj["http2"]?.try(&.as_bool?) || @http2
       @sni = obj["sni"]?.try(&.as_s?) || @sni
@@ -97,6 +119,7 @@ module Gori::Fuzz
       # Assigned, not guarded: `config_json` writes the key as `null` when there is no
       # timeout, and a guarded read kept the stale one when the peer had CLEARED it.
       @config.timeout = Settings.int_field(obj, "timeout_s").try(&.seconds)
+      obj["timeout_ms"]?.try(&.as_i64?).try { |ms| @config.timeout = ms.milliseconds }
       Settings.int_field(obj, "retries").try { |n| @config.retries = n }
       @config.max_requests = obj["max_requests"]?.try(&.as_i64?)
       @config.race_count = Settings.int_field(obj, "race_count")
@@ -130,6 +153,12 @@ module Gori::Fuzz
       @matcher.filter_time = obj["filter_time"]?.try(&.as_s?)
       @matcher.match_regex = obj["match_regex"]?.try(&.as_s?).try { |s| Regex.new(s) rescue nil }
       @matcher.filter_regex = obj["filter_regex"]?.try(&.as_s?).try { |s| Regex.new(s) rescue nil }
+      @matcher.match_grpc = obj["match_grpc"]?.try(&.as_s?)
+      @matcher.filter_grpc = obj["filter_grpc"]?.try(&.as_s?)
+      @matcher.match_lines = obj["match_lines"]?.try(&.as_s?)
+      @matcher.filter_lines = obj["filter_lines"]?.try(&.as_s?)
+      @matcher.match_header = obj["match_header"]?.try(&.as_s?)
+      @matcher.filter_header = obj["filter_header"]?.try(&.as_s?)
       apply_extractors_json(obj)
       @grpc_fields = string_knob(obj, "grpc_fields")
       apply_macro_json(obj)
@@ -137,6 +166,24 @@ module Gori::Fuzz
     rescue
       # tolerate a malformed/older config blob — keep defaults
       false
+    end
+
+    def options_raw_json : String?
+      @options_raw.try(&.to_json)
+    end
+
+    def apply_options_raw(raw : String?) : Nil
+      @options_raw = raw.try { |value| (JSON.parse(value) rescue JSON::Any.new(value)) }
+    end
+
+    private def apply_options_json(obj : Hash(String, JSON::Any)) : Nil
+      @options = nil
+      @options_error = nil
+      @options_raw = obj["plan_options"]?
+      return unless raw = @options_raw
+      @options = SessionOptions.from_json(raw.to_json)
+    rescue ex
+      @options_error = "saved Fuzzer options cannot be read: #{ex.message}"
     end
 
     # Each spec on its own, so one that no longer parses is dropped rather than every other one
@@ -205,6 +252,7 @@ module Gori::Fuzz
     private def parse_set_kind(k : String?) : Symbol?
       case k
       when "list"    then :list
+      when "bytes"   then :bytes
       when "file"    then :file
       when "preset"  then :preset
       when "project" then :project

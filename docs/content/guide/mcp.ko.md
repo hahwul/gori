@@ -94,7 +94,7 @@ gori mcp --read-only
 
 | 시작 방법 | 도구 | `tools/list` | 토큰 | 용도 |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 199 | ~182 KB | ~47k | 전부 (기본값) |
+| `gori mcp` | 200 | ~201 KB | ~51k | 전부 (기본값) |
 | `--read-only` | 65 | ~57 KB | ~15k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
 | `--tools=@analysis` | 5 | ~8 KB | ~2k | 시작할 때 바인딩한 캡처 분석; 프로젝트 전환·TUI 메시지 없음 |
 | `--tools=@recon` | 39 | ~41 KB | ~11k | 캡처를 읽고 파악, 패시브 스캔, 요청 재전송, 이슈·노트 기록 |
@@ -239,6 +239,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `project_info` | 플로우 / 이슈 개수, 캡처 구간, 프로젝트 `description`과 `tags`, 데이터베이스, 워크스페이스 바인딩, 선택 출처 |
 | `get_current_context` | 사용자가 지금 TUI에서 보고 있는 것, **그리고 무엇을 선택했는지**. `selection.ids`는 History / Issues / Sitemap / Intercept에서 마크한 행이고, 마크가 없으면 커서 행, 디테일이 열려 있으면 거기 고정된 플로우입니다. `target_source`가 셋 중 무엇인지 알려 줍니다. Sitemap은 플로우 id가 아니라 `{host, path}` 쌍을 고르며 `kind`가 그걸 알려 줍니다. 배열이 잘렸다는 신호는 `truncated` 하나뿐입니다. `marked_count`는 마크 집합을 말하는 값이라 드릴인이 그걸 덮어쓴 경우에도 그대로 실립니다. `marks_elsewhere`는 이 selection이 싣지 못한 마크가 어느 탭에 있는지를(`tab`과 개수, 그리고 그 마크에 kind가 있을 때만 `kind`), `tui.live`는 gori TUI 창이 붙어 있는지를 말합니다(증거이지 증명은 아닙니다). History 선택은 `list_history{ids}`에 넘기면 됩니다. 그 선택이 걸러진 History 렌즈(`query`, `view`, `scope_lens`, `hide_static`)도 함께 오므로, 에이전트가 사용자가 보는 목록을 그대로 나열할 수 있습니다 |
 | `get_repeater_context` | Repeater 워크벤치 상태와 저장된 세션. 세션마다 id를 **둘 다** 싣습니다(모든 repeater 툴이 받는 `id`(`db_id`로도 실림), 그리고 TUI가 서브탭 칩에 그리는 1-based 번호 `tui_index`(`6:POST /api`)). 그래서 에이전트와 사용자가 같은 탭을 같은 이름으로 부릅니다. `create_repeater`가 돌려주고 이름 없는 탭의 칩에 그려지는 `summary`(`METHOD /path`)도 함께 싣습니다. `filter`는 TUI의 `/`와 같은 서브탭 문법(`tag:` `name:` `host:` `method:` `status:`, `-`는 부정, 맨 단어는 검색)이고 `query`와 AND로 묶입니다. `include_content`는 요청 헤드와 함께, 자격증명 헤더마다 비밀값 없이 배선만 밝히는 `env_headers` 모양(`Authorization: Bearer $ENV.AUTH`)을 줍니다. `include_response_body`는 저장된 마지막 응답 본문을 인라인합니다 |
+| `create_fuzzer` | 전송 없이 Fuzzer 서브탭을 준비합니다. `fuzz_start` 인자에 `name`을 더하며, `save_results`·`record_history`·`allow_unscoped`는 받지 않습니다. **프로젝트 데이터 편집** 권한이 필요하고 **트래픽 전송**이 꺼져 있어도 동작합니다. exec 체인은 **로컬 명령 실행**의 off/ask 권한을 동일하게 적용합니다. 공용 Plan으로 검증하고 payload 파일·프로젝트 소스를 읽은 뒤 `id`·`name`·`total`과 실행 경고를 반환합니다. 열린 TUI에 탭이 나타나며, 운영자가 검토 후 실행합니다. Advanced → **Options (JSON)**에서 processors·위치 지정·WebSocket 프레임 형태를 확인하고 수정할 수 있습니다(payload는 base64). 요청 원문은 그대로 저장하고 출력만 마스킹합니다. 프로젝트에서 읽은 payload와 파일을 합친 preset은 스냅샷으로, wordlist 경로는 절대 경로로 보존합니다. CLI에서는 `gori run fuzz create --project NAME --request request.txt --target https://example.com --payloads a,b --name review`를 사용합니다. scope 검사는 운영자가 실행할 때 적용합니다. |
 | `list_fuzz_runs` / `get_fuzz_run` | 영구 Fuzzer 결과 집합을 나열하고 들여다봅니다. 지표는 `result_index`를 포함해 스칼라 전용 투영을 쓰므로 보관된 BLOB을 읽지 않습니다. `include_content:true`는 SQLite에서 상한이 걸린 접두 바이트로 최대 25행을 돌려줍니다. `max_head_bytes`(기본 16 KiB, 최대 64 KiB)가 헤드를, `max_body_bytes`(기본 2 KiB, 최대 64 KiB)가 디코딩된 본문/원시 표본을 제한합니다. 원본 전체 크기와 헤드/원본/디코딩 절단 플래그가 무엇이 빠졌는지 말해 주며, `include_sensitive:true`는 상한이 걸린 정확한 접두 바이트를 선택하는 것이지 무제한 바이트가 아닙니다. 현재 형식 이전 스냅숏은 실행 메타데이터에 `legacy:true`로 표시되고, `condition_met` 실행은 `stop_on`이 걸린 결과를 `stop_index`로 밝힙니다. 그대로 `result_index`로 넘기면 됩니다(기록되지 않았으면 null이며, `fuzz_status`도 같은 필드를 실시간으로 보고합니다). `clusters:true`는 실행을 응답 모양으로 묶어 페이지 단위로, `cluster:"<id>"`는 그 묶음의 행을 돌려주며 `fuzz_results`와 같게 동작합니다 |
 | `ql_reference` | 쿼리 언어 레퍼런스 |
 | `ql_explain` | 쿼리를 실행하지 않고 진단. 요청을 쓰기 전에 필터를 점검할 때 사용 |

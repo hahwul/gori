@@ -43,7 +43,7 @@ describe "FuzzerView#build_engine refusals" do
   end
 
   it "refuses a numeric Advanced field that does not parse instead of running the default" do
-    refusal(fuzzer_with(->(s : AdvancedSnapshot) { s.copy_with(timeout: "1.5") })).not_nil!.should contain("Timeout")
+    refusal(fuzzer_with(->(s : AdvancedSnapshot) { s.copy_with(timeout: "1.5x") })).not_nil!.should contain("Timeout")
     refusal(fuzzer_with(->(s : AdvancedSnapshot) { s.copy_with(conc: "50x") })).not_nil!.should contain("Concurrency")
     refusal(fuzzer_with(->(s : AdvancedSnapshot) { s.copy_with(retries: "3 x") })).not_nil!.should contain("Retries")
   end

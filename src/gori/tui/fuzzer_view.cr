@@ -167,6 +167,10 @@ module Gori::Tui
       @scx = 0             # caret in the SNI row (@tcx is the URL row's)
       @target_field = :url # which field the TARGET pane edits: :url | :sni
       @http2 = false
+      @session_options = nil.as(Fuzz::SessionOptions?)
+      @session_options_error = nil.as(String?)
+      @session_options_raw = nil.as(String?)
+      @evidence_override = nil.as(Bool?)
       @evidence = false
       # The `$NAME`s the SEEDED template arrived with — see `operator_env_vars`, and
       # `RepeaterView#seed_draft_baselines` for the model. Empty on a draft, where every `$`
@@ -306,6 +310,8 @@ module Gori::Tui
       @outside_reps = Set(Int64).new
       # §-region offsets, recomputed only when the buffer changes (keyed on @editor.edits).
       # Backs BOTH the template tint colours and the Sets→marker chips, so they can't disagree.
+      @prepared_count_key = ""
+      @prepared_count = 0
       @marker_text_rev = -1
       @marker_spans = [] of {Int32, Int32}
       @marker_regions_rev = -1
@@ -900,6 +906,12 @@ module Gori::Tui
     end
 
     def clear_marks : String
+      @prepared_count_key = ""
+      @session_options.try do |options|
+        options.auto_mark = false
+        options.marks.clear
+        options.messages.try(&.each(&.clear_marks))
+      end
       # clear_markers renders the defaults inline — drops both the § delimiters AND any
       # ¦chain (a naive gsub("§","") would leave a stray value¦chain behind).
       @editor.remark_keeping_eols(Fuzz::Template.clear_markers(@editor.text))
@@ -1408,7 +1420,8 @@ module Gori::Tui
         stop_after: @s_stop_after, stop_on: @s_stop_on,
         keep_interesting: @config.keep.interesting?,
         macro_steps: @s_macro_steps, macro_every: @s_macro_every,
-        macro_expect: @s_macro_expect, macro_on_failure: @s_macro_on_failure)
+        macro_expect: @s_macro_expect, macro_on_failure: @s_macro_on_failure,
+        plan_options: @session_options.try(&.to_json) || @session_options_raw || "")
     end
 
     # Write the overlay's edited knobs back into the engine buffers (regexes stay as
@@ -1458,7 +1471,19 @@ module Gori::Tui
       @s_macro_every = s.macro_every
       @s_macro_expect = s.macro_expect
       @s_macro_on_failure = s.macro_on_failure
+      apply_session_options(s.plan_options)
       @dirty = true
+    end
+
+    private def apply_session_options(raw : String) : Nil
+      Fuzz::SessionOptions.new.apply_config(@config) if @session_options
+      @session_options_raw = raw.presence
+      @session_options_error = nil
+      @session_options = raw.blank? ? nil : Fuzz::SessionOptions.from_json(raw)
+      @prepared_count_key = ""
+    rescue ex
+      @session_options = nil
+      @session_options_error = "saved Fuzzer options cannot be read: #{ex.message}"
     end
 
     private def blank_nil(s : String) : String?
@@ -1474,7 +1499,7 @@ module Gori::Tui
       # The RAW field row, not the parsed list: this runs on the render fiber every frame and
       # `grpc_field_specs` allocates, while the string it splits is the thing that actually
       # changes. (`position_count` is memoized on the editor revision for the same reason.)
-      sig = "#{@config.mode}|#{position_count}|#{@s_grpc_fields}|#{@sets.map { |s| "#{s.kind}:#{s.display}" }.join("~")}"
+      sig = "#{@config.mode}|#{run_position_count}|#{@s_grpc_fields}|#{@sets.map { |s| "#{s.kind}:#{s.display}" }.join("~")}"
       return @run_count_cache if sig == @run_count_sig
       @run_count_sig = sig
       @run_count_cache = compute_run_count
@@ -1486,7 +1511,16 @@ module Gori::Tui
     # estimate asks this instead. Without it a field-only sweep reported `Run · 0 requests`
     # for a run that was about to send one per payload.
     private def run_position_count : Int32
-      position_count + grpc_field_specs.size
+      count = position_count
+      if options = @session_options
+        key = "#{@editor.edits}|#{Env.highlight_rev}|#{options.object_id}"
+        if key != @prepared_count_key
+          @prepared_count_key = key
+          @prepared_count = options.position_count(@editor.wire_text, @evidence, @http2, operator_env_vars)
+        end
+        count = @prepared_count
+      end
+      count + (grpc_field_specs.size rescue 0)
     end
 
     # The first thing a run still lacks, in the order `Fuzz::Plan.build` refuses them; nil for
@@ -1495,8 +1529,7 @@ module Gori::Tui
     # `grpc_field_specs` does.
     def run_step : TrafficEmptyState::FuzzStep?
       return nil if @config.race_count
-      grpc = @s_grpc_fields.each_char.any? { |c| c != ',' && !c.whitespace? }
-      return TrafficEmptyState::FuzzStep::Mark if position_count == 0 && !grpc && !repeat_run?
+      return TrafficEmptyState::FuzzStep::Mark if run_position_count == 0 && !repeat_run?
       @sets.empty? ? TrafficEmptyState::FuzzStep::Payloads : TrafficEmptyState::FuzzStep::Run
     end
 
@@ -1573,7 +1606,7 @@ module Gori::Tui
       # past Int32 read with `to_i?` fell back to the default while the row kept showing it.
       @config.concurrency = (@s_conc.to_i64? || 20_i64).clamp(1, 1000).to_i
       @config.rps = @s_rate.to_f?.try { |r| r > 0 ? r : nil }
-      @config.timeout = @s_timeout.to_i64?.try { |t| t > 0 ? t.clamp(1, Int32::MAX).seconds : nil }
+      @config.timeout = buffered_timeout
       @config.retries = (@s_retries.to_i64? || 0_i64).clamp(0, 1000).to_i
       # Blank / unparsable / <= 0 all mean "no cap" — the same reading `--max-requests`
       # and MCP give an absent key, so clearing the field really does remove the ceiling.
@@ -1590,6 +1623,10 @@ module Gori::Tui
       @config.stop_after_matches = @s_stop_after.to_i?.try { |n| n > 0 ? n : nil }
       @matcher.stop_condition = compiled_stop_condition
       @config.request_macro = macro_spec
+    end
+
+    private def buffered_timeout : Time::Span?
+      @s_timeout.to_f?.try { |t| t.finite? && t > 0 ? t.clamp(0.001, Int32::MAX).seconds : nil }
     end
 
     # The ADVANCED card's macro rows as a spec, or nil when no steps are named (which is every
@@ -1636,7 +1673,10 @@ module Gori::Tui
       spec = @s_stop_on.strip
       return nil if spec.empty?
       cond = Fuzz::Matcher.new
+      return Fuzz::SavedMatcher.from_json(spec).build if spec.starts_with?('{')
       Fuzz.apply_stop_term(spec, cond).nil? ? cond : nil
+    rescue
+      nil
     end
 
     # The stop-condition buffer's GRAMMAR error, or nil — the twin of `regex_error`, named for
@@ -1646,13 +1686,16 @@ module Gori::Tui
     private def stop_on_error : String?
       spec = @s_stop_on.strip
       return nil if spec.empty?
+      if spec.starts_with?('{')
+        return compiled_stop_condition ? nil : "invalid stop condition JSON"
+      end
       Fuzz.apply_stop_term(spec, Fuzz::Matcher.new)
     end
 
     private def sync_buffers : Nil
       @s_conc = @config.concurrency.to_s
       @s_rate = @config.rps.try(&.to_s) || ""
-      @s_timeout = @config.timeout.try(&.total_seconds.to_i.to_s) || ""
+      @s_timeout = @config.timeout.try { |t| t.total_seconds % 1 == 0 ? t.total_seconds.to_i.to_s : t.total_seconds.to_s } || ""
       @s_retries = @config.retries.to_s
       @s_max_req = @config.max_requests.try(&.to_s) || ""
       @s_race = @config.race_count.try(&.to_s) || ""
@@ -1678,13 +1721,13 @@ module Gori::Tui
     private def buffer_error : String?
       {
         {"Concurrency", @s_conc, "a whole number"}, {"Rate", @s_rate, "requests per second"},
-        {"Timeout", @s_timeout, "whole seconds"}, {"Retries", @s_retries, "a whole number"},
+        {"Timeout", @s_timeout, "seconds"}, {"Retries", @s_retries, "a whole number"},
         {"Max requests", @s_max_req, "a whole number"}, {"Race", @s_race, "a whole number"},
         {"Stop after N hits", @s_stop_after, "a whole number"},
       }.each do |(name, buf, form)|
         v = buf.strip
         next if v.empty?
-        ok = name == "Rate" ? !v.to_f?.nil? : !v.to_i64?.nil?
+        ok = {"Rate", "Timeout"}.includes?(name) ? !!v.to_f?.try(&.finite?) : !v.to_i64?.nil?
         return "invalid #{name}: #{v} (#{form})" unless ok
       end
       stop_after_range_error
@@ -1712,6 +1755,7 @@ module Gori::Tui
     def build_engine(verify : Bool, scope : Gori::Scope,
                      overrides : Gori::HostOverrides? = nil,
                      project : Gori::Store? = nil) : {Fuzz::Engine?, String?}
+      return {nil, @session_options_error} if @session_options_error
       commit_buffers
       if err = regex_error
         return {nil, err} # don't silently run match-everything on a bad pattern
@@ -1749,7 +1793,7 @@ module Gori::Tui
       # on a head that already carries CRLF (`Env.normalize_crlf` only inserts a CR before an
       # LF that has none), so a wire-form template changes nothing downstream.
       @matcher.extractors = extractors
-      options = Fuzz::PlanOptions.new(evidence_template, evidence: @evidence,
+      options = Fuzz::PlanOptions.new(plan_template, evidence: @evidence,
         target: @target, http2: @http2,
         sources: @sets.map { |s| build_source(s) }, config: @config, matcher: @matcher,
         grpc_fields: grpc_field_specs,
@@ -1757,6 +1801,7 @@ module Gori::Tui
         # The project a Project set reads (#1352). The live TUI reports the search-index backlog
         # instead of waiting on a writer (`project_drain_fts: false`): this runs on the event loop.
         project: project, project_drain_fts: false)
+      options = @session_options.try(&.apply(options)) || options
       @payload_reports = [] of Gori::PayloadFrom::Report # a failed build must not leave the last run's
       @macro_info = nil                                  # …nor its macro
       plan = Fuzz::Plan.build(options, Gori::Outbound.interactive(scope))
@@ -1817,7 +1862,18 @@ module Gori::Tui
     # rather than `,` — `Decoder::SEPARATORS` treats all three as equivalent, so nothing is
     # lost, and the comma is what separates FIELDS on this row.
     private def grpc_field_specs : Array(String)
-      @s_grpc_fields.split(',').map(&.strip).reject(&.empty?)
+      raw = @s_grpc_fields.strip
+      if raw.starts_with?('[')
+        JSON.parse(raw).as_a.map(&.as_s)
+      else
+        raw.split(',').map(&.strip).reject(&.empty?)
+      end
+    rescue JSON::ParseException | TypeCastError
+      raise Gori::Error.new("invalid gRPC fields JSON — use an array of field strings")
+    end
+
+    private def plan_template : String
+      @evidence_override.nil? ? evidence_template : @editor.wire_text
     end
 
     # The template bytes handed to `Plan.build`, with ONE editor-owed fixup applied for an
@@ -2036,38 +2092,7 @@ module Gori::Tui
     end
 
     private def build_source(s : SetSpec) : Fuzz::PayloadSource
-      case s.kind
-      when :list    then Fuzz::InlineList.new(SetSpec.list_values(s.value))
-      when :file    then Fuzz::WordlistFile.new(s.value)
-      when :preset  then Fuzz::PresetSource.new(s.value)
-      when :project then build_project_source(s)
-      when :null    then Fuzz::NullPayloads.new(s.value.to_i? || 1)
-      when :numbers then build_numbers(s.value)
-      when :brute   then build_brute(s.value)
-      else               Fuzz::InlineList.new([s.value])
-      end
-    end
-
-    # A `:project` set as the source the plan builder reads (#1352). Nothing is read here.
-    private def build_project_source(s : SetSpec) : Fuzz::PayloadSource
-      spec = s.project_spec || raise Gori::Error.new("a project payload set could not be read back — edit it and choose its source again")
-      Fuzz::ProjectSource.new(spec)
-    end
-
-    private def build_numbers(value : String) : Fuzz::NumberRange
-      range, _, step = value.partition(':')
-      # Match two (possibly negative) integers, so a leading '-' on From isn't mistaken
-      # for the from/to separator (partition('-') would split "-5-5" as "" / "5-5").
-      m = range.match(/\A(-?\d+)-(-?\d+)\z/)
-      from = (m.try(&.[1].to_i64?)) || 0_i64
-      to = (m.try(&.[2].to_i64?)) || 0_i64
-      Fuzz::NumberRange.new(from, to, step.to_i64? || 1_i64)
-    end
-
-    private def build_brute(value : String) : Fuzz::BruteForce
-      charset, _, lens = value.rpartition(':')
-      lo, _, hi = lens.partition('-')
-      Fuzz::BruteForce.new(charset, lo.to_i? || 1, hi.to_i? || (lo.to_i? || 1))
+      s.build_source
     end
 
     # --- results pane navigation --------------------------------------------
@@ -2828,7 +2853,12 @@ module Gori::Tui
     # --- config serialization ------------------------------------------------
     private def session_config : Fuzz::SessionConfig
       Fuzz::SessionConfig.new(@config, @matcher, @http2, @sni, @sets, @extractor_columns,
-        @s_stop_on, @s_grpc_fields, @s_macro_steps, @s_macro_every, @s_macro_expect, @s_macro_on_failure)
+        @s_stop_on, @s_grpc_fields, @s_macro_steps, @s_macro_every, @s_macro_expect, @s_macro_on_failure).tap do |state|
+        state.evidence = @evidence_override
+        state.options = @session_options
+        # Preserve malformed options so a save never turns an inert row into an armed default.
+        state.apply_options_raw(@session_options_raw) if @session_options_error
+      end
     end
 
     def config_json : String
@@ -2839,6 +2869,13 @@ module Gori::Tui
     private def apply_config_json(raw : String) : Nil
       state = session_config
       applied = state.apply_json(raw)
+      Fuzz::SessionOptions.new.apply_config(@config) if @session_options
+      @session_options = state.options
+      @session_options_error = state.options_error
+      @session_options_raw = state.options_raw_json
+      @evidence_override = state.evidence
+      @evidence = state.evidence == true unless state.evidence.nil?
+      @editor.env_literal_source = @evidence ? @evidence_env_seed : nil
       @http2 = state.http2?
       @sni = state.sni
       @sets = state.sets
@@ -3154,7 +3191,8 @@ module Gori::Tui
       screen.fill(Rect.new(inner.x, y, inner.w, 1), bg) if foc
       screen.text(inner.x + 1, y, "Advanced", foc ? Theme.text_bright : Theme.muted, bg)
       dx = inner.x + 10
-      screen.text(dx, y, "Engine · Match · Filter  ⏎", Theme.muted, bg, width: {inner.right - dx, 1}.max) if dx < inner.right
+      summary = @session_options.try(&.summary) || "Engine · Match · Filter"
+      screen.text(dx, y, "#{summary}  ⏎", Theme.muted, bg, width: {inner.right - dx, 1}.max) if dx < inner.right
     end
 
     # A passive read-out of the run size (mode × sets × markers) at the CONFIG foot. NOT a

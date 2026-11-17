@@ -716,3 +716,23 @@ describe "Fuzz::Plan gRPC field preflight and exec hooks" do
     end
   end
 end
+
+describe "Prepared gRPC field arrays" do
+  it "preserves a comma-separated Decoder chain inside one field spec" do
+    with_demo_schema do
+      with_store do |store|
+        options = Fuzz::PlanOptions.new(grpc_request(demo_request_bytes), target: "http://h",
+          grpc_fields: ["name¦base64-encode,url-encode"],
+          sources: [Fuzz::InlineList.new(["p"]).as(Fuzz::PayloadSource)])
+        prepared = Fuzz::PreparedSession.build(options, ungated_outbound)
+        id = prepared.insert(store, "grpc chain", nil)
+        view = Gori::Tui::FuzzerView.new
+        view.restore(store.get_fuzz_session(id).not_nil!)
+        engine, error = view.build_engine(false, Gori::Scope.load(store), project: store)
+        error.should be_nil
+        engine.not_nil!.total.should eq(prepared.plan.total)
+        view.run_request_count.should eq(1_i64)
+      end
+    end
+  end
+end

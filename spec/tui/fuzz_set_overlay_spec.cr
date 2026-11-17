@@ -98,8 +98,8 @@ describe Gori::Tui::FuzzSetOverlay do
 
   it "cycling the Type row wraps back to List" do
     ov = FuzzSetOverlay.for_list
-    7.times { ov.handle_key(okey(Termisu::Input::Key::Right)) } # list→…→brute→preset→project→list
-    ov.handle_key(okey(Termisu::Input::Key::Down))              # values editor
+    FuzzSetOverlay::PTYPES.size.times { ov.handle_key(okey(Termisu::Input::Key::Right)) } # one full cycle
+    ov.handle_key(okey(Termisu::Input::Key::Down))                                        # values editor
     otype(ov, "x")
     ov.build_spec.not_nil!.kind.should eq(:list)
   end
