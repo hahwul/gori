@@ -478,7 +478,8 @@ module Gori::Fuzz
           # grammar `Env.unescape_set` ignores it and hands this pass its own `resolve` set — so a
           # narrowed evidence expansion CONSUMED `$$ENV.X` and replayed `$ENV.X`. The narrowing is
           # about the var TABLE; the escape belongs to the capture either way.
-          (vars = options.env_vars) ? String.new(Env.expand_wire(options.template, vars, unescape: Env::Owns::None)) : options.template
+          # Evidence framing is already wire data; an editor owns any newline promotion.
+          (vars = options.env_vars) ? Env.expand(options.template, vars, unescape: Env::Owns::None) : options.template
         elsif options.verbatim?
           # `PlanOptions#verbatim?`: the operator's bytes, no pass at all — and so no
           # unresolved-env refusal either, as for the Repeater's `--verbatim`.
@@ -505,46 +506,18 @@ module Gori::Fuzz
         Env.expand(m.payload)
       end)
 
-      if options.auto_mark?
-        text = Template.auto_mark(text)
-        # A frame gets the BODY-shaped marker pass (`auto_mark_payload`): it has no request line
-        # and no `Cookie:` header, so the head half of `auto_mark` has nothing to mark there.
-        # The OPCODE rides along — that pass marks TEXT frames only, because its urlencoded
-        # sniff would otherwise carve positions out of a binary payload that happens to carry
-        # an `=` (see there).
-        if (sources = options.ws_messages) && (texts = ws_texts)
-          ws_texts = texts.map_with_index { |t, i| Template.auto_mark_payload(t, sources[i].opcode) }
+      text, mark_matches, shadowed_marks = mark_text(text, options.auto_mark?, options.marks)
+      if (sources = options.ws_messages) && (texts = ws_texts)
+        texts.each_with_index do |frame, i|
+          marked, matches, shadowed = mark_text(frame, options.auto_mark?, options.marks, sources[i].opcode)
+          texts[i] = marked
+          matches.each_with_index { |(_, count), k| mark_matches[k] = {mark_matches[k][0], mark_matches[k][1] + count} }
+          shadowed_marks.concat(shadowed)
         end
       end
-
-      shadowed_marks = [] of String
-      # Once per token: a repeat was reported both shadowed (by its first copy) and matched.
-      mark_matches = options.marks.uniq.map do |tok|
-        text, count, shadowed = wrap_token(text, tok)
-        # Across EVERY part. A `--mark` aimed at a value that lives in a frame would otherwise
-        # report `{token, 0}` and mark nothing, while the operator watched the flag they typed
-        # do nothing to the payload they typed it for. The counts sum.
-        #
-        # `shadowed` ORs, and `&&` here was a bug. `wrap_token` returns `shadowed == false` for
-        # a part that does not CONTAIN the token at all, so ANDing made a token shadowed only if
-        # every part contained it and had it marked already — which for a two-part script is
-        # almost never. Since `shadowed_marks` is reported only when the total `count` is also
-        # zero (i.e. the mark added no position ANYWHERE), OR is the right fold: at least one
-        # part had occurrences that were all already inside a `§…§`, and no part made a new
-        # position. With `&&` the operator got no note at all that their `--mark` did nothing.
-        if texts = ws_texts
-          texts.each_with_index do |t, i|
-            t2, c2, sh2 = wrap_token(t, tok)
-            texts[i] = t2
-            count += c2
-            shadowed ||= sh2
-          end
-        end
-        # It occurred, and every occurrence was already marked — see `shadowed_marks`. A token
-        # that DID make positions is not listed: it landed, and the count says so.
-        shadowed_marks << tok if shadowed && count.zero?
-        {tok, count}
-      end
+      # A mark is shadowed only when no part (handshake or frame) added a position.
+      shadowed_marks.uniq!
+      shadowed_marks.reject! { |token| mark_matches.any? { |(name, count)| name == token && count > 0 } }
       template = Template.parse(text, options.http2?)
 
       # The template's BASELINE rendering — every position spliced with its own default — and
@@ -1074,6 +1047,21 @@ module Gori::Fuzz
     #
     # Returns `text` ITSELF when the token does not occur, so the common case is
     # byte-identical and allocation-free.
+    # The same byte-oriented marking for a run and the tab's no-I/O position preview.
+    def self.mark_text(text : String, auto_mark : Bool, marks : Array(String), opcode : Int32? = nil)
+      if auto_mark
+        text = opcode ? Template.auto_mark_payload(text, opcode) : Template.auto_mark(text)
+      end
+      shadowed = [] of String
+      matches = marks.uniq.map do |token|
+        marked, count, skipped = wrap_token(text, token)
+        text = marked
+        shadowed << token if skipped && count.zero?
+        {token, count}
+      end
+      {text, matches, shadowed}
+    end
+
     private def self.wrap_token(text : String, token : String) : {String, Int32, Bool}
       return {text, 0, false} if token.empty?
       hay = text.to_slice

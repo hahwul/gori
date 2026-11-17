@@ -2,6 +2,7 @@ require "compress/zip"
 require "db"
 require "sqlite3"
 require "json"
+require "base64"
 require "file_utils"
 require "./open_lock"
 require "./paths"
@@ -693,9 +694,24 @@ module Gori
       conn.query_each("SELECT CAST(template AS BLOB), CAST(config AS BLOB) FROM fuzz_sessions") do |rs|
         template, config = rs.read(Bytes?), rs.read(Bytes?)
         grpc = config.try { |bytes| json?(String.new(bytes)).try(&.as_h?).try(&.["grpc_fields"]?).try(&.as_s?) }
-        count += 1 if template.try { |bytes| exec_text?(String.new(bytes)) } || grpc.try { |text| exec_text?(text) }
+        scripted = config.try { |bytes| fuzz_script_exec?(String.new(bytes)) } || false
+        count += 1 if scripted || template.try { |bytes| exec_text?(String.new(bytes)) } || grpc.try { |text| exec_text?(text) }
       end
       count
+    end
+
+    private def self.fuzz_script_exec?(raw : String) : Bool
+      obj = json?(raw).try(&.as_h?) || return false
+      options = obj["plan_options"]?.try(&.as_h?) || return false
+      messages = options["messages"]?.try(&.as_a?) || return false
+      messages.any? { |message| fuzz_message_exec?(message) }
+    end
+
+    private def self.fuzz_message_exec?(message : JSON::Any) : Bool
+      payload = message.as_h?.try(&.["payload"]?).try(&.as_s?)
+      payload ? exec_text?(String.new(Base64.decode(payload))) : false
+    rescue Base64::Error
+      false
     end
 
     # Tolerant: a malformed value is nil, never a refused import.

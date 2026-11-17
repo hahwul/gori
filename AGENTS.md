@@ -65,6 +65,9 @@ parity with it, and every parity gap found so far has been in a surface, not an 
   fallback values are projections for listing, never permission to rewrite. `MatchRule#inert?`
   gates both replacement and short-circuit selection. Surfaces may list and delete such rows,
   but must not enable, edit, duplicate, move or reorder them.
+- Fuzzer session JSON belongs to `Fuzz::SessionConfig`, including prepared `plan_options`;
+  unknown or malformed options must remain stored and refuse execution. Preparing a tab
+  validates with `Plan.build` but never calls run, calibration, or binding replay.
 - The seam is **not** the `Verb` registry. Its 675 verbs are TUI-only by decision: a verb reads
   its target from TUI selection state instead of naming it, and the missing argument schema is
   the blocker, not registry wiring (`src/gori/verb.cr`, DESIGN.md §7). Do not "fix" parity by

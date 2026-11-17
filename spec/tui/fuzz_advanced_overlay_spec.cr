@@ -248,7 +248,7 @@ describe Gori::Tui::FuzzAdvancedOverlay do
     h = OverlayHarness.new(ov, area: body)
     h.box.should_not be_nil
     h.rendered?("Macro on failure").should be_false # off-screen until the list scrolls
-    downs_to(:macro_on_failure).times { h.press(Termisu::Input::Key::Down) }
+    downs_to(:plan_options).times { h.press(Termisu::Input::Key::Down) }
     h.rendered?("Macro on failure").should be_true # this render is what advances @scroll
 
     # The list has scrolled to its tail, so the first VISIBLE row is ROWS[size - 11], not
@@ -267,7 +267,7 @@ describe Gori::Tui::FuzzAdvancedOverlay do
     h.commits.should eq(1)
   end
 
-  it "groups the rows into six sections, in this order" do
+  it "groups the rows into seven sections, in this order" do
     sections = [] of {String, Array(String)}
     FuzzAdvancedOverlay::ROWS.each do |_, label, kind|
       kind == :header ? sections << {label, [] of String} : sections.last[1] << label
@@ -281,6 +281,7 @@ describe Gori::Tui::FuzzAdvancedOverlay do
       {"wire", ["Auto Content-Length", "TLS fingerprint", "Race (N conns)",
                 "gRPC reframe (unary)", "gRPC field(s)"]},
       {"macro", ["Macro steps", "Macro cadence", "Macro must rebind", "Macro on failure"]},
+      {"payload / transport options", ["Options (JSON)"]},
     ])
   end
 

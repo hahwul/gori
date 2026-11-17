@@ -1959,6 +1959,11 @@ module Gori::Tui
       true
     end
 
+    private def notify_peer_tab(row : Store::FuzzSessionRecord) : Nil
+      label = row.name.try(&.presence) || "##{row.id}"
+      @host.notifications.push(:info, "Fuzzer tab added: #{label}", Jobs::Goto.new(:fuzzer, row.id), source: "app")
+    end
+
     # Live converge with fuzz_sessions after a data_version bump (own save or peer).
     # Soft-sync request side only — never full restore() (would wipe results + force
     # focus=:template).
@@ -1982,6 +1987,7 @@ module Gori::Tui
         view = new_fuzzer_view
         view.restore(row)
         @sessions << FuzzerTab.new(view, row.flow_id, row.id)
+        notify_peer_tab(row)
       end
 
       removed = [] of FuzzerTab

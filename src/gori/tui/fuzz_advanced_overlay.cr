@@ -48,7 +48,8 @@ module Gori::Tui
     macro_steps : String = "",
     macro_every : String = "",
     macro_expect : String = "",
-    macro_on_failure : String = ""
+    macro_on_failure : String = "",
+    plan_options : String = ""
 
   # The full-area popup for the Fuzzer's advanced run settings. Every engine / match
   # / filter knob gets its OWN labeled row (no more horizontal fields walked by ↑/↓,
@@ -162,6 +163,8 @@ module Gori::Tui
       {:macro_every, "Macro cadence", :text},
       {:macro_expect, "Macro must rebind", :text},
       {:macro_on_failure, "Macro on failure", :text},
+      {:extra, "payload / transport options", :header},
+      {:plan_options, "Options (JSON)", :text},
     ]
     LABEL_W = 22 # value column offset (widest label "gRPC reframe (unary)" + padding)
 
@@ -175,6 +178,7 @@ module Gori::Tui
       @reframe_grpc = snap.reframe_grpc
       @keep_interesting = snap.keep_interesting
       @fields = {
+        :plan_options     => TextField.new(snap.plan_options),
         :conc             => TextField.new(snap.conc),
         :rate             => TextField.new(snap.rate),
         :timeout          => TextField.new(snap.timeout),
@@ -312,7 +316,8 @@ module Gori::Tui
         stop_after: @fields[:stop_after].value, stop_on: @fields[:stop_on].value,
         keep_interesting: @keep_interesting,
         macro_steps: @fields[:macro_steps].value, macro_every: @fields[:macro_every].value,
-        macro_expect: @fields[:macro_expect].value, macro_on_failure: @fields[:macro_on_failure].value)
+        macro_expect: @fields[:macro_expect].value, macro_on_failure: @fields[:macro_on_failure].value,
+        plan_options: @fields[:plan_options].value)
     end
 
     # --- rendering ----------------------------------------------------------

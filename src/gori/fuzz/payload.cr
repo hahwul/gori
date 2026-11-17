@@ -38,6 +38,8 @@ module Gori::Fuzz
 
   # Inline values (a comma list or a hand-typed set).
   class InlineList < PayloadSource
+    getter values : Array(String)
+
     def initialize(@values : Array(String))
     end
 
@@ -200,6 +202,10 @@ module Gori::Fuzz
 
   # Generated numbers: from..to by step, decimal or hex, optionally zero-padded.
   class NumberRange < PayloadSource
+    getter from : Int64
+    getter to : Int64
+    getter step : Int64
+
     def initialize(@from : Int64, @to : Int64, @step : Int64 = 1_i64,
                    @base : Symbol = :dec, @pad : Int32 = 0)
       @step = 1_i64 if @step == 0
@@ -274,6 +280,13 @@ module Gori::Fuzz
   # Brute-force: every string of length min..max over a charset (odometer). `size`
   # saturates to nil on Int64 overflow so the run is gated by a cap.
   class BruteForce < PayloadSource
+    getter min : Int32
+    getter max : Int32
+
+    def charset : String
+      @chars.join
+    end
+
     # The longest payload length any surface accepts. A real length, not Int32::MAX:
     # `BruteIterator` allocates an odometer of `min` slots up front, so `ab:2000000000` was
     # an 8.6 GB `Array.new` before a byte was sent — and the request budget caps how MANY
@@ -382,6 +395,8 @@ module Gori::Fuzz
   end
 
   struct Prefix < Processor
+    getter text : String
+
     def initialize(@text : String)
     end
 
@@ -391,6 +406,8 @@ module Gori::Fuzz
   end
 
   struct Suffix < Processor
+    getter text : String
+
     def initialize(@text : String)
     end
 
@@ -400,6 +417,8 @@ module Gori::Fuzz
   end
 
   struct RegexReplace < Processor
+    getter pattern : Regex
+    getter replacement : String
     @pattern : Regex
 
     # Wordlist lines are byte-exact, so a latin-1 line reaches PCRE2 as is; without
@@ -417,6 +436,8 @@ module Gori::Fuzz
   # :url (percent-encode reserved chars), :url_all (percent-encode every byte),
   # :base64, :hex.
   struct Encode < Processor
+    getter kind : Symbol
+
     def initialize(@kind : Symbol)
     end
 
@@ -447,6 +468,8 @@ module Gori::Fuzz
   end
 
   struct Case < Processor
+    getter kind : Symbol
+
     def initialize(@kind : Symbol) # :upper | :lower
     end
 
@@ -456,6 +479,8 @@ module Gori::Fuzz
   end
 
   struct Hasher < Processor
+    getter algo : Symbol
+
     def initialize(@algo : Symbol) # :md5 | :sha1 | :sha256
     end
 

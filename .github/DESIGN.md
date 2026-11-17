@@ -5879,3 +5879,30 @@ made, one was a bug, and one was friction worth removing.
 - **Left as they are:** `gori run` repeats the handshake per process (bindings are per
   process, #1233); a captured `Mcp-Session-Id` is copied by `session from-request`; a tool is
   found by name with `rpc:tools/call req.body:NAME`.
+
+
+### 2026-11-17 — A prepared Fuzzer tab is data, not permission to send (#1910)
+
+The 2026-10-11 decision that an agent may author steps but not arm them also applies to
+a workbench: MCP `create_fuzzer` and `gori run fuzz create` validate a plan and persist a tab,
+then discard the engine. They never run calibration, binding replays, macro steps or a sweep.
+Preparation has no scope refusal; an operator's later run uses the current interactive
+Outbound gate, including sandbox and excludes. MCP preparation belongs to `write`, and any
+exec chain still passes the run's `exec` off/ask gate before validation evaluates payloads.
+
+`Fuzz::SessionConfig` owns the persisted JSON for all three surfaces. Existing rows retain
+their fields, defaults and serialized bytes. Prepared tabs add normalized `plan_options` for
+processors, authored marking instructions, WebSocket frames and transport knobs. The TUI
+restores these into the same `Plan.build` path and exposes them under Advanced's Options
+(JSON); malformed or unknown options remain stored and refuse execution. Captured provenance
+is persisted explicitly, including a capture seeded through a Repeater, and fractional
+timeouts survive both persistence and Advanced edits. A prepared capture retains its wire
+head endings, matching the authoring plan; the legacy TUI editor still owns newline promotion
+for manually seeded tabs. Operator request and payload bytes
+are not masked in storage; MCP masks its receipt. Binary payloads and frames use base64.
+
+Project-derived payload values and merged presets are frozen at preparation, while lazy
+generated sets remain lazy and file references retain their resolved absolute paths. A
+scripted frame containing an exec chain joins the archive's existing executable-content
+disclosure. Preparation creates the normal agent-action notification; it adds neither an
+agent stamp nor an automatic run. Miner and Sequencer preparation remain separate decisions.
