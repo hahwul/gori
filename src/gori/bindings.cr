@@ -728,6 +728,10 @@ module Gori
     def observe(raw : Repeater::Result, subject : InterceptFilter::Subject,
                 flow_id : Int64? = nil, *, as_slot : String? = nil) : Array(String)
       return [] of String if raw.error
+      # The response is in hand, so a condition's `header:` / `body:` reads it, as on the proxy
+      # path (`observe_response`). Without this a rule conditioned on either never fired on a
+      # Repeater send, a refresh step or a macro step, and said nothing.
+      subject = subject.copy_with(head: raw.head, payload: raw.body) unless subject.head
       context = as_slot ? @slots.try(&.find(as_slot)) : @slots.try(&.active)
       # Not throttled: one deliberate send is one operator action, and they asked for it.
       run(candidates(subject, context), raw, flow_id, entity_available: true, throttle: false,

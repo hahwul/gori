@@ -394,6 +394,17 @@ describe Gori::Tui::FuzzerView do
       view.config.race_count = 2
       view.run_step.should be_nil
     end
+
+    # `Fuzz::Plan` repeats the request as it is for null sets alone (#1912), so the card must
+    # not ask for a mark the run does not need, and the Run row counts the sends.
+    it "asks for no mark when the only sets are null payloads" do
+      view = loaded_fuzzer
+      view.apply_set(nil, Gori::Tui::SetSpec.new(:null, "20"))
+      view.run_step.should eq(Gori::Tui::TrafficEmptyState::FuzzStep::Run)
+      view.run_request_count.should eq(20_i64)
+      view.apply_set(nil, Gori::Tui::SetSpec.new(:list, "a"))
+      view.run_step.should eq(Gori::Tui::TrafficEmptyState::FuzzStep::Mark)
+    end
   end
 
   describe "#auto_mark" do

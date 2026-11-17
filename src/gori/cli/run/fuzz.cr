@@ -563,7 +563,7 @@ module Gori
             if missing = ex.detail
               "no positions — no --mark token occurs in the request (#{missing})"
             else
-              "no positions — add §…§ markers, --auto, or --mark TOKEN"
+              "no positions — add §…§ markers, --auto, or --mark TOKEN (or repeat the request as it is: --null=N alone)"
             end
           end
         in Fuzz::PlanError::Reason::NoTarget

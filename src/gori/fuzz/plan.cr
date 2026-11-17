@@ -588,9 +588,25 @@ module Gori::Fuzz
       # both guards below (and NoPayloads, one screen down) are skipped when it is set.
       # (`race_count` is validated above, ahead of the gRPC field guard — see there.)
       # `detail` = the marks that occur nowhere, comma-joined, so the refusal can name them.
-      if marked.position_count == 0 && !race_count
+      #
+      # A run of ONLY null sets is the third case (#1912): a null payload fills nothing, so with
+      # no position it repeats the request as it stands, N times — how a rate is read off a
+      # target whose answer varies (a model's reply). Anything that would be dropped without a
+      # word is still refused: another kind of set, a processor (it turns a null into a real
+      # payload), and a `--mark` or `--auto` that made no position.
+      repeat = marked.position_count == 0 && !race_count && !options.sources.empty? &&
+               options.sources.all?(NullPayloads) && options.processors.empty? &&
+               mark_matches.empty? && !options.auto_mark?
+      if marked.position_count == 0 && !race_count && !repeat
         missing = mark_matches.compact_map { |(tok, n)| tok.inspect if n.zero? && !shadowed_marks.includes?(tok) }
         raise PlanError.new(PlanError::Reason::NoPositions, "the template has no §…§ positions", missing.join(", ").presence)
+      end
+      # Calibration samples a position with a nonce, and a repeat run has none, so it would
+      # switch itself off unsaid. A plain `Gori::Error`, for `validate_stop_on`'s reason.
+      if repeat && options.config.auto_calibrate?
+        raise Gori::Error.new(
+          "auto-calibration (`auto_calibrate`/`--ac`) samples a §…§ position, and a run that only " \
+          "repeats the request (null payloads, no position) has none. Drop it, or mark a position")
       end
       # The twin of the target's unresolved-token refusal (`resolve_origin`, below), for the same
       # reason: a `¦chain` this run cannot apply leaves the position's payload UNTRANSFORMED on
@@ -635,7 +651,8 @@ module Gori::Fuzz
       # Sets handed over that `Generator` will never draw from. Counted off `gen_sets` and the
       # run's own position count — the two facts `Generator#set_for` actually maps through — so
       # this cannot drift from the contract it reports on. See `Plan#unused_payload_sets`.
-      unused_sets = Math.max(sets.size - Math.min(gen_sets.size, marked.position_count), 0)
+      # A repeat run draws its count from set 1, so that one is used.
+      unused_sets = Math.max(sets.size - Math.min(gen_sets.size, repeat ? 1 : marked.position_count), 0)
       reused_set_note = reused_set_note(gen_sets.size, marked.position_count) if config.mode.per_position?
       # A payload a field's DECLARATION cannot hold, refused before the first dial — `abc` into
       # an `int32`, an enum name the schema does not carry. Beside `refuse_unrunnable_chains`

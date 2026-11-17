@@ -5845,3 +5845,37 @@ bytes on the proxy path.
 - **The transcript is a copy format, not part of the pane.** `LlmCall.transcript` is built for
   the copy menu or an export, so the pane's `from_flow` carries no message text on the History
   fiber. MCP gets no twin: `get_flow` already returns the body and the `llm` projection.
+
+### 2026-11-17: an MCP session is a slot's refresh steps, and a repeat needs no position (#1912)
+
+Refines: the 2026-09-25 refresh entry (#1233), #1350 and the entry above. Replaying a stateful
+MCP call end to end left a list of gaps. Read against the log, most were decisions already
+made, one was a bug, and one was friction worth removing.
+
+- **The handshake is refresh steps, not a macro.** `initialize` mints the session, so it must
+  not carry the one it replaces: that is #1233's refresh step (no overlay), not #1350's macro
+  step (sent as the slot, on purpose, for a CSRF page that needs the session). A macro step
+  keeps its overlay.
+- **A `404` still starts nothing.** A dead `Mcp-Session-Id` is the same case as an expired
+  token, and #1233's reasons hold unchanged: a retried row stands for two requests, and in
+  Authorize the status is the verdict. `ttl=` set under the server's idle timeout is the answer.
+- **An extract rule's condition reads the response on a deliberate send too.** The docs said
+  `header:` and `body:` work in an extract-rule condition, and on the proxy path they did.
+  `Bindings#observe` built its subject without the response it was holding, so the same rule
+  never fired on a Repeater send, a refresh step or a macro step. A rule conditioned on
+  `header:mcp-session-id` is what makes the handshake quiet on every other response.
+- **Null sets alone need no position.** A null payload fills nothing, so the position was a
+  throwaway header that changed the request it was meant to repeat. `Plan.build` now admits no
+  position when every set is null, and the generator sends the request as it stands once per
+  value of set 1, in any mode. Whatever would be dropped without a word is still refused with
+  no position: another kind of set, a processor (it turns a null into a payload), and a mark or
+  `--auto` that made no position. Auto-calibration is refused on such a run, since it samples
+  a position and would otherwise switch itself off unsaid.
+- **A changed tool definition is a comparison, not a rule.** `get_flow` and
+  `gori run show --json` already carry the `tools/list` reply as indented JSON under
+  `json_rpc`, whether it arrived as one body or a stream, so two captures diff with the
+  operator's own tools. A passive rule would need state across flows for a check the operator
+  runs on demand. The playbook has the two lines.
+- **Left as they are:** `gori run` repeats the handshake per process (bindings are per
+  process, #1233); a captured `Mcp-Session-Id` is copied by `session from-request`; a tool is
+  found by name with `rpc:tools/call req.body:NAME`.
