@@ -38,8 +38,9 @@ module Gori
   #                       to buffer the body, so asking it about the body is circular.
   #   HTTP response gate  head = the response head. Body: NO, for the same reason.
   #   WebSocket message   payload = the message. No head: a WS message has no head of its own.
-  #   Extract rules       head AND body of the response — `Bindings#observe_response` is handed
-  #                       both, so a condition there can read either.
+  #   Extract rules       head AND body of the response — `Bindings#observe_response` (the
+  #                       proxy) and `#observe` (a deliberate send) hold both, so a condition
+  #                       there can read either.
   #
   # A colour rule is NOT in this list on purpose: it runs against a captured row with no bytes
   # at all, so `Colormarker` compiles those conditions to QL and asks the store instead. See its

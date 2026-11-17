@@ -143,6 +143,21 @@ describe Gori::Bindings do
       end
     end
 
+    # A Repeater send, a refresh step and a macro step all reach `observe`, which holds the
+    # response. `header:` / `body:` answered false there, so a rule conditioned on either bound
+    # on the proxy path and never on a send (#1912).
+    it "lets a condition read the response head and body on a deliberate send" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("SID", "header:mcp-session-id", Gori::ExtractKind::Header, "Mcp-Session-Id").should be_nil
+        b.add("TOKEN", "body:protocolVersion", Gori::ExtractKind::JsonPath, "$.t").should be_nil
+        b.add("OTHER", "header:x-absent", Gori::ExtractKind::JsonPath, "$.t").should be_nil
+        head = "HTTP/1.1 200 OK\r\nMcp-Session-Id: abc\r\n\r\n"
+        b.observe(response_result(head, %({"protocolVersion":"x","t":"tok"})), subject)
+          .sort.should eq(["SID", "TOKEN"])
+      end
+    end
+
     # The check belongs to this chokepoint and not to one surface's argument parsing: the CLI
     # calls `Bindings` rather than the store precisely so it "gets the SAME refusals the TUI
     # and MCP do", and while the range test lived in the MCP tool layer alone that was false —
