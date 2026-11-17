@@ -6,6 +6,7 @@
 - Probe: `llm_prompt_injection` also flags an MCP `tools/list` result whose tool description hides itself from the user (#1912)
 - Fuzzer: a run whose only payload sets are null payloads needs no `§…§` position and sends the request as it stands N times (`--null=20`), to read a hit rate off a target whose answer varies (#1912)
 - Session bindings: an extract rule whose condition reads `header:` or `body:` fires on a Repeater send, a slot's refresh step and a macro step, not only on proxied traffic (#1912)
+- Docs: the **Test an AI target** playbook covers LLM and MCP targets end to end, including an MCP session carried by a slot's refresh steps; it is also an MCP prompt (#1912)
 
 - MCP: project binding replies include engagement guidance, capped at 2,000 characters with the full text in `project_info`; handshake instructions point agents to it before acting (#1911).
 

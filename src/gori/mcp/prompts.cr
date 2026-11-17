@@ -25,6 +25,7 @@ module Gori
         "grade-token-randomness"   => {{ read_file("#{__DIR__}/../../../docs/content/playbooks/grade-token-randomness.md") }},
         "confirm-blind-vulns-oast" => {{ read_file("#{__DIR__}/../../../docs/content/playbooks/confirm-blind-vulns-oast.md") }},
         "decode-and-transform"     => {{ read_file("#{__DIR__}/../../../docs/content/playbooks/decode-and-transform.md") }},
+        "test-an-ai-target"        => {{ read_file("#{__DIR__}/../../../docs/content/playbooks/test-an-ai-target.md") }},
         "triage-and-report"        => {{ read_file("#{__DIR__}/../../../docs/content/playbooks/triage-and-report.md") }},
       }
 
