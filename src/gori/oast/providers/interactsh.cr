@@ -9,13 +9,17 @@ module Gori::Oast
   # server; each poll returns interactions AES-encrypted under a per-poll key that is
   # itself RSA-OAEP-encrypted to our public key. This is the default/flagship provider.
   class Interactsh < Provider
+    # Interactsh validates the xid preamble and zbase32 nonce separately.
+    CORRELATION_CHARSET = "0123456789abcdefghijklmnopqrstuv"
+    NONCE_CHARSET       = "ybndrfg8ejkmcpqxot1uwisza345h769"
+
     def initialize(host : String, token : String? = nil)
       super(ProviderKind::Interactsh, host, token)
     end
 
     def register(http : Http) : Session
       rsa = RsaKeyPair.generate_2048
-      corr = Crypto.random_id(20)
+      corr = Crypto.random_id(20, CORRELATION_CHARSET)
       secret = Crypto.random_id(13)
       resp = http.request("POST", "#{base_url}/register", json_headers,
         register_body(rsa, corr, secret))
@@ -47,7 +51,7 @@ module Gori::Oast
     # LOCAL: 20-char correlation id + a fresh 13-char nonce + "." + server host (33-char
     # DNS label). All payloads in a session share the correlation-id the poll keys on.
     def generate_payload(session : Session) : String
-      "#{session.correlation_id}#{Crypto.random_id(13)}.#{session.host}"
+      "#{session.correlation_id}#{Crypto.random_id(13, NONCE_CHARSET)}.#{session.host}"
     end
 
     def poll(http : Http, session : Session) : Array(Interaction)

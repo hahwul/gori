@@ -199,6 +199,19 @@ describe Gori::Oast do
   end
 
   describe O::Interactsh do
+    it "registers correlation ids accepted by Interactsh's xid alphabet validation" do
+      provider = O::Interactsh.new("https://oast.pro")
+      http = RecordingHttp.new("/register", "")
+
+      8.times do
+        session = provider.register(http)
+        body = JSON.parse(http.bodies.last.not_nil!)
+        correlation_id = body["correlation-id"].as_s
+        correlation_id.should match(/\A[0-9a-v]{20}\z/)
+        session.correlation_id.should eq(correlation_id)
+      end
+    end
+
     it "polls, RSA-OAEP + AES-CFB decrypts, and normalizes an interaction" do
       provider = O::Interactsh.new("https://oast.pro")
       session = O::Session.new(1_i64, O::ProviderKind::Interactsh, "https://oast.pro",
@@ -216,13 +229,17 @@ describe Gori::Oast do
       i.raw_request.should contain("opcode: QUERY")
     end
 
-    it "generates a local payload sharing the correlation id" do
+    it "generates local payloads with the session id and a zbase32 nonce" do
       provider = O::Interactsh.new("https://oast.pro")
+      correlation_id = "c6rj61aciaeutn2ae680"
       session = O::Session.new(1_i64, O::ProviderKind::Interactsh, "https://oast.pro",
-        "abc123", "sec")
-      url = provider.generate_payload(session)
-      url.should start_with("abc123")
-      url.should end_with(".oast.pro")
+        correlation_id, "sec")
+
+      64.times do
+        payload = provider.generate_payload(session)
+        payload.should start_with(correlation_id)
+        payload.should match(/\A[0-9a-v]{20}[ybndrfg8ejkmcpqxot1uwisza345h769]{13}\.oast\.pro\z/)
+      end
     end
 
     it "treats a 204 poll as no interactions" do
