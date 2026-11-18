@@ -443,3 +443,34 @@ describe "the JWT and Cookie workbench controllers" do
     end
   end
 end
+
+describe "temporary workbench sessions on project exit" do
+  it "counts inactive edits, names, secrets and undo history, excluding blank sessions" do
+    each_tool do |ctl, _host, _t|
+      ctl.temporary_session_count.should eq(0)
+      cur_of(ctl).secret = "authored secret"
+      ctl.new_session
+      ctl.temporary_session_count.should eq(1)
+      cur_of(ctl).view.name = "named draft"
+      ctl.new_session
+      second_editor(ctl).insert('x')
+      second_editor(ctl).backspace
+      ctl.new_session
+      ctl.temporary_session_count.should eq(3)
+      ctl.commit.should be_true
+      ctl.temporary_session_count.should eq(3)
+    end
+  end
+end
+
+describe "Cookie temporary salt" do
+  it "includes an authored salt in the exit warning even if every other field is empty" do
+    with_wb_session do |session|
+      ctl = CookieController.new(FakeHost.new(session))
+      cur_of(ctl).salt = "authored-salt"
+      ctl.temporary_session_count.should eq(1)
+      ctl.new_session
+      ctl.temporary_session_count.should eq(1)
+    end
+  end
+end

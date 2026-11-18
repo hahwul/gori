@@ -1608,9 +1608,9 @@ module Gori::Tui
         # The policy is `Runner.quit_decision`, shared with `quit!` (the palette's Quit) so
         # the two entry points cannot answer "does this need a confirm?" differently again.
         case Runner.quit_decision(Settings.confirm_quit?, chord: true, armed: @quit_armed,
-          notes_conflict: issues_notes_conflict?)
+          notes_conflict: issues_notes_conflict?, temporary_sessions: !temporary_session_summary.nil?)
         in .confirm?
-          # Opt-in (settings:general): a confirm modal replaces the double-press arm. Skip
+          # A quit preference or temporary work replaces the double-press arm with a modal. Skip
           # re-opening if the quit confirm is already up (^D then just waits for y/n/esc).
           raise_quit_confirm unless @overlay.confirm?
         in .quit?
@@ -2138,6 +2138,16 @@ module Gori::Tui
       ov if ov && @overlay == ov.key
     end
 
+    def self.overlay_commit_visible?(ov : Overlay, ev : Termisu::Event::Key, area : Rect) : Bool
+      # Esc in a sub-editor returns its draft to the parent even after a resize hides it.
+      ev.key.escape? || !!ov.overlay_box(area).try { |box| !box.empty? }
+    end
+
+    private def overlay_commit_visible?(ov : Overlay, ev : Termisu::Event::Key) : Bool
+      w, h = @backend.size
+      Layout.usable?(w, h) && Runner.overlay_commit_visible?(ov, ev, Layout.compute(w, h, statusline_active?).body)
+    end
+
     # :stay stays open; :cancel closes; :commit runs the injected commit closure and
     # closes iff it returns true (a validation failure keeps the form up).
     private def dispatch_overlay_key(ov : Overlay, ev : Termisu::Event::Key) : Nil
@@ -2152,8 +2162,7 @@ module Gori::Tui
       when :cancel then close_active_overlay(ov)
       when :commit
         # An unusable frame omits the card, leaving its own "drawn" flag stale.
-        w, h = @backend.size
-        return unless Layout.usable?(w, h)
+        return unless overlay_commit_visible?(ov, ev)
         # ↵ on a form that cannot save lands on the field that blocks it and says what is missing.
         if ev.key.enter? && (why = ov.commit_blocker)
           status(why)
@@ -3694,16 +3703,16 @@ module Gori::Tui
     # The teardown is `finish_quit`; the confirm's accept block calls THAT, or accepting would
     # re-enter here and raise a second confirm forever.
     #
-    # With the setting OFF this still quits immediately rather than arming. The arm exists
+    # Without temporary work or peer conflicts, the setting OFF quits immediately. The arm exists
     # because ^C/^D is one mistyped keystroke, and its toast says "press ^D (or ^C) again" — a
     # chord the palette operator never pressed; ^P, typing a filter, and ↵ on a row that reads
     # "Quit gori" is already the deliberate act the arm asks for.
     def quit! : Nil
       # chord: false — a palette dispatch can never arm, so this is Confirm or Quit, and with
       # the confirm setting off it is Quit with nothing shown. `notes_conflict` is what turns
-      # that one into a question.
+      # that one into a question; temporary sessions do too.
       if Runner.quit_decision(Settings.confirm_quit?, chord: false, armed: false,
-           notes_conflict: issues_notes_conflict?).confirm?
+           notes_conflict: issues_notes_conflict?, temporary_sessions: !temporary_session_summary.nil?).confirm?
         raise_quit_confirm
       else
         finish_quit
@@ -3734,13 +3743,13 @@ module Gori::Tui
     # the frontier to completion against the target while the operator was back at the
     # picker with no bottom bar, no run list and no key that could stop it.
     #
-    # With NOTHING running the modal is byte-identical to what it always was: no extra
-    # line, and still a non-danger confirm — closing an idle project discards nothing.
+    # Without jobs, peer conflicts or temporary work, leaving stays a routine confirmation.
     def leave_project : Nil
       active = @jobs.active_summary
       notes_conflict = issues_notes_conflict?
-      confirm("LEAVE PROJECT", Runner.leave_confirm_message(active, @jobs.active.size, notes_conflict),
-        confirm_label: "leave", danger: !active.nil? || notes_conflict, return_to: @overlay.to_sym) do
+      temporary = temporary_session_summary
+      confirm("LEAVE PROJECT", Runner.leave_confirm_message(active, @jobs.active.size, notes_conflict, temporary_sessions: temporary),
+        confirm_label: "leave", danger: !active.nil? || notes_conflict || !temporary.nil?, return_to: @overlay.to_sym) do
         # Inside the accept block, so a CANCEL leaves every job running untouched.
         finish_exit(:back)
       end
@@ -3773,7 +3782,23 @@ module Gori::Tui
     end
 
     private def quit_message : String
-      Runner.quit_confirm_message(@jobs.active_summary, @jobs.active.size, issues_notes_conflict?)
+      Runner.quit_confirm_message(@jobs.active_summary, @jobs.active.size, issues_notes_conflict?,
+        temporary_sessions: temporary_session_summary)
+    end
+
+    private def temporary_session_summary : String?
+      Runner.temporary_session_summary(jwt_controller.temporary_session_count,
+        cookie_controller.temporary_session_count, comparer_controller.temporary_session_count)
+    end
+
+    def self.temporary_session_summary(jwt : Int32, cookie : Int32, comparer : Int32) : String?
+      tools = [{"JWT", jwt}, {"Cookie", cookie}, {"Comparer", comparer}]
+        .select { |_, count| count > 0 }.map { |name, count| "#{name}: #{count}" }
+      tools.empty? ? nil : tools.join(", ")
+    end
+
+    private def self.warn_temporary_sessions(message : String, summary : String?) : String
+      summary ? "#{message}\nTemporary sessions will be discarded:\n#{summary}\nCopy their contents before leaving." : message
     end
 
     private def quit_arm_hint : String
@@ -3818,22 +3843,24 @@ module Gori::Tui
     # The two modal messages put the count/consequence and the per-kind inventory on
     # SEPARATE lines: `ConfirmDialog` sizes its card to the longest line and clamps at 60
     # columns, so one combined sentence lost its own verb to the ellipsis.
-    def self.leave_confirm_message(active : String?, count : Int32, notes_conflict : Bool = false) : String
+    def self.leave_confirm_message(active : String?, count : Int32, notes_conflict : Bool = false, *, temporary_sessions : String? = nil) : String
       base = "Close this project and return to the picker?"
       msg = active ? "#{base}\n#{job_count(count)} still running — leaving stops #{count == 1 ? "it" : "them"}.\n#{active}" : base
-      notes_conflict ? "#{msg}\n#{NOTES_CONFLICT_LINE}" : msg
+      msg = notes_conflict ? "#{msg}\n#{NOTES_CONFLICT_LINE}" : msg
+      warn_temporary_sessions(msg, temporary_sessions)
     end
 
     # Quit's two prompts — the opt-in modal and the double-press arm — name the live jobs
     # for the same reason the leave confirm does: quitting abandons them.
-    def self.quit_confirm_message(active : String?, count : Int32, notes_conflict : Bool = false) : String
+    def self.quit_confirm_message(active : String?, count : Int32, notes_conflict : Bool = false, *, temporary_sessions : String? = nil) : String
       # The parenthetical is a PROMISE, so it only gets made when it is true. `commit_pending_edits`
       # refuses an Issues writeup a peer has rewritten (IssuesController#commit), and saying
       # "pending edits are committed first" over the top of that is the lie that made this the
       # one place a writeup could disappear without the operator being told anything at all.
       base = notes_conflict ? "Quit gori?" : "Quit gori? (pending edits are committed first)"
       msg = active ? "#{base}\n#{job_count(count)} still running — quitting stops #{count == 1 ? "it" : "them"}.\n#{active}" : base
-      notes_conflict ? "#{msg}\n#{NOTES_CONFLICT_LINE}" : msg
+      msg = notes_conflict ? "#{msg}\n#{NOTES_CONFLICT_LINE}" : msg
+      warn_temporary_sessions(msg, temporary_sessions)
     end
 
     # Said the same way in all three exit prompts, because it is the same fact — and said in
@@ -3940,8 +3967,8 @@ module Gori::Tui
     end
 
     def self.quit_decision(confirm_setting : Bool, *, chord : Bool, armed : Bool,
-                           notes_conflict : Bool = false) : QuitAction
-      return QuitAction::Confirm if confirm_setting
+                           notes_conflict : Bool = false, temporary_sessions : Bool = false) : QuitAction
+      return QuitAction::Confirm if confirm_setting || temporary_sessions
       return QuitAction::Quit if armed # the arm hint already said what this press costs
       # The palette's "Quit gori" verb is not a chord, so it never arms — with the confirm
       # setting off it is the ONE quit that tears down having shown nothing at all. That is

@@ -28,7 +28,8 @@ require "./memory_backend"
 # spec-side statement of that contract, and a modal spec that passes against a stale
 # harness proves nothing about the real shell.
 #
-# WHAT IT DOES NOT MODEL: the shell's pre-filter. `^C`/`^D` (quit-arm), `^B` (reveal) and
+# WHAT IT DOES NOT MODEL: the shell's submission visibility gate (pinned by
+# overlay_dispatch_spec against Runner.overlay_commit_visible?), or its pre-filter. `^C`/`^D` (quit-arm), `^B` (reveal) and
 # the space-menu / copy-as / send-to / `^F` prompts are all claimed in `Runner#handle_key`
 # BEFORE a migrated modal is dispatched to, so those keys never reach an overlay in the
 # real app. Driving them through this harness will "work" here and be dead in the TUI —

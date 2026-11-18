@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/memory_backend"
 
 include Gori::Tui
 
@@ -153,5 +154,28 @@ describe Gori::Tui::SequenceConfigOverlay do
     ov.set_selected(SequenceConfigOverlay::SELECTOR_ROW)
     ov.text_fields.first.set("SID=([a-f0-9]+)")
     ov.valid?.should be_true
+  end
+end
+
+describe "Sequence config on short terminals" do
+  it "keeps Start visible and hit-tests its scrolled row" do
+    ov = SequenceConfigOverlay.new(seed(Q::TokenLoc.cookie("SID")))
+    area = Layout.compute(80, 16).body
+    mb = MemoryBackend.new(80, 16)
+    ov.render(Screen.new(mb), area)
+    field = ov.text_fields.first
+    old_x, old_y = field.@last_x, field.@last_y
+    field.hit?(old_x, old_y).should be_true
+    ov.set_selected(SequenceConfigOverlay::START_ROW)
+    ov.render(Screen.new(mb), area)
+    field.hit?(old_x, old_y).should be_false
+    box = ov.overlay_box(area).not_nil!
+    y = (box.y...box.bottom).find { |row| mb.row(row).includes?("Start") }.not_nil!
+    ov.row_at(box, box.x + 3, y).should eq(SequenceConfigOverlay::START_ROW)
+    ov.row_at(box, box.x + 3, box.bottom - 1).should be_nil
+    ov.handle_click(area, box.x + 3, y).should eq(:commit)
+    ov.set_selected(0)
+    ov.render(Screen.new(mb), area)
+    mb.contains?("token type:").should be_true
   end
 end

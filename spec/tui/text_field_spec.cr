@@ -273,3 +273,19 @@ describe "TextField resolved caret" do
     field.selection_text.should eq("🇦🇧")
   end
 end
+
+describe "TextField pointer geometry after scrolling out of view" do
+  it "stops accepting pointer input until the field is drawn again" do
+    field = TextField.new("authored value")
+    screen = Screen.new(MemoryBackend.new(40, 4))
+    field.render(screen, 3, 1, 20, true, Theme.text, Theme.bg)
+    field.hit?(5, 1).should be_true
+    caret = field.caret
+    field.forget_geometry
+    field.hit?(5, 1).should be_false
+    field.click_to_cursor(5, 1).should be_false
+    field.caret.should eq(caret)
+    field.render(screen, 3, 2, 20, true, Theme.text, Theme.bg)
+    field.hit?(5, 2).should be_true
+  end
+end

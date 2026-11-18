@@ -273,3 +273,23 @@ describe "MineConfigOverlay#prefill (Miner Reconfigure)" do
     ov.hint.should contain("apply")
   end
 end
+
+describe "Mine config on short terminals" do
+  it "scrolls to Start and never interprets the bottom border as a row" do
+    q = [Gori::Miner::Location::Query, Gori::Miner::Location::Headers, Gori::Miner::Location::Cookies]
+    ov = MineConfigOverlay.new(seed(q, q))
+    area = Layout.compute(80, 18).body
+    ov.move(100)
+    mb = MemoryBackend.new(80, 18)
+    ov.render(Screen.new(mb), area)
+    mb.contains?("Start mining").should be_true
+    box = ov.overlay_box(area).not_nil!
+    y = (box.y...box.bottom).find { |row| mb.row(row).includes?("Start mining") }.not_nil!
+    ov.row_at(box, box.x + 3, y).should_not be_nil
+    ov.row_at(box, box.x + 3, box.bottom - 1).should be_nil
+    ov.handle_click(area, box.x + 3, y).should eq(:commit)
+    ov.render(Screen.new(MemoryBackend.new(80, 12)), Layout.compute(80, 12).body)
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter)).should eq(:stay)
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape)).should eq(:cancel)
+  end
+end

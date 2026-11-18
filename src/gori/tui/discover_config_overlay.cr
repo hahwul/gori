@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./overlay"
+require "./viewport"
 require "../discover"
 require "../settings"
 
@@ -99,6 +100,8 @@ module Gori::Tui
       @keep_alive = true
       @assets = false
       @selected = 0
+      @scroll = 0
+      @drawn = true
       restore_saved_prefs
     end
 
@@ -159,6 +162,7 @@ module Gori::Tui
     def handle_key(ev : Termisu::Event::Key) : Symbol
       k = ev.key
       return :cancel if k.escape?
+      return :stay unless @drawn
       if k.up?
         move(-1)
       elsif k.down?
@@ -245,6 +249,7 @@ module Gori::Tui
 
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
+      @drawn = !box.nil?
       unless box
         Overlay.too_small(screen, area, "config needs a larger window")
         return
@@ -252,11 +257,14 @@ module Gori::Tui
       Frame.card(screen, box, "DISCOVER", border: Theme.border_focus)
       screen.text(box.x + 2, box.y + 1, @seed.base_label, Theme.text_bright, Theme.panel, Attribute::Bold, width: box.w - 4)
       first = box.y + 3
-      ROWS.times do |i|
-        py = first + i
-        break if py >= box.bottom
-        draw_row(screen, box, i, py)
+      visible = list_capacity(box)
+      @scroll = Viewport.scroll_to_show(@selected, @scroll, visible, ROWS)
+      visible.times do |i|
+        ri = @scroll + i
+        break if ri >= ROWS
+        draw_row(screen, box, ri, first + i)
       end
+      Frame.scroll_gauge(screen, Rect.new(box.x + 1, first, box.w - 2, visible), ROWS, @scroll, true, Theme.panel)
     end
 
     private def draw_row(screen : Screen, box : Rect, i : Int32, py : Int32) : Nil
@@ -305,9 +313,15 @@ module Gori::Tui
       screen.text(vx + val.size + 2, py, "↵ edit", Theme.muted, bg)
     end
 
+    private def list_capacity(box : Rect) : Int32
+      box.h - 4
+    end
+
     def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
       return nil unless box.contains?(mx, my)
-      i = my - (box.y + 3)
+      first = box.y + 3
+      return nil unless first <= my < first + list_capacity(box)
+      i = @scroll + my - first
       (0 <= i < ROWS) ? i : nil
     end
   end

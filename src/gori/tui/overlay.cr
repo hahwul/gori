@@ -4,6 +4,7 @@ require "./geometry"
 require "./text_field"
 require "./theme"
 require "./frame"
+require "./viewport"
 
 module Gori::Tui
   # Every modal state the shell's `@overlay` can hold. This was a bare `Symbol` with 33
@@ -507,6 +508,7 @@ module Gori::Tui
   # `draw_row_body`, and keeps its own key cases.
   abstract class FormOverlay < Overlay
     @sel = 0
+    @form_scroll = 0
 
     abstract def row_count : Int32
 
@@ -682,6 +684,7 @@ module Gori::Tui
     end
 
     def render(screen : Screen, area : Rect) : Nil
+      text_fields.each(&.forget_geometry)
       box = overlay_box(area)
       unless box
         Overlay.too_small(screen, area, too_small_what)
@@ -690,10 +693,12 @@ module Gori::Tui
       Frame.card(screen, box, card_title, border: Theme.border_focus)
       draw_head(screen, box)
       first = first_row_y(box)
-      row_count.times do |i|
-        py = first + i
-        break if py >= rows_bottom(box)
-        draw_row(screen, box, i, py)
+      visible = rows_bottom(box) - first
+      @form_scroll = Viewport.scroll_to_show(@sel, @form_scroll, visible, row_count)
+      visible.times do |i|
+        ri = @form_scroll + i
+        break if ri >= row_count
+        draw_row(screen, box, ri, first + i)
       end
       draw_tail(screen, box, first)
       # No key hint on the bottom border: the shell already draws `hint` in the status strip
@@ -719,7 +724,8 @@ module Gori::Tui
     def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
       return nil unless box.contains?(mx, my)
       return nil if my >= rows_bottom(box) # render stops there: the preview band, not a row
-      i = my - first_row_y(box)
+      return nil if my < first_row_y(box)
+      i = @form_scroll + my - first_row_y(box)
       (0 <= i < row_count) ? i : nil
     end
   end

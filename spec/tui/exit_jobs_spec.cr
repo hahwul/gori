@@ -420,3 +420,27 @@ describe "quit through the guarded entry (the palette's Quit gori)" do
     end
   end
 end
+
+describe "exiting with temporary sessions" do
+  it "requires a modal from either quit entry point, even after a previous quit arm" do
+    {false, true}.each do |chord|
+      {false, true}.each do |armed|
+        Runner.quit_decision(false, chord: chord, armed: armed, temporary_sessions: true)
+          .should eq(Runner::QuitAction::Confirm)
+      end
+    end
+  end
+
+  it "names only nonempty tools without including their contents" do
+    Runner.temporary_session_summary(0, 0, 0).should be_nil
+    Runner.temporary_session_summary(2, 0, 1).should eq("JWT: 2, Comparer: 1")
+    summary = Runner.temporary_session_summary(1, 2, 3)
+    [Runner.leave_confirm_message("fuzzing 1", 1, true, temporary_sessions: summary),
+     Runner.quit_confirm_message("fuzzing 1", 1, true, temporary_sessions: summary)].each do |message|
+      message.should contain("Temporary sessions will be discarded")
+      message.should contain("JWT: 1, Cookie: 2, Comparer: 3")
+      message.should contain("1 job still running")
+      message.should contain("rewritten by another session")
+    end
+  end
+end

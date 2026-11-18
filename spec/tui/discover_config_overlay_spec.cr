@@ -211,3 +211,41 @@ describe "Gori::Tui::DiscoverSeed.build" do
     DiscoverSeed.start_dir("/media/clip.mp4").should eq("/media/")
   end
 end
+
+describe "Discover config on short terminals" do
+  it "keeps the selected row visible and hit-tests the scrolled window" do
+    [18, 20, 24].each do |height|
+      ov = DiscoverConfigOverlay.new(dseed)
+      area = Layout.compute(80, height).body
+      h = OverlayHarness.new(ov, area: area)
+      ov.set_selected(DiscoverConfigOverlay::ROW_HEADERS)
+      mb = h.render
+      mb.contains?("custom headers:").should be_true
+      box = h.box.not_nil!
+      row = (box.y...box.bottom).find { |y| mb.row(y).includes?("custom headers:") }.not_nil!
+      ov.row_at(box, box.x + 3, row).should eq(DiscoverConfigOverlay::ROW_HEADERS)
+      ov.row_at(box, box.x + 3, box.bottom - 1).should be_nil
+      ov.set_selected(DiscoverConfigOverlay::ROW_START)
+      h.render.contains?("Start discovery").should be_true
+      ov.set_selected(0)
+      h.render.contains?("start at:").should be_true
+    end
+  end
+
+  it "does not launch or open a child after a resize hides the card" do
+    ov = DiscoverConfigOverlay.new(dseed)
+    ov.render(Screen.new(MemoryBackend.new(80, 24)), Layout.compute(80, 24).body)
+    ov.render(Screen.new(MemoryBackend.new(80, 12)), Layout.compute(80, 12).body)
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter)).should eq(:stay)
+    opened = false
+    ov.on_edit_headers = -> { opened = true; nil }
+    ov.set_selected(DiscoverConfigOverlay::ROW_HEADERS)
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter)).should eq(:stay)
+    opened.should be_false
+    ov.set_selected(DiscoverConfigOverlay::ROW_START)
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Space)).should eq(:stay)
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape)).should eq(:cancel)
+    ov.render(Screen.new(MemoryBackend.new(80, 24)), Layout.compute(80, 24).body)
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter)).should eq(:commit)
+  end
+end
