@@ -63,12 +63,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     history_controller.history_mark_extend(delta)
   end
 
-  # One flow → its full raw request (the byte-exact dump you'd paste into Repeater).
-  # N flows → the URL list, since concatenating N request dumps is never the ask;
-  # the other multi-flow formats live behind Copy-as (#copy_as_menu).
+  # The cursor copies a raw request; marks copy URLs, even with a single mark.
   def copy_selection : Nil
     ids = history_target_flow_ids
-    ids.size > 1 ? history_controller.copy_urls(ids) : history_controller.copy_selection(ids.first?)
+    if history_mark_menu_count > 0
+      history_controller.copy_urls(ids)
+    else
+      history_controller.copy_selection(ids.first?)
+    end
   end
 
   forward history_query : Nil, to: history_controller

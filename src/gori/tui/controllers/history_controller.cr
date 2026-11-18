@@ -1025,9 +1025,7 @@ module Gori::Tui
       @host.status("copied #{detail.row.method} #{Url.origin_path(detail.row.target)} to clipboard (#{written}b)#{Clipboard.note(written, raw)}")
     end
 
-    # Multi-mark copy (#442): concatenating N raw request dumps is not what anyone marking
-    # 12 rows wants — "copy the URLs" is. So bare `y` over a mark set yields the URL list;
-    # the other formats live behind the Copy-as picker (Runner#copy_as_menu).
+    # Bare `y` over marks copies URLs (#442); the Copy-as picker offers other formats.
     def copy_urls(ids : Array(Int64)) : Nil
       store = @host.session.store
       urls = ids.compact_map { |id| store.flow_row(id).try(&.url) }

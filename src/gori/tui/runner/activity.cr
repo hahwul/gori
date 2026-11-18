@@ -23,7 +23,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       return
     end
     if tab = target.tab
-      run_goto(Jobs::Goto.new(tab, target.session_id))
+      status(GOTO_TARGET_UNAVAILABLE) unless run_goto(Jobs::Goto.new(tab, target.session_id))
     elsif fid = target.flow_id
       # The row holds an id that was committed, so only a prune or a retention sweep between
       # then and now reaches the miss branch.

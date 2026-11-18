@@ -1,3 +1,4 @@
+require "random/secure"
 require "./screen"
 require "./theme"
 require "./frame"
@@ -14,7 +15,7 @@ module Gori::Tui
   class DiscoverRun
     getter target : String
     getter config : Discover::Config
-    property id : Int32 = 0
+    getter id : Int64
     property job_id : Int32 = 0
     # :idle | :running | :paused | :done | :budget_exhausted | :stopped | :error.
     # `:budget_exhausted` is its own state, not a flavour of :done: a crawl that ran out of
@@ -47,6 +48,9 @@ module Gori::Tui
     property? outside_scope = false
 
     def initialize(@target : String, @config : Discover::Config)
+      # Activity outlives the window. Leave the former Int32 counter range unused so
+      # old entries, including those of earlier builds, cannot point to a new run.
+      @id = Random::Secure.rand((Int32::MAX.to_i64 + 1)..Int64::MAX)
       @started_at = Time.instant
     end
 
@@ -289,10 +293,10 @@ module Gori::Tui
       @scroll = 0
     end
 
-    def select_run_by_id(id : Int32) : Nil
-      if idx = @runs.index { |r| r.id == id }
-        select_run(idx)
-      end
+    def select_run_by_id(id : Int64) : Bool
+      return false unless idx = @runs.index { |r| r.id == id }
+      select_run(idx)
+      true
     end
 
     def any_running? : Bool

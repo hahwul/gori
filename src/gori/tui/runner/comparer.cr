@@ -97,10 +97,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def comparer_add_selected : Nil
     ids = history_target_flow_ids
     return (@toast = "select a flow first") if ids.empty?
+    return (@toast = "mark exactly 2 flows to compare · esc clears marks") if ids.size > 2
     return comparer_add_pair(ids) if ids.size == 2
-    # 1 mark (or none — the cursor row), or 3+: keep the next-slot ring. 3+ marks has no
-    # meaning for a two-slot diff, so it falls back rather than silently picking two.
-    @toast = "comparer takes 2 flows — mark exactly 2, or use the cursor row" if ids.size > 2
     id = ids.first
     detail = @session.store.get_flow(id)
     return (@toast = "flow no longer available") unless detail

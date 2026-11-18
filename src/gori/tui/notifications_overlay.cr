@@ -115,10 +115,8 @@ module Gori::Tui
       "↑/↓ select · ↵ open · y copy · c clear · esc close"
     end
 
-    # The copy verdict, shown in the hint until the next key: this card has no host to toast
-    # through, and the centre exists to keep the one message an operator cannot afford to
-    # lose — being unable to put it on the clipboard was the gap.
-    @flash : String? = nil
+    # Copy and jump feedback shown in the card until the next key.
+    setter flash : String? = nil
 
     # Formerly Runner#handle_notifications_key. ↵ commits (the open-site's closure jumps
     # to the selected note's result); `c` empties the store in place and stays open.

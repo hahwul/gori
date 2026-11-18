@@ -1847,9 +1847,9 @@ module Gori::Tui
       true
     end
 
-    # Focus a specific session/sub-tab by its persisted id (notification "jump to
-    # result"). Default no-op; Repeater/Fuzzer/Miner controllers override to reveal the row.
-    def reveal_session(id : Int64) : Nil
+    # Resolve the exact destination before activating its tab, then reveal the result.
+    def reveal_session(id : Int64, activate : Proc(Nil)) : Bool
+      false
     end
 
     # One queued value if the channel has any, else nil — the non-blocking poll every
