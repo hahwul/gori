@@ -8,12 +8,11 @@ module Gori::Oast
   module Crypto
     extend self
 
-    # DNS-label-safe charset for correlation ids / nonces (WE mint these; the server just
-    # echoes them back on the hostname, so lowercase alnum is all that's required).
+    # Default alphabet for providers whose IDs only need to be DNS-label-safe.
     CHARSET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
-    def random_id(len : Int32) : String
-      String.build(len) { |sb| len.times { sb << CHARSET[Random::Secure.rand(CHARSET.size)] } }
+    def random_id(len : Int32, charset : String = CHARSET) : String
+      String.build(len) { |sb| len.times { sb << charset[Random::Secure.rand(charset.size)] } }
     end
 
     # AES-256 decrypt an interactsh message: IV = the first 16 bytes, ciphertext = the rest.
