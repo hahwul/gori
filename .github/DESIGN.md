@@ -5469,7 +5469,7 @@ A third walk, this one checking the hint row against the keys it names, tab by t
   registry instead of "space".
 - **`reveal_session` is an empty default, and Repeater had not written one.** A jump to a
   Repeater session (an Activity row, a minimize notice) switched tabs and left whichever
-  sub-tab was current. History still has none: a jump there lands on the tab, not the flow.
+  sub-tab was current. At the time, History jumps still opened the tab without opening the flow.
 - **Preferences scrolls to the row, not its header.** A one-row section (Reset, Hotkeys,
   Tabs) reported its header as the focused row, so on a short card the row itself was below
   the fold and `↵` opened FACTORY RESET unseen.
@@ -5911,3 +5911,10 @@ agent stamp nor an automatic run. Miner and Sequencer preparation remain separat
 ### 2026-11-18: project exits disclose temporary work (#1925)
 
 Refines: [P4](#p4). JWT, Cookie and Comparer sessions remain in memory only. Leaving a project or quitting with nonempty temporary sessions requires a danger confirmation naming each tool and its session count, including inactive sessions and recoverable editor history. Blank sessions add no warning. The quit chord and palette share this policy even when the general quit-confirm preference is off; confirming still saves persistent editors before teardown, and declining leaves temporary work available to copy.
+
+### 2026-11-19: result links resolve before changing tabs (#1927)
+
+Extends the 2026-11-13 result-jump correction. A Notifications or Activity link carrying
+an ID opens that session or History flow. If the target is gone, the current screen and
+selection stay in place and show why. Discover results live in memory, so their IDs must
+identify a run across windows and avoid the range used by old per-window counters in Activity.

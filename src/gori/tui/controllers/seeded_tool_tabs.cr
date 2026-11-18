@@ -202,11 +202,11 @@ module Gori::Tui
     end
 
     # Notification "jump to result": focus the session row with this db_id.
-    def reveal_session(id : Int64) : Nil
-      if idx = index_for_db_id(id)
-        @current_idx = idx
-        @host.focus_body
-      end
+    def reveal_session(id : Int64, activate : Proc(Nil)) : Bool
+      return false unless idx = index_for_db_id(id)
+      activate.call
+      jump_subtab(idx)
+      true
     end
 
     def index_for_db_id(id : Int64) : Int32?

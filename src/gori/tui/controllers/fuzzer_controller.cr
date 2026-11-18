@@ -1213,11 +1213,11 @@ module Gori::Tui
     end
 
     # Focus a fuzz sub-tab by persisted id (notification "jump to result").
-    def reveal_session(id : Int64) : Nil
-      if idx = @sessions.index { |t| t.db_id == id }
-        select_subtab(idx) # saving the tab it leaves, as every other switch does
-        @host.focus_body
-      end
+    def reveal_session(id : Int64, activate : Proc(Nil)) : Bool
+      return false unless idx = @sessions.index { |t| t.db_id == id }
+      activate.call
+      jump_subtab(idx)
+      true
     end
 
     # --- run lifecycle ---

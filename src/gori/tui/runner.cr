@@ -4221,18 +4221,24 @@ module Gori::Tui
       # …and an agent's open question (#1324) raises its answer card the same way, from
       # on_close, carrying the row's id so the card hands the operator back to it.
       question = nil.as({Gori::AgentQuestion, Int32}?)
-      # The jump itself lands on the target tab, and focus_tab already clears @overlay —
-      # so the shell's close-on-commit is a no-op after it, not a second dismissal.
       ov.on_commit = -> {
         note = ov.selected_note
-        if note && (q = answerable_question_for(note))
+        if note.nil?
+          false
+        elsif q = answerable_question_for(note)
           question = {q, note.id}
-        elsif note && note.opens_card?
+          true
+        elsif note.opens_card?
           detail_note = note
+          true
+        elsif (target = note.goto) && run_goto(target)
+          # The jump owns the destination overlay, which can be a History flow detail.
+          @active_overlay = nil
+          true
         else
-          run_goto(note.try(&.goto))
+          ov.flash = GOTO_TARGET_UNAVAILABLE
+          false
         end
-        true
       }
       ov.on_close = -> {
         if asked = question
@@ -4590,12 +4596,16 @@ module Gori::Tui
       true
     end
 
-    private def run_goto(g : Jobs::Goto?) : Nil
-      return unless g
-      switch_tab(g.tab)
+    GOTO_TARGET_UNAVAILABLE = "Result is no longer available"
+
+    private def run_goto(g : Jobs::Goto) : Bool
       if sid = g.session_id
-        @tabs[g.tab]?.try(&.reveal_session(sid))
+        return open_flow_detail(sid) if g.tab == :history
+        return false unless controller = @tabs[g.tab]?
+        return controller.reveal_session(sid, -> { switch_tab(g.tab) })
       end
+      switch_tab(g.tab)
+      true
     end
 
     # Open the space action menu for the CURRENT focus area. `action_context` is read BEFORE
@@ -6282,9 +6292,9 @@ module Gori::Tui
       case verb_id
       when "history.copy"       then "Copy #{Gori.plural(n, "URL")}"
       when "history.mark-clear" then "Clear #{Gori.plural(n, "mark")}"
-        # Only meaningful at exactly 2 — otherwise leave the registered title, which IS what
-        # comparer_add_selected falls back to (the next-slot ring on the cursor row).
-      when "history.compare" then n == 2 ? "Compare the 2 marked flows" : nil
+      when "history.compare"
+        return "Mark exactly 2 flows to compare" if n > 2
+        "Compare the 2 marked flows" if n == 2
       end
     end
 

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- TUI: History Copy uses URLs for marked flows, and selecting more than two flows leaves the current comparison intact. Notifications and Activity report when a linked result is gone (#1927).
+
 - TUI: leaving a project asks before discarding temporary JWT, Cookie and Comparer work. Short config forms scroll to the selected field, hidden forms cannot start a run, and Retest keeps its run and close keys visible (#1925).
 
 - TUI: Find keeps its input visible in narrow terminals and lets you click to move the caret. History cancels delayed detail opens when you leave the list and explains how to search from Hex view (#1926).

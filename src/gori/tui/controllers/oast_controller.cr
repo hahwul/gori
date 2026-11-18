@@ -1839,12 +1839,6 @@ module Gori::Tui
       Oast::HttpClient.new
     end
 
-    # Notification "jump to result" lands on this tab (no per-row reveal needed).
-    def reveal_session(id : Int64) : Nil
-      @active_sub = 0
-      @host.focus_body
-    end
-
     # =========================================================================
     # Promote a callback to an Issue
     # =========================================================================

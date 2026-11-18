@@ -31,7 +31,6 @@ module Gori::Tui
       # Which findings row each buffered pair came from, same order as @persist_buf, so the
       # ids the batch returns can be handed back to the rows that will open them.
       @persist_owners = [] of {DiscoverRun, Int32}
-      @run_seq = 0
     end
 
     def view : DiscoverView
@@ -347,17 +346,16 @@ module Gori::Tui
     # --- cross-surface entry: launch a run from a seed (called by the Runner after the
     #     config overlay confirms). Runs in the background; the caller may switch here. ---
     def start_session(target : String, config : Discover::Config) : DiscoverRun
-      @run_seq += 1
       run = DiscoverRun.new(target, config)
-      run.id = @run_seq
       @view.add(run)
       start_run(run)
       run
     end
 
-    def reveal_session(id : Int64) : Nil
-      @view.select_run_by_id(id.to_i)
-      @host.focus_body
+    def reveal_session(id : Int64, activate : Proc(Nil)) : Bool
+      return false unless @view.select_run_by_id(id)
+      activate.call
+      true
     end
 
     # --- run lifecycle ---
@@ -369,7 +367,7 @@ module Gori::Tui
       end
       run.engine = engine
       run.begin_run
-      run.job_id = @host.jobs.start(:discover, run.label(40), goto: Jobs::Goto.new(:target, run.id.to_i64))
+      run.job_id = @host.jobs.start(:discover, run.label(40), goto: Jobs::Goto.new(:target, run.id))
       events = @discover_events
       terminal_sent = false
       spawn(name: "gori-discover") do
@@ -546,12 +544,12 @@ module Gori::Tui
     end
 
     private def push_notification(run : DiscoverRun, level : Symbol, msg : String) : Nil
-      @host.notifications.push(level, msg, Jobs::Goto.new(:target, run.id.to_i64), source: "discover")
+      @host.notifications.push(level, msg, Jobs::Goto.new(:target, run.id), source: "discover")
     end
 
     private def log_event(run : DiscoverRun, level : Symbol, msg : String) : Nil
       @host.session.store.insert_event("discover", "job_done", level, msg,
-        goto_tab: "target", goto_session_id: run.id.to_i64)
+        goto_tab: "target", goto_session_id: run.id)
     end
 
     # --- persistence: discovered endpoints → Store → Sitemap / History ---

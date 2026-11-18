@@ -3282,14 +3282,11 @@ module Gori::Tui
       @repeaters.index { |t| t.db_id == id }
     end
 
-    # A "jump to result" names its Repeater session (an Activity row, a minimize notice). The
-    # base method is an empty default and Crystal has no `override` to say a subclass forgot
-    # one, so the jump switched to this tab and left whichever sub-tab happened to be current.
-    def reveal_session(id : Int64) : Nil
-      if idx = index_for_db_id(id)
-        jump_subtab(idx)
-        @host.focus_body
-      end
+    def reveal_session(id : Int64, activate : Proc(Nil)) : Bool
+      return false unless idx = index_for_db_id(id)
+      activate.call
+      jump_subtab(idx)
+      true
     end
 
     def db_id_at(idx : Int32) : Int64?

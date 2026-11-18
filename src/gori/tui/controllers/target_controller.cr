@@ -269,9 +269,11 @@ module Gori::Tui
 
     # A finished Discover job's notification jumps here: select the Discover sub-tab and
     # reveal the run.
-    def reveal_session(id : Int64) : Nil
-      set_sub(1)
-      @discover.reveal_session(id)
+    def reveal_session(id : Int64, activate : Proc(Nil)) : Bool
+      @discover.reveal_session(id, -> {
+        activate.call
+        set_sub(1)
+      })
     end
 
     def select_discover : Nil

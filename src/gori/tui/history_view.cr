@@ -1733,8 +1733,8 @@ module Gori::Tui
     # (used by the Issues tab to jump back to an issue's linked evidence). Also
     # syncs @selected to it when the row is in the current list, so back/▲▼ behave.
     def open_detail_id(id : Int64, store : Store) : Bool
-      @detail = store.get_flow(id)
-      return false if @detail.nil?
+      return false unless detail = store.get_flow(id)
+      @detail = detail
       @detail_read_at = Time.instant
       @detail_stale = false
       @ws_narrow = nil # a narrow belongs to the flow it was made on, and so does its query

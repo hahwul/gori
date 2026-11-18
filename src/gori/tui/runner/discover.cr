@@ -108,20 +108,21 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   # Drive the History controller and raise its detail overlay for one flow id, or toast
-  # `missing` when the row is gone.
+  # `missing` when the row is gone and the caller supplied a message.
   #
   # Shared because the Activity pane makes the same hop for an event carrying a `flow_id`, and
   # the three fields it sets are not independent: the detail overlay's own navigation is gated
   # on `@active_tab == :history`, so a second copy that drifts breaks the arrows silently
   # rather than loudly. Lives here, on the Runner, because the tab switch and the overlay are
   # the shell's to set — a controller cannot write either.
-  def open_flow_detail(id : Int64, missing : String) : Nil
+  def open_flow_detail(id : Int64, missing : String? = nil) : Bool
     if history_controller.view.open_detail_id(id, @session.store)
-      @active_tab = :history
-      @focus = :body
+      goto_tab(:history)
       @overlay = OverlayKind::Detail
+      true
     else
-      @toast = missing
+      status(missing) if missing
+      false
     end
   end
 
