@@ -142,6 +142,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   private def toggle_search_replace : Nil
     return unless @search_replace || replace_target?
     @search_replace = !@search_replace
+    @search_input_hit = nil
     @search_preedit = "" # the composing text belongs to the row we just left
   end
 
@@ -246,6 +247,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   private def open_search(target : Symbol) : Nil
+    if target == :detail && history_controller.view.hex_view?
+      reg = @session.registry
+      route = Hotkeys.binding_label(reg, "detail.toggle-hex", "")
+      route = Hotkeys.route(reg, "detail.toggle-hex") if route.empty?
+      return status(route ? "Switch to text to search (#{route})" : "Switch to text to search")
+    end
+    @search_input_hit = nil
     @search_target = target
     @search_buffer = ""
     @search_cx = 0
@@ -261,7 +269,69 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   private def close_search : Nil
     set_search_hl("") # clear the match highlight on the target view
     @search_open = false
+    @search_input_hit = nil
     @search_preedit = ""
     @search_replace = false
+  end
+
+  FIND_INPUT_MIN = 12
+
+  # Give the input room before fitting the secondary hints into the rest of the row.
+  def self.find_row_layout(row : Rect, label : String, hint : String) : {Rect, String}
+    label_w = Screen.draw_width(label)
+    room = {row.w - label_w, 0}.max
+    hint_room = {room - FIND_INPUT_MIN - 1, 0}.max
+    fitted = Chrome.fit_hints(hint, hint_room)
+    fitted = fitted.rchop(" …") if Screen.draw_width(fitted) > hint_room
+    return {Rect.new(row.x + label_w, row.y, room, 1), ""} if fitted.empty? || Screen.draw_width(fitted) > hint_room
+    {Rect.new(row.x + label_w, row.y, room - Screen.draw_width(fitted) - 1, 1), fitted}
+  end
+
+  private def render_search_prompt(screen : Screen, rect : Rect) : Nil
+    if @search_replace
+      top = Rect.new(rect.x, rect.y - 1, rect.w, 1)
+      draw_find_row(screen, top, "find    › ", find_hint("tab edit find · ↑↓ step"), @search_buffer, nil)
+      draw_find_row(screen, rect, "replace › ", "↵ replace all · esc done", @search_replace_buffer, @search_replace_cx)
+    else
+      hint = replace_target? ? "tab replace · ↑↓/↵ step · esc done" : "↑↓/↵ step · esc done"
+      draw_find_row(screen, rect, "find › ", find_hint(hint), @search_buffer, @search_cx)
+    end
+  end
+
+  private def draw_find_row(screen : Screen, row : Rect, label : String, hint : String, value : String, caret : Int32?) : Nil
+    input, fitted = Runner.find_row_layout(row, label, hint)
+    screen.fill(row, Theme.panel)
+    screen.text(row.x, row.y, label, caret ? Theme.accent : Theme.muted, Theme.panel, width: row.w)
+    if caret
+      start = screen.input_line(input.x, input.y, value, caret, @search_preedit, Theme.text_bright, Theme.panel, width: input.w)
+      # A click clears preedit before dispatch. Use the last paint to decide whether its
+      # columns can map to committed text.
+      @search_input_hit = @search_preedit.empty? ? {input, start} : nil
+    else
+      screen.text(input.x, input.y, value, Theme.text, Theme.panel, width: input.w)
+    end
+    color = fitted.starts_with?("no matches") ? Theme.yellow : Theme.muted
+    screen.text(input.right + 1, row.y, fitted, color, Theme.panel) unless fitted.empty?
+  end
+
+  private def find_hint(hint : String) : String
+    return hint if @search_buffer.empty?
+    count = @search_hits.empty? ? "no matches" : "#{@search_idx + 1}/#{@search_hits.size}"
+    "#{count} · #{hint}"
+  end
+
+  private def click_search_prompt(status_row : Rect, mx : Int32, my : Int32) : Nil
+    first = @search_replace ? status_row.y - 1 : status_row.y
+    unless status_row.x <= mx < status_row.right && first <= my <= status_row.y
+      return close_search
+    end
+    return unless hit = @search_input_hit
+    input, start = hit
+    return unless input.contains?(mx, my)
+    if @search_replace
+      @search_replace_cx = Screen.input_click(@search_replace_buffer, start, mx - input.x)
+    else
+      @search_cx = Screen.input_click(@search_buffer, start, mx - input.x)
+    end
   end
 end

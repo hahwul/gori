@@ -257,8 +257,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # A confirm card over a prompt takes the click (its buttons, or click-away to cancel),
     # the same precedence the key path gives it; the prompt is still there afterwards.
     if (@goto_open || @search_open || @rename_open || @tag_edit_open) && !@overlay.confirm?
-      close_goto if @goto_open # a click anywhere dismisses the bottom prompt (like esc)
-      close_search if @search_open
+      return click_search_prompt(layout.status, mx, my) if @search_open
+      close_goto if @goto_open
       close_rename if @rename_open
       close_tag_edit if @tag_edit_open
       return
