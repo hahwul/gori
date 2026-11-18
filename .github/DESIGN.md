@@ -5906,3 +5906,8 @@ generated sets remain lazy and file references retain their resolved absolute pa
 scripted frame containing an exec chain joins the archive's existing executable-content
 disclosure. Preparation creates the normal agent-action notification; it adds neither an
 agent stamp nor an automatic run. Miner and Sequencer preparation remain separate decisions.
+
+
+### 2026-11-18: project exits disclose temporary work (#1925)
+
+Refines: [P4](#p4). JWT, Cookie and Comparer sessions remain in memory only. Leaving a project or quitting with nonempty temporary sessions requires a danger confirmation naming each tool and its session count, including inactive sessions and recoverable editor history. Blank sessions add no warning. The quit chord and palette share this policy even when the general quit-confirm preference is off; confirming still saves persistent editors before teardown, and declining leaves temporary work available to copy.

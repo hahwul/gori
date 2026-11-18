@@ -210,3 +210,19 @@ describe Gori::Tui::RetestOverlay do
     retest_card([] of Gori::Retest::Planned).key.should eq(OverlayKind::Retest)
   end
 end
+
+describe "Retest guidance on an 80-column terminal" do
+  it "keeps run and close visible in both idle modes" do
+    ov = retest_card([retest_planned(1_i64, :baseline, "status:200")])
+    2.times do
+      mb = MemoryBackend.new(80, 24)
+      screen = Screen.new(mb)
+      layout = Layout.compute(80, 24)
+      ov.render(screen, layout.body)
+      Chrome.render_status(screen, layout.status, focus: ov.title, hints: ov.hint)
+      mb.row(layout.status.y).should contain("r run")
+      mb.row(layout.status.y).should contain("esc close")
+      ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Tab))
+    end
+  end
+end

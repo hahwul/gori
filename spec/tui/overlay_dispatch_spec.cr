@@ -610,3 +610,31 @@ describe "Runner modal dispatch in an unusable terminal" do
     end
   end
 end
+
+describe "modal submission visibility" do
+  it "refuses Enter and Space when the card cannot be drawn, while Esc can return a draft" do
+    ov = DiscoverConfigOverlay.new(DiscoverSeed.new([{"/", "http://h.test/"}], "h.test"))
+    small = Layout.compute(80, 12).body
+    full = Layout.compute(80, 24).body
+    [Termisu::Input::Key::Enter, Termisu::Input::Key::Space].each do |key|
+      Runner.overlay_commit_visible?(ov, skey(key), small).should be_false
+      Runner.overlay_commit_visible?(ov, skey(key), full).should be_true
+    end
+    Runner.overlay_commit_visible?(ov, skey(Termisu::Input::Key::Escape), small).should be_true
+  end
+
+  it "windows rule forms without losing their selected save row or clicking a border" do
+    forms = [ScopeRuleOverlay.adding, CustomRuleOverlay.adding, ExtractRuleOverlay.adding,
+             ColormarkerRuleOverlay.adding, OastProviderOverlay.adding] of FormOverlay
+    area = Layout.compute(80, 18).body
+    forms.each do |ov|
+      ov.set_selected(ov.row_count - 1)
+      mb = MemoryBackend.new(80, 18)
+      ov.render(Screen.new(mb), area)
+      box = ov.overlay_box(area).not_nil!
+      selected_y = (box.y...box.bottom).find { |y| mb.row(y)[box.x + 1] == '▎' }.not_nil!
+      ov.row_at(box, box.x + 3, selected_y).should eq(ov.row_count - 1)
+      ov.row_at(box, box.x + 3, box.bottom - 1).should be_nil
+    end
+  end
+end

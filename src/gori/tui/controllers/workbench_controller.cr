@@ -194,6 +194,10 @@ module Gori::Tui
         "session closed", "session closed", blank: blank?(cur))
     end
 
+    def temporary_session_count : Int32
+      @sessions.count { |s| !blank?(s) }
+    end
+
     # Holds no text of the operator's: no name, and every editor and field empty with nothing
     # to undo back to. A session is more than its INPUT (the second lens's editors, the
     # secret), so "the input is empty" is not this test. The lens, alg and format are not

@@ -66,11 +66,18 @@ module Gori::Tui
       @host.status("new comparison (#{@sessions.size} open)")
     end
 
-    # Close the active session, or the marked ones. The last one is reset to blank (always
-    # keep ≥1).
+    def temporary_session_count : Int32
+      @sessions.count { |s| !blank_session?(s) }
+    end
+
+    private def blank_session?(v : ComparerView) : Bool
+      v.name.nil? && v.slot(:a).nil? && v.slot(:b).nil?
+    end
+
+    # Close the active or marked sessions; reset the last session to blank.
     def comparer_close : Nil
       close_sessions("CLOSE COMPARISONS", "Each pair of slots is discarded.", "comparison cleared", "comparison closed",
-        blank: view.name.nil? && view.slot(:a).nil? && view.slot(:b).nil?)
+        blank: blank_session?(view))
     end
 
     # The last comparison is RESET IN PLACE rather than replaced — which is exactly why the

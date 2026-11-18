@@ -26,9 +26,9 @@ module Gori::Tui
   # edit, move, remove, run, stop, and opening a result row's recorded flow. The card itself
   # never touches the Store.
   class RetestOverlay < PickerOverlay
-    STEPS_HINT   = "↑/↓ select · a add · e edit · ⇧J/⇧K move · d remove · r run · ⇧R run+cleanup · ⇥ results · esc close"
-    RESULTS_HINT = "↑/↓ select · ↵ open the recorded response · ⇥ steps · r re-run · ⇧R run+cleanup · esc close"
-    RUNNING_HINT = "running… · s stop · esc close (the run continues)"
+    STEPS_HINT   = "r run · esc close · ⇥ results · a add · e edit · ↑/↓ select · ⇧J/⇧K move · d remove · ⇧R run+cleanup"
+    RESULTS_HINT = "r run · esc close · ↵ response · ⇥ steps · ↑/↓ select · ⇧R run+cleanup"
+    RUNNING_HINT = "s stop · esc close (the run continues) · running…"
 
     # Fixed gutters, so role and outcome line up down the card whatever the rows say.
     ROLE_W    =  9

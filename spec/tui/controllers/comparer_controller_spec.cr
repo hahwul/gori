@@ -34,3 +34,17 @@ describe "ComparerController#body_hint" do
     end
   end
 end
+
+describe "temporary comparisons on project exit" do
+  it "counts named and populated comparisons even while a blank session is active" do
+    with_comparer_controller do |ctl|
+      ctl.temporary_session_count.should eq(0)
+      ctl.view.name = "authored comparison"
+      ctl.comparer_new
+      ctl.temporary_session_count.should eq(1)
+      ctl.view.set_slot(:a, ComparerSlot.from_exchange("repeater", "GET", "http://example.test/", nil, nil, nil, nil))
+      ctl.comparer_new
+      ctl.temporary_session_count.should eq(2)
+    end
+  end
+end

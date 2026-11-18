@@ -294,7 +294,7 @@ module Gori::Tui
     end
 
     private def rows_bottom(box : Rect) : Int32
-      box.bottom
+      box.bottom - 1
     end
 
     def draw_row_body(screen : Screen, box : Rect, i : Int32, py : Int32,

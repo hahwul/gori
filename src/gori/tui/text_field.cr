@@ -266,6 +266,11 @@ module Gori::Tui
     end
 
     # --- pointer --------------------------------------------------------------
+    # A scrolled form resets every field before repainting the visible ones.
+    def forget_geometry : Nil
+      @last_w = 0
+    end
+
     # Whether (mx, my) lands on this field as it was LAST DRAWN. The owning overlay knows
     # where it put the field; this is how it asks without re-deriving the row rect.
     def hit?(mx : Int32, my : Int32) : Bool
