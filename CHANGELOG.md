@@ -4,6 +4,8 @@
 
 - TUI: leaving a project asks before discarding temporary JWT, Cookie and Comparer work. Short config forms scroll to the selected field, hidden forms cannot start a run, and Retest keeps its run and close keys visible (#1925).
 
+- TUI: Find keeps its input visible in narrow terminals and lets you click to move the caret. History cancels delayed detail opens when you leave the list and explains how to search from Hex view (#1926).
+
 - Fuzzer: agents can prepare a sub-tab with `create_fuzzer` while Send traffic is off, and scripts can use `gori run fuzz create`; the operator reviews and runs the saved request, payloads, processors and WebSocket script in the TUI (#1910).
 
 - LLM targets: QL `llm:true` finds LLM API calls and `llm:claude` narrows by model name, and the Fuzzer's body regex also matches a streamed reply as reassembled text, so a word split across SSE deltas is found. **Copy as… › LLM transcript** and `gori run show --format transcript` write a call as Markdown for a report (#1912)

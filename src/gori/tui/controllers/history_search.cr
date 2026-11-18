@@ -96,10 +96,15 @@ module Gori::Tui
       true
     end
 
+    # Leaving the body revokes the click even if the operator re-enters before the read finishes.
+    def cancel_pending_open : Nil
+      @pending_open = nil
+    end
+
     private def apply_pending_open : Nil
       return unless click = @pending_open
       return unless click[0] == @search_generation
-      return unless @history.selected_id == click[1] && @host.overlay == :none
+      return unless @history.selected_id == click[1] && @host.overlay == :none && @host.focus == :body
       open_detail
     end
 

@@ -4091,3 +4091,20 @@ describe "HistoryView h2 cookie folding" do
     end
   end
 end
+
+describe "History detail text search" do
+  it "distinguishes a hex dump from its searchable text view" do
+    with_store do |store|
+      id = add_flow(store, "GET", "/find-me")
+      view = HistoryView.new
+      view.open_detail_id(id, store).should be_true
+      view.hex_view?.should be_false
+      view.detail_search_lines("find-me").should eq([0])
+      view.toggle_detail_hex
+      view.hex_view?.should be_true
+      view.detail_search_lines("find-me").should be_empty
+      view.toggle_detail_hex
+      view.detail_search_lines("find-me").should eq([0])
+    end
+  end
+end

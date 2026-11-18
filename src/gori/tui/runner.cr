@@ -243,6 +243,7 @@ module Gori::Tui
       # typing feeds @search_replace_buffer, and ↵ swaps every match behind a confirm.
       # ↑/↓ keep stepping in BOTH modes — that's why Tab, not an arrow, is the toggle.
       @search_open = false
+      @search_input_hit = nil.as({Rect, Int32}?)
       @search_buffer = ""
       @search_cx = 0 # caret into @search_buffer (the prompts edit through `prompt_edit`)
       @search_preedit = ""
@@ -5013,69 +5014,6 @@ module Gori::Tui
       open_overlay(ov)
     end
 
-    private def render_search_prompt(screen : Screen, rect : Rect) : Nil
-      return if rect.w < 8
-      # Replace mode needs a second row, taken from the body ABOVE the status row (the
-      # prompts float over whatever's underneath). If there's no row to take, fall back
-      # to the one-row find bar rather than drawing off-screen.
-      return render_replace_prompt(screen, rect) if @search_replace && rect.y > 0
-      screen.fill(rect, Theme.panel)
-      prefix = "find › "
-      screen.text(rect.x, rect.y, prefix, Theme.accent, Theme.panel)
-      x = rect.x + prefix.size
-      # match count (or "no matches") right-aligned; dim "esc done · ↑↓ next" hint after
-      # the input. Only advertise tab where replace can actually commit — on the
-      # read-only panes the key is a no-op, so offering it would just mislead.
-      suffix = hint_with_count(replace_target? ? "↵/↑↓ step · tab replace · esc done" : "↵/↑↓ step · esc done")
-      sx = {rect.right - suffix.size, x}.max
-      iw = {sx - x - 1, 0}.max
-      screen.input_line(x, rect.y, @search_buffer, @search_cx, @search_preedit, Theme.text_bright, Theme.panel, width: iw)
-      screen.text(sx, rect.y, suffix, no_matches? ? Theme.yellow : Theme.muted, Theme.panel)
-    end
-
-    # find&replace: the query row (read-only here — tab back to edit it) stacked over
-    # the replacement row, which owns the caret. ↵ commits, ↑/↓ still step matches.
-    private def render_replace_prompt(screen : Screen, rect : Rect) : Nil
-      top = Rect.new(rect.x, rect.y - 1, rect.w, 1)
-      screen.fill(top, Theme.panel)
-      screen.fill(rect, Theme.panel)
-      screen.text(rect.x, top.y, "find    › ", Theme.muted, Theme.panel)
-      screen.text(rect.x, rect.y, "replace › ", Theme.accent, Theme.panel)
-      x = rect.x + 10 # both labels padded to the same width so the two fields line up
-
-      # Top row: the query plus the live match count, dimmed — it isn't focused.
-      qsuffix = hint_with_count("↑↓ step · tab edit find")
-      qsx = {top.right - qsuffix.size, x}.max
-      screen.text(x, top.y, @search_buffer, Theme.text, Theme.panel, width: {qsx - x - 1, 0}.max)
-      screen.text(qsx, top.y, qsuffix, no_matches? ? Theme.yellow : Theme.muted, Theme.panel)
-
-      # Bottom row: the focused field — input_line syncs the hardware cursor here.
-      rsuffix = "↵ replace all · esc done"
-      rsx = {rect.right - rsuffix.size, x}.max
-      screen.input_line(x, rect.y, @search_replace_buffer, @search_replace_cx, @search_preedit, Theme.text_bright, Theme.panel, width: {rsx - x - 1, 0}.max)
-      screen.text(rsx, rect.y, rsuffix, Theme.muted, Theme.panel)
-    end
-
-    private def no_matches? : Bool
-      @search_hits.empty? && !@search_buffer.empty?
-    end
-
-    # Blank until something is typed, then the hit count (or "no matches"). @search_preedit
-    # counts as typing ONLY in find mode — in replace mode the composing text belongs to
-    # the replacement row, so an empty query must not read "no matches" just because
-    # you're mid-Hangul in the box below.
-    private def hint_with_count(hint : String) : String
-      pending = @search_replace ? "" : @search_preedit
-      count = if @search_buffer.empty? && pending.empty?
-                ""
-              elsif @search_hits.empty?
-                "no matches"
-              else
-                "#{@search_idx + 1}/#{@search_hits.size}"
-              end
-      count.empty? ? hint : "#{count}  #{hint}"
-    end
-
     def current_tab : Symbol
       @active_tab
     end
@@ -5088,6 +5026,7 @@ module Gori::Tui
       fuzzer_controller.save_current if @active_tab == :fuzzer && @focus == :body && pane != :body
       decoder_controller.commit if @active_tab == :decoder && @focus == :body && pane != :body
       notes_controller.save_notes if @active_tab == :notes && @focus == :body && pane != :body
+      history_controller.cancel_pending_open if @active_tab == :history && pane != :body
       @focus = pane
       @menu_more = false # any focus change lands on a real tab, not the `0:Tabs` stop
       # Unconditional, INCLUDING pane == :subtabs. This is what keeps entering a tab landing
@@ -5316,8 +5255,9 @@ module Gori::Tui
       if @focus == :menu
         @focus = :body
         dir > 0 ? view_focus_first : view_focus_last
-      else
-        @focus = :menu unless view_pane_advance(dir)
+      elsif !view_pane_advance(dir)
+        history_controller.cancel_pending_open if @active_tab == :history
+        @focus = :menu
       end
     end
 

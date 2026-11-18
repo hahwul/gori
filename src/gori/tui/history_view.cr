@@ -2731,7 +2731,7 @@ module Gori::Tui
       hits = [] of Int32
       # FRAMES has no hex view, so it renders as text even when @detail_hex is set —
       # match the render/goto predicate so search agrees (not a bare @detail_hex).
-      return hits if query.empty? || (@detail_hex && !log_pane?)
+      return hits if query.empty? || hex_view?
       q = query.downcase
       # Reveal-whitespace renders on its OWN line space (raw head+body bytes) with its own
       # scroll bounds (detail_scroll_max). Search must scan reveal_lines so the hit indices

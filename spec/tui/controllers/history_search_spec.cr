@@ -163,6 +163,30 @@ describe "History cooperative searches" do
     end
   end
 
+  it "keeps a delayed detail open cancelled after leaving and re-entering the History body" do
+    with_search_controller do |controller, view, session|
+      rect = Gori::Tui::Rect.new(0, 0, 80, 24)
+      view.select_row(1)
+      id = view.selected_id
+      view.pause = true
+      view.set_query("path:/")
+      view.reload(session.store)
+      receive_within(view.started)
+      view.start_query
+      view.render_list(Gori::Tui::Screen.new(MemoryBackend.new(80, 24)), rect.inset(1, 1))
+      controller.handle_click(rect, 10, 6)
+      controller.@pending_open.should_not be_nil
+
+      # Runner cancels on departure. The host is back in the body when results arrive.
+      controller.cancel_pending_open
+      view.pause = false
+      view.resume.send(nil)
+      settle_history(controller)
+      view.detail_flow_id.should be_nil
+      view.selected_id.should eq(id)
+    end
+  end
+
   it "removes committed deletions immediately while their replacement search is pending" do
     with_search_controller do |controller, view, session|
       view.pause = true
