@@ -1693,3 +1693,26 @@ describe "Gori::QL ws: term" do
     Gori::QL.ws_match("").should be_nil
   end
 end
+
+describe "Gori::QL::Filter#fts_driver" do
+  it "carries the phrase and the rest of a top-level AND around a positive body: term" do
+    Gori::QL.parse("body:alpha").fts_driver.should eq({"\"alpha\"", "1", [] of DB::Any})
+    driver = Gori::QL.parse("host:a.test resp.body:alpha").fts_driver.not_nil!
+    driver[0].should eq(%(resp : "alpha"))
+    driver[1].should_not contain("flows_fts")
+    driver[2].should eq(Gori::QL.parse("host:a.test").args)
+  end
+
+  it "is nil where the index cannot drive the query" do
+    ["-body:alpha", "NOT body:alpha", "body:alpha OR host:a", "NOT (body:alpha host:a)",
+     "body:al", "host:a.test"].each do |q|
+      Gori::QL.parse(q).fts_driver.should be_nil, q
+    end
+    Gori::QL.parse("body:alpha", fts: false).fts_driver.should be_nil
+  end
+
+  it "survives QL.and on either side" do
+    Gori::QL.and(Gori::QL.parse("host:a"), Gori::QL.parse("body:alpha")).fts_driver.not_nil![0].should eq(%("alpha"))
+    Gori::QL.and(Gori::QL.parse("body:alpha"), Gori::QL.parse("host:a")).fts_driver.not_nil![0].should eq(%("alpha"))
+  end
+end

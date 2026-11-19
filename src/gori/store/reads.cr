@@ -85,6 +85,38 @@ module Gori
       rows
     end
 
+    # The statement `search` runs, and its bound values. Public for the plan pins in
+    # `spec/store/list_index_spec.cr`, which must read the SQL this builds, not a copy of it.
+    def search_sql(filter : QL::Filter, limit : Int32, before_id : Int64? = nil,
+                   since_id : Int64? = nil) : {String, Array(DB::Any)}
+      if driver = filter.fts_driver
+        # Driven from the index (see `QL::Filter#fts_driver`): CROSS JOIN pins `flows_fts` as the
+        # outer loop, so FTS5 yields matching rowids in the ORDER BY's direction and the scan
+        # stops at LIMIT. `id` is still `flows.id` — `flows_fts` has no such column.
+        phrase, rest, rest_args = driver
+        args = [phrase.as(DB::Any)] + rest_args
+        from = "#{SELECT_ROW.sub(/FROM flows\z/, "FROM flows_fts CROSS JOIN flows ON flows.id = flows_fts.rowid")} " \
+               "WHERE flows_fts MATCH ? AND #{rest}"
+        id = "flows_fts.rowid"
+      else
+        args = filter.args.dup
+        from = "#{SELECT_ROW} WHERE (#{filter.sql})"
+        id = "id"
+      end
+      if since_id
+        args << since_id
+        args << limit
+        {"#{from} AND #{id} > ? ORDER BY #{id} ASC LIMIT ?", args}
+      elsif before_id
+        args << before_id
+        args << limit
+        {"#{from} AND #{id} < ? ORDER BY #{id} DESC LIMIT ?", args}
+      else
+        args << limit
+        {"#{from} ORDER BY #{id} DESC LIMIT ?", args}
+      end
+    end
+
     # Newest-first flows matching a compiled QL filter. `before_id` is a cursor for
     # paging into older matches (stable as new rows append, unlike OFFSET).
     # `raise_on_error` propagates a SQLite execution failure (a malformed FTS phrase,
@@ -96,19 +128,7 @@ module Gori
     def search(filter : QL::Filter, limit : Int32, before_id : Int64? = nil, since_id : Int64? = nil, *,
                raise_on_error : Bool = false, control : QueryControl? = nil) : Array(FlowRow)
       rows = [] of FlowRow
-      args = filter.args.dup
-      if since_id
-        args << since_id
-        args << limit
-        sql = "#{SELECT_ROW} WHERE (#{filter.sql}) AND id > ? ORDER BY id ASC LIMIT ?"
-      elsif before_id
-        args << before_id
-        args << limit
-        sql = "#{SELECT_ROW} WHERE (#{filter.sql}) AND id < ? ORDER BY id DESC LIMIT ?"
-      else
-        args << limit
-        sql = "#{SELECT_ROW} WHERE #{filter.sql} ORDER BY id DESC LIMIT ?"
-      end
+      sql, args = search_sql(filter, limit, before_id, since_id)
       controlled_query(sql, args, control) do |rs|
         rs.each { rows << read_row(rs) }
       end
