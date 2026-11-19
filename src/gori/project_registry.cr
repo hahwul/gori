@@ -260,7 +260,9 @@ module Gori
     # project's tags refuse it again. Empty for an untagged or legacy project, and for one
     # whose sidecar cannot be read.
     def tags_of(project : Project) : Array(String)
-      ProjectRegistry.salvage_tags(File.read(File.join(project.dir, TAGS_FILE)).lines)
+      file = File.join(project.dir, TAGS_FILE)
+      return [] of String unless File.file?(file) # the common case, without a raise
+      ProjectRegistry.salvage_tags(File.read(file).lines)
     rescue
       [] of String
     end

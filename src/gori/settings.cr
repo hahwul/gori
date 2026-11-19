@@ -546,9 +546,11 @@ module Gori
 
     private RACY_WINDOW = 2.seconds
 
+    # `File.info?`, not a rescued `File.info`: with no settings.json (an MCP-only install never
+    # writes one) every tool call reloads eight sections, and a raise apiece cost ~1 ms a call.
     private def self.file_signature : {String, Time, Int64}?
-      info = File.info(path)
-      {path, info.modification_time, info.size.to_i64}
+      info = File.info?(path)
+      info && {path, info.modification_time, info.size.to_i64}
     rescue
       nil
     end
@@ -563,6 +565,7 @@ module Gori
                                       & : JSON::Any -> Nil) : Nil
       sig = file_signature
       return if sig && @@reloaded_stat[key]? == sig # not written since this section was settled
+      return unless sig                             # no file to read: `load_raw` would answer nil, by raising
       raw = load_raw
       return unless raw
       here = {path, raw}
