@@ -9,8 +9,8 @@ module Gori
       # Cache-Control are a common API footgun — especially `application/json` without
       # `no-store`. Response-gated; document (HTML) headers stay in SecurityHeaders.
       #
-      # Gated on the response being AUTHENTICATED — the request carried a Cookie or an
-      # Authorization header, or the response sets a cookie. The whole risk is a cache retaining
+      # Outside successful OAuth token exchanges, the request must carry a Cookie or an
+      # Authorization header, or the response must set a cookie. The whole risk is a cache retaining
       # one user's data and serving it to another, which requires the data to be one user's in the
       # first place: a public, unauthenticated JSON endpoint left cacheable is a performance
       # decision, not a finding. Without that gate this fired Medium on every Cache-Control-less
@@ -19,7 +19,7 @@ module Gori
       class CacheableApi < Rule
         def info : RuleInfo
           RuleInfo.new("cacheable_api", "Cacheable API responses",
-            "Flags JSON/API responses cacheable by browsers or shared caches, which may retain tokens or PII.",
+            "Flags cacheable authenticated JSON/API responses and OAuth token responses missing no-store.",
             Category::HEADERS)
         end
 
@@ -29,24 +29,27 @@ module Gori
           return unless success?(resp)
           # Empty bodies have nothing sensitive to cache; skip pure ACKs.
           return if body_empty?(ctx)
-          # Nothing user-specific in the response ⇒ nothing for a cache to leak across users.
+          if ctx.oauth_token_grant
+            # A public OAuth client can receive credentials without sending a Cookie or Authorization.
+            unless ctx.cache_control.includes?("no-store")
+              emit(ctx, acc, "oauth_token_no_store", "OAuth token response lacks no-store",
+                "OAuth token response lacks Cache-Control: no-store")
+            end
+            return
+          end
           return unless authenticated?(ctx, resp)
 
           parts = ctx.cache_control
           return if CacheControl.directive?(parts, "no-store")
 
           if reason = cacheable_reason(parts, resp.headers.get?("Expires"), resp.headers.get?("Pragma"))
-            evidence = evidence_for(parts, reason)
-            acc << Detection.new(
-              "cacheable_json",
-              Category::HEADERS,
-              ctx.host,
-              ctx.url,
-              "JSON response may be cached (#{reason})",
-              Store::Severity::Medium,
-              evidence,
-              ctx.fid)
+            emit(ctx, acc, "cacheable_json", "JSON response may be cached (#{reason})", evidence_for(parts, reason))
           end
+        end
+
+        private def emit(ctx : Context, acc : Array(Detection), code : String, title : String, evidence : String) : Nil
+          acc << Detection.new(code, Category::HEADERS, ctx.host, ctx.url,
+            title, Store::Severity::Medium, evidence, ctx.fid)
         end
 
         # application/json, application/*+json (problem+json, ld+json, …), text/json.
