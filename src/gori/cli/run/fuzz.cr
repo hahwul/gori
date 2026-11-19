@@ -289,7 +289,7 @@ module Gori
         # `--flow` used to skip this and `--request` then skipped `open_store`, so
         # `--slot` / `--bind-from` lied with SLOT_NO_PROJECT despite `--project`.
         hydrate_project_env(proj.name, proj.db) if project_named?(proj.name, proj.db)
-        seed = fuzz_source(flow_id, repeater_id, request_file, proj.name, proj.db, format)
+        seed = fuzz_source(flow_id, repeater_id, request_file, proj.name, proj.db, format, stdin_read)
         text = seed.text
         default_target = seed.target
         evidence = seed.evidence
@@ -782,7 +782,8 @@ module Gori
       # the host: `FlowRequest.seed_sni`) and is a DEFAULT —
       # an explicit `--sni` still wins.
       private def self.fuzz_source(flow_id : Int64?, repeater_id : Int64?, request_file : String?,
-                                   project_name : String?, db_path : String?, format : Symbol = :text) : FuzzSeed
+                                   project_name : String?, db_path : String?, format : Symbol = :text,
+                                   stdin_read : Bool = false) : FuzzSeed
         if file = request_file
           FuzzSeed.new(read_input_file(file, "gori run fuzz"), nil, false, false, nil)
         elsif rid = repeater_id
@@ -823,7 +824,7 @@ module Gori
           hs = String.new(Fuzz::Template.escape_literal_markers(built.bytes))
           ws = Repeater::WsEngine.replayable?(hs) ? fuzz_ws_seed_flow(id, project_name, db_path) : nil
           FuzzSeed.new(hs, built.target, built.http2, true, Repeater::FlowRequest.seed_sni(detail), ws)
-        elsif !STDIN.tty?
+        elsif !stdin_read && !STDIN.tty? # not once `-w -` drained it: that read as an empty template
           FuzzSeed.new(read_stdin_fallback(STDIN, "gori run fuzz", "request"), nil, false, false, nil)
         else
           abort "gori run fuzz: no source — give a <flow-id>, --flow/--repeater/--request, or pipe a request on stdin"
