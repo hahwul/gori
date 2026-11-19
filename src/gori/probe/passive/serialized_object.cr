@@ -34,15 +34,15 @@ module Gori
         JAVA_B64 = "rO0AB"
         # The same stream hex-encoded (some frameworks hex a serialized cookie); anchored at the
         # start so a hex blob merely CONTAINING these bytes later does not match.
-        JAVA_HEX = /\Aaced0005/i
+        class_getter java_hex : Regex { /\Aaced0005/i }
         # base64( 00 01 00 00 00 FF FF FF FF ) — the .NET BinaryFormatter SerializationHeaderRecord.
         NET_BINFMT = "AAEAAAD/////"
         # An ASP.NET / JSF LosFormatter ViewState value: base64( FF 01 … ) → `/wE…`. The trailing
         # base64 run keeps a literal value of `/wE` (or a path like `/web`) from matching.
-        VIEWSTATE = /\A\/wE[A-Za-z0-9+\/]{8,}={0,2}/
+        class_getter viewstate : Regex { /\A\/wE[A-Za-z0-9+\/]{8,}={0,2}/ }
         # A PHP `serialize()`d object: `O:<len>:"ClassName":<count>:{`. The full structural shape
         # (class-name length, quoted name, property count, brace) is what a prose `O:` cannot fake.
-        PHP_OBJECT = /\AO:\d{1,5}:"[^"]{1,256}":\d{1,6}:\{/
+        class_getter php_object : Regex { /\AO:\d{1,5}:"[^"]{1,256}":\d{1,6}:\{/ }
 
         # An `<input …>` that both names itself a ViewState field AND carries a value, capturing
         # the value. Two orderings (name-before-value and value-before-name) are both covered
@@ -52,8 +52,9 @@ module Gori
         # has to be answered by the tag that matched: a page can mention `javax.faces.ViewState`
         # in a script or a second form while the input that actually carries the blob is
         # `__VIEWSTATE`, and a whole-body test then labels the ASP.NET finding as JSF.
-        VIEWSTATE_INPUT =
+        class_getter viewstate_input : Regex do
           Utf8.tolerant(/<input\b(?=[^>]*\bname\s*=\s*["'](__VIEWSTATE|javax\.faces\.ViewState)["'])[^>]*\bvalue\s*=\s*["']([^"']*)["']/i)
+        end
 
         # Cheap gate in front of VIEWSTATE_INPUT, whose `<input\b(?=…` opening gives PCRE no
         # literal to skip on. It is a REGEX, not the pair of `String#includes?("VIEWSTATE")` /
@@ -69,7 +70,7 @@ module Gori
         # page would then pay a whole-body `scan(VIEWSTATE_INPUT)`, whose `[^>]*`+`\bvalue`
         # backtracks per `<input` tag. Naming the fields keeps the /i widening (the lowercase
         # field is still caught) without opening the gate onto ordinary SPA bundles.
-        VIEWSTATE_MARKER = Utf8.tolerant(/__VIEWSTATE|javax\.faces\.ViewState/i)
+        class_getter viewstate_marker : Regex { Utf8.tolerant(/__VIEWSTATE|javax\.faces\.ViewState/i) }
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           # evidence => severity, deduped within the flow (a cookie echoed in both the request
@@ -129,8 +130,8 @@ module Gori
             end
           end
 
-          if (body = ctx.body_text) && VIEWSTATE_MARKER.matches?(body)
-            body.scan(VIEWSTATE_INPUT) do |m|
+          if (body = ctx.body_text) && SerializedObject.viewstate_marker.matches?(body)
+            body.scan(SerializedObject.viewstate_input) do |m|
               if fmt = classify(m[2])
                 mark(hits, fmt, "#{field_label(m[1])} field", Store::Severity::Low)
               end
@@ -158,9 +159,9 @@ module Gori
             next if v.empty?
             return "Java serialized object" if v.starts_with?(JAVA_B64)
             return ".NET BinaryFormatter object" if v.starts_with?(NET_BINFMT)
-            return "ASP.NET ViewState (unencrypted)" if VIEWSTATE.matches?(v)
-            return "PHP serialized object" if PHP_OBJECT.matches?(v)
-            return "Java serialized object" if JAVA_HEX.matches?(v)
+            return "ASP.NET ViewState (unencrypted)" if SerializedObject.viewstate.matches?(v)
+            return "PHP serialized object" if SerializedObject.php_object.matches?(v)
+            return "Java serialized object" if SerializedObject.java_hex.matches?(v)
           end
           nil
         end

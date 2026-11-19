@@ -31,16 +31,18 @@ module Gori
         # from `debug_mode_exposed` / `sourcemap` / `serialized_object` / `exposed_config`.
         # (`AsciiBytes` remains the right tool only for a SHORT or possibly-invalid-UTF-8
         # subject, where PCRE2 would raise; a scrubbed body text is neither.)
-        NEEDLE = Utf8.tolerant(/Index of \//)
+        class_getter needle : Regex { Utf8.tolerant(/Index of \//) }
 
-        TITLE = Utf8.tolerant(/<title>\s*Index of \/[^<]*<\/title>/i)
+        class_getter title : Regex { Utf8.tolerant(/<title>\s*Index of \/[^<]*<\/title>/i) }
         # Second marker, any one of: the autoindex heading, Apache's parent link text, or the
         # `../` anchor nginx opens its <pre> block with.
-        STRUCTURE = [
-          /<h1>\s*Index of \//i,
-          /Parent Directory/i,
-          /<a href="\.\.\/?">/i,
-        ].map { |pattern| Utf8.tolerant(pattern) }
+        class_getter structure : Array(Regex) do
+          [
+            /<h1>\s*Index of \//i,
+            /Parent Directory/i,
+            /<a href="\.\.\/?">/i,
+          ].map { |pattern| Utf8.tolerant(pattern) }
+        end
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless resp = ctx.response
@@ -48,9 +50,9 @@ module Gori
           # Only a served listing counts; a 403/404 error page can carry the same words.
           return unless (200..299).includes?(resp.status)
           text = ctx.body_text
-          return if text.nil? || !NEEDLE.matches?(text)
-          return unless TITLE.matches?(text)
-          return unless STRUCTURE.any?(&.matches?(text))
+          return if text.nil? || !DirectoryListing.needle.matches?(text)
+          return unless DirectoryListing.title.matches?(text)
+          return unless DirectoryListing.structure.any?(&.matches?(text))
           acc << Detection.new("directory_listing", Category::INFOLEAK, ctx.host, ctx.url,
             "Directory listing enabled (auto-generated index)", Store::Severity::Low,
             "autoindex page", ctx.fid)

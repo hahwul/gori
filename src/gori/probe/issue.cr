@@ -236,7 +236,7 @@ module Gori
     # DELIBERATELY UNMAPPED, and not an oversight:
     #   * `tech_*` — a fingerprint is a project fact, not a weakness; there is nothing to file.
     #   * `jwt_in_body` / `jwt_in_ws` — Info notes on where tokens flow. Handing the client its
-    #     own token is the design (see Secrets::JWT), so stamping a CWE on it would re-create the
+    #     own token is the design (see Secrets.jwt), so stamping a CWE on it would re-create the
     #     exact "a High that fires everywhere" problem splitting these codes out was meant to fix.
     #   * `custom_*` — the operator's own rule; only they know what it means.
     #   * `cookie_broad_domain` — an Info hardening note (a Domain scoped to a parent domain).

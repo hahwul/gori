@@ -24,7 +24,7 @@ module Gori
 
         # All three segments ≥6 chars: the old 1-char-signature tail (`[...]+`) matched dotted
         # non-JWT values like `eyJx.yy.z`. A real signed JWT's signature is far longer.
-        JWT_VALUE = /\beyJ[A-Za-z0-9_\-]{6,}\.[A-Za-z0-9_\-]{6,}\.[A-Za-z0-9_\-]{6,}/
+        class_getter jwt_value : Regex { /\beyJ[A-Za-z0-9_\-]{6,}\.[A-Za-z0-9_\-]{6,}\.[A-Za-z0-9_\-]{6,}/ }
 
         # Name tiers in priority order (High > Medium > Low); the highest present wins. Built
         # once at load — was a fresh Hash literal allocated on every flow just to iterate it.
@@ -38,7 +38,7 @@ module Gori
           pairs = query_pairs(ctx.req.target)
           return if pairs.empty?
           # A JWT-shaped value under any name is the strongest, lowest-FP signal — flag High.
-          if hit = pairs.find { |(_, v)| JWT_VALUE.matches?(v) }
+          if hit = pairs.find { |(_, v)| SecretInUrl.jwt_value.matches?(v) }
             return emit(acc, ctx, hit[0], Store::Severity::High)
           end
           # Otherwise rank by the name tier (High > Medium > Low); the highest present wins.

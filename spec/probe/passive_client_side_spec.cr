@@ -259,7 +259,7 @@ describe "Gori::Probe::Passive::Secrets (client-side shapes)" do
   end
 
   # A JWT is the one shape in this family an app legitimately hands its own client, so it is
-  # NOT a High secret_in_body — it gets its own Info code (see Secrets::JWT).
+  # NOT a High secret_in_body — it gets its own Info code (see Secrets.jwt).
   it "reports a JWT as Info jwt_in_body, never as a High secret_in_body" do
     with_store do |store|
       dets = analyze_js(store, "var t = '#{PROBE_JWT}';")
@@ -373,7 +373,7 @@ end
 
 describe "Gori::Probe::Passive::Secrets (provider shapes)" do
   private_hit = ->(s : String) do
-    Gori::Probe::Passive::Secrets::PATTERNS.select { |(re, _)| re.matches?(s) }.map { |(_, l)| l }
+    Gori::Probe::Passive::Secrets.patterns.select { |(re, _)| re.matches?(s) }.map { |(_, l)| l }
   end
 
   it "matches the added provider key shapes" do
@@ -525,12 +525,12 @@ describe "Gori::Probe::Passive::JsScan (navigation + parsing sinks)" do
   # here is silent — the uncovered source's bucket just stays empty forever.
   it "covers every SOURCES entry exactly once across the factored and solo scans" do
     factored = [] of Int32
-    Gori::Probe::Passive::JsScan::SOURCE_SCANS.each do |(_, slots)|
+    Gori::Probe::Passive::JsScan.source_scans.each do |(_, slots)|
       slots.each_value { |i| factored << i }
     end
-    covered = (factored + Gori::Probe::Passive::JsScan::SOLO_SOURCES).uniq.sort!
-    covered.should eq((0...Gori::Probe::Passive::JsScan::SOURCES.size).to_a)
-    (factored & Gori::Probe::Passive::JsScan::SOLO_SOURCES).should be_empty
+    covered = (factored + Gori::Probe::Passive::JsScan.solo_sources).uniq.sort!
+    covered.should eq((0...Gori::Probe::Passive::JsScan.sources.size).to_a)
+    (factored & Gori::Probe::Passive::JsScan.solo_sources).should be_empty
   end
 
   # SOURCES order is the priority with which a statement carrying several sources is labelled,

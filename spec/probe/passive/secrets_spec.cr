@@ -31,7 +31,7 @@ describe Gori::Probe::Passive::Secrets do
       "glptt-" + "a" * 40 + "_",
       "pre_glptt-" + "a" * 40,
     ].each do |text|
-      Gori::Probe::Passive::Secrets::PATTERNS.none? { |pattern, _| pattern.matches?(text) }.should be_true
+      Gori::Probe::Passive::Secrets.patterns.none? { |pattern, _| pattern.matches?(text) }.should be_true
     end
   end
 

@@ -24,17 +24,19 @@ module Gori
 
         # Assignment into a prototype key, dot or (possibly quoted) bracket form, plus the
         # deep-merge/assign APIs most commonly behind real CVEs.
-        SINK_PATTERNS = ([
-          {/\.__proto__\s*=(?!=)/, "__proto__ assignment"},
-          {/\[\s*["'`]__proto__["'`]\s*\]\s*=(?!=)/, "__proto__ key assignment"},
-          {/\bconstructor\s*\.\s*prototype\s*\[/, "constructor.prototype[] write"},
-          {/\bObject\s*\.\s*prototype\s*\[/, "Object.prototype[] write"},
-          {/\$\s*\.\s*extend\s*\(\s*true\b/, "$.extend(true) deep merge"},
-          {/\b_\s*\.\s*(?:merge|mergeWith|defaultsDeep|set|setWith)\s*\(/, "lodash deep merge/set"},
-        ] of {Regex, String}).map { |(re, label)| {Utf8.tolerant(re), label} }
+        class_getter sink_patterns : Array({Regex, String}) do
+          ([
+            {/\.__proto__\s*=(?!=)/, "__proto__ assignment"},
+            {/\[\s*["'`]__proto__["'`]\s*\]\s*=(?!=)/, "__proto__ key assignment"},
+            {/\bconstructor\s*\.\s*prototype\s*\[/, "constructor.prototype[] write"},
+            {/\bObject\s*\.\s*prototype\s*\[/, "Object.prototype[] write"},
+            {/\$\s*\.\s*extend\s*\(\s*true\b/, "$.extend(true) deep merge"},
+            {/\b_\s*\.\s*(?:merge|mergeWith|defaultsDeep|set|setWith)\s*\(/, "lodash deep merge/set"},
+          ] of {Regex, String}).map { |(re, label)| {Utf8.tolerant(re), label} }
+        end
 
         # A prototype key inside a request body region (urlencoded / JSON / bracketed).
-        REQ_BODY_PROTO = Utf8.tolerant(/(?:["'\[]\s*__proto__|__proto__\s*[\]"':=]|constructor(?:\[|%5[Bb]).{0,12}prototype)/i)
+        class_getter req_body_proto : Regex { Utf8.tolerant(/(?:["'\[]\s*__proto__|__proto__\s*[\]"':=]|constructor(?:\[|%5[Bb]).{0,12}prototype)/i) }
 
         # Every alternative of REQ_BODY_PROTO needs one of these two literals, so their absence
         # from the body is proof the pattern cannot match. Lowercase because the pattern is /i and
@@ -47,7 +49,7 @@ module Gori
           check_request(ctx, acc)
           seen = Set(String).new
           ctx.client_scripts_nocomment.each do |code| # keep string keys, drop comments (no commented-out-code FPs)
-            SINK_PATTERNS.each do |(re, label)|
+            PrototypePollution.sink_patterns.each do |(re, label)|
               next unless re.matches?(code)
               next unless seen.add?(label)
               acc << Detection.new("prototype_pollution", Category::CLIENT, ctx.host, ctx.url,
@@ -96,7 +98,7 @@ module Gori
                                 AsciiBytes.contains_ci?(body, CONSTRUCTOR_NEEDLE)
           end
           text = ctx.request_body_text
-          !text.nil? && REQ_BODY_PROTO.matches?(text)
+          !text.nil? && PrototypePollution.req_body_proto.matches?(text)
         end
       end
     end

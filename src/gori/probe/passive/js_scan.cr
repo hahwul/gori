@@ -24,11 +24,11 @@ module Gori
         # Inline <script>…</script>; group 1 = attributes, group 2 = body. `[\s\S]` matches
         # across newlines without depending on the DOTALL flag; non-greedy stops at the first
         # closing tag.
-        SCRIPT_BLOCK = Utf8.tolerant(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/i)
+        class_getter script_block : Regex { Utf8.tolerant(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/i) }
         # A src= attribute (external script — its inline body is empty) or a non-executable
         # <script type> (data/template island, not JS).
-        HAS_SRC     = /\bsrc\s*=/i
-        NON_JS_TYPE = /\btype\s*=\s*["']?\s*(?:application\/(?:json|ld\+json)|text\/(?:template|html|x-template|x-handlebars-template)|importmap|speculationrules)/i
+        class_getter has_src : Regex { /\bsrc\s*=/i }
+        class_getter non_js_type : Regex { /\btype\s*=\s*["']?\s*(?:application\/(?:json|ld\+json)|text\/(?:template|html|x-template|x-handlebars-template)|importmap|speculationrules)/i }
 
         # Character window (each side) used to bound a DOM-XSS source<->sink correlation to the
         # same statement. Large enough for a real one-liner, small enough to stay cheap and to
@@ -42,31 +42,33 @@ module Gori
         # which a statement carrying several sources is labelled. `source_spans` fills these
         # buckets with fewer scans than there are entries (see SOURCE_SCANS) but keeps this
         # order, so the label a window reports is unchanged.
-        SOURCES = ([
-          {/\blocation\.hash\b/, "location.hash"},
-          {/\blocation\.search\b/, "location.search"},
-          {/\blocation\.(?:href|pathname)\b/, "location.href"},
-          {/\bdocument\.URL\b/, "document.URL"},
-          {/\bdocument\.documentURI\b/, "document.documentURI"},
-          {/\bdocument\.baseURI\b/, "document.baseURI"},
-          {/\bdocument\.referrer\b/, "document.referrer"},
-          {/\bdocument\.cookie\b/, "document.cookie"},
-          {/\bdocument\.location\b/, "document.location"},
-          {/\bwindow\.name\b/, "window.name"},
-          {/\bhistory\.state\b/, "history.state"},
-          {/\b(?:e|ev|evt|event|msg|message)\.data\b/, "postMessage data"},
-          {/\b(?:localStorage|sessionStorage)\.getItem\b/, "web storage"},
-          # No `URLSearchParams` entry, deliberately. It was here and it is DOMINATED: the
-          # source↔sink window is bounded by BOUNDS (';' '{' '}' '\n'), so a constructor in an
-          # earlier statement was never reachable, and every in-statement TAINTED construction
-          # already carries its own listed source — `new URLSearchParams(location.search)`,
-          # `(window.location.search)`, `(location.hash.slice(1))` all match location.search /
-          # location.hash right beside it. There is no one-liner where the bare identifier is the
-          # only source token AND the flow is tainted, so it contributed zero unique findings.
-          # What it did contribute is a false pair on ordinary SPA code:
-          # `location.href = "/x?" + new URLSearchParams(form)` — untainted input, benign
-          # navigation — reported as DOM-XSS against the `location assignment` sink below.
-        ] of {Regex, String}).map { |(re, label)| {Utf8.tolerant(re), label} }
+        class_getter sources : Array({Regex, String}) do
+          ([
+            {/\blocation\.hash\b/, "location.hash"},
+            {/\blocation\.search\b/, "location.search"},
+            {/\blocation\.(?:href|pathname)\b/, "location.href"},
+            {/\bdocument\.URL\b/, "document.URL"},
+            {/\bdocument\.documentURI\b/, "document.documentURI"},
+            {/\bdocument\.baseURI\b/, "document.baseURI"},
+            {/\bdocument\.referrer\b/, "document.referrer"},
+            {/\bdocument\.cookie\b/, "document.cookie"},
+            {/\bdocument\.location\b/, "document.location"},
+            {/\bwindow\.name\b/, "window.name"},
+            {/\bhistory\.state\b/, "history.state"},
+            {/\b(?:e|ev|evt|event|msg|message)\.data\b/, "postMessage data"},
+            {/\b(?:localStorage|sessionStorage)\.getItem\b/, "web storage"},
+            # No `URLSearchParams` entry, deliberately. It was here and it is DOMINATED: the
+            # source↔sink window is bounded by BOUNDS (';' '{' '}' '\n'), so a constructor in an
+            # earlier statement was never reachable, and every in-statement TAINTED construction
+            # already carries its own listed source — `new URLSearchParams(location.search)`,
+            # `(window.location.search)`, `(location.hash.slice(1))` all match location.search /
+            # location.hash right beside it. There is no one-liner where the bare identifier is the
+            # only source token AND the flow is tainted, so it contributed zero unique findings.
+            # What it did contribute is a false pair on ordinary SPA code:
+            # `location.href = "/x?" + new URLSearchParams(form)` — untainted input, benign
+            # navigation — reported as DOM-XSS against the `location assignment` sink below.
+          ] of {Regex, String}).map { |(re, label)| {Utf8.tolerant(re), label} }
+        end
 
         # How `source_spans` actually walks the script. Nine of the SOURCES entries above share a
         # literal prefix — `location.` (3) and `document.` (6) — and scanning them one pattern at
@@ -85,11 +87,13 @@ module Gori
         # The captured alternative decides which SOURCES bucket a span lands in, so the resulting
         # index is IDENTICAL to the one 14 separate scans produced — same buckets, same order,
         # same spans — and `source_in_window`'s priority semantics are untouched.
-        SOURCE_SCANS = ([
-          {/\blocation\.(hash|search|href|pathname)\b/, {"hash" => 0, "search" => 1, "href" => 2, "pathname" => 2}},
-          {/\bdocument\.(URL|documentURI|baseURI|referrer|cookie|location)\b/,
-           {"URL" => 3, "documentURI" => 4, "baseURI" => 5, "referrer" => 6, "cookie" => 7, "location" => 8}},
-        ] of {Regex, Hash(String, Int32)}).map { |(re, slots)| {Utf8.tolerant(re), slots} }
+        class_getter source_scans : Array({Regex, Hash(String, Int32)}) do
+          ([
+            {/\blocation\.(hash|search|href|pathname)\b/, {"hash" => 0, "search" => 1, "href" => 2, "pathname" => 2}},
+            {/\bdocument\.(URL|documentURI|baseURI|referrer|cookie|location)\b/,
+             {"URL" => 3, "documentURI" => 4, "baseURI" => 5, "referrer" => 6, "cookie" => 7, "location" => 8}},
+          ] of {Regex, Hash(String, Int32)}).map { |(re, slots)| {Utf8.tolerant(re), slots} }
+        end
 
         # SOURCES entries no SOURCE_SCANS group covers, scanned individually. DERIVED, not
         # written out: a hardcoded index list is a silent-failure shape here, because a new
@@ -97,37 +101,39 @@ module Gori
         # that taint source simply stops producing pairs, with no compile error and no spec
         # failure (a per-label spec enumerates the labels that exist, so it stays green too).
         # Deriving it means the union always covers SOURCES by construction.
-        SOLO_SOURCES = (0...SOURCES.size).reject { |i| SOURCE_SCANS.any? { |(_, slots)| slots.each_value.includes?(i) } }
+        class_getter solo_sources : Array(Int32) { (0...JsScan.sources.size).reject { |i| JsScan.source_scans.any? { |(_, slots)| slots.each_value.includes?(i) } } }
 
         # HTML/JS execution sinks. Each keys on a distinctive identifier so PCRE's first-byte
         # optimisation skips clean code fast (like body_leaks' per-pattern loop). Sinks whose
         # payload is normally a string (setTimeout/eval) still work post-strip: a `foo+source`
         # concatenation leaves `source` as code even after the string half is blanked.
-        SINKS = ([
-          {/\.(?:inner|outer)HTML\s*\+?=(?!=)/, "innerHTML"},
-          {/\.insertAdjacentHTML\s*\(/, "insertAdjacentHTML"},
-          {/\bdocument\.write(?:ln)?\s*\(/, "document.write"},
-          {/\.srcdoc\s*=(?!=)/, "iframe.srcdoc"},
-          {/\beval\s*\(/, "eval"},
-          {/\bnew\s+Function\s*\(/, "Function"},
-          {/\bset(?:Timeout|Interval)\s*\(/, "setTimeout/setInterval"},
-          {/\bdangerouslySetInnerHTML\b/, "dangerouslySetInnerHTML"},
-          # `(?!\))` keeps the ARGUMENT-LESS form out: `$(el).html()` READS the markup, it does not
-          # write it — the same distinction the `(?!=)` guards above draw between `=` and `==`.
-          # `\s*` before it so a newline-wrapped argument still counts as a sink.
-          {/\.html\s*\(\s*(?!\))/, "jQuery.html()"},
-          # Navigation sinks. A tainted navigation target is how `javascript:`-URL XSS and
-          # client-side open redirect both land, and neither is reachable through the HTML/eval
-          # sinks above. The bare-`location` form deliberately also matches `document.location =`
-          # and `window.location =` (the `\b` holds after the dot); `(?!=)` keeps `==`/`===` out.
-          {/\b(?:window\.)?location(?:\.href)?\s*=(?!=)/, "location assignment"},
-          {/\blocation\.(?:replace|assign)\s*\(/, "location.replace/assign"},
-          {/\bwindow\.open\s*\(/, "window.open"},
-          # HTML-parsing sinks: both turn a string into live nodes, which is the same capability
-          # as innerHTML once the result is inserted.
-          {/\.createContextualFragment\s*\(/, "createContextualFragment"},
-          {/\bparseFromString\s*\(/, "DOMParser.parseFromString"},
-        ] of {Regex, String}).map { |(re, label)| {Utf8.tolerant(re), label} }
+        class_getter sinks : Array({Regex, String}) do
+          ([
+            {/\.(?:inner|outer)HTML\s*\+?=(?!=)/, "innerHTML"},
+            {/\.insertAdjacentHTML\s*\(/, "insertAdjacentHTML"},
+            {/\bdocument\.write(?:ln)?\s*\(/, "document.write"},
+            {/\.srcdoc\s*=(?!=)/, "iframe.srcdoc"},
+            {/\beval\s*\(/, "eval"},
+            {/\bnew\s+Function\s*\(/, "Function"},
+            {/\bset(?:Timeout|Interval)\s*\(/, "setTimeout/setInterval"},
+            {/\bdangerouslySetInnerHTML\b/, "dangerouslySetInnerHTML"},
+            # `(?!\))` keeps the ARGUMENT-LESS form out: `$(el).html()` READS the markup, it does not
+            # write it — the same distinction the `(?!=)` guards above draw between `=` and `==`.
+            # `\s*` before it so a newline-wrapped argument still counts as a sink.
+            {/\.html\s*\(\s*(?!\))/, "jQuery.html()"},
+            # Navigation sinks. A tainted navigation target is how `javascript:`-URL XSS and
+            # client-side open redirect both land, and neither is reachable through the HTML/eval
+            # sinks above. The bare-`location` form deliberately also matches `document.location =`
+            # and `window.location =` (the `\b` holds after the dot); `(?!=)` keeps `==`/`===` out.
+            {/\b(?:window\.)?location(?:\.href)?\s*=(?!=)/, "location assignment"},
+            {/\blocation\.(?:replace|assign)\s*\(/, "location.replace/assign"},
+            {/\bwindow\.open\s*\(/, "window.open"},
+            # HTML-parsing sinks: both turn a string into live nodes, which is the same capability
+            # as innerHTML once the result is inserted.
+            {/\.createContextualFragment\s*\(/, "createContextualFragment"},
+            {/\bparseFromString\s*\(/, "DOMParser.parseFromString"},
+          ] of {Regex, String}).map { |(re, label)| {Utf8.tolerant(re), label} }
+        end
 
         # A random-access `Char` view over ASCII bytes, used instead of `String#chars` on the
         # (overwhelmingly common) all-ASCII script. `chars` builds an `Array(Char)` sized to the
@@ -172,12 +178,12 @@ module Gori
           if js
             yield text, 0
           elsif html
-            text.scan(SCRIPT_BLOCK) do |m|
+            text.scan(JsScan.script_block) do |m|
               attrs = m[1]
               body = m[2]
               next if body.empty?
-              next if HAS_SRC.matches?(attrs)     # external script; body is decorative
-              next if NON_JS_TYPE.matches?(attrs) # data/template island, not code
+              next if JsScan.has_src.matches?(attrs)     # external script; body is decorative
+              next if JsScan.non_js_type.matches?(attrs) # data/template island, not code
               yield body, m.byte_begin(2)
             end
           end
@@ -527,7 +533,7 @@ module Gori
           # each source ONCE up front for its match POSITIONS turns every one of those into an
           # allocation-free binary search (see `source_in_window`).
           return pairs if sources.empty?
-          SINKS.each do |(sink_re, sink_label)|
+          JsScan.sinks.each do |(sink_re, sink_label)|
             # `scan`, NOT a `while m = sink_re.match(code, pos)` loop: re-entering `match` with a
             # start offset is ~515× slower than one `scan` walk for the SAME matches and the SAME
             # allocation (74.00ms vs 143.64µs over 2448 hits in a 256 KiB body — pure CPU inside
@@ -547,30 +553,34 @@ module Gori
         # SINKS because DomXss labels everything it pairs as XSS. The third field is which
         # top-level argument holds the URL (XHR's `open(method, url)` is the one at index 1), and
         # `window.open` is excluded from `.open(` — it is a navigation sink, and SINKS has it.
-        REQUEST_SINKS = ([
-          {/\bfetch\s*\(/, "fetch", 0},
-          {/(?<!window)\.open\s*\(/, "XMLHttpRequest.open", 1},
-          {/\baxios(?:\.(?:get|post|put|patch|delete|request))?\s*\(/, "axios", 0},
-          {/(?:\$|\bjQuery)\.(?:ajax|get|post|getJSON)\s*\(/, "jQuery.ajax", 0},
-          {/\bnew\s+Request\s*\(/, "Request", 0},
-        ] of {Regex, String, Int32}).map { |(re, label, arg)| {Utf8.tolerant(re), label, arg} }
+        class_getter request_sinks : Array({Regex, String, Int32}) do
+          ([
+            {/\bfetch\s*\(/, "fetch", 0},
+            {/(?<!window)\.open\s*\(/, "XMLHttpRequest.open", 1},
+            {/\baxios(?:\.(?:get|post|put|patch|delete|request))?\s*\(/, "axios", 0},
+            {/(?:\$|\bjQuery)\.(?:ajax|get|post|getJSON)\s*\(/, "jQuery.ajax", 0},
+            {/\bnew\s+Request\s*\(/, "Request", 0},
+          ] of {Regex, String, Int32}).map { |(re, label, arg)| {Utf8.tolerant(re), label, arg} }
+        end
 
         # The `.open(` sink counts only in a script that names XMLHttpRequest. A regex, not
         # `String#includes?`: PCRE's literal search is ~60× faster on a 256 KiB bundle (5µs vs
         # 327µs), and this gate runs on every script with no request sink at all.
-        XHR = Utf8.tolerant(/XMLHttpRequest/)
+        class_getter xhr : Regex { Utf8.tolerant(/XMLHttpRequest/) }
 
         # SPA router values: a path segment the router hands the component, so as tainted for
         # CSPT as `location.pathname`. Deliberately NOT in SOURCES — a router param assigned to
         # innerHTML is a weaker XSS lead than this list's precision for request URLs, and adding
         # them there would change every dom_xss result. Appended after SOURCES, so a URL argument
         # that also names a SOURCES entry is labelled by that entry.
-        ROUTER_SOURCES = ([
-          {/\buseParams\s*\(/, "useParams()"},
-          {/\$?\broute\.params\b/, "route.params"},
-          {/\brouter\.query\b/, "router.query"},
-          {/\bsearchParams\.get\s*\(/, "searchParams.get()"},
-        ] of {Regex, String}).map { |(re, label)| {Utf8.tolerant(re), label} }
+        class_getter router_sources : Array({Regex, String}) do
+          ([
+            {/\buseParams\s*\(/, "useParams()"},
+            {/\$?\broute\.params\b/, "route.params"},
+            {/\brouter\.query\b/, "router.query"},
+            {/\bsearchParams\.get\s*\(/, "searchParams.get()"},
+          ] of {Regex, String}).map { |(re, label)| {Utf8.tolerant(re), label} }
+        end
 
         # Sources that are the whole current URL. Re-requesting it (`fetch(location.href)`, a
         # PJAX refresh) goes nowhere the navigation did not already go; it takes an app-chosen
@@ -599,8 +609,8 @@ module Gori
           pairs = [] of {String, String}
           all = nil
           twin = kept.try { |k| Twin.new(code.to_slice, k.to_slice) }
-          REQUEST_SINKS.each do |(sink_re, sink_label, arg)|
-            next if arg == 1 && !XHR.matches?(code)
+          JsScan.request_sinks.each do |(sink_re, sink_label, arg)|
+            next if arg == 1 && !JsScan.xhr.matches?(code)
             found = hits = 0
             # End of the last URL span read: a call nested in it was already read (keeps the walk
             # linear). Only the URL span: a call in a config's `success:` callback is its own request.
@@ -677,7 +687,7 @@ module Gori
         # SOURCES hit keeps its label.
         private def self.router_spans(code : String) : SourceIndex
           index = [] of {Array({Int32, Int32}), String}
-          ROUTER_SOURCES.each do |(re, label)|
+          JsScan.router_sources.each do |(re, label)|
             spans = [] of {Int32, Int32}
             code.scan(re) { |m| spans << {m.byte_begin(0), m.byte_end(0)} }
             index << {spans, label} unless spans.empty?
@@ -839,20 +849,20 @@ module Gori
           # order leaves every bucket ascending in both begin and end — the property
           # `span_within?` binary-searches on — and a bucket fed by several alternatives of one
           # factored regex (location.href / location.pathname) inherits it as a subsequence.
-          buckets = Array(Array({Int32, Int32})).new(SOURCES.size) { [] of {Int32, Int32} }
-          SOURCE_SCANS.each do |(re, slot_of)|
+          buckets = Array(Array({Int32, Int32})).new(JsScan.sources.size) { [] of {Int32, Int32} }
+          JsScan.source_scans.each do |(re, slot_of)|
             code.scan(re) do |m|
               next unless slot = slot_of[m[1]]?
               buckets[slot] << {m.byte_begin(0), m.byte_end(0)}
             end
           end
-          SOLO_SOURCES.each do |slot|
-            re = SOURCES[slot][0]
+          JsScan.solo_sources.each do |slot|
+            re = JsScan.sources[slot][0]
             code.scan(re) { |m| buckets[slot] << {m.byte_begin(0), m.byte_end(0)} }
           end
           index = [] of {Array({Int32, Int32}), String}
           buckets.each_with_index do |spans, slot|
-            index << {spans, SOURCES[slot][1]} unless spans.empty?
+            index << {spans, JsScan.sources[slot][1]} unless spans.empty?
           end
           index
         end

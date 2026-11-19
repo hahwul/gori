@@ -85,8 +85,8 @@ module Gori
       body = Entity.bytes(detail.response_head, detail.response_body, MAX_MAP_BYTES)
       return nil if body.nil? || body.empty?
       text = JsRefs.offset_text(body)
-      return nil unless Probe::Passive::SourceMap::NEEDLE.matches?(text)
-      Probe::Passive::SourceMap::MARKER.match(text).try(&.[1])
+      return nil unless Probe::Passive::SourceMap.needle.matches?(text)
+      Probe::Passive::SourceMap.marker.match(text).try(&.[1])
     end
 
     # Resolve and unpack a flow's source map. Reads the flow's `sourceMappingURL`, fetches (or

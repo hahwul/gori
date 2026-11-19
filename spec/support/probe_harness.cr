@@ -4,7 +4,7 @@
 # file-private helpers other specs keep.
 
 # A key id shaped exactly like a real one and deliberately NOT one of AWS's published
-# documentation placeholders (`AKIAIOSFODNN7EXAMPLE` and friends), which `Secrets::PATTERNS`
+# documentation placeholders (`AKIAIOSFODNN7EXAMPLE` and friends), which `Secrets.patterns`
 # screens out — so a fixture standing in for a LEAKED key has to avoid them. Assembled from two
 # halves so secret-scanning push protection lets the fixture through.
 PROBE_AWS_KEY_ID = "AKIA" + "3ZQF7XKPL2WVNB6D"

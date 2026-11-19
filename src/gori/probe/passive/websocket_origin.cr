@@ -7,8 +7,8 @@ module Gori
   module Probe
     module Passive
       class WebSocketOrigin < Rule
-        private ORIGIN = %r{\A(https?)://(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::([0-9]{1,5}))?\z}i
-        private KEY    = %r{\A[A-Za-z0-9+/]{22}==\z}
+        class_getter origin : Regex { %r{\A(https?)://(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::([0-9]{1,5}))?\z}i }
+        class_getter key : Regex { %r{\A[A-Za-z0-9+/]{22}==\z} }
 
         def info : RuleInfo
           RuleInfo.new("websocket_origin", "Cross-site WebSocket handshakes",
@@ -45,12 +45,12 @@ module Gori
           keys = headers.get_all("Sec-WebSocket-Key")
           return false unless keys.size == 1
           key = keys.first
-          return false unless key.bytesize == 24 && key.ascii_only? && KEY.matches?(key)
+          return false unless key.bytesize == 24 && key.ascii_only? && WebSocketOrigin.key.matches?(key)
           response.headers.get_all("Sec-WebSocket-Accept") == [Proxy::WS::Handshake.accept_value(key)]
         end
 
         private def origin_differs?(value : String, ctx : Context) : Bool
-          return false unless value.ascii_only? && (origin = ORIGIN.match(value))
+          return false unless value.ascii_only? && (origin = WebSocketOrigin.origin.match(value))
           return false if (port = origin[3]?) && !(1..65535).includes?(port.to_i)
           # An otherwise identical origin cannot become cross-site by changing only its port.
           host = origin[2]

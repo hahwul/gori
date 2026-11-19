@@ -322,7 +322,7 @@ module Gori
 
         # A nonce-source or hash-source in the script context (parse_csp keeps the quotes and
         # lowercases, so the value's original case is irrelevant to this prefix test).
-        SCRIPT_NONCE_HASH = /\A'(?:nonce|sha256|sha384|sha512)-/
+        class_getter script_nonce_hash : Regex { /\A'(?:nonce|sha256|sha384|sha512)-/ }
 
         # CSP source-list keywords, matched as WHOLE tokens. These used to be tested with
         # `includes?`, which fires on any source that merely CONTAINS the word: a script-src of
@@ -384,7 +384,7 @@ module Gori
         private def unrestricted_inline?(sources : Array(String)?) : Bool
           return true unless sources
           sources.any? { |s| UNSAFE_INLINE.includes?(s) } &&
-            sources.none? { |s| STRICT_DYNAMIC.includes?(s) || SCRIPT_NONCE_HASH.matches?(s) }
+            sources.none? { |s| STRICT_DYNAMIC.includes?(s) || SecurityHeaders.script_nonce_hash.matches?(s) }
         end
 
         private def external_script_capabilities(sources : Array(String)?) : ScriptCapability

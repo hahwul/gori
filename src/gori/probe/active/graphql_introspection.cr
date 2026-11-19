@@ -58,7 +58,7 @@ module Gori
         INTROSPECTION_POST_BODY = %({"query":"{__schema{queryType{name}}}"})
 
         # The introspection RESULT anchor — a QUOTED `"__schema"` key opening an object, the shape
-        # of `{"data":{"__schema":{…}}}`. Mirrors Passive::GraphqlIntrospection::INTROSPECTION_RESULT
+        # of `{"data":{"__schema":{…}}}`. Mirrors Passive::GraphqlIntrospection.introspection_result
         # (kept local so the active rule stays self-contained): it rejects a mere query echo (there
         # `__schema` is unquoted) and sits at the body start, surviving the 64 KiB cap.
         INTROSPECTION_RESULT = /"__schema"\s*:\s*\{/

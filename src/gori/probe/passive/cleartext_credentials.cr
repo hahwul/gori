@@ -50,16 +50,16 @@ module Gori
         # a false-positive magnet. An unquoted boolean (`"showPassword": false`) never matches the
         # `"…"` value; quoted UI-state values are screened while the scan CONTINUES, so an earlier
         # `"showPassword":"false"` cannot hide a later real `"password":"…"` member.
-        JSON_CREDENTIAL = Utf8.tolerant(/"([A-Za-z0-9_.\[\]-]*(?:password|passwd|pwd)|pass|passphrase|client[_-]?secret|secret|api[_-]?(?:key|secret))"\s*:\s*"((?:[^"\\]++|\\.)+)"/i)
+        class_getter json_credential : Regex { Utf8.tolerant(/"([A-Za-z0-9_.\[\]-]*(?:password|passwd|pwd)|pass|passphrase|client[_-]?secret|secret|api[_-]?(?:key|secret))"\s*:\s*"((?:[^"\\]++|\\.)+)"/i) }
 
         # `<input … type=password>`. The negative lookbehind is the same one the neighbouring HTML
         # scans use: without it a `data-type="password"` attribute matches, because `\b` treats the
         # hyphen as a boundary.
-        PASSWORD_INPUT = Utf8.tolerant(/<input\b[^>]*(?<![-\w])type\s*=\s*["']?password\b/i)
+        class_getter password_input : Regex { Utf8.tolerant(/<input\b[^>]*(?<![-\w])type\s*=\s*["']?password\b/i) }
         # Cheap necessary-condition gate for it, a REGEX for the reason `body_leaks` documents at
         # length: PCRE2 memchr-skips a literal where `String#includes?` walks every offset, and
         # PASSWORD_INPUT itself opens on `<input`, which a form-heavy page carries everywhere.
-        PASSWORD_GATE = Utf8.tolerant(/password/i)
+        class_getter password_gate : Regex { Utf8.tolerant(/password/i) }
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.scheme == "http"
@@ -108,8 +108,8 @@ module Gori
           return unless ctx.response
           return unless ctx.html?
           text = ctx.client_body_text
-          return if text.nil? || !PASSWORD_GATE.matches?(text)
-          return unless PASSWORD_INPUT.matches?(text)
+          return if text.nil? || !CleartextCredentials.password_gate.matches?(text)
+          return unless CleartextCredentials.password_input.matches?(text)
           acc << det(ctx, "cleartext_password_form",
             "Password field served over cleartext HTTP", Store::Severity::Medium,
             "<input type=password>")
@@ -134,7 +134,7 @@ module Gori
         end
 
         private def json_password(body : String) : String?
-          body.scan(JSON_CREDENTIAL) do |m|
+          body.scan(CleartextCredentials.json_credential) do |m|
             # A quoted boolean-ish value (`"showPassword":"false"`) is UI state, not a
             # transmitted secret. Keep walking: a real password can be a later member.
             next if NON_SECRET_VALUES.includes?(m[2].downcase)

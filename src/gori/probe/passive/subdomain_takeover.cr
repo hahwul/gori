@@ -44,30 +44,32 @@ module Gori
         # platform, create it and it is yours" — the takeover is one signup away. The rest are
         # Medium: the resource is unclaimed, but claiming the HOSTNAME on those platforms takes an
         # account-level step (a verified domain, a paid plan) that this response does not evidence.
-        SIGNATURES = [
-          # S3 and GCS both answer a missing bucket with this XML error code.
-          {/<Code>NoSuchBucket<\/Code>/, "unclaimed S3/GCS bucket",
-           ["amazonaws.com", "googleapis.com"], Store::Severity::High},
-          {/There isn[’']t a GitHub Pages site here\./, "unclaimed GitHub Pages site",
-           ["github.io", "github.com"], Store::Severity::High},
-          # Heroku's 404 for an app that does not exist is served from its CDN error page.
-          {/herokucdn\.com\/error-pages\/no-such-app\.html/, "unclaimed Heroku app",
-           ["herokuapp.com", "herokudns.com"], Store::Severity::High},
-          {/The gods are wise, but do not know of the site which you seek/, "unclaimed Pantheon site",
-           ["pantheonsite.io"], Store::Severity::High},
-          {/Sorry, this shop is currently unavailable/, "unclaimed Shopify store",
-           ["myshopify.com"], Store::Severity::Medium},
-          {/Fastly error: unknown domain/, "domain not configured on Fastly",
-           ["fastly.net", "fastlylb.net"], Store::Severity::Medium},
-          {/404 Web Site not found|Error 404 - Web app not found/, "unclaimed Azure app service",
-           ["azurewebsites.net", "cloudapp.net", "trafficmanager.net", "azureedge.net"], Store::Severity::Medium},
-          {/Help Center Closed/, "unclaimed Zendesk help centre",
-           ["zendesk.com"], Store::Severity::Medium},
-          {/DEPLOYMENT_NOT_FOUND/, "unclaimed Vercel deployment",
-           ["vercel.app", "vercel.com", "now.sh"], Store::Severity::Medium},
-          {/Whatever you were looking for doesn[’']t currently exist at this address/, "unclaimed Tumblr blog",
-           ["tumblr.com"], Store::Severity::Medium},
-        ].map { |(marker, label, suffixes, severity)| {Utf8.tolerant(marker), label, suffixes, severity} }
+        class_getter signatures : Array({Regex, String, Array(String), Store::Severity}) do
+          [
+            # S3 and GCS both answer a missing bucket with this XML error code.
+            {/<Code>NoSuchBucket<\/Code>/, "unclaimed S3/GCS bucket",
+             ["amazonaws.com", "googleapis.com"], Store::Severity::High},
+            {/There isn[’']t a GitHub Pages site here\./, "unclaimed GitHub Pages site",
+             ["github.io", "github.com"], Store::Severity::High},
+            # Heroku's 404 for an app that does not exist is served from its CDN error page.
+            {/herokucdn\.com\/error-pages\/no-such-app\.html/, "unclaimed Heroku app",
+             ["herokuapp.com", "herokudns.com"], Store::Severity::High},
+            {/The gods are wise, but do not know of the site which you seek/, "unclaimed Pantheon site",
+             ["pantheonsite.io"], Store::Severity::High},
+            {/Sorry, this shop is currently unavailable/, "unclaimed Shopify store",
+             ["myshopify.com"], Store::Severity::Medium},
+            {/Fastly error: unknown domain/, "domain not configured on Fastly",
+             ["fastly.net", "fastlylb.net"], Store::Severity::Medium},
+            {/404 Web Site not found|Error 404 - Web app not found/, "unclaimed Azure app service",
+             ["azurewebsites.net", "cloudapp.net", "trafficmanager.net", "azureedge.net"], Store::Severity::Medium},
+            {/Help Center Closed/, "unclaimed Zendesk help centre",
+             ["zendesk.com"], Store::Severity::Medium},
+            {/DEPLOYMENT_NOT_FOUND/, "unclaimed Vercel deployment",
+             ["vercel.app", "vercel.com", "now.sh"], Store::Severity::Medium},
+            {/Whatever you were looking for doesn[’']t currently exist at this address/, "unclaimed Tumblr blog",
+             ["tumblr.com"], Store::Severity::Medium},
+          ].map { |(marker, label, suffixes, severity)| {Utf8.tolerant(marker), label, suffixes, severity} }
+        end
 
         # One alternation pass instead of ten on the miss — and the miss is every ordinary 404,
         # which is the volume this rule actually sees. Each branch is the shortest literal that
@@ -75,15 +77,15 @@ module Gori
         # the second stage runs on almost nothing. Same two-stage shape as `sourcemap`/`exposed_config`;
         # the gate is a REGEX rather than a chain of `String#includes?` for the reason spelled out
         # there — PCRE2 memchr-skips a literal where `includes?` walks every offset.
-        NEEDLE = Utf8.tolerant(/NoSuchBucket|GitHub Pages site here|no-such-app\.html|know of the site which you seek|shop is currently unavailable|Fastly error: unknown domain|Web [Ss]ite not found|Web app not found|Help Center Closed|DEPLOYMENT_NOT_FOUND|currently exist at this address/)
+        class_getter needle : Regex { Utf8.tolerant(/NoSuchBucket|GitHub Pages site here|no-such-app\.html|know of the site which you seek|shop is currently unavailable|Fastly error: unknown domain|Web [Ss]ite not found|Web app not found|Help Center Closed|DEPLOYMENT_NOT_FOUND|currently exist at this address/) }
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless resp = ctx.response
           return unless resp.status >= 400
           text = ctx.body_text
-          return if text.nil? || !NEEDLE.matches?(text)
+          return if text.nil? || !SubdomainTakeover.needle.matches?(text)
           host = ctx.host.downcase
-          SIGNATURES.each do |(marker, service, own, sev)|
+          SubdomainTakeover.signatures.each do |(marker, service, own, sev)|
             next unless marker.matches?(text)
             next if provider_host?(host, own)
             acc << Detection.new("subdomain_takeover", Category::INFOLEAK, ctx.host, ctx.url,
