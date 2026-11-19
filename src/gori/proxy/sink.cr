@@ -10,6 +10,21 @@ module Gori::Proxy
     abstract def on_request(req : Store::CapturedRequest) : Int64
     # Fill in the response (or error) for an existing flow.
     abstract def on_response(resp : Store::CapturedResponse) : Nil
+
+    # `on_request` for a caller that does not need the id yet: the channel answers it. A sink
+    # that can queue the write (StoreSink) returns before the commit; the default answers at
+    # once, so a recording double behaves exactly as it does under `on_request`.
+    def on_request_deferred(req : Store::CapturedRequest) : Channel(Int64)
+      id = Channel(Int64).new(1)
+      id.send(on_request(req))
+      id
+    end
+
+    # `on_response` without waiting for the write to land; the default is `on_response`.
+    def on_response_deferred(resp : Store::CapturedResponse) : Nil
+      on_response(resp)
+    end
+
     # Record a captured WebSocket message for a flow (post-101). `shape` is the frame
     # header the payload arrived in (V7); the default spares every CALLER from passing it.
     # It does NOT spare an implementor: Crystal matches an abstract def by its full parameter
@@ -73,6 +88,15 @@ module Gori::Proxy
     def on_response(resp : Store::CapturedResponse) : Nil
       return if resp.flow_id <= 0 # the request insert failed (e.g. disk full) — no row to update
       @store.update_response(resp)
+    end
+
+    def on_request_deferred(req : Store::CapturedRequest) : Channel(Int64)
+      @store.insert_flow_deferred(req)
+    end
+
+    def on_response_deferred(resp : Store::CapturedResponse) : Nil
+      return if resp.flow_id <= 0
+      @store.update_response_deferred(resp)
     end
 
     def on_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes,

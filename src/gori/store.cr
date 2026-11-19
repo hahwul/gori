@@ -875,11 +875,22 @@ module Gori
     # channel would otherwise raise into (and tear down) that fiber. Dropping the
     # late row on shutdown is the right degradation (mirrors insert_h2_frame).
     def insert_flow(req : CapturedRequest) : Int64
+      insert_flow_deferred(req).receive
+    end
+
+    # The same insert, without waiting for it: the returned channel answers the id once the row
+    # is committed (0 when the store is closing or the batch rolled back). For a caller that has
+    # more to do before it needs the id — the h2 frame pump, whose next frame may belong to
+    # another stream. The writer is FIFO, so a write the caller queues after receiving the id
+    # can never land before this row.
+    def insert_flow_deferred(req : CapturedRequest) : Channel(Int64)
       reply = Channel(Int64).new(1) # buffered: the writer must never block sending a reply
-      @writes.send(InsertFlow.new(req, reply))
-      reply.receive
-    rescue Channel::ClosedError
-      0_i64 # store closing — drop the late row instead of raising into the proxy fiber
+      begin
+        @writes.send(InsertFlow.new(req, reply))
+      rescue Channel::ClosedError
+        reply.send(0_i64) # store closing — drop the late row instead of raising into the proxy fiber
+      end
+      reply
     end
 
     # Insert many flows atomically (one writer transaction). Returns the committed
@@ -905,6 +916,15 @@ module Gori
       reply = Channel(Nil).new(1) # buffered: the writer must never block sending a reply
       @writes.send(UpdateResp.new(resp, reply))
       reply.receive
+    rescue Channel::ClosedError
+      nil
+    end
+
+    # The same update, queued without waiting for its commit. Nothing is dropped: a full
+    # channel still blocks the caller, as `update_response` does. Events still fire only after
+    # the commit, so no reader sees the row earlier; only the caller stops waiting.
+    def update_response_deferred(resp : CapturedResponse) : Nil
+      @writes.send(UpdateResp.new(resp, Channel(Nil).new(1)))
     rescue Channel::ClosedError
       nil
     end

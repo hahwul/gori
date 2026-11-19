@@ -134,7 +134,30 @@ module Gori::Proxy::H2
     private class Stream
       getter req = Side.new
       getter resp = Side.new
-      property flow_id : Int64? = nil
+      # The request row's id, read off `@flow_id_future` the first time something needs it.
+      # `emit_request` queues the insert and the pump goes on reading frames, other streams'
+      # included: waiting for each commit serialized a whole connection's capture behind the
+      # writer. What needs the id (the response update, a hold, an extract) comes a round trip
+      # later, when the row has long been committed.
+      @flow_id : Int64? = nil
+      @flow_id_future : Channel(Int64)? = nil
+
+      def flow_id : Int64?
+        if future = @flow_id_future
+          @flow_id_future = nil
+          @flow_id = future.receive
+        end
+        @flow_id
+      end
+
+      def flow_id_future=(@flow_id_future : Channel(Int64)) : Nil
+      end
+
+      # Whether `emit_request` projected this stream's request, without waiting for its id.
+      def request_emitted? : Bool
+        !(@flow_id.nil? && @flow_id_future.nil?)
+      end
+
       # Authority recorded before the request head is forwarded, so a response rewrite cannot
       # race the assembler's later projection.
       property request_authority : String? = nil
@@ -418,7 +441,7 @@ module Gori::Proxy::H2
     # feed before the request block does (`remember_request_authority`), which must still open.
     private def abandon_head(request : Bool, stream_id : UInt32) : Nil
       stream = @streams[stream_id]? || return
-      return if stream.flow_id || (request ? stream.req : stream.resp).headers # decoded: finalize projects it
+      return if stream.request_emitted? || (request ? stream.req : stream.resp).headers # decoded: finalize projects it
       @streams.delete(stream_id)
       note_closed(stream_id) if request
     end
@@ -537,8 +560,8 @@ module Gori::Proxy::H2
     # delete the stream in that case, or the later request END_STREAM would allocate a
     # fresh empty stream and lose both halves entirely.
     private def emit_ready(stream_id : UInt32, stream : Stream) : Nil
-      emit_request(stream_id, stream) if stream.req.ended? && stream.req.headers && stream.flow_id.nil?
-      if stream.resp.ended? && stream.resp.headers && stream.flow_id
+      emit_request(stream_id, stream) if stream.req.ended? && stream.req.headers && !stream.request_emitted?
+      if stream.resp.ended? && stream.resp.headers && stream.request_emitted?
         # `flow_id` used to imply the request half was closed, because that is the only thing
         # that produced one. An extended CONNECT's flow is projected at the request HEAD
         # (`open_ws_capture` says why it must be), so on a live WebSocket it no longer does —
@@ -838,7 +861,7 @@ module Gori::Proxy::H2
     end
 
     private def emit_request(stream_id : UInt32, stream : Stream) : Nil
-      return if stream.flow_id # already emitted
+      return if stream.request_emitted?
       headers = stream.req.headers.not_nil!
       note_extended_connect(stream, headers)
       note_trailer_pseudo(stream, stream.req, "request")
@@ -869,7 +892,7 @@ module Gori::Proxy::H2
         source: FlowSource::Kind::Proxy, intercept_original: stream.intercept_original,
         short_circuited: !stream.stub_ref.nil?, source_ref: stream.stub_ref.try(&.presence))
       captured.rewrite = stream.req_rewrite
-      stream.flow_id = @sink.on_request(captured)
+      stream.flow_id_future = @sink.on_request_deferred(captured)
     end
 
     private def emit_response(stream : Stream, *, state : Store::FlowState = Store::FlowState::Complete,
@@ -905,7 +928,18 @@ module Gori::Proxy::H2
         captured.live = true
         captured.event_times = cap.event_times
       end
-      @sink.on_response(captured)
+      project_response(stream, captured)
+    end
+
+    # The response update, queued without waiting for its commit (see `Stream#flow_id`), except
+    # on a WebSocket candidate: `notify_tunnel_complete` publishes straight to the event feed,
+    # not through the writer, and `capture --max` must find the row it names committed.
+    private def project_response(stream : Stream, captured : Store::CapturedResponse) : Nil
+      if stream.websocket_candidate?
+        @sink.on_response(captured)
+      else
+        @sink.on_response_deferred(captured)
+      end
     end
 
     # A trailing header block carried a pseudo-header, which RFC 9113 §8.1 forbids in a
@@ -967,7 +1001,7 @@ module Gori::Proxy::H2
     # Pending forever. The raw frame log remains the byte-exact truth (P7).
     private def finalize_stream(stream_id : UInt32, stream : Stream, reason : String) : Nil
       close_ws(stream) # whatever the socket was mid-message on, before the flow is written off
-      emit_request(stream_id, stream) if stream.req.headers && stream.flow_id.nil?
+      emit_request(stream_id, stream) if stream.req.headers && !stream.request_emitted?
       flow_id = stream.flow_id
       return unless flow_id # never saw request headers — nothing to project
       reason = extended_connect_note(stream, reason)
@@ -979,7 +1013,7 @@ module Gori::Proxy::H2
         end
       else
         duration_us = (Time.instant - stream.started_at).total_microseconds.to_i64
-        @sink.on_response(FlowMapper.aborted_response(flow_id, reason, duration_us: duration_us))
+        project_response(stream, FlowMapper.aborted_response(flow_id, reason, duration_us: duration_us))
       end
       notify_tunnel_complete(stream)
     end
@@ -1002,12 +1036,12 @@ module Gori::Proxy::H2
     private def arm_live_capture(stream : Stream) : Nil
       side = stream.resp
       return if side.ended? || side.body.total > 0 || side.body.is_a?(LiveCapture)
-      return if stream.websocket_candidate?
-      flow_id = stream.flow_id || return
+      return if stream.websocket_candidate? || !stream.request_emitted?
       headers = side.headers || return
       status = final_response_status(stream) || return
       content_type = HeadCodec.pseudo(headers, "content-type")
       return unless Sse.sse?(content_type)
+      flow_id = stream.flow_id || return
       head = Store::CapturedResponse.new(
         flow_id: flow_id, status: status, head: HeadCodec.synth_response(headers, side.trailer_names),
         content_type: content_type,
@@ -1027,7 +1061,7 @@ module Gori::Proxy::H2
     # END_STREAM means no flow exists while the socket is live, and `ws_messages` rows have no
     # flow to hang on. It is the same moment the HTTP/1.1 path projects its 101 at.
     private def open_ws_capture(stream_id : UInt32, stream : Stream) : Nil
-      return if stream.ws || stream.flow_id # already open, or this block is trailers
+      return if stream.ws || stream.request_emitted? # already open, or this block is trailers
       headers = stream.req.headers
       return unless headers
       protocol = extended_connect_protocol(headers)
