@@ -24,11 +24,11 @@ module Gori
         # Inline <script>…</script>; group 1 = attributes, group 2 = body. `[\s\S]` matches
         # across newlines without depending on the DOTALL flag; non-greedy stops at the first
         # closing tag.
-        SCRIPT_BLOCK = Utf8.tolerant(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/i)
+        class_getter script_block : Regex { Utf8.tolerant(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/i) }
         # A src= attribute (external script — its inline body is empty) or a non-executable
         # <script type> (data/template island, not JS).
-        HAS_SRC     = /\bsrc\s*=/i
-        NON_JS_TYPE = /\btype\s*=\s*["']?\s*(?:application\/(?:json|ld\+json)|text\/(?:template|html|x-template|x-handlebars-template)|importmap|speculationrules)/i
+        class_getter has_src : Regex { /\bsrc\s*=/i }
+        class_getter non_js_type : Regex { /\btype\s*=\s*["']?\s*(?:application\/(?:json|ld\+json)|text\/(?:template|html|x-template|x-handlebars-template)|importmap|speculationrules)/i }
 
         # Character window (each side) used to bound a DOM-XSS source<->sink correlation to the
         # same statement. Large enough for a real one-liner, small enough to stay cheap and to
@@ -42,31 +42,33 @@ module Gori
         # which a statement carrying several sources is labelled. `source_spans` fills these
         # buckets with fewer scans than there are entries (see SOURCE_SCANS) but keeps this
         # order, so the label a window reports is unchanged.
-        SOURCES = ([
-          {/\blocation\.hash\b/, "location.hash"},
-          {/\blocation\.search\b/, "location.search"},
-          {/\blocation\.(?:href|pathname)\b/, "location.href"},
-          {/\bdocument\.URL\b/, "document.URL"},
-          {/\bdocument\.documentURI\b/, "document.documentURI"},
-          {/\bdocument\.baseURI\b/, "document.baseURI"},
-          {/\bdocument\.referrer\b/, "document.referrer"},
-          {/\bdocument\.cookie\b/, "document.cookie"},
-          {/\bdocument\.location\b/, "document.location"},
-          {/\bwindow\.name\b/, "window.name"},
-          {/\bhistory\.state\b/, "history.state"},
-          {/\b(?:e|ev|evt|event|msg|message)\.data\b/, "postMessage data"},
-          {/\b(?:localStorage|sessionStorage)\.getItem\b/, "web storage"},
-          # No `URLSearchParams` entry, deliberately. It was here and it is DOMINATED: the
-          # source↔sink window is bounded by BOUNDS (';' '{' '}' '\n'), so a constructor in an
-          # earlier statement was never reachable, and every in-statement TAINTED construction
-          # already carries its own listed source — `new URLSearchParams(location.search)`,
-          # `(window.location.search)`, `(location.hash.slice(1))` all match location.search /
-          # location.hash right beside it. There is no one-liner where the bare identifier is the
-          # only source token AND the flow is tainted, so it contributed zero unique findings.
-          # What it did contribute is a false pair on ordinary SPA code:
-          # `location.href = "/x?" + new URLSearchParams(form)` — untainted input, benign
-          # navigation — reported as DOM-XSS against the `location assignment` sink below.
-        ] of {Regex, String}).map { |(re, label)| {Utf8.tolerant(re), label} }
+        class_getter sources : Array({Regex, String}) do
+          ([
+            {/\blocation\.hash\b/, "location.hash"},
+            {/\blocation\.search\b/, "location.search"},
+            {/\blocation\.(?:href|pathname)\b/, "location.href"},
+            {/\bdocument\.URL\b/, "document.URL"},
+            {/\bdocument\.documentURI\b/, "document.documentURI"},
+            {/\bdocument\.baseURI\b/, "document.baseURI"},
+            {/\bdocument\.referrer\b/, "document.referrer"},
+            {/\bdocument\.cookie\b/, "document.cookie"},
+            {/\bdocument\.location\b/, "document.location"},
+            {/\bwindow\.name\b/, "window.name"},
+            {/\bhistory\.state\b/, "history.state"},
+            {/\b(?:e|ev|evt|event|msg|message)\.data\b/, "postMessage data"},
+            {/\b(?:localStorage|sessionStorage)\.getItem\b/, "web storage"},
+            # No `URLSearchParams` entry, deliberately. It was here and it is DOMINATED: the
+            # source↔sink window is bounded by BOUNDS (';' '{' '}' '\n'), so a constructor in an
+            # earlier statement was never reachable, and every in-statement TAINTED construction
+            # already carries its own listed source — `new URLSearchParams(location.search)`,
+            # `(window.location.search)`, `(location.hash.slice(1))` all match location.search /
+            # location.hash right beside it. There is no one-liner where the bare identifier is the
+            # only source token AND the flow is tainted, so it contributed zero unique findings.
+            # What it did contribute is a false pair on ordinary SPA code:
+            # `location.href = "/x?" + new URLSearchParams(form)` — untainted input, benign
+            # navigation — reported as DOM-XSS against the `location assignment` sink below.
+          ] of {Regex, String}).map { |(re, label)| {Utf8.tolerant(re), label} }
+        end
 
         # How `source_spans` actually walks the script. Nine of the SOURCES entries above share a
         # literal prefix — `location.` (3) and `document.` (6) — and scanning them one pattern at
@@ -85,11 +87,13 @@ module Gori
         # The captured alternative decides which SOURCES bucket a span lands in, so the resulting
         # index is IDENTICAL to the one 14 separate scans produced — same buckets, same order,
         # same spans — and `source_in_window`'s priority semantics are untouched.
-        SOURCE_SCANS = ([
-          {/\blocation\.(hash|search|href|pathname)\b/, {"hash" => 0, "search" => 1, "href" => 2, "pathname" => 2}},
-          {/\bdocument\.(URL|documentURI|baseURI|referrer|cookie|location)\b/,
-           {"URL" => 3, "documentURI" => 4, "baseURI" => 5, "referrer" => 6, "cookie" => 7, "location" => 8}},
-        ] of {Regex, Hash(String, Int32)}).map { |(re, slots)| {Utf8.tolerant(re), slots} }
+        class_getter source_scans : Array({Regex, Hash(String, Int32)}) do
+          ([
+            {/\blocation\.(hash|search|href|pathname)\b/, {"hash" => 0, "search" => 1, "href" => 2, "pathname" => 2}},
+            {/\bdocument\.(URL|documentURI|baseURI|referrer|cookie|location)\b/,
+             {"URL" => 3, "documentURI" => 4, "baseURI" => 5, "referrer" => 6, "cookie" => 7, "location" => 8}},
+          ] of {Regex, Hash(String, Int32)}).map { |(re, slots)| {Utf8.tolerant(re), slots} }
+        end
 
         # SOURCES entries no SOURCE_SCANS group covers, scanned individually. DERIVED, not
         # written out: a hardcoded index list is a silent-failure shape here, because a new
@@ -97,37 +101,39 @@ module Gori
         # that taint source simply stops producing pairs, with no compile error and no spec
         # failure (a per-label spec enumerates the labels that exist, so it stays green too).
         # Deriving it means the union always covers SOURCES by construction.
-        SOLO_SOURCES = (0...SOURCES.size).reject { |i| SOURCE_SCANS.any? { |(_, slots)| slots.each_value.includes?(i) } }
+        class_getter solo_sources : Array(Int32) { (0...JsScan.sources.size).reject { |i| JsScan.source_scans.any? { |(_, slots)| slots.each_value.includes?(i) } } }
 
         # HTML/JS execution sinks. Each keys on a distinctive identifier so PCRE's first-byte
         # optimisation skips clean code fast (like body_leaks' per-pattern loop). Sinks whose
         # payload is normally a string (setTimeout/eval) still work post-strip: a `foo+source`
         # concatenation leaves `source` as code even after the string half is blanked.
-        SINKS = ([
-          {/\.(?:inner|outer)HTML\s*\+?=(?!=)/, "innerHTML"},
-          {/\.insertAdjacentHTML\s*\(/, "insertAdjacentHTML"},
-          {/\bdocument\.write(?:ln)?\s*\(/, "document.write"},
-          {/\.srcdoc\s*=(?!=)/, "iframe.srcdoc"},
-          {/\beval\s*\(/, "eval"},
-          {/\bnew\s+Function\s*\(/, "Function"},
-          {/\bset(?:Timeout|Interval)\s*\(/, "setTimeout/setInterval"},
-          {/\bdangerouslySetInnerHTML\b/, "dangerouslySetInnerHTML"},
-          # `(?!\))` keeps the ARGUMENT-LESS form out: `$(el).html()` READS the markup, it does not
-          # write it — the same distinction the `(?!=)` guards above draw between `=` and `==`.
-          # `\s*` before it so a newline-wrapped argument still counts as a sink.
-          {/\.html\s*\(\s*(?!\))/, "jQuery.html()"},
-          # Navigation sinks. A tainted navigation target is how `javascript:`-URL XSS and
-          # client-side open redirect both land, and neither is reachable through the HTML/eval
-          # sinks above. The bare-`location` form deliberately also matches `document.location =`
-          # and `window.location =` (the `\b` holds after the dot); `(?!=)` keeps `==`/`===` out.
-          {/\b(?:window\.)?location(?:\.href)?\s*=(?!=)/, "location assignment"},
-          {/\blocation\.(?:replace|assign)\s*\(/, "location.replace/assign"},
-          {/\bwindow\.open\s*\(/, "window.open"},
-          # HTML-parsing sinks: both turn a string into live nodes, which is the same capability
-          # as innerHTML once the result is inserted.
-          {/\.createContextualFragment\s*\(/, "createContextualFragment"},
-          {/\bparseFromString\s*\(/, "DOMParser.parseFromString"},
-        ] of {Regex, String}).map { |(re, label)| {Utf8.tolerant(re), label} }
+        class_getter sinks : Array({Regex, String}) do
+          ([
+            {/\.(?:inner|outer)HTML\s*\+?=(?!=)/, "innerHTML"},
+            {/\.insertAdjacentHTML\s*\(/, "insertAdjacentHTML"},
+            {/\bdocument\.write(?:ln)?\s*\(/, "document.write"},
+            {/\.srcdoc\s*=(?!=)/, "iframe.srcdoc"},
+            {/\beval\s*\(/, "eval"},
+            {/\bnew\s+Function\s*\(/, "Function"},
+            {/\bset(?:Timeout|Interval)\s*\(/, "setTimeout/setInterval"},
+            {/\bdangerouslySetInnerHTML\b/, "dangerouslySetInnerHTML"},
+            # `(?!\))` keeps the ARGUMENT-LESS form out: `$(el).html()` READS the markup, it does not
+            # write it — the same distinction the `(?!=)` guards above draw between `=` and `==`.
+            # `\s*` before it so a newline-wrapped argument still counts as a sink.
+            {/\.html\s*\(\s*(?!\))/, "jQuery.html()"},
+            # Navigation sinks. A tainted navigation target is how `javascript:`-URL XSS and
+            # client-side open redirect both land, and neither is reachable through the HTML/eval
+            # sinks above. The bare-`location` form deliberately also matches `document.location =`
+            # and `window.location =` (the `\b` holds after the dot); `(?!=)` keeps `==`/`===` out.
+            {/\b(?:window\.)?location(?:\.href)?\s*=(?!=)/, "location assignment"},
+            {/\blocation\.(?:replace|assign)\s*\(/, "location.replace/assign"},
+            {/\bwindow\.open\s*\(/, "window.open"},
+            # HTML-parsing sinks: both turn a string into live nodes, which is the same capability
+            # as innerHTML once the result is inserted.
+            {/\.createContextualFragment\s*\(/, "createContextualFragment"},
+            {/\bparseFromString\s*\(/, "DOMParser.parseFromString"},
+          ] of {Regex, String}).map { |(re, label)| {Utf8.tolerant(re), label} }
+        end
 
         # A random-access `Char` view over ASCII bytes, used instead of `String#chars` on the
         # (overwhelmingly common) all-ASCII script. `chars` builds an `Array(Char)` sized to the
@@ -172,12 +178,12 @@ module Gori
           if js
             yield text, 0
           elsif html
-            text.scan(SCRIPT_BLOCK) do |m|
+            text.scan(JsScan.script_block) do |m|
               attrs = m[1]
               body = m[2]
               next if body.empty?
-              next if HAS_SRC.matches?(attrs)     # external script; body is decorative
-              next if NON_JS_TYPE.matches?(attrs) # data/template island, not code
+              next if JsScan.has_src.matches?(attrs)     # external script; body is decorative
+              next if JsScan.non_js_type.matches?(attrs) # data/template island, not code
               yield body, m.byte_begin(2)
             end
           end
@@ -187,23 +193,34 @@ module Gori
         # A nil side is one this call is not building (`strip` builds only `code`,
         # `strip_comments` only `kept`); `strip_both` builds both.
         #
-        # `String::Builder`, not `IO`: a concrete receiver keeps `<<` a direct call on the hot
-        # per-char path instead of a virtual dispatch. Every emission goes through `<<` (same
-        # char to both) or `push` (one char each, different) — never a multi-char write — so
-        # "one consumed char emits exactly one char per side", the invariant every offset in
-        # this file rests on, is visible in the shape rather than argued about.
-        private struct Sink
-          def initialize(@code : String::Builder?, @kept : String::Builder?)
+        # Each side starts as a COPY of the source, and the lexers can only blank one position
+        # in it: `blank` on both sides, `blank_code` on the code side alone. So "every offset in
+        # either view is the source's offset", the invariant this file rests on, is the shape
+        # rather than an argument, and a code char costs nothing at all. Writing every char into
+        # two `String::Builder`s instead was most of the lex on a 1 MiB bundle. `T` is the
+        # buffer `lex` picked: `Bytes` for an all-ASCII script, else `Array(Char)`.
+        private struct Sink(T)
+          getter code : T?
+          getter kept : T?
+
+          def initialize(@code : T?, @kept : T?)
           end
 
-          def <<(ch : Char) : Nil
-            @code.try &.<<(ch)
-            @kept.try &.<<(ch)
+          def blank(i : Int32) : Nil
+            blank_code(i)
+            @kept.try { |side| space(side, i) }
           end
 
-          def push(code_ch : Char, kept_ch : Char) : Nil
-            @code.try &.<<(code_ch)
-            @kept.try &.<<(kept_ch)
+          def blank_code(i : Int32) : Nil
+            @code.try { |side| space(side, i) }
+          end
+
+          private def space(side : Bytes, i : Int32) : Nil
+            side[i] = 0x20_u8
+          end
+
+          private def space(side : Array(Char), i : Int32) : Nil
+            side[i] = ' '
           end
         end
 
@@ -214,7 +231,7 @@ module Gori
         # comment. Every consumed char emits exactly one char, so indices stay aligned.
         def self.strip(js : String) : String
           return js if js.empty?
-          String.build(js.bytesize) { |io| lex(js, Sink.new(io, nil)) }
+          lex(js, code: true, kept: false)[0]
         end
 
         # Blank ONLY // and /* */ comments, keeping string/template CONTENTS intact (offsets
@@ -224,7 +241,7 @@ module Gori
         # `//` or `/*` (e.g. in a URL literal) is not mistaken for a comment.
         def self.strip_comments(js : String) : String
           return js if js.empty?
-          String.build(js.bytesize) { |io| lex(js, Sink.new(nil, io)) }
+          lex(js, code: false, kept: true)[1]
         end
 
         # BOTH projections of one script from ONE pass: `{strip(js), strip_comments(js)}`.
@@ -234,11 +251,10 @@ module Gori
         # interpolation and a closing quote are found at the same offsets whether the contents
         # are blanked or copied). So a Context that needs both — every HTML or JS flow does, one
         # for the DOM-XSS/clobbering rules and one for the postMessage/prototype-pollution rules
-        # — was lexing the same bytes twice. Fusing saves the walk, not the emission (each side
-        # still writes its own char), so the pair costs ~1.7 walks instead of 2: measured over
-        # the 256 KiB bundle in bench/probe_passive_bench, 1.75ms → 1.47ms. It pays far better on
-        # the non-ASCII variant of the same bundle, where `scan_source` falls back to
-        # `String#chars`: 2.92ms → 2.05ms, and one ~1 MiB `Array(Char)` built instead of two.
+        # — was lexing the same bytes twice. Fusing saves the walk: measured over the 256 KiB
+        # bundle in bench/probe_passive_bench, 1.75ms → 1.47ms, and on its non-ASCII variant,
+        # where `lex` falls back to `String#chars`, 2.92ms → 2.05ms, with one ~1 MiB
+        # `Array(Char)` built instead of two. (Both before `Sink` stopped copying char by char.)
         #
         # Not a third lexer: `lex` below is the only one, and `strip`/`strip_comments` are it
         # with the other side's builder left nil. Keeping one walk is the point — a copy of this
@@ -246,10 +262,7 @@ module Gori
         # failure `lex_string` is written the way it is to prevent.
         def self.strip_both(js : String) : {String, String}
           return {js, js} if js.empty?
-          code = String::Builder.new(js.bytesize)
-          kept = String::Builder.new(js.bytesize)
-          lex(js, Sink.new(code, kept))
-          {code.to_s, kept.to_s}
+          lex(js, code: true, kept: true)
         end
 
         # Opens a string / template literal. One home so the three places that ask — the top-level
@@ -259,48 +272,52 @@ module Gori
           ch == '\'' || ch == '"' || ch == '`'
         end
 
-        # The single left-to-right lexer behind all three entry points above.
-        private def self.lex(js : String, out_to : Sink) : Nil
-          scan_source(js) do |chars, n|
-            i = 0
-            last = -1 # index of the last non-space CODE char, for `regex_start?`
-            while i < n
-              # The token dispatch is spelled out here rather than delegated to a nilable-result
-              # helper: the OVERWHELMINGLY common case is an ordinary code character, and deciding
-              # it from the char in the loop keeps this hot path on a plain Int32. The branch
-              # order (comment, then string, then regex) is what both projections use.
-              c = chars[i]
-              if c == '/' && i + 1 < n && chars[i + 1] == '/'
-                i = blank_line_comment(chars, i, n, out_to)
-              elsif c == '/' && i + 1 < n && chars[i + 1] == '*'
-                i = blank_block_comment(chars, i, n, out_to)
-              elsif quote?(c)
-                i = lex_string(chars, i, n, out_to, 0)
-                last = i - 1 # a literal ends an operand: its closing delimiter makes a `/` division
-              elsif c == '/' && regex_start?(chars, last)
-                i = lex_regex(chars, i, n, out_to)
-                last = i - 1
-              else
-                out_to << c
-                last = i unless c.ascii_whitespace?
-                i += 1
-              end
-            end
+        # The single left-to-right lexer behind all three entry points above, building the
+        # sides asked for ("" for a side it was not asked for).
+        private def self.lex(js : String, *, code : Bool, kept : Bool) : {String, String}
+          if js.ascii_only?
+            src = js.to_slice
+            sink = Sink(Bytes).new(code ? src.dup : nil, kept ? src.dup : nil)
+            lex(AsciiChars.new(src), src.size, sink)
+            {sink.code.try { |b| String.new(b) } || "", sink.kept.try { |b| String.new(b) } || ""}
+          else
+            chars = js.chars
+            sink = Sink(Array(Char)).new(code ? chars.dup : nil, kept ? chars.dup : nil)
+            lex(chars, chars.size, sink)
+            {sink.code.try { |c| chars_to_s(c, js.bytesize) } || "",
+             sink.kept.try { |c| chars_to_s(c, js.bytesize) } || ""}
           end
         end
 
-        # Yields the random-access char source for `js` plus its length: a zero-allocation
-        # AsciiChars view when the script is all-ASCII, else the `Array(Char)` the lexer has
-        # always used. Both satisfy the same `size`/`[]` shape, so the lexer below is compiled
-        # for each and neither is special-cased. `ascii_only?` is a single byte pass, far cheaper
-        # than the array it avoids.
-        private def self.scan_source(js : String, &)
-          if js.ascii_only?
-            view = AsciiChars.new(js.to_slice)
-            yield view, view.size
-          else
-            chars = js.chars
-            yield chars, chars.size
+        private def self.chars_to_s(chars : Array(Char), capacity : Int32) : String
+          String.build(capacity) { |io| chars.each { |ch| io << ch } }
+        end
+
+        # Over `chars`, an AsciiChars view of an all-ASCII script (byte index == char index), else
+        # its `Array(Char)`; both have the same `size`/`[]` shape, so this is compiled for each.
+        private def self.lex(chars, n : Int32, out_to) : Nil
+          i = 0
+          last = -1 # index of the last non-space CODE char, for `regex_start?`
+          while i < n
+            # The token dispatch is spelled out here rather than delegated to a nilable-result
+            # helper: the OVERWHELMINGLY common case is an ordinary code character, and deciding
+            # it from the char in the loop keeps this hot path on a plain Int32. The branch
+            # order (comment, then string, then regex) is what both projections use.
+            c = chars[i]
+            if c == '/' && i + 1 < n && chars[i + 1] == '/'
+              i = blank_line_comment(chars, i, n, out_to)
+            elsif c == '/' && i + 1 < n && chars[i + 1] == '*'
+              i = blank_block_comment(chars, i, n, out_to)
+            elsif quote?(c)
+              i = lex_string(chars, i, n, out_to, 0)
+              last = i - 1 # a literal ends an operand: its closing delimiter makes a `/` division
+            elsif c == '/' && regex_start?(chars, last)
+              i = lex_regex(chars, i, n)
+              last = i - 1
+            else
+              last = i unless c.ascii_whitespace?
+              i += 1
+            end
           end
         end
 
@@ -345,17 +362,14 @@ module Gori
         # classes (a `/` inside a class does not close it), or up to a newline if unterminated.
         # Emitted verbatim on both sides — a regex body is code, not string content — so neither
         # view's offsets move. The flags after it are ordinary identifier chars.
-        private def self.lex_regex(chars, i : Int32, n : Int32, out_to : Sink) : Int32
-          out_to << '/'
+        private def self.lex_regex(chars, i : Int32, n : Int32) : Int32
           i += 1
           in_class = false
           while i < n
             ch = chars[i]
             break if ch == '\n'
-            out_to << ch
             i += 1
             if ch == '\\' && i < n && chars[i] != '\n'
-              out_to << chars[i]
               i += 1
             elsif ch == '['
               in_class = true
@@ -390,9 +404,9 @@ module Gori
         # Blank every remaining char of the fragment (one space each, offsets preserved) and
         # return the end index, so the caller's `while i < n` loop terminates immediately. Both
         # projections blank here — past the depth cap neither view is trustworthy.
-        private def self.blank_rest(chars, i : Int32, n : Int32, out_to : Sink) : Int32
+        private def self.blank_rest(chars, i : Int32, n : Int32, out_to) : Int32
           while i < n
-            out_to << ' '
+            out_to.blank(i)
             i += 1
           end
           n
@@ -401,7 +415,7 @@ module Gori
         # If chars[i] starts a // or /* */ comment, blank it (→ spaces, offsets preserved) and
         # return the index just past it; else nil. A comment is blanked in BOTH projections —
         # that is the one thing they agree on — and never recurses, so there is no `depth`.
-        private def self.lex_comment_at(chars, i : Int32, n : Int32, out_to : Sink) : Int32?
+        private def self.lex_comment_at(chars, i : Int32, n : Int32, out_to) : Int32?
           c = chars[i]
           if c == '/' && i + 1 < n && chars[i + 1] == '/'
             blank_line_comment(chars, i, n, out_to)
@@ -417,24 +431,22 @@ module Gori
         # content, so it is handed to lex_interpolation — which also keeps a NESTED template's
         # backtick from being mistaken for this template's closing delimiter (that would
         # terminate early and re-lex the real remainder, blanking a URL's // as a comment).
-        private def self.lex_string(chars, i : Int32, n : Int32, out_to : Sink, depth : Int32) : Int32
+        private def self.lex_string(chars, i : Int32, n : Int32, out_to, depth : Int32) : Int32
           quote = chars[i]
-          out_to << quote # opening delimiter kept on both sides
-          i += 1
+          i += 1 # opening delimiter kept on both sides
           while i < n
             ch = chars[i]
             if ch == '\\' && i + 1 < n
-              out_to.push(' ', ch) # escaped pair: blanked as two spaces, kept verbatim
-              out_to.push(' ', chars[i + 1])
+              out_to.blank_code(i) # escaped pair: blanked as two spaces, kept verbatim
+              out_to.blank_code(i + 1)
               i += 2
             elsif quote == '`' && ch == '$' && i + 1 < n && chars[i + 1] == '{'
               i = lex_interpolation(chars, i, n, out_to, depth)
             elsif ch == quote
-              out_to << ch # closing delimiter kept on both sides
-              i += 1
+              i += 1 # closing delimiter kept on both sides
               break
             else
-              out_to.push(' ', ch) # content blanked (incl. newlines inside a template), or kept
+              out_to.blank_code(i) # content blanked (incl. newlines inside a template), or kept
               i += 1
             end
           end
@@ -450,24 +462,23 @@ module Gori
         # the window at the interpolation, while `kept` copies them. Nested strings and comments
         # recurse through lex_string / lex_comment_at, so each side gets its own treatment there
         # too. `i` points at `$`.
-        private def self.lex_interpolation(chars, i : Int32, n : Int32, out_to : Sink, depth : Int32) : Int32
+        private def self.lex_interpolation(chars, i : Int32, n : Int32, out_to, depth : Int32) : Int32
           return blank_rest(chars, i, n, out_to) if depth >= MAX_INTERP_DEPTH
-          out_to.push(' ', '$') # blank the '${' delimiter on the code side (offset-preserved)
-          out_to.push(' ', '{')
+          out_to.blank_code(i) # blank the '${' delimiter on the code side (offset-preserved)
+          out_to.blank_code(i + 1)
           i += 2
           braces = 1
           while i < n && braces > 0
             ch = chars[i]
             if ch == '{' || ch == '}'
               braces += ch == '{' ? 1 : -1
-              out_to.push(ch == '}' && braces == 0 ? ' ' : ch, ch) # blank the OUTER closing '}'
+              out_to.blank_code(i) if ch == '}' && braces == 0 # blank the OUTER closing '}'
               i += 1
             elsif j = lex_comment_at(chars, i, n, out_to)
               i = j
             elsif quote?(ch)
               i = lex_string(chars, i, n, out_to, depth + 1)
             else
-              out_to << ch
               i += 1
             end
           end
@@ -475,29 +486,29 @@ module Gori
         end
 
         # Blank a // comment through end-of-line (the terminating newline is left to the caller).
-        private def self.blank_line_comment(chars, i : Int32, n : Int32, out_to : Sink) : Int32
-          out_to << ' '
-          out_to << ' '
+        private def self.blank_line_comment(chars, i : Int32, n : Int32, out_to) : Int32
+          out_to.blank(i)
+          out_to.blank(i + 1)
           i += 2
           while i < n && chars[i] != '\n'
-            out_to << ' '
+            out_to.blank(i)
             i += 1
           end
           i
         end
 
         # Blank a /* … */ comment, delimiters included.
-        private def self.blank_block_comment(chars, i : Int32, n : Int32, out_to : Sink) : Int32
-          out_to << ' '
-          out_to << ' '
+        private def self.blank_block_comment(chars, i : Int32, n : Int32, out_to) : Int32
+          out_to.blank(i)
+          out_to.blank(i + 1)
           i += 2
           while i < n && !(chars[i] == '*' && i + 1 < n && chars[i + 1] == '/')
-            out_to << ' '
+            out_to.blank(i)
             i += 1
           end
           if i < n
-            out_to << ' '
-            out_to << ' '
+            out_to.blank(i)
+            out_to.blank(i + 1)
             i += 2
           end
           i
@@ -522,7 +533,7 @@ module Gori
           # each source ONCE up front for its match POSITIONS turns every one of those into an
           # allocation-free binary search (see `source_in_window`).
           return pairs if sources.empty?
-          SINKS.each do |(sink_re, sink_label)|
+          JsScan.sinks.each do |(sink_re, sink_label)|
             # `scan`, NOT a `while m = sink_re.match(code, pos)` loop: re-entering `match` with a
             # start offset is ~515× slower than one `scan` walk for the SAME matches and the SAME
             # allocation (74.00ms vs 143.64µs over 2448 hits in a 256 KiB body — pure CPU inside
@@ -542,30 +553,34 @@ module Gori
         # SINKS because DomXss labels everything it pairs as XSS. The third field is which
         # top-level argument holds the URL (XHR's `open(method, url)` is the one at index 1), and
         # `window.open` is excluded from `.open(` — it is a navigation sink, and SINKS has it.
-        REQUEST_SINKS = ([
-          {/\bfetch\s*\(/, "fetch", 0},
-          {/(?<!window)\.open\s*\(/, "XMLHttpRequest.open", 1},
-          {/\baxios(?:\.(?:get|post|put|patch|delete|request))?\s*\(/, "axios", 0},
-          {/(?:\$|\bjQuery)\.(?:ajax|get|post|getJSON)\s*\(/, "jQuery.ajax", 0},
-          {/\bnew\s+Request\s*\(/, "Request", 0},
-        ] of {Regex, String, Int32}).map { |(re, label, arg)| {Utf8.tolerant(re), label, arg} }
+        class_getter request_sinks : Array({Regex, String, Int32}) do
+          ([
+            {/\bfetch\s*\(/, "fetch", 0},
+            {/(?<!window)\.open\s*\(/, "XMLHttpRequest.open", 1},
+            {/\baxios(?:\.(?:get|post|put|patch|delete|request))?\s*\(/, "axios", 0},
+            {/(?:\$|\bjQuery)\.(?:ajax|get|post|getJSON)\s*\(/, "jQuery.ajax", 0},
+            {/\bnew\s+Request\s*\(/, "Request", 0},
+          ] of {Regex, String, Int32}).map { |(re, label, arg)| {Utf8.tolerant(re), label, arg} }
+        end
 
         # The `.open(` sink counts only in a script that names XMLHttpRequest. A regex, not
         # `String#includes?`: PCRE's literal search is ~60× faster on a 256 KiB bundle (5µs vs
         # 327µs), and this gate runs on every script with no request sink at all.
-        XHR = Utf8.tolerant(/XMLHttpRequest/)
+        class_getter xhr : Regex { Utf8.tolerant(/XMLHttpRequest/) }
 
         # SPA router values: a path segment the router hands the component, so as tainted for
         # CSPT as `location.pathname`. Deliberately NOT in SOURCES — a router param assigned to
         # innerHTML is a weaker XSS lead than this list's precision for request URLs, and adding
         # them there would change every dom_xss result. Appended after SOURCES, so a URL argument
         # that also names a SOURCES entry is labelled by that entry.
-        ROUTER_SOURCES = ([
-          {/\buseParams\s*\(/, "useParams()"},
-          {/\$?\broute\.params\b/, "route.params"},
-          {/\brouter\.query\b/, "router.query"},
-          {/\bsearchParams\.get\s*\(/, "searchParams.get()"},
-        ] of {Regex, String}).map { |(re, label)| {Utf8.tolerant(re), label} }
+        class_getter router_sources : Array({Regex, String}) do
+          ([
+            {/\buseParams\s*\(/, "useParams()"},
+            {/\$?\broute\.params\b/, "route.params"},
+            {/\brouter\.query\b/, "router.query"},
+            {/\bsearchParams\.get\s*\(/, "searchParams.get()"},
+          ] of {Regex, String}).map { |(re, label)| {Utf8.tolerant(re), label} }
+        end
 
         # Sources that are the whole current URL. Re-requesting it (`fetch(location.href)`, a
         # PJAX refresh) goes nowhere the navigation did not already go; it takes an app-chosen
@@ -594,8 +609,8 @@ module Gori
           pairs = [] of {String, String}
           all = nil
           twin = kept.try { |k| Twin.new(code.to_slice, k.to_slice) }
-          REQUEST_SINKS.each do |(sink_re, sink_label, arg)|
-            next if arg == 1 && !XHR.matches?(code)
+          JsScan.request_sinks.each do |(sink_re, sink_label, arg)|
+            next if arg == 1 && !JsScan.xhr.matches?(code)
             found = hits = 0
             # End of the last URL span read: a call nested in it was already read (keeps the walk
             # linear). Only the URL span: a call in a config's `success:` callback is its own request.
@@ -672,7 +687,7 @@ module Gori
         # SOURCES hit keeps its label.
         private def self.router_spans(code : String) : SourceIndex
           index = [] of {Array({Int32, Int32}), String}
-          ROUTER_SOURCES.each do |(re, label)|
+          JsScan.router_sources.each do |(re, label)|
             spans = [] of {Int32, Int32}
             code.scan(re) { |m| spans << {m.byte_begin(0), m.byte_end(0)} }
             index << {spans, label} unless spans.empty?
@@ -834,20 +849,20 @@ module Gori
           # order leaves every bucket ascending in both begin and end — the property
           # `span_within?` binary-searches on — and a bucket fed by several alternatives of one
           # factored regex (location.href / location.pathname) inherits it as a subsequence.
-          buckets = Array(Array({Int32, Int32})).new(SOURCES.size) { [] of {Int32, Int32} }
-          SOURCE_SCANS.each do |(re, slot_of)|
+          buckets = Array(Array({Int32, Int32})).new(JsScan.sources.size) { [] of {Int32, Int32} }
+          JsScan.source_scans.each do |(re, slot_of)|
             code.scan(re) do |m|
               next unless slot = slot_of[m[1]]?
               buckets[slot] << {m.byte_begin(0), m.byte_end(0)}
             end
           end
-          SOLO_SOURCES.each do |slot|
-            re = SOURCES[slot][0]
+          JsScan.solo_sources.each do |slot|
+            re = JsScan.sources[slot][0]
             code.scan(re) { |m| buckets[slot] << {m.byte_begin(0), m.byte_end(0)} }
           end
           index = [] of {Array({Int32, Int32}), String}
           buckets.each_with_index do |spans, slot|
-            index << {spans, SOURCES[slot][1]} unless spans.empty?
+            index << {spans, JsScan.sources[slot][1]} unless spans.empty?
           end
           index
         end

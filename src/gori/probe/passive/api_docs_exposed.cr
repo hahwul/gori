@@ -26,23 +26,25 @@ module Gori
         # global/init call, an asset filename, or a DOM id / custom element — not the bare product
         # name, so prose that names the tool ("we disabled GraphiQL in prod") does not match.
         # Interactive IDEs are Medium (they run live queries from the browser); a static UI is Low.
-        HTML_SIGNATURES = ([
-          {/GraphQLPlayground|react-graphql-playground|graphql-playground-react/i,
-           "GraphQL Playground (interactive)", Store::Severity::Medium},
-          {/graphiql(?:\.min)?\.(?:js|css)|renderGraphiQL|GraphiQL\.createFetcher/i,
-           "GraphiQL (interactive)", Store::Severity::Medium},
-          {/SwaggerUIBundle|swagger-ui(?:-bundle)?(?:\.min)?\.(?:js|css)|id\s*=\s*["']swagger-ui/i,
-           "Swagger UI", Store::Severity::Low},
-          {/<redoc[\s>]|redoc(?:\.standalone)?(?:\.min)?\.js|Redoc\.init/i,
-           "ReDoc API reference", Store::Severity::Low},
-        ] of {Regex, String, Store::Severity}).map { |(pattern, label, severity)| {Utf8.tolerant(pattern), label, severity} }
+        class_getter html_signatures : Array({Regex, String, Store::Severity}) do
+          ([
+            {/GraphQLPlayground|react-graphql-playground|graphql-playground-react/i,
+             "GraphQL Playground (interactive)", Store::Severity::Medium},
+            {/graphiql(?:\.min)?\.(?:js|css)|renderGraphiQL|GraphiQL\.createFetcher/i,
+             "GraphiQL (interactive)", Store::Severity::Medium},
+            {/SwaggerUIBundle|swagger-ui(?:-bundle)?(?:\.min)?\.(?:js|css)|id\s*=\s*["']swagger-ui/i,
+             "Swagger UI", Store::Severity::Low},
+            {/<redoc[\s>]|redoc(?:\.standalone)?(?:\.min)?\.js|Redoc\.init/i,
+             "ReDoc API reference", Store::Severity::Low},
+          ] of {Regex, String, Store::Severity}).map { |(pattern, label, severity)| {Utf8.tolerant(pattern), label, severity} }
+        end
 
         # OpenAPI 3 (`"openapi": "3…"`) or Swagger 2 (`"swagger": "2…"`) next to a top-level
         # "paths" object. Requiring "paths" keeps a JSON response that merely carries an "openapi"
         # field out. (A spec larger than Context::BODY_CAP whose "paths" sits past the 64 KiB cap
         # is a known miss — requiring "paths" is the deliberate low-FP trade.)
-        SPEC_VERSION = Utf8.tolerant(/"openapi"\s*:\s*"3|"swagger"\s*:\s*"2/)
-        SPEC_PATHS   = Utf8.tolerant(/"paths"\s*:/)
+        class_getter spec_version : Regex { Utf8.tolerant(/"openapi"\s*:\s*"3|"swagger"\s*:\s*"2/) }
+        class_getter spec_paths : Regex { Utf8.tolerant(/"paths"\s*:/) }
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.response
@@ -55,7 +57,7 @@ module Gori
           return if text.nil? || text.empty?
 
           if ctx.html?
-            HTML_SIGNATURES.each do |(pattern, label, severity)|
+            ApiDocsExposed.html_signatures.each do |(pattern, label, severity)|
               next unless pattern.matches?(text)
               return emit(acc, ctx, label, severity)
             end
@@ -68,10 +70,10 @@ module Gori
           # A normal JSON response stays on the shared 64 KiB prefix. Only a capped prefix
           # that does not already contain the complete structural pair gets the bounded second
           # look, preventing broad large-body work while recovering late `paths` objects.
-          if ctx.body_capped? && !(SPEC_VERSION.matches?(text) && SPEC_PATHS.matches?(text))
+          if ctx.body_capped? && !(ApiDocsExposed.spec_version.matches?(text) && ApiDocsExposed.spec_paths.matches?(text))
             text = ctx.structured_body_text
           end
-          return unless text && SPEC_VERSION.matches?(text) && SPEC_PATHS.matches?(text)
+          return unless text && ApiDocsExposed.spec_version.matches?(text) && ApiDocsExposed.spec_paths.matches?(text)
           emit(acc, ctx, "OpenAPI/Swagger specification", Store::Severity::Low)
         end
 

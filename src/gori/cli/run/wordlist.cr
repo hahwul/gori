@@ -49,7 +49,8 @@ module Gori
                      "List the lists in #{Paths.wordlists_dir}. Each is a plain file: select one by\n" \
                      "name with `gori run fuzz -w NAME`, `gori run mine --wordlist NAME`, `gori run\n" \
                      "discover --wordlist NAME`. A bare name is looked up in the current directory\n" \
-                     "first, then here; anything with a `/` is a path and is read as given."
+                     "first, then here; anything with a `/` is a path and is read as given.\n\n" \
+                     "Or run with a subcommand: show, save, rename, delete (each takes -h)"
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         if msg = no_positional_error(positional, "gori run wordlist", "to inspect one list, use `gori run wordlist show <name>`")
@@ -309,7 +310,7 @@ module Gori
         entry = begin
           WordlistCatalog.rename(positional[0], positional[1], overwrite: overwrite)
         rescue ex : WordlistCatalog::Error
-          wordlist_error("rename", ex)
+          wordlist_error("rename", ex, format)
         end
         if format == :json
           puts JSON.build { |j| wordlist_entry_json(j, entry) }

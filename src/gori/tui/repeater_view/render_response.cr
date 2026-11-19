@@ -41,6 +41,9 @@ class Gori::Tui::RepeaterView
     "— not sent yet — press #{key_label("repeater.send", "^R")} to send —"
   end
 
+  # The pane after the operator stopped a send before any response head arrived.
+  STOPPED_LINE = "— stopped before any response arrived —"
+
   # The latency·size read-out and the ⚠ beside it; answers where the next read-out to the
   # left must END. `min_x:` because this border's left stop is the CHIP cluster, not the
   # title.
@@ -245,8 +248,9 @@ class Gori::Tui::RepeaterView
     if b = resp_hex_bytes
       HexView.render(screen, body, b, @scroll)
     elsif result = shown_result
-      msg = result.error ? "repeater error: #{result.error}" : "— no response —"
-      color = result.error ? Theme.red : Theme.muted
+      stopped = @result_stopped && result.head.empty?
+      msg = stopped ? STOPPED_LINE : result.error ? "repeater error: #{result.error}" : "— no response —"
+      color = result.error && !stopped ? Theme.red : Theme.muted
       screen.text(body.x, body.y, msg, color)
     else
       screen.text(body.x, body.y, not_sent_hint, Theme.muted)

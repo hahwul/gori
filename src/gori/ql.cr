@@ -32,8 +32,15 @@ module Gori
     struct Filter
       getter sql : String # safe to splice into "WHERE ..."; values are in `args`
       getter args : Array(DB::Any)
+      # The same filter split as `<FTS phrase> AND <rest sql, rest args>`, when its top level is
+      # an AND (or a lone term) holding a positive `body:` index term. `sql` stays complete —
+      # every other caller splices it as before — and only `Store#search` reads this: driving
+      # the query from `flows_fts` lets FTS5 hand rowids out newest-first and stop at LIMIT,
+      # where `id IN (SELECT rowid …)` materialises every match first (593 ms → 1.2 ms for a
+      # common needle at 500k flows). OR, NOT and a negated term keep the IN form only.
+      getter fts_driver : {String, String, Array(DB::Any)}?
 
-      def initialize(@sql : String, @args : Array(DB::Any))
+      def initialize(@sql : String, @args : Array(DB::Any), @fts_driver : {String, String, Array(DB::Any)}? = nil)
       end
 
       # Does answering this filter read the trigram index? `body:` is the only term that
@@ -124,10 +131,14 @@ module Gori
     # miss it while `path:http` and `path:<port>` matched every such flow. The authority ends
     # at the first '/', '?' or '#' — each `instr` gets a sentinel so a missing one sorts last —
     # and whatever follows gets a leading '/' when it has none (a pathless query, or nothing).
+    # The leading `substr(target, 1, 1) = '/'` arm is the origin-form fast path: such a target
+    # cannot start with a scheme, so the general arm would return it unchanged too, and it is
+    # nearly every row — a no-match `path:` scan does half the per-row work (16.7 → 8.5 ms at 100k).
     private PATH_REST = "substr(target, instr(target, '://') + 3)"
     private PATH_CUT  = "min(instr(#{PATH_REST} || '/', '/'), instr(#{PATH_REST} || '?', '?'), " \
                         "instr(#{PATH_REST} || '#', '#'))"
-    PATH_EXPR = "(CASE WHEN lower(substr(target, 1, 7)) = 'http://' OR lower(substr(target, 1, 8)) = 'https://' " \
+    PATH_EXPR = "(CASE WHEN substr(target, 1, 1) = '/' THEN target " \
+                "WHEN lower(substr(target, 1, 7)) = 'http://' OR lower(substr(target, 1, 8)) = 'https://' " \
                 "THEN (CASE WHEN substr(#{PATH_REST}, #{PATH_CUT}, 1) = '/' THEN substr(#{PATH_REST}, #{PATH_CUT}) " \
                 "ELSE '/' || substr(#{PATH_REST}, #{PATH_CUT}) END) ELSE target END)"
 
@@ -351,7 +362,12 @@ module Gori
     def self.and(a : Filter, b : Filter) : Filter
       return b if a.sql == "1"
       return a if b.sql == "1"
-      Filter.new("(#{a.sql}) AND (#{b.sql})", a.args + b.args)
+      driver = if d = a.fts_driver
+                 {d[0], "(#{d[1]}) AND (#{b.sql})", d[2] + b.args}
+               elsif d = b.fts_driver
+                 {d[0], "(#{a.sql}) AND (#{d[1]})", a.args + d[2]}
+               end
+      Filter.new("(#{a.sql}) AND (#{b.sql})", a.args + b.args, driver)
     end
 
     # Boolean structure (AND/OR/NOT, parentheses, quoting) comes from the shared
@@ -389,7 +405,18 @@ module Gori
       tree = FilterAst.build(FilterAst.parse(query)) { |t| term_to_sql(t, fts, body_max, scope) }
       return EMPTY unless tree
       args = [] of DB::Any
-      Filter.new(wrap_sql(tree, args), args)
+      Filter.new(wrap_sql(tree, args), args, fts_driver(tree))
+    end
+
+    # The first positive index term at the top level, and the rest of an AND around it (see
+    # `Filter#fts_driver`). Matched on the exact fragment `fts_cond` emits: a negated term reads
+    # `NOT (…)` and a grouped one sits under a NOT or OR node, so neither is taken.
+    private def self.fts_driver(tree : FilterAst::Tree(SqlTerm)) : {String, String, Array(DB::Any)}?
+      kids = tree.op.and? ? tree.children : [tree]
+      i = kids.index { |k| k.op.leaf? && k.leaf[0] == FTS_MATCH_SQL } || return nil
+      args = [] of DB::Any
+      rest = kids.each_with_index.reject { |(_, j)| j == i }.map { |(k, _)| tree_sql(k, args) }.to_a
+      {kids[i].leaf[1].first.as(String), rest.empty? ? "1" : "(#{rest.join(" AND ")})", args}
     end
 
     # A bare leaf/negation is parenthesised at the top so the fragment is always safe
@@ -1067,10 +1094,12 @@ module Gori
     # `text/event-stream\t; charset=utf-8` was SSE in the PROTO column and missed by `proto:sse`.
     private SPACE_BYTES = "char(9, 10, 11, 12, 13, 32)"
     # A Connect stream (`application/connect+…`, #1632) is in the gRPC family, as in `Proto.grpc?`.
-    GRPC_SQL = "((content_type IS NOT NULL AND (lower(ltrim(content_type, #{SPACE_BYTES})) LIKE 'application/grpc%' OR " \
-               "lower(ltrim(content_type, #{SPACE_BYTES})) LIKE 'application/connect+%')) OR " \
-               "(request_content_type IS NOT NULL AND (lower(ltrim(request_content_type, #{SPACE_BYTES})) LIKE 'application/grpc%' OR " \
-               "lower(ltrim(request_content_type, #{SPACE_BYTES})) LIKE 'application/connect+%')))"
+    # No `lower()`: `LIKE` already folds ASCII case (`case_sensitive_like` stays off), and
+    # SQLite's `lower()` folds only ASCII too, so the call changed nothing but the per-row cost.
+    GRPC_SQL = "((content_type IS NOT NULL AND (ltrim(content_type, #{SPACE_BYTES}) LIKE 'application/grpc%' OR " \
+               "ltrim(content_type, #{SPACE_BYTES}) LIKE 'application/connect+%')) OR " \
+               "(request_content_type IS NOT NULL AND (ltrim(request_content_type, #{SPACE_BYTES}) LIKE 'application/grpc%' OR " \
+               "ltrim(request_content_type, #{SPACE_BYTES}) LIKE 'application/connect+%')))"
     SSE_SQL = "(content_type IS NOT NULL AND " \
               "lower(trim(substr(content_type, 1, instr(content_type || ';', ';') - 1), #{SPACE_BYTES})) = 'text/event-stream')"
     # BOTH transports, because a WebSocket is one protocol and used to be two answers here: an
@@ -1182,8 +1211,11 @@ module Gori
       # quoted phrase whose embedded quotes were doubled just above — so the term is still not an
       # injection surface, and it stays a single bound `?`.
       phrase = "#{fts_column(side)} : #{phrase}" if side
-      {"id IN (SELECT rowid FROM flows_fts WHERE flows_fts MATCH ?)", [phrase] of DB::Any}
+      {FTS_MATCH_SQL, [phrase] of DB::Any}
     end
+
+    # What `fts_cond` compiles to; `fts_driver` recognises a term by it.
+    FTS_MATCH_SQL = "id IN (SELECT rowid FROM flows_fts WHERE flows_fts MATCH ?)"
 
     private def self.body_cond(value : String, fts : Bool = true,
                                body_max : Int32? = nil, side : Symbol? = nil) : {String, Array(DB::Any)}?

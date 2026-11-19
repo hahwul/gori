@@ -551,7 +551,7 @@ module Gori
         with_store(resolve_read_project(project_name, db_path)) do |store|
           rows = store.repeaters_meta
           from = rows.index { |r| r.id == id }
-          abort "gori run repeater move: no repeater session ##{id} (see `gori run repeater list`)" unless from
+          not_found_abort("gori run repeater move", "no repeater session ##{id} (see `gori run repeater list`)", format, store) unless from
           from += 1
 
           target =
@@ -647,7 +647,10 @@ module Gori
           store.set_repeater_positions(rows.reject { |r| gone.includes?(r.id) }.map(&.id))
 
           if format == :json
+            # `ok`/`ids` as every other delete prints them; `deleted` keeps its rows.
             puts({
+              "ok"        => failed.empty?,
+              "ids"       => deleted.map { |(i, _, _)| i },
               "deleted"   => deleted.map { |(i, n, was)| {"id" => i, "name" => n, "was_tui_index" => was} },
               "failed"    => failed,
               "remaining" => rows.size - deleted.size,
@@ -1137,7 +1140,7 @@ module Gori
 
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
-          existing = store.get_repeater(id) || abort "#{cmd}: no repeater session ##{id}"
+          existing = store.get_repeater(id) || not_found_abort(cmd, "no repeater session ##{id}", format, store)
           write_repeater_update(store, project, existing, f, sources.empty? ? existing.request : content.to_slice, format, cmd)
         end
       end
@@ -1597,7 +1600,7 @@ module Gori
         loaded, host_overrides = begin
           rows = ids.map do |id|
             rec = store.get_repeater_full(id)
-            abort "#{cmd}: no repeater session ##{id}" unless rec
+            not_found_abort(cmd, "no repeater session ##{id}") unless rec
             if !verbatim && Repeater::DraftMarkers.live?(store, rec)
               abort "#{cmd}: #{Repeater::DraftMarkers.refusal(id, MARKER_REMEDY)}"
             end
@@ -2236,10 +2239,16 @@ module Gori
         report_unbound_slot_overlay("gori run repeater ws")
         Run.report_interrupted(1, "session", "closed") if interrupted.call
         if err
+          # Not-found is the one refusal here with an MCP code of its own (`NOT_FOUND`).
+          puts failure_json(err.lchop("gori run repeater ws: "), "not_found", "NOT_FOUND") if format == :json && err == ws_not_found_line(id)
           STDERR.puts err
           exit 1
         end
         exit 1 unless ok
+      end
+
+      private def self.ws_not_found_line(id : Int64) : String
+        "gori run repeater ws: no repeater session ##{id}"
       end
 
       # Resolve the saved repeater session, run its handshake through the `Repeater::Plan` +
@@ -2307,7 +2316,7 @@ module Gori
         ensure
           store.close
         end
-        return "gori run repeater ws: no repeater session ##{id}" unless rec
+        return ws_not_found_line(id) unless rec
         unless Repeater::WsEngine.replayable?(String.new(rec.request))
           return "gori run repeater ws: session ##{id} is not a WebSocket handshake " \
                  "(neither an RFC 6455 `Upgrade:` request nor an RFC 8441 extended CONNECT)"
@@ -2884,25 +2893,44 @@ module Gori
       # `self.` and public so MCP renders the identical three sentences: two copies of a
       # three-way classification is how two surfaces come to disagree about one flow.
       def self.incomplete_reason(result : Repeater::Result, timed_out : Bool = false) : String
-        cap = Proxy::Codec::Body::CAPTURE_READ_MAX
-        case result.bounded
-        when "events"
-          return "incomplete — gori stopped the event stream at its event bound (--sse-events / sse_max_events)"
-        when "time"
-          return "incomplete — gori stopped the event stream at its time bound (--sse-time / sse_max_ms)"
-        when "cancelled"
-          return "incomplete — the send was cancelled while the event stream was open"
-        when "budget"
-          return "incomplete — the body was still arriving when gori stopped reading at its " \
-                 "whole-read budget (three times the timeout; raise the timeout to read the rest)"
-        end
-        if (b = result.body) && b.size >= cap
-          "incomplete — gori stopped reading at its #{cap // (1024 * 1024)} MiB capture ceiling"
-        elsif timed_out
+        case incomplete_cause(result, timed_out)
+        when :events
+          "incomplete — gori stopped the event stream at its event bound (--sse-events / sse_max_events)"
+        when :time
+          "incomplete — gori stopped the event stream at its time bound (--sse-time / sse_max_ms)"
+        when :cancelled
+          "incomplete — the send was cancelled while the event stream was open"
+        when :budget
+          "incomplete — the body was still arriving when gori stopped reading at its " \
+          "whole-read budget (three times the timeout; raise the timeout to read the rest)"
+        when :cap
+          "incomplete — gori stopped reading at its #{CAPTURE_MIB} MiB capture ceiling"
+        when :deadline
           "incomplete — the origin stopped sending and the read deadline expired; " \
           "it did not close the connection (raise the timeout to read the rest)"
         else
           "incomplete — origin closed before the framed body finished"
+        end
+      end
+
+      CAPTURE_MIB = Proxy::Codec::Body::CAPTURE_READ_MAX // (1024 * 1024)
+
+      # The classification behind `incomplete_reason`, for a surface with no room for its
+      # sentence (the TUI's status row): :events, :time, :cancelled, :budget, :cap, :deadline
+      # or :closed. One classifier, so the short word and the sentence cannot disagree.
+      def self.incomplete_cause(result : Repeater::Result, timed_out : Bool = false) : Symbol
+        case result.bounded
+        when "events"    then return :events
+        when "time"      then return :time
+        when "cancelled" then return :cancelled
+        when "budget"    then return :budget
+        end
+        if (b = result.body) && b.size >= Proxy::Codec::Body::CAPTURE_READ_MAX
+          :cap
+        elsif timed_out
+          :deadline
+        else
+          :closed
         end
       end
 

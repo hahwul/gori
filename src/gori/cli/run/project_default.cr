@@ -143,7 +143,7 @@ module Gori
         rescue ex : ProjectRegistry::Ambiguous
           abort "gori run project switch: #{ex.message}"
         end
-        abort "gori run project switch: no project matching '#{CLI::Output.term_safe(name)}'#{have_projects(registry, name)}" unless project
+        not_found_abort("gori run project switch", "no project matching '#{CLI::Output.term_safe(name)}'#{have_projects(registry, name)}") unless project
         # Written to a sibling and renamed, so a concurrent reader sees the old pin or the new
         # one, never half of either.
         tmp = "#{default_pin_path}.#{Process.pid}.tmp"

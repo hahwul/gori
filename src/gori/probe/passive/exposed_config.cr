@@ -43,29 +43,31 @@ module Gori
         # `directory_listing` — the rule is: do not hand-roll a prefilter in front of something
         # that already prefilters itself, and settle it by measurement, not by reasoning about
         # allocations.
-        SIGNATURES = [
-          # A `.git/config`: the `[core]` section header is immediately followed by the
-          # repository format version. A prose mention of "[core]" cannot produce that pair.
-          {/\[core\][^\[]{0,80}repositoryformatversion\s*=/,
-           ".git/config", Store::Severity::High},
-          # phpinfo() output. The <title> is emitted by the function itself and is not something
-          # a page merely DISCUSSING phpinfo would carry; the PHP Version table row confirms it.
-          {/<title>phpinfo\(\)<\/title>/i,
-           "phpinfo() output", Store::Severity::Medium},
-          # An Apache/nginx password file: `user:$apr1$…` (or bcrypt / SHA-512 crypt). The hash
-          # prefix is the anchor — a bare `user:password` line would match nothing here. This is
-          # the one signature whose own first-byte set is just `\n`, so it is the least skippable
-          # of the five; it still measured 7.5µs over the 16 KiB prefix, against 35µs for the
-          # `:$` byte search that used to guard it.
-          {/(?:\A|\n)[\w.\-]{1,64}:\$(?:apr1|2[aby]|5|6)\$[^\s:]{8,}/,
-           ".htpasswd credentials", Store::Severity::High},
-          # wp-config.php served as source instead of executed: the DB password define().
-          {/define\s*\(\s*['"]DB_PASSWORD['"]\s*,/,
-           "wp-config.php credentials", Store::Severity::High},
-          # Spring Boot Actuator /env (or /configprops): the response envelope is distinctive.
-          {/"propertySources"\s*:\s*\[/,
-           "Spring actuator env", Store::Severity::Medium},
-        ].map { |(pattern, label, severity)| {Utf8.tolerant(pattern), label, severity} }
+        class_getter signatures : Array({Regex, String, Store::Severity}) do
+          [
+            # A `.git/config`: the `[core]` section header is immediately followed by the
+            # repository format version. A prose mention of "[core]" cannot produce that pair.
+            {/\[core\][^\[]{0,80}repositoryformatversion\s*=/,
+             ".git/config", Store::Severity::High},
+            # phpinfo() output. The <title> is emitted by the function itself and is not something
+            # a page merely DISCUSSING phpinfo would carry; the PHP Version table row confirms it.
+            {/<title>phpinfo\(\)<\/title>/i,
+             "phpinfo() output", Store::Severity::Medium},
+            # An Apache/nginx password file: `user:$apr1$…` (or bcrypt / SHA-512 crypt). The hash
+            # prefix is the anchor — a bare `user:password` line would match nothing here. This is
+            # the one signature whose own first-byte set is just `\n`, so it is the least skippable
+            # of the five; it still measured 7.5µs over the 16 KiB prefix, against 35µs for the
+            # `:$` byte search that used to guard it.
+            {/(?:\A|\n)[\w.\-]{1,64}:\$(?:apr1|2[aby]|5|6)\$[^\s:]{8,}/,
+             ".htpasswd credentials", Store::Severity::High},
+            # wp-config.php served as source instead of executed: the DB password define().
+            {/define\s*\(\s*['"]DB_PASSWORD['"]\s*,/,
+             "wp-config.php credentials", Store::Severity::High},
+            # Spring Boot Actuator /env (or /configprops): the response envelope is distinctive.
+            {/"propertySources"\s*:\s*\[/,
+             "Spring actuator env", Store::Severity::Medium},
+          ].map { |(pattern, label, severity)| {Utf8.tolerant(pattern), label, severity} }
+        end
 
         # A `.env` file is the one artifact with no structural envelope — it is just
         # `KEY=value` lines, which is also what a great many ordinary text responses look like.
@@ -77,7 +79,7 @@ module Gori
         # essentially every response body, so one would cost a full byte scan and reject
         # nothing. The content-type gate below is the real filter, and after it PCRE's own
         # first-byte set (the key initials following a newline) does the skipping.
-        DOTENV = Utf8.tolerant(/(?:\A|\n)(?:DB_PASSWORD|DB_USERNAME|DATABASE_URL|APP_KEY|APP_SECRET|SECRET_KEY|SECRET_KEY_BASE|AWS_SECRET_ACCESS_KEY|STRIPE_SECRET_KEY|JWT_SECRET|MAIL_PASSWORD|REDIS_PASSWORD)\s*=\s*\S/)
+        class_getter dotenv : Regex { Utf8.tolerant(/(?:\A|\n)(?:DB_PASSWORD|DB_USERNAME|DATABASE_URL|APP_KEY|APP_SECRET|SECRET_KEY|SECRET_KEY_BASE|AWS_SECRET_ACCESS_KEY|STRIPE_SECRET_KEY|JWT_SECRET|MAIL_PASSWORD|REDIS_PASSWORD)\s*=\s*\S/) }
 
         # Every artifact here DECLARES ITSELF in its opening bytes: `[core]` opens a git config,
         # `<title>phpinfo()</title>` is in the document head, an `.htpasswd` record is line one,
@@ -100,7 +102,7 @@ module Gori
           return if full.nil? || full.empty?
           text = head_of(full)
 
-          SIGNATURES.each do |(pattern, label, severity)|
+          ExposedConfig.signatures.each do |(pattern, label, severity)|
             acc << det(ctx, label, severity) if pattern.matches?(text)
           end
           check_dotenv(ctx, acc, text)
@@ -112,7 +114,7 @@ module Gori
         # what makes the loose `KEY=value` shape safe to match at all.
         private def check_dotenv(ctx : Context, acc : Array(Detection), text : String) : Nil
           return if ctx.html? || ctx.js?
-          return unless DOTENV.matches?(text)
+          return unless ExposedConfig.dotenv.matches?(text)
           acc << det(ctx, ".env file", Store::Severity::High)
         end
 

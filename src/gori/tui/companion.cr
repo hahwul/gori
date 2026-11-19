@@ -668,6 +668,13 @@ module Gori::Tui
       @restless = true
     end
 
+    # Do not say hello this process: a session that opens on a warning (capture off, a
+    # fallback port) has something to say that matters more, and the greeting — newer than
+    # any toast set before her first tick — would hold the status row for its whole TTL.
+    def self.skip_greeting! : Nil
+      @@greeted = true
+    end
+
     # Forget that this process has been greeted. A SPEC SEAM only — nothing in the app
     # un-greets, because nothing in a run of gori is a second first meeting.
     def self.forget_greeting! : Nil

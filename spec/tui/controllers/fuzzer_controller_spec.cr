@@ -296,6 +296,30 @@ describe "FuzzerController.done_line" do
     FuzzerController.done_line(run.call("200"), " on GET / (stopped)", " · macro: 1 failed")
       .should eq({:success, "Fuzzer: 2 hits / 2 sent on GET / (stopped) · macro: 1 failed"})
   end
+
+  # A sweep against a dead port finished as "✓ 200 sent"; the CLI says `200 errors` (W#4).
+  failing = ->(errors : Int32, total : Int32) do
+    view = FuzzerView.new
+    view.load_request("https://h", "GET /?x=1 HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+    view.begin_run(total.to_i64)
+    total.times do |i|
+      err = i < errors ? "connect failed: 127.0.0.1:9 — host unreachable" : nil
+      view.append_result(Gori::Fuzz::Result.new(i.to_i64, ["p#{i}"], nil, err ? nil : 200, 1_i64, 1, 1, 1_i64, err, false, false, nil))
+    end
+    view.finish_run("done")
+    view
+  end
+
+  it "reports a run where every request failed as an error" do
+    FuzzerController.done_line(failing.call(3, 3), " on GET /", "")
+      .should eq({:error, "Fuzzer: all 3 failed on GET /"})
+  end
+
+  it "counts errors beside the sent count, and warns when most failed" do
+    FuzzerController.done_line(failing.call(1, 4), " on GET /", "")
+      .should eq({:info, "Fuzzer: 4 sent, 1 error on GET / — no match rule"})
+    FuzzerController.done_line(failing.call(3, 4), " on GET /", "")[0].should eq(:warn)
+  end
 end
 
 describe "FuzzerController — prepared peer tab" do

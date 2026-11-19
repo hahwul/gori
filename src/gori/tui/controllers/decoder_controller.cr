@@ -575,8 +575,15 @@ module Gori::Tui
     # The pane is kept; only the chain autocomplete is closed. `handle_complete_key` is
     # gated on body focus, so a popup left open across a trip to the tab bar would sit
     # unreachable on the way back in.
+    #
+    # …except CHAIN, which has no READ mode: re-entered there, the first letter typed was
+    # appended to the chain expression and re-ran it broken. INPUT it is, in READ — the
+    # Repeater's rule that a pane is entered in READ however it was left.
     def focus_resume : Nil
       @popup.close
+      return unless cur.pane == :chain
+      cur.pane = :input
+      cur.input_mode = InputMode::Read
     end
 
     def insert_key_refusal : String?

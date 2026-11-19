@@ -87,4 +87,19 @@ describe Gori::CaptureCompletion do
       delete_db_files(path)
     end
   end
+
+  # The printer asks this before it reads the row, so it must never skip an event `ready?`
+  # could count, for any row shape.
+  it "lets the printer skip only the events no row could count" do
+    rows = [capture_row(200, Gori::Store::FlowState::Complete), capture_row(101, Gori::Store::FlowState::Complete),
+            capture_row(200, Gori::Store::FlowState::Complete, "websocket"), capture_row(nil, Gori::Store::FlowState::Pending)]
+    {:inserted, :updated, :tunnel_completed}.each do |kind|
+      event = Gori::Store::FlowEvent.new(1_i64, kind)
+      next if Gori::CaptureCompletion.may_count?(event)
+      rows.each { |row| Gori::CaptureCompletion.new.ready?(event, row).should be_false }
+    end
+    Gori::CaptureCompletion.may_count?(Gori::Store::FlowEvent.new(1_i64, :inserted)).should be_false
+    Gori::CaptureCompletion.may_count?(Gori::Store::FlowEvent.new(1_i64, :updated)).should be_true
+    Gori::CaptureCompletion.may_count?(Gori::Store::FlowEvent.new(1_i64, :tunnel_completed)).should be_true
+  end
 end

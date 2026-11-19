@@ -786,8 +786,15 @@ describe "MCP issue links and evidence caps" do
       iid = store.insert_issue("t", Gori::Store::Severity::Low, "h.test", nil)
       links = Gori::MCP::Tools::ISSUE_ITEMS_MAX + 10
       links.times { |i| store.ensure_link(Gori::Store::LinkOwnerKind::Issue, iid, Gori::Store::LinkRefKind::Flow, 10_000_i64 + i) }
-      snap = Gori::Evidence.from_flow(store.get_flow(fid).not_nil!)
-      7.times { store.freeze_evidence(iid, snap) }
+      # Seven distinct exchanges: the same bytes again would be the issue's same copy.
+      7.times do |i|
+        src = i.zero? ? fid : store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
+          method: "GET", target: "/x#{i}", http_version: "HTTP/1.1",
+          head: "GET /x#{i} HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice,
+          source: Gori::FlowSource::Kind::Proxy))
+        store.freeze_evidence(iid, Gori::Evidence.from_flow(store.get_flow(src).not_nil!))
+      end
       tools = tools_for(store, allow_actions: false)
 
       row = mcp_ok_json(tools, "list_issues", "{}")["issues"][0]

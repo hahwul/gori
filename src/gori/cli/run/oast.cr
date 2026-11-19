@@ -189,7 +189,8 @@ module Gori
         leftover = parse_args(args, "gori run oast providers") do |p|
           p.banner = "Usage: gori run oast providers [list] [options]\n\n" \
                      "List saved OAST providers. `id` is scope-qualified: p_<n> is this project's,\n" \
-                     "g_<hex> is a global one from settings.json (read-only here)."
+                     "g_<hex> is a global one from settings.json (read-only here).\n\n" \
+                     "Or run with a subcommand: add, update, enable, disable, delete/rm (each takes -h)"
           project_options(p, proj, "read")
           p.on("--show-tokens", "Print provider auth tokens instead of [REDACTED]") { show_tokens = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
@@ -384,6 +385,7 @@ module Gori
 
         leftover = one_positional_list(args, "gori run oast providers delete", "<id>") do |p|
           p.banner = "Usage: gori run oast providers delete <id>"
+          yes_flag(p)
           project_options(p, proj, "update")
           format_flag(p, [:text, :json], delete_format_help) { |f| format = f }
         end
@@ -507,7 +509,7 @@ module Gori
         store = open_store(resolve_read_project(proj.name, proj.db), long_running: true)
         failed =
           begin
-            bound = oast_bind_session(store, id, "resume")
+            bound = oast_bind_session(store, id, "resume", json)
             http = Oast::HttpClient.new
             begin
               Oast::Sessions.resume(bound, http)
@@ -633,10 +635,13 @@ module Gori
           abort("gori run oast #{verb}: malformed session id '#{raw}' (expected a number, as `gori run oast list` prints)")
       end
 
-      private def self.oast_bind_session(store : Store, id : Int64, verb : String) : Oast::Sessions::Bound
+      private def self.oast_bind_session(store : Store, id : Int64, verb : String,
+                                         json : Bool = false) : Oast::Sessions::Bound
         bound = Oast::Sessions.bind(store, id)
         if bound.is_a?(Oast::Sessions::Problem)
-          abort "gori run oast #{verb}: #{Oast::Sessions.message_for(bound, id)}"
+          msg = Oast::Sessions.message_for(bound, id)
+          not_found_abort("gori run oast #{verb}", msg, json ? :json : :text, store) if bound.missing?
+          abort "gori run oast #{verb}: #{msg}"
         end
         Oast::Sessions.ambiguity_note(bound, id).try { |note| STDERR.puts "gori run oast #{verb}: note — #{note}" }
         bound

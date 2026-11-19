@@ -1109,6 +1109,8 @@ module Gori
         # this adapter receives every ResultEvent and writes the complete run independently.
         property persistence : Fuzz::Persistence? = nil
         property? persistence_finished = false
+        # The `record_history` rows not yet committed, held here for the shutdown flush.
+        property history : Fuzz::HistoryRecord::Batch({Fuzz::Result, String})? = nil
         # A terminal failure observed while the drain must stay logically running until Done
         # flushes the permanent tail; otherwise project switching can rebind the store mid-job.
         property? terminal_error = false

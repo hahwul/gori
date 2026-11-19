@@ -50,6 +50,7 @@ module Gori
         aggressive = false
         insecure = false
         lenient = false
+        strict = false
         in_scope = false
         persist = false
         persist_failed = false
@@ -86,6 +87,7 @@ module Gori
           # way to say otherwise.
           p.on("-k", "--insecure-upstream", "With --active, do not verify upstream TLS certificates") { insecure = true }
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text (old behaviour)") { lenient = true }
+          p.on("--strict", "Refuse a query with a term QL would drop (an invalid value) instead of warning — MCP's strict:true") { strict = true }
           p.on("--persist", "Also write the findings into the project's persisted list (what `probe issues` and the TUI Probe tab show), merged as the live scanner merges them") { persist = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
@@ -116,7 +118,7 @@ module Gori
           parsed = QL.parse(q, scope: QL::SCOPE_SHAPE_ONLY)
           # Both halves, not just invalid-regex: an UNRECOGNIZED field is dropped by QL and
           # broadens the scan, which is the direction that matters here — see Run.warn_query_terms.
-          Run.warn_query_terms("probe", q)
+          Run.warn_query_terms("probe", q, strict)
           # `--active` sends probes for every selected flow, so a dropped term that widened the
           # selection is refused rather than warned about.
           if active && !(unusable = QL.analyze(q, scope: QL::SCOPE_SHAPE_ONLY).ignored).empty?
@@ -125,7 +127,7 @@ module Gori
           # A query that compiles to NOTHING (e.g. `status:>=foo`) becomes the match-all EMPTY
           # filter — here that would scan every flow, the opposite of what was asked. Refuse it.
           if !q.strip.empty? && parsed == QL::EMPTY
-            abort "gori run probe: query #{truncate_query(q).inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)"
+            Run.usage_abort("gori run probe: query #{truncate_query(q).inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)", "QUERY_SYNTAX")
           end
           filter = parsed
         end
@@ -346,7 +348,7 @@ module Gori
             busy_abort("gori run probe dismiss", "NOT applied (project busy) — the findings are unchanged") unless store.dismiss_probe_by_host(hst)
             puts "Dismissed #{n} open finding#{n == 1 ? "" : "s"} on #{hst}."
           elsif iid = id
-            issue = store.get_probe_issue(iid) || abort("gori run probe dismiss: no probe finding with id #{iid}")
+            issue = store.get_probe_issue(iid) || not_found_abort("gori run probe dismiss", "no probe finding with id #{iid}", store: store)
             landed = Probe::Triage.toggle_dismiss(store, issue)
             busy_abort "gori run probe dismiss", "NOT applied (project busy) — finding ##{iid} is unchanged" if landed == issue.status
             puts "Finding ##{issue.id} is now #{landed.label}."
@@ -385,7 +387,7 @@ module Gori
         abort "gori run probe promote: <id> is required (see `gori run probe issues`)" unless id
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
-          issue = store.get_probe_issue(id) || abort("gori run probe promote: no probe finding with id #{id}")
+          issue = store.get_probe_issue(id) || not_found_abort("gori run probe promote", "no probe finding with id #{id}", store: store)
           res = Probe::Triage.promote(store, issue)
           case res.outcome
           in Probe::Triage::Outcome::Promoted
@@ -475,7 +477,8 @@ module Gori
           p.banner = "Usage: gori run probe rules [list] [options]\n\n" \
                      "List every scan rule — built-in passive, built-in active, and custom match\n" \
                      "rules — with whether it is enabled. A scan on ANY surface (here, the TUI, or\n" \
-                     "MCP) honours this config."
+                     "MCP) honours this config.\n\n" \
+                     "Or run with a subcommand: add, update, enable, disable, delete/rm (each takes -h)"
           project_options(p, proj, "read")
           p.on("--kind=KIND", "Only list rules of this kind (passive|active|custom)") { |v| kind = parse_rule_kind(v) }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
@@ -700,6 +703,7 @@ module Gori
         positional = one_positional_list(args, "gori run probe rules delete", "<custom-rule-id>") do |p|
           p.banner = "Usage: gori run probe rules delete <custom-rule-id>\n\n" \
                      "Delete a project custom rule. A built-in can only be DISABLED, never deleted."
+          yes_flag(p)
           project_options(p, proj, "write")
           format_flag(p, [:text, :json], delete_format_help) { |f| format = f }
         end

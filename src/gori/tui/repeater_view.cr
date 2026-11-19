@@ -370,6 +370,9 @@ module Gori::Tui
       # {stored row, editor text} right after a restore / peer sync reflected Content-Length
       # into the pane — see `request_side_matches?`.
       @row_reflection = nil.as({String, String}?)
+      # {stored row bytes, editor revision} the last poll found this pane equal to — see the
+      # `Bytes` overload of `request_side_matches?`.
+      @matched_row = nil.as({Bytes, Int32}?)
       # `§…§` markers carry inline Decoder chains applied on send (mark a value, attach
       # base64-encode → it's encoded on the wire). On a DRAFT they are always active (like the
       # Fuzzer): a request that contains a marker region renders it on send, a marker-free

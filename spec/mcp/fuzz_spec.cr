@@ -1720,7 +1720,7 @@ module Gori::MCP
     end
 
     def __drain_fuzz_event(fjob : FuzzJob, ev : Fuzz::Event) : Nil
-      drain_fuzz_event(fjob, ev)
+      drain_fuzz_event(fjob, ev, Fuzz::HistoryRecord::Batch({Fuzz::Result, String}).new(store, ->(_ex : Exception) { nil }))
     end
 
     def __register_fuzz_job(fjob : FuzzJob) : Nil

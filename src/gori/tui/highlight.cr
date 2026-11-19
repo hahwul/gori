@@ -99,7 +99,16 @@ module Gori::Tui
         new(Bytes.empty, [] of Int32, lines)
       end
 
+      # The last line materialised, shared by every copy of this struct (they share the bytes).
+      # ^F and the drill both re-read the line they are on, and on a minified multi-MB body that
+      # was a full scrub per access — two thirds of a ^F keystroke.
+      private class Memo
+        property i = -1
+        property line = ""
+      end
+
       def initialize(@bytes : Bytes, @starts : Array(Int32), @lines : Array(String)?)
+        @memo = Memo.new
       end
 
       def size : Int32
@@ -119,7 +128,10 @@ module Gori::Tui
         finish = (i + 1 < @starts.size) ? (@starts[i + 1] - 1) : @bytes.size
         len = finish - start
         return "" if len <= 0
-        String.new(@bytes[start, len]).scrub.rstrip('\r')
+        return @memo.line if @memo.i == i
+        line = String.new(@bytes[start, len]).scrub.rstrip('\r')
+        @memo.i = i
+        @memo.line = line
       end
     end
 

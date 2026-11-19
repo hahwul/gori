@@ -51,7 +51,7 @@ describe Gori::Probe::Passive::InternalHostLeak do
   it "leaves public addresses and version strings alone" do
     with_store do |store|
       leaks(store, "X-Served-By: 203.0.113.9\r\nServer: nginx/1.10.1.2\r\n").should be_empty
-      # Loopback is excluded upstream in BodyLeaks::PRIVATE_IP and stays excluded here.
+      # Loopback is excluded upstream in BodyLeaks.private_ip and stays excluded here.
       leaks(store, "X-Debug: 127.0.0.1\r\n").should be_empty
     end
   end

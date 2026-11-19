@@ -40,46 +40,48 @@ module Gori
         # LITERAL REGEX (~19µs, not an `includes?`) only where the confirming pattern genuinely
         # cannot anchor itself — today just the Rails web-console alternation, which opens on
         # `<[^>]+` and costs ~178µs unguarded.
-        SIGNATURES = ([
-          # Werkzeug/Flask interactive debugger — a live Python console (RCE if the PIN is off or
-          # brute-forced). The title string is emitted only by the debugger page.
-          {nil,
-           /Werkzeug Debugger/,
-           "Werkzeug interactive debugger", Store::Severity::High},
-          # Rails web-console — an in-browser IRB on the error page (RCE). The mount marker and
-          # its session id are rendered only when the console gem is active. `console-` is a
-          # necessary substring of BOTH alternatives (`id="console-`, `data-console-session`).
-          #
-          # Case-INSENSITIVE, and that is load-bearing: the pattern it guards is /i, so a
-          # case-sensitive gate would drop `DATA-CONSOLE-SESSION` / `<div ID="CONSOLE-abc">`
-          # — uppercased markup out of a template, a minifier or a proxy — and silently lose a
-          # HIGH (RCE) finding. That is exactly the bug `reverse_tabnabbing` shipped once: an /i
-          # regex paired with a case-SENSITIVE membership test. `/i` on a literal costs the same
-          # as a case-sensitive one (see the measurements in body_leaks), so there is nothing to
-          # trade here.
-          {/console-/i,
-           /<[^>]+\bid\s*=\s*["']console-|data-console-session/i,
-           "Rails web-console", Store::Severity::High},
-          # Django DEBUG=True technical error / 404 page. `Django Version:` is rendered by that
-          # page (and the technical-404 page) — never by an ordinary response.
-          {nil,
-           /Django Version:/,
-           "Django debug page (DEBUG=True)", Store::Severity::Medium},
-          # Laravel Ignition (the modern debug page). Its client bundle / config marker.
-          {nil,
-           /laravel-ignition|"ignitionConfig"|flare-client/i,
-           "Laravel Ignition debug page", Store::Severity::Medium},
-          # Whoops (older Laravel / generic PHP). The namespaced handler class is printed in the
-          # page frames — a prose "whoops" cannot produce `Whoops\Something`.
-          {nil,
-           /Whoops\\[A-Z]\w+/,
-           "PHP Whoops error page", Store::Severity::Medium},
-          # Rails development exception page (`config.consider_all_requests_local = true`). The
-          # source-extract heading is dev-only; the production page says "something went wrong".
-          {nil,
-           /Extracted source \(around line/,
-           "Rails development error page", Store::Severity::Medium},
-        ] of {Regex?, Regex, String, Store::Severity}).map { |(prefilter, pattern, label, severity)| {Utf8.tolerant(prefilter), Utf8.tolerant(pattern), label, severity} }
+        class_getter signatures : Array({Regex?, Regex, String, Store::Severity}) do
+          ([
+            # Werkzeug/Flask interactive debugger — a live Python console (RCE if the PIN is off or
+            # brute-forced). The title string is emitted only by the debugger page.
+            {nil,
+             /Werkzeug Debugger/,
+             "Werkzeug interactive debugger", Store::Severity::High},
+            # Rails web-console — an in-browser IRB on the error page (RCE). The mount marker and
+            # its session id are rendered only when the console gem is active. `console-` is a
+            # necessary substring of BOTH alternatives (`id="console-`, `data-console-session`).
+            #
+            # Case-INSENSITIVE, and that is load-bearing: the pattern it guards is /i, so a
+            # case-sensitive gate would drop `DATA-CONSOLE-SESSION` / `<div ID="CONSOLE-abc">`
+            # — uppercased markup out of a template, a minifier or a proxy — and silently lose a
+            # HIGH (RCE) finding. That is exactly the bug `reverse_tabnabbing` shipped once: an /i
+            # regex paired with a case-SENSITIVE membership test. `/i` on a literal costs the same
+            # as a case-sensitive one (see the measurements in body_leaks), so there is nothing to
+            # trade here.
+            {/console-/i,
+             /<[^>]+\bid\s*=\s*["']console-|data-console-session/i,
+             "Rails web-console", Store::Severity::High},
+            # Django DEBUG=True technical error / 404 page. `Django Version:` is rendered by that
+            # page (and the technical-404 page) — never by an ordinary response.
+            {nil,
+             /Django Version:/,
+             "Django debug page (DEBUG=True)", Store::Severity::Medium},
+            # Laravel Ignition (the modern debug page). Its client bundle / config marker.
+            {nil,
+             /laravel-ignition|"ignitionConfig"|flare-client/i,
+             "Laravel Ignition debug page", Store::Severity::Medium},
+            # Whoops (older Laravel / generic PHP). The namespaced handler class is printed in the
+            # page frames — a prose "whoops" cannot produce `Whoops\Something`.
+            {nil,
+             /Whoops\\[A-Z]\w+/,
+             "PHP Whoops error page", Store::Severity::Medium},
+            # Rails development exception page (`config.consider_all_requests_local = true`). The
+            # source-extract heading is dev-only; the production page says "something went wrong".
+            {nil,
+             /Extracted source \(around line/,
+             "Rails development error page", Store::Severity::Medium},
+          ] of {Regex?, Regex, String, Store::Severity}).map { |(prefilter, pattern, label, severity)| {Utf8.tolerant(prefilter), Utf8.tolerant(pattern), label, severity} }
+        end
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.response
@@ -92,7 +94,7 @@ module Gori
           text = ctx.body_text
           return if text.nil? || text.empty?
 
-          SIGNATURES.each do |(prefilter, pattern, label, severity)|
+          DebugModeExposed.signatures.each do |(prefilter, pattern, label, severity)|
             next if prefilter && !prefilter.matches?(text)
             next unless pattern.matches?(text)
             acc << det(ctx, label, severity)
@@ -121,10 +123,10 @@ module Gori
         # naive scan (~85µs) in front of a ~22µs one. The two `includes?` below it stay: they are
         # reached only once the banner has ALREADY matched, i.e. on an actual ASP.NET error page,
         # so they cost nothing on the ordinary responses this rule spends its time on.
-        ASPNET_BANNER = Utf8.tolerant(/Server Error in '[^']*' Application/)
+        class_getter aspnet_banner : Regex { Utf8.tolerant(/Server Error in '[^']*' Application/) }
 
         private def check_aspnet(ctx : Context, acc : Array(Detection), text : String) : Nil
-          return unless ASPNET_BANNER.matches?(text)
+          return unless DebugModeExposed.aspnet_banner.matches?(text)
           return unless text.includes?("Stack Trace:")
           return if text.includes?("prevent the details of the application error from being viewed")
           acc << det(ctx, "ASP.NET detailed error page", Store::Severity::Medium)

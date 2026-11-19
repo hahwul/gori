@@ -341,6 +341,54 @@ private def list_overlay(*values : String) : FuzzSetOverlay
   ov
 end
 
+# A pasted wordlist goes in as ONE edit (the keystroke path snapshotted the whole list per
+# pasted line), and it builds the buffer the keystroke path builds.
+private def key_pasted(text : String) : FuzzSetOverlay
+  ov = FuzzSetOverlay.for_list
+  text.each_char do |c|
+    ev = c == '\n' ? okey(Termisu::Input::Key::Enter) : (c == '\t' ? okey(Termisu::Input::Key::Tab) : okey(Termisu::Input::Key::LowerA, c))
+    ov.handle_key(ev) if ov.takes_pasted?(ev)
+  end
+  ov
+end
+
+describe "FuzzSetOverlay bulk paste" do
+  it "takes a paste whole from the Type row ^L opens on, and from the values editor" do
+    ov = FuzzSetOverlay.for_list
+    ov.accepts_bulk_paste?.should be_true
+    ov.paste_text("w1\nw2\nw3").should be_true
+    ov.build_spec.not_nil!.value.should eq(key_pasted("w1\nw2\nw3").build_spec.not_nil!.value)
+    ov.accepts_bulk_paste?.should be_true # now in the values editor
+    ov.paste_text("\nw4").should be_true
+    Gori::Tui::SetSpec.list_values(ov.build_spec.not_nil!.value).should eq(["w1", "w2", "w3", "w4"])
+  end
+
+  it "drops a ↹ the way the keystroke path does" do
+    ov = FuzzSetOverlay.for_list
+    ov.paste_text("a\tb\nc")
+    ov.build_spec.not_nil!.value.should eq(key_pasted("a\tb\nc").build_spec.not_nil!.value)
+  end
+
+  it "refuses a paste that opens with a line break on the Type row, as a keyed one is" do
+    ov = FuzzSetOverlay.for_list
+    ov.paste_text("\nw1").should be_true
+    ov.build_spec.should be_nil
+    render_text(ov).should contain(Gori::Tui::Runner::PASTE_MODAL_REFUSED[0, 30])
+  end
+
+  it "is only the List/Bytes editor, and not while the name prompt is up" do
+    ov = FuzzSetOverlay.for_list
+    ov.handle_key(okey(Termisu::Input::Key::Right)) # → Numbers
+    ov.accepts_bulk_paste?.should be_false
+    with_wordlist_home do
+      ov = FuzzSetOverlay.for_list
+      ov.paste_text("a")
+      ov.handle_key(ctrl_s)
+      ov.accepts_bulk_paste?.should be_false
+    end
+  end
+end
+
 private def render_text(ov : FuzzSetOverlay) : String
   backend = MemoryBackend.new(120, 30)
   ov.render(Screen.new(backend), Rect.new(0, 0, 120, 30))

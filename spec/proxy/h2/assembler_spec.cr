@@ -1136,3 +1136,39 @@ describe Gori::Proxy::H2::Assembler do
     String.new(sink.requests.first.head).should_not contain("X-Gori-Protocol")
   end
 end
+
+describe "Gori::Proxy::H2::Assembler with a StoreSink" do
+  # Each stream's insert and update used to wait for its commit on the frame pump, so one
+  # connection's streams were captured one commit at a time.
+  it "queues each stream's capture without waiting for the commit, and stores every flow complete" do
+    with_store do |store|
+      assembler = Gori::Proxy::H2::Assembler.new(Gori::Proxy::StoreSink.new(store), "example.com", 443)
+      req_enc = Gori::Proxy::H2::HPACK::Encoder.new
+      resp_enc = Gori::Proxy::H2::HPACK::Encoder.new
+      ids = (0...32).map { |i| (i * 2 + 1).to_u32 }
+      ids.each do |sid|
+        block = req_enc.encode([{":method", "GET"}, {":scheme", "https"}, {":path", "/s#{sid}"},
+                                {":authority", "example.com"}])
+        assembler.feed("out", headers_frame(sid, Frame::END_HEADERS | Frame::END_STREAM, block))
+      end
+      # Nothing yielded to the writer yet: a pump that waited would have committed every row.
+      store.count.should eq(0)
+
+      ids.reverse_each do |sid|
+        block = resp_enc.encode([{":status", "200"}, {"content-type", "text/plain"}])
+        assembler.feed("in", headers_frame(sid, Frame::END_HEADERS, block))
+        assembler.feed("in", data_frame(sid, Frame::END_STREAM, "body #{sid}"))
+      end
+      store.flush
+
+      rows = store.recent_flows(100)
+      rows.size.should eq(32)
+      rows.each do |row|
+        row.state.should eq(Gori::Store::FlowState::Complete)
+        row.status.should eq(200)
+        detail = store.get_flow(row.id).not_nil!
+        String.new(detail.response_body.not_nil!).should eq("body #{row.target.lchop("/s")}")
+      end
+    end
+  end
+end

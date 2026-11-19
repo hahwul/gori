@@ -156,6 +156,7 @@ module Gori
         format = :text
         positional = parse_args(args, "gori run colormarker color rm") do |p|
           p.banner = "Usage: gori run colormarker color rm <name>"
+          yes_flag(p)
           format_flag(p, [:text, :json], delete_format_help("name")) { |f| format = f }
         end
         abort "gori run colormarker color rm: missing <name>" if positional.empty?
@@ -441,6 +442,7 @@ module Gori
         format = :text
         positional = parse_args(args, "gori run colormarker rm") do |p|
           p.banner = "Usage: gori run colormarker rm <id> [options]"
+          yes_flag(p)
           project_options(p, proj, "update")
           p.on("--scope=SCOPE", "Which <id>: project (default) | global; a listed P#/G# id names it itself") { |v| scope_flag = parse_rule_scope(v, "gori run colormarker") }
           format_flag(p, [:text, :json], delete_format_help) { |f| format = f }

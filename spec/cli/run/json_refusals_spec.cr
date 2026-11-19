@@ -12,6 +12,10 @@ module Gori::CLI::Run
   def self.one_positional_list_for_spec(args : Array(String)) : Array(String)
     one_positional_list(args, "gori run x", "name") { }
   end
+
+  def self.value_flags_for_spec : Set(String)
+    VALUE_FLAGS
+  end
 end
 
 module JsonRefusals
@@ -156,5 +160,82 @@ describe "gori run — one positional, counted inside unknown_args" do
     Gori::CLI::Run.extra_positional_error(["off", "-extra"], "gori run probe mode", "<mode>").should_not be_nil
     src = File.read(File.join(JsonRefusals::ROOT, "..", "run.cr"))
     src.scan("before.reject").size.should eq(1)
+  end
+end
+
+# Fifteen refusals printed nothing on stdout under `--json` (not-found on `repeater
+# update/move/timing/race/ws`, `notes update`, `retest …`, `session edit/baseline/refresh`,
+# `oast resume`, `project switch`, `wordlist rename`, `probe dismiss/promote`, `evidence
+# freeze/link`), and so did `send`'s pre-send checks and the shared usage refusals.
+describe "gori run --json — the refusals that printed nothing" do
+  it "reads --json off argv before any parser runs, and never past --" do
+    {
+      %w[history --limit 0 --json] => true,
+      %w[history --format=JSONL]   => true,
+      %w[history --format json]    => true,
+      %w[history --format text]    => false,
+      %w[capture -- curl --json]   => false,
+      %w[send -d x --format=har]   => false,
+      # Another flag's value, as OptionParser reads it: a search for "--json", not the flag.
+      %w[history -q --json]             => false,
+      %w[fuzz 3 --payloads --json]      => false,
+      %w[history --query --format json] => false,
+      %w[history -k --json]             => true,
+      %w[issues --count --json]         => true,
+      %w[history -q x --json]           => true,
+    }.each do |argv, want|
+      Gori::CLI::Run.json_requested?(argv).should eq(want), failure_message: argv.join(' ')
+    end
+  end
+
+  # `VALUE_FLAGS` against the parsers: every flag defined with a value (`--query=QL`, `-qQL`),
+  # less the few that are valueless in another subcommand.
+  it "knows every flag that takes the next word as its value" do
+    valued = Set(String).new
+    plain = Set(String).new
+    # Forward slashes: `Dir.glob` reads a backslash as an escape, so a Windows-joined pattern matched nothing.
+    (Dir.glob("#{Path[JsonRefusals::ROOT].to_posix}/**/*.cr") << "#{JsonRefusals::ROOT}.cr").each do |path|
+      File.read(path).scan(/p\.on\(([^)]*)/) do |m|
+        m[1].scan(/"(-[A-Za-z]|--[a-z0-9-]+)([= ]?[A-Z<\[]?)/) do |f|
+          (f[2].empty? ? plain : valued) << f[1]
+        end
+      end
+    end
+    want = valued - plain - Set{"--format"}
+    Gori::CLI::Run.value_flags_for_spec.should eq(want)
+  end
+
+  it "routes each not-found through not_found_abort" do
+    {
+      {"repeater.cr", "not_found_abort(\"gori run repeater move\", \"no repeater session"},
+      {"repeater.cr", "get_repeater(id) || not_found_abort(cmd, \"no repeater session"},
+      {"repeater.cr", "not_found_abort(cmd, \"no repeater session #\#{id}\") unless rec"},
+      {"repeater.cr", "err == ws_not_found_line(id)"},
+      {"notes.cr", "resolve_note_index(store, doc, n, note_id, \"gori run notes update\", format)"},
+      {"session.cr", "not_found_abort(\"gori run session refresh\""},
+      {"session.cr", "not_found_abort(\"gori run session edit\""},
+      {"session.cr", "not_found_abort(\"gori run session baseline\""},
+      {"oast.cr", "oast_bind_session(store, id, \"resume\", json)"},
+      {"project_default.cr", "not_found_abort(\"gori run project switch\""},
+      {"wordlist.cr", "wordlist_error(\"rename\", ex, format)"},
+      {"probe.cr", "not_found_abort(\"gori run probe promote\""},
+      {"evidence.cr", "not_found_abort(\"gori run evidence freeze\", \"no issue"},
+      {"evidence.cr", "not_found_abort(\"gori run evidence freeze\", snap"},
+    }.each do |file, needle|
+      File.read(File.join(JsonRefusals::ROOT, file)).should contain(needle), failure_message: "#{file}: #{needle}"
+    end
+    File.read(File.join(JsonRefusals::ROOT, "retest.cr")).should_not match(/abort "gori run retest \w+: no /)
+  end
+
+  it "gives send's pre-send refusals the delivered:false object" do
+    body = JsonRefusals.method("send.cr", "send_arg_abort")
+    body.should contain(%(failure_json(reason, "invalid_argument", "INVALID_ARGUMENT", delivered: false)))
+    # The helper's own line is the only bare one left.
+    File.read(File.join(JsonRefusals::ROOT, "send.cr")).scan(%(abort "gori run send: )).size.should eq(1)
+  end
+
+  it "says ok in the project and repeater delete replies" do
+    JsonRefusals.method("project.cr", "cmd_project_delete").should contain(%(j.field "ok", true))
+    File.read(File.join(JsonRefusals::ROOT, "repeater.cr")).should contain(%("ok"        => failed.empty?))
   end
 end

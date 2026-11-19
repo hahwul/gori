@@ -17,8 +17,21 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # timer (the folded-field discipline the clock/resource meter also follow).
   def refresh_agent_presence : Bool
     before = agent_chip
-    @agents = Gori::AgentPresence.live(@session.project.db_path)
+    db = @session.project.db_path
+    @agents = Gori::AgentPresence.live(db, dir: agent_marker_dir(db))
     agent_chip != before
+  end
+
+  # The marker directory, resolved once per db path rather than on every poll: the realpath
+  # behind it blocked the UI loop for ~1 s under disk contention. The open database exists
+  # for the whole visit, so its canonical spelling cannot move under it.
+  @agent_marker_dir : {String, String}? = nil
+
+  private def agent_marker_dir(db : String) : String
+    if (m = @agent_marker_dir) && m[0] == db
+      return m[1]
+    end
+    Gori::AgentPresence.dir_for(db).tap { |dir| @agent_marker_dir = {db, dir} }
   end
 
   # The top-bar chip label — "" when nothing is attached (Chrome drops an empty chip).

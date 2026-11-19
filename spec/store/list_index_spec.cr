@@ -16,9 +16,9 @@ private def query_plan(store : Gori::Store, sql : String, args : Array(DB::Any) 
 end
 
 # The statement `Store#search` runs for a filter (newest-first page, no cursor).
-private def search_plan(store : Gori::Store, query : String) : String
-  f = Gori::QL.parse(query)
-  query_plan(store, "#{Gori::Store::SELECT_ROW} WHERE #{f.sql} ORDER BY id DESC LIMIT ?", f.args + [200] of DB::Any)
+private def search_plan(store : Gori::Store, query : String, before_id : Int64? = nil) : String
+  sql, args = store.search_sql(Gori::QL.parse(query), 200, before_id)
+  query_plan(store, sql, args)
 end
 
 private def index_columns(store : Gori::Store, index : String) : Array(String)
@@ -104,6 +104,22 @@ describe "History list covering index (schema V37)" do
         plan = query_plan(store, "#{sel} ORDER BY #{rank.column} DESC, id DESC LIMIT 50")
         plan.should contain("COVERING INDEX idx_flows_list")
       end
+    end
+  end
+
+  # `body:` in a top-level AND is driven from `flows_fts` (QL::Filter#fts_driver): FTS5 hands
+  # rowids out in the ORDER BY's direction, so a page stops at LIMIT instead of materialising
+  # every match into an `id IN (…)` list first.
+  it "drives a body: page from flows_fts without materialising its matches" do
+    with_store do |store|
+      [{"body:alpha", nil}, {"resp.body:alpha host:api", nil}, {"body:alpha -method:GET", 5000_i64}].each do |(q, before)|
+        plan = search_plan(store, q, before)
+        plan.should start_with("SCAN flows_fts VIRTUAL TABLE INDEX"), "#{q}: #{plan}"
+        plan.should contain("INTEGER PRIMARY KEY (rowid=?)"), "#{q}: #{plan}"
+        plan.should_not contain("LIST SUBQUERY"), "#{q}: #{plan}"
+        plan.should_not contain("TEMP B-TREE"), "#{q}: #{plan}"
+      end
+      search_plan(store, "body:alpha OR host:api").should contain("LIST SUBQUERY") # the IN form stays
     end
   end
 

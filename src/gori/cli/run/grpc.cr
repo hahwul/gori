@@ -240,6 +240,7 @@ module Gori
                      "Drop a cached reflection result. TARGET is the value `gori run grpc schema`\n" \
                      "prints (scheme://host:port). Nothing else is touched — a descriptor-set FILE\n" \
                      "is unloaded by clearing the path in Project settings."
+          yes_flag(p)
           p.on("--project=NAME", "Project to use (#{DEFAULT_PROJECT_HELP})") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file") { |v| db_path = v }
           p.on("--all", "Forget every cached reflection target") { all = true }

@@ -163,10 +163,67 @@ module Gori
 
       def self.dispatch(args : Array(String)) : Nil
         route_logs_to_stderr
-        self.json_stdout = false
+        self.json_stdout = json_requested?(args)
         repeated_target_flag_error(args).try { |err| abort err }
         args = hoist_target_flags(args)
         dispatch_subcommand(args)
+      end
+
+      # The flags that take the NEXT word as their value (`-q x`, `--query x`), whatever it
+      # looks like: `-q --json` searches for "--json". Pinned to the parsers by
+      # `spec/cli/run/json_refusals_spec.cr`. Left out: `-k`, `--count`, `--encode`,
+      # `--record-history` and `--regex`, which take a value in one subcommand and none in another.
+      private VALUE_FLAGS = Set.new(%w[
+        -b -d -f -H -l -n -o -p -q -r -s -t -v -w -X
+        --alg --algorithm --assert --auto-reply --bind-from --body --body-file --browser
+        --brute --bucket --burp --ca-dir --case --category --cluster --code --color --column
+        --concurrency --containment --context --cookie --copy-header --curl --cvss --data
+        --db --delay --description --detail --detail-file --device-port --direction --export
+        --extensions --extract --extractor --fail-on --fault --fc --fg --fh --field --fields
+        --file --filter --find-context --find-from --find-max --fl --flow --for --form-key
+        --fr --from --from-db --from-flow --fs --ft --fw --grpc-field --hang --har --hash
+        --head --header --hex --hook --host --id --identities --idle-ms --input --insomnia
+        --interval --ip --issue --json-field --json-pointer --jsonpath --keep --key --kind
+        --level --limit --listen --location --locations --macro --macro-every --macro-expect
+        --macro-on-failure --mark --match --max --max-body --max-bytes --max-depth
+        --max-endpoints --max-flows --max-requests --max-samples --mc --message
+        --message-frame --method --mg --mh --ml --mode --mr --ms --mt --mw --name --note
+        --note-position --notes --notes-file --null --numbers --oas --offset --op --opcode
+        --order --origin --output --owner --pane --part --path --pattern --payload
+        --payload-from --payload-from-locations --payload-from-max-flows
+        --payload-from-max-values --payloads --port --position --postman --prefix --preset
+        --project --provider --proxy --query --race --race-warmup --range --rate --raw
+        --raw-file --redact --ref --ref-id --refresh --refresh-before --regex-replace
+        --region --remote-debugging-port --remove --repeater --request --request-file
+        --request-raw --respond --response-file --retries --rm-header --role --rule --salt
+        --samples --scope --secret --secrets --selector --serial --server --session --set
+        --set-header --severity --shell --side --slot --sni --sort --sse-events --sse-time
+        --status --stop-after-matches --stop-on --strip-prefix --style --suffix --tag --tags
+        --target --text --throttle --timeout --timestamp --title --tls-preset --to --to-db
+        --token --token-cookie --token-header --tokens --type --unpack --url --urls --value
+        --verdict --view --warmup --when --wordlist --ws-match --wsdl
+      ])
+
+      # Whether argv asks for JSON, read before any parser runs: `--limit 0 --json` refuses
+      # inside `--limit`'s handler, before `format_flag` has seen `--json`. `format_flag` still
+      # settles it once the flag is parsed. Never past `--`, which is another program's argv,
+      # and never a word another flag takes as its value (`--payloads --json`).
+      def self.json_requested?(args : Array(String)) : Bool
+        words = args.take_while { |a| a != "--" }
+        i = 0
+        while a = words[i]?
+          f = a == "--format" ? words[i + 1]?.to_s : a.starts_with?("--format=") ? a.lchop("--format=") : nil
+          return true if a == "--json" || f.try(&.downcase.in?("json", "jsonl"))
+          i += a == "--format" || VALUE_FLAGS.includes?(a) ? 2 : 1
+        end
+        false
+      end
+
+      # A usage refusal: the line on STDERR, and under `--json` the failed-call object on stdout
+      # (`INVALID_ARGUMENT`, or `QUERY_SYNTAX` for a query, as MCP codes them).
+      def self.usage_abort(message : String, code : String = "INVALID_ARGUMENT", store : Store? = nil) : NoReturn
+        puts failure_json(message.sub(/\Agori run[^:]*: /, ""), "invalid_argument", code) if json_stdout?
+        abort_closing(store, message)
       end
 
       # `--project`/`--db` anywhere among the leading words — before the subcommand
@@ -1040,7 +1097,9 @@ module Gori
       # (`failure_json`), coded as MCP codes it (`NOT_FOUND`), so a script reading stdout gets an
       # object instead of nothing. The human line stays on STDERR and the exit stays 1; text
       # mode prints exactly what it always did.
-      def self.not_found_abort(prefix : String, reason : String, format : Symbol, store : Store? = nil) : NoReturn
+      # A caller with no `format` in reach leaves it to `json_stdout?`, which `format_flag` keeps.
+      def self.not_found_abort(prefix : String, reason : String, format : Symbol = (json_stdout? ? :json : :text),
+                               store : Store? = nil) : NoReturn
         puts failure_json(reason, "not_found", "NOT_FOUND") if format.in?(:json, :jsonl)
         abort_closing(store, "#{prefix}: #{reason}")
       end
@@ -1919,7 +1978,7 @@ module Gori
       # spelling the escape hatch this flag does.
       def self.refuse_unknown_query_fields(cmd : String, q : String?, lenient : Bool) : Nil
         return if lenient
-        (msg = unknown_query_field_error(cmd, q)) && abort(msg)
+        (msg = unknown_query_field_error(cmd, q)) && usage_abort(msg, "QUERY_SYNTAX")
       end
 
       # The sentence `refuse_unknown_query_fields` aborts with, or nil to proceed — split out for
@@ -1976,9 +2035,14 @@ module Gori
         notes
       end
 
-      def self.warn_query_terms(cmd : String, q : String) : Nil
-        QL.invalid_regex_terms(q).each do |t|
-          STDERR.puts "gori run #{cmd}: warning: invalid regex in #{t.inspect} — that term matches nothing"
+      #
+      # An invalid `~` regex is refused, not warned about: QL's DOC calls it a HARD ERROR and MCP
+      # answers it `QUERY_SYNTAX`, because the never-match clause it compiles to makes an empty
+      # listing that reads as "nothing matched". `strict` (`--strict`, MCP's `strict:true`)
+      # refuses an ignored term the same way. `store` is closed first when the caller has one open.
+      def self.warn_query_terms(cmd : String, q : String, strict : Bool = false, store : Store? = nil) : Nil
+        if reason = query_terms_error(q, strict)
+          usage_abort("gori run #{cmd}: #{reason}", "QUERY_SYNTAX", store)
         end
         # `SCOPE_SHAPE_ONLY`, not the project's real lens: this runs BEFORE the store is opened
         # at every caller (deliberately — `authorize` says out loud that hearing about a bad
@@ -1994,6 +2058,19 @@ module Gori
         broader = analysis.applied.empty? ? "" : ", so the result is BROADER than the query asks for"
         STDERR.puts "gori run #{cmd}: warning: ignored #{ignored.map(&.inspect).join(", ")} " \
                     "— unrecognized or invalid#{broader}"
+      end
+
+      # `warn_query_terms`' refusal, or nil to run — split out because `abort` is not spec-able.
+      def self.query_terms_error(q : String, strict : Bool = false) : String?
+        unless (bad = QL.invalid_regex_terms(q)).empty?
+          return "invalid regex in #{bad.map(&.inspect).join(", ")} — it would match nothing, " \
+                 "so an empty result would read as \"no matches\" (fix the pattern or drop the term)"
+        end
+        return nil unless strict
+        ignored = QL.analyze(q, scope: QL::SCOPE_SHAPE_ONLY).ignored
+        return nil if ignored.empty?
+        "--strict refuses #{ignored.map(&.inspect).join(", ")} — unrecognized or invalid, " \
+        "so QL would drop it (omit --strict to run leniently)"
       end
 
       # QL negation terms ("-field:value" / "-field~rx") begin with '-', so OptionParser
@@ -2091,11 +2168,37 @@ module Gori
       # that IS a reserved verb is still the flag-before-verb discard: `history --project=X
       # delete 42` listed instead of deleting, `probe --project=X dismiss 5` scanned with
       # the free-text `dismiss 5`. Same sentence as `list_leftover_error`.
+      #
+      # A bare first word one typo from a verb (`probe isues`, `history shwo 13`) is refused too,
+      # as `issues shwo` is: run as free text it answered with exit 0 and the wrong rows. A typo
+      # here is one letter dropped, doubled or swapped with its neighbour (`verb_typo?`), never a
+      # letter replaced: that is how a real search word sits next to a verb (`shop`/`show`,
+      # `clean`/`clear`). Nor a letter added or dropped at either end: that is a plural, a
+      # tense or a stem (`rule`/`rules`, `shown`/`show`, `param`/`params`, `deleted`), so a
+      # real typo is an interior edit (`isues`, `parms`). Only verbs of four letters or more,
+      # so `tab` is not read as `tag`.
       def self.reserved_query_verb_error(leftover : Array(String), sub : String,
                                          reserved : Array(String), verbs : String) : String?
         first = leftover.first?
-        return nil unless first && reserved.includes?(first)
-        list_leftover_error(leftover, sub, verbs)
+        return nil unless first
+        return list_leftover_error(leftover, sub, verbs) if reserved.includes?(first)
+        return nil unless first.matches?(/\A[a-z][a-z-]*\z/)
+        return nil unless near = reserved.find { |v| v.size >= 4 && verb_typo?(first, v) }
+        "gori run #{sub}: unknown subcommand '#{first}' — did you mean '#{near}'? " \
+        "To search for it, pass -q '#{first}'. Verbs: #{verbs}"
+      end
+
+      # `word` is `verb` with one interior letter dropped or added, or two neighbours swapped.
+      private def self.verb_typo?(word : String, verb : String) : Bool
+        short, long = word.size < verb.size ? {word, verb} : {verb, word}
+        if long.size == short.size + 1
+          return false if long.starts_with?(short) || long.ends_with?(short)
+          (0...long.size).any? { |i| long.delete_at(i) == short }
+        elsif word.size == verb.size
+          (0...word.size - 1).any? { |i| word[i] == verb[i + 1] && word[i + 1] == verb[i] && word.delete_at(i, 2) == verb.delete_at(i, 2) }
+        else
+          false
+        end
       end
 
       # One `what` positional naming an id (`rewriter rm <id>`, `intercept get <item-id>`):
@@ -2152,20 +2255,20 @@ module Gori
 
       private def self.parse_count(v : String, flag : String? = nil) : Int32
         n = v.to_i?
-        abort "gori run: invalid #{flag || "count"} '#{v}' (expected a positive integer)" unless n && n > 0
+        usage_abort "gori run: invalid #{flag || "count"} '#{v}' (expected a positive integer)" unless n && n > 0
         n
       end
 
       # A single-valued flag given twice: the parser kept the last one in silence, so
       # `history delete -q A -q B` deleted B's matches. Refused, like a repeated `--project`.
       private def self.once(prev : String?, v : String, flag : String) : String
-        abort "gori run: #{flag} is given twice — pass it once" if prev
+        usage_abort "gori run: #{flag} is given twice — pass it once" if prev
         v
       end
 
       # Two flags for one setting that disagree (`--http1 --http2`): refused, not last-wins.
       private def self.agree(prev : Bool?, v : Bool, flags : String) : Bool
-        abort "gori run: #{flags} disagree — pass one" if !prev.nil? && prev != v
+        usage_abort "gori run: #{flags} disagree — pass one" if !prev.nil? && prev != v
         v
       end
 
@@ -2212,6 +2315,12 @@ module Gori
         pick = ->(f : Symbol) { self.json_stdout = f.in?(:json, :jsonl); set.call(f) }
         p.on("--format=FMT", help) { |v| pick.call(parse_format(v, allowed, refused)) }
         p.on("--json", "Same as --format=json") { pick.call(:json) } if allowed.includes?(:json)
+      end
+
+      # `-y`/`--yes` on a delete that asks for no confirmation: accepted and ignored, so a script
+      # can pass it to every delete (a dozen of them require it). It never adds a requirement.
+      private def self.yes_flag(p : OptionParser) : Nil
+        p.on("-y", "--yes", "Accepted and ignored (this delete asks no confirmation)") { }
       end
 
       # `--project=NAME` / `--db=PATH`, the two ways a command names its project. A class and
@@ -2292,11 +2401,11 @@ module Gori
               when "sarif"                        then :sarif
               when "names"                        then :names
               when "urls"                         then :urls
-              else                                     abort "gori run: unknown --format '#{v}'"
+              else                                     usage_abort "gori run: unknown --format '#{v}'"
               end
         unless allowed.includes?(sym)
           note = refused.try { |(f, n)| " — #{n}" if f == sym }
-          abort "gori run: --format #{v} not valid here (use #{allowed.join("|")})#{note}"
+          usage_abort "gori run: --format #{v} not valid here (use #{allowed.join("|")})#{note}"
         end
         sym
       end

@@ -14,7 +14,7 @@ module Gori
       # mainstream encoding for realtime APIs, and a token rides in such a frame as an ordinary
       # ASCII string field — so ignoring them was a straight false negative on the very transport
       # this rule exists for. No deframing is needed and none is done: every shape in
-      # `Secrets::PATTERNS` is a literal ASCII vendor prefix plus a fixed-charset tail, which
+      # `Secrets.patterns` is a literal ASCII vendor prefix plus a fixed-charset tail, which
       # survives the projection below intact.
       class WsPayloads < Rule
         def info : RuleInfo
@@ -37,7 +37,7 @@ module Gori
             next if msg.control? || msg.notice? || msg.injected?
             text = payload_text(msg.payload, msg.text?)
             next if text.nil? || text.empty?
-            Secrets::PATTERNS.each do |(pat, label)|
+            Secrets.patterns.each do |(pat, label)|
               next if seen.includes?(label)
               next unless pat.matches?(text)
               seen << label
@@ -46,8 +46,8 @@ module Gori
                 label, ctx.fid)
             end
             # Reported apart from the High shapes above: a socket carrying the session token it
-            # was authenticated with is the normal design, not a leak (see Secrets::JWT).
-            if !jwt_seen && Secrets::JWT[0].matches?(text)
+            # was authenticated with is the normal design, not a leak (see Secrets.jwt).
+            if !jwt_seen && Secrets.jwt[0].matches?(text)
               jwt_seen = true
               acc << Detection.new("jwt_in_ws", Category::INFOLEAK, ctx.host, ctx.url,
                 "JSON Web Token in a WebSocket message", Store::Severity::Info, nil, ctx.fid)

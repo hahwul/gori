@@ -919,6 +919,25 @@ describe Gori::Proxy::Upstream do
     end
   end
 
+  # A verify-off context skips loading OpenSSL's default CA bundle (a third of a one-shot
+  # `gori run send -k` process), so it is built from `Client.insecure` with the options
+  # `Client.new` sets. What the origin sees must not move: the same hello either way.
+  describe ".context_for_policy without verification" do
+    it "offers the ClientHello a verifying context offers" do
+      fp = Gori::Proxy::Tls::Fingerprint
+      rules = [Gori::Settings::DEFAULT_OUTBOUND_TLS] + %w[chrome firefox].map do |preset|
+        Gori::Settings::OutboundTlsRule.new("a.test", "", "", "", "", "", false, preset)
+      end
+      rules.each do |rule|
+        [nil, "h2"].each do |alpn|
+          off = fp.of_context(Gori::Proxy::Upstream.context_for_policy(rule, verify: false, alpn: alpn)).not_nil!
+          on = fp.of_context(Gori::Proxy::Upstream.context_for_policy(rule, verify: true, alpn: alpn)).not_nil!
+          {off.ja3_text, off.ja4_r}.should eq({on.ja3_text, on.ja4_r})
+        end
+      end
+    end
+  end
+
   # System CA trust resolution (#323): a statically-linked binary whose compiled-in
   # OPENSSLDIR resolves to nothing leaves the verify store EMPTY, so all upstream HTTPS
   # verification fails. We probe the standard system CA locations and load them explicitly.

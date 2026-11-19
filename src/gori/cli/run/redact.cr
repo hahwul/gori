@@ -466,6 +466,7 @@ module Gori
           p.banner = "Usage: gori run redact rm <name> [options]\n\n" \
                      "Deletes a profile from this project, or from settings.json with --global.\n" \
                      "A built-in profile cannot be deleted; define one of the same name to replace it."
+          yes_flag(p)
           project_options(p, proj, "write")
           p.on("--global", "Write settings.json instead of this project") { global = true }
           format_flag(p, [:text, :json], delete_format_help("name")) { |f| format = f }

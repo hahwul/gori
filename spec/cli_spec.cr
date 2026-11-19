@@ -621,3 +621,14 @@ describe "gori settings --edit validation" do
     end
   end
 end
+
+# `gori run fuzz > rows.jsonl` on a full disk died with an unhandled IO::Error backtrace: the
+# top-level rescue answered EPIPE only. A write the filesystem refused is a one-line error now.
+describe "Gori::CLI.disk_refused?" do
+  it "names a full disk and nothing else" do
+    Gori::CLI.disk_refused?(IO::Error.from_os_error("write", Errno::ENOSPC)).should be_true
+    Gori::CLI.disk_refused?(IO::Error.from_os_error("write", Errno::EFBIG)).should be_true
+    Gori::CLI.disk_refused?(IO::Error.from_os_error("write", Errno::EPIPE)).should be_false
+    Gori::CLI.disk_refused?(IO::Error.new("closed stream")).should be_false
+  end
+end

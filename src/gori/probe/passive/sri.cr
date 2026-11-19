@@ -28,12 +28,12 @@ module Gori
 
         # Both tag types in ONE pattern: scanning for them separately walked the same (up to
         # 256 KiB) document twice.
-        TAG              = Utf8.tolerant(/<(?:script|link)(?=[\t\n\f\r \/>])(?:[^"'<>]++|"[^"]*"|'[^']*')*>/i)
-        STYLESHEET_TOKEN = /(?:\A|[\t\n\f\r ])stylesheet(?:[\t\n\f\r ]|\z)/i
+        class_getter tag : Regex { Utf8.tolerant(/<(?:script|link)(?=[\t\n\f\r \/>])(?:[^"'<>]++|"[^"]*"|'[^']*')*>/i) }
+        class_getter stylesheet_token : Regex { /(?:\A|[\t\n\f\r ])stylesheet(?:[\t\n\f\r ]|\z)/i }
         # Empty or unsupported-only metadata is ignored by SRI. Do not require the digest
         # to have a correct length: recognized but mismatching hashes BLOCK the resource.
         # https://www.w3.org/TR/sri/#parse-metadata
-        SUPPORTED_INTEGRITY = /(?:\A|[\t\n\f\r ])sha(?:256|384|512)(?:[-?\t\n\f\r ]|\z)/
+        class_getter supported_integrity : Regex { /(?:\A|[\t\n\f\r ])sha(?:256|384|512)(?:[-?\t\n\f\r ]|\z)/ }
 
         MAX_HOSTS = 5 # distinct third-party hosts reported per flow
 
@@ -50,7 +50,7 @@ module Gori
         # UNTERMINATED comment matches nothing and its tags stay reported — the previous
         # behaviour, and the safe direction (a lead, not a silence) when the 256 KiB body prefix
         # cut the closing `-->` off.
-        COMMENT = Utf8.tolerant(/<!--[\s\S]*?-->/)
+        class_getter comment : Regex { Utf8.tolerant(/<!--[\s\S]*?-->/) }
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.response
@@ -59,7 +59,7 @@ module Gori
           return if text.nil? || text.empty?
           comments = comment_spans(text)
           hosts = [] of String
-          text.scan(TAG) do |m|
+          text.scan(Sri.tag) do |m|
             break if hosts.size >= MAX_HOSTS
             next if in_comment?(comments, m.byte_begin(0))
             next unless h = external_ref(m[0], ctx)
@@ -85,7 +85,7 @@ module Gori
         # hand-roll a prefilter in front of something that already prefilters itself.
         private def comment_spans(text : String) : Array({Int32, Int32})
           spans = [] of {Int32, Int32}
-          text.scan(COMMENT) { |m| spans << {m.byte_begin(0), m.byte_end(0)} }
+          text.scan(Sri.comment) { |m| spans << {m.byte_begin(0), m.byte_end(0)} }
           spans
         end
 
@@ -113,7 +113,7 @@ module Gori
           link = tag.size >= 5 && tag[0, 5].compare("<link", case_insensitive: true) == 0
           url, rel, guarded = attributes(tag, link)
           return nil if guarded
-          return nil if link && !STYLESHEET_TOKEN.matches?(rel || "")
+          return nil if link && !Sri.stylesheet_token.matches?(rel || "")
           return nil unless url
           external_host(url, ctx)
         end
@@ -128,7 +128,7 @@ module Gori
               rel ||= tag.byte_slice(start, size)
             elsif name_is?(name, "integrity")
               integrity ||= tag.byte_slice(start, size)
-              return {nil, nil, true} if SUPPORTED_INTEGRITY.matches?(integrity)
+              return {nil, nil, true} if Sri.supported_integrity.matches?(integrity)
             end
           end
           {url_span.try { |span| tag.byte_slice(span[0], span[1]) }, rel, false}

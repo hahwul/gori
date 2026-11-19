@@ -1442,6 +1442,18 @@ describe "Intercept review follow-ups" do
     end
   end
 
+  # No window holds a lock FILE that could not be created (W#9) — there is no other window.
+  it "does not blame another window when the capture lock could not be created" do
+    tmp_interceptor do |ic|
+      view = InterceptView.new
+      view.reload(ic)
+      backend = MemoryBackend.new(110, 10)
+      view.render(Screen.new(backend), Rect.new(0, 0, 110, 10), holding: false, lock_unavailable: true)
+      backend.row(0).should contain("could not create this project's capture lock")
+      backend.row(0).should_not contain("another window")
+    end
+  end
+
   # Tab into the detail pane opens the editor exactly as ↵/e do, so it owes the same sentence
   # — the caveat exists to be read BEFORE the operator types.
   it "exposes the caveat however the editor is entered" do
@@ -1510,6 +1522,12 @@ describe "Intercept queue hint on a narrow row" do
     fitted.should contain("f fwd")
     fitted.should contain("d drop")
     fitted.should contain("space cmds")
+  end
+
+  it "calls `/` the catch condition, as the idle hint does — it is not a queue search" do
+    full = InterceptController.queue_keys("f", "d", "t", "⇧F", "y", "/", "c")
+    full.should contain("/ condition")
+    full.should_not contain("/ filter")
   end
 end
 

@@ -25,6 +25,7 @@ module Gori
         verdicts : Array(Gori::Diff::Verdict)? = nil
         unchanged = false
         lenient = false
+        strict = false
         format = :text
 
         parser = option_parser("gori run diff") do |p|
@@ -42,6 +43,7 @@ module Gori
           p.on("-qQL", "--query=QL", "Narrow BOTH sides with a QL query (host: method: path: status: …)") { |v| query = once(query, v, "-q/--query") }
           p.on("--in-scope", "Only hosts in each project's own configured scope") { in_scope = true }
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text") { lenient = true }
+          p.on("--strict", "Refuse a query with a term QL would drop (an invalid value) instead of warning — MCP's strict:true") { strict = true }
           p.on("-nN", "--limit=N", "Max endpoint groups to read per side (default #{Store::ENDPOINT_OBSERVATION_MAX})") { |v| limit = parse_count(v, "--limit") }
           p.on("--verdict=LIST", "Only list these verdicts: #{DIFF_VERDICTS.map(&.label).join(",")}") { |v| verdicts = parse_diff_verdicts(v) }
           p.on("--unchanged", "Also list the unchanged endpoints (they are always COUNTED)") { unchanged = true }
@@ -54,7 +56,7 @@ module Gori
 
         abort "gori run diff: need a baseline side — pass --from NAME (or --from-db PATH)\n#{parser}" if from_name.nil? && from_db.nil?
         Run.refuse_unknown_query_fields("diff", query, lenient)
-        filter = diff_filter(query)
+        filter = diff_filter(query, strict)
         # Into a fresh local first: `verdicts` is assigned inside an OptionParser block, so
         # the compiler keeps it a union and `||` cannot narrow it.
         chosen = verdicts
@@ -123,14 +125,14 @@ module Gori
       # Same QL handling as `gori run sitemap`: shape-only (both stores are still closed),
       # and a non-blank query that compiles to nothing is refused rather than silently
       # broadening the diff to every endpoint.
-      private def self.diff_filter(query : String?) : QL::Filter
+      private def self.diff_filter(query : String?, strict : Bool = false) : QL::Filter
         return QL::EMPTY unless q = query
         return QL::EMPTY if q.strip.empty?
         filter = QL.parse(q, scope: QL::SCOPE_SHAPE_ONLY)
-        Run.warn_query_terms("diff", q)
+        Run.warn_query_terms("diff", q, strict)
         if filter == QL::EMPTY
-          abort "gori run diff: query #{q.inspect} did not match any field " \
-                "(check syntax, e.g. host:example.com method:POST path:/api status:>=500)"
+          Run.usage_abort("gori run diff: query #{q.inspect} did not match any field " \
+                          "(check syntax, e.g. host:example.com method:POST path:/api status:>=500)", "QUERY_SYNTAX")
         end
         filter
       end

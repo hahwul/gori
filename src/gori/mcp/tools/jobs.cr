@@ -236,6 +236,9 @@ module Gori
         @discover_jobs.each_value { |djob| flush_discover_persist(djob) if djob.live? }
         @jobs.each_value do |fjob|
           next unless fjob.live?
+          # Its queued History rows too: the drain's own flush would come after the store
+          # closed. Safe beside that flush, which takes the batch's rows before it commits.
+          fjob.history.try { |h| flush_fuzz_history(fjob, h) }
           finish_fuzz_persistence(fjob, :stopped)
           # A finish the job's own fiber already has in flight returns at once above; `close`
           # waits it out, so the store is not closed under an uncommitted terminal row.

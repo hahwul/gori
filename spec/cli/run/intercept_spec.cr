@@ -454,6 +454,27 @@ describe "Gori::CLI::Run.intercept_send_refusal" do
   end
 end
 
+# A refused ack had its own `{status, ok, detail}` shape under `--json`, with no error code,
+# and its text line went to STDOUT. It keeps those fields and adds the failed-call object's.
+describe "Gori::CLI::Run.intercept_ack_json" do
+  it "codes a refusal as MCP does, keeping status/ok/detail" do
+    j = JSON.parse(Gori::CLI::Run.intercept_ack_json("no_such_item", "item 9999 is no longer held"))
+    j["status"].should eq("no_such_item")
+    j["ok"].as_bool.should be_false
+    j["detail"].should eq("item 9999 is no longer held")
+    j["error"].should eq("item 9999 is no longer held")
+    j["error_code"].should eq("NOT_FOUND")
+    j["retryable"].as_bool.should be_false
+    JSON.parse(Gori::CLI::Run.intercept_ack_json("stale", nil))["error_code"].should eq("SESSION_CHANGED")
+  end
+
+  it "adds nothing to a success" do
+    j = JSON.parse(Gori::CLI::Run.intercept_ack_json("forwarded", nil))
+    j["ok"].as_bool.should be_true
+    j.as_h.has_key?("error_code").should be_false
+  end
+end
+
 describe "Gori::CLI::Run.intercept_direction_note" do
   it "reads the half a command does not set off the bridge" do
     with_store do |store|

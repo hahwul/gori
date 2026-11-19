@@ -149,8 +149,8 @@ module Gori
         abort "gori run retest add: --assert: #{parsed}" if parsed.is_a?(String)
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
-          abort "gori run retest add: no issue with id #{iid}" unless store.get_issue(iid)
-          abort "gori run retest add: no repeater session ##{rid} (ids from `gori run repeater list`)" unless store.get_repeater(rid)
+          not_found_abort("gori run retest add", "no issue with id #{iid}", store: store) unless store.get_issue(iid)
+          not_found_abort("gori run retest add", "no repeater session ##{rid} (ids from `gori run repeater list`)", store: store) unless store.get_repeater(rid)
           id, status = store.add_retest_step(iid, role, Store::LinkRefKind::Repeater, rid, parsed.to_s)
           case status
           in .issue_gone? then abort "gori run retest add: issue ##{iid} was deleted before the step was written"
@@ -195,7 +195,7 @@ module Gori
         end
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
-          abort "gori run retest update: no retest step with id #{id}" unless store.get_retest_step(id)
+          not_found_abort("gori run retest update", "no retest step with id #{id}", store: store) unless store.get_retest_step(id)
           case store.update_retest_step(id, role: role, assertion: stored_assertion)
           in .issue_gone? then abort "gori run retest update: the issue was deleted before the edit landed"
           in .step_gone?  then abort "gori run retest update: step ##{id} was deleted before the edit landed"
@@ -217,6 +217,7 @@ module Gori
                      "[id] column of `gori run retest steps`), not its position — a position moves.\n" \
                      "The Repeater session and any entity link to it are untouched: a retest step is\n" \
                      "a test plan, not a link."
+          yes_flag(p)
           project_options(p, proj, "update")
           format_flag(p, [:text, :json], delete_format_help) { |f| format = f }
         end
@@ -261,7 +262,7 @@ module Gori
         pos = pos_opt
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
-          abort "gori run retest move: no retest step with id #{id}" unless store.get_retest_step(id)
+          not_found_abort("gori run retest move", "no retest step with id #{id}", store: store) unless store.get_retest_step(id)
           case store.move_retest_step(id, pos)
           in .issue_gone?, .step_gone? then abort "gori run retest move: step ##{id} was deleted before the move landed"
           in .busy?                    then busy_abort("gori run retest move", "NOT moved (project busy or unwritable)")
@@ -294,7 +295,7 @@ module Gori
         iid = require_issue_id(issue_id, "gori run retest clear")
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
-          abort "gori run retest clear: no issue with id #{iid}" unless store.get_issue(iid)
+          not_found_abort("gori run retest clear", "no issue with id #{iid}", store: store) unless store.get_issue(iid)
           n = store.count_retest_steps(iid)
           abort "gori run retest clear: issue ##{iid} has no retest steps" if n == 0
           unless yes
@@ -356,7 +357,7 @@ module Gori
         # `long_running`: the live backend sends through this handle and the run summary is
         # written at the end of a retest several seconds long.
         passed = with_store(project, long_running: true) do |store|
-          abort "gori run retest run: no issue with id #{iid}" unless store.get_issue(iid)
+          not_found_abort("gori run retest run", "no issue with id #{iid}", store: store) unless store.get_issue(iid)
           planned = Retest.plan(store, iid)
           if planned.empty?
             abort "gori run retest run: issue ##{iid} has no retest steps — add one with " \
@@ -474,6 +475,7 @@ module Gori
           p.banner = "Usage: gori run retest forget RUN\n\n" \
                      "Delete one run summary and its result rows. The retest steps stay, and the\n" \
                      "History flows each send recorded stay — this drops the report, not the evidence."
+          yes_flag(p)
           project_options(p, proj, "update")
           format_flag(p, [:text, :json], delete_format_help) { |f| format = f }
         end

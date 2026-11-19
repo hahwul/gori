@@ -436,6 +436,40 @@ describe "RepeaterController on an event stream" do
     end
   end
 
+  # A Stop before any head arrived closes the socket, which the engine reports as a read
+  # failure: it drew a red "repeater error … Closed stream" for the operator's own key (W#7).
+  it "reports a stop before any response as stopped, not as a transport error" do
+    with_repeater_controller do |ctl, host|
+      silent = TCPServer.new("127.0.0.1", 0) # accepts, never answers
+      held = [] of TCPSocket
+      spawn do
+        while c = silent.accept?
+          held << c
+        end
+      end
+      begin
+        ctl.repeater_from_request("http://127.0.0.1:#{silent.local_address.port}", HTTP_REQ, false, nil)
+        v = ctl.current_view.not_nil!
+        host.active_tab = :repeater
+        ctl.repeater_send
+        sleep 100.milliseconds
+        ctl.repeater_stop
+        deadline = Time.instant + 10.seconds
+        until !v.inflight? || Time.instant > deadline
+          sleep 20.milliseconds
+        end
+        ctl.drain_results.should be_true
+        v.result_stopped?.should be_true
+        host.statuses.last.should start_with("stopped after")
+        host.statuses.last.should_not contain("repeater error")
+        resp_lines(v).first.should contain("stopped before any response")
+      ensure
+        silent.close
+        held.each { |c| c.close rescue nil }
+      end
+    end
+  end
+
   it "does not render the stream while another tab is on screen, and catches up on return" do
     with_repeater_controller do |ctl, host|
       port = start_sse_origin(every: 20.milliseconds)
@@ -546,6 +580,29 @@ describe "RepeaterController#reconcile chip labels (#1807)" do
   end
 end
 
+describe "RepeaterController#reconcile request side" do
+  # An unchanged row is answered from a per-tab memo on every tick; a peer's edit, even one
+  # that keeps the request's length, still lands on the next one.
+  it "skips an unchanged row and still applies a peer's request edit" do
+    seed = ->(store : Gori::Store) do
+      store.insert_repeater("http://h.test/", "GET /aaa HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, false, true, nil, 0)
+      nil
+    end
+    with_repeater_controller(seed) do |ctl, host|
+      store = host.session.store
+      id = store.repeaters_meta.first.id
+      3.times { ctl.reconcile }
+      ctl.current_view.not_nil!.request_text.should contain("/aaa")
+      store.update_repeater(id, "http://h.test/", "GET /bbb HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, false, true)
+      ctl.reconcile
+      ctl.current_view.not_nil!.request_text.should contain("/bbb")
+      store.update_repeater(id, "http://h2.test/", "GET /bbb HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, false, true)
+      ctl.reconcile
+      ctl.current_view.not_nil!.target.should eq("http://h2.test/")
+    end
+  end
+end
+
 describe "RepeaterController#restore_send (#1808)" do
   it "saves the restored request and its response on the row" do
     seed = ->(store : Gori::Store) do
@@ -596,5 +653,40 @@ describe "RepeaterController auto-mark" do
       ctl.repeater_auto_mark
       host.statuses.last.should_not contain("encodes")
     end
+  end
+end
+
+# The send toast names who cut a response short (W#6): gori's own limits are not the origin's.
+describe "RepeaterController.cut_note" do
+  head = "HTTP/1.1 200 OK\r\nContent-Length: 99999999\r\n\r\n".to_slice
+  result = ->(body : Bytes, bounded : String?, timed_out : Bool) do
+    Gori::Repeater::Result.new(head, body, nil, 1_i64, nil, true, delivered: true, timed_out: timed_out, bounded: bounded)
+  end
+
+  it "keeps (stopped) for a stop someone chose" do
+    RepeaterController.cut_note(result.call(Bytes.new(3), nil, false), true).should eq(" (stopped)")
+    RepeaterController.cut_note(result.call(Bytes.new(3), "cancelled", false), false).should eq(" (stopped)")
+  end
+
+  it "names gori's own read budget and capture cap" do
+    RepeaterController.cut_note(result.call(Bytes.new(3), "budget", false), false).should contain("gori's read budget")
+    cap = Bytes.new(Gori::Proxy::Codec::Body::CAPTURE_READ_MAX)
+    RepeaterController.cut_note(result.call(cap, nil, false), false).should contain("8 MiB capture cap")
+  end
+
+  it "fits the 80×24 status row with the send line around it" do
+    ["budget", "events", "time"].each do |b|
+      line = "✓ sent → 200 in 9.0s#{RepeaterController.cut_note(result.call(Bytes.new(3), b, false), false)}"
+      Screen.display_width(line).should be <= 59
+    end
+    {false, true}.each do |t|
+      line = "✓ sent → 200 in 9.0s#{RepeaterController.cut_note(result.call(Bytes.new(3), nil, t), false)}"
+      Screen.display_width(line).should be <= 59
+    end
+  end
+
+  it "is empty for a whole response" do
+    whole = Gori::Repeater::Result.new(head, Bytes.new(3), nil, 1_i64, nil, false, delivered: true)
+    RepeaterController.cut_note(whole, false).should eq("")
   end
 end

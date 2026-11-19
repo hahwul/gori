@@ -75,3 +75,16 @@ describe "DecoderController#decoder_from_text" do
     end
   end
 end
+
+# CHAIN has no READ mode, so a re-entry that kept it there turned the next letter into a chain
+# edit (L#3). A resume lands on INPUT, in READ.
+describe "DecoderController#focus_resume" do
+  it "leaves CHAIN for INPUT, where a letter is a key and not text" do
+    with_decoder_controller do |ctl|
+      ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Down)) # INPUT → CHAIN
+      ctl.body_badge.should eq(:editor)
+      ctl.focus_resume
+      ctl.body_badge.should eq(:body)
+    end
+  end
+end

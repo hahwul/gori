@@ -175,8 +175,19 @@ module Gori::Tui
       # where Delete would destroy a flow nobody marked. Kept as defence in depth now that ids
       # are never reissued. See `prune_reused_marks`.
       @mark_stamps = {} of Int64 => Int64
-      @marks_seen_max = nil.as(Int64?)            # `prune_reused_marks`' last MAX(id)
-      @filter_dirty = false                       # a filtered view needs a coalesced reload after draining
+      @marks_seen_max = nil.as(Int64?) # `prune_reused_marks`' last MAX(id)
+      @filter_dirty = false            # a filtered view needs a coalesced reload after draining
+      # What a filtered refresh can extend instead of re-running the question (`refresh_filtered`):
+      # the request the rows on screen answer, with the newest flow id that answer had certainly
+      # seen and the identity it was asked under. `@inc_prepared` is the one in flight, promoted
+      # by `apply_search`. `@inc_updated` holds the flows whose answers moved since; `@inc_full`
+      # says a change arrived that no flow event describes (a peer, a delete), which only the
+      # whole question answers.
+      @inc_prepared = nil.as({SearchRequest, Int64, SearchIdentity}?)
+      @inc_base = nil.as({SearchRequest, Int64, SearchIdentity}?)
+      @inc_capped = false
+      @inc_updated = Set(Int64).new
+      @inc_full = false
       @last_filter_flush = nil.as(Time::Instant?) # debounce clock for flush_filter (nil ⇒ first flush is immediate)
       @query = ""
       @qcx = 0
@@ -847,17 +858,22 @@ module Gori::Tui
     # Load flows applying the Scope lens AND the QL query. store.search returns
     # newest-first (ORDER BY id DESC); reverse when the layout pref is oldest-first.
     def reload(store : Store) : Nil
+      reload_baselines(store)
+      if handler = @reload_handler
+        handler.call(store)
+      elsif request = prepare_search(store)
+        apply_search(fetch_search(store, request))
+      end
+    end
+
+    # What every refresh of the list re-reads first, the whole question or an extension of it.
+    private def reload_baselines(store : Store) : Nil
       # The first baseline for `prune_reused_marks`' MAX(id) comparison; later ones are its own.
       @marks_seen_max ||= store.max_flow_id || 0_i64
       # Following means everything in the store so far is seen, whether or not the query shows
       # it: a filter that matched nothing must not leave old traffic to count as `+N` once it is
       # cleared, and an empty list needs a baseline below the first flow to arrive.
       @seen_id = store.max_flow_id || 0_i64 if @follow || @seen_id.nil?
-      if handler = @reload_handler
-        handler.call(store)
-      elsif request = prepare_search(store)
-        apply_search(fetch_search(store, request))
-      end
     end
 
     record SearchRequest, filter : QL::Filter, view : SavedViews::View?, note : String?
@@ -876,6 +892,9 @@ module Gori::Tui
       @suggest_store = store
       @search_error = nil
       @filter_dirty = false
+      @inc_prepared = nil
+      @inc_updated.clear
+      @inc_full = false
       # The `scope:` lens: this view already holds the Scope it applies for `s`, and a `scope:`
       # TERM is that same predicate asked as a question rather than switched on — `ql_lens` reads
       # the rules regardless of the flag (see there), so `scope:in` means the same thing with the
@@ -917,7 +936,10 @@ module Gori::Tui
       combined = QL.and(QL.and(@scope.try(&.filter) || QL::EMPTY, view_filter || QL::EMPTY),
         query_filter)
       combined = QL.and(combined, QL.hide_static) if @hide_static
-      SearchRequest.new(combined, view, @query_note)
+      request = SearchRequest.new(combined, view, @query_note)
+      # Read BEFORE the search runs, so every flow at or below it is in that search's snapshot.
+      @inc_prepared = {request, store.max_flow_id || 0_i64, search_identity}
+      request
     end
 
     def fetch_search(store : Store, request : SearchRequest,
@@ -939,8 +961,11 @@ module Gori::Tui
       @search_error = result.error
       if result.error
         @query_note = result.error
+        @inc_base = nil
         return
       end
+      @inc_base, @inc_prepared = @inc_prepared, nil
+      @inc_capped = result.rows.size >= PAGE
       prev_id = selected_id
       @rows = result.rows
       @rows_newest_first = Settings.history_newest_first?
@@ -1156,13 +1181,91 @@ module Gori::Tui
         return false
       end
       @last_filter_flush = now
-      reload(store)
+      reload(store) unless refresh_filtered(store)
       true
     end
 
+    # Changes the flow events did not describe — a peer's commit, a delete — so only the whole
+    # question answers them.
     def stale_filter : Nil
       @filter_dirty = true
+      @inc_full = true
       @host_suggest_dirty = true
+    end
+
+    # More moved flows than this in one flush and the whole question is cheaper to re-ask.
+    INC_MAX_UPDATES = 500
+
+    # A filtered list under capture, brought up to date WITHOUT re-running its question.
+    #
+    # The full search re-ran up to 4×/s while capturing, and a no-match `path:` or `header:`
+    # walks the whole table each time (0.3–1 s at 500k flows). The flow events say exactly what
+    # moved: flows newer than the last answer, which one `id > N` probe asks the filter about,
+    # and flows whose response landed (`:updated`), which are asked again by id. The rows that
+    # result are the newest PAGE matches — the full search's answer — and go through
+    # `apply_search`, so selection, scroll, follow and the order setting behave as a reload's.
+    #
+    # Returns false, and the caller re-asks the whole question, whenever the extension could
+    # differ from it: a change no event describes (`@inc_full`), a different question or order,
+    # a `body:` term (the trigram index catches up OFF the capture commit, so a flow can start
+    # matching with no event at all), a capped window that lost rows (the full answer would
+    # backfill from below it), or more new matches than one page.
+    private def refresh_filtered(store : Store) : Bool
+      return false unless base = extendable_base
+      request, through, identity = base
+      reload_baselines(store)
+      newest = store.max_flow_id || 0_i64 # before the reads, like `prepare_search`
+      return false unless found = extension_rows(store, request, through)
+      fresh, moved = found
+      moved_ids = @inc_updated.to_a
+      @inc_updated.clear
+      @filter_dirty = false
+      @inc_prepared = {request, newest, identity}
+      if fresh.empty? && moved_ids.empty?
+        @inc_base, @inc_prepared = @inc_prepared, nil
+        return true
+      end
+      by_id = {} of Int64 => Store::FlowRow
+      @rows.each { |r| by_id[r.id] = r }
+      moved_ids.each { |id| by_id.delete(id) }
+      moved.each { |r| by_id[r.id] = r }
+      fresh.each { |r| by_id[r.id] = r }
+      rows = by_id.values.sort_by! { |r| -r.id }.first(PAGE)
+      apply_search(SearchResult.new(rows, request.note, rows.empty? && store.recent_flows(1).empty?,
+        rows.empty? ? empty_view_note(request.view, store) : nil))
+      true
+    rescue ex
+      ::Log.warn { "history refresh failed: #{ex.message}" }
+      false
+    end
+
+    # The applied answer `refresh_filtered` may extend, or nil when only the whole question will do.
+    private def extendable_base : {SearchRequest, Int64, SearchIdentity}?
+      return nil if @inc_full || !filtering?
+      return nil unless base = @inc_base
+      return nil unless base[2] == search_identity && newest_first? == Settings.history_newest_first?
+      return nil if base[0].filter.uses_fts? || @inc_updated.size > INC_MAX_UPDATES
+      base
+    end
+
+    # The new matches past `through` and the moved flows that still match, or nil when the
+    # extension could differ from the full answer (a page of new matches, a full window losing rows).
+    private def extension_rows(store : Store, request : SearchRequest,
+                               through : Int64) : {Array(Store::FlowRow), Array(Store::FlowRow)}?
+      fresh = store.search(request.filter, PAGE, since_id: through, raise_on_error: true)
+      return nil if fresh.size >= PAGE
+      ids = @inc_updated.to_a
+      return {fresh, [] of Store::FlowRow} if ids.empty?
+      moved = store.search(QL.and(request.filter, ids_filter(ids)), ids.size, raise_on_error: true)
+      if @inc_capped
+        still = moved.map(&.id).to_set
+        return nil if @rows.any? { |r| @inc_updated.includes?(r.id) && !still.includes?(r.id) }
+      end
+      {fresh, moved}
+    end
+
+    private def ids_filter(ids : Array(Int64)) : QL::Filter
+      QL::Filter.new("id IN (#{Array.new(ids.size, "?").join(',')})", ids.map(&.as(DB::Any)))
     end
 
     def on_event(event : Store::FlowEvent, store : Store) : Nil
@@ -1182,6 +1285,15 @@ module Gori::Tui
       end
       if filtering? || @searching
         @filter_dirty = true # coalesce: the Runner reloads once after draining
+        # `refresh_filtered` asks these again. Capped HERE, not at the flush: an off-tab History
+        # never flushes, so past the cap the whole question is the answer and the set stops growing.
+        unless event.kind == :inserted || @inc_full
+          @inc_updated << event.id
+          if @inc_updated.size > INC_MAX_UPDATES
+            @inc_full = true
+            @inc_updated.clear
+          end
+        end
         return
       end
       case event.kind

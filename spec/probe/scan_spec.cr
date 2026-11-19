@@ -4,7 +4,7 @@ require "../support/probe_harness"
 # --- file-local harness (mirrors spec/probe_spec.cr's private with_store/capture_flow) ---
 
 # A key id shaped like a real one and NOT one of AWS's published documentation placeholders,
-# which `Secrets::PATTERNS` screens out (mirrors spec/probe_spec.cr's AWS_KEY_ID).
+# which `Secrets.patterns` screens out (mirrors spec/probe_spec.cr's AWS_KEY_ID).
 private AWS_KEY_ID = "AKIA" + "3ZQF7XKPL2WVNB6D"
 
 # A completed 101 upgrade — the shape `scan_flows` reads WebSocket frames for.

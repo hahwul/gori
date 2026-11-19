@@ -194,7 +194,9 @@ module Gori
                      "every one of them; a send (Repeater/Fuzz/intercept forward) applies the ONE\n" \
                      "named by --slot.\n\n" \
                      "Header VALUES are [REDACTED] — a session cookie is a credential and this list\n" \
-                     "is scrollback. --show-values prints them."
+                     "is scrollback. --show-values prints them.\n\n" \
+                     "Or run with a subcommand: show, add, from-flow, from-request, edit, rm/delete,\n" \
+                     "baseline, refresh (each takes -h)"
           project_options(p, proj, "read")
           p.on("--show-values", "Print set-header values instead of [REDACTED]") { show_values = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
@@ -492,7 +494,7 @@ module Gori
         store, slots = session_slots(proj.name, proj.db)
         begin
           current = slots.find(target)
-          abort "gori run session edit: no session slot named #{target.inspect}" unless current
+          not_found_abort("gori run session edit", "no session slot named #{target.inspect}", store: store) unless current
           renamed = edit.name || current.name
           # `except:` is the row being renamed, so `edit admin --name ADMIN` re-cases a slot's
           # own name without reading as a collision with itself.
@@ -547,6 +549,7 @@ module Gori
           p.banner = "Usage: gori run session rm <name> [options]\n\n" \
                      "Delete a session slot. Any extract rule it claimed goes back to writing the\n" \
                      "GLOBAL binding table, which is where an unclaimed rule has always written."
+          yes_flag(p)
           project_options(p, proj, "write")
           format_flag(p, [:text, :json], delete_format_help("name")) { |f| format = f }
         end
@@ -579,7 +582,7 @@ module Gori
 
         store, slots = session_slots(proj.name, proj.db)
         begin
-          abort "gori run session baseline: no session slot named #{name.inspect}" unless slots.find(name)
+          not_found_abort("gori run session baseline", "no session slot named #{name.inspect}", store: store) unless slots.find(name)
           busy_abort("gori run session baseline", "the project could not be written — the baseline " \
                                                   "did not move") unless slots.set_baseline(name)
           puts "#{name} is the baseline"
@@ -644,7 +647,7 @@ module Gori
 
       private def self.session_refresh_slot(store : Store, name : String) : Gori::SessionSlot
         slot = session_layer(store).slots.try(&.find(name))
-        abort_closing(store, "gori run session refresh: no session slot named #{name.inspect}") unless slot
+        not_found_abort("gori run session refresh", "no session slot named #{name.inspect}", store: store) unless slot
         slot
       end
 

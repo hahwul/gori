@@ -10,6 +10,21 @@ module Gori::Proxy
     abstract def on_request(req : Store::CapturedRequest) : Int64
     # Fill in the response (or error) for an existing flow.
     abstract def on_response(resp : Store::CapturedResponse) : Nil
+
+    # `on_request` for a caller that does not need the id yet: the channel answers it. A sink
+    # that can queue the write (StoreSink) returns before the commit; the default answers at
+    # once, so a recording double behaves exactly as it does under `on_request`.
+    def on_request_deferred(req : Store::CapturedRequest) : Channel(Int64)
+      id = Channel(Int64).new(1)
+      id.send(on_request(req))
+      id
+    end
+
+    # `on_response` without waiting for the write to land; the default is `on_response`.
+    def on_response_deferred(resp : Store::CapturedResponse) : Nil
+      on_response(resp)
+    end
+
     # Record a captured WebSocket message for a flow (post-101). `shape` is the frame
     # header the payload arrived in (V7); the default spares every CALLER from passing it.
     # It does NOT spare an implementor: Crystal matches an abstract def by its full parameter
@@ -63,6 +78,10 @@ module Gori::Proxy
 
   # Default sink: writes straight through to the SQLite store.
   class StoreSink < FlowSink
+    # The largest body or WebSocket payload queued without waiting for its commit. The writer
+    # channel holds 1024 ops, so this bounds what queued capture can pin at ~64 MiB.
+    DEFER_MAX = 64 * 1024
+
     def initialize(@store : Store)
     end
 
@@ -75,10 +94,24 @@ module Gori::Proxy
       @store.update_response(resp)
     end
 
+    def on_request_deferred(req : Store::CapturedRequest) : Channel(Int64)
+      @store.insert_flow_deferred(req)
+    end
+
+    def on_response_deferred(resp : Store::CapturedResponse) : Nil
+      return if resp.flow_id <= 0
+      # ponytail: a size cutoff, not a byte budget. A big body waits for its commit as before, so
+      # queued writes hold at most DEFER_MAX each; a per-connection in-flight budget if this bites.
+      return @store.update_response(resp) if (resp.body.try(&.size) || 0) > DEFER_MAX
+      @store.update_response_deferred(resp)
+    end
+
     def on_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes,
                       shape : Gori::Proxy::WS::Shape = Gori::Proxy::WS::Shape::DEFAULT) : Nil
       return if flow_id <= 0
-      @store.insert_ws_message(flow_id, direction, opcode, payload, shape: shape)
+      # The peer picks the message size (up to 16 MiB), so only small ones ride the queue.
+      return @store.insert_ws_message(flow_id, direction, opcode, payload, shape: shape) if payload.size > DEFER_MAX
+      @store.queue_ws_message(flow_id, direction, opcode, payload, shape: shape)
     end
 
     def on_ws_injected(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes,
@@ -98,7 +131,10 @@ module Gori::Proxy
       @store.append_live(flow_id, off, bytes, head, first, times)
     end
 
+    # After the transcript's queued messages commit, so the event still follows the whole
+    # captured transcript (`on_ws_message` does not wait for them).
     def on_tunnel_complete(flow_id : Int64) : Nil
+      @store.await_writes
       @store.notify_tunnel_complete(flow_id)
     end
 

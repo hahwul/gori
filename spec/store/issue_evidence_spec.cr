@@ -40,6 +40,50 @@ private def prune_store(retention, prune_interval, &)
 end
 
 describe "Store#freeze_evidence (V26)" do
+  # Freezing the same exchange again made identical rows that each spent quota (L#7).
+  it "answers the existing copy for the same source and bytes, and writes a changed source" do
+    with_store do |store|
+      fid = store.insert_flow(captured("/same"))
+      respond(store, fid, "v1")
+      issue = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
+      first, status = store.freeze_evidence(issue, flow_snapshot(store, fid))
+      status.ok?.should be_true
+
+      again, status = store.freeze_evidence(issue, flow_snapshot(store, fid), link: true)
+      status.duplicate?.should be_true
+      again.should eq(first)
+      store.issue_evidence(issue).size.should eq(1)
+      # "link & freeze" still files the live link it asked for.
+      store.list_links(Gori::Store::LinkOwnerKind::Issue, issue).map(&.ref_id).should eq([fid])
+
+      # Another issue gets its own copy, and a source whose bytes changed is new evidence.
+      other = store.insert_issue("u", Gori::Store::Severity::Low, nil, nil)
+      store.freeze_evidence(other, flow_snapshot(store, fid))[1].ok?.should be_true
+      respond(store, fid, "v2")
+      changed, status = store.freeze_evidence(issue, flow_snapshot(store, fid))
+      status.ok?.should be_true
+      changed.should_not eq(first)
+      store.issue_evidence(issue).size.should eq(2)
+    end
+  end
+
+  it "writes a new copy when only the error or status moved" do
+    with_store do |store|
+      fid = store.insert_flow(captured("/slow"))
+      issue = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
+      pending = flow_snapshot(store, fid)
+      first, status = store.freeze_evidence(issue, pending)
+      status.ok?.should be_true
+      # Abandoned with an error, same bytes: the copy must keep what happened.
+      errored, status = store.freeze_evidence(issue, pending.copy_with(error: "abandoned"))
+      status.ok?.should be_true
+      errored.should_not eq(first)
+      store.get_evidence(errored).not_nil!.meta.error.should eq("abandoned")
+      store.freeze_evidence(issue, pending.copy_with(error: "abandoned"))[1].duplicate?.should be_true
+      store.freeze_evidence(issue, pending.copy_with(status: 502))[1].ok?.should be_true
+    end
+  end
+
   it "copies a flow's exchange with its provenance and hashes, in one write with the live link" do
     with_store do |store|
       fid = store.insert_flow(captured("/login", "u=a&p=b"))
@@ -177,7 +221,10 @@ describe "Store#freeze_evidence (V26)" do
       # writes nothing — including no link, so the failed batch leaves no half.
       _, status = store.freeze_evidence(issue, snap, quota: snap.bytes)
       status.ok?.should be_true
-      id, status = store.freeze_evidence(issue, snap, link: true, quota: snap.bytes)
+      # A second source of the same size: the same source again is the same copy, not a write.
+      fid2 = store.insert_flow(captured("/q"))
+      respond(store, fid2, "0123456789")
+      id, status = store.freeze_evidence(issue, flow_snapshot(store, fid2), link: true, quota: snap.bytes)
       status.should eq(Gori::Store::FreezeStatus::Quota)
       id.should eq(0)
       store.count_evidence.should eq(1)
@@ -191,9 +238,11 @@ describe "Store#freeze_evidence (V26)" do
       respond(store, fid)
       a = store.insert_issue("a", Gori::Store::Severity::Low, nil, nil)
       b = store.insert_issue("b", Gori::Store::Severity::Low, nil, nil)
+      fid2 = store.insert_flow(captured("/c2")) # b's second copy is of another exchange
+      respond(store, fid2)
       ea, _ = store.freeze_evidence(a, flow_snapshot(store, fid))
       eb1, _ = store.freeze_evidence(b, flow_snapshot(store, fid))
-      eb2, _ = store.freeze_evidence(b, flow_snapshot(store, fid))
+      eb2, _ = store.freeze_evidence(b, flow_snapshot(store, fid2))
       store.link_evidence(ea, b).should be_true
       store.get_evidence_meta(ea).not_nil!.issue_ids.should eq([a, b])
 

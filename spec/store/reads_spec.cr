@@ -97,3 +97,63 @@ describe Gori::Store do
     end
   end
 end
+
+# `body:` drives `Store#search` from `flows_fts` (see `QL::Filter#fts_driver`) instead of the
+# `id IN (SELECT rowid …)` form, which materialised every match before LIMIT. The rows must be
+# exactly the IN form's for every shape QL allows, so each query runs both ways: as parsed, and
+# with the driver stripped (`Filter.new(sql, args)` is the SQL every caller ran before).
+private def seed_fts_flow(store : Gori::Store, i : Int32) : Int64
+  words = %w[alpha beta gamma]
+  host = i.even? ? "a.test" : "b.test"
+  method = i % 3 == 0 ? "POST" : "GET"
+  req_body = method == "POST" ? "#{words[i % 3]} req #{i}" : nil
+  id = store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: i.to_i64, scheme: "https", host: host, port: 443,
+    method: method, target: "/p/#{i}", http_version: "HTTP/1.1",
+    head: "#{method} /p/#{i} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice,
+    body: req_body.try(&.to_slice), source: i % 4 == 0 ? Gori::FlowSource::Kind::Repeater : Gori::FlowSource::Kind::Proxy))
+  status = i % 5 == 0 ? 500 : 200
+  store.update_response(Gori::Store::CapturedResponse.new(
+    flow_id: id, status: status, head: "HTTP/1.1 #{status} X\r\n\r\n".to_slice,
+    body: "#{words[(i + 1) % 3]} resp #{i % 7 == 0 ? "alpha" : ""}".to_slice, content_type: "text/plain"))
+  id
+end
+
+describe "Store#search driven from flows_fts" do
+  it "returns the IN form's rows for every query shape, limit and cursor" do
+    with_store do |store|
+      ids = (1..40).map { |i| seed_fts_flow(store, i) }
+      store.index_pending!
+      queries = [
+        "body:alpha", "resp.body:alpha", "req.body:alpha", "body:alp", "body:al",
+        "body:alpha host:a.test", "host:a.test body:alpha", "body:alpha -host:a.test",
+        "body:alpha method:POST status:>=500", "body:alpha body:beta", "body:alpha -body:beta",
+        "body:alpha OR host:b.test", "-body:alpha", "NOT body:alpha", "NOT (body:alpha OR body:beta)",
+        "host:a.test AND (body:alpha OR method:POST)", "(body:alpha host:a.test) OR status:500",
+        "body:alpha AND NOT method:GET", "body:zzqx", "body:alpha host:zzqx",
+      ]
+      view = Gori::QL.parse("src:proxy OR src:repeater")
+      cursors = [ids[10], ids[25], ids.last + 1]
+      driven = 0
+      queries.each do |q|
+        parsed = Gori::QL.parse(q)
+        [parsed, Gori::QL.and(view, parsed), Gori::QL.and(parsed, view)].each do |filter|
+          driven += 1 if filter.fts_driver
+          plain = Gori::QL::Filter.new(filter.sql, filter.args)
+          [1, 3, 1000].each do |limit|
+            store.search(filter, limit, raise_on_error: true).map(&.id)
+              .should eq(store.search(plain, limit, raise_on_error: true).map(&.id)), "#{q} limit #{limit}"
+            cursors.each do |c|
+              store.search(filter, limit, before_id: c, raise_on_error: true).map(&.id)
+                .should eq(store.search(plain, limit, before_id: c, raise_on_error: true).map(&.id)), "#{q} before #{c}"
+              store.search(filter, limit, since_id: c - 20, raise_on_error: true).map(&.id)
+                .should eq(store.search(plain, limit, since_id: c - 20, raise_on_error: true).map(&.id)), "#{q} since #{c - 20}"
+            end
+          end
+        end
+      end
+      driven.should be > 20 # the driven path actually ran, not only the fallback
+      store.search(Gori::QL.parse("body:alpha"), 1000).size.should be > 5
+    end
+  end
+end

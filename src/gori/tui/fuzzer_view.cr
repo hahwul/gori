@@ -1151,6 +1151,10 @@ module Gori::Tui
       {@run_result_count, @progress.try(&.sent) || 0_i64}.max
     end
 
+    def error_count : Int64
+      {@run_error_count, @progress.try(&.errors) || 0_i64}.max
+    end
+
     def retained_result_count : Int32
       @results.size
     end

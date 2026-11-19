@@ -37,7 +37,7 @@ module Gori
         # Cookie names whose being shared between clients is a session compromise rather than a
         # hygiene note. Matched as a substring of the downcased name, so `__Host-session_id`,
         # `XSRF-TOKEN` and `remember_me` all land here.
-        SESSION_ISH = /session|sess_|sessid|auth|token|jwt|login|remember|csrf|xsrf|sid\b/i
+        class_getter session_ish : Regex { /session|sess_|sessid|auth|token|jwt|login|remember|csrf|xsrf|sid\b/i }
 
         MAX_COOKIE_NAMES = 3
 
@@ -55,7 +55,7 @@ module Gori
           return unless CacheControl.shared_storeable?(parts)
           names = cookies.compact_map { |c| cookie_name(c) }
           return if names.empty?
-          session = names.any? { |n| SESSION_ISH.matches?(n) }
+          session = names.any? { |n| SharedCache.session_ish.matches?(n) }
           shown = names.first(MAX_COOKIE_NAMES).join(" ")
           shown = "#{shown} …" if names.size > MAX_COOKIE_NAMES
           acc << Detection.new("cacheable_set_cookie", Category::HEADERS, ctx.host, ctx.url,

@@ -38,7 +38,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     gone : Int32,
     frozen : Array(Int64),
     bytes : Int64,
-    refusal : String? do
+    refusal : String?,
+    dups : Array(Int64) = [] of Int64 do
+    # `frozen` and `bytes` are the copies this act WROTE; `dups` the refs whose bytes the issue
+    # already held (linked by this act all the same, so `linked` counts them).
     def toast : String
       parts = [head]
       parts << "#{@refs - @gone - @linked} already linked" if @refs > 1 && @refs - @gone > @linked
@@ -47,6 +50,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
         parts << "frozen as evidence ##{@frozen[0]} (#{Fmt.size(@bytes)})"
       elsif @frozen.size > 1
         parts << "#{@frozen.size} frozen (#{Fmt.size(@bytes)})"
+      end
+      if @dups.size == 1 && @frozen.empty?
+        parts << "already frozen as evidence ##{@dups[0]}"
+      elsif !@dups.empty?
+        parts << "#{@dups.size} already frozen"
       end
       # NAMED, never swallowed: "linked" on its own would read as if the bytes were kept.
       parts << "not frozen: #{@refusal}" if @refusal
@@ -88,10 +96,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     issue = issues_controller.view.detail_issue || return
     res = issues_controller.view.selected_resolved_link || return
     snap = evidence_snapshot(res.link.ref_kind, res.link.ref_id) || return
-    freeze_into_issue(issue.id, [snap], link: false) do |ids, refusal|
+    freeze_into_issue(issue.id, [snap], link: false) do |ids, dups, refusal|
       refresh_issue_evidence(issue.id, ids.last?)
       refresh_evidence_markers
-      @toast = refusal || "frozen as evidence ##{ids.last?} (#{Fmt.size(snap.bytes)}) — the live #{res.tag} row stays live"
+      @toast = refusal || Runner.already_frozen_line(dups) || "frozen as evidence ##{ids.last?} (#{Fmt.size(snap.bytes)}) — the live #{res.tag} row stays live"
     end
   end
 
@@ -275,14 +283,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
                                       res : Links::Resolved) : Nil
     issue = issues_controller.view.detail_issue || return
     back = -> { open_overlay(viewer) }
-    freeze_into_issue(issue.id, [snap], link: false, after: back) do |ids, refusal|
+    freeze_into_issue(issue.id, [snap], link: false, after: back) do |ids, dups, refusal|
       refresh_issue_evidence(issue.id, ids.last?)
       refresh_evidence_markers
       refresh_evidence_availability
       if id = ids.last?
         @session.store.get_evidence(id).try { |ev| viewer.frozen_as(ev) }
       end
-      @toast = refusal || "frozen as evidence ##{ids.last?} (#{Fmt.size(snap.bytes)}) — the live #{res.tag} row stays live"
+      @toast = refusal || Runner.already_frozen_line(dups) || "frozen as evidence ##{ids.last?} (#{Fmt.size(snap.bytes)}) — the live #{res.tag} row stays live"
     end
   end
 
@@ -624,10 +632,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       back.call
       return
     end
-    freeze_into_issue(owner_id, [snap], link: false, after: back) do |ids, refusal|
+    freeze_into_issue(owner_id, [snap], link: false, after: back) do |ids, dups, refusal|
       refresh_issue_evidence(owner_id, ids.last?)
       refresh_evidence_markers
-      @toast = refusal || "frozen as evidence ##{ids.last?} (#{Fmt.size(snap.bytes)}) on issue ##{owner_id}"
+      @toast = refusal || Runner.already_frozen_line(dups) || "frozen as evidence ##{ids.last?} (#{Fmt.size(snap.bytes)}) on issue ##{owner_id}"
     end
   end
 
@@ -652,8 +660,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       return
     end
     declined = -> { finish_link(issue_id, owner, snaps, none, FREEZE_DECLINED) }
-    freeze_into_issue(issue_id, copies, link: true, after: back, declined: declined) do |ids, refusal|
-      finish_link(issue_id, owner, snaps, ids, refusal)
+    freeze_into_issue(issue_id, copies, link: true, after: back, declined: declined) do |ids, dups, refusal|
+      finish_link(issue_id, owner, snaps, ids, refusal, dups)
     end
   end
 
@@ -664,7 +672,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # the refusal that stopped the batch, or frozen not at all — is linked here, so a quota wall
   # or a declined gate can never leave the operator with nothing.
   private def finish_link(issue_id : Int64, owner : String, snaps : Array(LinkSnapshot),
-                          frozen : Array(Int64), refusal : String?) : Nil
+                          frozen : Array(Int64), refusal : String?, dups = [] of Int64) : Nil
     # `write_frozen` writes in order and stops at the first refusal, so the first `frozen.size`
     # freezable refs are the ones already linked; the rest still need their row.
     kept = 0
@@ -679,11 +687,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     refresh_link_owners(Store::LinkOwnerKind::Issue, issue_id)
     refresh_issue_evidence(issue_id, frozen.size == 1 ? frozen[0] : nil)
     refresh_evidence_markers unless frozen.empty?
-    bytes = snaps.compact_map(&.snapshot)[0, frozen.size].sum(&.bytes)
+    # A copy the issue already held was linked by this act, but its bytes were not written now.
+    fresh = frozen - dups
+    bytes = snaps.compact_map(&.snapshot)[0, frozen.size].zip(frozen).sum(0_i64) { |s, id| dups.includes?(id) ? 0_i64 : s.bytes }
     @toast = LinkOutcome.new(owner, snaps.size, linked, plain.size - live.size,
-      frozen, bytes, refusal || unfrozen_reason(plain)).toast
+      fresh, bytes, refusal || unfrozen_reason(plain), dups).toast
     # A rollback is not "already linked": say the plain links did not land.
-    @toast = "#{frozen.empty? ? "" : "#{frozen.size} frozen · "}links NOT added (project busy)" if added.nil?
+    @toast = "#{fresh.empty? ? "" : "#{fresh.size} frozen · "}links NOT added (project busy)" if added.nil?
   end
 
   # Why the refs that were not frozen were not. The FIRST refusal stands for the set — they
@@ -763,17 +773,17 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   FREEZE_CAPPED = "freezing is capped at #{BATCH_SUBTAB_CAP} flows"
 
-  # Confirm-if-large, then write every snapshot, then `yield` the ids written and the
-  # refusal that stopped the batch, if one did (never called when nothing was written and
-  # nothing refused). `after` runs on EVERY exit — declined confirm included — and is where
+  # Confirm-if-large, then write every snapshot, then `yield` the ids written, the duplicates
+  # among them and the refusal that stopped the batch, if one did (never called when nothing
+  # was written and nothing refused). `after` runs on EVERY exit — declined confirm included — and is where
   # a caller puts the modal back where it was.
   private def freeze_into_issue(issue_id : Int64, snaps : Array(Evidence::Snapshot), *,
                                 link : Bool, after : Proc(Nil)? = nil, declined : Proc(Nil)? = nil,
-                                &done : Array(Int64), String? -> Nil) : Nil
+                                &done : Array(Int64), Array(Int64), String? -> Nil) : Nil
     total = snaps.sum(&.bytes)
     write = -> {
-      ids, refusal = write_frozen(issue_id, snaps, link)
-      done.call(ids, refusal) unless ids.empty? && refusal.nil?
+      ids, dups, refusal = write_frozen(issue_id, snaps, link)
+      done.call(ids, dups, refusal) unless ids.empty? && refusal.nil?
       nil
     }
     cost = -> {
@@ -875,19 +885,37 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   # Write the copies in order; stop at the first refusal (a quota reached mid-batch would
-  # refuse every later one the same way). Answers {ids written, the refusal or nil} — the
-  # caller composes ONE toast from both, so a refusal is never overwritten by a success
+  # refuse every later one the same way). Answers {ids, duplicates, the refusal or nil} — the
+  # caller composes ONE toast from them, so a refusal is never overwritten by a success
   # line that does not mention it.
-  private def write_frozen(issue_id : Int64, snaps : Array(Evidence::Snapshot), link : Bool) : {Array(Int64), String?}
+  #
+  # A copy the issue already holds (same source, same bytes) is not written again. Its id
+  # stands in `ids` — it IS the copy for that ref, which keeps a caller's "first N refs"
+  # arithmetic true — and in `dups`, so no caller counts it as frozen now.
+  private def write_frozen(issue_id : Int64, snaps : Array(Evidence::Snapshot), link : Bool) : {Array(Int64), Array(Int64), String?}
     ids = [] of Int64
+    dups = [] of Int64
     snaps.each do |snap|
       id, status = @session.store.freeze_evidence(issue_id, snap, link: link)
-      return {ids, freeze_refusal(issue_id, status)} unless status.ok?
+      if status.duplicate?
+        ids << id
+        dups << id
+        next
+      end
+      return {ids, dups, freeze_refusal(issue_id, status)} unless status.ok?
       ids << id
       refresh_evidence_availability
       log_evidence_frozen(issue_id, id, snap)
     end
-    {ids, nil}
+    {ids, dups, nil}
+  end
+
+  # The note for a freeze whose bytes the issue already holds (L#7); nil when none did. Short
+  # enough for 80×24's 59 toast columns whole.
+  def self.already_frozen_line(ids : Array(Int64)) : String?
+    return if ids.empty?
+    return "already frozen as evidence ##{ids[0]} — nothing written" if ids.size == 1
+    "#{ids.size} already frozen (same bytes) — nothing written"
   end
 
   # The tail every "issue created" toast carries when the form was opened holding copies
@@ -897,7 +925,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # (`issues_new`, the retest Diff's file-and-stay).
   private def write_form_snapshots(issue_id : Int64, form : IssueForm) : String
     return "" if form.snapshots.empty?
-    frozen, refusal = write_frozen(issue_id, form.snapshots, false)
+    frozen, _, refusal = write_frozen(issue_id, form.snapshots, false) # a new issue holds no duplicate
     refresh_evidence_markers
     parts = [] of String
     parts << (frozen.size == 1 ? "frozen as evidence ##{frozen[0]}" : "#{frozen.size} frozen") unless frozen.empty?
@@ -912,8 +940,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     in .issue_gone? then "issue ##{issue_id} no longer exists — nothing was frozen"
     in .quota?
       "evidence quota reached (#{Fmt.size(@session.store.evidence_bytes)} of #{Fmt.size(Evidence::QUOTA_BYTES)}) — delete a frozen copy first"
-    in .busy? then "could not freeze (store busy) — nothing was written, try again"
-    in .ok?   then "" # unreachable: callers ask only on a refusal
+    in .busy?            then "could not freeze (store busy) — nothing was written, try again"
+    in .ok?, .duplicate? then "" # unreachable: `write_frozen` asks only on a refusal
     end
   end
 

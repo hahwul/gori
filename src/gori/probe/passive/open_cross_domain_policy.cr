@@ -23,19 +23,19 @@ module Gori
 
         # Prefilter: the policy root element. An ordinary XML/HTML body never carries it, so the
         # wildcard scan is skipped for essentially all traffic.
-        ROOT = Utf8.tolerant(/<(?:cross-domain-policy|access-policy)\b/i)
+        class_getter root : Regex { Utf8.tolerant(/<(?:cross-domain-policy|access-policy)\b/i) }
 
         # A wildcard grant in either dialect: Flash `<allow-access-from domain="*">` /
         # `<allow-http-request-headers-from domain="*">`, or Silverlight `<domain uri="*">`. The
         # value must be exactly `*` (closing quote right after), so a `domain="*.example.com"`
         # subdomain grant is not read as fully open.
-        WILDCARD = Utf8.tolerant(/<(?:allow-access-from|allow-http-request-headers-from)\b[^>]*\bdomain\s*=\s*["']\*["']|<domain\b[^>]*\buri\s*=\s*["']\*["']/i)
+        class_getter wildcard : Regex { Utf8.tolerant(/<(?:allow-access-from|allow-http-request-headers-from)\b[^>]*\bdomain\s*=\s*["']\*["']|<domain\b[^>]*\buri\s*=\s*["']\*["']/i) }
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.response
           text = ctx.body_text
-          return if text.nil? || !ROOT.matches?(text)
-          return unless WILDCARD.matches?(text)
+          return if text.nil? || !OpenCrossDomainPolicy.root.matches?(text)
+          return unless OpenCrossDomainPolicy.wildcard.matches?(text)
           acc << Detection.new("open_cross_domain_policy", Category::CORS, ctx.host, ctx.url,
             "Cross-domain policy allows all origins", Store::Severity::Medium,
             "wildcard domain in cross-domain policy", ctx.fid)

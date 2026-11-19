@@ -23,7 +23,8 @@ describe "HistoryView's frozen-evidence marker" do
       issue = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
       snap = Gori::Evidence.from_flow(store.get_flow(id).not_nil!)
       store.freeze_evidence(issue, snap)
-      store.freeze_evidence(issue, snap)
+      # Another issue's copy: the same bytes again on one issue are that issue's same copy.
+      store.freeze_evidence(store.insert_issue("u", Gori::Store::Severity::Low, nil, nil), snap)
       view.refresh_evidence_marker(store)
       stats_row(view).should contain("frozen ×2")
 

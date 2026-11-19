@@ -477,10 +477,10 @@ describe Gori::QL do
 "(status IS NOT NULL AND +status >= 200 AND +status < 300 AND " \
 "connect_protocol IS NOT NULL AND lower(connect_protocol) = 'websocket')))")
     Gori::QL.parse("proto:grpc").sql.should eq(
-      "(((content_type IS NOT NULL AND (lower(ltrim(content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%' OR " \
-      "lower(ltrim(content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/connect+%')) OR " \
-      "(request_content_type IS NOT NULL AND (lower(ltrim(request_content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%' OR " \
-      "lower(ltrim(request_content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/connect+%'))))")
+      "(((content_type IS NOT NULL AND (ltrim(content_type, char(9, 10, 11, 12, 13, 32)) LIKE 'application/grpc%' OR " \
+      "ltrim(content_type, char(9, 10, 11, 12, 13, 32)) LIKE 'application/connect+%')) OR " \
+      "(request_content_type IS NOT NULL AND (ltrim(request_content_type, char(9, 10, 11, 12, 13, 32)) LIKE 'application/grpc%' OR " \
+      "ltrim(request_content_type, char(9, 10, 11, 12, 13, 32)) LIKE 'application/connect+%'))))")
     Gori::QL.parse("proto:sse").sql.should eq(
       "((content_type IS NOT NULL AND " \
       "lower(trim(substr(content_type, 1, instr(content_type || ';', ';') - 1), char(9, 10, 11, 12, 13, 32))) = 'text/event-stream'))")
@@ -492,10 +492,10 @@ describe Gori::QL do
       "(NOT ((status IS NOT NULL AND status = 101) OR " \
       "(status IS NOT NULL AND +status >= 200 AND +status < 300 AND " \
       "connect_protocol IS NOT NULL AND lower(connect_protocol) = 'websocket')) " \
-      "AND NOT ((content_type IS NOT NULL AND (lower(ltrim(content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%' OR " \
-      "lower(ltrim(content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/connect+%')) OR " \
-      "(request_content_type IS NOT NULL AND (lower(ltrim(request_content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%' OR " \
-      "lower(ltrim(request_content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/connect+%'))) " \
+      "AND NOT ((content_type IS NOT NULL AND (ltrim(content_type, char(9, 10, 11, 12, 13, 32)) LIKE 'application/grpc%' OR " \
+      "ltrim(content_type, char(9, 10, 11, 12, 13, 32)) LIKE 'application/connect+%')) OR " \
+      "(request_content_type IS NOT NULL AND (ltrim(request_content_type, char(9, 10, 11, 12, 13, 32)) LIKE 'application/grpc%' OR " \
+      "ltrim(request_content_type, char(9, 10, 11, 12, 13, 32)) LIKE 'application/connect+%'))) " \
       "AND NOT (content_type IS NOT NULL AND " \
       "lower(trim(substr(content_type, 1, instr(content_type || ';', ';') - 1), char(9, 10, 11, 12, 13, 32))) = 'text/event-stream'))")
   end
@@ -516,10 +516,10 @@ describe Gori::QL do
       "connect_protocol IS NOT NULL AND lower(connect_protocol) = 'websocket'))) " \
       "AND scheme = 'https')")
     Gori::QL.parse("proto:grpcs").sql.should eq(
-      "((((content_type IS NOT NULL AND (lower(ltrim(content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%' OR " \
-      "lower(ltrim(content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/connect+%')) OR " \
-      "(request_content_type IS NOT NULL AND (lower(ltrim(request_content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%' OR " \
-      "lower(ltrim(request_content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/connect+%')))) " \
+      "((((content_type IS NOT NULL AND (ltrim(content_type, char(9, 10, 11, 12, 13, 32)) LIKE 'application/grpc%' OR " \
+      "ltrim(content_type, char(9, 10, 11, 12, 13, 32)) LIKE 'application/connect+%')) OR " \
+      "(request_content_type IS NOT NULL AND (ltrim(request_content_type, char(9, 10, 11, 12, 13, 32)) LIKE 'application/grpc%' OR " \
+      "ltrim(request_content_type, char(9, 10, 11, 12, 13, 32)) LIKE 'application/connect+%')))) " \
       "AND scheme = 'https')")
     Gori::QL.parse("proto:sses").sql.should eq(
       "(((content_type IS NOT NULL AND " \
@@ -1691,5 +1691,61 @@ describe "Gori::QL ws: term" do
     Gori::QL.ws_match("ws~[").should be_nil
     Gori::QL.ws_match(%(WS:"two words")).should eq(Gori::QL.ws_message_cond("two words", regex: false))
     Gori::QL.ws_match("").should be_nil
+  end
+end
+
+describe "Gori::QL::Filter#fts_driver" do
+  it "carries the phrase and the rest of a top-level AND around a positive body: term" do
+    Gori::QL.parse("body:alpha").fts_driver.should eq({"\"alpha\"", "1", [] of DB::Any})
+    driver = Gori::QL.parse("host:a.test resp.body:alpha").fts_driver.not_nil!
+    driver[0].should eq(%(resp : "alpha"))
+    driver[1].should_not contain("flows_fts")
+    driver[2].should eq(Gori::QL.parse("host:a.test").args)
+  end
+
+  it "is nil where the index cannot drive the query" do
+    ["-body:alpha", "NOT body:alpha", "body:alpha OR host:a", "NOT (body:alpha host:a)",
+     "body:al", "host:a.test"].each do |q|
+      Gori::QL.parse(q).fts_driver.should be_nil, q
+    end
+    Gori::QL.parse("body:alpha", fts: false).fts_driver.should be_nil
+  end
+
+  it "survives QL.and on either side" do
+    Gori::QL.and(Gori::QL.parse("host:a"), Gori::QL.parse("body:alpha")).fts_driver.not_nil![0].should eq(%("alpha"))
+    Gori::QL.and(Gori::QL.parse("body:alpha"), Gori::QL.parse("host:a")).fts_driver.not_nil![0].should eq(%("alpha"))
+  end
+end
+
+# `PATH_EXPR` gained an origin-form fast path and `GRPC_SQL` dropped a `lower()` that `LIKE`
+# already does, both for per-row cost on a no-match scan. Each must give the value the old
+# spelling gave on every row, so the old spelling is rebuilt here and both run over targets and
+# content types chosen to sit on each branch and each fold.
+describe "QL per-row expressions keep their values" do
+  it "computes the same path: and proto:grpc as the spellings they replaced" do
+    old_path = Gori::QL::PATH_EXPR.sub("CASE WHEN substr(target, 1, 1) = '/' THEN target WHEN ", "CASE WHEN ")
+    old_path.should_not eq(Gori::QL::PATH_EXPR)
+    old_grpc = Gori::QL::GRPC_SQL.gsub(/ltrim\((\w+), (char\([^)]*\))\) LIKE/, "lower(ltrim(\\1, \\2)) LIKE")
+    old_grpc.scan("lower(").size.should eq(4)
+    targets = ["/", "/Admin?b#c", "", "*", "a/b", "//x", "/http://x", "/ü/ß", "http://h", "HTTP://h/x",
+               "https://h?q=1", "hTtPs://h:8/p?x#f", "https://h#f", "http:/x", "http://", "ftp://h/x"]
+    types = [nil, "application/grpc", "Application/GRPC+proto", " \tapplication/grpc-web",
+             "APPLICATION/CONNECT+json", "application/connect", "application/grpcx", "ÀPPLICATION/grpc",
+             "application/grpç", "text/html", "\napplication/connect+proto"]
+    with_store do |store|
+      db = store.@db
+      targets.each do |t|
+        db.query_one("SELECT #{old_path} IS #{Gori::QL::PATH_EXPR} FROM (SELECT ? AS target)", t, as: Int64)
+          .should eq(1), t.inspect
+      end
+      types.each do |ct|
+        types.each do |rct|
+          db.query_one("SELECT #{old_grpc} IS #{Gori::QL::GRPC_SQL} FROM (SELECT ? AS content_type, ? AS request_content_type)",
+            ct, rct, as: Int64).should eq(1), {ct, rct}.inspect
+        end
+      end
+      db.query_one("SELECT #{Gori::QL::GRPC_SQL} FROM (SELECT 'Application/GRPC' AS content_type, NULL AS request_content_type)", as: Int64)
+        .should eq(1) # the fold LIKE does on its own
+    end
   end
 end

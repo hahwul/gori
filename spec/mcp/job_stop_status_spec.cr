@@ -221,6 +221,44 @@ describe "MCP fuzz_results evidence note (#1395)" do
   end
 end
 
+# A sweep with no predicate reported every row matched (a reflecting endpoint: 25/25), which an
+# agent read as 25 reflections.
+describe "MCP fuzz match note" do
+  it "says every response counts as matched when no rule narrows them, and not when one does" do
+    with_store do |store|
+      port = start_origin
+      tools = tools_for(store)
+      bare = start_fuzz(tools, port)
+      wait_terminal(tools, "fuzz", bare)
+      call_json(tools, "fuzz_status", {job_id: bare}.to_json)["match_note"].as_s.should contain("every response counts as matched")
+      call_json(tools, "fuzz_results", {job_id: bare}.to_json)["match_note"].as_s.should contain("match:{regex:…} or extract")
+
+      # An `extract` already passed is not suggested again.
+      extracting = call_json(tools, "fuzz_start", {
+        template:       "GET /f?q=§FUZZ§ HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n",
+        url:            "http://127.0.0.1:#{port}",
+        payloads:       [{list: ["a"]}],
+        extract:        "q=(\\w+)",
+        allow_unscoped: true,
+      }.to_json)["job_id"].as_s
+      wait_terminal(tools, "fuzz", extracting)
+      note = call_json(tools, "fuzz_status", {job_id: extracting}.to_json)["match_note"].as_s
+      note.should contain("match:{regex:")
+      note.should_not contain("extract")
+
+      ruled = call_json(tools, "fuzz_start", {
+        template:       "GET /f?q=§FUZZ§ HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n",
+        url:            "http://127.0.0.1:#{port}",
+        payloads:       [{list: ["a"]}],
+        match:          {status: "200"},
+        allow_unscoped: true,
+      }.to_json)["job_id"].as_s
+      wait_terminal(tools, "fuzz", ruled)
+      call_json(tools, "fuzz_status", {job_id: ruled}.to_json).as_h.has_key?("match_note").should be_false
+    end
+  end
+end
+
 describe "MCP job-results pagination clamp" do
   it "reports a clamped limit on fuzz_results, list_fuzz_runs and get_fuzz_run" do
     with_store do |store|

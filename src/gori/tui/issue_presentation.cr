@@ -11,11 +11,15 @@ module Gori::Tui
   # the whole point of the colour ladder below is that CRIT looks the same wherever an
   # operator meets it, and two copies of the mapping is a promise the code cannot keep.
   module IssuePresentation
+    # Four columns between the badge and the title (IssuesView `title_x`), so `resolved`
+    # itself does not fit; `res` is its abbreviation the way `conf` is `confirmed`. It used to
+    # read `done`, a word no other surface uses for this status — the picker, the detail, the
+    # Evidence tab, the CLI, MCP and the export all say `resolved`.
     private def status_tag(s : Store::Status) : String
       case s
       when .confirmed?      then "conf"
       when .false_positive? then "fp"
-      when .resolved?       then "done"
+      when .resolved?       then "res"
       else                       "open"
       end
     end
@@ -24,7 +28,7 @@ module Gori::Tui
       # SEVERITY owns the colour ladder on these rows; triage status does not compete for it.
       # The two were drawn five columns apart out of the SAME hues — `CRIT conf` was two reds
       # meaning two different axes, `LOW open` two accents — on a list whose whole job is
-      # "scan for red". The four words (conf / fp / done / open) already tell the statuses
+      # "scan for red". The four words (conf / fp / res / open) already tell the statuses
       # apart, so what is left for colour here is the one distinction the WORDS do not make
       # at a glance: still live, or already handled.
       case s

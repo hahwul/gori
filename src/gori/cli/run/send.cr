@@ -130,7 +130,7 @@ module Gori
             sni: sni, tls_preset: tls_preset, http2: http2, verify: !insecure,
             timeout: timeout, overrides: host_overrides, sse: sse.bound(Repeater::StreamBound::SEND)), outbound)
         rescue ex : Repeater::PlanError
-          repeater_plan_abort("gori run send", ex)
+          send_arg_abort(repeater_plan_error("gori run send", ex).lchop("gori run send: "))
         end
         # Before the scope gate and the History write, as MCP's `apply_rules` does, so the
         # request judged and recorded is the one the rules produced.
@@ -151,18 +151,18 @@ module Gori
                                          body_file : String?, cookies : Array(String),
                                          tls_preset : String?) : {String, Array({String, String})}
         dial_url = send_url_arg(url, positional)
-        abort "gori run send: #{dial_url.message}" if dial_url.is_a?(SendArgError)
+        send_arg_abort(dial_url.message) if dial_url.is_a?(SendArgError)
         if err = send_source_error(sources, method: method, headers: headers, body: body, body_file: body_file,
              cookies: cookies)
-          abort "gori run send: #{err}"
+          send_arg_abort(err)
         end
         if err = Settings.tls_preset_error(tls_preset)
-          abort "gori run send: #{err}"
+          send_arg_abort(err)
         end
         pairs = send_header_pairs(headers)
-        abort "gori run send: #{pairs.message}" if pairs.is_a?(SendArgError)
+        send_arg_abort(pairs.message) if pairs.is_a?(SendArgError)
         cookie = cookie_header_value(cookies, headers)
-        abort "gori run send: #{cookie.message}" if cookie.is_a?(SendArgError)
+        send_arg_abort(cookie.message) if cookie.is_a?(SendArgError)
         pairs << {"Cookie", cookie} if cookie
         {dial_url, pairs}
       end
@@ -233,7 +233,7 @@ module Gori
       private def self.send_raw_content(sources : Array(String), file : String?, raw : String?,
                                         stdin : Bool) : String
         content = request_content(file: file, raw: raw, stdin: stdin, io: STDIN, what: "gori run send")
-        abort "gori run send: the request must not be empty (#{sources.first} gave no bytes)" if content.empty?
+        send_arg_abort("the request must not be empty (#{sources.first} gave no bytes)") if content.empty?
         content
       end
 
@@ -253,9 +253,16 @@ module Gori
           Repeater::UrlRequest.structured(target, method, headers, body_file || body, expand: !verbatim)
         end
       rescue ex : Gori::Error
-        abort "gori run send: #{ex.message}"
+        send_arg_abort(ex.message.to_s)
       rescue ex : Repeater::PlanError
-        repeater_plan_abort("gori run send", ex)
+        send_arg_abort(repeater_plan_error("gori run send", ex).lchop("gori run send: "))
+      end
+
+      # A request refused before anything was sent. Under `--json` stdout gets the failed-call
+      # object a network failure prints, `delivered: false`; the stderr line is unchanged.
+      private def self.send_arg_abort(reason : String) : NoReturn
+        puts failure_json(reason, "invalid_argument", "INVALID_ARGUMENT", delivered: false) if json_stdout?
+        abort "gori run send: #{reason}"
       end
 
       # Send `plan` and print what came back — the tail every repeater send shares: the History

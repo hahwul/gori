@@ -22,7 +22,7 @@ module Gori
         #     "__schema" doc mention;
         #   * sits at the very START of the body, so it survives the 64 KiB body-prefix cap no
         #     matter how large the `types` array is — no longer needs `queryType` to also fit.
-        INTROSPECTION_RESULT = Utf8.tolerant(/"__schema"\s*:\s*\{/)
+        class_getter introspection_result : Regex { Utf8.tolerant(/"__schema"\s*:\s*\{/) }
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.response
@@ -32,7 +32,7 @@ module Gori
           return unless ct.nil? || ct.includes?("json") || ct.includes?("graphql")
           text = ctx.body_text
           return if text.nil? || text.empty?
-          return unless INTROSPECTION_RESULT.matches?(text)
+          return unless GraphqlIntrospection.introspection_result.matches?(text)
           acc << Detection.new("graphql_introspection", Category::INFOLEAK, ctx.host, ctx.url,
             "GraphQL introspection enabled (full schema exposed)", Store::Severity::Medium,
             "introspection response", ctx.fid)

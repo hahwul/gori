@@ -41,11 +41,11 @@ describe "Gori::Utf8.tolerant" do
   it "is applied to the body-scanning rule tables" do
     next unless tolerant_available?
     flag = Regex::CompileOptions::MATCH_INVALID_UTF
-    Gori::Probe::Passive::BodyLeaks::ERROR_SIGNATURES.each { |(rx, _)| rx.options.includes?(flag).should be_true }
-    Gori::Probe::Passive::Secrets::PATTERNS.each { |(rx, _)| rx.options.includes?(flag).should be_true }
-    Gori::Probe::Passive::Secrets::JWT[0].options.includes?(flag).should be_true
-    Gori::Probe::Passive::JsScan::SINKS.each { |(rx, _)| rx.options.includes?(flag).should be_true }
-    Gori::Probe::Passive::Tech::FRAMEWORK_MARKERS.each { |(rx, _, _, _)| rx.options.includes?(flag).should be_true }
+    Gori::Probe::Passive::BodyLeaks.error_signatures.each { |(rx, _)| rx.options.includes?(flag).should be_true }
+    Gori::Probe::Passive::Secrets.patterns.each { |(rx, _)| rx.options.includes?(flag).should be_true }
+    Gori::Probe::Passive::Secrets.jwt[0].options.includes?(flag).should be_true
+    Gori::Probe::Passive::JsScan.sinks.each { |(rx, _)| rx.options.includes?(flag).should be_true }
+    Gori::Probe::Passive::Tech.framework_markers.each { |(rx, _, _, _)| rx.options.includes?(flag).should be_true }
   end
 end
 

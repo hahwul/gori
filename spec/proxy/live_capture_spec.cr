@@ -192,6 +192,12 @@ private class FlagSink < Gori::Proxy::StoreSink
     @live << resp.live?
     super
   end
+
+  # The h2 path's door: its response update does not wait for the commit.
+  def on_response_deferred(resp : Gori::Store::CapturedResponse) : Nil
+    @live << resp.live?
+    super
+  end
 end
 
 # An origin that sends one event, waits for `release`, then a second and ends the chunked body.

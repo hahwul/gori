@@ -88,8 +88,11 @@ module Gori::Tui
       InterceptController.queue_keys(f, d, mark, fa, y, filt, catch)
     end
 
+    # `/` is the CATCH condition — what gets held from now on — not a search of the queue, so
+    # the queue's hint says "condition" as the idle hint does: "filter" invited typing a search
+    # that silently changed the catch rule (W#5).
     def self.queue_keys(f : String, d : String, mark : String, fa : String, y : String, filt : String, catch : String) : String
-      "↑/↓ move · #{f} fwd · #{d} drop · ↵/e edit · #{mark} mark · ⇧↑/↓ range · #{fa} all · #{y} copy · #{filt} filter · #{catch} catch · space cmds · esc tabs"
+      "↑/↓ move · #{f} fwd · #{d} drop · ↵/e edit · #{mark} mark · ⇧↑/↓ range · #{fa} all · #{y} copy · #{filt} condition · #{catch} catch · space cmds · esc tabs"
     end
 
     def self.idle_keys(toggle : String, direction : String, filt : String) : String
@@ -110,7 +113,7 @@ module Gori::Tui
       BodyChrome.framed(screen, rect, shell) do |inner|
         @intercept.render(screen, inner, focused: body_focused,
           listen: {proxy.host, proxy.port}, capturing: @host.session.capturing?,
-          holding: @host.session.capturing_lock_held?)
+          holding: @host.session.capturing_lock_held?, lock_unavailable: @host.session.capture_lock_unavailable?)
       end
     end
 
@@ -588,6 +591,19 @@ module Gori::Tui
     # there would turn Tab into a dead key instead of the focus ring it is everywhere else.
     def editor_captures_tab? : Bool
       @intercept.text_insert?
+    end
+
+    # --- bracketed paste, in bulk (see TabController#accepts_bulk_paste?) ---
+    # The TEXT editor in INS only, like the Repeater request: the hex editor frames its own
+    # nibbles and READ has no caret to paste at.
+    def accepts_bulk_paste? : Bool
+      @intercept.text_insert?
+    end
+
+    def paste_text(text : String) : Bool
+      return false unless @intercept.edit_paste(text)
+      report_replaced(@intercept.edit_last_replaced) # a paste over a selection REPLACES it
+      true
     end
 
     def handle_editor_tab(ev : Termisu::Event::Key) : Bool

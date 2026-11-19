@@ -24,21 +24,21 @@ module Gori
         # (`addEventListener("message", onMsg)`) is deliberately not matched — its body is defined
         # elsewhere, so no window around this call site can tell whether it checks the origin, and
         # guessing would be a false positive.
-        LISTENER = Utf8.tolerant(/(?:addEventListener\s*\(\s*["'`]message["'`]\s*,|\bonmessage\s*=(?!=))\s*(?:async\s+)?(?:function\b[^(]*\(|\()[^)]*\)\s*(?:=>\s*)?\{/)
+        class_getter listener : Regex { Utf8.tolerant(/(?:addEventListener\s*\(\s*["'`]message["'`]\s*,|\bonmessage\s*=(?!=))\s*(?:async\s+)?(?:function\b[^(]*\(|\()[^)]*\)\s*(?:=>\s*)?\{/) }
         # Any origin consultation. Searched in a WINDOW after the handler opens, not across the
         # whole fragment: `.origin` is ubiquitous in a bundled SPA, so a whole-fragment test meant
         # one unrelated occurrence anywhere in a 256 KiB bundle suppressed every finding in it —
         # the rule detected nothing at all on exactly the targets it matters most for. Scoping the
         # test to the handler body restores that, and pairing it with the inline-function gate
         # above keeps the conservative bias: we only judge handlers we can read.
-        ORIGIN_CHECK = Utf8.tolerant(/\.origin\b/)
+        class_getter origin_check : Regex { Utf8.tolerant(/\.origin\b/) }
         # How far past the handler's opening brace to look. Generous — a real message handler with
         # its dispatch table still fits, and over-reaching only makes the rule quieter.
         HANDLER_WINDOW = 2000
         # postMessage(<data>, "*") — the wildcard target origin as the (last) argument.
-        WILDCARD_POST = Utf8.tolerant(/\.postMessage\s*\([^;\n]*,\s*["'`]\*["'`]\s*\)/)
+        class_getter wildcard_post : Regex { Utf8.tolerant(/\.postMessage\s*\([^;\n]*,\s*["'`]\*["'`]\s*\)/) }
         # document.domain = … (assignment, not the === comparison).
-        DOMAIN_SET = Utf8.tolerant(/\bdocument\.domain\s*=(?!=)/)
+        class_getter domain_set : Regex { Utf8.tolerant(/\bdocument\.domain\s*=(?!=)/) }
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           scripts = ctx.client_scripts_nocomment # keep string literals, drop comments (no commented-out-code FPs)
@@ -49,11 +49,11 @@ module Gori
               acc << pm(ctx, "postmessage_no_origin", "postMessage handler without origin check",
                 Store::Severity::Medium, "message listener, no .origin check")
             end
-            if WILDCARD_POST.matches?(code) && emitted.add?("wildcard")
+            if PostMessage.wildcard_post.matches?(code) && emitted.add?("wildcard")
               acc << pm(ctx, "postmessage_wildcard", "postMessage to a wildcard target origin",
                 Store::Severity::Low, %(postMessage(..., "*")))
             end
-            if DOMAIN_SET.matches?(code) && emitted.add?("domain")
+            if PostMessage.domain_set.matches?(code) && emitted.add?("domain")
               acc << pm(ctx, "document_domain_set", "document.domain assignment relaxes same-origin",
                 Store::Severity::Low, "document.domain =")
             end
@@ -70,10 +70,10 @@ module Gori
         # mid-character.
         private def unchecked_handler?(code : String) : Bool
           bytes = code.to_slice
-          code.scan(LISTENER) do |m|
+          code.scan(PostMessage.listener) do |m|
             at = m.byte_end(0)
             body = Utf8.text(bytes[at, Math.min(HANDLER_WINDOW, bytes.size - at)])
-            return true unless ORIGIN_CHECK.matches?(body)
+            return true unless PostMessage.origin_check.matches?(body)
           end
           false
         end

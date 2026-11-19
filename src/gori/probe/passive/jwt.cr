@@ -80,7 +80,7 @@ module Gori
         # --- extraction ---------------------------------------------------------------------
 
         # Yields {location label, token} for every JWT-shaped value in the carrying headers.
-        # `Jwt::SCAN_RE` (not `SecretInUrl::JWT_VALUE`) is the extractor on purpose: it allows an
+        # `Jwt::SCAN_RE` (not `SecretInUrl.jwt_value`) is the extractor on purpose: it allows an
         # EMPTY third segment, which is exactly the shape an `alg:none` token has — the highest-
         # value case here would otherwise never match.
         #

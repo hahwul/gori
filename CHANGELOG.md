@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+- Large projects: a `body:` search returns its first page in milliseconds instead of reading every match first, `path:` and `proto:grpc` scans run up to 40% faster, and the retention sweep removes the oldest flows a bounded chunk at a time, so capture and the TUI no longer freeze while a project over its `retention.max_flows` cap is trimmed (#1942).
+
+- TUI: pasting a large wordlist into a Fuzzer payload set, or a large body into an Intercept held request, no longer freezes the app, and a filtered History re-runs its whole query less often under capture (#1942).
+
+- `gori run`: an invalid `~` regex in a query is an error, as its help and MCP say, and `--strict` refuses a term QL would drop (#1942).
+
+- `gori run`: a mistyped `probe`, `history` or `sitemap` verb is refused instead of searched, `fuzz -w -` reads stdin, every delete accepts `--yes`, and under `--json` a not-found, pre-send, usage or `intercept` refusal prints the error object (an `intercept` refusal also goes to stderr in text mode) and `project delete`/`repeater delete` say `ok` (#1942).
+
+- TUI: startup warnings show at once instead of behind the greeting and stay in Notifications: a fallback port, capture off, a project dir gori cannot write (no longer blamed on another window), a corrupt settings.json under `--db`, and flows a crash left incomplete. Other action messages no longer wait behind a companion bubble either (#1942).
+
+- Fuzzer: the TUI completion line counts errors as the CLI does, and a run where every request failed ends as `all N failed` instead of a green ✓ (#1942).
+
+- TUI: an import that duplicates an earlier one, or did not commit every flow, says so on the status row ahead of the path and keeps the warning in Notifications (#1942).
+
+- Repeater: stopping a send reads as stopped instead of a red `Closed stream` error, and a response gori cut short names the cause (its read budget, its 8 MiB capture cap, an idle origin) instead of a bare `(stopped)` or `(incomplete)` (#1942).
+
+- TUI: the Intercept queue hint calls `/` the catch condition it sets, not a filter; coming back to Decoder lands on INPUT instead of typing into the chain, and the footer under a sub-tab filter being typed shows the filter's keys instead of strip letters that now type. The Issues list marks a resolved issue `res`, not `done` (#1942).
+
+- Evidence: freezing an exchange an issue already holds with the same bytes writes no second copy; the TUI and `gori run evidence freeze` name the existing copy and MCP `freeze_evidence` returns it with `already_frozen: true`. A source whose bytes changed still freezes a new copy (#1942).
+
+- Extract rules: a rule that re-binds the same value on every response no longer makes another rule's `extract_miss` warning repeat on most captured flows (#1942).
+
+- Proxy: capture keeps up under load. A new connection is answered during a sustained burst instead of waiting seconds for it to end, the streams of one HTTP/2 connection no longer wait for each other's database write, and a chatty WebSocket no longer waits for each message's (#1942).
+
+- Fuzzer: recording a run to History (`--record-history`, MCP `record_history`) commits its flows in chunks instead of two writes per request, so a recording sweep uses about a third of the CPU it did; a recorded row prints once its chunk lands (#1942).
+
+- CLI: `gori run` and `gori mcp` start with about 30% less work, because Probe's passive rules are compiled on the first scan instead of at every launch, and an HTTPS send with `-k` no longer loads the CA bundle (#1942).
+
+- CLI: a `gori run` whose output file fills the disk now says so in one line and exits 1, instead of printing a backtrace (#1942).
+
 - TUI: typed input is no longer lost or changed behind your back. A Repeater or Fuzzer TARGET being edited takes Ctrl-A/E/U/W itself and returns to READ when you leave it, issue and rule forms ask once before `esc` or a click outside discards an edit, `esc` in Project settings cancels the edit instead of saving it, and a Rewriter stub keeps its line endings when it is opened and closed (#1938, #1941).
 
 - TUI: Find counts every occurrence and scrolls to the match, centred on an unwrapped line, a new History filter puts the cursor on the newest match, Issues export writes the marked or filtered issues and says which, and the `Space` menu shows all its rows again after the terminal grows (#1938, #1941).

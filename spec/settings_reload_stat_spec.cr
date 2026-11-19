@@ -39,4 +39,24 @@ describe "Settings.reload_section stat gate" do
       Gori::Settings.saved_views.map(&.name).should eq(["one", "two"])
     end
   end
+
+  # No settings.json at all (an MCP-only install never writes one): the stat answers nil and
+  # the section is left exactly as memory holds it, without reading — and the file appearing
+  # later is still folded.
+  it "leaves memory alone while the file is missing and folds it once it appears" do
+    with_settings_file do |path|
+      prev = Gori::Settings.saved_views
+      begin
+        Gori::Settings.saved_views = [Gori::Settings::SavedView.new(1_i64, "kept", "status:500")]
+        Gori::Settings.reload_saved_views_from_disk
+        Gori::Settings.saved_views.map(&.name).should eq(["kept"])
+
+        File.write(path, {"saved_views" => {"views" => [{"name" => "disk", "query" => "status:200"}]}}.to_json)
+        Gori::Settings.reload_saved_views_from_disk
+        Gori::Settings.saved_views.map(&.name).should eq(["disk"])
+      ensure
+        Gori::Settings.saved_views = prev
+      end
+    end
+  end
 end

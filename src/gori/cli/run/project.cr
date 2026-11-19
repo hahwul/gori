@@ -589,6 +589,7 @@ module Gori
         if format == :json
           puts(JSON.build do |j|
             j.object do
+              j.field "ok", true
               j.field "deleted", true
               j.field "name", project.name
               j.field "id", id
@@ -1210,6 +1211,7 @@ module Gori
 
         positional = parse_args(args, "gori run project scope delete") do |p|
           p.banner = "Usage: gori run project scope delete|rm <rule-id> [options]"
+          yes_flag(p)
           project_options(p, proj, "update")
           format_flag(p, [:text, :json], delete_format_help) { |f| format = f }
         end
@@ -1503,6 +1505,7 @@ module Gori
 
         positional = parse_args(args, "gori run project env delete") do |p|
           p.banner = "Usage: gori run project env delete|rm KEY [options]"
+          yes_flag(p)
           project_options(p, proj, "update")
           format_flag(p, [:text, :json], delete_format_help("key")) { |f| format = f }
         end
@@ -1704,6 +1707,7 @@ module Gori
 
         positional = parse_args(args, "gori run project host-override delete") do |p|
           p.banner = "Usage: gori run project host-override delete|rm <id> [options]"
+          yes_flag(p)
           project_options(p, proj, "update")
           format_flag(p, [:text, :json], delete_format_help) { |f| format = f }
         end

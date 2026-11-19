@@ -105,7 +105,8 @@ class Gori::Tui::RepeaterView
       if !result
         RespView.new([[Highlight::Span.new(not_sent_hint, Theme.muted)]], Highlight::BodyLines.empty, :text)
       elsif !result.ok? && result.head.empty?
-        RespView.new([[Highlight::Span.new("repeater error: #{result.error}", Theme.red)]], Highlight::BodyLines.empty, :text)
+        line = @result_stopped ? Highlight::Span.new(STOPPED_LINE, Theme.muted) : Highlight::Span.new("repeater error: #{result.error}", Theme.red)
+        RespView.new([[line]], Highlight::BodyLines.empty, :text)
       else
         build_resp_view(result)
       end

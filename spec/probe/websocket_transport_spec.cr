@@ -22,7 +22,7 @@ require "../spec_helper"
 
 private alias HeadCodec = Gori::Proxy::H2::HeadCodec
 
-# Deliberately not one of AWS's published documentation placeholders, which `Secrets::PATTERNS`
+# Deliberately not one of AWS's published documentation placeholders, which `Secrets.patterns`
 # screens out; assembled from two halves so push protection lets the fixture through.
 private WS_SECRET    = "AKIA" + "3ZQF7XKPL2WVNB6D"
 private SECRET_FRAME = %({"authorize":{"key":"#{WS_SECRET}"}})

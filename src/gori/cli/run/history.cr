@@ -350,6 +350,7 @@ module Gori
         limit = 50
         format = :text
         lenient = false
+        strict = false
         in_scope = false
         hide_static = false
         include_sensitive = false
@@ -377,6 +378,7 @@ module Gori
           p.on("--in-scope", "Only flows in the project's configured scope (the TUI's `s` lens; capture still records everything)") { in_scope = true }
           p.on("--hide-static", "Leave out static assets — images, fonts, media (the TUI's hide-static lens; same as -q -static:true)") { hide_static = true }
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text (old behaviour)") { lenient = true }
+          p.on("--strict", "Refuse a query with a term QL would drop (an invalid value) instead of warning — MCP's strict:true") { strict = true }
           p.on("--column=SPEC", "Show an extracted value per row: [LABEL=][req|res:]kind:selector — e.g. header:x-request-id, RID=jsonpath:data.id, position:0:32 (repeatable; replaces this project's configured History columns)") { |v| column_specs << v }
           p.on("--no-columns", "Don't draw this project's configured History columns (see the TUI's Columns… on the History tab)") { no_columns = true }
           format_flag(p, [:text, :json, :jsonl, :har], "Output: text (default) | json (one array) | jsonl (one object per line) | har (one HAR 1.2 log)") { |f| format = f }
@@ -504,7 +506,7 @@ module Gori
           if scope_unconfigured
           elsif q = query
             filter = QL.parse(q, scope: lens)
-            Run.warn_query_terms("history", q)
+            Run.warn_query_terms("history", q, strict, store)
             # Two states where a `scope:` query runs CLEAN and lists nothing; an empty listing
             # cannot say which. Worded once, in `Run`, so the next surface to want them cannot
             # word them differently.
@@ -513,7 +515,7 @@ module Gori
             # yields the match-all EMPTY filter — silently dumping every flow,
             # the opposite of what the user asked. Refuse it instead.
             if !q.strip.empty? && filter == QL::EMPTY
-              abort_closing(store, "gori run history: query #{q.inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)")
+              Run.usage_abort("gori run history: query #{q.inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)", "QUERY_SYNTAX", store)
             end
             # The hide-static lens LAST, after the operator's own terms, the way the TUI and MCP
             # order it: a cheap `host LIKE` rejects a row before the lens is consulted.
@@ -630,20 +632,22 @@ module Gori
             # separator and the array closes in `ensure`, so a read that raises mid-stream still
             # leaves the rows before it as one valid document, as the fuzz stream does.
             array = format == :json
-            print '[' if array
-            begin
-              store.with_errors(rows).each_with_index do |r, i|
-                cols, cols_redacted = row_columns(store, r, prepared, include_sensitive, matcher) || {nil, false}
-                line = CLI::Output.flow_row_json(r, store.request_head(r.id), cols,
-                  include_sensitive: include_sensitive, columns_redacted: cols_redacted)
-                print ',' if array && i > 0
-                array ? print(line) : puts(line)
-              end
-            ensure
-              if array
-                begin
-                  puts ']'
-                rescue IO::Error # a closed pipe: nothing is reading the close either
+            CLI::Output.bulk do
+              print '[' if array
+              begin
+                store.with_errors(rows).each_with_index do |r, i|
+                  cols, cols_redacted = row_columns(store, r, prepared, include_sensitive, matcher) || {nil, false}
+                  line = CLI::Output.flow_row_json(r, store.request_head(r.id), cols,
+                    include_sensitive: include_sensitive, columns_redacted: cols_redacted)
+                  print ',' if array && i > 0
+                  array ? print(line) : puts(line)
+                end
+              ensure
+                if array
+                  begin
+                    puts ']'
+                  rescue IO::Error # a closed pipe: nothing is reading the close either
+                  end
                 end
               end
             end
@@ -655,7 +659,9 @@ module Gori
             # (it is the interactive read, not the feed a script or an agent captures) and the
             # note above promises the flag changes `--format json` alone. Stated at the call
             # site rather than defaulted, so the choice is visible where it is made.
-            rows.each { |r| puts CLI::Output.flow_row_text(r, row_columns(store, r, prepared, include_sensitive: true, matcher: matcher).try(&.[0])) }
+            CLI::Output.bulk do
+              rows.each { |r| puts CLI::Output.flow_row_text(r, row_columns(store, r, prepared, include_sensitive: true, matcher: matcher).try(&.[0])) }
+            end
           end
         end
       end

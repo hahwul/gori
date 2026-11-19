@@ -555,6 +555,10 @@ module Gori
             "bytes to start from — pass include_sensitive:true and follow `request_read_more` if it " \
             "is capped, or you will rebuild a redacted or truncated copy of them."
           end
+        # A flow resent with other headers is usually an authz test, which has its own tool.
+        if sources.includes?("flow_id") && shaping.includes?("headers")
+          remedy += " To replay a stored flow under other identities (auth headers), use authorize_start."
+        end
         "this call names #{named}. NOTHING was sent. #{remedy}"
       end
 

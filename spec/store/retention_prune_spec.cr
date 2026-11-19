@@ -128,4 +128,44 @@ describe "Store#prune retention cutoff" do
       (ids + more).select { |id| store.flow_row(id) }.should eq([ids[0], ids[1], ids[8], ids[9]] + more)
     end
   end
+
+  # One sweep is one writer transaction on a single-threaded process, so it deletes a bounded
+  # chunk — twice what arrived since the last sweep — rather than the whole excess. An over-cap
+  # project (here 20 flows captured unlimited, reopened under a cap of 5) used to lose all 15 in
+  # the first sweep, which at 402k flows froze capture and the TUI for 106 s.
+  it "drains an over-cap project a bounded chunk per sweep" do
+    path = File.tempname("gori-retention-prune", ".db")
+    begin
+      db = DB.open("sqlite3:#{path}?journal_mode=wal&busy_timeout=5000")
+      Gori::Store::Schema.migrate!(db)
+      seed = Gori::Store.new(db, nil, retention_flows: 0, prune_interval: 2)
+      ids = (1..20).map { |i| seed.insert_flow(pruned_request("/#{i}")) }
+      seed.close
+
+      capturing_log do |logs|
+        db = DB.open("sqlite3:#{path}?journal_mode=wal&busy_timeout=5000")
+        store = Gori::Store.new(db, nil, retention_flows: 5, prune_interval: 2)
+        begin
+          more = (21..22).map { |i| store.insert_flow(pruned_request("/#{i}")) }
+          store.flush
+          all = ids + more
+          # 22 rows, cap 5: the sweep after 2 inserts takes the oldest 4, not all 17.
+          all.select { |id| store.flow_row(id) }.should eq(all[4..])
+          logs.entries.map(&.message).select(&.starts_with?("retention:")).should eq([
+            "retention: dropped 4 oldest flow(s), keeping the newest 5 (settings retention.max_flows)",
+          ])
+          # It keeps draining while capture runs, and settles on exactly the newest 5.
+          more += (23..40).map { |i| store.insert_flow(pruned_request("/#{i}")) }
+          store.flush
+          (ids + more).select { |id| store.flow_row(id) }.should eq(more.last(5))
+        ensure
+          store.close
+        end
+      end
+    ensure
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
 end

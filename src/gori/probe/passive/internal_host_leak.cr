@@ -24,7 +24,7 @@ module Gori
 
         # The private-IP shape, from its one home in `BodyLeaks` — same ranges, same guards against
         # matching inside a version string, and no second spelling to drift.
-        PRIVATE_IP = BodyLeaks::PRIVATE_IP
+        class_getter private_ip : Regex { BodyLeaks.private_ip }
 
         # A hostname whose last label is a name that only resolves inside a network: mDNS `.local`,
         # the `.internal` / `.intranet` / `.lan` / `.corp` / `.localdomain` conventions.
@@ -33,7 +33,7 @@ module Gori
         # `api.internal-tools.example.com`, which is an ordinary public name and would have been a
         # standing false positive. The leading guard is the mirror, so `x.corp.example.com` (where
         # `corp` is not the last label) stays out too.
-        INTERNAL_HOST = /(?<![\w.-])(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:local|internal|intranet|lan|corp|localdomain)(?![\w.-])/i
+        class_getter internal_host : Regex { /(?<![\w.-])(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:local|internal|intranet|lan|corp|localdomain)(?![\w.-])/i }
 
         # Distinct (header, value) leaks reported per response. A proxy chain can stamp the same
         # address into half a dozen headers; the group accumulates evidence across flows anyway, so
@@ -55,7 +55,7 @@ module Gori
           # One pass over the head — ~1 KiB, already materialised and memoised on Context — decides
           # whether it is worth splitting into lines at all. Iterating the parsed HeaderList instead
           # would run two PCRE calls per header (~30 on an ordinary response) where this runs two.
-          return unless PRIVATE_IP.matches?(head) || INTERNAL_HOST.matches?(head)
+          return unless InternalHostLeak.private_ip.matches?(head) || InternalHostLeak.internal_host.matches?(head)
           reported = 0
           seen = Set(String).new
           # Skip the status line: it is the only line that is not a header, and a reason phrase
@@ -69,7 +69,7 @@ module Gori
             next if CLIENT_IP_HEADERS.includes?(name.downcase)
             value = line[(colon + 1)..].strip
             next if value.empty?
-            token = (PRIVATE_IP.match(value).try(&.[0])) || (INTERNAL_HOST.match(value).try(&.[0])) || next
+            token = (InternalHostLeak.private_ip.match(value).try(&.[0])) || (InternalHostLeak.internal_host.match(value).try(&.[0])) || next
             evidence = "#{safe(name)}: #{safe(token)}"
             next unless seen.add?(evidence)
             acc << Detection.new("internal_host_leak", Category::INFOLEAK, ctx.host, ctx.url,

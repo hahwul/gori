@@ -242,7 +242,13 @@ module Gori
     # sweeps regardless of what it passes.
     RETENTION_UNLIMITED = 0
     # Inserts between retention sweeps — amortizes the prune cost.
-    PRUNE_INTERVAL = 2_000
+    #
+    # A sweep deletes at most twice this many flows (see `prune`), so it is also what bounds one
+    # sweep's writer stall: each one runs on the writer fiber, and the rows it removes are the
+    # OLDEST, i.e. cold, so SQLite walks every one's overflow chain from disk to free it. At 2000
+    # a sweep at the default cap froze capture and the TUI for 0.3–2.5 s; at 500 it is a quarter
+    # of the rows per sweep, and the fixed part (two COUNTs, the h2 reap) is a few ms.
+    PRUNE_INTERVAL = 500
 
     # Newest `events` rows kept. Every surface writes them (job lifecycle, agent actions, binding
     # warnings, config changes — `spec/store/event_source_registry_spec.cr` is what counts the
@@ -869,11 +875,22 @@ module Gori
     # channel would otherwise raise into (and tear down) that fiber. Dropping the
     # late row on shutdown is the right degradation (mirrors insert_h2_frame).
     def insert_flow(req : CapturedRequest) : Int64
+      insert_flow_deferred(req).receive
+    end
+
+    # The same insert, without waiting for it: the returned channel answers the id once the row
+    # is committed (0 when the store is closing or the batch rolled back). For a caller that has
+    # more to do before it needs the id — the h2 frame pump, whose next frame may belong to
+    # another stream. The writer is FIFO, so a write the caller queues after receiving the id
+    # can never land before this row.
+    def insert_flow_deferred(req : CapturedRequest) : Channel(Int64)
       reply = Channel(Int64).new(1) # buffered: the writer must never block sending a reply
-      @writes.send(InsertFlow.new(req, reply))
-      reply.receive
-    rescue Channel::ClosedError
-      0_i64 # store closing — drop the late row instead of raising into the proxy fiber
+      begin
+        @writes.send(InsertFlow.new(req, reply))
+      rescue Channel::ClosedError
+        reply.send(0_i64) # store closing — drop the late row instead of raising into the proxy fiber
+      end
+      reply
     end
 
     # Insert many flows atomically (one writer transaction). Returns the committed
@@ -899,6 +916,15 @@ module Gori
       reply = Channel(Nil).new(1) # buffered: the writer must never block sending a reply
       @writes.send(UpdateResp.new(resp, reply))
       reply.receive
+    rescue Channel::ClosedError
+      nil
+    end
+
+    # The same update, queued without waiting for its commit. Nothing is dropped: a full
+    # channel still blocks the caller, as `update_response` does. Events still fire only after
+    # the commit, so no reader sees the row earlier; only the caller stops waiting.
+    def update_response_deferred(resp : CapturedResponse) : Nil
+      @writes.send(UpdateResp.new(resp, Channel(Nil).new(1)))
     rescue Channel::ClosedError
       nil
     end
@@ -935,9 +961,19 @@ module Gori
     def insert_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes,
                           repeater_id : Int64? = nil,
                           shape : WsShape = WsShape::DEFAULT, origin : String? = nil) : Nil
+      queue_ws_message(flow_id, direction, opcode, payload, repeater_id, shape, origin).try(&.receive)
+    end
+
+    # The same insert, queued: the returned channel answers once it commits (nil when the store
+    # is closing). The proxy relay does not wait, so a chatty socket rides the writer's batching
+    # instead of paying one commit per message; a full channel still blocks it, so nothing is
+    # dropped. Its `ts` is taken here, at capture, exactly as before.
+    def queue_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes,
+                         repeater_id : Int64? = nil,
+                         shape : WsShape = WsShape::DEFAULT, origin : String? = nil) : Channel(Nil)?
       reply = Channel(Nil).new(1) # buffered: the writer must never block sending a reply
       @writes.send(InsertWs.new(flow_id, repeater_id, now_us, direction, opcode, payload, reply, shape, origin))
-      reply.receive
+      reply
     rescue Channel::ClosedError
       nil
     end
@@ -1065,8 +1101,14 @@ module Gori
     # calls this; it is the one-shot/`spec` barrier, where correctness beats latency. A live
     # surface (the TUI) must NOT use it — it reports #fts_backlog instead of stalling.
     def flush : Nil
-      exec_task ->(_c : DB::Connection) { nil }
+      await_writes
       index_pending!
+    end
+
+    # Returns once every write queued before it has committed (or the store is closing): the
+    # barrier for a caller that queued writes without waiting and must now come after them.
+    def await_writes : Nil
+      exec_task ->(_c : DB::Connection) { nil }
     end
 
     # Indexes the whole FTS backlog, blocking until it is empty; returns the flows indexed.
@@ -1650,6 +1692,12 @@ module Gori
           # each time — the batch or the prune above may have retired the connection they ran
           # on, and indexing must not inherit a dead one.
           index_replies.each(&.send(index_batch_safely || 0))
+          # The callers just answered (and the subscribers just published to) hand work back
+          # to this fiber without ever leaving the run queue empty, and the scheduler polls I/O
+          # only when it is: under a sustained burst a new connection's accept, or any fiber
+          # parked on a timer, waited for the whole burst. After the replies, so batching and
+          # reply-after-commit are untouched. Same shape as `index_pending!`'s yield (#1791).
+          Fiber.yield
         end
         @writer_loop_exited = true # the loop is done; anything that raises now is the release
       ensure
@@ -1729,7 +1777,15 @@ module Gori
       trim_events(conn)
       return if @writer_conn_suspect # as above: do not run the retention sweep on a dead connection
       return if @retention_flows <= 0
-      return unless cutoff = oldest_excess_cutoff(conn, "flows", @retention_flows)
+      # At most TWICE what arrived since the last sweep, not the whole excess. One sweep is one
+      # writer transaction, and the whole process is one thread: an over-cap project (a cap
+      # lowered later, a `retention 0` capture or an archive import opened under the default cap)
+      # once deleted 402k flows in a single sweep and froze capture and the TUI for 106 s. Twice
+      # still takes the excess down by at least one interval per sweep while capture runs, and a
+      # project at its cap is back under it in one sweep, as before. Read before the writer loop
+      # zeroes the counter; a batch of imports can carry it past the interval.
+      at_most = Math.max(@inserts_since_prune, @prune_interval) * 2
+      return unless cutoff = oldest_excess_cutoff(conn, "flows", @retention_flows, at_most: at_most)
       dropped = 0_i64
       write_transaction(conn) do |c|
         dropped, reaped_conns = Store.delete_flows_through(c, cutoff)
@@ -1851,7 +1907,8 @@ module Gori
     end
 
     # The id of the newest row that has to go for `table` to hold at most `keep` rows, or nil
-    # when it already does. Everything `id <= cutoff` is then exactly the oldest excess.
+    # when it already does. Everything `id <= cutoff` is then exactly the oldest excess — or,
+    # with `at_most`, only its oldest `at_most` rows, so the caller deletes a bounded chunk.
     #
     # Counted and then seeked from the LOW end, not by walking the newest `keep` rows down from
     # the top: `COUNT(*)` reads the smallest index (or the table's leaf pages without decoding a
@@ -1863,12 +1920,13 @@ module Gori
     # peer process (a second gori on the project running its own sweep) could delete low rows in
     # between, and the stale count would push the offset past the excess and drop rows that were
     # meant to stay — irreversibly. The old single-statement form could only ever under-delete.
-    private def oldest_excess_cutoff(conn : DB::Connection, table : String, keep : Int32) : Int64?
+    private def oldest_excess_cutoff(conn : DB::Connection, table : String, keep : Int32,
+                                     at_most : Int32 = Int32::MAX) : Int64?
       return nil if keep <= 0 # a non-positive cap is "unlimited", as the old `LIMIT` read it
       conn.query_one?(
         "SELECT id FROM #{table} WHERE (SELECT COUNT(*) FROM #{table}) > ?1 " \
-        "ORDER BY id LIMIT 1 OFFSET (SELECT COUNT(*) FROM #{table}) - ?1 - 1",
-        keep, as: Int64)
+        "ORDER BY id LIMIT 1 OFFSET min((SELECT COUNT(*) FROM #{table}) - ?1, ?2) - 1",
+        keep, at_most, as: Int64)
     end
 
     # One gori.log line per sweep that actually removed history, naming the setting that

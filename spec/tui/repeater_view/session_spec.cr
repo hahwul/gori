@@ -73,4 +73,25 @@ describe "Gori::Tui::RepeaterView send history" do
     view.apply(Gori::Repeater::Result.new("HTTP/1.1 200 X\r\n\r\n".to_slice, nil, nil, 1_i64))
     view.send_history.should be_empty
   end
+
+  it "restores whether a send was the operator's Stop, and a duplicate keeps it" do
+    view = RepeaterView.new
+    view.load_blank
+    view.replace_request("GET /a HTTP/1.1\r\n\r\n")
+    view.sent_request = {view.target, view.request_text, false, true, nil}
+    view.apply(Gori::Repeater::Result.new(Bytes.empty, nil, nil, 1_i64, "connection refused"))
+    live = Gori::Repeater::LiveBody.new
+    view.live_begin(live)
+    live.stop
+    view.apply(Gori::Repeater::Result.new(Bytes.empty, nil, nil, 1_i64, "read failed"))
+    view.result_stopped?.should be_true
+
+    view.restore_send(view.send_history[0]).should be_nil
+    view.result_stopped?.should be_false # the red error, not "stopped before any response"
+    view.restore_send(view.send_history[1]).should be_nil
+    view.result_stopped?.should be_true
+    copy = RepeaterView.new
+    copy.duplicate_from(view)
+    copy.result_stopped?.should be_true
+  end
 end

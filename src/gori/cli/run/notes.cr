@@ -154,7 +154,7 @@ module Gori
                                          append : Bool, format : Symbol) : Nil
         doc = Notes.load(store)
         # By the note's STABLE id, inside the write transaction — see `Notes.update`.
-        id = doc.notes[resolve_note_index(store, doc, n, note_id, "gori run notes update")].id
+        id = doc.notes[resolve_note_index(store, doc, n, note_id, "gori run notes update", format)].id
         case Notes.update(store, id, body, append: append)
         when .busy?
           busy_abort("gori run notes update", "project is busy (write did not commit) — try again", store)

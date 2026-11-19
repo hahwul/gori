@@ -1365,8 +1365,8 @@ module Gori::Proxy
             record_opaque_upgrade(flow_id, resp, req, host, sent_req.target, moved)
           end
         ensure
-          # A 101 is printed/countable only when its tunnel ends. WebSocket frame writes above
-          # are synchronous, so this follows the complete captured transcript.
+          # A 101 is printed/countable only when its tunnel ends. The sink waits for the frame
+          # writes queued above first, so this follows the complete captured transcript.
           @sink.on_tunnel_complete(flow_id)
         end
         return false

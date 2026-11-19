@@ -67,6 +67,17 @@ describe "the one toast a link reports" do
       .toast.should end_with("· 2 frozen (2.0KB) · not frozen: store busy")
   end
 
+  it "counts a ref whose bytes the issue already held as linked, never as frozen now" do
+    # Link & freeze on a ref already frozen still files its link in the same write.
+    Runner::LinkOutcome.new("issue #3", 1, 1, 0, [] of Int64, 0_i64, nil, [12_i64])
+      .toast.should eq("linked to issue #3 · already frozen as evidence #12")
+    Runner::LinkOutcome.new("issue #3", 4, 4, 0, [11_i64, 13_i64], 2_000_i64, nil, [5_i64, 6_i64])
+      .toast.should eq("linked 4 flows to issue #3 · 2 frozen (2.0KB) · 2 already frozen")
+    finish = runner_code("runner/evidence.cr")[/private def finish_link.*?\n  end/m].not_nil!
+    finish.should contain("fresh = frozen - dups")
+    finish.should contain("dups.includes?(id) ? 0_i64 : s.bytes")
+  end
+
   it "does not claim a link it did not write" do
     Runner::LinkOutcome.new("issue #3", 1, 0, 0, [] of Int64, 0_i64, nil)
       .toast.should eq("already linked to issue #3")
@@ -200,5 +211,17 @@ describe "History's Add issue" do
     write = runner_code("runner/evidence.cr")[/private def write_form_snapshots.*?\n  end/m].not_nil!
     write.should contain("write_frozen(issue_id, form.snapshots, false)") # linked by the insert
     write.should contain("not frozen: #{"#"}{refusal}")
+  end
+end
+
+# Freezing bytes the issue already holds writes nothing and says which copy holds them (L#7).
+describe "Runner.already_frozen_line" do
+  it "names the copy, and counts several" do
+    Runner.already_frozen_line([5_i64]).should eq("already frozen as evidence #5 — nothing written")
+    Runner.already_frozen_line([5_i64, 6_i64]).not_nil!.should start_with("2 already frozen")
+    # Whole inside 80×24's 59 toast columns, ids and counts up to four digits.
+    Screen.display_width(Runner.already_frozen_line([9999_i64]).not_nil!).should be <= 59
+    Screen.display_width(Runner.already_frozen_line((1_i64..9999_i64).to_a).not_nil!).should be <= 59
+    Runner.already_frozen_line([] of Int64).should be_nil
   end
 end

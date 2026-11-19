@@ -232,7 +232,7 @@ module Gori
         # only other symptom is the wizard silently re-opening on every launch.
         notice = wizard_error.try { |e| "setup wizard: #{e}" } || settings_warning
         if open_db_path
-          outcome, db_error = open_and_run(project_for_db_path(open_db_path), term)
+          outcome, db_error = open_and_run(project_for_db_path(open_db_path), term, notice: notice)
           return if outcome == :quit
           notice = db_error || notice
         end
@@ -362,7 +362,12 @@ module Gori
     #
     # `focus_flow_id` opens the session on that flow's History detail (see
     # `Runner#focus_flow_on_start`).
-    private def open_and_run(project : Project, term : Termisu, focus_flow_id : Int64? = nil) : {Symbol, String?}
+    #
+    # `notice` is the picker's line for a `--db` open, which skips the picker: said on entry
+    # instead (toast + ring), or a corrupt settings.json ran the whole session on defaults with
+    # nothing on screen to say so.
+    private def open_and_run(project : Project, term : Termisu, focus_flow_id : Int64? = nil,
+                             notice : String? = nil) : {Symbol, String?}
       # Pick up any bind address / verify-upstream toggle changed via Settings since startup
       # (the previous session kept its values; this one opens on the new ones). `startup_*`,
       # not the bare globals: a `-l`/`-p` flag lives in its own layer now, and dropping it here
@@ -389,6 +394,7 @@ module Gori
       begin
         runner = Tui::Runner.new(session, term)
         runner.focus_flow_on_start = focus_flow_id
+        notice.try { |n| runner.status(n, :error) }
         # Verify on but no CA trust store resolvable (e.g. a static musl build on a host
         # without a standard CA bundle): every HTTPS flow would fail upstream verification
         # (#323). Surface it once at startup — the per-flow error (#332) explains each failure,
@@ -428,7 +434,7 @@ module Gori
       end
       loop do
         event = session.flow_events.receive
-        next unless row = session.store.flow_row(event.id)
+        next unless row = capture_event_row(session.store, event)
         next unless completion.count?(event, row)
         # An upgraded flow emits an :updated event for its handshake and another :updated event
         # for each captured message. Count it only on the one completion event after the tunnel
@@ -462,6 +468,11 @@ module Gori
     # One completed flow on the capture stream: an array element (comma-led after the first),
     # a JSON line, or a text row.
     # A JSON row carries an errored flow's `error`, which the list read leaves out (#1680).
+    # The row an event names, unread when the event could never count (`may_count?`).
+    private def capture_event_row(store : Store, event : Store::FlowEvent) : Store::FlowRow?
+      store.flow_row(event.id) if CaptureCompletion.may_count?(event)
+    end
+
     private def print_capture_row(store : Store, row : Store::FlowRow, format : Symbol, *, first : Bool) : Nil
       case format
       when :json

@@ -913,6 +913,7 @@ module Gori
       # Decided at most ONCE per response and only if a `text_only?` descriptor actually binds
       # off it — the check decodes the entity, so a project of cookie rules never pays for it.
       lossy = nil.as(Bool?)
+      changed = false
       picked.each do |c|
         # A body-scoped descriptor on a response gori never buffered cannot possibly match, and
         # saying "found nothing" would blame the selector for gori's own decision. Say which it
@@ -942,10 +943,13 @@ module Gori
           lossy = Gori::TokenExtract.text_lossy?(raw) if lossy.nil?
           report_scrubbed(c.rule, flow_id) if lossy
         end
-        bind(c.rule, value, active, now)
+        changed = true if bind(c.rule, value, active, now)
         bound << c.rule.name
       end
-      unless bound.empty?
+      # Only a value that CHANGED moves the revision. A cookie every response re-sets to the
+      # same value bumped it per response, and that reset the miss throttle below for every
+      # other rule (one `extract_miss` row per response) and repainted every editor.
+      if changed
         @mutex.synchronize { @rev &+= 1 }
         # Repaint every `$KEY` token in every open editor: an unbound name paints like an
         # unknown key and a bound one like a set var, and that difference is the operator's
@@ -957,13 +961,19 @@ module Gori
 
     # Write one observed value into the table it belongs in: the ACTIVE slot's when that slot
     # claims this rule, else the global one. `candidates` has already refused every other
-    # combination, so this is a two-way choice rather than a search.
+    # combination, so this is a two-way choice rather than a search. False when the table
+    # already held this rule's same value: the revision need not move, though the bound time does.
     private def bind(rule : Store::ExtractRule, value : String, active : SessionSlot?,
-                     now : Time) : Nil
+                     now : Time) : Bool
       owner = (active && active.claims?(rule.name)) ? active.name : nil
       @mutex.synchronize do
         table = owner ? (@slot_values[owner] ||= {} of String => Bound) : @values
+        prior = table[rule.name]?
+        # Always re-stamped: `RequestMacro::Runner#settle` and `SessionRefresh#rebound_since`
+        # read a moved `bound_at` as "this step rebound it", and a token the server re-sets to
+        # the same value is still a successful refresh.
         table[rule.name] = Bound.new(value, rule.id, now)
+        !(prior && prior.value == value && prior.rule_id == rule.id)
       end
     end
 

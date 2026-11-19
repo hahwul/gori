@@ -708,7 +708,7 @@ describe "Gori::Probe.cwe" do
   it "leaves exactly the deliberately unmapped codes without a CWE" do
     unmapped = Gori::Probe::REMEDIATION.keys.reject { |c| Gori::Probe::CWE.has_key?(c) }
     # jwt_in_body/jwt_in_ws are Info notes on where tokens flow — handing the client its own
-    # token is the design, not a weakness (see Passive::Secrets::JWT). cookie_broad_domain is an
+    # token is the design, not a weakness (see Passive::Secrets.jwt). cookie_broad_domain is an
     # Info hardening note (a Domain scoped to a parent domain) that no CWE fits cleanly — 1275 is
     # SameSite, 565/732/668 all overreach — so it stays unmapped rather than borrowing a wrong id.
     # ws_cross_site_cookie describes an accepted handshake. Cross-site access may be intentional.

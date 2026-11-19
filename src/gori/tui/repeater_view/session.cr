@@ -157,7 +157,7 @@ class Gori::Tui::RepeaterView
   # unexpanded, which is why it is not read back from the History flow) and what came back.
   # Session-only, oldest first; a restore-then-send appends, it never truncates.
   record SendEntry, target : String, request : String, http2 : Bool, auto_cl : Bool, sni : String?,
-    tls_preset : String?, result : Repeater::Result, at : Time
+    tls_preset : String?, result : Repeater::Result, at : Time, stopped : Bool = false
 
   SEND_HISTORY_CAP = 50
   getter send_history = [] of SendEntry
@@ -172,7 +172,7 @@ class Gori::Tui::RepeaterView
   private def remember_send(result : Repeater::Result) : Nil
     return unless send_history_kind? && (sent = @sent_request)
     target, text, http2, auto_cl, sni = sent
-    @send_history << SendEntry.new(target, text, http2, auto_cl, sni, @tls_preset, result, Time.local)
+    @send_history << SendEntry.new(target, text, http2, auto_cl, sni, @tls_preset, result, Time.local, @result_stopped)
     @send_history.shift if @send_history.size > SEND_HISTORY_CAP
   end
 
@@ -201,6 +201,7 @@ class Gori::Tui::RepeaterView
     @sent_request = {entry.target, entry.request, entry.http2, entry.auto_cl, entry.sni}
     @prev_result = @result
     @result = entry.result
+    @result_stopped = entry.stopped
     @result_times = nil
     @group_results = nil
     reset_result_caches
@@ -356,12 +357,40 @@ class Gori::Tui::RepeaterView
   def request_side_matches?(target : String, request : String, http2 : Bool, auto_cl : Bool,
                             sni : String?, ws_keep_key : Bool = false,
                             ws_http_only : Bool = false, tls_preset : String? = nil) : Bool
-    text = request_text
-    @target == target && (text == request || @row_reflection == {request, text}) &&
-      @http2 == http2 && @auto_content_length == auto_cl &&
+    request_fields_match?(target, http2, auto_cl, sni, ws_keep_key, ws_http_only, tls_preset) &&
+      request_text_matches?(request)
+  end
+
+  # The same answer for the row's stored bytes, which the reconcile poll asks of every tab on
+  # every commit. Serialising the whole pane to compare it with a row that did not move was
+  # O(all repeater bytes) per tick (15 MB of repeaters: ~36 ms of every poll), so a row equal
+  # byte for byte to the one this pane last matched, at the same editor revision, is answered
+  # with a memcmp. Any edit moves `TextArea#edits` and any re-seed goes through `set_text`,
+  # which moves it too.
+  def request_side_matches?(target : String, request : Bytes, http2 : Bool, auto_cl : Bool,
+                            sni : String?, ws_keep_key : Bool = false,
+                            ws_http_only : Bool = false, tls_preset : String? = nil) : Bool
+    return false unless request_fields_match?(target, http2, auto_cl, sni, ws_keep_key, ws_http_only, tls_preset)
+    rev = @editor.edits
+    if (m = @matched_row) && m[1] == rev && m[0] == request && hex_buffer_text.nil?
+      return true
+    end
+    return false unless request_text_matches?(String.new(request))
+    @matched_row = hex_buffer_text.nil? ? {request, rev} : nil
+    true
+  end
+
+  private def request_fields_match?(target : String, http2 : Bool, auto_cl : Bool, sni : String?,
+                                    ws_keep_key : Bool, ws_http_only : Bool, tls_preset : String?) : Bool
+    @target == target && @http2 == http2 && @auto_content_length == auto_cl &&
       @ws_keep_key == ws_keep_key && @ws_http_only == ws_http_only &&
       @tls_preset == Settings.tls_preset_normalize(tls_preset) &&
       (sni_override || "") == (sni || "")
+  end
+
+  private def request_text_matches?(request : String) : Bool
+    text = request_text
+    text == request || @row_reflection == {request, text}
   end
 
   # Auto Content-Length on a stored row whose header disagrees with its body: the pane shows
@@ -539,6 +568,7 @@ class Gori::Tui::RepeaterView
     else
       @result = nil
     end
+    @result_stopped = src.@result_stopped
     @result_times = src.@result_times.try(&.dup)
     @prev_result = nil
     @original_lines = [] of String
