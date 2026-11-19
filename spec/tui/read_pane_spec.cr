@@ -323,6 +323,30 @@ describe Gori::Tui::ReadPane do
     end
   end
 
+  # Wrap off, a ^F jump (goto_line with a column) seats the match mid-pane; past
+  # `Wrap::FIND_PAN_MAX_CHARS` it lands on the line start instead of panning.
+  describe "a ^F jump with wrap off" do
+    it "seats the match whole in view, and skips the pan on a line over the ceiling" do
+      Gori::Settings.wrap_lines = false
+      pane = ReadPane.new(wrap: true)
+      pane.source(["#{"a" * 1500}NEEDLE#{"b" * 500}"])
+      render_pane(pane)
+      pane.goto_line(0, 1500)
+      xs, cw = pane.xscroll, pane.@last_cw
+      (xs <= 1500 && 1500 + "NEEDLE".size <= xs + cw).should be_true
+
+      cx = Wrap::FIND_PAN_MAX_CHARS
+      big = ReadPane.new(wrap: true)
+      big.source(["x", "#{"a" * cx}NEEDLE"])
+      render_pane(big)
+      big.goto_line(1, cx)
+      big.xscroll.should eq(0)
+      big.cursor.cy.should eq(1)
+    ensure
+      Gori::Settings.wrap_lines = true
+    end
+  end
+
   describe "line_select_only" do
     # For the Comparer: a screen row is TWO columns of a diff, so a char rectangle would address
     # cells that are not adjacent on screen. Selection is whole lines, and there is no word.

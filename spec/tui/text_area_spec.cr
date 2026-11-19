@@ -1271,3 +1271,27 @@ describe "Gori::Tui::TextArea#goto_line onto a concealed match" do
     ta.text.should contain("¦base64§")
   end
 end
+
+describe "Gori::Tui::TextArea#goto_line with wrap off" do
+  # A ^F jump seats the match mid-pane (caret-follow would leave it on the right edge); past
+  # `Wrap::FIND_PAN_MAX_CHARS` the caret lands on the line start instead of panning.
+  it "seats the match whole in view, and skips the pan on a line over the ceiling" do
+    area = Gori::Tui::TextArea.new("#{"a" * 1500}NEEDLE#{"b" * 500}")
+    area.follow_x = true
+    area.goto_line(1, 1500)
+    area.render(Screen.new(MemoryBackend.new(80, 10)), Rect.new(0, 0, 80, 10), cursor: true)
+    xs, cw = area.@xscroll, area.@last_cw
+    (xs <= 1500 && 1500 + "NEEDLE".size <= xs + cw).should be_true
+    area.move(0, 1) # ordinary caret-follow afterwards: no re-centre
+    area.render(Screen.new(MemoryBackend.new(80, 10)), Rect.new(0, 0, 80, 10), cursor: true)
+    area.@xscroll.should eq(xs)
+
+    cx = Gori::Tui::Wrap::FIND_PAN_MAX_CHARS
+    big = Gori::Tui::TextArea.new("x\n#{"a" * cx}NEEDLE")
+    big.follow_x = true
+    big.goto_line(2, cx)
+    big.render(Screen.new(MemoryBackend.new(80, 10)), Rect.new(0, 0, 80, 10), cursor: true)
+    big.@xscroll.should eq(0)
+    big.cy.should eq(1)
+  end
+end

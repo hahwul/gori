@@ -89,6 +89,26 @@ describe ProjectController do
     end
   end
 
+  # The sandbox and lens rows apply at once: esc never reverts THEIR action, so their tail
+  # names only what it does cancel — another row's unapplied edit.
+  it "does not promise esc cancels an instant toggle row" do
+    TuiContract.with_session("project-settings-instant") do |session|
+      host = ApplySpyHost.new(session)
+      host.tab = :project
+      ctl = ProjectController.new(host)
+      ctl.on_enter
+      ctl.view.focus_pane(:settings)
+      ctl.view.select_setting(ProjectView::SETTINGS_SANDBOX_ROW)
+      ctl.body_hint(:body).should end_with("esc sub-tabs")
+      ctl.view.select_setting(11)
+      settings_type(ctl, "9")
+      [ProjectView::SETTINGS_SANDBOX_ROW, 0].each do |row|
+        ctl.view.select_setting(row)
+        ctl.body_hint(:body).should end_with("· esc cancel edits")
+      end
+    end
+  end
+
   # Every other multi-line editor deletes forward on Delete; the DESCRIPTION card dropped it.
   it "deletes forward on Delete in the DESCRIPTION editor" do
     TuiContract.with_session("project-desc-delete") do |session|

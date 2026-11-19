@@ -64,6 +64,10 @@ module Gori::Tui
       @saving = nil.as(TextField?)
       @notice = nil.as(String?)
       @replace_name = nil.as(String?)
+      # Whether the last `render` drew the card (false: the too-small line), and whether the
+      # previous key was an esc a bad number refused — see `escape_exit`.
+      @drawn = true
+      @esc_flagged = false
     end
 
     # Open pre-seeded to List (the ^L / "Add a List payload set" verb).
@@ -197,6 +201,7 @@ module Gori::Tui
       key = ev.key
       f = focused
       @notice = nil # an outcome is shown until the next key, then gone
+      flagged, @esc_flagged = @esc_flagged, false
       if sv = @saving
         return handle_save_name(ev, sv)
       end
@@ -206,7 +211,7 @@ module Gori::Tui
         return outcome
       end
 
-      return commit_or_flag if key.escape?
+      return escape_exit(flagged) if key.escape?
       if key.tab?
         move_row(1); return :stay
       elsif key.back_tab?
@@ -501,13 +506,32 @@ module Gori::Tui
     # Every exit applies, so a numeric field that does not parse would apply as the
     # fallback `num`/`num64` give it (`To: ten` became `1-0`, 0 requests) without a word.
     # Such a field blocks the exit instead: focus moves to it and the hint row says why.
-    private def commit_or_flag : Symbol
+    private def commit_or_flag(tail : String = "fix it to apply") : Symbol
       bad = field_rows.find { |f| bad_number?(f) }
       return :commit unless bad
       @sel = rows.index(bad) || @sel
       @path_complete.close
-      @notice = "#{field_label(bad)} must be a whole number — fix it to apply"
+      # An ASCII-digit value only fails to parse by overflowing: "whole number" would be wrong.
+      # `[0-9]`, not `\d`: that one also matches full-width digits, which do not parse at all.
+      what = @fields[bad].value.strip.matches?(/\A[-+]?[0-9]+\z/) ? "is out of range" : "must be a whole number"
+      @notice = "#{field_label(bad)} #{what} · #{tail}"
       :stay
+    end
+
+    # Esc applies, and a bad number refuses it once; a second esc in a row closes WITHOUT
+    # applying (the set stays as it was), so esc always gets out — the premise
+    # `Runner.quit_chord_claimed?` yields ^C/^D to a modal on. A card the window is too small
+    # to draw still applies what parses (#371), but never flags a field nobody can see.
+    private def escape_exit(flagged : Bool) : Symbol
+      return :cancel if flagged
+      return unseen_exit unless @drawn
+      outcome = commit_or_flag("esc again closes without applying")
+      @esc_flagged = outcome == :stay
+      outcome
+    end
+
+    private def unseen_exit : Symbol
+      field_rows.any? { |f| bad_number?(f) } ? :cancel : :commit
     end
 
     private def bad_number?(f : Symbol) : Bool
@@ -571,6 +595,7 @@ module Gori::Tui
 
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
+      @drawn = !box.nil?
       unless box
         Overlay.too_small(screen, area, "payload set editor needs a larger window")
         return
@@ -786,10 +811,13 @@ module Gori::Tui
     # --- mouse ---------------------------------------------------------------
     # Focus the row under a click; place the List caret when the click lands in the
     # editor. A click outside the card APPLIES (esc semantics) — the same dismissal the
-    # shell used to run through apply_close_fuzz_set.
+    # shell used to run through apply_close_fuzz_set. A card too small to draw closes as esc
+    # does there (`unseen_exit`).
     def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      @esc_flagged = false # a click is a key like any other: the next esc asks again
       box = overlay_box(area)
-      return commit_or_flag if box.nil? || !box.contains?(mx, my)
+      return unseen_exit if box.nil?
+      return commit_or_flag unless box.contains?(mx, my)
       if my == box.y + 1
         @sel = 0
         sync_path_complete

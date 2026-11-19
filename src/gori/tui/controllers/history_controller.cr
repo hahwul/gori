@@ -565,9 +565,11 @@ module Gori::Tui
         end
         # `^F find` right behind the arrows: it is the pane's only way to search, nothing else
         # names it (the Editor scope has no menu rows), and the hints drop from the right. Not
-        # on a hex dump, which ^F refuses.
+        # on a hex dump, which ^F refuses. The literal ^F, not `editor.find`'s binding: that verb
+        # is Editor-scope and unreachable over the detail, which only the Runner's hard-coded ^F
+        # guard answers — a keyset's `/` (vim) named here did nothing.
         nav = if @history.detail_navigable?
-                "↑/↓ move · #{Hotkeys.binding_label(reg, "editor.find", "^F")} find"
+                "↑/↓ move · ^F find"
               else
                 "↑/↓ scroll"
               end

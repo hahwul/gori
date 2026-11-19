@@ -8,7 +8,7 @@ class Gori::Tui::RepeaterView
   # off-screen — so the comparison and the re-anchor both happen in rows (Wrap).
   # Falls back to the line-based arithmetic before the first render, when no width is
   # known yet and nothing has been laid out to disagree with.
-  private def ensure_resp_visible(view_h : Int32) : Nil
+  private def ensure_resp_visible(view_h : Int32, *, find : Bool = false) : Nil
     return if view_h <= 0
     cy = @resp_cursor.cy
     cw = @resp_last_cw
@@ -22,7 +22,7 @@ class Gori::Tui::RepeaterView
       @scroll = 0 if @scroll < 0
       # The horizontal half, and the only way sideways with wrap off: ⇧←/→ extends the read
       # selection here (the h-scroll binding is gone), so the caret is what pans the view.
-      ensure_resp_visible_x(cw, size, line_at, off)
+      ensure_resp_visible_x(cw, size, line_at, off, find)
       return
     end
     @resp_xscroll = 0 # nothing sits off to the side of a wrapped row
@@ -45,8 +45,9 @@ class Gori::Tui::RepeaterView
   # second one (a per-frame clamp against the widest visible row) is not merely redundant but
   # actively wrong: its ceiling is one column short of what an end-of-line caret needs, so
   # the caret vanished on exactly the longest line on screen.
+  # `find`: a ^F jump seats the match mid-pane (`Wrap.find_xscroll`), as the History detail.
   private def ensure_resp_visible_x(cw : Int32, size : Int32,
-                                    drawn_at : Int32 -> String, off : Int32) : Nil
+                                    drawn_at : Int32 -> String, off : Int32, find : Bool = false) : Nil
     if cw <= 0 || size <= 0
       @resp_xscroll = 0
       return
@@ -57,6 +58,10 @@ class Gori::Tui::RepeaterView
       return
     end
     curx = Wrap.row_col(line, nil, 0, (@resp_cursor.cx + off).clamp(0, line.size), reveal: @reveal)
+    if find
+      @resp_xscroll = Wrap.find_xscroll(curx, cw)
+      return
+    end
     @resp_xscroll = curx if curx < @resp_xscroll
     @resp_xscroll = curx - cw + 1 if curx >= @resp_xscroll + cw
     @resp_xscroll = 0 if @resp_xscroll < 0

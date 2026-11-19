@@ -23,15 +23,18 @@ module Gori::Tui
       @editor = TextArea.new(text)
     end
 
+    # The stub as authored, every line keeping its own terminator (`TextArea#wire_text`): a stub
+    # is the operator's bytes (P7), and the LF-joined `TextArea#text` rewrote a stored CRLF stub
+    # to LF — and marked the rule form dirty — on a mere open and close.
     def text : String
-      @editor.text
+      @editor.wire_text
     end
 
     # Live feedback on whether what is in the buffer would actually answer a request. A stub
     # that does not parse is refused at save time, so saying so here is what keeps that from
     # being a surprise.
     def status_line : String
-      body = @editor.text
+      body = text
       return "empty — a stub needs at least a status line (e.g. 200 OK)" if body.blank?
       return "invalid — first line must be a status (200 · 200 OK · HTTP/1.1 200 OK)" unless RuleStub.valid?(body)
       RuleStub.summary(body, "")

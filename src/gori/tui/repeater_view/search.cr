@@ -102,10 +102,12 @@ class Gori::Tui::RepeaterView
       size, line_at = resp_line_source
       return if size <= 0
       cy = (n - 1).clamp(0, size - 1)
-      @resp_cursor.sync(cy, cx > 0 ? cx.clamp(0, line_at.call(cy).size) : 0)
+      line = line_at.call(cy)
+      cx = Wrap.find_jump_cx(line, cx) unless resp_wrap? # too long to pan to: the line start
+      @resp_cursor.sync(cy, cx > 0 ? cx.clamp(0, line.size) : 0)
       @scroll = cy
       @scroll_sub = resp_caret_sub
-      ensure_resp_visible(@resp_last_h) if @resp_last_h > 0 # wrap off: pan to the column
+      ensure_resp_visible(@resp_last_h, find: cx > 0) if @resp_last_h > 0 # wrap off: the match mid-pane
     else
       @scroll = (n - 1).clamp(0, {resp_line_count - 1, 0}.max)
     end

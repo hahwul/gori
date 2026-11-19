@@ -137,6 +137,28 @@ describe "FuzzerController#fuzz_focus_chain_pane" do
   end
 end
 
+# Esc on the converter list Tab opened closes the list; only the next esc discards the chain.
+describe "FuzzerController esc in the CHAIN pane" do
+  it "closes an open converter list before it discards the chain" do
+    with_fuzzer_controller do |ctl|
+      ctl.fuzz_new
+      view = ctl.current_view.not_nil!
+      view.load_request("https://h", "§x§ HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+      view.focus_pane(:template)
+      ctl.fuzz_focus_chain_pane
+      "md5".each_char { |c| view.handle_chain_pane_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+      tab = Termisu::Event::Key.new(Termisu::Input::Key::Tab)
+      2.times { ctl.handle_editor_tab(tab) } # accept md5, then list every converter
+      esc = Termisu::Event::Key.new(Termisu::Input::Key::Escape)
+      ctl.handle_body_key(esc)
+      view.chain_pane_active?.should be_true
+      view.@chain_pane.value.should eq("md5 > ")
+      ctl.handle_body_key(esc)
+      view.chain_pane_active?.should be_false
+    end
+  end
+end
+
 # The Set and Advanced cards commit to the view they were opened on. Reconcile runs under the
 # modal, so a peer closing that session re-anchors `current_view` on a neighbour.
 describe "FuzzerController — a card's commit after a peer closed its session" do

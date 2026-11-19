@@ -417,4 +417,26 @@ describe "Gori::Tui::RepeaterView diff pane decoration memo" do
     b.bg_at(b.row(row).index!("NEEDLE"), row).should eq(Theme.yellow)
     view.resp_cursor.cx.should eq(600)
   end
+
+  # Wrap off: the jump seats the match mid-pane, and a line past the ceiling is not panned.
+  it "seats a wrap-off ^F match whole in view, and skips the pan on a line over the ceiling" do
+    Gori::Settings.wrap_lines = false
+    rect = Rect.new(0, 0, 80, 14)
+    view = loaded_view("#{"a" * 1500}NEEDLE#{"b" * 500}")
+    view.render(Screen.new(MemoryBackend.new(80, 14)), rect)
+    view.goto_response_line(4, 1500)
+    view.render(Screen.new(MemoryBackend.new(80, 14)), rect)
+    xs, cw = view.@resp_xscroll, view.@resp_last_cw
+    (xs <= 1500 && 1500 + "NEEDLE".size <= xs + cw).should be_true
+
+    cx = Wrap::FIND_PAN_MAX_CHARS
+    big = loaded_view("#{"a" * cx}NEEDLE")
+    big.render(Screen.new(MemoryBackend.new(80, 14)), rect)
+    big.goto_response_line(4, cx)
+    big.render(Screen.new(MemoryBackend.new(80, 14)), rect)
+    big.@resp_xscroll.should eq(0)
+    big.resp_cursor.cy.should eq(3)
+  ensure
+    Gori::Settings.wrap_lines = true
+  end
 end

@@ -34,6 +34,22 @@ describe Gori::Tui::IssuesView do
     end
   end
 
+  # A peer deleting the only marked issue leaves a mark that resolves to nothing: it must not
+  # turn the export into an empty list (refused as "no issues match the filter").
+  it "exports everything when every mark is stale" do
+    with_store do |store|
+      marks_view(store) do |view, ids|
+        _crit, high, _low, _info = ids
+        view.select_index(1)
+        view.toggle_mark
+        store.delete_issue(high)
+        view.reload(store)
+        view.mark_count.should eq(1) # the stale mark is kept, it just fails to resolve
+        view.export_selection.should be_nil
+      end
+    end
+  end
+
   # A host as wide as the row used to take every column right of the status tag, leaving the
   # title — the one thing naming the finding — zero cells.
   it "keeps the title on screen beside a very long host" do

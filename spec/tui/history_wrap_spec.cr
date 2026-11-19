@@ -289,4 +289,33 @@ describe "Gori::Tui::HistoryView detail soft wrap" do
       view.detail_read.cx.should eq(cx)
     end
   end
+
+  # Wrap off, a ^F jump seats the match mid-pane — caret-follow alone left a forward step's
+  # match on the right edge, one char of it shown — and past `Wrap::FIND_PAN_MAX_CHARS` it
+  # lands on the line start instead of panning (each step walked the line from char 0).
+  it "seats a wrap-off ^F match whole in view, and skips the pan on a line over the ceiling" do
+    Gori::Settings.wrap_lines = false
+    with_store do |store|
+      line = "#{"a" * 1500}NEEDLE#{"b" * 500}"
+      view = response_view(store, line)
+      rect = Rect.new(0, 0, 80, 20)
+      view.render_detail(Screen.new(MemoryBackend.new(80, 20)), rect)
+      view.goto_detail_line(BODY_LI + 1, 1500)
+      view.render_detail(Screen.new(MemoryBackend.new(80, 20)), rect)
+      xs, cw = view.@detail_xscroll, view.@detail_last_cw
+      (xs <= 1500 && 1500 + "NEEDLE".size <= xs + cw).should be_true
+    end
+    with_store do |store|
+      cx = Wrap::FIND_PAN_MAX_CHARS
+      view = response_view(store, "#{"a" * cx}NEEDLE")
+      rect = Rect.new(0, 0, 80, 20)
+      view.render_detail(Screen.new(MemoryBackend.new(80, 20)), rect)
+      view.goto_detail_line(BODY_LI + 1, cx)
+      view.render_detail(Screen.new(MemoryBackend.new(80, 20)), rect)
+      view.@detail_xscroll.should eq(0)
+      view.detail_read.cy.should eq(BODY_LI)
+    end
+  ensure
+    Gori::Settings.wrap_lines = true
+  end
 end

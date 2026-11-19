@@ -5972,7 +5972,10 @@ and a TARGET left in INS kept typing into the URL on the next visit.
 
 - **A form asks once.** `DiscardGuard` (the hotkey editor's rule, now shared by `FormOverlay` and
   `IssueForm`): an untouched form closes on one `esc`, a changed one says `not saved yet — esc again
-  discards`, and any other key withdraws the question. A pasted `esc` is neither the question nor its answer.
+  discards`, and any other key withdraws the question. A click outside the card asks the same question
+  (#1941). A pasted `esc` is neither the question nor its answer.
+- **`esc` always gets out.** A modal may refuse the first `esc` (the Fuzzer payload card over a bound that is
+  not a number), never the second: the runner yields ^C/^D to a modal on that premise (#1941).
 - **Project settings cancels.** `esc` drops every unapplied edit in the card back to what is stored, pin
   state included, and nothing is rebound. `↵`, moving off the card, Tab and a click out still apply, as before.
 - **INS is per visit.** A Repeater or Fuzzer TARGET returns to READ when focus leaves it by any route, which
@@ -5981,4 +5984,14 @@ and a TARGET left in INS kept typing into the URL on the next visit.
 
 Not done: a Fuzzer RESULTS filter on `/`. It collides with the strip filter behind `T` under the helix and vim
 keysets, and R1 allows that only by an allowlist entry, which a new verb does not get to add for itself.
+
+### 2026-11-19: a Find jump pans to its match only on a line it can pan cheaply (#1941)
+
+With wrap off, a ^F jump seats the match mid-pane (`Wrap.find_xscroll`), so the whole match and context on
+both sides are in view; caret-follow alone left a forward step's match on the right edge. Panning is O(column)
+today — `Wrap.row_col` walks the line from char 0 and every frame's `Highlight.slice_left` re-walks the columns
+scrolled off — so on a line longer than `Wrap::FIND_PAN_MAX_CHARS` (50,000 chars; a release-build step is about
+20 ms there on a non-ASCII line, 610 ms at 1.6 M) the jump lands on the line start, as before #1938: the match
+is counted and its line reached. The ceiling goes away once both walks resume from a checkpoint the way wrap
+mode does with `ClusterMarks`.
 

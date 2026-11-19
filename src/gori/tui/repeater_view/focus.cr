@@ -89,12 +89,16 @@ class Gori::Tui::RepeaterView
     set_focus(:target)
   end
 
+  # Entries (the ring from the tab bar, ↑ from the request): READ, as `focus_resume` — `set_focus`
+  # keeps INS when focus is already on TARGET, which is where a ring that left from it returns.
   def focus_first : Nil
     set_focus(:target)
+    focus_resume
   end
 
   def focus_last : Nil
     set_focus(pane_drawn?(:response) ? :response : :target)
+    focus_resume
   end
 
   # Re-entry from the tab bar / strip: the pane stays, the ^S SNI sub-field does not — the

@@ -91,16 +91,19 @@ module Gori::Tui
     private def settings_hint : String
       pending = @project_view.settings_dirty? || @project_view.protos_dirty?
       esc = pending ? "esc cancel" : "esc sub-tabs"
+      # The sandbox and lens rows apply at once, so esc reverts nothing of THEIRS: only the
+      # other rows' unapplied edits, which is what their tail names.
+      instant = pending ? "esc cancel edits" : "esc sub-tabs"
       if @project_view.settings_text_row?
         pending ? "type to edit · ↵ apply · esc cancel · ←/→ cursor · ↑/↓ move" : "type to edit · ↵ apply · ←/→ cursor · ↑/↓ move · esc sub-tabs"
       elsif @project_view.settings_protocol_row?
         "←/→/space protocol · SOCKS5 local DNS · SOCKS5H proxy DNS · ↑/↓ move · #{esc}"
       elsif @project_view.settings_sandbox_row?
-        "space/↵ sandbox — ON blocks ALL out-of-scope traffic · ↑/↓ move · #{esc}"
+        "space/↵ sandbox — ON blocks ALL out-of-scope traffic · ↑/↓ move · #{instant}"
       elsif @project_view.settings_auth_row?
         "←/→/space proxy auth · ↑/↓ move · #{esc}"
       elsif @project_view.settings_toggle_row?
-        "space/↵ toggle lens · ↑/↓ move · #{esc}"
+        "space/↵ toggle lens · ↑/↓ move · #{instant}"
       else
         # A proxy host/port with no usable protocol, a credential with auth off: the row
         # takes no key. It used to fall through to the lens hint, which named an action the

@@ -262,7 +262,7 @@ module Gori::Tui
       # An unconsumed ctrl/alt chord (^R run, ^X stop, ^A automark, …) defers to the
       # central keymap so it's rebindable.
       return false if (ev.ctrl? || ev.alt?) && !ev.key.escape?
-      return true.tap { handle_escape(v) } if ev.key.escape?
+      return true.tap { handle_escape(v, ev) } if ev.key.escape?
       handle_pane_key(ev, v)
     end
 
@@ -355,8 +355,10 @@ module Gori::Tui
       end
     end
 
-    private def handle_escape(v : FuzzerView) : Nil
-      return v.discard_chain_pane if v.chain_pane_active? # esc in the CHAIN pane → cancel + back (^Q again saves)
+    private def handle_escape(v : FuzzerView, ev : Termisu::Event::Key) : Nil
+      # Esc in the CHAIN pane: the pane first (an open converter list closes), else cancel + back
+      # (^Q again saves). Discarding straight away threw the chain out with the list.
+      return v.handle_chain_pane_key(ev) if v.chain_pane_active?
       if v.focus == :template && v.template_insert?
         v.exit_template_insert!
       elsif v.focus == :target && v.editing_sni?

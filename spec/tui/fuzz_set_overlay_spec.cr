@@ -519,6 +519,54 @@ describe "FuzzSetOverlay numeric fields" do
     FuzzSetOverlay.for_list.handle_key(okey(Termisu::Input::Key::Escape)).should eq(:commit)
   end
 
+  # Esc must always get out (the premise the runner yields ^C/^D to a modal on): a second esc
+  # in a row on the flagged card closes it without applying, and says so first.
+  it "closes without applying on a second esc in a row, and names the overflow" do
+    ov = FuzzSetOverlay.for_list
+    ov.handle_key(okey(Termisu::Input::Key::Right))            # Numbers
+    2.times { ov.handle_key(okey(Termisu::Input::Key::Down)) } # To
+    5.times { ov.handle_key(okey(Termisu::Input::Key::Backspace)) }
+    otype(ov, "ten")
+    ov.handle_key(okey(Termisu::Input::Key::Escape)).should eq(:stay)
+    backend = MemoryBackend.new(76, 20) # an 80x24 terminal's body: a 72-column card
+    ov.render(Screen.new(backend), Rect.new(0, 0, 76, 20))
+    (0...20).map { |y| backend.row(y) }.join("\n").should contain("To must be a whole number · esc again closes without applying")
+    ov.handle_key(okey(Termisu::Input::Key::Escape)).should eq(:cancel)
+
+    big = FuzzSetOverlay.for_list
+    big.handle_key(okey(Termisu::Input::Key::Right))
+    2.times { big.handle_key(okey(Termisu::Input::Key::Down)) }
+    5.times { big.handle_key(okey(Termisu::Input::Key::Backspace)) }
+    otype(big, "99999999999999999999")
+    big.handle_key(okey(Termisu::Input::Key::Escape)).should eq(:stay)
+    render_text(big).should contain("To is out of range")
+    big.handle_key(okey(Termisu::Input::Key::Left)) # any other key re-arms the block
+    big.handle_key(okey(Termisu::Input::Key::Escape)).should eq(:stay)
+    big.handle_click(Rect.new(0, 0, 120, 30), 60, 12) # …and so does a click on the card
+    big.handle_key(okey(Termisu::Input::Key::Escape)).should eq(:stay)
+
+    wide = FuzzSetOverlay.for_list # full-width digits match \d but are not a number
+    wide.handle_key(okey(Termisu::Input::Key::Right))
+    2.times { wide.handle_key(okey(Termisu::Input::Key::Down)) }
+    5.times { wide.handle_key(okey(Termisu::Input::Key::Backspace)) }
+    otype(wide, "１２")
+    wide.handle_key(okey(Termisu::Input::Key::Escape)).should eq(:stay)
+    render_text(wide).should contain("To must be a whole number")
+  end
+
+  it "closes a too-small card holding a bad number without applying, by esc or click" do
+    [:esc, :click].each do |how|
+      ov = FuzzSetOverlay.for_list
+      ov.handle_key(okey(Termisu::Input::Key::Right))
+      2.times { ov.handle_key(okey(Termisu::Input::Key::Down)) }
+      otype(ov, "x")
+      area = Rect.new(0, 0, 80, 8)
+      ov.render(Screen.new(MemoryBackend.new(80, 8)), area)
+      outcome = how == :esc ? ov.handle_key(okey(Termisu::Input::Key::Escape)) : ov.handle_click(area, 3, 3)
+      outcome.should eq(:cancel)
+    end
+  end
+
   it "lets an emptied bound keep its default instead of trapping the card" do
     ov = FuzzSetOverlay.for_list
     ov.handle_key(okey(Termisu::Input::Key::Right))            # Numbers

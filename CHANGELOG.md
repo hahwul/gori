@@ -2,11 +2,11 @@
 
 ## Unreleased
 
-- TUI: typed input is no longer lost or changed behind your back. A Repeater or Fuzzer TARGET being edited takes Ctrl-A/E/U/W itself and returns to READ when you leave it, issue and rule forms ask once before `esc` discards an edit, and `esc` in Project settings cancels the edit instead of saving it (#1938).
+- TUI: typed input is no longer lost or changed behind your back. A Repeater or Fuzzer TARGET being edited takes Ctrl-A/E/U/W itself and returns to READ when you leave it, issue and rule forms ask once before `esc` or a click outside discards an edit, `esc` in Project settings cancels the edit instead of saving it, and a Rewriter stub keeps its line endings when it is opened and closed (#1938, #1941).
 
-- TUI: Find counts every occurrence and scrolls to the match inside a long wrapped line, a new History filter puts the cursor on the newest match, Issues export writes the marked or filtered issues and says which, and the `Space` menu shows all its rows again after the terminal grows (#1938).
+- TUI: Find counts every occurrence and scrolls to the match, centred on an unwrapped line, a new History filter puts the cursor on the newest match, Issues export writes the marked or filtered issues and says which, and the `Space` menu shows all its rows again after the terminal grows (#1938, #1941).
 
-- Fuzzer: the payload card shows all eight types and refuses a bound that is not a number, the CONFIG card follows its cursor on a short terminal, a refused run stays in Notifications, and Tab on an empty processor chain lists the converters (#1938).
+- Fuzzer: the payload card shows all eight types and refuses a bound that is not a number until a second `esc` closes it unapplied, the CONFIG card follows its cursor on a short terminal, a refused run stays in Notifications, and Tab on an empty processor chain lists the converters, which `esc` closes without dropping the chain (#1938, #1941).
 
 - Palette: `Ctrl-P` finds actions by Burp Suite and Caido words such as `replay`, `send to intruder`, `findings`, `httpql` and `preferences` (#1938).
 

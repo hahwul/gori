@@ -2480,7 +2480,7 @@ module Gori::Tui
     # off-screen — so the comparison and the re-anchor both happen in rows (Wrap). Falls back
     # to the line-based arithmetic before the first render, when no width is known yet and
     # nothing has been laid out to disagree with.
-    private def ensure_detail_visible(view_h : Int32) : Nil
+    private def ensure_detail_visible(view_h : Int32, *, find : Bool = false) : Nil
       return if view_h <= 0
       cy = @detail_read.cy
       cw = @detail_last_cw
@@ -2495,7 +2495,7 @@ module Gori::Tui
         # The horizontal half, and the ONLY way sideways here: this pane has never had an
         # h-scroll binding (`verbs/history.cr` says so), so ⇧←/→ moves the caret and the
         # view has to come with it. Hex draws its own fixed rows and never pans.
-        ensure_detail_visible_x(cw, size, line_at) unless @detail_hex
+        ensure_detail_visible_x(cw, size, line_at, find) unless @detail_hex
         return
       end
       @detail_xscroll = 0 # nothing sits off to the side of a wrapped row
@@ -2524,7 +2524,11 @@ module Gori::Tui
     # disagreed outright. Caret-follow needs no help: it resets to 0 the moment the line fits,
     # and otherwise pins the offset inside [curx - cw + 1, curx], which is by construction a
     # valid window into that line. Dropping the clamp also drops an O(widest) walk per frame.
-    private def ensure_detail_visible_x(cw : Int32, size : Int32, line_at : Int32 -> String) : Nil
+    # `find` is a ^F jump's one call: the match is seated mid-pane (`Wrap.find_xscroll`) rather
+    # than at the edge caret-follow would leave it on; later frames then leave it be, since the
+    # caret is already inside the window.
+    private def ensure_detail_visible_x(cw : Int32, size : Int32, line_at : Int32 -> String,
+                                        find : Bool = false) : Nil
       if cw <= 0 || size <= 0
         @detail_xscroll = 0
         return
@@ -2536,6 +2540,10 @@ module Gori::Tui
         return
       end
       curx = Wrap.row_col(line, nil, 0, @detail_read.cx.clamp(0, line.size), reveal: reveal)
+      if find
+        @detail_xscroll = Wrap.find_xscroll(curx, cw)
+        return
+      end
       @detail_xscroll = curx if curx < @detail_xscroll
       @detail_xscroll = curx - cw + 1 if curx >= @detail_xscroll + cw
       @detail_xscroll = 0 if @detail_xscroll < 0
@@ -2632,12 +2640,14 @@ module Gori::Tui
         size, line_at = detail_line_source
         return if size <= 0
         cy = (n - 1).clamp(0, size - 1)
-        @detail_read.sync(cy, cx > 0 ? cx.clamp(0, line_at.call(cy).size) : 0)
+        line = line_at.call(cy)
+        cx = Wrap.find_jump_cx(line, cx) unless detail_wrap? # too long to pan to: the line start
+        @detail_read.sync(cy, cx > 0 ? cx.clamp(0, line.size) : 0)
         @detail_scroll = cy
         # ^G (cx 0) names a LOGICAL line, so lands on its first visual row; with wrap off the
-        # ensure pans sideways to the column instead.
+        # ensure pans sideways to the column instead, the match mid-pane.
         @detail_scroll_sub = detail_caret_sub
-        ensure_detail_visible(@detail_last_h) if @detail_last_h > 0
+        ensure_detail_visible(@detail_last_h, find: cx > 0) if @detail_last_h > 0
       else
         @detail_scroll = (n - 1).clamp(0, detail_scroll_max)
       end

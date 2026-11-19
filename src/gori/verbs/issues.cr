@@ -350,7 +350,7 @@ module Gori
       # filters overrides through `registry[id]?`, so one naming a removed verb is discarded
       # rather than raising.
       r.register Verb::Definition.new(
-        "issues.export", "Export issues…", "Write all issues to a file (asks for the format, then the path)",
+        "issues.export", "Export issues…", "Write issues to a file: on the Issues tab the marked or filtered ones, else all (asks for the format, then the path)",
         Verb::Scope::Global, [] of Verb::Chord, keywords: %w[save report]) { |ctx| ctx.issues_export_pick; nil }
 
       # The discoverable export key on the Issues tab (the verb above is the palette entry).
@@ -367,7 +367,7 @@ module Gori
       # menu_key skips shift chords, hence the intent's lexicon letter — the same pairing
       # notes.send-to uses for 'S'.
       r.register Verb::Definition.new(
-        "issues.export-key", "Export issues…", "Write all issues to a file (asks for the format, then the path)",
+        "issues.export-key", "Export issues…", "Write issues to a file: on the Issues tab the marked or filtered ones, else all (asks for the format, then the path)",
         Verb::Scope::Issues, [Verb::Chord.new("e", shift: true)],
         intent: :export) { |ctx| ctx.issues_export_pick; nil }
     end

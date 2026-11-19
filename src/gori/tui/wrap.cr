@@ -461,6 +461,30 @@ module Gori::Tui
       end
     end
 
+    # ponytail: a ^F jump on a line drawn WITHOUT wrap pans to its match only below this many
+    # chars; past it the caret lands on the line start (the match is still counted and its
+    # line reached), as before #1938. Panning there is O(column): caret-follow's `row_col`
+    # walks the line from char 0 and every frame's `Highlight.slice_left` re-walks every column
+    # scrolled off. Measured on a non-ASCII JSON line, one History detail step (jump + frame):
+    # release ≈ 20 ms at 50k chars, 38 ms at 100k, 610 ms at 1.6M; a debug build is ~10× that.
+    # Upgrade path: resume `row_col` and `slice_left` from a checkpoint, as wrap mode does with
+    # `ClusterMarks`, and drop the ceiling.
+    FIND_PAN_MAX_CHARS = 50_000
+
+    # The char index a ^F jump seats the caret at on a wrap-off line (`FIND_PAN_MAX_CHARS`).
+    # Shared by the four panes that pan to a match: the History detail, the Repeater response,
+    # `TextArea` and `ReadPane`.
+    def self.find_jump_cx(line : String, cx : Int32) : Int32
+      line.size > FIND_PAN_MAX_CHARS ? 0 : cx
+    end
+
+    # The horizontal offset a ^F jump seats a match at display column `curx` with: mid-pane,
+    # so the whole match and context on both sides are in view whichever way the step went.
+    # Caret-follow alone left a forward step's match on the right edge, one char of it shown.
+    def self.find_xscroll(curx : Int32, cw : Int32) : Int32
+      {curx - cw // 2, 0}.max
+    end
+
     # ^F hits as `{line, char index}`, one per OCCURRENCE — the non-overlapping left-to-right
     # walk `SearchScan` marks with, so the prompt's `n/N` and the band agree. `lower_at` hands
     # back line `i` already downcased (a pane may hold that copy cached). A per-occurrence

@@ -381,6 +381,28 @@ describe "RepeaterController#repeater_focus_chain_pane" do
   end
 end
 
+# Esc on the converter list Tab opened closes the list; only the next esc discards the chain.
+describe "RepeaterController esc in the CHAIN pane" do
+  it "closes an open converter list before it discards the chain" do
+    with_repeater_controller do |_, host|
+      host.session.store.insert_repeater("https://a.test/", "§v§ HTTP/1.1\nHost: a.test\n\n".to_slice, false, true, nil, 0)
+      ctl = RepeaterController.new(host)
+      view = ctl.current_view.not_nil!
+      view.focus_pane(:request)
+      ctl.repeater_focus_chain_pane
+      "md5".each_char { |c| view.handle_chain_pane_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+      tab = Termisu::Event::Key.new(Termisu::Input::Key::Tab)
+      2.times { ctl.handle_editor_tab(tab) }
+      esc = Termisu::Event::Key.new(Termisu::Input::Key::Escape)
+      ctl.handle_body_key(esc)
+      view.chain_pane_active?.should be_true
+      view.@chain_pane.value.should eq("md5 > ")
+      ctl.handle_body_key(esc)
+      view.chain_pane_active?.should be_false
+    end
+  end
+end
+
 # #1631: a send to an event stream follows it live, and Stop keeps what arrived.
 describe "RepeaterController on an event stream" do
   it "shows events while the stream is open and keeps them on Stop" do
