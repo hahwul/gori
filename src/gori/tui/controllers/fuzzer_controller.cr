@@ -1128,18 +1128,29 @@ module Gori::Tui
       level, msg = FuzzerController.done_line(v, "#{wire} on #{v.summary}#{ending}", macro_failure_note(p))
       log_event(v, level, msg)
       @host.notifications.push(level, msg, goto_for(v), source: "fuzzer")
-      @host.status(msg, :done) if Settings.notify_toast?
+      # No ✓ on a run that mostly failed. Not `:error` either: that kind pushes the line into the
+      # ring a second time, and the push above already carries it with its jump.
+      @host.status(msg, level.in?(:error, :warn) ? :plain : :done) if Settings.notify_toast?
     end
 
     # The completion line and its level. `where` is everything after the sent count (the wire
     # count, the request, how the run ended). With no match rule every response "hits", so
     # the line names the missing rule instead of a hit count, and it is news rather than a
     # find: `9 hits / 9 sent` under a success toast read as nine findings.
+    #
+    # Errors are counted as the CLI's `done · N sent · M errors` counts them, right after the
+    # sent count so a narrow status row keeps them. A run where every request failed is an
+    # error, not a sweep: a dead port used to finish as "✓ 200 sent"; most failing is a warning.
     def self.done_line(v : FuzzerView, where : String, note : String) : {Symbol, String}
-      sent = "#{v.result_count} sent#{where}"
-      return {:info, "Fuzzer: #{sent} — no match rule#{note}"} unless v.run_selective?
+      total = v.result_count
+      errors = v.error_count
+      return {:error, "Fuzzer: all #{total} failed#{where}#{note}"} if total > 0 && errors >= total
+      sent = "#{total} sent#{errors > 0 ? ", #{Gori.plural(errors, "error")}" : ""}#{where}"
+      mostly_failed = errors * 2 > total
+      return {mostly_failed ? :warn : :info, "Fuzzer: #{sent} — no match rule#{note}"} unless v.run_selective?
       n = v.matched_count
-      {n > 0 ? :success : :info, "Fuzzer: #{Gori.plural(n, "hit")} / #{sent}#{note}"}
+      level = mostly_failed ? :warn : n > 0 ? :success : :info
+      {level, "Fuzzer: #{Gori.plural(n, "hit")} / #{sent}#{note}"}
     end
 
     # A macro that FAILED is the reason some rows are errors rather than answers, and the
