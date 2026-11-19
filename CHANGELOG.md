@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-- TUI: unsaved issue drafts require a save or an explicit discard, simultaneous edits to a note are preserved as separate notes, and closing a note with links requires confirmation. The project name search supports caret movement and click-to-edit.
+- TUI: unsaved issue drafts require a save or an explicit discard, simultaneous edits to a note are preserved as separate notes, and closing a note with links requires confirmation (#1929).
 
-- TUI: project-wide search restores the query, results and selection after viewing a flow and refuses to open results when the list is hidden. The Comparer and link pickers can find older flows and keep the filter open when it has no matches.
+- TUI: project-wide search restores its results and selection after viewing a flow and blocks opening hidden results, while project-name search supports caret movement and click-to-edit. The Comparer and link pickers find older flows and keep the filter open when it has no matches (#1929).
 
 - TUI: the command palette keeps the selected result visible in short terminals. If the palette or Space menu no longer fits, resize to resume or press Esc to close it (#1928).
 
