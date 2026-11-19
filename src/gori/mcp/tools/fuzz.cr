@@ -476,6 +476,7 @@ module Gori
             j.field "requests", fjob.requests
             j.field "candidates_remaining", (t = fjob.total) ? {0_i64, t - fjob.sent}.max : nil
             j.field "matched", fjob.matched
+            emit_match_note(j, fjob)
             j.field "errors", fjob.errors
             # A refused send never reached the network, but it does produce an errored
             # Result — so a fully-refused run used to report `sent:N, matched:0, errors:N,
@@ -604,6 +605,7 @@ module Gori
             j.field "results_truncated", fjob.truncated?
             j.field "history_truncated", fjob.history_truncated?
             emit_fuzz_save_state(j, fjob)
+            emit_match_note(j, fjob)
             # A match with no way to its body. The default `record_history: "none"` records no
             # History flow and `save_results` keeps no run, so every row on this page lacks the
             # `flow_id` a follow-up `get_flow` would take — said here, where the missing field
@@ -616,6 +618,13 @@ module Gori
             end
           end
         end)
+      end
+
+      # With no predicate every response passes, so a reflection sweep reads as all hits.
+      private def emit_match_note(j : JSON::Builder, fjob : FuzzJob) : Nil
+        return if fjob.engine.matcher_constrained? || fjob.engine.auto_calibrate?
+        j.field "match_note", "no match/filter rule, so every response counts as matched; " \
+                              "pass match:{regex:…} or extract to find a reflection"
       end
 
       # The positions in `fjob.results` that `fuzz_results` pages, and how many it holds back.
