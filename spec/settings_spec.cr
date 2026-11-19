@@ -1215,7 +1215,10 @@ describe Gori::Settings do
 
       Gori::Settings.theme = "goridark"
       Gori::Settings.bind_port = 8070
+      Gori::Settings.reset_load_warning_guard
       Gori::Settings.load # unparseable → keep defaults AND back up the file
+      # The reason before the path: a toast or the picker's row cuts the line at its width (W#11).
+      Gori::Settings.load_warning.not_nil!.should start_with("settings.json is not valid JSON — using defaults")
 
       Gori::Settings.theme.should eq("goridark") # defaults kept, not the corrupt "dracula"
       backup = "#{Gori::Settings.path}.corrupt"

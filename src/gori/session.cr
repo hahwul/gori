@@ -84,6 +84,13 @@ module Gori
     # `gori run capture` through `Log` — because only they know which channel the operator is
     # watching. See `EnvMigration.reconcile`.
     property env_syntax_migration : EnvMigration::StoreReport? = nil
+    # Flows a previous session left Pending (a crash or `kill -9`) that this open marked
+    # orphaned — carried for the opening surface to say, as `env_syntax_migration` is.
+    property orphaned_on_open : Int32 = 0
+    # True when `bind_error` is the capture lock FILE failing to open (permissions, a
+    # read-only volume) rather than another instance holding it: no other window exists, so
+    # "take over when it closes" is the wrong advice.
+    property? capture_lock_unavailable : Bool = false
 
     # Why the live proxy isn't listening (e.g. "port in use"), or nil when capture
     # is up. The project still opens for History/Repeater/Sitemap/etc. — only live
@@ -180,6 +187,7 @@ module Gori
         # it captures on its own port (the bind falls back when the configured port
         # is taken). The bind itself stays NON-FATAL: History/Repeater/Sitemap/Issues
         # all read the store / dial upstream directly and don't need the listener.
+        lock_unavailable = false
         bind_error =
           begin
             lock = CaptureLock.try_at(project.capture_lock_path)
@@ -214,6 +222,7 @@ module Gori
             # bind issue; release anything we opened and report it.
             lock.try(&.close) rescue nil
             lock = nil
+            lock_unavailable = true
             ex.message || "could not open the project capture lock"
           end
         if lock
@@ -221,7 +230,7 @@ module Gori
           # session's crash/kill (nothing else will ever resolve them) before we capture, then
           # run the scanner. Both are gated on the lock so a view-only 2nd instance touches
           # neither the shared Pending rows nor the shared issue set.
-          store.abandon_pending!("orphaned by a previous session")
+          orphaned = store.abandon_pending!("orphaned by a previous session")
           # #123: wipe any live-intercept snapshot / command rows a dead session left behind
           # (their per-session item ids no longer mean anything) before we start publishing.
           store.clear_intercept_state!
@@ -237,6 +246,8 @@ module Gori
         # notification ring does not exist yet, and `gori run capture` writes to `Log`), so the
         # surface that opened the project reads it off the session and says it its own way.
         session.env_syntax_migration = syntax_migration
+        session.orphaned_on_open = orphaned || 0
+        session.capture_lock_unavailable = lock_unavailable
         session.sync_capture_status!
         session
       rescue ex

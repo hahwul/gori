@@ -110,7 +110,7 @@ module Gori::Tui
       BodyChrome.framed(screen, rect, shell) do |inner|
         @intercept.render(screen, inner, focused: body_focused,
           listen: {proxy.host, proxy.port}, capturing: @host.session.capturing?,
-          holding: @host.session.capturing_lock_held?)
+          holding: @host.session.capturing_lock_held?, lock_unavailable: @host.session.capture_lock_unavailable?)
       end
     end
 

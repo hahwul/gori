@@ -607,6 +607,17 @@ describe Gori::Tui::Companion do
     end
   end
 
+  # A session that opens on a startup warning skips the hello, which would otherwise hold the
+  # status row over it for the greeting's whole TTL (W#2).
+  it "stays quiet when the session skipped the greeting" do
+    with_companion(true) do
+      Companion.skip_greeting!
+      companion = Companion.new(Notifications.new)
+      companion.tick(Time.instant)
+      companion.frame.not_nil!.bubble.should be_nil
+    end
+  end
+
   # --- say (a line with no notification behind it) --------------------------
 
   it "says a line handed to it directly, with the level's mood" do

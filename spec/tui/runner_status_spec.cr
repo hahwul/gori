@@ -53,3 +53,47 @@ describe "Runner.first_hold?" do
     end
   end
 end
+
+# A bare `@toast =` never stamped `@toast_at`, so the greeting bubble hid it for 8 s (L#1).
+# `status_line` now stamps a toast it has not drawn before.
+describe "Runner.toast_stamp" do
+  t0 = Time.instant
+  t1 = t0 + 1.second
+
+  it "stamps a toast the row has not seen" do
+    Runner.toast_stamp("port 8070 in use", nil, nil, t1).should eq(t1)
+    Runner.toast_stamp("new", "old", t0, t1).should eq(t1)
+  end
+
+  it "keeps the stamp of a toast it already drew, or one `status` stamped" do
+    msg = "imported 3 flows"
+    Runner.toast_stamp(msg, msg, t0, t1).should eq(t0)
+  end
+
+  it "leaves the stamp alone when there is no toast" do
+    Runner.toast_stamp(nil, "old", t0, t1).should eq(t0)
+  end
+end
+
+# A capture that did not start names its cause; the lock FILE failing is not another window (W#9).
+describe "Runner.bind_error_line" do
+  it "blames permissions, not a phantom instance, when the lock file could not be created" do
+    line = Runner.bind_error_line("Permission denied", false, true, "/p/demo")
+    line.should start_with("capture OFF — cannot create the capture lock")
+    line.should contain("/p/demo")
+    line.should_not contain("take over")
+  end
+
+  it "keeps the view-only and port wording for the other two causes" do
+    Runner.bind_error_line("another gori instance already holds this database's capture lock", false, false, "/p")
+      .should start_with("view-only — ")
+    Runner.bind_error_line("Address in use", true, false, "/p").should contain("set a free port")
+  end
+end
+
+describe "Runner.orphaned_line" do
+  it "says how many in-flight flows the last session left, cause first" do
+    Runner.orphaned_line(5).should start_with("5 flows from the last session were left incomplete")
+    Runner.orphaned_line(1).should start_with("1 flow from the last session was left incomplete")
+  end
+end

@@ -72,3 +72,50 @@ describe Gori::Session, "#refresh_project_name" do
     end
   end
 end
+
+# What an open has to say on entry, carried for the surface that opened it (W#9, W#12).
+describe Gori::Session, ".open notices" do
+  it "counts the Pending flows a crashed session left behind" do
+    root = File.tempname("gori-session-orphans")
+    Dir.mkdir_p(root)
+    begin
+      project = Gori::ProjectRegistry.new(File.join(root, "projects")).create("crash")
+      ca = Gori::Proxy::Tls::CertAuthority.load_or_create(File.join(root, "ca"))
+      # A session that died before its close resolved these: written straight into the db.
+      store = Gori::Store.open(project.db_path)
+      2.times { |i| store.insert_flow(pending_request("/in-flight-#{i}")) }
+      store.close
+      session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0), ca, Gori::Verbs.registry, project)
+      begin
+        session.orphaned_on_open.should eq(2)
+        session.capture_lock_unavailable?.should be_false
+      ensure
+        session.close
+      end
+    ensure
+      FileUtils.rm_rf(root)
+    end
+  end
+
+  it "tells a lock file that cannot be created from a lock another instance holds" do
+    root = File.tempname("gori-session-lockfile")
+    Dir.mkdir_p(root)
+    begin
+      project = Gori::ProjectRegistry.new(File.join(root, "projects")).create("ro")
+      ca = Gori::Proxy::Tls::CertAuthority.load_or_create(File.join(root, "ca"))
+      # A directory where the lock file goes: opening it for write fails the way a read-only
+      # project dir does, and does so for root too.
+      Dir.mkdir_p(project.capture_lock_path)
+      session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0), ca, Gori::Verbs.registry, project)
+      begin
+        session.capturing_lock_held?.should be_false
+        session.capture_lock_unavailable?.should be_true
+        session.bind_error.should_not be_nil
+      ensure
+        session.close
+      end
+    ensure
+      FileUtils.rm_rf(root)
+    end
+  end
+end

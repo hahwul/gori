@@ -373,6 +373,8 @@ module Gori::Tui
       # placement also writes to it, so the two are resolved by recency rather than by a
       # fixed precedence — see #companion_notice for why a fixed one is wrong.
       @toast_at = nil.as(Time::Instant?)
+      # The toast the last frame drew, so a bare `@toast =` is stamped once (`Runner.toast_stamp`).
+      @toast_seen = nil.as(String?)
       # The last toast set WITH a kind (see `status(message, kind)`), paired with its text so
       # the glyph only ever decorates that message.
       @toast_kinded = nil.as({String, Symbol}?)
@@ -483,6 +485,27 @@ module Gori::Tui
       err.starts_with?("Hostname lookup") ? "set a Listen IP that resolves" : "set a free port"
     end
 
+    # The startup line for a capture that did not start. Three causes, three remedies: we own
+    # the lock but the bind failed; the lock FILE could not be created (permissions, a
+    # read-only volume — there is no other window, so "take over" would send the operator
+    # hunting for one); or another live instance holds the lock.
+    def self.bind_error_line(err : String, lock_held : Bool, lock_unavailable : Bool, dir : String) : String
+      if lock_held
+        # The port is taken, or the Listen IP does not resolve (`bind_host_error` allows a
+        # hostname by design).
+        "capture OFF — #{err}. History/Repeater work; #{bind_fix(err)} in settings (^P) then press c"
+      elsif lock_unavailable
+        "capture OFF — cannot create the capture lock; check write permission on #{dir} (#{err})"
+      else
+        "view-only — #{err}. History/Repeater work; press c to take over if it closed"
+      end
+    end
+
+    def self.orphaned_line(count : Int32) : String
+      "#{Gori.plural(count, "flow")} from the last session #{count == 1 ? "was" : "were"} left incomplete " \
+      "(gori did not exit cleanly) — marked orphaned"
+    end
+
     def run : Symbol
       # The fiber that runs the event loop: a session slot's before-send refresh asked from it
       # runs in the background instead of blocking the loop on a login (#1233).
@@ -499,16 +522,11 @@ module Gori::Tui
       # Surface the bind outcome on entry: capture-off if nothing could bind, or a
       # port-fallback note if the configured port was taken and we picked another.
       requested = @session.config.port
+      # Through `status`/the ring, never a bare `@toast =`: a bare one lost the status row to the
+      # greeting for its 8 s, was cleared by the first key, and could not be read again.
       if err = @session.bind_error
-        @toast =
-          if @session.capturing_lock_held?
-            # We own this project's capture but the bind failed: the port is taken, or the
-            # Listen IP does not resolve (`bind_host_error` allows a hostname by design).
-            "capture OFF — #{err}. History/Repeater work; #{Runner.bind_fix(err)} in settings (^P) then press c"
-          else
-            # View-only: another live instance owns this project's capture.
-            "view-only — #{err}. History/Repeater work; press c to take over if it closed"
-          end
+        status(Runner.bind_error_line(err, @session.capturing_lock_held?, @session.capture_lock_unavailable?,
+          File.dirname(@session.project.capture_lock_path)), :error)
       elsif fallback = Runner.port_fallback(requested, @session.proxy.port)
         # RECORDED, never written back into a config layer. This used to assign the fallback
         # into `Settings.project_bind_port` (a project override, which `apply_project_network`
@@ -518,7 +536,14 @@ module Gori::Tui
         # transient environmental accident overwrote the port the operator deliberately
         # pinned. See `Runner.port_fallback` for the full invariant.
         @bind_fallback = fallback
-        @toast = "port #{requested} in use — capturing on #{@session.proxy.port} instead (point your client there)"
+        line = "port #{requested} in use — capturing on #{@session.proxy.port} instead (point your client there)"
+        @notifications.push(:warn, line, source: "app")
+        status(line)
+      end
+      if (n = @session.orphaned_on_open) > 0
+        line = Runner.orphaned_line(n)
+        @notifications.push(:warn, line, Jobs::Goto.new(:history), source: "app")
+        @toast ||= line
       end
       # The Project SETTINGS pane is an editor for the PINNED config, so its snapshot (and the
       # dirty baseline `load_settings_values` takes from it) must read the pin, not the port
@@ -539,6 +564,8 @@ module Gori::Tui
       # paint so Miss Ring has it to say. After `Runner#initialize` seeded the reply cursor,
       # which is what bounds "while you were away".
       startup_step(:input) { announce_missed_replies }
+      # A notice raised before the first frame outranks Miss Ring's hello (W#2).
+      Companion.skip_greeting! if @toast
       startup_step(:render) do
         render # initial paint (the loop below only re-renders when something changed)
       end
@@ -1628,7 +1655,8 @@ module Gori::Tui
       end
       @quit_armed = false
 
-      @toast = nil # clear last action's feedback; a new action may set it again
+      @toast = nil      # clear last action's feedback; a new action may set it again
+      @toast_seen = nil # …and a repeat of the same literal is fresh feedback (`Runner.toast_stamp`)
       # In hotkey CAPTURE mode the next key IS the new binding — intercept it before the
       # ^G/^F/^B guards (and everything else) so those chords can be recorded.
       if raw_capture && ov
@@ -3650,8 +3678,10 @@ module Gori::Tui
       # blind and the line that explains it appeared only after some other key had cleared the
       # toast. The news is not lost — `offer_open_created` puts the standing toast in the card,
       # where it is read with the question.
-      return nil if @overlay.confirm?
       toast = @toast
+      @toast_at = Runner.toast_stamp(toast, @toast_seen, @toast_at, Time.instant)
+      @toast_seen = toast
+      return nil if @overlay.confirm?
       notice = companion_in_bar_shown? ? @companion.frame.try(&.bubble) : nil
       return format_status_message(toast) unless notice
       return notice unless toast && (at = @toast_at)
@@ -4035,6 +4065,18 @@ module Gori::Tui
     def status(message : String) : Nil
       @toast = message
       @toast_at = Time.instant
+      @toast_seen = message
+    end
+
+    # When the status row's toast was set, as `status_line` reads it each frame. Most toasts
+    # are a bare `@toast =` (some 270 sites), which never stamped `@toast_at`, so they lost the
+    # recency race to any companion bubble — the greeting hid a startup warning for its whole
+    # 8 s. A toast the row has not seen before (by identity: a new String) is stamped on the
+    # frame that first draws it, which is the frame after it was set; `status` stamps its own
+    # and records it as seen, so its stamp is the earlier one.
+    def self.toast_stamp(toast : String?, seen : String?, at : Time::Instant?, now : Time::Instant) : Time::Instant?
+      return at unless toast
+      toast.same?(seen) ? at : now
     end
 
     # A toast with a status-strip glyph: `:busy` (spinner), `:done` (✓) or `:error` (✗). See
@@ -6075,8 +6117,10 @@ module Gori::Tui
       end
     rescue ex
       # Starting capture re-binds the listener, which can fail (port in use / bad
-      # address). Report it instead of crashing the TUI; capture stays off.
-      @toast = "can't start capture: #{ex.message} — free the port in settings (^P)"
+      # address). Report it instead of crashing the TUI; capture stays off. A lock FILE that
+      # could not be created at open raises here again, and a port is not its remedy.
+      fix = @session.capture_lock_unavailable? && !@session.capturing_lock_held? ? "check write permission on the project dir" : "free the port in settings (^P)"
+      @toast = "can't start capture: #{ex.message} — #{fix}"
     end
 
     def export_ca : Nil

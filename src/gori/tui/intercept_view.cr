@@ -1066,17 +1066,18 @@ module Gori::Tui
     # already refuses to let those controls be changed here; the bar has to stop claiming them.
     def render(screen : Screen, rect : Rect, focused : Bool = true, *,
                listen : {String, Int32}? = nil, capturing : Bool = true,
-               holding : Bool = true) : Nil
+               holding : Bool = true, lock_unavailable : Bool = false) : Nil
       return if rect.empty?
       @body_focused = focused
-      render_panes(screen, rect, focused, listen: listen, capturing: capturing, holding: holding)
+      render_panes(screen, rect, focused, listen: listen, capturing: capturing, holding: holding,
+        lock_unavailable: lock_unavailable)
       render_query_popup(screen, rect, rect.y + bar_h, QUERY_PREFIX, GATE_HELP)
     end
 
     private def render_panes(screen : Screen, rect : Rect, focused : Bool = true, *,
                              listen : {String, Int32}? = nil, capturing : Bool = true,
-                             holding : Bool = true) : Nil
-      render_filter_bar(screen, Rect.new(rect.x, rect.y, rect.w, FILTER_BAR_H), focused, holding)
+                             holding : Bool = true, lock_unavailable : Bool = false) : Nil
+      render_filter_bar(screen, Rect.new(rect.x, rect.y, rect.w, FILTER_BAR_H), focused, holding, lock_unavailable)
       render_suggestions(screen, rect, rect.y + FILTER_BAR_H) if @querying
       body = body_rect(rect)
       return if body.empty?
@@ -1097,7 +1098,7 @@ module Gori::Tui
     # (`catch › …`); otherwise a catch-direction chip, the committed condition (or a
     # field hint), and a right-aligned held count. Mirrors History's QL bar.
     private def render_filter_bar(screen : Screen, rect : Rect, focused : Bool,
-                                  holding : Bool = true) : Nil
+                                  holding : Bool = true, lock_unavailable : Bool = false) : Nil
       return if rect.empty?
       if @querying
         screen.text(rect.x + 1, rect.y, QUERY_PREFIX, Theme.accent)
@@ -1126,9 +1127,12 @@ module Gori::Tui
       # proxy fiber ever reaches, so the chips left of here describe a local object and the
       # condition slot has nothing true to put in it. Say which window this is instead of
       # painting a gate state that belongs to another process.
+      # …unless no window holds it: a lock FILE that could not be created (permissions, a
+      # read-only volume) means capture is off everywhere, and "another window's" sent the
+      # operator looking for a window that does not exist.
       unless holding
-        screen.text(x, rect.y, "view-only — the catch running on this project is another window's",
-          Theme.orange, width: left_w)
+        note = lock_unavailable ? "capture off — gori could not create this project's capture lock" : "view-only — the catch running on this project is another window's"
+        screen.text(x, rect.y, note, Theme.orange, width: left_w)
         return
       end
       if @query.blank?

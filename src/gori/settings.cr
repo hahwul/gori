@@ -715,7 +715,9 @@ module Gori
       # a sentence that no longer names the unparseable file — and emit nothing.
       grammar_note = recover_env_syntax_from_corrupt(raw)
       warning = String.build do |s|
-        s << "settings: #{path} is not valid JSON — using defaults for this run"
+        # The reason first: a toast or the picker's row cuts the line at its width, and the path
+        # alone told nobody what was wrong.
+        s << "settings.json is not valid JSON — using defaults for this run (#{path})"
         s << "; your file is preserved at #{path}.corrupt" if kept
         s << "; #{grammar_note}" if grammar_note
       end
