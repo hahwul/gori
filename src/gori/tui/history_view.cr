@@ -141,6 +141,7 @@ module Gori::Tui
     getter? searching_shown : Bool = false
     @searching_since : Time::Instant? = nil
     getter search_error : String? = nil
+    @applied_question : {String, SavedViews::View?}? = nil # what the rows on screen answer — see `apply_search`
     @host_suggest_dirty = false
     @host_suggest_refresh_at = Time.instant
     @host_suggest_pending = false
@@ -948,19 +949,34 @@ module Gori::Tui
       @no_flows = result.no_flows
       @view_note = result.view_note
       prev_selected = @selected
+      # A NEW question (the bar or the view changed) whose answer dropped the selected flow
+      # starts at the newest row: the old row INDEX means nothing in a different result. A
+      # live refresh of the same question keeps clamping it, which holds the highlight still.
+      asked = {@query, active_view}
+      new_question = !@applied_question.nil? && asked != @applied_question # not the first load
+      @applied_question = asked
+      kept = prev_id ? index_of(prev_id) : nil
       @selected =
         if @follow
           follow_index
-        elsif prev_id && (idx = index_of(prev_id))
-          idx # keep the highlight on the same flow across a reload
+        elsif kept
+          kept # keep the highlight on the same flow across a reload
+        elsif new_question
+          follow_index
         else
           @selected.clamp(0, {@rows.size - 1, 0}.max)
         end
+      return if @follow
+      # render's ensure_visible brings an oldest-first list's newest row in from the top.
+      if new_question && kept.nil?
+        @scroll = 0
+        return
+      end
       # The row moved by the rows that arrived above it; move the viewport by the same amount
       # so the highlight stays ON SCREEN WHERE IT WAS, as the unfiltered insert path does
       # (`on_event`: `@selected += 1; @scroll += 1`). Without this a filtered list under
       # capture crept the highlight down one row per matching flow until it hit the edge.
-      @scroll = {@scroll + (@selected - prev_selected), 0}.max unless @follow
+      @scroll = {@scroll + (@selected - prev_selected), 0}.max
     end
 
     # A short note explaining a filter that matches nothing because it is INVALID (vs a
@@ -2608,14 +2624,20 @@ module Gori::Tui
     # has no caret; in navigable (cursor-tracked) modes, sync @detail_read too —
     # otherwise the first ↑/↓ after the jump moves from the caret's stale pre-jump
     # position instead of the line just jumped to.
-    def goto_detail_line(n : Int32) : Nil
+    #
+    # `cx` is a ^F match's char index: the anchor lands on the VISUAL row holding it, so a hit
+    # deep inside one minified body line is on screen rather than its line's first rows.
+    def goto_detail_line(n : Int32, cx : Int32 = 0) : Nil
       if detail_navigable?
-        size, _ = detail_line_source
+        size, line_at = detail_line_source
         return if size <= 0
         cy = (n - 1).clamp(0, size - 1)
-        @detail_read.sync(cy, 0)
+        @detail_read.sync(cy, cx > 0 ? cx.clamp(0, line_at.call(cy).size) : 0)
         @detail_scroll = cy
-        @detail_scroll_sub = 0 # ^G names a LOGICAL line, so land on its first visual row
+        # ^G (cx 0) names a LOGICAL line, so lands on its first visual row; with wrap off the
+        # ensure pans sideways to the column instead.
+        @detail_scroll_sub = detail_caret_sub
+        ensure_detail_visible(@detail_last_h) if @detail_last_h > 0
       else
         @detail_scroll = (n - 1).clamp(0, detail_scroll_max)
       end
@@ -2728,22 +2750,23 @@ module Gori::Tui
     end
 
     def detail_search_lines(query : String) : Array(Int32)
-      hits = [] of Int32
+      detail_search_hits(query).map(&.[0]).uniq!
+    end
+
+    # ^F hits per occurrence as `{line, char index}` (see `Wrap.search_hits`).
+    def detail_search_hits(query : String) : Array({Int32, Int32})
       # FRAMES has no hex view, so it renders as text even when @detail_hex is set —
       # match the render/goto predicate so search agrees (not a bare @detail_hex).
-      return hits if query.empty? || hex_view?
-      q = query.downcase
+      return [] of {Int32, Int32} if query.empty? || hex_view?
       # Reveal-whitespace renders on its OWN line space (raw head+body bytes) with its own
       # scroll bounds (detail_scroll_max). Search must scan reveal_lines so the hit indices
       # match what goto_detail_line scrolls to — mirroring the hex exclusion above (the
       # decoded/pretty detail_view has a different line count, so its indices would scroll wrong).
       if rl = shown_reveal_lines
-        rl.each_with_index { |ln, i| hits << i if ln.downcase.includes?(q) }
-        return hits
+        return Wrap.search_hits(rl.size, query) { |i| rl[i].downcase }
       end
       dv = detail_view
-      (0...dv.total).each { |i| hits << i if dv.line_text(i).downcase.includes?(q) }
-      hits
+      Wrap.search_hits(dv.total, query) { |i| dv.line_text(i).downcase }
     end
 
     private def detail_scroll_max : Int32

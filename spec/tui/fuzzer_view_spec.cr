@@ -2565,3 +2565,41 @@ describe "Gori::Tui::FuzzerView run without a match rule" do
     view.results_count_label.should contain("1 hit")
   end
 end
+
+describe "FuzzerView TARGET INS does not outlive the visit" do
+  it "drops TARGET to READ when focus leaves it or comes back from the strip" do
+    view = loaded_fuzzer
+    view.focus_first
+    view.enter_target_insert!
+    view.pane_advance(1)
+    view.focus.should eq(:template)
+    view.target_insert?.should be_false
+    view.focus_first
+    view.target_insert?.should be_false
+
+    view.enter_target_insert!
+    view.focus_resume
+    view.target_insert?.should be_false
+  end
+end
+
+# A short CONFIG card (80x24) used to keep the cursor on rows it did not draw: the footer said
+# `↵ add a payload set` over a card showing only the set and Mode. It scrolls one list of
+# cursor rows now, so the row the footer describes is always on screen.
+describe "FuzzerView short CONFIG card" do
+  it "draws whichever row the cursor is on" do
+    view = loaded_fuzzer
+    view.apply_set(nil, Gori::Tui::SetSpec.list(["alpha"]))
+    view.apply_set(nil, Gori::Tui::SetSpec.list(["beta"]))
+    view.focus_config
+    labels = {set: "beta", add: "+ Add payload set", mode: "Mode", advanced: "Advanced"}
+    5.times do |i|
+      view.form_move(1) if i > 0
+      backend = MemoryBackend.new(80, 16)
+      view.render(Screen.new(backend), Rect.new(0, 0, 80, 16))
+      want = view.config_row == :set && view.current_set_index == 0 ? "alpha" : labels[view.config_row]
+      backend.contains?(want).should be_true
+    end
+    view.config_row.should eq(:advanced)
+  end
+end

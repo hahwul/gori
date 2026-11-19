@@ -29,6 +29,7 @@ module Gori::Tui
   # one place to edit it, and `↵` keeps meaning "go on" rather than a chord you have to know.
   class IssueForm < Overlay
     include IssuePresentation
+    include DiscardGuard
 
     # Card geometry + the two labels the draw lays down, in one place because `render` and the
     # click hit-tests below both measure off them. A second copy of `"severity ‹ "` next to the
@@ -110,6 +111,11 @@ module Gori::Tui
       # overrode it once must not have that overridden back by the mere act of re-opening the
       # form — so this only decides which of the two labels the severity row wears.
       @severity_from_cvss = !@cvss.empty? && Gori::Cvss.severity_for(@cvss) == @severity
+      @opened_state = form_state
+    end
+
+    private def form_state : String
+      "#{@issue_title}|#{@cvss}|#{@severity}"
     end
 
     # --- Overlay contract (see overlay.cr) ---
@@ -122,13 +128,14 @@ module Gori::Tui
     end
 
     def hint : String
+      commit = @edit_id ? "save" : "create" # ↵ updates the issue in EDIT ISSUE
       case @sel
       when ROW_SEV
-        "←/→ severity · ⇥ title · ↵ create · esc cancel"
+        "←/→ severity · ⇥ title · ↵ #{commit} · esc cancel"
       when ROW_CVSS
         "↵ calculator · ⌫ clear · ⇥ severity · esc cancel"
       else
-        "type title · ←/→ caret · ⇥ cvss · ↵ create · esc cancel"
+        "type title · ←/→ caret · ⇥ cvss · ↵ #{commit} · esc cancel"
       end
     end
 
@@ -149,8 +156,10 @@ module Gori::Tui
 
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
+      if outcome = discard_key(ev)
+        return outcome
+      end
       case
-      when key.escape?            then return :cancel
       when key.enter?             then return enter
       when key.tab?, key.down?    then move_row(1)
       when key.back_tab?, key.up? then move_row(-1)

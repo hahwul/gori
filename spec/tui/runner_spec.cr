@@ -20,6 +20,14 @@ private class RunnerSpecShell < Gori::Tui::Runner
     fuzzer_controller
   end
 
+  def repeater : Gori::Tui::RepeaterController
+    repeater_controller
+  end
+
+  def feed(ev : Termisu::Event::Key) : Nil
+    handle_key(ev)
+  end
+
   def discover : Gori::Tui::DiscoverView
     discover_controller.view
   end
@@ -254,6 +262,43 @@ describe Gori::Tui::Runner do
       runner.press(Termisu::Input::Key::Enter)
       runner.active_tab.should eq(:target)
       runner.discover.current.should be(run)
+    end
+  end
+
+  # ^A/^E/^U/^W over the Repeater/Fuzzer TARGET in INS are the shell's line keys (#1379), not
+  # the shell's ^W close or the tab's ^U pretty / ^A auto-mark on the same letters.
+  it "hands the line keys to a TARGET being typed into, ahead of ^W close" do
+    TuiContract.with_session("runner-target-line-keys") do |session|
+      runner = RunnerSpecShell.new(session, RunnerSpecTerminal.allocate)
+      runner.focus_tab(:repeater)
+      runner.repeater.repeater_from_request("https://h.test", "POST / HTTP/1.1\r\nHost: h.test\r\n\r\n{\"a\":1}", false, nil)
+      v = runner.repeater.current_view.not_nil!
+      v.focus_pane(:target)
+      v.enter_target_insert!
+      body = v.request_text
+      runner.feed(TuiContract.ctrl('a'))
+      runner.type("X")
+      runner.feed(TuiContract.ctrl('e'))
+      runner.type("/p")
+      v.target.should eq("Xhttps://h.test/p")
+      runner.feed(TuiContract.ctrl('w'))
+      v.target.should eq("Xhttps://h.test/")
+      runner.feed(TuiContract.ctrl('u'))
+      v.target.should eq("")
+      runner.overlay.should eq(:none) # no close confirm
+      runner.repeater.subtab_labels.size.should eq(1)
+      v.request_text.should eq(body) # ^U did not pretty-print the request
+
+      runner.focus_tab(:fuzzer)
+      runner.fuzzer.fuzz_new
+      fv = runner.fuzzer.current_view.not_nil!
+      fv.focus_first
+      fv.enter_target_insert!
+      runner.feed(TuiContract.ctrl('u'))
+      fv.target.should eq("")
+      runner.feed(TuiContract.ctrl('w'))
+      runner.overlay.should eq(:none)
+      runner.fuzzer.current_view.should be(fv)
     end
   end
 end

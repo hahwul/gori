@@ -125,6 +125,12 @@ module Gori::Tui
       @options = parsed.is_a?(String) ? Store::RespondArgs.new : parsed
       source = respond == "fault" ? (@options.fault.try(&.label) || "close") : respond
       @source_i = idx(SOURCES, source)
+      @opened_state = form_state
+    end
+
+    # The stub and the options are edited in their own sub-editors, so a change there counts too.
+    private def form_state : String
+      "#{super}|#{@scope_i}|#{@stub}|#{preview_signature}"
     end
 
     def self.adding : RewriterRuleOverlay
@@ -455,7 +461,9 @@ module Gori::Tui
 
     private def edit_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
-      return :cancel if key.escape?
+      if outcome = discard_key(ev)
+        return outcome
+      end
       return :stay if field_nav?(ev)
 
       if cycler_row?(@sel)

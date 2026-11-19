@@ -254,7 +254,7 @@ module Gori::Tui
         return false
       end
       c = ev.char || ev.key.to_char
-      return true if dispatch_chord(chord_action(ev, c), v, c)
+      return true if dispatch_chord(chord_action(ev, c), v, c, ev)
       # ⌥/⌃ + ←/→/Home/End/⌫ are EDITOR motion (word step, buffer jump, word delete), not
       # command chords — see `RepeaterController#handle_body_key` for why routing them past
       # the defer cannot shadow a binding (no bindable chord is an arrow).
@@ -318,10 +318,11 @@ module Gori::Tui
     end
 
     # Run the action a chord mapped to; false when it was not a chord (fall through).
-    private def dispatch_chord(action : Symbol?, v : FuzzerView, c : Char?) : Bool
+    private def dispatch_chord(action : Symbol?, v : FuzzerView, c : Char?, ev : Termisu::Event::Key) : Bool
       case action
-      when :palette then save_current; @host.open_palette
-      when :close   then request_close
+      when :line_edit then edit_target(ev, v)
+      when :palette   then save_current; @host.open_palette
+      when :close     then request_close
       when :undo
         # Only the TEMPLATE pane has a text buffer; anywhere else ^Z is not ours, so it falls
         # through to the keymap rather than being silently swallowed.
@@ -340,6 +341,9 @@ module Gori::Tui
     # the registry, so they were absent from the space menu and could not be rebound, while
     # their four siblings were `fuzz.*` verbs. See `fuzz.mark-word` / `fuzz.insert-marker`.
     private def chord_action(ev : Termisu::Event::Key, c : Char?) : Symbol?
+      # The TARGET/SNI field being typed into takes ^A/^E/^U/^W ahead of the chords on those
+      # letters (auto-mark, pretty, close), like every other bar (#1379, LineEdit.action).
+      return :line_edit if LineEdit.action(ev) && line_field_editing?
       return nil unless ev.ctrl?
       key = ev.key
       case
@@ -455,7 +459,7 @@ module Gori::Tui
       key = ev.key
       case
       when key.enter?, key.down? then v.pane_advance(1)
-      when key.up?               then @host.request_focus(subtab_strip_shown? ? :subtabs : :menu)
+      when key.up?               then v.exit_target_insert!; @host.request_focus(subtab_strip_shown? ? :subtabs : :menu)
       else                            edit_target_common(ev, v)
       end
       true
@@ -496,11 +500,10 @@ module Gori::Tui
     private def edit_target_common(ev : Termisu::Event::Key, v : FuzzerView) : Nil
       key = ev.key
       case
-      when key.backspace? then v.target_backspace
-      when key.left?      then v.target_move(-1)
-      when key.right?     then v.target_move(1)
-      when key.home?      then v.target_home
-      when key.end?       then v.target_end
+      when act = LineEdit.action(ev) then v.target_line_edit(act) # ^A/^E/^U/^W, word motion, Home/End/Delete
+      when key.backspace?            then v.target_backspace
+      when key.left?                 then v.target_move(-1)
+      when key.right?                then v.target_move(1)
       else
         LineEdit.typed_char(ev).try { |ch| v.target_insert(ch) }
       end
@@ -818,6 +821,10 @@ module Gori::Tui
 
     def handle_editor_complete_key(ev : Termisu::Event::Key) : Bool
       current_view.try(&.handle_template_env_complete_key(ev)) || false
+    end
+
+    def line_field_editing? : Bool
+      (v = current_view) ? v.focus == :target && v.pane_insert?(:target) : false
     end
 
     def editor_captures_tab? : Bool
@@ -1241,7 +1248,9 @@ module Gori::Tui
       engine, err = v.build_engine(!@host.session.config.insecure_upstream?,
         @host.session.scope, @host.session.host_overrides, @host.session.store)
       unless engine
-        @host.status(err || "can't run")
+        # :error so the Notifications card keeps it: a plan refusal is a sentence the 59-column
+        # toast cuts mid-way, and the next keypress replaced it.
+        @host.status(err || "can't run", :error)
         return
       end
       total = begin

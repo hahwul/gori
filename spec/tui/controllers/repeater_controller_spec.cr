@@ -142,6 +142,18 @@ describe "RepeaterController on a body too short for its panes (#1421)" do
     end
   end
 
+  it "leaves TARGET's INS behind when ↑ takes focus to the strip" do
+    with_repeater_controller do |ctl, host|
+      ctl.repeater_from_request("https://h.test", HTTP_REQ, false, nil)
+      v = ctl.current_view.not_nil!
+      v.focus_pane(:target)
+      v.enter_target_insert!
+      ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Up))
+      host.focus_requests.should_not be_empty
+      v.target_insert?.should be_false
+    end
+  end
+
   it "still lets READ keys out of a pane the frame did not draw" do
     with_repeater_controller do |ctl, host|
       ctl.repeater_from_request("https://h.test", HTTP_REQ, false, nil)

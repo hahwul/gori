@@ -17,6 +17,38 @@ private def marks_view(store, &)
 end
 
 describe Gori::Tui::IssuesView do
+  # Export writes what the list is pointing at: the marks, else the filtered rows, else all.
+  it "names the export's issues: the marks, else the filter's rows, else every issue" do
+    with_store do |store|
+      marks_view(store) do |view, ids|
+        crit, high, _low, _info = ids
+        view.export_selection.should be_nil # all — the runner counts them from the store
+        view.start_query
+        "sev:>=high".each_char { |c| view.query_insert(c) }
+        view.stop_query
+        view.export_selection.should eq({[crit, high], "2 issues matching the filter"})
+        view.select_index(1)
+        view.toggle_mark
+        view.export_selection.should eq({[high], "1 marked issue"}) # marks win over the filter
+      end
+    end
+  end
+
+  # A host as wide as the row used to take every column right of the status tag, leaving the
+  # title — the one thing naming the finding — zero cells.
+  it "keeps the title on screen beside a very long host" do
+    with_store do |store|
+      store.insert_issue("Quarterly report exposed", Gori::Store::Severity::Medium,
+        "acme-corporation-staging-eu-central-1.tenants.internal.services.demo.test", nil)
+      view = IssuesView.new
+      view.reload(store)
+      b = MemoryBackend.new(80, 10)
+      view.render(Screen.new(b), Rect.new(0, 0, 80, 10))
+      b.contains?("Quarterly").should be_true
+      b.contains?("acme-corporation").should be_true
+    end
+  end
+
   it "renders the severity-sorted list with badges + a status tag" do
     with_store do |store|
       store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "acme.test", nil)
@@ -140,7 +172,15 @@ describe Gori::Tui::IssuesView do
       # The badges survive — pre-existing, the host had the same unbounded draw and at this
       # width it had eaten `▎CRIT open` outright.
       narrow.any?(&.includes?("CRIT open")).should be_true
-      narrow.any?(&.includes?("9.8")).should be_false
+      # The host is capped short of the title's floor now, so the title and the score both
+      # have room again — beside the badges, not over them.
+      narrow.any?(&.includes?("CRIT open SQLi")).should be_true
+      narrow.any?(&.includes?("9.8")).should be_true
+      # Too narrow for even that: the score is dropped, the badges stay.
+      tiny = MemoryBackend.new(16, 10)
+      view.render(Screen.new(tiny), Rect.new(0, 0, 16, 10))
+      (0...10).map { |y| tiny.row(y) }.any?(&.includes?("CRIT open")).should be_true
+      (0...10).map { |y| tiny.row(y) }.any?(&.includes?("9.8")).should be_false
 
       # …and it is still drawn when there is room for it.
       wide = MemoryBackend.new(100, 10)

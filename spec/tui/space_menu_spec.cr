@@ -775,6 +775,21 @@ describe Gori::Tui::SpaceMenu do
     backend.contains?(first).should be_false                # the top entries scrolled off
   end
 
+  # A terminal that GROWS under an open card: the old offset stayed, so the taller card drew
+  # the last rows over blank lines with the rest scrolled away.
+  it "drops a stale scroll offset when the terminal grows" do
+    ctx = FakeExecContext.new
+    ctx.selected = 5_i64
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+    menu.open(Gori::Verb::Scope::Body, :common, ctx)
+    menu.move(menu.entries.size)
+    menu.render(Screen.new(MemoryBackend.new(40, 8)), Rect.new(0, 0, 40, 6)) # scrolled to the tail
+    backend = MemoryBackend.new(120, 40)
+    menu.render(Screen.new(backend), Rect.new(0, 0, 120, 40))
+    backend.contains?(menu.entries.first.title).should be_true
+    backend.contains?(menu.entries.last.title).should be_true
+  end
+
   it "grows past the old 12-row cap to fit a busy scope without scrolling (History Body has 13)" do
     # ctx-independent: 15 synthetic entries on a tall body. Old MAX_ROWS=12 clamped the
     # popup to 14 rows (scrolling 3 off); now it grows to fit all 15 (cap 16).

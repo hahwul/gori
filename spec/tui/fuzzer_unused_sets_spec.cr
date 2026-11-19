@@ -67,3 +67,19 @@ describe "FuzzerView unused payload sets" do
     v.unused_sets_note.should contain("position")
   end
 end
+
+# The run-start line's note is overwritten by progress within a second, so the CONFIG header
+# says it too, for as long as it is true.
+describe "FuzzerView CONFIG header for unused sets" do
+  it "notes set 2+ under a shared-set mode and drops it once the mode uses them" do
+    v = fuzzer(SetSpec.list(["a"]), SetSpec.list(["b"]))
+    render = -> {
+      b = MemoryBackend.new(120, 30)
+      v.render(Screen.new(b), Rect.new(0, 0, 120, 30))
+      b
+    }
+    render.call.contains?("set 2+ unused").should be_true
+    2.times { v.cycle_mode_forward } # -> pitchfork: two sets, two positions
+    render.call.contains?("set 2+ unused").should be_false
+  end
+end

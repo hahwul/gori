@@ -97,11 +97,11 @@ module Gori
 
       r.register Verb::Definition.new(
         "repeater.oast-insert", "Insert OAST payload", "Insert a fresh OAST payload URL at the request cursor",
-        Verb::Scope::Repeater, available: insert_avail.call(:repeater), intent: :oast_payload) { |ctx| ctx.oast_insert_payload; nil }
+        Verb::Scope::Repeater, available: insert_avail.call(:repeater), intent: :oast_payload, keywords: ["insert collaborator payload"]) { |ctx| ctx.oast_insert_payload; nil }
 
       r.register Verb::Definition.new(
         "fuzzer.oast-insert", "Insert OAST payload", "Insert a fresh OAST payload URL at the template cursor",
-        Verb::Scope::Fuzzer, available: ->(ctx : Verb::ExecContext) { ctx.subtab_search_count >= 1 && insert_avail.call(:fuzzer).call(ctx) }, intent: :oast_payload) { |ctx| ctx.oast_insert_payload; nil }
+        Verb::Scope::Fuzzer, available: ->(ctx : Verb::ExecContext) { ctx.subtab_search_count >= 1 && insert_avail.call(:fuzzer).call(ctx) }, intent: :oast_payload, keywords: ["insert collaborator payload"]) { |ctx| ctx.oast_insert_payload; nil }
 
       r.register Verb::Definition.new(
         "history.oast-copy", "Copy OAST payload", "Copy a fresh OAST payload URL to the clipboard",

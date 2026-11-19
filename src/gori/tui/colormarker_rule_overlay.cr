@@ -80,6 +80,11 @@ module Gori::Tui
       @scope_i = idx(SCOPES, scope)
       @color_i = idx(color_options, color)
       @style_i = idx(STYLES, style)
+      @opened_state = form_state
+    end
+
+    private def form_state : String
+      "#{super}|#{@scope_i}|#{@color_i}|#{@style_i}"
     end
 
     # The picker's colour vocabulary: the six built-in words FIRST, then every user-defined
@@ -225,7 +230,9 @@ module Gori::Tui
 
     private def edit_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
-      return :cancel if key.escape?
+      if outcome = discard_key(ev)
+        return outcome
+      end
 
       # ↹ on the condition row completes the QL token under the caret — but ONLY when there IS
       # one, and this arm has to come BEFORE the field-nav arm below or the completion is

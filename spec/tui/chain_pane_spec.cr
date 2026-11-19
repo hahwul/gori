@@ -49,7 +49,17 @@ describe Gori::Tui::ChainPane do
     # Popup open → Tab is OWNED (consumed) and accepts, not left for the focus ring to steal.
     pane.handle_key(key(Termisu::Input::Key::Tab)).should be_true
     pane.value.should eq("base64-encode > ") # accepted + chain separator, ready for the next step
-    # Popup now closed → Tab reverts to a focus-exit key (false), so there's still a way out.
+    # Popup closed, caret past the separator: the token is empty, so Tab lists every converter.
+    pane.handle_key(key(Termisu::Input::Key::Tab)).should be_true
+  end
+
+  it "opens the whole converter list on Tab over an empty token, and leaves on a typed one" do
+    pane = ChainPane.new
+    pane.load("")
+    pane.handle_key(key(Termisu::Input::Key::Tab)).should be_true # was: commit and leave
+    pane.handle_key(key(Termisu::Input::Key::Tab)).should be_true # the open list: accept
+    pane.value.should eq("#{Gori::Decoder.shared_registry.match("").first.name} > ")
+    pane.load("md5") # a typed token with the list shut: Tab is still a way out
     pane.handle_key(key(Termisu::Input::Key::Tab)).should be_false
   end
 end

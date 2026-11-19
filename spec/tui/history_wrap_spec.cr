@@ -265,4 +265,28 @@ describe "Gori::Tui::HistoryView detail soft wrap" do
       b.bg_at(body.x + gw, r0 + 1).should eq(Theme.yellow)   # … "ITME" on the next
     end
   end
+
+  # ^F counts and visits OCCURRENCES, and a jump lands the anchor on the visual row that
+  # holds the match: a minified body is one logical line, and landing on its first rows left
+  # the match off screen while the prompt said 1/1.
+  it "finds every occurrence in one wrapped line and scrolls each one's visual row into view" do
+    with_store do |store|
+      line = (0...60).map { |i| %({"id":#{i},"sku":"DW-#{1000 + i}"}) }.join(",") + ",DW-1000"
+      view = response_view(store, line)
+      rect = Rect.new(0, 0, 80, 20)
+      view.render_detail(Screen.new(MemoryBackend.new(80, 20)), rect)
+      hits = view.detail_search_hits("dw-1000")
+      hits.should eq([{BODY_LI, line.index!("DW-1000")}, {BODY_LI, line.rindex!("DW-1000")}])
+      view.detail_search_lines("dw-1000").should eq([BODY_LI]) # the line API is unchanged
+      li, cx = hits.last
+      view.goto_detail_line(li + 1, cx)
+      view.search_hl = "DW-1000"
+      b = MemoryBackend.new(80, 20)
+      view.render_detail(Screen.new(b), rect)
+      body = detail_body_rect(rect)
+      row = (body.y...body.bottom).find { |y| b.row(y).includes?(",DW-1000") }.not_nil!
+      b.bg_at(b.row(row).index!(",DW-1000") + 1, row).should eq(Theme.yellow) # on screen, lit
+      view.detail_read.cx.should eq(cx)
+    end
+  end
 end

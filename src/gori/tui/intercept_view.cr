@@ -849,12 +849,16 @@ module Gori::Tui
     end
 
     # ^G go-to-line / ^F search in the held-message editor (only while editing).
-    def edit_goto_line(n : Int32) : Nil
-      @editor.goto_line(n) if text_editing?
+    def edit_goto_line(n : Int32, cx : Int32 = 0) : Nil
+      @editor.goto_line(n, cx) if text_editing?
     end
 
     def edit_search_lines(query : String) : Array(Int32)
       text_editing? ? @editor.search_lines(query) : [] of Int32
+    end
+
+    def edit_search_hits(query : String) : Array({Int32, Int32})
+      text_editing? ? @editor.search_hits(query) : [] of {Int32, Int32}
     end
 
     def edit_match_count(query : String) : Int32

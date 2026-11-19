@@ -56,36 +56,41 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     jump_line(@goto_target, n)
   end
 
-  # Jump a target view to 1-based line `n` (cursor for editors, scroll for the
-  # read-only panes). Shared by ^G go-to-line and ^F search.
-  private def jump_line(target : Symbol, n : Int32) : Nil
+  # Jump a target view to 1-based line `n`, at char index `cx` (cursor for editors, scroll
+  # for the read-only panes, onto the visual row holding `cx`). Shared by ^G go-to-line
+  # (cx 0) and ^F search (the match's column).
+  private def jump_line(target : Symbol, n : Int32, cx : Int32 = 0) : Nil
     case target
-    when :repeater_request  then repeater_controller.current_view.try(&.goto_request_line(n))
-    when :repeater_response then repeater_controller.current_view.try(&.goto_response_line(n))
-    when :notes             then notes_controller.view.goto_line(n)
-    when :project           then project_controller.view.goto_line(n)
-    when :detail            then history_controller.view.goto_detail_line(n)
-    when :intercept         then intercept_controller.view.edit_goto_line(n)
-    when :decoder_input     then decoder_controller.input_area.goto_line(n)
-    when :decoder_output    then decoder_controller.goto_output_line(n)
-    when :fuzz_template     then fuzzer_controller.current_view.try(&.goto_template_line(n))
-    when :fuzz_detail       then fuzzer_controller.current_view.try(&.goto_detail_line(n))
+    when :repeater_request  then repeater_controller.current_view.try(&.goto_request_line(n, cx))
+    when :repeater_response then repeater_controller.current_view.try(&.goto_response_line(n, cx))
+    when :notes             then notes_controller.view.goto_line(n, cx)
+    when :project           then project_controller.view.goto_line(n, cx)
+    when :detail            then history_controller.view.goto_detail_line(n, cx)
+    when :intercept         then intercept_controller.view.edit_goto_line(n, cx)
+    when :decoder_input     then decoder_controller.input_area.goto_line(n, cx)
+    when :decoder_output    then decoder_controller.goto_output_line(n, cx)
+    when :fuzz_template     then fuzzer_controller.current_view.try(&.goto_template_line(n, cx))
+    when :fuzz_detail       then fuzzer_controller.current_view.try(&.goto_detail_line(n, cx))
     end
   end
 
-  private def search_lines_for(target : Symbol, query : String) : Array(Int32)
+  # ^F hits as `{line, char index}`, one per OCCURRENCE: the count says how many matches
+  # there are, not how many lines hold one, and stepping visits each — a term repeated
+  # forty times inside one minified body line is forty stops, each scrolled into view.
+  private def search_hits_for(target : Symbol, query : String) : Array({Int32, Int32})
+    none = [] of {Int32, Int32}
     case target
-    when :repeater_request  then repeater_controller.current_view.try(&.request_search_lines(query)) || [] of Int32
-    when :repeater_response then repeater_controller.current_view.try(&.response_search_lines(query)) || [] of Int32
-    when :notes             then notes_controller.view.search_lines(query)
-    when :project           then project_controller.view.search_lines(query)
-    when :detail            then history_controller.view.detail_search_lines(query)
-    when :intercept         then intercept_controller.view.edit_search_lines(query)
-    when :decoder_input     then decoder_controller.input_area.search_lines(query)
-    when :decoder_output    then decoder_controller.output_search_lines(query)
-    when :fuzz_template     then fuzzer_controller.current_view.try(&.template_search_lines(query)) || [] of Int32
-    when :fuzz_detail       then fuzzer_controller.current_view.try(&.detail_search_lines(query)) || [] of Int32
-    else                         [] of Int32
+    when :repeater_request  then repeater_controller.current_view.try(&.request_search_hits(query)) || none
+    when :repeater_response then repeater_controller.current_view.try(&.response_search_hits(query)) || none
+    when :notes             then notes_controller.view.search_hits(query)
+    when :project           then project_controller.view.search_hits(query)
+    when :detail            then history_controller.view.detail_search_hits(query)
+    when :intercept         then intercept_controller.view.edit_search_hits(query)
+    when :decoder_input     then decoder_controller.input_area.search_hits(query)
+    when :decoder_output    then decoder_controller.output_search_hits(query)
+    when :fuzz_template     then fuzzer_controller.current_view.try(&.template_search_hits(query)) || none
+    when :fuzz_detail       then fuzzer_controller.current_view.try(&.detail_search_hits(query)) || none
+    else                         none
     end
   end
 
@@ -220,7 +225,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   private def search_refresh : Nil
-    @search_hits = search_lines_for(@search_target, @search_buffer)
+    @search_hits = search_hits_for(@search_target, @search_buffer)
     @search_idx = 0
     set_search_hl(@search_buffer) # highlight matches in the target view
     jump_to_match
@@ -237,13 +242,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # cached hits + count stay correct without re-scanning on every ↑/↓ step.
   private def search_recompute : Nil
     return unless @search_open
-    @search_hits = search_lines_for(@search_target, @search_buffer)
+    @search_hits = search_hits_for(@search_target, @search_buffer)
     @search_idx = @search_idx.clamp(0, {@search_hits.size - 1, 0}.max)
   end
 
   private def jump_to_match : Nil
     return if @search_hits.empty?
-    jump_line(@search_target, @search_hits[@search_idx] + 1) # hits are 0-based; jump is 1-based
+    li, cx = @search_hits[@search_idx]
+    jump_line(@search_target, li + 1, cx) # hits are 0-based; jump is 1-based
   end
 
   private def open_search(target : Symbol) : Nil
@@ -258,7 +264,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     @search_buffer = ""
     @search_cx = 0
     @search_preedit = ""
-    @search_hits = [] of Int32
+    @search_hits = [] of {Int32, Int32}
     @search_idx = 0
     @search_replace = false
     @search_replace_buffer = ""

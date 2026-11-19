@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/memory_backend"
 
 # The picker owns a live Termisu, so archive-mode coverage follows the source-reading
 # convention used by the adjacent project-picker specs.
@@ -72,6 +73,20 @@ describe "project archive modes in ProjectPicker" do
     choose.should contain("when :archive_export")
     picker_archive_method(source, "handle_list").should contain("if space_opens_menu?")
     picker_archive_method(source, "commit_archive_import").should contain("@project_query.set(\"\")")
+  end
+
+  # A refused import (the name exists) keeps the name card up to fix in place, so the reason
+  # has to be ON the card: the list's flash row is not drawn while it is.
+  it "puts a refused import's reason on the name card it leaves open" do
+    commit = picker_archive_method(picker_archive_code("tui", "project_picker.cr"), "commit_archive_import")
+    commit.should match(/@mode = :archive_import_name\n\s+overlay\.error = "import failed: #\{ex\.message\}"/)
+    ov = Gori::Tui::NamePromptOverlay.new("IMPORT PROJECT", "Archive reviewed. Name the new project.",
+      initial: "demo", action: "import", noun: "project name")
+    ov.error = %(import failed: project "demo" already exists — choose another name)
+    backend = MemoryBackend.new(120, 34)
+    ov.render(Gori::Tui::Screen.new(backend), Gori::Tui::Rect.new(0, 0, 120, 34))
+    backend.contains?("already exists — choose another name").should be_true
+    backend.contains?("Archive reviewed. Name the new project.").should be_true # not cut
   end
 end
 

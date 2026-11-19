@@ -14,7 +14,7 @@ module Gori
       # verb-driven Sitemap/Issues bodies (a surprising one-key dead-end mid-browse).
       r.register Verb::Definition.new(
         "app.back", "Back to projects", "Close this project and return to the picker", Verb::Scope::Global,
-        [] of Verb::Chord, category: Verb::Category::Navigation) { |ctx| ctx.leave_project; nil }
+        [] of Verb::Chord, category: Verb::Category::Navigation, keywords: ["archive", "project archive", "backups"]) { |ctx| ctx.leave_project; nil }
       r.register Verb::Definition.new(
         "app.back-key", "Back to projects", "Close this project (q on the tab bar)", Verb::Scope::Sidebar,
         [Verb::Chord.new("q")], hidden: true) { |ctx| ctx.leave_project; nil }
@@ -70,7 +70,7 @@ module Gori
       # the card above is where you find out who is listening.
       r.register Verb::Definition.new(
         "app.tell-agent", "Tell the agent…", "Send one line to an attached agent's session (delivery shows in the ring)",
-        Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.tell_agent; nil }
+        Verb::Scope::Global, category: Verb::Category::Action, keywords: %w[assistant]) { |ctx| ctx.tell_agent; nil }
 
       # …and the way back for a DECISION (#1324): the oldest `ask_operator` question waiting,
       # on its answer card. Palette-only for tell-agent's reason, with the `ask:N` chip and the
@@ -86,7 +86,7 @@ module Gori
       # picks the one pointer, which is memory-only and never persisted).
       r.register Verb::Definition.new(
         "session.slot", "Session slot", "Choose the identity every send goes out as (header overlay + binding table)",
-        Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.open_session_slots; nil }
+        Verb::Scope::Global, category: Verb::Category::Action, keywords: ["session handling", "macros"]) { |ctx| ctx.open_session_slots; nil }
 
       r.register Verb::Definition.new(
         "capture.toggle", "Toggle capture", "Start/stop capturing traffic", Verb::Scope::Global,
@@ -123,7 +123,7 @@ module Gori
       # gori's CA and routed through the proxy, like Burp/Caido's embedded browser.
       r.register Verb::Definition.new(
         "browser.open", "Open browser", "Launch a browser pre-trusting gori's CA, routed via the proxy",
-        Verb::Scope::Global) { |ctx| ctx.open_browser_picker; nil }
+        Verb::Scope::Global, keywords: ["burp browser", "embedded browser"]) { |ctx| ctx.open_browser_picker; nil }
 
       # Palette-only, beside browser.open: its terminal counterpart (#1238). A shell whose tools
       # go through the proxy and trust the CA, opened in place of the TUI or copied as export
@@ -144,7 +144,7 @@ module Gori
       # come from the SAME Tui::SettingsCatalog, so they can't list different sections.
       r.register Verb::Definition.new(
         "settings.open", "Settings", "Open Settings — the preferences modal (all sections)",
-        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_preferences; nil }
+        Verb::Scope::Global, category: Verb::Category::Settings, keywords: ["preferences", "options", "user options"]) { |ctx| ctx.open_preferences; nil }
       Tui::SettingsCatalog::SECTIONS.each do |s|
         r.register Verb::Definition.new(
           s.id, "Settings: #{s.title}", s.desc,
@@ -329,7 +329,7 @@ module Gori
       # while the held-bytes editor + condition bar still swallow them as literal text.
       r.register Verb::Definition.new(
         "intercept.direction", "Catch direction", "Cycle which to hold: requests only (default) / responses only / all",
-        Verb::Scope::Intercept, [Verb::Chord.new("c")]) { |ctx| ctx.intercept_cycle_direction; nil }
+        Verb::Scope::Intercept, [Verb::Chord.new("c")], keywords: ["do intercept", "response interception"]) { |ctx| ctx.intercept_cycle_direction; nil }
       r.register Verb::Definition.new(
         "intercept.filter", "Catch condition", "Only hold messages matching a query (host: method: path: status: scheme:)",
         Verb::Scope::Intercept, [Verb::Chord.new("/")], intent: :filter) { |ctx| ctx.intercept_query; nil }

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- TUI: typed input is no longer lost or changed behind your back. A Repeater or Fuzzer TARGET being edited takes Ctrl-A/E/U/W itself and returns to READ when you leave it, issue and rule forms ask once before `esc` discards an edit, and `esc` in Project settings cancels the edit instead of saving it (#1938).
+
+- TUI: Find counts every occurrence and scrolls to the match inside a long wrapped line, a new History filter puts the cursor on the newest match, Issues export writes the marked or filtered issues and says which, and the `Space` menu shows all its rows again after the terminal grows (#1938).
+
+- Fuzzer: the payload card shows all eight types and refuses a bound that is not a number, the CONFIG card follows its cursor on a short terminal, a refused run stays in Notifications, and Tab on an empty processor chain lists the converters (#1938).
+
+- Palette: `Ctrl-P` finds actions by Burp Suite and Caido words such as `replay`, `send to intruder`, `findings`, `httpql` and `preferences` (#1938).
+
 - Param Miner: every probe now carries a unique cache-busting query parameter so mining a cacheable endpoint is neither served a stale cached response nor poisoned into a shared cache; on by default, opt out with `gori run mine --no-cachebuster`, MCP `cachebuster:false`, or the TUI mine config overlay checkbox (#1930).
 
 - Source maps: an opt-in step fetches the `.map` a JS response points at (or parses an inline `data:` one), recovers the endpoints hidden in its original sources, and feeds them into the existing JS endpoint listing — via `unpack_sourcemap` (MCP), `gori run sitemap js --unpack`, and the History "Unpack source map" action (#1932).

@@ -65,6 +65,11 @@ module Gori::Tui
       @region_i = idx(REGIONS, region)
       @kind_i = idx(KINDS, kind)
       @sev_i = idx(SEVS, severity)
+      @opened_state = form_state
+    end
+
+    private def form_state : String
+      "#{super}|#{@scope_i}|#{@side_i}|#{@region_i}|#{@kind_i}|#{@sev_i}"
     end
 
     def self.adding : CustomRuleOverlay
@@ -191,7 +196,9 @@ module Gori::Tui
     # :stay | :commit | :cancel
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
-      return :cancel if key.escape?
+      if outcome = discard_key(ev)
+        return outcome
+      end
       return :stay if field_nav?(ev)
 
       if cycler_row?(@sel)

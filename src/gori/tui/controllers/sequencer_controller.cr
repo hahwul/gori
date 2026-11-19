@@ -67,29 +67,33 @@ module Gori::Tui
       pane == :config || pane == :samples || pane == :analysis
     end
 
-    # A bare key past SeededToolTabs#handle_body_key.
+    # A bare key past SeededToolTabs#handle_body_key (a ctrl/alt chord never gets here).
     #
-    # ⇧E → sequence.export and bare `c` → sequence.configure, both dispatched by the
-    # keymap. The line below swallows every key this body does not itself use, so a key
-    # the keymap owns never reaches it unless it is declined here BY NAME.
+    # A printable no pane here uses (only `j`/`k` are) goes on to the keymap: ⇧E is
+    # sequence.export, bare `c` sequence.configure, `?` help.hotkeys, and anything unbound
+    # reads `‹z› — nothing bound here` as on every other tab. This used to swallow them all,
+    # so a key the keymap owns had to be declined BY NAME or it never fired (a rebind of
+    # `sequence.configure` moved nothing; `?` opened nothing from this body).
     #
-    # `c` used to be an arm that called `reconfigure_sequence` directly. The verb's own
-    # chord could therefore never fire: it showed in the Hotkeys editor, and a rebind of
-    # `sequence.configure` moved nothing. The `:detail` test comes along because that is
-    # the one focus where the arm did not run, and the swallow below is what has always
-    # made `c` inert there.
-    #
-    # `?` is Global's `help.hotkeys`: swallowed here, the Shortcuts popup opened from every
-    # Sequencer pane but this body.
+    # Two stay here: Global's `i` holds all traffic and `c` stops capture, which a stray press
+    # in DETAIL (where `c` is not configure) must not do. They are named the same way.
     private def session_key(ev : Termisu::Event::Key, v : SequencerView, c : Char?) : Bool
-      return false if c == 'E' || c == '?'
-      return false if c == 'c' && !ev.ctrl? && !ev.alt? && v.focus != :detail
       # PgUp/PgDn/Home/End over SAMPLES go to the Runner's page/jump route (`body_scroll`
       # below), declined by name for the same reason. ANALYSIS and DETAIL keep them: there
       # they are the read pane's line-edge and page motions, ⇧ extending (#1419).
       return false if v.focus == :samples && page_nav_key?(ev.key)
+      if c && !c.control? && !{' ', 'j', 'k'}.includes?(c)
+        return false unless c == 'i' || (c == 'c' && v.focus == :detail)
+        name_unbound(c)
+        return true
+      end
       ev.key.escape? ? handle_escape(v) : handle_pane_key(ev, v)
       true
+    end
+
+    private def name_unbound(c : Char) : Nil
+      return unless hint = Runner.unbound_key_hint(Verb::Chord.new(c.to_s))
+      @host.status(Hotkeys.expand(@host.session.registry, hint))
     end
 
     private def handle_pane_key(ev : Termisu::Event::Key, v : SequencerView) : Nil

@@ -158,11 +158,12 @@ module Gori::Tui
     # pane whose provider builds its lines lazily (`Highlight::BodyLines`) would pay per line
     # here — fine for one keystroke, and the reason this is not called per frame.
     def search_lines(query : String) : Array(Int32)
-      hits = [] of Int32
-      return hits if query.empty? || empty?
-      q = query.downcase
-      (0...@size).each { |i| hits << i if @line_at.call(i).downcase.includes?(q) }
-      hits
+      search_hits(query).map(&.[0]).uniq!
+    end
+
+    # ^F hits per occurrence as `{line, char index}` (see `Wrap.search_hits`).
+    def search_hits(query : String) : Array({Int32, Int32})
+      Wrap.search_hits(@size, query) { |i| @line_at.call(i).downcase }
     end
 
     # Drop the caret, the selection and both scroll offsets — the pane is showing different
@@ -204,10 +205,12 @@ module Gori::Tui
     # are reachable by something other than a keystroke — the Comparer's jump to the next
     # changed row — where `move`'s relative step would have to be computed by the caller from
     # a `scroll` it does not own. Drops any selection: the caret did not walk there.
-    def goto_line(i : Int32) : Nil
+    def goto_line(i : Int32, cx : Int32 = 0) : Nil
       return if empty?
       @cursor.clear_selection
-      @cursor.move_to(i.clamp(0, @size - 1), 0)
+      li = i.clamp(0, @size - 1)
+      cx = cx.clamp(0, @line_at.call(li).size) if cx > 0 # a ^F match's char index; ^G passes 0
+      @cursor.move_to(li, {cx, 0}.max)
       ensure_visible
     end
 

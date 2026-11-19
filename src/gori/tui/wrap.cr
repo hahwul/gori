@@ -461,6 +461,27 @@ module Gori::Tui
       end
     end
 
+    # ^F hits as `{line, char index}`, one per OCCURRENCE — the non-overlapping left-to-right
+    # walk `SearchScan` marks with, so the prompt's `n/N` and the band agree. `lower_at` hands
+    # back line `i` already downcased (a pane may hold that copy cached). A per-occurrence
+    # column is what lets the jump land on the visual row of a match deep in a wrapped line.
+    def self.search_hits(size : Int32, query : String, & : Int32 -> String) : Array({Int32, Int32})
+      hits = [] of {Int32, Int32}
+      return hits if query.empty?
+      q = query.downcase
+      qb = q.bytesize
+      size.times do |i|
+        dl = yield i
+        next unless nb = dl.byte_index(q)
+        chars = dl.ascii_only? ? nil : Offsets.new(dl, false)
+        while nb
+          hits << {i, chars ? chars.char_at(nb) : nb}
+          nb = dl.byte_index(q, nb + qb)
+        end
+      end
+      hits
+    end
+
     # One pane's ^F scan cache, carried across frames: the drawn rows of a logical line, and
     # the next frame's rows of it, share one `SearchScan`. Bounded to two entries — the last
     # line at least `BIG` bytes (the one worth keeping: a minified body filling the viewport)

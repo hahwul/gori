@@ -65,4 +65,15 @@ describe "^N / ^W on the nine sub-tab strips" do
       dispatch_close.should contain(":#{t}")
     end
   end
+
+  # The empty RESULTS card advertises ^A/^O/^R, and on the Fuzzer strip they did nothing and
+  # said nothing (#B8). Answered with where they work — never rerouted into the body.
+  it "names ↓ for a Fuzzer chord pressed on its strip, without dispatching it" do
+    strip = SUBTABS[/private def handle_subtabs_key.*?^  end/m].not_nil!
+    strip.should contain("fuzzer_strip_hint(ev) unless dispatch_global_chord(ev)")
+    hint = SUBTABS[/private def fuzzer_strip_hint.*?^  end/m].not_nil!
+    hint.should contain("resolve_verb_id(chord, Verb::Scope::Fuzzer)")
+    hint.should contain("↓ enters it")
+    hint.should_not contain("call_keyed")
+  end
 end

@@ -39,6 +39,7 @@ module Gori::Tui
     # The `/` bar's own label, hoisted out of `render_filter_bar` because the dropdown
     # anchors to the column the query text starts in and must not re-measure it.
     QUERY_PREFIX = "filter › "
+    TITLE_MIN    = 24 # list-row columns a long host may not take from the title (see render_list)
 
     # The cold-start suggestion row (the idle bar says only `/ filter`), GENERATED from this
     # backend's vocabulary rather than written out. The literal they replace named `severity:`,
@@ -786,6 +787,17 @@ module Gori::Tui
       @all.compact_map { |f| f.id if @marks.marked?(f.id) }
     end
 
+    # What an export writes and how its card names it: the marks if any are set, else what
+    # the filter shows, else nil: every issue. The marks win over the filter as they do for
+    # every batch verb: a mark the filter hides is still one the operator chose.
+    def export_selection : {Array(Int64), String}?
+      unless @marks.empty?
+        ids = marked_ids
+        return {ids, Gori.plural(ids.size, "marked issue")}
+      end
+      {@issues.map(&.id), "#{Gori.plural(@issues.size, "issue")} matching the filter"} if filtering?
+    end
+
     # The effective target set every batch verb acts on: the marks if any are set, else the
     # cursor row. One rule, so a verb needs no notion of "batch mode".
     def target_ids : Array(Int64)
@@ -1211,9 +1223,14 @@ module Gori::Tui
         # its width floored at 0, so it never repaints those cells and the damage stays. Cap,
         # then ellipsize: an ellipsized host still tells you which host, a missing badge does
         # not tell you anything. (Pre-existing; the score below inherited the same trap.)
+        #
+        # …and capped short of the title's own floor (half the row, at most TITLE_MIN): a
+        # 75-column tenant host otherwise took the whole row at 80 columns and left the title,
+        # the one thing that says WHICH finding this is, zero cells.
         right = rect.right - 1
         if (host = f.host) && !host.empty?
-          hw = {Screen.display_width(host), {rect.right - 1 - title_x, 0}.max}.min
+          space = {rect.right - 1 - title_x, 0}.max
+          hw = {Screen.display_width(host), space - {space // 2, TITLE_MIN}.min - 1}.min
           if hw > 0
             screen.text(rect.right - hw - 1, y, ellipsize(host, hw), Theme.muted, bg, width: hw)
             right = rect.right - hw - 2

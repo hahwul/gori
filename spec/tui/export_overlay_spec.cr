@@ -56,6 +56,13 @@ describe Gori::Tui::ExportOverlay do
     backend.contains?("WAL-safe snapshot").should be_true
   end
 
+  # A marked or filtered issue export says which issues and how many before it writes.
+  it "names the issues an issue export writes on its first line" do
+    backend = MemoryBackend.new(100, 30)
+    ExportOverlay.new(:issues_json, "/tmp/i.json", "2 marked issues").render(Screen.new(backend), Rect.new(0, 0, 100, 30))
+    backend.contains?("Write 2 marked issues to a JSON file.").should be_true
+  end
+
   it "arrives PREFILLED with the destination the open-site chose" do
     # The whole point of the prefill: ↵ on an untouched field is the sane default, which is
     # what keeps the Issues export a single keystroke after it stopped hardcoding its path.

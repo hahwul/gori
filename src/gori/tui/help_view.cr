@@ -248,8 +248,9 @@ module Gori::Tui
         Item.new("^A", "cycle the format (auto / flask / rack / django)", "cookie.cycle-format"),
         # No verb id: cookie.cycle-algorithm has no chord (^G is the shell's go-to-line key), so
         # the OPTIONS `algo` badge is click-only, plus its menu row and the palette. The token
-        # spells the menu path; a verb id would replace the whole column, badge included.
-        Item.new("algo badge / {space:cookie.cycle-algorithm}", "cycle the Django HMAC algorithm (sha256 / sha1)"),
+        # spells the menu path; the badge rides the description, since both in the key cell
+        # overflowed KEY_W (`algo badge / space …`).
+        Item.new("{space:cookie.cycle-algorithm}", "cycle the Django HMAC algorithm (sha256 / sha1) · or click the algo badge"),
         Item.new("^L", "clear the session", "cookie.clear"),
         Item.new("↹", "cycle INPUT → DECODED → OPTIONS → SECRET (decode) / PAYLOAD → OPTIONS → SECRET → OUTPUT (forge)"),
         Item.new("c", "crack the secret over the SECRET field (a wordlist path or comma list)", "cookie.crack"),
@@ -388,7 +389,9 @@ module Gori::Tui
       {"REWRITER", [
         Item.new("{rewriter.add} · ↵/e", "add a Match & Replace rule · edit the selected one"),
         Item.new("{rewriter.toggle} · {rewriter.delete}", "enable/disable in this project · delete the selected rule"),
-        Item.new("{space:rewriter.scope} · {space:rewriter.toggle-default}", "move the rule global ⇄ project · flip a global rule's default everywhere"),
+        # Two rows: both menu routes in one key cell overflow KEY_W and print `space → s · space →…`.
+        Item.new("{space:rewriter.scope}", "move the rule global ⇄ project"),
+        Item.new("{space:rewriter.toggle-default}", "flip a global rule's default everywhere"),
         Item.new("G / P column", "global (every project) or project · G* = this project overrides its default"),
         Item.new("{rewriter.move-down} / {rewriter.move-up}", "reorder within a scope — globals apply first, then project rules"),
         # ↹, not `[ / ]`: those are the global next/prev TAB (`nav.next-tab`), and this tab's
@@ -404,7 +407,9 @@ module Gori::Tui
       {"COLORMARKER", [
         Item.new("{colormarker.add} · ↵/e", "add a History row-colour rule · edit the selected one"),
         Item.new("{colormarker.toggle} · {colormarker.delete}", "enable/disable in this project · delete the selected rule"),
-        Item.new("{space:colormarker.scope} · {space:colormarker.toggle-default}", "move the rule global ⇄ project · flip a global rule's default everywhere"),
+        # Two rows: both menu routes in one key cell overflow KEY_W and print `space → s · space →…`.
+        Item.new("{space:colormarker.scope}", "move the rule global ⇄ project"),
+        Item.new("{space:colormarker.toggle-default}", "flip a global rule's default everywhere"),
         Item.new("{colormarker.move-down} / {colormarker.move-up}", "reorder — the FIRST enabled match paints the row, the rest are skipped"),
         Item.new("style", "full = tint the whole row · strip = one colour cell ahead of TIME"),
         # Full History QL (`Colormarker`'s two tiers): `header:`/`size:`/`dur:`/`body:` work too.

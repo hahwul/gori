@@ -5963,3 +5963,22 @@ conflict crafts, and a separate h2 self-check confirms the smuggled header survi
 The safety posture is unchanged: off by default, `allow_unsafe` required to plan at all, the front-end
 pre-filter gates the intrusive probe, and the complete-prefix differential stays behind aggressive+unsafe. A
 variant that is not safely sendable on a flow's transport is simply not offered for it — never a false clean.
+
+### 2026-11-19: esc neither discards nor saves an edit without saying so (#1938)
+
+Three places answered `esc` with something the operator had not asked for. A rule form or the issue form
+closed over a filled-in edit; the Project settings card saved and applied the edit, a bind port included;
+and a TARGET left in INS kept typing into the URL on the next visit.
+
+- **A form asks once.** `DiscardGuard` (the hotkey editor's rule, now shared by `FormOverlay` and
+  `IssueForm`): an untouched form closes on one `esc`, a changed one says `not saved yet — esc again
+  discards`, and any other key withdraws the question. A pasted `esc` is neither the question nor its answer.
+- **Project settings cancels.** `esc` drops every unapplied edit in the card back to what is stored, pin
+  state included, and nothing is rebound. `↵`, moving off the card, Tab and a click out still apply, as before.
+- **INS is per visit.** A Repeater or Fuzzer TARGET returns to READ when focus leaves it by any route, which
+  is the READ-on-entry rule (2026-11-07) applied to the way out. While it is in INS it takes the line keys
+  (`LineEdit.action`) ahead of the tab's chords, as every `/` bar does (#1379).
+
+Not done: a Fuzzer RESULTS filter on `/`. It collides with the strip filter behind `T` under the helix and vim
+keysets, and R1 allows that only by an allowlist entry, which a new verb does not get to add for itself.
+

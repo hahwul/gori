@@ -24,6 +24,11 @@ module Gori::Tui
       @kind_idx = Scope::KINDS.index(kind) || 0
       @type_idx = Scope::TYPES.index(match_type) || 0
       @pattern = TextField.new(pattern) # rows: 0 kind · 1 type · 2 pattern · 3 save
+      @opened_state = form_state
+    end
+
+    private def form_state : String
+      "#{super}|#{@kind_idx}|#{@type_idx}"
     end
 
     def self.adding : ScopeRuleOverlay
@@ -97,7 +102,9 @@ module Gori::Tui
     # :stay | :commit | :cancel
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
-      return :cancel if key.escape?
+      if outcome = discard_key(ev)
+        return outcome
+      end
       return :stay if field_nav?(ev)
 
       case @sel

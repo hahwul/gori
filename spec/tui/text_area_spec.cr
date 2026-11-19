@@ -51,6 +51,20 @@ private def motion_key(k : Termisu::Input::Key, *, shift = false, alt = false, c
 end
 
 describe Gori::Tui::TextArea do
+  # ^F steps occurrences, and its jump carries the match's column (^G keeps column 0).
+  describe "^F hits and the column jump" do
+    it "answers one hit per occurrence and parks the caret on the one asked for" do
+      ta = Gori::Tui::TextArea.new
+      ta.set_text("GET / HTTP/1.1\nX: tok tok\n")
+      ta.search_hits("TOK").should eq([{1, 3}, {1, 7}])
+      ta.search_lines("tok").should eq([1])
+      ta.goto_line(2, 7)
+      {ta.cy, ta.cx}.should eq({1, 7})
+      ta.goto_line(1)
+      {ta.cy, ta.cx}.should eq({0, 0})
+    end
+  end
+
   # Named control badges must take the same columns in plain and syntax-highlighted editors.
   describe "named control badges in text areas" do
     it "draws an embedded tab badge without collapsing neighbours" do
@@ -1241,5 +1255,19 @@ describe "TextArea IME preview rendering" do
       backend.bg_at(7, 0).should eq(Theme.accent)
       area.text.should eq("A" * 20 + "Z")
     end
+  end
+end
+
+describe "Gori::Tui::TextArea#goto_line onto a concealed match" do
+  # ^F scans the raw line, so a hit can sit inside a hidden `¦chain`; the caret must not rest
+  # there, or the next INS keystroke edits text the operator cannot see.
+  it "steps the caret off the hidden chain" do
+    ta = Gori::Tui::TextArea.new("q=§data¦base64§")
+    ta.conceal_spans = [{7, 14}]
+    hit = ta.search_hits("base64").first
+    ta.goto_line(hit[0], hit[1])
+    ta.insert('Z')
+    ta.text.should_not contain("¦Zbase64")
+    ta.text.should contain("¦base64§")
   end
 end

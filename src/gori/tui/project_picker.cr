@@ -1497,7 +1497,7 @@ module Gori::Tui
       @confirm = nil
       @confirm_kind = :delete
       @archive_name_overlay = NamePromptOverlay.new("IMPORT PROJECT",
-        "Archive contents reviewed. Choose a display name for the new project.",
+        "Archive reviewed. Name the new project.",
         initial: prepared.manifest.project_name, action: "import", noun: "project name")
       @preedit = ""
       @mode = :archive_import_name
@@ -1534,11 +1534,12 @@ module Gori::Tui
         end
         set_flash("imported project #{project.name.inspect} — #{prepared.inventory.summary}", ok: true)
       rescue ex : Gori::Error | File::Error | IO::Error
-        # Keep the name field open so an existing project collision can be fixed in place.
+        # Keep the name field open so an existing project collision can be fixed in place —
+        # and say why ON the card: the list's flash row is not drawn while it is up.
         @archive_import_overlay = nil
         @archive_name_overlay = overlay
         @mode = :archive_import_name
-        set_flash("project import failed: #{ex.message}", ok: false)
+        overlay.error = "import failed: #{ex.message}"
       end
     end
 

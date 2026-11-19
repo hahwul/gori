@@ -63,7 +63,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "history.query", "Filter (QL)", "Filter the list with a query (host: status:>=500 size:>10000 body~regex …)",
-        Verb::Scope::Body, [Verb::Chord.new("/")], available: in_history, group: :view, intent: :filter, keywords: %w[search find]) { |ctx| ctx.history_query; nil }
+        Verb::Scope::Body, [Verb::Chord.new("/")], available: in_history, group: :view, intent: :filter, keywords: %w[search find httpql]) { |ctx| ctx.history_query; nil }
 
       # MENU-ONLY since the key audit's F3. `f` carried six unrelated meanings across the tabs
       # and settles into two TIERS: **freeze** in every evidence context (the Issues detail and
@@ -86,7 +86,7 @@ module Gori
       r.register Verb::Definition.new(
         "history.view", "View…", "Pick a History view — a saved filter the list narrows to, on top of the filter bar",
         Verb::Scope::Body, [Verb::Chord.new("v")],
-        available: in_history, mnemonic: 'v', group: :view) { |ctx| ctx.history_view_pick; nil }
+        available: in_history, mnemonic: 'v', group: :view, keywords: ["filter presets"]) { |ctx| ctx.history_view_pick; nil }
 
       # The hide-static lens (#1239) — images, fonts and media folded out of the list, over
       # whichever view is on. Menu-only, NO chord: it is flipped once per engagement and left,
@@ -185,12 +185,12 @@ module Gori
       # from the Project tab — that verb now lives in Verb::Scope::ProjectDesc.)
       r.register Verb::Definition.new(
         "history.copy-as", "Copy as…", "Pick a copy format for the selected/marked flows (urls/hosts/curl/raw)",
-        Verb::Scope::Body, available: history_targets, intent: :copy_as, group: :copy, keywords: %w[curl]) { |ctx| ctx.copy_as_open; nil }
+        Verb::Scope::Body, available: history_targets, intent: :copy_as, group: :copy, keywords: ["curl", "copy as curl command", "csrf poc"]) { |ctx| ctx.copy_as_open; nil }
 
       r.register Verb::Definition.new(
         "history.repeater", "Send to Repeater", "Open the selected flow in the Repeater tab",
         Verb::Scope::Body, [Verb::Chord.new("r", ctrl: true)],
-        available: history_targets, mnemonic: 'r', intent: :to_repeater, pinned: true, group: :send) { |ctx| ctx.repeater_selected; nil }
+        available: history_targets, mnemonic: 'r', intent: :to_repeater, pinned: true, group: :send, keywords: ["replay", "send to replay"]) { |ctx| ctx.repeater_selected; nil }
 
       # Spider + brute-force the selected flow's host (opens the Discover config popup; the
       # run streams into the Target → Discover sub-tab). Menu-only (no chord).
@@ -313,7 +313,7 @@ module Gori
       # across COMMON ∪ every Repeater section (all-lowercase keys there).
       r.register Verb::Definition.new(
         "repeater.copy-as", "Copy as…", "Pick a copy format for the focused pane (url/headers/body/cookies/curl/wscat/raw)",
-        Verb::Scope::Repeater, available: in_repeater_read, intent: :copy_as, keywords: %w[curl]) { |ctx| ctx.copy_as_open; nil }
+        Verb::Scope::Repeater, available: in_repeater_read, intent: :copy_as, keywords: ["curl", "copy as curl command", "csrf poc"]) { |ctx| ctx.copy_as_open; nil }
 
       # History's open-in-browser for the response IN HAND. Gated on a sub-tab, not on a
       # response: the refusal names what is missing ("send the request first"),
@@ -775,7 +775,7 @@ module Gori
       r.register Verb::Definition.new(
         "detail.repeater", "Send to Repeater", "Open this flow in the Repeater tab",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("r", ctrl: true)],
-        mnemonic: 'r', intent: :to_repeater, pinned: true, group: :send) { |ctx| ctx.close_detail; ctx.repeater_selected; nil }
+        mnemonic: 'r', intent: :to_repeater, pinned: true, group: :send, keywords: ["replay", "send to replay"]) { |ctx| ctx.close_detail; ctx.repeater_selected; nil }
 
       # Create an issue while reading the flow — the natural moment to file one.
       # Without this, ⇧F silently dead-ends in the detail (it's a Body-scope verb). The form
@@ -819,14 +819,14 @@ module Gori
       # REQUEST/RESPONSE pane bytes. Menu key 'Y' pairs with copy's 'y'.
       r.register Verb::Definition.new(
         "detail.copy-as", "Copy as…", "Pick a copy format for this pane (url/headers/body/cookies/curl/raw)",
-        Verb::Scope::HistoryDetail, intent: :copy_as, group: :copy) { |ctx| ctx.copy_as_open; nil }
+        Verb::Scope::HistoryDetail, intent: :copy_as, group: :copy, keywords: ["curl", "copy as curl command", "csrf poc"]) { |ctx| ctx.copy_as_open; nil }
 
       # Send the open flow to the Fuzzer (mirrors history.fuzz ⇧I / Send flow to… from the list) —
       # close the detail first so it doesn't float over the Fuzzer tab.
       r.register Verb::Definition.new(
         "detail.fuzz", "Send to Fuzzer", "Open this flow in the Fuzzer tab",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("i", shift: true)],
-        intent: :to_fuzzer, group: :send) { |ctx| ctx.close_detail; ctx.fuzz_selected; nil }
+        intent: :to_fuzzer, group: :send, keywords: ["send to intruder", "send to automate"]) { |ctx| ctx.close_detail; ctx.fuzz_selected; nil }
 
       # Add the open flow's host to the scope lens (mirrors scope.add-host from the list,
       # menu-only there too). The lexicon's `H`: `h` is the ← pane-nav chord in the detail,
@@ -866,13 +866,13 @@ module Gori
       r.register Verb::Definition.new(
         "history.fuzz", "Send to Fuzzer", "Open the selected flow in the Fuzzer tab",
         Verb::Scope::Body, [Verb::Chord.new("i", shift: true)],
-        available: history_targets, intent: :to_fuzzer, group: :send) { |ctx| ctx.fuzz_selected; nil }
+        available: history_targets, intent: :to_fuzzer, group: :send, keywords: ["send to intruder", "send to automate"]) { |ctx| ctx.fuzz_selected; nil }
       r.register Verb::Definition.new(
         # Send flow to… → `f`, the letter it has on every tab (#1274). At level 1 it held 'f'
         # until the key audit gave that to `repeater.find-subtab`, then 'F' — while History
         # spelled the same act 'z'; the family table is what ended that drift.
         "repeater.fuzz", "Send to Fuzzer", "Turn this repeater request into a fuzz template",
-        Verb::Scope::Repeater, available: REPEATER_SESSION, intent: :to_fuzzer) { |ctx| ctx.fuzz_from_repeater; nil }
+        Verb::Scope::Repeater, available: REPEATER_SESSION, intent: :to_fuzzer, keywords: ["send to intruder", "send to automate"]) { |ctx| ctx.fuzz_from_repeater; nil }
 
       r.register Verb::Definition.new(
         "fuzz.run", "Run fuzz", "Start the fuzz/intruder run", Verb::Scope::Fuzzer,

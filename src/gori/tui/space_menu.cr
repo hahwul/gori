@@ -838,9 +838,9 @@ module Gori::Tui
       return if viewport <= 0 || rows.empty?
       sel_row = rows.index { |r| r.entry == @selected } || 0
       off = g.col_rows > 0 ? sel_row % g.col_rows : sel_row
-      @scroll = off if off < @scroll
-      @scroll = off - viewport + 1 if off >= @scroll + viewport
-      @scroll = 0 if @scroll < 0
+      # With the tail clamp: a terminal that GREW would otherwise keep the old offset, drawing
+      # the last rows over blank lines with everything above them scrolled away.
+      @scroll = Viewport.scroll_to_show(off, @scroll, viewport, g.col_rows > 0 ? g.col_rows : rows.size)
     end
 
     # Maps a click in `body` to an entry index (or nil) — inverts box()/render()'s grid.

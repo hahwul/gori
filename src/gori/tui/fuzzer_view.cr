@@ -634,6 +634,7 @@ module Gori::Tui
     # rule above — going away and coming back must not route URL keystrokes into @sni).
     def focus_resume : Nil
       @target_field = :url
+      @target_mode = InputMode::Read # a pane is entered in READ (i/↵ edits), however it was left
     end
 
     def focus_pane(pane : Symbol) : Nil
@@ -662,6 +663,7 @@ module Gori::Tui
     end
 
     private def set_focus(pane : Symbol) : Nil
+      @target_mode = InputMode::Read if pane != :target # INS is per visit, as RepeaterView#set_focus
       @focus = pane
       @target_field = :url
     end
@@ -2265,9 +2267,9 @@ module Gori::Tui
     # text would jump the caret to a line the pane is not showing.
 
     # `n` is 1-based (what the gutter prints); `ReadPane` indexes from 0.
-    def goto_detail_line(n : Int32) : Nil
+    def goto_detail_line(n : Int32, cx : Int32 = 0) : Nil
       sync_detail_source
-      @detail_read.goto_line(n - 1)
+      @detail_read.goto_line(n - 1, cx)
     end
 
     # Searches the CURRENTLY-SHOWN sub-pane (REQUEST / RESPONSE / a decoded pane), because
@@ -2276,6 +2278,11 @@ module Gori::Tui
     def detail_search_lines(query : String) : Array(Int32)
       sync_detail_source
       @detail_read.search_lines(query)
+    end
+
+    def detail_search_hits(query : String) : Array({Int32, Int32})
+      sync_detail_source
+      @detail_read.search_hits(query)
     end
 
     def detail_search_hl=(q : String) : Nil
@@ -2287,12 +2294,16 @@ module Gori::Tui
     # panes are the same `TextArea` holding the same captured request, so they answer the same
     # way. No hex arm here — the Fuzzer template has no hex mode to go stale behind.
 
-    def goto_template_line(n : Int32) : Nil
-      @editor.goto_line(n)
+    def goto_template_line(n : Int32, cx : Int32 = 0) : Nil
+      @editor.goto_line(n, cx)
     end
 
     def template_search_lines(query : String) : Array(Int32)
       @editor.search_lines(query)
+    end
+
+    def template_search_hits(query : String) : Array({Int32, Int32})
+      @editor.search_hits(query)
     end
 
     def template_match_count(query : String) : Int32
@@ -3088,9 +3099,9 @@ module Gori::Tui
       # TEMPLATE card's gutter beside it; selection bands still span the whole interior.
       screen.text(inner.x + 1, inner.y, "PAYLOAD SETS", Theme.muted, Theme.bg)
       mcount = marker_spans.size
-      if @config.mode.per_position? && !@sets.empty? && @sets.size != mcount
+      if hint = sets_hint(mcount)
         hx = inner.x + 14
-        screen.text(hx, inner.y, sets_hint(mcount, @sets.size), Theme.muted, Theme.bg, width: {mx - hx, 1}.max)
+        screen.text(hx, inner.y, hint, Theme.muted, Theme.bg, width: {mx - hx, 1}.max)
       end
 
       # Mode / Advanced + the run-size read-out anchor to the bottom 3 rows; the sets list +
@@ -3104,10 +3115,39 @@ module Gori::Tui
       # hand the tail what is left, dropping the run read-out, then Advanced, then Mode.
       tail_rows = (inner.h - 2).clamp(0, 3)
       tail_top = inner.bottom - tail_rows
+      # Too short for that layout to keep every cursor row (the sets need their Add row, or a
+      # windowed set + its overflow hint + Add): while the card holds the cursor, scroll one
+      # list of cursor rows instead, so the row the footer describes is always a row on screen.
+      # Unfocused it keeps the anchored layout: the set and Mode are the summary worth reading.
+      if focused && inner.h - 4 < { {@sets.size, 1}.max + 1, 3 }.min
+        return render_config_rows(screen, inner, inner.y + 1, focused)
+      end
       render_sets(screen, inner, inner.y + 1, focused, tail_top)
       render_mode_row(screen, inner, tail_top, focused) if tail_rows >= 1
       render_advanced_row(screen, inner, tail_top + 1, focused) if tail_rows >= 2
       render_run_summary(screen, inner, tail_top + 2) if tail_rows >= 3
+    end
+
+    # The short card: every cursor row (sets, Add, Mode, Advanced) in one window over
+    # [y0, inner.bottom) that follows `@cfg_row`. The run read-out is passive and gives way.
+    private def render_config_rows(screen, inner : Rect, y0 : Int32, focused : Bool) : Nil
+      n = inner.bottom - y0
+      return if n < 1
+      pp = @config.mode.per_position?
+      @cfg_scroll = Viewport.scroll_to_show(@cfg_row, @cfg_scroll, n, config_row_count)
+      stop = {@cfg_scroll + n, config_row_count}.min
+      (@cfg_scroll...stop).each_with_index do |row, k|
+        y = y0 + k
+        if row < @sets.size
+          render_set_row(screen, inner, y, @sets[row], row, set_selected?(row), focused, pp)
+        else
+          case CONFIG_TAIL[row - @sets.size]
+          when :add  then draw_add_row(screen, inner, y, focused, inner.bottom)
+          when :mode then render_mode_row(screen, inner, y, focused)
+          else            render_advanced_row(screen, inner, y, focused)
+          end
+        end
+      end
     end
 
     # Payload-set rows within [y0, limit), followed by the "+ Add payload set…" row.
@@ -3273,7 +3313,15 @@ module Gori::Tui
 
     # set_for(p) = @sets[p]? || @sets[0]: with fewer sets than markers the extras wrap
     # back to set 1; with more, the surplus sets are unused. 1-based to match the rows.
-    private def sets_hint(markers : Int32, sets : Int32) : String
+    # The header's note on sets the mode will not line up with markers, or nil. Sniper and
+    # Battering ram draw from set 1 alone, so a second set is said here for as long as it is
+    # true — the run-start line that also says it is overwritten by progress within a second.
+    private def sets_hint(markers : Int32) : String?
+      sets = @sets.size
+      unless @config.mode.per_position?
+        return sets > 1 ? "· set 2+ unused" : nil
+      end
+      return nil if sets == 0 || sets == markers
       sets < markers ? "· #{markers} markers, #{sets} sets — marker #{sets + 1}+ reuse set 1" : "· #{markers} markers — set #{markers + 1}+ unused"
     end
 

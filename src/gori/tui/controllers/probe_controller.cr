@@ -894,7 +894,7 @@ module Gori::Tui
         end
         @host.status("updated custom rule")
       else
-        unless insert_custom_rule(ov, store)
+        unless added = insert_custom_rule(ov, store)
           @host.status("rule \"#{ov.rule_title}\" NOT added (#{write_cause(ov.scope)}) — " \
                        "nothing is scanning for it")
           return false
@@ -902,20 +902,24 @@ module Gori::Tui
         @host.status("added custom rule")
       end
       reload_rules
+      @rules.select_rule(added) if added # the new row is the one the operator is looking for
       true
     end
 
-    # Whether the new rule reached its library. Both writers report a refusal in their own
-    # dialect: `add_scan_rule` answers "" (the `0_i64` of this family's id type) and
-    # `insert_probe_custom_rule` answers 0 — NOT nil — for a batch that never committed, and
-    # 0 is TRUTHY in Crystal, which is the trap `Probe::Triage.promote` names.
-    private def insert_custom_rule(ov : CustomRuleOverlay, store : Store, enabled : Bool = true) : Bool
+    # The new rule's row key (`CustomRule#code`), or nil when it did not reach its library.
+    # Both writers report a refusal in their own dialect: `add_scan_rule` answers "" (the
+    # `0_i64` of this family's id type) and `insert_probe_custom_rule` answers 0 — NOT nil —
+    # for a batch that never committed, and 0 is TRUTHY in Crystal, which is the trap
+    # `Probe::Triage.promote` names.
+    private def insert_custom_rule(ov : CustomRuleOverlay, store : Store, enabled : Bool = true) : String?
       if ov.scope == "global"
-        !Settings.add_scan_rule(ov.rule_title, ov.description, ov.side, ov.region, ov.kind,
-          ov.pattern, ov.severity.label, enabled).empty?
+        id = Settings.add_scan_rule(ov.rule_title, ov.description, ov.side, ov.region, ov.kind,
+          ov.pattern, ov.severity.label, enabled)
+        "custom_g_#{id}" unless id.empty?
       else
-        store.insert_probe_custom_rule(ov.rule_title, ov.description, ov.side, ov.region,
-          ov.kind, ov.pattern, ov.severity, enabled) != 0
+        id = store.insert_probe_custom_rule(ov.rule_title, ov.description, ov.side, ov.region,
+          ov.kind, ov.pattern, ov.severity, enabled)
+        "custom_p_#{id}" unless id == 0
       end
     end
 

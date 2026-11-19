@@ -614,3 +614,85 @@ describe Gori::Tui::PaletteState, "what a newcomer types" do
     end
   end
 end
+
+# Someone arriving from Burp Suite or Caido types THEIR tool's word. Each row is (query → the
+# row ^P opens on). `history_body` is ^P from the History list with a flow under the cursor
+# (and marked, so Link… is offered); nil is ^P where the focused tab adds nothing.
+describe Gori::Tui::PaletteState, "Burp and Caido words" do
+  history_body = Gori::Tui::ActionContext.new(Gori::Verb::Scope::Body, :common)
+
+  top = ->(here : Gori::Tui::ActionContext?, q : String, marked : Bool) do
+    ctx = FakeExecContext.new
+    ctx.selected = 5_i64
+    ctx.marks = [5_i64] if marked
+    palette = PaletteState.new(Gori::Verbs.registry)
+    palette.capture(here, ctx)
+    palette.reset(ctx)
+    q.each_char { |c| palette.append(c, ctx) }
+    palette.results.first?.try(&.id)
+  end
+
+  it "opens on the gori row for the other tool's word" do
+    {
+      # Burp
+      "intruder" => "tab.fuzzer", "turbo intruder" => "tab.fuzzer", "scanner" => "tab.probe",
+      "live scan" => "tab.probe", "passive scan" => "tab.probe", "collaborator" => "tab.oast",
+      "proxy history" => "tab.history", "logger" => "tab.history", "site map" => "tab.target",
+      "match and replace" => "tab.rewriter", "param miner" => "tab.miner", "guess params" => "tab.miner",
+      "autorize" => "tab.authorize", "organizer" => "tab.notes", "highlight" => "tab.colormarker",
+      "session handling" => "session.slot", "macro" => "session.slot", "burp browser" => "browser.open",
+      "preferences" => "settings.open", "user options" => "settings.open", "options" => "settings.open",
+      "socks" => "settings.network", "upstream proxy" => "settings.network", "report" => "issues.export",
+      # Caido
+      "http history" => "tab.history", "replay" => "tab.repeater", "automate" => "tab.fuzzer",
+      "tamper" => "tab.rewriter", "convert" => "tab.decoder", "findings" => "tab.issues",
+      "environment" => "settings.env", "backups" => "app.back", "archive" => "app.back",
+      "assistant" => "app.tell-agent", "save" => "issues.export",
+    }.each do |q, id|
+      top.call(nil, q, false).should eq(id), q
+    end
+  end
+
+  it "opens on the History action for the other tool's verb" do
+    {
+      "send to intruder" => "history.fuzz", "send to automate" => "history.fuzz",
+      "send to replay" => "history.repeater", "replay" => "history.repeater",
+      "send to autorize" => "history.authorize", "copy as curl command" => "history.copy-as",
+      "csrf" => "history.copy-as", "httpql" => "history.query", "search" => "history.query",
+      "filter presets" => "history.view", "comment" => "link.history.attach",
+      "report" => "issues.export",
+    }.each do |q, id|
+      top.call(history_body, q, true).should eq(id), q
+    end
+  end
+
+  # The synonyms must not take gori's own names: each short prefix opens where it did before
+  # they were added, from both contexts.
+  it "leaves gori's own names and their prefixes where they were" do
+    {
+      "hi" => "tab.history", "his" => "tab.history", "hist" => "tab.history",
+      "int" => "intercept.toggle", "inter" => "intercept.toggle", "fu" => "tab.fuzzer",
+      "fuzz" => "tab.fuzzer", "rep" => "rules.edit", "repe" => "tab.repeater", "dec" => "tab.decoder",
+      "pro" => "app.back", "prob" => "tab.probe", "proj" => "app.back", "sett" => "settings.open",
+      "tar" => "tab.target", "min" => "tab.miner", "oa" => "tab.oast", "seq" => "tab.sequencer",
+      "col" => "tab.colormarker", "rew" => "tab.rewriter", "iss" => "tab.issues",
+      "au" => "tab.authorize", "auth" => "tab.authorize", "ev" => "tab.evidence", "jw" => "tab.jwt",
+      "coo" => "tab.cookie", "he" => "tab.help", "cap" => "capture.toggle", "br" => "browser.open",
+      "exp" => "issues.export", "gu" => "help.tour", "gen" => "settings.general",
+    }.each do |q, id|
+      top.call(nil, q, false).should eq(id), q
+    end
+    {
+      "hi" => "history.clear", "int" => "intercept.toggle", "inter" => "intercept.toggle",
+      "fuzz" => "history.fuzz", "rep" => "history.repeater", "dec" => "tab.decoder",
+      "pro" => "history.probe-active", "sett" => "settings.open", "tar" => "tab.target",
+      "min" => "history.mine", "seq" => "history.sequence", "comp" => "history.compare",
+      "col" => "history.columns", "rew" => "tab.rewriter", "iss" => "issue.create",
+      "auth" => "history.authorize", "dis" => "history.discover", "hel" => "tab.help",
+      "sco" => "scope.add-host", "bro" => "history.open-browser", "gu" => "help.tour",
+      "gen" => "settings.general",
+    }.each do |q, id|
+      top.call(history_body, q, false).should eq(id), q
+    end
+  end
+end

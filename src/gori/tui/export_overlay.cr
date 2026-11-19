@@ -31,7 +31,9 @@ module Gori::Tui
     # default name has exactly one source — the open-site's `default_path`.
     getter default_basename : String
 
-    def initialize(@kind : Symbol, default_path : String)
+    # `subject` names WHICH issues an issue export writes ("2 marked issues"): the card's
+    # first line says it, so a marked or filtered export holds no surprise.
+    def initialize(@kind : Symbol, default_path : String, @subject : String = "every issue")
       @field = TextField.new(default_path)
       @default_basename = File.basename(default_path)
       @path_complete = PathComplete.new
@@ -76,9 +78,9 @@ module Gori::Tui
       case @kind
       when :note            then "Write the current note's text to a Markdown file."
       when :project_archive then "Write a WAL-safe snapshot of the selected project to one archive."
-      when :issues_md       then "Write the Markdown issue report to a file."
-      when :issues_json     then "Write every issue to a JSON file."
-      when :issues_sarif    then "Write every issue as a SARIF 2.1.0 log — the format GitHub code scanning and CI dashboards ingest."
+      when :issues_md       then "Write #{@subject} as a Markdown report to a file."
+      when :issues_json     then "Write #{@subject} to a JSON file."
+      when :issues_sarif    then "Write #{@subject} as a SARIF 2.1.0 log — the format GitHub code scanning and CI dashboards ingest."
       when :sequence_md     then "Write this session's token-randomness report to a Markdown file (no token values)."
       when :sequence_json   then "Write this session's token-randomness report to a JSON file (no token values)."
       when :evidence_json   then "Write this immutable snapshot and provenance to a JSON file."

@@ -206,7 +206,7 @@ module Gori::Tui
         return outcome
       end
 
-      return :commit if key.escape?
+      return commit_or_flag if key.escape?
       if key.tab?
         move_row(1); return :stay
       elsif key.back_tab?
@@ -345,7 +345,7 @@ module Gori::Tui
       case
       when key.up?    then move_row(-1)
       when key.down?  then move_row(1)
-      when key.enter? then return :commit if on_last_row?; move_row(1)
+      when key.enter? then return commit_or_flag if on_last_row?; move_row(1)
       else
         tf.handle_edit_key(ev)
         refresh_path(f) # keep the wordlist dropdown in lockstep with the field
@@ -498,6 +498,26 @@ module Gori::Tui
       @values.text.split('\n').map(&.strip).reject(&.empty?)
     end
 
+    # Every exit applies, so a numeric field that does not parse would apply as the
+    # fallback `num`/`num64` give it (`To: ten` became `1-0`, 0 requests) without a word.
+    # Such a field blocks the exit instead: focus moves to it and the hint row says why.
+    private def commit_or_flag : Symbol
+      bad = field_rows.find { |f| bad_number?(f) }
+      return :commit unless bad
+      @sel = rows.index(bad) || @sel
+      @path_complete.close
+      @notice = "#{field_label(bad)} must be a whole number — fix it to apply"
+      :stay
+    end
+
+    private def bad_number?(f : Symbol) : Bool
+      wide = f.in?(:from, :to, :step)
+      return false unless wide || f.in?(:count, :min, :max)
+      v = @fields[f].value
+      return false if v.strip.empty? # an empty field keeps its default, as it always has
+      wide ? v.to_i64?.nil? : v.to_i?.nil?
+    end
+
     private def num(f : Symbol, default : Int32 = 0) : Int32
       @fields[f].value.to_i? || default
     end
@@ -511,7 +531,7 @@ module Gori::Tui
 
     private def ptype_label(t : Symbol) : String
       case t
-      when :bytes    then "Bytes (base64 JSON)"
+      when :bytes    then "Bytes" # the empty editor's hint says "JSON array of base64 payloads"
       when :preset   then "Preset"
       when :numbers  then "Numbers"
       when :wordlist then "Wordlist"
@@ -545,8 +565,7 @@ module Gori::Tui
     LABEL_W = 9 # value column offset (widest field label "Charset" + padding)
 
     def overlay_box(area : Rect) : Rect?
-      # 76 wide at most: the Type row carries seven labels now (Project joined Preset) and the
-      # last of them did not fit in 66 columns, which drops it from the row without a word.
+      # 76 wide at most: the Type row carries eight labels (see `render_type_row`).
       area.card?(76, 20, 34, 8)
     end
 
@@ -589,15 +608,23 @@ module Gori::Tui
       x = box.x + 2
       screen.text(x, box.y + 1, "Type", Theme.muted, Theme.bg)
       x += LABEL_W
-      PTYPES.each do |t|
-        sel = t == @ptype
-        seg = " #{ptype_label(t)} "
-        break if x + seg.size > box.right - 2
-        bg = sel ? (foc ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
-        fg = sel ? Theme.text_bright : Theme.muted
-        screen.text(x, box.y + 1, seg, fg, bg)
-        x += seg.size + 1
+      limit = box.right - 2
+      labels = PTYPES.map { |t| ptype_label(t) }
+      # One space between labels; the selected one's band takes the space on either side. All
+      # eight fit the card at 80 columns (55 cells). A narrower card drops leading labels until
+      # the selected one fits, so the type being edited is never the one left off the row.
+      si = PTYPES.index(@ptype) || 0
+      first = (0..si).find { |f| x + labels[f..si].sum { |l| l.size + 1 } + 1 <= limit } || si
+      sel_x = nil
+      (first...PTYPES.size).each do |i|
+        break if x + labels[i].size + 2 > limit
+        sel_x = x if i == si
+        screen.text(x + 1, box.y + 1, labels[i], Theme.muted, Theme.bg)
+        x += labels[i].size + 1
       end
+      return unless sx = sel_x
+      bg = foc ? Theme.accent_bg : Theme.selection_dim
+      screen.text(sx, box.y + 1, " #{labels[si]} ", Theme.text_bright, bg)
     end
 
     private def render_fields(screen : Screen, box : Rect) : Nil
@@ -762,7 +789,7 @@ module Gori::Tui
     # shell used to run through apply_close_fuzz_set.
     def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
       box = overlay_box(area)
-      return :commit if box.nil? || !box.contains?(mx, my)
+      return commit_or_flag if box.nil? || !box.contains?(mx, my)
       if my == box.y + 1
         @sel = 0
         sync_path_complete

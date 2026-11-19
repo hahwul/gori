@@ -304,3 +304,31 @@ describe "FuzzerController — prepared peer tab" do
     end
   end
 end
+
+# Records the kind a toast was raised with — FakeHost keeps only the text.
+private class KindedFuzzHost < FakeHost
+  getter kinded = [] of {String, Symbol}
+
+  def status(message : String, kind : Symbol) : Nil
+    @kinded << {message, kind}
+    super
+  end
+end
+
+describe "FuzzerController#fuzz_run refusals" do
+  # A plan refusal is a sentence the 59-column toast cuts, and it was a plain toast, so the
+  # Notifications card (which keeps `:error` toasts only) never had it either.
+  it "raises a plan refusal as an :error toast" do
+    with_fuzzer_controller do |_, session|
+      host = KindedFuzzHost.new(session)
+      ctl = FuzzerController.new(host)
+      ctl.fuzz_new
+      view = ctl.current_view.not_nil!
+      view.load_request("https://h", "GET /?x=1 HTTP/1.1\r\nHost: h\r\n\r\n", false, "") # no marker
+      view.apply_set(nil, Gori::Tui::SetSpec.list(["a"]))
+      ctl.fuzz_run
+      host.kinded.size.should eq(1)
+      host.kinded.first[1].should eq(:error)
+    end
+  end
+end

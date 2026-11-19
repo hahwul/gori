@@ -362,14 +362,19 @@ module Gori::Tui
     # The `result` the OUTPUT pane derives its text from has to come from the live session, so
     # these thin wrappers exist rather than the shell reaching for `cur` itself.
 
-    def goto_output_line(n : Int32) : Nil
+    def goto_output_line(n : Int32, cx : Int32 = 0) : Nil
       s = cur
-      s.view.goto_output_line(n, s.result)
+      s.view.goto_output_line(n, s.result, cx)
     end
 
     def output_search_lines(query : String) : Array(Int32)
       s = cur
       s.view.output_search_lines(query, s.result)
+    end
+
+    def output_search_hits(query : String) : Array({Int32, Int32})
+      s = cur
+      s.view.output_search_hits(query, s.result)
     end
 
     def output_search_hl=(q : String) : Nil

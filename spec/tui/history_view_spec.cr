@@ -792,6 +792,27 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  # A NEW filter whose result dropped the selected flow starts at the newest row; the old row
+  # INDEX (row 6 of 6) means nothing in a different answer. A flow still in it keeps the cursor.
+  it "lands a changed query on the newest row unless the selected flow survives it" do
+    with_store do |store|
+      a = (0...6).map { |i| add_flow(store, "GET", "/a/#{i}", 200) }
+      b = (0...2).map { |i| add_flow(store, "GET", "/b/#{i}", 200) }
+      view = HistoryView.new
+      view.set_query("path:/a")
+      view.reload(store)
+      view.move(4)
+      view.selected_id.should eq(a[1])
+      view.set_query("path:/a/")
+      view.reload(store)
+      view.selected_id.should eq(a[1]) # still in the answer: stay on it (row 5 of 6)
+      view.set_query("path:/b")
+      view.reload(store)
+      view.selected_id.should eq(b[1]) # gone: the newest row, not the old index clamped
+      view.selected.should eq(0)
+    end
+  end
+
   it "loads flows newest-first with the newest selected (follow)" do
     with_store do |store|
       add_flow(store, "GET", "/a", 200)

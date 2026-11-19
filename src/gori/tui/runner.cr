@@ -248,7 +248,7 @@ module Gori::Tui
       @search_cx = 0 # caret into @search_buffer (the prompts edit through `prompt_edit`)
       @search_preedit = ""
       @search_target = :none
-      @search_hits = [] of Int32
+      @search_hits = [] of {Int32, Int32} # ^F hits as {line, char index}, one per occurrence
       @search_idx = 0
       @search_replace = false
       @search_replace_buffer = ""
@@ -1840,6 +1840,12 @@ module Gori::Tui
       if @overlay.none? && ev.ctrl? && ev.key.comma?
         open_preferences
         return
+      end
+
+      # A one-line field being typed into takes ^A/^E/^U/^W like every `/` bar above, ahead of
+      # the ^W close below (`TabController#line_field_editing?`, LineEdit.action).
+      if @overlay.none? && @focus == :body && LineEdit.action(ev) && (lt = @tabs[@active_tab]?) && lt.line_field_editing?
+        return if lt.handle_body_key(ev)
       end
 
       # ^N / ^W create and close a sub-tab from ANY focus level, on every tab that has a
@@ -3501,6 +3507,7 @@ module Gori::Tui
         return pt.hint
       end
       if ov = active_overlay # migrated modals carry their own hint (Overlay seam)
+        return DiscardGuard::DISCARD_HINT if ov.is_a?(DiscardGuard) && ov.discard_armed?
         return ov.hint
       end
       case @overlay
@@ -5029,8 +5036,9 @@ module Gori::Tui
     # stays up showing the error toast with the typed path intact instead of making the user
     # retype it — the same "keep the form up on a correctable failure" the CA import commit
     # relies on.
-    private def open_export(kind : Symbol, default_path : String, &write : String -> Bool) : Nil
-      ov = ExportOverlay.new(kind, default_path)
+    private def open_export(kind : Symbol, default_path : String, subject : String = "every issue",
+                            &write : String -> Bool) : Nil
+      ov = ExportOverlay.new(kind, default_path, subject)
       ov.on_commit = -> { write.call(ov.resolved_path) }
       open_overlay(ov)
     end

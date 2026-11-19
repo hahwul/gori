@@ -227,6 +227,10 @@ module Gori::Tui
       v.ws_mode? ? "ws" : (v.http2? ? "h2" : "h1")
     end
 
+    def line_field_editing? : Bool
+      (v = current_view) ? v.focus == :target && v.pane_insert?(:target) && v.pane_drawn?(:target) : false
+    end
+
     # The gRPC field list takes ↑/↓ and ↵ for itself, like an editor.
     def pane_captures_keys? : Bool
       super || current_view.try(&.grpc_fields?) || false
@@ -524,6 +528,10 @@ module Gori::Tui
         # Switch repeater sub-tab by its (absolute) chip number — works even while editing
         # fields because of the ctrl check. jump_subtab reveals a filtered-out target.
         jump_subtab(c.to_i - 1)
+      elsif LineEdit.action(ev) && line_field_editing? && (view = current_view)
+        # The field being typed into takes ^A/^E/^U/^W ahead of the tab chords on those letters
+        # (auto-mark, pretty, close), like every other bar (#1379, LineEdit.action).
+        return edit_repeater_target(ev, view)
       elsif ev.ctrl? && key.lower_w?
         request_close
       elsif ev.ctrl_z? && (view = current_view) && view.focus == :request
@@ -3748,7 +3756,7 @@ module Gori::Tui
       key = ev.key
       case
       when key.enter? then view.pane_advance(1)
-      when key.up?    then @host.request_focus(subtab_strip_shown? ? :subtabs : :menu)
+      when key.up?    then view.exit_target_insert!; @host.request_focus(subtab_strip_shown? ? :subtabs : :menu)
       when key.down?  then view.pane_advance(1)
       else                 edit_target_common(ev, view)
       end
@@ -3824,16 +3832,15 @@ module Gori::Tui
     end
 
     # Shared single-line editing for the TARGET / SNI fields (both route through the view's
-    # target_* mutators): caret nav (←/→/Home/End), delete/backspace, and literal insert.
+    # target_* mutators): the `LineEdit` keys (^A/^E/^U/^W, word motion, Home/End/Delete),
+    # ←/→, backspace, and literal insert.
     private def edit_target_common(ev : Termisu::Event::Key, view : RepeaterView) : Nil
       key = ev.key
       case
-      when key.backspace? then view.target_backspace
-      when key.left?      then view.target_move(-1)
-      when key.right?     then view.target_move(1)
-      when key.home?      then view.target_home
-      when key.end?       then view.target_end
-      when key.delete?    then view.target_delete
+      when act = LineEdit.action(ev) then view.target_line_edit(act)
+      when key.backspace?            then view.target_backspace
+      when key.left?                 then view.target_move(-1)
+      when key.right?                then view.target_move(1)
       else
         if c = LineEdit.typed_char(ev)
           view.target_insert(c)

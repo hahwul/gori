@@ -101,6 +101,7 @@ class Gori::Tui::RepeaterView
   # same rule `set_focus` states below, minus the pane move.
   def focus_resume : Nil
     @target_field = :url
+    @target_mode = InputMode::Read # a pane is entered in READ (i/↵ edits), however it was left
   end
 
   # Move focus to `pane`, exiting the ^S SNI sub-field. SNI editing is an explicit
@@ -116,6 +117,8 @@ class Gori::Tui::RepeaterView
     # Covers every target→elsewhere path (keyboard pane_advance, mouse focus_pane, chips);
     # exit_target_insert! (Esc) and repeater_send (^R straight from target) are the other two.
     sync_host_to_target_once if @focus == :target && pane != :target
+    # …and drops TARGET to READ: INS is per visit, so coming back must not type into the URL.
+    @target_mode = InputMode::Read if pane != :target
     @focus = pane
     @target_field = :url
   end

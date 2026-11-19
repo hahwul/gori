@@ -213,7 +213,7 @@ module Gori
       r.register Verb::Definition.new(
         "#{prefix}.send-to", "Send selection to…", send_desc, scope,
         available: ->(ctx : Verb::ExecContext) { ctx.read_selection_active? || gate.call(ctx) },
-        intent: :send_selection, section: send_section) { |ctx| ctx.send_to_open; nil }
+        intent: :send_selection, section: send_section, keywords: ["send to decoder"]) { |ctx| ctx.send_to_open; nil }
     end
   end
 end
