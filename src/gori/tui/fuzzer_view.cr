@@ -2267,9 +2267,9 @@ module Gori::Tui
     # text would jump the caret to a line the pane is not showing.
 
     # `n` is 1-based (what the gutter prints); `ReadPane` indexes from 0.
-    def goto_detail_line(n : Int32) : Nil
+    def goto_detail_line(n : Int32, cx : Int32 = 0) : Nil
       sync_detail_source
-      @detail_read.goto_line(n - 1)
+      @detail_read.goto_line(n - 1, cx)
     end
 
     # Searches the CURRENTLY-SHOWN sub-pane (REQUEST / RESPONSE / a decoded pane), because
@@ -2278,6 +2278,11 @@ module Gori::Tui
     def detail_search_lines(query : String) : Array(Int32)
       sync_detail_source
       @detail_read.search_lines(query)
+    end
+
+    def detail_search_hits(query : String) : Array({Int32, Int32})
+      sync_detail_source
+      @detail_read.search_hits(query)
     end
 
     def detail_search_hl=(q : String) : Nil
@@ -2289,12 +2294,16 @@ module Gori::Tui
     # panes are the same `TextArea` holding the same captured request, so they answer the same
     # way. No hex arm here — the Fuzzer template has no hex mode to go stale behind.
 
-    def goto_template_line(n : Int32) : Nil
-      @editor.goto_line(n)
+    def goto_template_line(n : Int32, cx : Int32 = 0) : Nil
+      @editor.goto_line(n, cx)
     end
 
     def template_search_lines(query : String) : Array(Int32)
       @editor.search_lines(query)
+    end
+
+    def template_search_hits(query : String) : Array({Int32, Int32})
+      @editor.search_hits(query)
     end
 
     def template_match_count(query : String) : Int32

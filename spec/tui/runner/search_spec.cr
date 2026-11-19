@@ -44,7 +44,7 @@ private class FindPromptRunner < Runner
     @search_replace_buffer = value
     @search_replace_cx = caret
     @search_preedit = ""
-    @search_hits = [] of Int32
+    @search_hits = [] of {Int32, Int32}
   end
 
   def paint : String

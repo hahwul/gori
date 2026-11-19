@@ -42,10 +42,25 @@ describe "Gori::Tui::ReadPane ^F search" do
     end
 
     it "counts a line once however many times the query occurs on it" do
-      # Line indices, not occurrences — the prompt's ↑/↓ steps LINES. (`search_match_count`
-      # is the occurrence question, and only the editable targets answer it.)
+      # Line indices, not occurrences: the prompt steps `search_hits`, one per occurrence.
       pane = search_pane(["a a a", "b"])
       pane.search_lines("a").should eq([0])
+    end
+  end
+
+  describe "#search_hits" do
+    it "answers one {line, char index} per occurrence, non-overlapping, in char indices" do
+      pane = search_pane(["a a a", "b", "é TOKEN token"])
+      pane.search_hits("a").should eq([{0, 0}, {0, 2}, {0, 4}])
+      pane.search_hits("aa").should be_empty
+      pane.search_hits("token").should eq([{2, 2}, {2, 8}]) # é is 2 bytes, 1 char
+    end
+
+    it "lands goto_line on the match's column" do
+      pane = search_pane(["x", "#{"." * 50}token"])
+      pane.goto_line(1, 50)
+      pane.cursor.cy.should eq(1)
+      pane.cursor.cx.should eq(50)
     end
 
     it "is empty for an empty query" do

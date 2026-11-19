@@ -86,6 +86,28 @@ describe "HistoryController detail esc" do
       fitted = Chrome.fit_hints(ctl.body_hint(:body), 57) # 80x24 beside the companion chip
       fitted.should eq("←/→ panes · ↓/↵ enter · ^X hex · space cmds · esc back")
       ctl.body_hint(:body).should contain("^R repeater · space cmds · esc back")
+      ctl.body_hint(:body).should_not contain("find") # the strip's line stays as it was
+    end
+  end
+
+  # ^F is the text pane's only search and the Editor scope has no menu rows, so the pane's
+  # own line names it — early, since an 80-column row drops hints from the right.
+  it "names ^F find on the detail text line, and keeps it at 80 columns" do
+    TuiContract.with_session("history-detail-find") do |session|
+      id = session.store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "GET", target: "/x", http_version: "HTTP/1.1",
+        head: "GET /x HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil,
+        source: Gori::FlowSource::Kind::Proxy))
+      session.store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
+      session.store.flush
+      ctl = HistoryController.new(DetailUpHost.new(session))
+      ctl.view.reload(session.store)
+      settle_history(ctl)
+      ctl.view.open_detail(session.store).should be_true
+      ctl.view.set_detail_focus(:body)
+      Chrome.fit_hints(ctl.body_hint(:body), 57).should start_with("↑/↓ move · ^F find · ")
     end
   end
 end

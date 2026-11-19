@@ -4,15 +4,20 @@
 class Gori::Tui::RepeaterView
   # ^G go-to-line in the request editor (no-op in hex mode — the TextArea is stale).
   # Pure navigation → does NOT dirty the tab (no content change to persist/lock).
-  def goto_request_line(n : Int32) : Nil
+  def goto_request_line(n : Int32, cx : Int32 = 0) : Nil
     return unless @focus == :request && !request_hex?
-    req_editor.goto_line(n)
+    req_editor.goto_line(n, cx)
   end
 
   # ^F search in the request editor: 0-based line indices containing `query`.
   def request_search_lines(query : String) : Array(Int32)
-    return [] of Int32 if request_hex?
-    req_editor.search_lines(query)
+    request_search_hits(query).map(&.[0]).uniq!
+  end
+
+  # ^F hits per occurrence as `{line, char index}` (see `Wrap.search_hits`).
+  def request_search_hits(query : String) : Array({Int32, Int32})
+    return [] of {Int32, Int32} if request_hex?
+    req_editor.search_hits(query)
   end
 
   # ^F find&replace over the request editor. Hex mode is excluded like the search
@@ -89,14 +94,18 @@ class Gori::Tui::RepeaterView
   # no caret to move; in navigable (cursor-tracked) modes, sync @resp_cursor too —
   # otherwise the first ↑/↓ after the jump moves from the caret's stale pre-jump
   # position instead of the line just jumped to.
-  def goto_response_line(n : Int32) : Nil
+  #
+  # `cx` is a ^F match's char index: the anchor lands on the VISUAL row holding it (see
+  # `HistoryView#goto_detail_line`); ^G passes 0 and lands on the line's first row.
+  def goto_response_line(n : Int32, cx : Int32 = 0) : Nil
     if resp_navigable?
-      size, _ = resp_line_source
+      size, line_at = resp_line_source
       return if size <= 0
       cy = (n - 1).clamp(0, size - 1)
-      @resp_cursor.sync(cy, 0)
+      @resp_cursor.sync(cy, cx > 0 ? cx.clamp(0, line_at.call(cy).size) : 0)
       @scroll = cy
-      @scroll_sub = 0 # ^G names a LOGICAL line, so land on its first visual row
+      @scroll_sub = resp_caret_sub
+      ensure_resp_visible(@resp_last_h) if @resp_last_h > 0 # wrap off: pan to the column
     else
       @scroll = (n - 1).clamp(0, {resp_line_count - 1, 0}.max)
     end
@@ -109,11 +118,13 @@ class Gori::Tui::RepeaterView
   # response scanned the plain lines and returned indices into a document the pane was not
   # showing — and it would have needed a fifth branch for the WS handshake card. One source.
   def response_search_lines(query : String) : Array(Int32)
-    hits = [] of Int32
-    return hits if query.empty? || resp_hex_active?
-    q = query.downcase
+    response_search_hits(query).map(&.[0]).uniq!
+  end
+
+  # ^F hits per occurrence as `{line, char index}` (see `Wrap.search_hits`).
+  def response_search_hits(query : String) : Array({Int32, Int32})
+    return [] of {Int32, Int32} if query.empty? || resp_hex_active?
     size, line_at = resp_line_source
-    (0...size).each { |i| hits << i if line_at.call(i).downcase.includes?(q) }
-    hits
+    Wrap.search_hits(size, query) { |i| line_at.call(i).downcase }
   end
 end

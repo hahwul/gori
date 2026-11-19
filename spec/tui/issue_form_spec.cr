@@ -17,6 +17,10 @@ describe Gori::Tui::IssueForm do
     edit = IssueForm.new("old", nil, nil, Gori::Store::Severity::Critical, edit_id: 42_i64)
     edit.edit_id.should eq(42_i64)
     edit.severity.should eq(Gori::Store::Severity::Critical)
+    # ↵ saves an edit and creates a new issue, and the hint says which.
+    edit.hint.should contain("↵ save")
+    edit.hint.should_not contain("create")
+    form.hint.should contain("↵ create")
   end
 
   it "supplies the chrome the shell's collapsed title/hint ladders read off it" do

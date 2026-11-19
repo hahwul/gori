@@ -187,8 +187,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # the path popup: asking two questions and then refusing to write is worse than not asking.
   # It uses count_issues rather than materializing store.issues here and again downstream.
   def issues_export_pick : Nil
-    if @session.store.count_issues == 0
-      @toast = "no issues to export"
+    if refusal = issues_export_refusal
+      @toast = refusal
       return
     end
     # A modal opened from inside another's commit is not closed afterwards (see
@@ -201,15 +201,30 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Step two: WHERE to write it. Still reachable on its own — `gori run issues --export` has
   # no picker, and a caller that already knows the format should not have to open one.
   def issues_export(format : Symbol) : Nil
-    if @session.store.count_issues == 0
-      @toast = "no issues to export"
+    if refusal = issues_export_refusal
+      @toast = refusal
       return
     end
+    # The marks, else the filtered list, else everything — named on the card.
+    ids, subject = issues_export_selection || {nil, "all #{Gori.plural(@session.store.count_issues, "issue")}"}
     ext, kind = case format
                 when :json  then {"json", :issues_json}
                 when :sarif then {"sarif", :issues_sarif}
                 else             {"md", :issues_md}
                 end
-    open_export(kind, File.join(Dir.current, "issues.#{ext}")) { |p| issues_controller.issues_export_to(format, p) }
+    open_export(kind, File.join(Dir.current, "issues.#{ext}"), subject) { |p| issues_controller.issues_export_to(format, p, ids) }
+  end
+
+  private def issues_export_refusal : String?
+    return "no issues to export" if @session.store.count_issues == 0
+    sel = issues_export_selection
+    "no issues match the filter" if sel && sel[0].empty?
+  end
+
+  # Marks and the filter narrow the export only ON the Issues tab, where they are on screen.
+  # The palette's "Export issues…" from any other tab writes all of them: the view there is a
+  # snapshot from the last visit, and a filter nobody can see must not thin a report.
+  private def issues_export_selection : {Array(Int64), String}?
+    issues_controller.view.export_selection if @active_tab == :issues
   end
 end

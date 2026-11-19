@@ -4,6 +4,7 @@ require "./frame"
 require "./picker_overlay"
 require "../store"
 require "../links"
+require "../notes"
 
 module Gori::Tui
   # Manage entity_links for an Issue or Note: list, select, open, remove, and add.
@@ -52,6 +53,8 @@ module Gori::Tui
     # edit, not a dismissal.
     property on_remove : Proc(Nil)?
 
+    @note_title : String? = nil
+
     def initialize(@owner_kind : Store::LinkOwnerKind, @owner_id : Int64)
       @resolved = [] of Links::Resolved
       @adding = false
@@ -73,6 +76,12 @@ module Gori::Tui
       end
       @resolved = Links.resolve_all(store, links)
       @selected = @selected.clamp(0, {@resolved.size - 1, 0}.max)
+      # A note's id is an internal key (a TUI-created one is 19 digits), so the card names the
+      # note by its title, the way its sub-tab and the link picker do.
+      if @owner_kind.note?
+        entry = Notes.load(store).notes.find { |n| n.id == @owner_id }
+        @note_title = entry.try { |e| Notes.title(e.text) }.try { |t| Issues::Export.one_line(t) }
+      end
     end
 
     def count : Int32
@@ -105,7 +114,13 @@ module Gori::Tui
     end
 
     def title : String
-      owner = @owner_kind.issue? ? "ISSUE ##{@owner_id}" : "NOTE ##{@owner_id}"
+      owner = if @owner_kind.issue?
+                "ISSUE ##{@owner_id}"
+              elsif t = @note_title
+                "NOTE “#{Screen.fit(t, 40)}”"
+              else
+                "NOTE ##{@owner_id}"
+              end
       "LINKS — #{owner}"
     end
 

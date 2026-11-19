@@ -330,9 +330,9 @@ module Gori::Tui
 
     # ^G go-to-line over the OUTPUT pane. `n` is 1-based (the shell's prompt takes what the
     # gutter shows); `ReadPane` indexes from 0.
-    def goto_output_line(n : Int32, result : Decoder::ChainResult) : Nil
+    def goto_output_line(n : Int32, result : Decoder::ChainResult, cx : Int32 = 0) : Nil
       output_lines(result)
-      @out.goto_line(n - 1)
+      @out.goto_line(n - 1, cx)
     end
 
     # ^F search over the OUTPUT pane: 0-based indices of the matching lines. Searches the text
@@ -342,6 +342,11 @@ module Gori::Tui
     def output_search_lines(query : String, result : Decoder::ChainResult) : Array(Int32)
       output_lines(result)
       @out.search_lines(query)
+    end
+
+    def output_search_hits(query : String, result : Decoder::ChainResult) : Array({Int32, Int32})
+      output_lines(result)
+      @out.search_hits(query)
     end
 
     def output_search_hl=(q : String) : Nil

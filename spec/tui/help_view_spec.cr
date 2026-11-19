@@ -126,6 +126,15 @@ describe Gori::Tui::HelpView do
       HelpView.shortcut_rows(registry).find(&.b.==("pick flow A · flow B")).not_nil!.a.should eq("a · b")
     end
 
+    # The key cell is KEY_W wide and cut with `…` past it; two menu routes in one cell came out
+    # as `space → s · space →…`, naming neither key in full.
+    it "fits every space-menu route's key cell in KEY_W" do
+      HelpView.shortcut_rows(Gori::Verbs.registry).each do |row|
+        next unless row.kind == :item && row.a.includes?("space →")
+        {row.a, Screen.display_width(row.a) <= HelpView::KEY_W}.should eq({row.a, true})
+      end
+    end
+
     # `>` was free before #1295, so a user may have put a Global verb there, which then wins
     # the key on every tab (`Keymap.global_claims`). Help must not keep promising the bare
     # `>` for the Send card; `space >` is what still opens it.

@@ -40,6 +40,16 @@ describe Gori::Tui::LinksOverlay do
     lo.hint.should eq("↑/↓ · ↵/o open · a add · f freeze · d remove · esc close")
   end
 
+  # A TUI-created note's id is a 19-digit internal key; the card names the note by its title.
+  it "names a note by its title once it has loaded it" do
+    with_store do |store|
+      id = Gori::Notes.create(store, "# Recon plan\nhosts").not_nil!
+      lo = LinksOverlay.new(Gori::Store::LinkOwnerKind::Note, id)
+      lo.reload(store)
+      lo.title.should eq("LINKS — NOTE “Recon plan”")
+    end
+  end
+
   it "swaps the hint when `a` arms adding (was a ternary in the Runner's ladder)" do
     lo = LinksOverlay.new(Gori::Store::LinkOwnerKind::Issue, 1_i64)
     h = OverlayHarness.new(lo)

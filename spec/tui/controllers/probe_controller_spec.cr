@@ -41,4 +41,15 @@ describe ProbeController do
       host.statuses.last.should eq("finding dismissed (c re-opens)")
     end
   end
+
+  # The list is ~40 rows long and custom rules sit at the bottom, so a new rule the cursor did
+  # not follow was off screen until End.
+  it "selects a custom rule it just added" do
+    with_probe_controller do |ctl, _host, session|
+      ctl.rules.reload(session.store)
+      ctl.apply_custom_rule(CustomRuleOverlay.new(title: "w3 needle", description: "d", scope: "project",
+        side: "response", region: "body", kind: "string", severity: "low", pattern: "zzneedle")).should be_true
+      ctl.rules.selected_row.try(&.title).should eq("w3 needle")
+    end
+  end
 end

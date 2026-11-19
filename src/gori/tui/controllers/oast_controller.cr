@@ -244,7 +244,7 @@ module Gori::Tui
         # `esc sub-tabs`, the way the PROVIDERS line below already ends — `handle_callbacks_key`
         # and `handle_providers_key` send escape to the same place, and only one of the two
         # said so.
-        keys("↑/↓ select · ‹/› provider · {oast.generate} payload · y copy · {oast.filter} filter · {oast.listen} listen · {oast.stop} stop · ↵ detail · space cmds · esc sub-tabs")
+        keys("↑/↓ select · ←/→ provider · {oast.generate} payload · y copy · {oast.filter} filter · {oast.listen} listen · {oast.stop} stop · ↵ detail · space cmds · esc sub-tabs")
       else
         # `t on/off` and `↵/e edit` — the vocabulary all four rule lists use since the key
         # audit's F4 moved the toggle off `x` (which is select-line everywhere). ↵ has always
@@ -452,7 +452,7 @@ module Gori::Tui
     # them to a bar that has nothing on it.
     private def no_provider_status(action : String) : String
       return "no enabled provider — add one in the Providers tab" if enabled_providers.empty?
-      "pick a provider to #{action} — ‹/› on the bar"
+      "pick a provider to #{action} — ←/→ on the bar"
     end
 
     # =========================================================================

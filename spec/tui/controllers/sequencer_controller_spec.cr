@@ -144,11 +144,19 @@ describe SequencerController do
       end
     end
 
-    it "swallows a bare key no pane takes" do
+    # A bare key no pane takes goes on to the keymap, whose `‹z› — nothing bound here` every
+    # other tab shows; only Global's `i` (hold all traffic) and `c` stay here, named the same way.
+    it "declines a bare key no pane takes, but keeps Global's i/c and names them" do
       with_sequencer_controller do |ctl, _session|
         view = collected_samples(ctl)
-        view.focus_pane(:config)
-        ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerZ, char: 'z')).should be_true
+        %i[config samples analysis detail].each do |pane|
+          pane == :detail ? view.open_detail : view.focus_pane(pane)
+          view.focus.should eq(pane)
+          ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerZ, char: 'z')).should be_false
+          ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerI, char: 'i')).should be_true
+        end
+        ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerC, char: 'c')).should be_true # detail
+        ctl.@host.as(FakeHost).statuses.last.should start_with("‹c› — nothing bound here")
       end
     end
 

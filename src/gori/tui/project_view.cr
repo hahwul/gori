@@ -1977,12 +1977,16 @@ module Gori::Tui
       @desc_area.scroll_view(step)
     end
 
-    def goto_line(n : Int32) : Nil
-      @desc_area.goto_line(n)
+    def goto_line(n : Int32, cx : Int32 = 0) : Nil
+      @desc_area.goto_line(n, cx)
     end
 
     def search_lines(query : String) : Array(Int32)
       @desc_area.search_lines(query)
+    end
+
+    def search_hits(query : String) : Array({Int32, Int32})
+      @desc_area.search_hits(query)
     end
 
     def match_count(query : String) : Int32

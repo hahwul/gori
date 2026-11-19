@@ -563,7 +563,14 @@ module Gori::Tui
           # this line from its end, `esc back` first, and kept `^X hex · p pretty`.
           return "←/→ panes · ↓/↵ enter · #{step}#{hex} hex · #{pretty} pretty · #{repeater} repeater · space cmds · esc back"
         end
-        nav = @history.detail_navigable? ? "↑/↓ move" : "↑/↓ scroll"
+        # `^F find` right behind the arrows: it is the pane's only way to search, nothing else
+        # names it (the Editor scope has no menu rows), and the hints drop from the right. Not
+        # on a hex dump, which ^F refuses.
+        nav = if @history.detail_navigable?
+                "↑/↓ move · #{Hotkeys.binding_label(reg, "editor.find", "^F")} find"
+              else
+                "↑/↓ scroll"
+              end
         # `u decode` / `u wire` only while the pane has escapes to decode, as the strip's chip
         # used to be: a key that does nothing here is not named here.
         uni = if @history.detail_unicode_offer?

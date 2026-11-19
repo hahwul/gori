@@ -399,4 +399,22 @@ describe "Gori::Tui::RepeaterView diff pane decoration memo" do
     b2.contains?("+ gamma").should be_true
     b2.contains?("- WWW").should be_true # now on the baseline side, as a deletion
   end
+
+  # ^F over the response: one hit per OCCURRENCE, and the jump puts the visual row holding
+  # the match on screen — not the first rows of the one logical line a minified body is.
+  it "finds every occurrence in a wrapped response line and scrolls to the match's row" do
+    line = "#{"a" * 600}NEEDLE#{"b" * 30}NEEDLE"
+    view = loaded_view(line)
+    rect = Rect.new(0, 0, 80, 14)
+    view.render(Screen.new(MemoryBackend.new(80, 14)), rect)
+    hits = view.response_search_hits("needle")
+    hits.should eq([{3, 600}, {3, 636}])
+    view.goto_response_line(hits[0][0] + 1, hits[0][1])
+    view.response_search_hl = "NEEDLE"
+    b = MemoryBackend.new(80, 14)
+    view.render(Screen.new(b), rect)
+    row = (0...14).find { |y| b.row(y).includes?("NEEDLE") }.not_nil!
+    b.bg_at(b.row(row).index!("NEEDLE"), row).should eq(Theme.yellow)
+    view.resp_cursor.cx.should eq(600)
+  end
 end

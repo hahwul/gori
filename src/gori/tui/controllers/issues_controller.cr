@@ -1264,9 +1264,14 @@ module Gori::Tui
     # byte-identical files for the same project and format (`--format=markdown|json`; the
     # CLI's DEFAULT --format is `text`, a different report entirely). JSON.build emits no
     # trailing newline of its own, so the JSON export gains one here.
-    def issues_export_to(format : Symbol, path : String) : Bool
+    # `ids` narrows the export to those issues (the marks or the filtered list); nil is all.
+    def issues_export_to(format : Symbol, path : String, ids : Array(Int64)? = nil) : Bool
       store = @host.session.store
       issues = store.issues
+      if ids
+        keep = ids.to_set
+        issues.select! { |f| keep.includes?(f.id) }
+      end
       if issues.empty?
         @host.status("no issues to export")
         return true

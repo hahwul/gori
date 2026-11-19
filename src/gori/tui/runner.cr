@@ -248,7 +248,7 @@ module Gori::Tui
       @search_cx = 0 # caret into @search_buffer (the prompts edit through `prompt_edit`)
       @search_preedit = ""
       @search_target = :none
-      @search_hits = [] of Int32
+      @search_hits = [] of {Int32, Int32} # ^F hits as {line, char index}, one per occurrence
       @search_idx = 0
       @search_replace = false
       @search_replace_buffer = ""
@@ -5036,8 +5036,9 @@ module Gori::Tui
     # stays up showing the error toast with the typed path intact instead of making the user
     # retype it — the same "keep the form up on a correctable failure" the CA import commit
     # relies on.
-    private def open_export(kind : Symbol, default_path : String, &write : String -> Bool) : Nil
-      ov = ExportOverlay.new(kind, default_path)
+    private def open_export(kind : Symbol, default_path : String, subject : String = "every issue",
+                            &write : String -> Bool) : Nil
+      ov = ExportOverlay.new(kind, default_path, subject)
       ov.on_commit = -> { write.call(ov.resolved_path) }
       open_overlay(ov)
     end

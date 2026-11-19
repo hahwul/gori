@@ -1218,11 +1218,13 @@ module Gori::Tui
       env_complete_close
     end
 
-    # Jump the cursor to 1-based line `n`, column 0 (out-of-range clamps to the
-    # first/last line). render's ensure_visible scrolls it into view next frame.
-    def goto_line(n : Int32) : Nil
+    # Jump the cursor to 1-based line `n`, char index `cx` (a ^F match; ^G passes 0;
+    # out-of-range clamps). render's ensure_visible scrolls its visual row into view next frame.
+    def goto_line(n : Int32, cx : Int32 = 0) : Nil
       @cy = (n - 1).clamp(0, @lines.size - 1)
-      @cx = 0
+      @cx = cx.clamp(0, @lines[@cy].size)
+      snap_cx_to_cluster(0) if cx > 0
+      snap_cx_out_of_conceal(0) # a match inside a hidden ¦chain: INS must not type into it
       @sel_anchor = nil
       break_run # a caret move ends the typing run — see push_undo
       env_complete_close
@@ -1390,11 +1392,13 @@ module Gori::Tui
     # the re-scans on drain/poll while the prompt is open) reuses them instead of allocating a
     # fresh `.downcase` per line every time — the buffer doesn't change while you type a query.
     def search_lines(query : String) : Array(Int32)
-      hits = [] of Int32
-      return hits if query.empty?
-      q = query.downcase
-      lowercased_lines.each_with_index { |l, i| hits << i if l.includes?(q) }
-      hits
+      search_hits(query).map(&.[0]).uniq!
+    end
+
+    # ^F hits per occurrence as `{line, char index}` (see `Wrap.search_hits`).
+    def search_hits(query : String) : Array({Int32, Int32})
+      lc = lowercased_lines
+      Wrap.search_hits(lc.size, query) { |i| lc[i] }
     end
 
     private def lowercased_lines : Array(String)

@@ -194,6 +194,13 @@ module Gori::Tui
       @sel = idxs[(pos + delta).clamp(0, idxs.size - 1)]
     end
 
+    # Land on the row keyed `rule_id` (a just-added custom rule); a no-op when the filter hides it.
+    def select_rule(rule_id : String) : Nil
+      if i = @rows.index { |r| r.selectable? && r.rule_id == rule_id }
+        @sel = i
+      end
+    end
+
     def select_index(idx : Int32) : Nil
       @sel = idx if 0 <= idx < @rows.size && @rows[idx].selectable?
     end

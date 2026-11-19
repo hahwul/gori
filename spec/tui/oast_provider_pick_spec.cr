@@ -99,6 +99,14 @@ private def picker_row(key : String, name : String, live : Bool = false) : OastP
 end
 
 describe Gori::Tui::OastController do
+  # The bar cycles on ←/→; `‹X›` elsewhere quotes a key, so `‹/›` read as a key that is not bound.
+  it "names the provider cycle by the arrows that drive it" do
+    with_providers(2) do |c, _|
+      c.body_hint(:body).should contain("←/→ provider")
+      c.body_hint(:body).should_not contain("‹/›")
+    end
+  end
+
   it "asks for a pick only when All is genuinely ambiguous" do
     with_providers(2) do |c, _|
       c.provider_pick_needed?.should be_true

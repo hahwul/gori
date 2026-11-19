@@ -128,13 +128,14 @@ module Gori::Tui
     end
 
     def hint : String
+      commit = @edit_id ? "save" : "create" # ↵ updates the issue in EDIT ISSUE
       case @sel
       when ROW_SEV
-        "←/→ severity · ⇥ title · ↵ create · esc cancel"
+        "←/→ severity · ⇥ title · ↵ #{commit} · esc cancel"
       when ROW_CVSS
         "↵ calculator · ⌫ clear · ⇥ severity · esc cancel"
       else
-        "type title · ←/→ caret · ⇥ cvss · ↵ create · esc cancel"
+        "type title · ←/→ caret · ⇥ cvss · ↵ #{commit} · esc cancel"
       end
     end
 
