@@ -88,8 +88,11 @@ module Gori
       # well-behaved Unix filter exits quietly on EPIPE rather than dumping a backtrace. Here,
       # once, for every surface — it lived only in `gori run`, so `gori settings | true`,
       # `gori ca --pem | true` and `gori --help | true` backtraced. Anything else re-raises.
-      raise ex unless ex.os_error == Errno::EPIPE
-      exit 0
+      exit 0 if ex.os_error == Errno::EPIPE
+      # A disk that refused the write (`gori run fuzz > rows.jsonl` filling it) is the
+      # operator's to fix, not a bug: one line and a failure status, not a backtrace.
+      abort "gori: could not write output: #{ex.os_error.try(&.message) || ex.message}" if disk_refused?(ex)
+      raise ex
     rescue ex : Error
       # Gori::Error is the project's EXPECTED-error type (see gori.cr) — something the
       # operator can act on, raised with a message written for them. One reaching the top
@@ -101,6 +104,12 @@ module Gori
     end
 
     private VERSION_FLAGS = {"-v", "-V", "--version"}
+
+    # A write the filesystem refused for want of space (Windows reports its own codes).
+    # Public for the spec: `abort` is not spec-able.
+    def self.disk_refused?(ex : IO::Error) : Bool
+      ex.os_error.in?(Errno::ENOSPC, Errno::EFBIG, WinError::ERROR_DISK_FULL, WinError::ERROR_HANDLE_DISK_FULL)
+    end
 
     # The TLS key log (#1593) is read from the environment before any SSL context exists, for the
     # surfaces that dial. stderr only: stdout is `gori mcp`'s JSON-RPC stream.
