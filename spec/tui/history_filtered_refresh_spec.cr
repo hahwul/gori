@@ -108,6 +108,22 @@ describe "HistoryView filtered refresh" do
     end
   end
 
+  it "stops remembering moved flows past the cap and re-asks the whole question instead" do
+    with_store do |store|
+      a = fr_flow(store, "/hit/1")
+      view = fr_view(store, "path:/hit")
+      # An off-tab History never flushes, so the set must not grow with the capture.
+      (1..HistoryView::INC_MAX_UPDATES + 50).each do |i|
+        view.on_event(Gori::Store::FlowEvent.new(a + i, :updated), store)
+      end
+      view.@inc_updated.size.should be <= HistoryView::INC_MAX_UPDATES
+      sleep HistoryView::FILTER_FLUSH_INTERVAL
+      view.flush_filter(store).should be_true
+      view.fetches.should eq(2)
+      view.rows.map(&.id).should eq([a])
+    end
+  end
+
   it "keeps the window at one page, and backfills it from the whole question when it shrinks" do
     with_store do |store|
       (1..HistoryView::PAGE + 2).each { |i| fr_respond(store, fr_flow(store, "/hit/#{i}"), 500) }

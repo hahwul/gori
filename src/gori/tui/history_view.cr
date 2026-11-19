@@ -1284,8 +1284,16 @@ module Gori::Tui
         @colormarker.try(&.forget(event.id))
       end
       if filtering? || @searching
-        @filter_dirty = true                                    # coalesce: the Runner reloads once after draining
-        @inc_updated << event.id unless event.kind == :inserted # `refresh_filtered` asks these again
+        @filter_dirty = true # coalesce: the Runner reloads once after draining
+        # `refresh_filtered` asks these again. Capped HERE, not at the flush: an off-tab History
+        # never flushes, so past the cap the whole question is the answer and the set stops growing.
+        unless event.kind == :inserted || @inc_full
+          @inc_updated << event.id
+          if @inc_updated.size > INC_MAX_UPDATES
+            @inc_full = true
+            @inc_updated.clear
+          end
+        end
         return
       end
       case event.kind
