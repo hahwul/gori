@@ -101,6 +101,21 @@ describe Gori::Probe::Passive::JsScan do
     it "handles an empty script without lexing it" do
       JsScan.strip_both("").should eq({"", ""})
     end
+
+    # The lexer stopped writing every char into two builders and now only blanks positions in
+    # copies of the source. Pinned to the digests the char-by-char lexer produced over a 1 MiB
+    # bundle-sized soup, all-ASCII and not, so the two views are byte-identical to before.
+    it "produces the same views as the char-by-char lexer over a 1 MiB script" do
+      ascii = ['a', '/', '*', '\'', '"', '`', '$', '{', '}', '\\', '\n', ';', ' ', '=', '(', '+']
+      {ascii => "a73197c50e3f779d86c7d9da75c6115db4a7fd0cd59498514307003504f244e8", ascii + ['é'] => "f413cdf5c8b113216b1f82dab50d03b4ea58d1a00e075267777835ecdcc5b858"}.each do |alphabet, digest|
+        rng = Random.new(20_261_119)
+        src = String.build { |io| (1 << 20).times { io << alphabet[rng.rand(alphabet.size)] } }
+        code, kept = JsScan.strip_both(src)
+        code.size.should eq(src.size)
+        {code, kept}.should eq({JsScan.strip(src), JsScan.strip_comments(src)})
+        Digest::SHA256.hexdigest("#{code}\0#{kept}").should eq(digest)
+      end
+    end
   end
 
   # A regex literal's `\/\/` or `"` used to open a comment or a string and blank the rest of a

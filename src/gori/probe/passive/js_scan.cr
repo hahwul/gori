@@ -187,23 +187,34 @@ module Gori
         # A nil side is one this call is not building (`strip` builds only `code`,
         # `strip_comments` only `kept`); `strip_both` builds both.
         #
-        # `String::Builder`, not `IO`: a concrete receiver keeps `<<` a direct call on the hot
-        # per-char path instead of a virtual dispatch. Every emission goes through `<<` (same
-        # char to both) or `push` (one char each, different) — never a multi-char write — so
-        # "one consumed char emits exactly one char per side", the invariant every offset in
-        # this file rests on, is visible in the shape rather than argued about.
-        private struct Sink
-          def initialize(@code : String::Builder?, @kept : String::Builder?)
+        # Each side starts as a COPY of the source, and the lexers can only blank one position
+        # in it: `blank` on both sides, `blank_code` on the code side alone. So "every offset in
+        # either view is the source's offset", the invariant this file rests on, is the shape
+        # rather than an argument, and a code char costs nothing at all. Writing every char into
+        # two `String::Builder`s instead was most of the lex on a 1 MiB bundle. `T` is the
+        # buffer `lex` picked: `Bytes` for an all-ASCII script, else `Array(Char)`.
+        private struct Sink(T)
+          getter code : T?
+          getter kept : T?
+
+          def initialize(@code : T?, @kept : T?)
           end
 
-          def <<(ch : Char) : Nil
-            @code.try &.<<(ch)
-            @kept.try &.<<(ch)
+          def blank(i : Int32) : Nil
+            blank_code(i)
+            @kept.try { |side| space(side, i) }
           end
 
-          def push(code_ch : Char, kept_ch : Char) : Nil
-            @code.try &.<<(code_ch)
-            @kept.try &.<<(kept_ch)
+          def blank_code(i : Int32) : Nil
+            @code.try { |side| space(side, i) }
+          end
+
+          private def space(side : Bytes, i : Int32) : Nil
+            side[i] = 0x20_u8
+          end
+
+          private def space(side : Array(Char), i : Int32) : Nil
+            side[i] = ' '
           end
         end
 
@@ -214,7 +225,7 @@ module Gori
         # comment. Every consumed char emits exactly one char, so indices stay aligned.
         def self.strip(js : String) : String
           return js if js.empty?
-          String.build(js.bytesize) { |io| lex(js, Sink.new(io, nil)) }
+          lex(js, code: true, kept: false)[0]
         end
 
         # Blank ONLY // and /* */ comments, keeping string/template CONTENTS intact (offsets
@@ -224,7 +235,7 @@ module Gori
         # `//` or `/*` (e.g. in a URL literal) is not mistaken for a comment.
         def self.strip_comments(js : String) : String
           return js if js.empty?
-          String.build(js.bytesize) { |io| lex(js, Sink.new(nil, io)) }
+          lex(js, code: false, kept: true)[1]
         end
 
         # BOTH projections of one script from ONE pass: `{strip(js), strip_comments(js)}`.
@@ -234,11 +245,10 @@ module Gori
         # interpolation and a closing quote are found at the same offsets whether the contents
         # are blanked or copied). So a Context that needs both — every HTML or JS flow does, one
         # for the DOM-XSS/clobbering rules and one for the postMessage/prototype-pollution rules
-        # — was lexing the same bytes twice. Fusing saves the walk, not the emission (each side
-        # still writes its own char), so the pair costs ~1.7 walks instead of 2: measured over
-        # the 256 KiB bundle in bench/probe_passive_bench, 1.75ms → 1.47ms. It pays far better on
-        # the non-ASCII variant of the same bundle, where `scan_source` falls back to
-        # `String#chars`: 2.92ms → 2.05ms, and one ~1 MiB `Array(Char)` built instead of two.
+        # — was lexing the same bytes twice. Fusing saves the walk: measured over the 256 KiB
+        # bundle in bench/probe_passive_bench, 1.75ms → 1.47ms, and on its non-ASCII variant,
+        # where `lex` falls back to `String#chars`, 2.92ms → 2.05ms, with one ~1 MiB
+        # `Array(Char)` built instead of two. (Both before `Sink` stopped copying char by char.)
         #
         # Not a third lexer: `lex` below is the only one, and `strip`/`strip_comments` are it
         # with the other side's builder left nil. Keeping one walk is the point — a copy of this
@@ -246,10 +256,7 @@ module Gori
         # failure `lex_string` is written the way it is to prevent.
         def self.strip_both(js : String) : {String, String}
           return {js, js} if js.empty?
-          code = String::Builder.new(js.bytesize)
-          kept = String::Builder.new(js.bytesize)
-          lex(js, Sink.new(code, kept))
-          {code.to_s, kept.to_s}
+          lex(js, code: true, kept: true)
         end
 
         # Opens a string / template literal. One home so the three places that ask — the top-level
@@ -259,48 +266,52 @@ module Gori
           ch == '\'' || ch == '"' || ch == '`'
         end
 
-        # The single left-to-right lexer behind all three entry points above.
-        private def self.lex(js : String, out_to : Sink) : Nil
-          scan_source(js) do |chars, n|
-            i = 0
-            last = -1 # index of the last non-space CODE char, for `regex_start?`
-            while i < n
-              # The token dispatch is spelled out here rather than delegated to a nilable-result
-              # helper: the OVERWHELMINGLY common case is an ordinary code character, and deciding
-              # it from the char in the loop keeps this hot path on a plain Int32. The branch
-              # order (comment, then string, then regex) is what both projections use.
-              c = chars[i]
-              if c == '/' && i + 1 < n && chars[i + 1] == '/'
-                i = blank_line_comment(chars, i, n, out_to)
-              elsif c == '/' && i + 1 < n && chars[i + 1] == '*'
-                i = blank_block_comment(chars, i, n, out_to)
-              elsif quote?(c)
-                i = lex_string(chars, i, n, out_to, 0)
-                last = i - 1 # a literal ends an operand: its closing delimiter makes a `/` division
-              elsif c == '/' && regex_start?(chars, last)
-                i = lex_regex(chars, i, n, out_to)
-                last = i - 1
-              else
-                out_to << c
-                last = i unless c.ascii_whitespace?
-                i += 1
-              end
-            end
+        # The single left-to-right lexer behind all three entry points above, building the
+        # sides asked for ("" for a side it was not asked for).
+        private def self.lex(js : String, *, code : Bool, kept : Bool) : {String, String}
+          if js.ascii_only?
+            src = js.to_slice
+            sink = Sink(Bytes).new(code ? src.dup : nil, kept ? src.dup : nil)
+            lex(AsciiChars.new(src), src.size, sink)
+            {sink.code.try { |b| String.new(b) } || "", sink.kept.try { |b| String.new(b) } || ""}
+          else
+            chars = js.chars
+            sink = Sink(Array(Char)).new(code ? chars.dup : nil, kept ? chars.dup : nil)
+            lex(chars, chars.size, sink)
+            {sink.code.try { |c| chars_to_s(c, js.bytesize) } || "",
+             sink.kept.try { |c| chars_to_s(c, js.bytesize) } || ""}
           end
         end
 
-        # Yields the random-access char source for `js` plus its length: a zero-allocation
-        # AsciiChars view when the script is all-ASCII, else the `Array(Char)` the lexer has
-        # always used. Both satisfy the same `size`/`[]` shape, so the lexer below is compiled
-        # for each and neither is special-cased. `ascii_only?` is a single byte pass, far cheaper
-        # than the array it avoids.
-        private def self.scan_source(js : String, &)
-          if js.ascii_only?
-            view = AsciiChars.new(js.to_slice)
-            yield view, view.size
-          else
-            chars = js.chars
-            yield chars, chars.size
+        private def self.chars_to_s(chars : Array(Char), capacity : Int32) : String
+          String.build(capacity) { |io| chars.each { |ch| io << ch } }
+        end
+
+        # Over `chars`, an AsciiChars view of an all-ASCII script (byte index == char index), else
+        # its `Array(Char)`; both have the same `size`/`[]` shape, so this is compiled for each.
+        private def self.lex(chars, n : Int32, out_to) : Nil
+          i = 0
+          last = -1 # index of the last non-space CODE char, for `regex_start?`
+          while i < n
+            # The token dispatch is spelled out here rather than delegated to a nilable-result
+            # helper: the OVERWHELMINGLY common case is an ordinary code character, and deciding
+            # it from the char in the loop keeps this hot path on a plain Int32. The branch
+            # order (comment, then string, then regex) is what both projections use.
+            c = chars[i]
+            if c == '/' && i + 1 < n && chars[i + 1] == '/'
+              i = blank_line_comment(chars, i, n, out_to)
+            elsif c == '/' && i + 1 < n && chars[i + 1] == '*'
+              i = blank_block_comment(chars, i, n, out_to)
+            elsif quote?(c)
+              i = lex_string(chars, i, n, out_to, 0)
+              last = i - 1 # a literal ends an operand: its closing delimiter makes a `/` division
+            elsif c == '/' && regex_start?(chars, last)
+              i = lex_regex(chars, i, n)
+              last = i - 1
+            else
+              last = i unless c.ascii_whitespace?
+              i += 1
+            end
           end
         end
 
@@ -345,17 +356,14 @@ module Gori
         # classes (a `/` inside a class does not close it), or up to a newline if unterminated.
         # Emitted verbatim on both sides — a regex body is code, not string content — so neither
         # view's offsets move. The flags after it are ordinary identifier chars.
-        private def self.lex_regex(chars, i : Int32, n : Int32, out_to : Sink) : Int32
-          out_to << '/'
+        private def self.lex_regex(chars, i : Int32, n : Int32) : Int32
           i += 1
           in_class = false
           while i < n
             ch = chars[i]
             break if ch == '\n'
-            out_to << ch
             i += 1
             if ch == '\\' && i < n && chars[i] != '\n'
-              out_to << chars[i]
               i += 1
             elsif ch == '['
               in_class = true
@@ -390,9 +398,9 @@ module Gori
         # Blank every remaining char of the fragment (one space each, offsets preserved) and
         # return the end index, so the caller's `while i < n` loop terminates immediately. Both
         # projections blank here — past the depth cap neither view is trustworthy.
-        private def self.blank_rest(chars, i : Int32, n : Int32, out_to : Sink) : Int32
+        private def self.blank_rest(chars, i : Int32, n : Int32, out_to) : Int32
           while i < n
-            out_to << ' '
+            out_to.blank(i)
             i += 1
           end
           n
@@ -401,7 +409,7 @@ module Gori
         # If chars[i] starts a // or /* */ comment, blank it (→ spaces, offsets preserved) and
         # return the index just past it; else nil. A comment is blanked in BOTH projections —
         # that is the one thing they agree on — and never recurses, so there is no `depth`.
-        private def self.lex_comment_at(chars, i : Int32, n : Int32, out_to : Sink) : Int32?
+        private def self.lex_comment_at(chars, i : Int32, n : Int32, out_to) : Int32?
           c = chars[i]
           if c == '/' && i + 1 < n && chars[i + 1] == '/'
             blank_line_comment(chars, i, n, out_to)
@@ -417,24 +425,22 @@ module Gori
         # content, so it is handed to lex_interpolation — which also keeps a NESTED template's
         # backtick from being mistaken for this template's closing delimiter (that would
         # terminate early and re-lex the real remainder, blanking a URL's // as a comment).
-        private def self.lex_string(chars, i : Int32, n : Int32, out_to : Sink, depth : Int32) : Int32
+        private def self.lex_string(chars, i : Int32, n : Int32, out_to, depth : Int32) : Int32
           quote = chars[i]
-          out_to << quote # opening delimiter kept on both sides
-          i += 1
+          i += 1 # opening delimiter kept on both sides
           while i < n
             ch = chars[i]
             if ch == '\\' && i + 1 < n
-              out_to.push(' ', ch) # escaped pair: blanked as two spaces, kept verbatim
-              out_to.push(' ', chars[i + 1])
+              out_to.blank_code(i) # escaped pair: blanked as two spaces, kept verbatim
+              out_to.blank_code(i + 1)
               i += 2
             elsif quote == '`' && ch == '$' && i + 1 < n && chars[i + 1] == '{'
               i = lex_interpolation(chars, i, n, out_to, depth)
             elsif ch == quote
-              out_to << ch # closing delimiter kept on both sides
-              i += 1
+              i += 1 # closing delimiter kept on both sides
               break
             else
-              out_to.push(' ', ch) # content blanked (incl. newlines inside a template), or kept
+              out_to.blank_code(i) # content blanked (incl. newlines inside a template), or kept
               i += 1
             end
           end
@@ -450,24 +456,23 @@ module Gori
         # the window at the interpolation, while `kept` copies them. Nested strings and comments
         # recurse through lex_string / lex_comment_at, so each side gets its own treatment there
         # too. `i` points at `$`.
-        private def self.lex_interpolation(chars, i : Int32, n : Int32, out_to : Sink, depth : Int32) : Int32
+        private def self.lex_interpolation(chars, i : Int32, n : Int32, out_to, depth : Int32) : Int32
           return blank_rest(chars, i, n, out_to) if depth >= MAX_INTERP_DEPTH
-          out_to.push(' ', '$') # blank the '${' delimiter on the code side (offset-preserved)
-          out_to.push(' ', '{')
+          out_to.blank_code(i) # blank the '${' delimiter on the code side (offset-preserved)
+          out_to.blank_code(i + 1)
           i += 2
           braces = 1
           while i < n && braces > 0
             ch = chars[i]
             if ch == '{' || ch == '}'
               braces += ch == '{' ? 1 : -1
-              out_to.push(ch == '}' && braces == 0 ? ' ' : ch, ch) # blank the OUTER closing '}'
+              out_to.blank_code(i) if ch == '}' && braces == 0 # blank the OUTER closing '}'
               i += 1
             elsif j = lex_comment_at(chars, i, n, out_to)
               i = j
             elsif quote?(ch)
               i = lex_string(chars, i, n, out_to, depth + 1)
             else
-              out_to << ch
               i += 1
             end
           end
@@ -475,29 +480,29 @@ module Gori
         end
 
         # Blank a // comment through end-of-line (the terminating newline is left to the caller).
-        private def self.blank_line_comment(chars, i : Int32, n : Int32, out_to : Sink) : Int32
-          out_to << ' '
-          out_to << ' '
+        private def self.blank_line_comment(chars, i : Int32, n : Int32, out_to) : Int32
+          out_to.blank(i)
+          out_to.blank(i + 1)
           i += 2
           while i < n && chars[i] != '\n'
-            out_to << ' '
+            out_to.blank(i)
             i += 1
           end
           i
         end
 
         # Blank a /* … */ comment, delimiters included.
-        private def self.blank_block_comment(chars, i : Int32, n : Int32, out_to : Sink) : Int32
-          out_to << ' '
-          out_to << ' '
+        private def self.blank_block_comment(chars, i : Int32, n : Int32, out_to) : Int32
+          out_to.blank(i)
+          out_to.blank(i + 1)
           i += 2
           while i < n && !(chars[i] == '*' && i + 1 < n && chars[i + 1] == '/')
-            out_to << ' '
+            out_to.blank(i)
             i += 1
           end
           if i < n
-            out_to << ' '
-            out_to << ' '
+            out_to.blank(i)
+            out_to.blank(i + 1)
             i += 2
           end
           i
