@@ -81,6 +81,7 @@ module Gori::Tui
       @notify_idx = NOTIFY_CHOICES.index(Miner::NotifyMode::WhenFound) || 0
       @maxreq_idx = 0
       @keep_alive = true
+      @cachebuster = true
       @selected = 0
       @scroll = 0
       @drawn = true
@@ -138,6 +139,7 @@ module Gori::Tui
       @notify_idx = NOTIFY_CHOICES.index(c.notify) || @notify_idx
       @maxreq_idx = MAX_REQ_CHOICES.index { |n| n.try(&.to_i64) == c.max_requests } || @maxreq_idx
       @keep_alive = c.keep_alive?
+      @cachebuster = c.cachebuster?
       prefill_macro(c.request_macro)
       @prefilled = cycler_state
     end
@@ -157,9 +159,10 @@ module Gori::Tui
     end
 
     # Rows: one per applicable location, then max-requests + concurrency + notification
-    # cyclers, then the keep-alive checkbox, then the three macro cyclers (#1350), then Start.
+    # cyclers, then the keep-alive and cache-buster checkboxes, then the three macro cyclers
+    # (#1350), then Start.
     private def row_count : Int32
-      @seed.applicable.size + 8
+      @seed.applicable.size + 9
     end
 
     private def maxreq_row : Int32
@@ -180,23 +183,29 @@ module Gori::Tui
       @seed.applicable.size + 3
     end
 
+    # Append a unique cache-busting query param to every probe — a checkbox like keep-alive, a
+    # plain on/off. Default ON: a mine must not poison the shared cache the target's users hit.
+    private def cachebuster_row : Int32
+      @seed.applicable.size + 4
+    end
+
     # The request-time macro's three rows (#1350): which saved Repeater session to replay before
     # each request, how often, and what a failure does. The second and third are inert while no
     # step is picked, and draw as such rather than as knobs that would do nothing.
     private def macro_row : Int32
-      @seed.applicable.size + 4
-    end
-
-    private def macro_every_row : Int32
       @seed.applicable.size + 5
     end
 
-    private def macro_fail_row : Int32
+    private def macro_every_row : Int32
       @seed.applicable.size + 6
     end
 
-    private def start_row : Int32
+    private def macro_fail_row : Int32
       @seed.applicable.size + 7
+    end
+
+    private def start_row : Int32
+      @seed.applicable.size + 8
     end
 
     # Is a macro step picked? The other two macro rows mean nothing without one.
@@ -270,10 +279,11 @@ module Gori::Tui
 
     def adjust(d : Int32) : Nil
       case @selected
-      when maxreq_row    then @maxreq_idx = (@maxreq_idx + d) % MAX_REQ_CHOICES.size
-      when conc_row      then @conc_idx = (@conc_idx + d) % CONC_CHOICES.size
-      when notify_row    then @notify_idx = (@notify_idx + d) % NOTIFY_CHOICES.size
-      when keepalive_row then @keep_alive = !@keep_alive
+      when maxreq_row      then @maxreq_idx = (@maxreq_idx + d) % MAX_REQ_CHOICES.size
+      when conc_row        then @conc_idx = (@conc_idx + d) % CONC_CHOICES.size
+      when notify_row      then @notify_idx = (@notify_idx + d) % NOTIFY_CHOICES.size
+      when keepalive_row   then @keep_alive = !@keep_alive
+      when cachebuster_row then @cachebuster = !@cachebuster
       when macro_row
         @macro_idx = (@macro_idx + d) % (@macro_sessions.size + 1) unless @macro_sessions.empty?
       when macro_every_row then @macro_every_idx = (@macro_every_idx + d) % MACRO_EVERY_CHOICES.size if macro_on?
@@ -288,6 +298,8 @@ module Gori::Tui
         @checked[loc] = !(@checked[loc]? || false)
       elsif @selected == keepalive_row
         @keep_alive = !@keep_alive
+      elsif @selected == cachebuster_row
+        @cachebuster = !@cachebuster
       elsif @selected == maxreq_row || @selected == conc_row || @selected == notify_row ||
             @selected == macro_row || @selected == macro_every_row || @selected == macro_fail_row
         adjust(1)
@@ -309,6 +321,7 @@ module Gori::Tui
       c.notify = NOTIFY_CHOICES[@notify_idx] unless was && was[1] == now[1]
       c.max_requests = MAX_REQ_CHOICES[@maxreq_idx].try(&.to_i64) unless was && was[2] == now[2]
       c.keep_alive = @keep_alive
+      c.cachebuster = @cachebuster
       c.seed_names = @seed.names
       c.request_macro = macro_spec unless was && was[3] == now[3]
       # `user_wordlist` and `hook` (#846) are NOT set here, on purpose and for the same reason:
@@ -403,6 +416,8 @@ module Gori::Tui
         draw_check(screen, x, py, bg, sel, @checked[loc]? || false, "#{loc.label} mining")
       elsif i == keepalive_row
         draw_check(screen, x, py, bg, sel, @keep_alive, "reuse connections (keep-alive)")
+      elsif i == cachebuster_row
+        draw_check(screen, x, py, bg, sel, @cachebuster, "cache-buster (avoid poisoning shared caches)")
       elsif i == start_row
         label = any_checked? ? (reconfiguring? ? "[ Apply to session ]" : "[ Start mining ]") : "[ select a location ]"
         screen.text(x, py, label, any_checked? ? Theme.accent : Theme.muted, bg, Attribute::Bold)

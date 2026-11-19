@@ -8,6 +8,7 @@ require "../process_hook"
 require "../repeater/flow_request"
 require "../request_macro"
 require "../settings"
+require "./cachebuster_backend"
 require "./detect"
 require "./engine"
 require "./hook_backend"
@@ -319,6 +320,10 @@ module Gori::Miner
       # The macro OUTSIDE the hook, so the value it leaves is bound before the hook expands the
       # request and signs it (see `MacroBackend`).
       backend = MacroBackend.new(backend, request_macro) if request_macro
+      # The cache-buster OUTSIDE the hook and macro (so a signed request's signature covers `__gcb`,
+      # and a macro-bound request carries it) and INSIDE the engine's cap (so a buster send counts
+      # against `--max-requests`). Default ON; the per-surface opt-out writes `config.cachebuster`.
+      backend = CachebusterBackend.new(backend) if config.cachebuster?
       engine = Engine.new(request, options.http2?, names, backend, config, inapplicable, request_macro)
       outbound.halt = ->engine.stopped?
       new(engine: engine,

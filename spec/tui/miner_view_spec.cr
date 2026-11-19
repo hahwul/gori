@@ -29,6 +29,26 @@ describe Gori::Tui::MinerView do
     restored.config.notify.should eq(Gori::Miner::NotifyMode::WhenFound)
   end
 
+  it "round-trips the cache-buster flag, and reads a pre-existing session (no key) as on (#1930)" do
+    view = Gori::Tui::MinerView.new
+    cfg = Gori::Miner::Config.new
+    cfg.cachebuster = false
+    view.load("http://h.test", "GET /a HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, false, nil, cfg)
+    restored = Gori::Tui::MinerView.new
+    restored.restore(Gori::Store::MinerSessionRecord.new(
+      id: 1, target: "http://h.test", request: Bytes.empty, http2: false, sni: nil,
+      config: view.config_json, flow_id: nil, position: 0, name: nil))
+    restored.config.cachebuster?.should be_false
+
+    # A session persisted before the key existed has no `cachebuster` field — read as the safe
+    # default (on), not silently off.
+    old = Gori::Tui::MinerView.new
+    old.restore(Gori::Store::MinerSessionRecord.new(
+      id: 1, target: "http://h.test", request: Bytes.empty, http2: false, sni: nil,
+      config: %({"notify":"always"}), flow_id: nil, position: 0, name: nil))
+    old.config.cachebuster?.should be_true
+  end
+
   it "reads an out-of-range int in a stored config as absent, keeping the rest" do
     restored = Gori::Tui::MinerView.new
     restored.restore(Gori::Store::MinerSessionRecord.new(

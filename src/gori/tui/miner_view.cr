@@ -410,6 +410,7 @@ module Gori::Tui
           j.field "max_requests", @config.max_requests
           j.field "notify", @config.notify.token
           j.field "keep_alive", @config.keep_alive?
+          j.field "cachebuster", @config.cachebuster?
           j.field "stability_rounds", @config.stability_rounds
           j.field "confirm_rounds", @config.confirm_rounds
           j.field "buckets" do
@@ -451,6 +452,10 @@ module Gori::Tui
       # `keep_alive` field at all, and reading a missing key as "off" would silently opt an
       # old session out of the default the overlay shows it as having.
       @config.keep_alive = any["keep_alive"]?.try(&.as_bool?) != false
+      # `!= false` for the same reason as `keep_alive`: a session persisted before this key existed
+      # has no `cachebuster` field, and reading its absence as "off" would silently opt an old
+      # session out of the safe default it ran under.
+      @config.cachebuster = any["cachebuster"]?.try(&.as_bool?) != false
       Settings.int_field(any, "stability_rounds").try { |n| @config.stability_rounds = n }
       Settings.int_field(any, "confirm_rounds").try { |n| @config.confirm_rounds = n }
       if buckets = any["buckets"]?.try(&.as_h?)

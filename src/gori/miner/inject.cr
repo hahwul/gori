@@ -193,6 +193,38 @@ module Gori::Miner
       end
     end
 
+    # Append a gori-authored cache-busting query parameter to the request line, returning the new
+    # bytes plus the `{at, delta}` a caller carrying verbatim spans needs: `at` is the byte offset
+    # the parameter was inserted at and `delta` how many bytes were added, so a span whose start is
+    # `>= at` shifts by `delta` — the exact rule `sync_spans` already follows for a Content-Length
+    # resync. Injected QUERY candidate spans live inside the request-target (before `at`) and so do
+    # not move; a Headers/Cookies/body candidate's span lives past the request line (`>= at`) and
+    # does. A request line that is not METHOD SP TARGET SP VERSION is returned unchanged with
+    # `{0, 0}`, the same bail-out `inject_query` makes — there is nothing to append a query to.
+    #
+    # P7: this decorates gori's OWN probe, it does not rewrite operator bytes being replayed. The
+    # name and value are ASCII-safe (a constant and lower-hex), carry no `$`, and are therefore
+    # inert to the send seam's binding expansion whether or not a span protects them — so the
+    # caller need only shift the EXISTING injected spans, never mark the cachebuster itself.
+    def self.cachebuster(request : Bytes, name : String, value : String) : {Bytes, Int32, Int32}
+      nl = request.index(0x0a_u8)
+      return {request, 0, 0} unless nl
+      first = String.new(request[0, nl]).rstrip('\r')
+      parts = first.split(' ')
+      return {request, 0, 0} unless parts.size == 3
+      target = parts[1]
+      sep = query_separator(target)
+      extra = "#{sep}#{URI.encode_www_form(name)}=#{URI.encode_www_form(value)}"
+      eol = (nl > 0 && request[nl - 1] == 0x0d_u8) ? "\r\n" : "\n"
+      io = IO::Memory.new(request.size + extra.bytesize + 2)
+      io << parts[0] << ' ' << target
+      at = io.pos.to_i32
+      io << extra << ' ' << parts[2] << eol
+      rest_at = nl + 1
+      io.write(request[rest_at, request.size - rest_at])
+      {io.to_slice, at, extra.bytesize}
+    end
+
     # ── form (application/x-www-form-urlencoded) ─────────────────────────────────────
 
     # Applicable only when there's an existing urlencoded-form body to append params to —

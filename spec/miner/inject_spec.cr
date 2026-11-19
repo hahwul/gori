@@ -611,3 +611,33 @@ describe "Gori::Miner::Inject on a mixed LF/CRLF head terminator" do
       "POST /a HTTP/1.1\nHost: h\nContent-Type: application/x-www-form-urlencoded\nContent-Length: 7\n\r\nx=1&p=v")
   end
 end
+
+# The cache-buster appends a gori-authored query param to the request line (P7: gori's OWN probe,
+# not operator bytes being replayed) and reports the {at, delta} a span-carrying caller needs.
+describe "Gori::Miner::Inject.cachebuster" do
+  it "adds `?name=value` when the target has no query yet" do
+    bytes, at, delta = M::Inject.cachebuster(req("GET /p HTTP/1.1\r\nHost: h\r\n\r\n"), "__gcb", "abc")
+    text(bytes).should eq("GET /p?__gcb=abc HTTP/1.1\r\nHost: h\r\n\r\n")
+    # `at` is just after the target; `delta` is the inserted length (`?__gcb=abc`).
+    "GET /p".bytesize.should eq(at)
+    delta.should eq("?__gcb=abc".bytesize)
+  end
+
+  it "joins an existing query with `&`" do
+    bytes, _, _ = M::Inject.cachebuster(req("GET /p?a=1 HTTP/1.1\r\nHost: h\r\n\r\n"), "__gcb", "abc")
+    text(bytes).should eq("GET /p?a=1&__gcb=abc HTTP/1.1\r\nHost: h\r\n\r\n")
+  end
+
+  it "percent-encodes the value and preserves a bare-LF request line" do
+    bytes, _, _ = M::Inject.cachebuster(req("GET /p HTTP/1.1\nHost: h\n\n"), "__gcb", "a b")
+    text(bytes).should eq("GET /p?__gcb=a+b HTTP/1.1\nHost: h\n\n")
+  end
+
+  it "leaves a request line that is not METHOD SP TARGET SP VERSION untouched, reporting {0, 0}" do
+    base = req("GARBAGE-no-version\r\nHost: h\r\n\r\n")
+    bytes, at, delta = M::Inject.cachebuster(base, "__gcb", "abc")
+    bytes.should eq(base)
+    at.should eq(0)
+    delta.should eq(0)
+  end
+end

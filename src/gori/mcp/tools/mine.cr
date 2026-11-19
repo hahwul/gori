@@ -244,6 +244,7 @@ module Gori
         config.request_macro = request_macro_spec(h)
         optional_int_arg(h, "throttle_ms").try { |v| config.throttle_ms = v.clamp(0_i64, 600_000_i64).to_i }
         config.keep_alive = bool_arg(h, "keep_alive", true)
+        config.cachebuster = bool_arg(h, "cachebuster", true)
         options = Miner::PlanOptions.new(text,
           # A `flow_id` template is CAPTURED evidence; a `template` string is the caller's
           # draft. See `Miner::PlanOptions#evidence?`.
@@ -407,6 +408,7 @@ module Gori
           s.field "hook", strprop("pipe each request through an external command (argv, no shell); its stdout is sent. RUNS A LOCAL COMMAND: refused when the operator switched off \"Run local commands\". A failing hook SKIPS the candidate (never a clean negative). #{Gori::Settings.hook_timeout_secs}s per request")
           request_macro_props(s, "request")
           s.field "keep_alive", boolprop("reuse one connection per worker (default true). false dials per probe")
+          s.field "cachebuster", boolprop("append a unique cache-busting query param to every probe (default true), so a cacheable endpoint is neither served from nor poisoned into a shared cache. false only for an endpoint that keys on it, or to probe cache behaviour")
           s.field "allow_unscoped", boolprop("REQUIRED to run against a target outside the project's scope, or when no scope is configured (refused by default)")
         end
 
