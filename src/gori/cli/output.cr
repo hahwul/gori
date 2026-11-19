@@ -26,6 +26,21 @@ module Gori
     # TUI-free output formatting and stream helpers shared by `gori run` and the
     # headless capture printer. The JSON shape here is the stable, documented script contract.
     module Output
+      # Runs a bulk listing with `io` block-buffered. Crystal line-flushes a non-TTY STDOUT,
+      # so a 100k-row listing into a pipe or file was 100k `write(2)`s. Flushed on the way out,
+      # even on a raise, so nothing printed afterwards (a summary on STDERR) overtakes the rows;
+      # a stream read live flushes on its own cadence inside the block (`gori run fuzz`).
+      def self.bulk(io : IO::FileDescriptor = STDOUT, &)
+        line_flush = io.flush_on_newline?
+        io.flush_on_newline = false
+        begin
+          yield
+        ensure
+          io.flush_on_newline = line_flush
+          io.flush
+        end
+      end
+
       # A scalar result is line-terminated for a terminal and byte-exact when piped.
       def self.write_value(io : IO, value : String, terminal : Bool) : Nil
         if terminal

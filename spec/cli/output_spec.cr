@@ -269,3 +269,25 @@ describe "CLI fuzz row extracts" do
     json["extracts"].as_h.transform_values(&.as_s).should eq({"extracted" => "9", "RID" => "r\e1", "sid" => ""})
   end
 end
+
+# A bulk listing into a pipe is block-buffered (Crystal line-flushes a non-TTY STDOUT, one
+# `write(2)` per row), and flushed — line flushing back on — when the listing ends.
+describe "Gori::CLI::Output.bulk" do
+  it "holds the rows until the block ends, then flushes them and restores line flushing" do
+    reader, writer = IO.pipe
+    writer.sync = false # a non-TTY STDOUT: buffered, flushed per line
+    writer.flush_on_newline = true
+    reader.read_timeout = 50.milliseconds
+    Gori::CLI::Output.bulk(writer) do
+      writer.puts "a"
+      writer.puts "b"
+      expect_raises(IO::TimeoutError) { reader.gets }
+    end
+    writer.flush_on_newline?.should be_true
+    reader.gets.should eq("a")
+    reader.gets.should eq("b")
+  ensure
+    reader.try(&.close)
+    writer.try(&.close)
+  end
+end

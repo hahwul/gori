@@ -935,6 +935,9 @@ module Gori
         Fuzz::WsMessageSource.new(msg.opcode, payload, msg.shape, false)
       end
 
+      # How often a streaming fuzz flushes its block-buffered rows to a pipe (`run_fuzz_stream`).
+      private STREAM_FLUSH = 100.milliseconds
+
       # `total` is the candidate count `fuzz_preflight` already resolved and gated — the caller
       # runs that preflight BEFORE anything sends (see cmd_fuzz), so this method never decides
       # whether the run may proceed; it only streams it.
@@ -988,6 +991,7 @@ module Gori
           Fuzz::HistoryRecord::Batch(Fuzz::Result).new(rs, ->(ex : Exception) do
             unless record_failed
               record_failed = true
+              STDOUT.flush
               STDERR.puts "gori run fuzz: could not record to History: #{ex.message} (further record errors suppressed)"
             end
             nil
@@ -1002,7 +1006,13 @@ module Gori
           end
           nil
         end
-        begin
+        # Block-buffered while the rows stream (see `Output.bulk`): a fast sweep into a pipe paid
+        # one `write(2)` per row. A reader following the pipe still gets them every
+        # `STREAM_FLUSH`, and every STDERR line below is preceded by a flush so it cannot
+        # overtake the rows printed before it.
+        flushed_at = Time.instant
+        result_at = flushed_at - STREAM_FLUSH
+        CLI::Output.bulk do
           say_request_line_rewrite # the run is about to send it — see `warn_request_line_rewrite`
           engine.run do |ev|
             case ev
@@ -1031,6 +1041,7 @@ module Gori
               flush_records.call if record_batch.try(&.due?)
             when Fuzz::DoneEvent
               flush_records.call
+              STDOUT.flush
               last_progress = ev.progress
               saved_terminal = true
               condition_met = !ev.stop_reason.nil?
@@ -1042,8 +1053,19 @@ module Gori
               # The engine follows setup errors with Done. Defer the terminal write to that
               # event so `error` cannot be immediately overwritten by `done`.
               had_error = true
+              STDOUT.flush
               STDERR.puts "fuzz error: #{ev.message}"
             end
+            # Also at once after a result that came alone (the one before it is STREAM_FLUSH
+            # old), so a slow sweep's reader sees each row as it lands, not when the next does.
+            # ponytail: a fast burst followed by a stall waits for the next event (a reply or a
+            # timeout); a flusher fiber would need a lock shared with every write here.
+            now = Time.instant
+            if now - flushed_at >= STREAM_FLUSH || (ev.is_a?(Fuzz::ResultEvent) && now - result_at >= STREAM_FLUSH)
+              STDOUT.flush
+              flushed_at = now
+            end
+            result_at = now if ev.is_a?(Fuzz::ResultEvent)
           end
         ensure
           # A broken stdout pipe must not strand a durable row in `running`: finalize the

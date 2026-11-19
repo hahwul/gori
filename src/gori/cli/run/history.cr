@@ -632,20 +632,22 @@ module Gori
             # separator and the array closes in `ensure`, so a read that raises mid-stream still
             # leaves the rows before it as one valid document, as the fuzz stream does.
             array = format == :json
-            print '[' if array
-            begin
-              store.with_errors(rows).each_with_index do |r, i|
-                cols, cols_redacted = row_columns(store, r, prepared, include_sensitive, matcher) || {nil, false}
-                line = CLI::Output.flow_row_json(r, store.request_head(r.id), cols,
-                  include_sensitive: include_sensitive, columns_redacted: cols_redacted)
-                print ',' if array && i > 0
-                array ? print(line) : puts(line)
-              end
-            ensure
-              if array
-                begin
-                  puts ']'
-                rescue IO::Error # a closed pipe: nothing is reading the close either
+            CLI::Output.bulk do
+              print '[' if array
+              begin
+                store.with_errors(rows).each_with_index do |r, i|
+                  cols, cols_redacted = row_columns(store, r, prepared, include_sensitive, matcher) || {nil, false}
+                  line = CLI::Output.flow_row_json(r, store.request_head(r.id), cols,
+                    include_sensitive: include_sensitive, columns_redacted: cols_redacted)
+                  print ',' if array && i > 0
+                  array ? print(line) : puts(line)
+                end
+              ensure
+                if array
+                  begin
+                    puts ']'
+                  rescue IO::Error # a closed pipe: nothing is reading the close either
+                  end
                 end
               end
             end
@@ -657,7 +659,9 @@ module Gori
             # (it is the interactive read, not the feed a script or an agent captures) and the
             # note above promises the flag changes `--format json` alone. Stated at the call
             # site rather than defaulted, so the choice is visible where it is made.
-            rows.each { |r| puts CLI::Output.flow_row_text(r, row_columns(store, r, prepared, include_sensitive: true, matcher: matcher).try(&.[0])) }
+            CLI::Output.bulk do
+              rows.each { |r| puts CLI::Output.flow_row_text(r, row_columns(store, r, prepared, include_sensitive: true, matcher: matcher).try(&.[0])) }
+            end
           end
         end
       end
