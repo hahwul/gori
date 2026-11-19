@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- TUI: the command palette keeps the selected result visible in short terminals. If the palette or Space menu no longer fits, resize to resume or press Esc to close it.
+- TUI: the command palette keeps the selected result visible in short terminals. If the palette or Space menu no longer fits, resize to resume or press Esc to close it (#1928).
 
 - TUI: History Copy uses URLs for marked flows, and selecting more than two flows leaves the current comparison intact. Notifications and Activity report when a linked result is gone (#1927).
 
