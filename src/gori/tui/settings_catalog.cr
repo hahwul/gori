@@ -89,7 +89,8 @@ module Gori::Tui
       Section.new(:mouse, "settings.mouse", "Mouse",
         "Click/scroll navigation, and whether releasing a drag also copies the selection", :editor, :form),
       Section.new(:env, "settings.env", "Env",
-        "Global environment variables you can reference in requests", :editor, :opener, resettable: false),
+        "Global environment variables you can reference in requests", :editor, :opener, resettable: false,
+        keywords: %w[environment variables]),
       # Operator DATA like Env's values (#1154): the list the USER_AGENT generators draw from.
       # Its default — the built-in list — is reached by emptying it, not by ^R.
       Section.new(:user_agents, "settings.user-agents", "User-Agents",
@@ -100,7 +101,7 @@ module Gori::Tui
       # Network & Tabs
       Section.new(:network, "settings.network", "Network",
         "Edit the proxy bind address + upstream proxy", :network, :form,
-        keywords: %w[proxy port bind listen upstream]),
+        keywords: %w[proxy port bind listen upstream socks]),
       Section.new(:tabs, "settings.tabs", "Tabs",
         "Customize the top tab bar — one ordered list, the top nine are the slots", :network, :opener),
       # Reachable via the Network section's "Host overrides" opener field, so it

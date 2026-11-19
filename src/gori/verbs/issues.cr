@@ -351,7 +351,7 @@ module Gori
       # rather than raising.
       r.register Verb::Definition.new(
         "issues.export", "Export issues…", "Write all issues to a file (asks for the format, then the path)",
-        Verb::Scope::Global, [] of Verb::Chord, keywords: %w[save]) { |ctx| ctx.issues_export_pick; nil }
+        Verb::Scope::Global, [] of Verb::Chord, keywords: %w[save report]) { |ctx| ctx.issues_export_pick; nil }
 
       # The discoverable export key on the Issues tab (the verb above is the palette entry).
       # NON-hidden so it joins the Issues list's "space" menu.

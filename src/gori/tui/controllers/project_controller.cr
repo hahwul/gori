@@ -85,22 +85,27 @@ module Gori::Tui
 
     # The PROJECT SETTINGS arm of `body_hint`, lifted out: it is the longest of the six and the
     # only one that branches on the selected ROW rather than on a pane mode.
+    #
+    # With an unapplied edit, esc CANCELS it (`cancel_settings_to_strip`), so the hint says so,
+    # and early: this hint has no `space cmds` anchor, so `Chrome.fit_hints` drops its tail first.
     private def settings_hint : String
+      pending = @project_view.settings_dirty? || @project_view.protos_dirty?
+      esc = pending ? "esc cancel" : "esc sub-tabs"
       if @project_view.settings_text_row?
-        "type to edit · ↵ apply · ←/→ cursor · ↑/↓ move · esc sub-tabs"
+        pending ? "type to edit · ↵ apply · esc cancel · ←/→ cursor · ↑/↓ move" : "type to edit · ↵ apply · ←/→ cursor · ↑/↓ move · esc sub-tabs"
       elsif @project_view.settings_protocol_row?
-        "←/→/space protocol · SOCKS5 local DNS · SOCKS5H proxy DNS · ↑/↓ move · esc sub-tabs"
+        "←/→/space protocol · SOCKS5 local DNS · SOCKS5H proxy DNS · ↑/↓ move · #{esc}"
       elsif @project_view.settings_sandbox_row?
-        "space/↵ sandbox — ON blocks ALL out-of-scope traffic · ↑/↓ move · esc sub-tabs"
+        "space/↵ sandbox — ON blocks ALL out-of-scope traffic · ↑/↓ move · #{esc}"
       elsif @project_view.settings_auth_row?
-        "←/→/space proxy auth · ↑/↓ move · esc sub-tabs"
+        "←/→/space proxy auth · ↑/↓ move · #{esc}"
       elsif @project_view.settings_toggle_row?
-        "space/↵ toggle lens · ↑/↓ move · esc sub-tabs"
+        "space/↵ toggle lens · ↑/↓ move · #{esc}"
       else
         # A proxy host/port with no usable protocol, a credential with auth off: the row
         # takes no key. It used to fall through to the lens hint, which named an action the
         # row does not have.
-        "not in use with the proxy rows above as they are · ↑/↓ move · esc sub-tabs"
+        "not in use with the proxy rows above as they are · ↑/↓ move · #{esc}"
       end
     end
 
@@ -1312,7 +1317,7 @@ module Gori::Tui
         save
         @host.open_palette
       elsif key.escape?
-        leave_settings_to_strip
+        cancel_settings_to_strip
       elsif key.up?
         settings_move(-1)
       elsif key.down?
@@ -1337,6 +1342,17 @@ module Gori::Tui
     # an invalid field is dropped rather than kept half-typed).
     private def leave_settings_to_strip : Nil
       commit_project_settings(on_leave: true)
+      leave_to_strip
+    end
+
+    # esc is the one leave that does NOT apply: it drops every unapplied edit (network and proto
+    # halves) back to what is stored, pin state included, and then leaves as before. Nothing is
+    # committed, so the live proxy is never rebound by an esc. ↵, ↑ off the top, Tab and a click
+    # out still apply.
+    private def cancel_settings_to_strip : Nil
+      @project_view.set_preedit("")
+      @project_view.refresh_settings
+      @project_view.refresh_protos
       leave_to_strip
     end
 
@@ -1425,8 +1441,8 @@ module Gori::Tui
     end
 
     # Validate + apply the pane's network fields to THIS project (persist to its DB + live
-    # rebind). `on_leave` = the commit fired because the pane is being left (esc/Tab/arrow/
-    # click) rather than an explicit ↵: a leave with an invalid field drops the bad edit, while
+    # rebind). `on_leave` = the commit fired because the pane is being left (Tab/arrow/click;
+    # esc cancels instead, see `cancel_settings_to_strip`) rather than an explicit ↵: a leave with an invalid field drops the bad edit, while
     # ↵ keeps it so the user can fix it. Dirty-guarded so an unchanged pane never re-applies.
     private def commit_project_network(on_leave : Bool = false) : String?
       return nil unless @project_view.settings_dirty?
