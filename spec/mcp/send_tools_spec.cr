@@ -658,7 +658,24 @@ describe Gori::MCP::Server do
         text = resp["result"]["content"][0]["text"].as_s
         text.should contain("NOTHING was sent")
         text.should contain("get_flow")
+        text.should_not contain("authorize_start")
         # The seed flow is the only row — no outbound request was recorded.
+        store.recent_flows(10).map(&.id).should eq([id])
+      end
+    end
+
+    # `{flow_id, headers}` is an agent's first try at "resend as another user"; the refusal
+    # now names the tool built for it.
+    it "points flow_id + headers at authorize_start" do
+      with_store do |store|
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: 1,
+          method: "GET", target: "/seed", http_version: "HTTP/1.1",
+          head: "GET /seed HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"flow_id":#{id},"headers":{"Authorization":"Bearer bob"},"allow_unscoped":true}}})
+        resp = mcp_drive(store, call)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        resp["result"]["content"][0]["text"].as_s.should contain("use authorize_start")
         store.recent_flows(10).map(&.id).should eq([id])
       end
     end
