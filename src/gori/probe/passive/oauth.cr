@@ -5,8 +5,8 @@ require "../../ascii_bytes"
 module Gori
   module Probe
     module Passive
-      # Weak OAuth 2.0 / OpenID Connect authorization requests, judged against RFC 9700 (OAuth 2.0
-      # Security BCP) from the one request every login leaves in History. Recognised by
+      # Weak OAuth 2.0 / OpenID Connect exchanges, judged against RFC 9700 (OAuth 2.0
+      # Security BCP). The authorization request is recognised by
       # `response_type` + `client_id` (both REQUIRED, RFC 6749 §4.1.1), in the query or — OIDC
       # Core §3.1.2.1 allows POST — a form-encoded body.
       #
@@ -14,19 +14,23 @@ module Gori
       # 9700 only RECOMMENDS PKCE for confidential clients, so a missing PKCE alone is Info and
       # only "no PKCE, no state, no nonce" is escalated. A PAR (`request_uri`) or JAR (`request`)
       # request carries its real parameters elsewhere, so it is skipped rather than guessed at.
-      # Evidence is the `response_type` / `code_challenge_method` values only — never `state`,
-      # `nonce`, `code_challenge` or `client_id`.
+      # A successful token exchange identifies password grant use without reading credentials into evidence.
       class OAuthAuthorization < Rule
         def info : RuleInfo
-          RuleInfo.new("oauth", "Weak OAuth/OIDC authorization request",
-            "Flags an OAuth 2.0 / OIDC authorization request using the implicit grant, the PKCE plain method, " \
-            "no PKCE, or no CSRF protection at all (no PKCE, state or nonce), per RFC 9700.",
+          RuleInfo.new("oauth", "Weak OAuth/OIDC grants and authorization requests",
+            "Flags successful password grants and authorization requests using the implicit grant, the PKCE plain method, " \
+            "no PKCE, or no CSRF protection (no PKCE, state or nonce), per RFC 9700.",
             Category::HEADERS)
         end
 
         private FORM_CT = "x-www-form-urlencoded".to_slice
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
+          if ctx.oauth_token_grant == "password"
+            emit(acc, ctx, "oauth_password_grant", "OAuth password grant in use", Store::Severity::Medium,
+              "grant_type=password")
+          end
+
           return unless params = authorization_params(ctx)
           return unless response_type = value(params, "response_type")
           types = response_type.tr(",", " ").split(' ', remove_empty: true) # Facebook: `token,signed_request`

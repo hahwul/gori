@@ -1,4 +1,7 @@
+require "json"
+require "uri"
 require "../../store"
+require "../../media_type"
 require "../../utf8"
 require "../../proxy/codec/http1"
 require "../../proxy/codec/content_decode"
@@ -48,6 +51,8 @@ module Gori
         @ct_low : String?
         @ct_low_done = false
         @cache_control : Array(String)?
+        @oauth_token_grant : String?
+        @oauth_token_grant_done = false
         @html : Bool?
         @js : Bool?
         @binary_media : Bool?
@@ -113,6 +118,47 @@ module Gori
           end
           resp = response
           @cache_control = resp ? CacheControl.parse(resp.headers) : [] of String
+        end
+
+        # Both OAuth and CacheableApi need evidence that a token was actually issued.
+        def oauth_token_grant : String?
+          return @oauth_token_grant if @oauth_token_grant_done
+          @oauth_token_grant_done = true
+          @oauth_token_grant = read_oauth_token_grant
+        end
+
+        private def read_oauth_token_grant : String?
+          return unless req.method == "POST" && response.try(&.status) == 200
+          return unless MediaType.essence(req.headers.get?("Content-Type")) == "application/x-www-form-urlencoded"
+          return unless MediaType.essence(content_type) == "application/json"
+          return if detail.request_body_truncated? || detail.response_body_truncated?
+          return unless grant = oauth_form_grant
+          grant if oauth_token_json?
+        end
+
+        private def oauth_form_grant : String?
+          return unless (body = request_body_text) && body.bytesize < BODY_CAP
+          return unless body.includes?("grant_type") || body.includes?('%')
+
+          grant = nil
+          # Crystal also splits on semicolons, which are data in OAuth form values.
+          URI::Params.parse(body.gsub(';', "%3B")) do |name, value|
+            next unless name == "grant_type"
+            return if grant
+            grant = value
+          end
+          grant.try(&.presence)
+        end
+
+        private def oauth_token_json? : Bool
+          return false if body_capped?
+          return false unless body = body_text
+          # RFC 6749 §5.1 puts both required fields at the root of a successful response.
+          return false unless object = JSON.parse(body).as_h?
+          return false if object.has_key?("error")
+          {"access_token", "token_type"}.all? { |key| object[key]?.try(&.as_s?).try(&.presence) }
+        rescue JSON::ParseException
+          false
         end
 
         # Memoised: the answer cannot change for a given flow, and both getters sit on the
