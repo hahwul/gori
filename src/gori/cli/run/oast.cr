@@ -508,7 +508,7 @@ module Gori
         store = open_store(resolve_read_project(proj.name, proj.db), long_running: true)
         failed =
           begin
-            bound = oast_bind_session(store, id, "resume")
+            bound = oast_bind_session(store, id, "resume", json)
             http = Oast::HttpClient.new
             begin
               Oast::Sessions.resume(bound, http)
@@ -634,10 +634,13 @@ module Gori
           abort("gori run oast #{verb}: malformed session id '#{raw}' (expected a number, as `gori run oast list` prints)")
       end
 
-      private def self.oast_bind_session(store : Store, id : Int64, verb : String) : Oast::Sessions::Bound
+      private def self.oast_bind_session(store : Store, id : Int64, verb : String,
+                                         json : Bool = false) : Oast::Sessions::Bound
         bound = Oast::Sessions.bind(store, id)
         if bound.is_a?(Oast::Sessions::Problem)
-          abort "gori run oast #{verb}: #{Oast::Sessions.message_for(bound, id)}"
+          msg = Oast::Sessions.message_for(bound, id)
+          not_found_abort("gori run oast #{verb}", msg, json ? :json : :text, store) if bound.missing?
+          abort "gori run oast #{verb}: #{msg}"
         end
         Oast::Sessions.ambiguity_note(bound, id).try { |note| STDERR.puts "gori run oast #{verb}: note — #{note}" }
         bound

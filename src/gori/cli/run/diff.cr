@@ -131,8 +131,8 @@ module Gori
         filter = QL.parse(q, scope: QL::SCOPE_SHAPE_ONLY)
         Run.warn_query_terms("diff", q, strict)
         if filter == QL::EMPTY
-          abort "gori run diff: query #{q.inspect} did not match any field " \
-                "(check syntax, e.g. host:example.com method:POST path:/api status:>=500)"
+          Run.usage_abort("gori run diff: query #{q.inspect} did not match any field " \
+                          "(check syntax, e.g. host:example.com method:POST path:/api status:>=500)", "QUERY_SYNTAX")
         end
         filter
       end

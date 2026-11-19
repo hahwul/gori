@@ -272,7 +272,7 @@ module Gori
         # Run.warn_query_terms.
         Run.warn_query_terms("sitemap", q, strict)
         if !q.strip.empty? && filter == QL::EMPTY
-          abort "gori run sitemap: query #{q.inspect} did not match any field (check syntax, e.g. host:example.com method:POST path:/api status:>=500)"
+          Run.usage_abort("gori run sitemap: query #{q.inspect} did not match any field (check syntax, e.g. host:example.com method:POST path:/api status:>=500)", "QUERY_SYNTAX")
         end
         filter
       end

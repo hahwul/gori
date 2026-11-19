@@ -63,9 +63,14 @@ module Gori
         iid, kind, rid = resolve_freeze_ends(issue_id, ref_s, ref_id)
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
-          abort "gori run evidence freeze: no issue with id #{iid}" unless store.get_issue(iid)
+          not_found_abort("gori run evidence freeze", "no issue with id #{iid}", format, store) unless store.get_issue(iid)
           snap = freeze_snapshot(store, kind, rid, allow_drift)
-          abort "gori run evidence freeze: #{snap}" if snap.is_a?(String)
+          if snap.is_a?(String)
+            # The drift gate names the flag this command passed it; every other refusal is
+            # `snapshot_for`'s missing or unsendable ref, which MCP answers NOT_FOUND.
+            abort_closing(store, "gori run evidence freeze: #{snap}") if snap.includes?("--allow-drift")
+            not_found_abort("gori run evidence freeze", snap, format, store)
+          end
           id, status = store.freeze_evidence(iid, snap, link: link)
           case status
           in .issue_gone? then abort "gori run evidence freeze: issue ##{iid} was deleted before the copy was written"
@@ -205,8 +210,8 @@ module Gori
         iid = iid_opt
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
-          meta = store.get_evidence_meta(id) || abort("gori run evidence #{verb}: no frozen evidence with id #{id}")
-          abort "gori run evidence #{verb}: no issue with id #{iid}" unless store.get_issue(iid)
+          meta = store.get_evidence_meta(id) || not_found_abort("gori run evidence #{verb}", "no frozen evidence with id #{id}", store: store)
+          not_found_abort("gori run evidence #{verb}", "no issue with id #{iid}", store: store) unless store.get_issue(iid)
           if link
             evidence_link_one(store, meta, iid)
           else

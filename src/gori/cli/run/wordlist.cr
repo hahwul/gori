@@ -309,7 +309,7 @@ module Gori
         entry = begin
           WordlistCatalog.rename(positional[0], positional[1], overwrite: overwrite)
         rescue ex : WordlistCatalog::Error
-          wordlist_error("rename", ex)
+          wordlist_error("rename", ex, format)
         end
         if format == :json
           puts JSON.build { |j| wordlist_entry_json(j, entry) }

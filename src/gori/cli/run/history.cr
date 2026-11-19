@@ -515,7 +515,7 @@ module Gori
             # yields the match-all EMPTY filter — silently dumping every flow,
             # the opposite of what the user asked. Refuse it instead.
             if !q.strip.empty? && filter == QL::EMPTY
-              abort_closing(store, "gori run history: query #{q.inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)")
+              Run.usage_abort("gori run history: query #{q.inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)", "QUERY_SYNTAX", store)
             end
             # The hide-static lens LAST, after the operator's own terms, the way the TUI and MCP
             # order it: a cheap `host LIKE` rejects a row before the lens is consulted.

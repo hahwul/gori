@@ -492,7 +492,7 @@ module Gori
         store, slots = session_slots(proj.name, proj.db)
         begin
           current = slots.find(target)
-          abort "gori run session edit: no session slot named #{target.inspect}" unless current
+          not_found_abort("gori run session edit", "no session slot named #{target.inspect}", store: store) unless current
           renamed = edit.name || current.name
           # `except:` is the row being renamed, so `edit admin --name ADMIN` re-cases a slot's
           # own name without reading as a collision with itself.
@@ -580,7 +580,7 @@ module Gori
 
         store, slots = session_slots(proj.name, proj.db)
         begin
-          abort "gori run session baseline: no session slot named #{name.inspect}" unless slots.find(name)
+          not_found_abort("gori run session baseline", "no session slot named #{name.inspect}", store: store) unless slots.find(name)
           busy_abort("gori run session baseline", "the project could not be written — the baseline " \
                                                   "did not move") unless slots.set_baseline(name)
           puts "#{name} is the baseline"
@@ -645,7 +645,7 @@ module Gori
 
       private def self.session_refresh_slot(store : Store, name : String) : Gori::SessionSlot
         slot = session_layer(store).slots.try(&.find(name))
-        abort_closing(store, "gori run session refresh: no session slot named #{name.inspect}") unless slot
+        not_found_abort("gori run session refresh", "no session slot named #{name.inspect}", store: store) unless slot
         slot
       end
 

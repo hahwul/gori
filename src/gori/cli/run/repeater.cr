@@ -551,7 +551,7 @@ module Gori
         with_store(resolve_read_project(project_name, db_path)) do |store|
           rows = store.repeaters_meta
           from = rows.index { |r| r.id == id }
-          abort "gori run repeater move: no repeater session ##{id} (see `gori run repeater list`)" unless from
+          not_found_abort("gori run repeater move", "no repeater session ##{id} (see `gori run repeater list`)", format, store) unless from
           from += 1
 
           target =
@@ -647,7 +647,10 @@ module Gori
           store.set_repeater_positions(rows.reject { |r| gone.includes?(r.id) }.map(&.id))
 
           if format == :json
+            # `ok`/`ids` as every other delete prints them; `deleted` keeps its rows.
             puts({
+              "ok"        => failed.empty?,
+              "ids"       => deleted.map { |(i, _, _)| i },
               "deleted"   => deleted.map { |(i, n, was)| {"id" => i, "name" => n, "was_tui_index" => was} },
               "failed"    => failed,
               "remaining" => rows.size - deleted.size,
@@ -1137,7 +1140,7 @@ module Gori
 
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
-          existing = store.get_repeater(id) || abort "#{cmd}: no repeater session ##{id}"
+          existing = store.get_repeater(id) || not_found_abort(cmd, "no repeater session ##{id}", format, store)
           write_repeater_update(store, project, existing, f, sources.empty? ? existing.request : content.to_slice, format, cmd)
         end
       end
@@ -1597,7 +1600,7 @@ module Gori
         loaded, host_overrides = begin
           rows = ids.map do |id|
             rec = store.get_repeater_full(id)
-            abort "#{cmd}: no repeater session ##{id}" unless rec
+            not_found_abort(cmd, "no repeater session ##{id}") unless rec
             if !verbatim && Repeater::DraftMarkers.live?(store, rec)
               abort "#{cmd}: #{Repeater::DraftMarkers.refusal(id, MARKER_REMEDY)}"
             end
@@ -2236,10 +2239,16 @@ module Gori
         report_unbound_slot_overlay("gori run repeater ws")
         Run.report_interrupted(1, "session", "closed") if interrupted.call
         if err
+          # Not-found is the one refusal here with an MCP code of its own (`NOT_FOUND`).
+          puts failure_json(err.lchop("gori run repeater ws: "), "not_found", "NOT_FOUND") if format == :json && err == ws_not_found_line(id)
           STDERR.puts err
           exit 1
         end
         exit 1 unless ok
+      end
+
+      private def self.ws_not_found_line(id : Int64) : String
+        "gori run repeater ws: no repeater session ##{id}"
       end
 
       # Resolve the saved repeater session, run its handshake through the `Repeater::Plan` +
@@ -2307,7 +2316,7 @@ module Gori
         ensure
           store.close
         end
-        return "gori run repeater ws: no repeater session ##{id}" unless rec
+        return ws_not_found_line(id) unless rec
         unless Repeater::WsEngine.replayable?(String.new(rec.request))
           return "gori run repeater ws: session ##{id} is not a WebSocket handshake " \
                  "(neither an RFC 6455 `Upgrade:` request nor an RFC 8441 extended CONNECT)"

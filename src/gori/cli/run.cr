@@ -163,10 +163,28 @@ module Gori
 
       def self.dispatch(args : Array(String)) : Nil
         route_logs_to_stderr
-        self.json_stdout = false
+        self.json_stdout = json_requested?(args)
         repeated_target_flag_error(args).try { |err| abort err }
         args = hoist_target_flags(args)
         dispatch_subcommand(args)
+      end
+
+      # Whether argv asks for JSON, read before any parser runs: `--limit 0 --json` refuses
+      # inside `--limit`'s handler, before `format_flag` has seen `--json`. `format_flag` still
+      # settles it once the flag is parsed. Never past `--`, which is another program's argv.
+      def self.json_requested?(args : Array(String)) : Bool
+        words = args.take_while { |a| a != "--" }
+        words.each_with_index.any? do |a, i|
+          f = a == "--format" ? words[i + 1]?.to_s : a.starts_with?("--format=") ? a.lchop("--format=") : nil
+          a == "--json" || f.try(&.downcase.in?("json", "jsonl")) || false
+        end
+      end
+
+      # A usage refusal: the line on STDERR, and under `--json` the failed-call object on stdout
+      # (`INVALID_ARGUMENT`, or `QUERY_SYNTAX` for a query, as MCP codes them).
+      def self.usage_abort(message : String, code : String = "INVALID_ARGUMENT", store : Store? = nil) : NoReturn
+        puts failure_json(message.sub(/\Agori run[^:]*: /, ""), "invalid_argument", code) if json_stdout?
+        abort_closing(store, message)
       end
 
       # `--project`/`--db` anywhere among the leading words — before the subcommand
@@ -1040,7 +1058,9 @@ module Gori
       # (`failure_json`), coded as MCP codes it (`NOT_FOUND`), so a script reading stdout gets an
       # object instead of nothing. The human line stays on STDERR and the exit stays 1; text
       # mode prints exactly what it always did.
-      def self.not_found_abort(prefix : String, reason : String, format : Symbol, store : Store? = nil) : NoReturn
+      # A caller with no `format` in reach leaves it to `json_stdout?`, which `format_flag` keeps.
+      def self.not_found_abort(prefix : String, reason : String, format : Symbol = (json_stdout? ? :json : :text),
+                               store : Store? = nil) : NoReturn
         puts failure_json(reason, "not_found", "NOT_FOUND") if format.in?(:json, :jsonl)
         abort_closing(store, "#{prefix}: #{reason}")
       end
@@ -1919,7 +1939,7 @@ module Gori
       # spelling the escape hatch this flag does.
       def self.refuse_unknown_query_fields(cmd : String, q : String?, lenient : Bool) : Nil
         return if lenient
-        (msg = unknown_query_field_error(cmd, q)) && abort(msg)
+        (msg = unknown_query_field_error(cmd, q)) && usage_abort(msg, "QUERY_SYNTAX")
       end
 
       # The sentence `refuse_unknown_query_fields` aborts with, or nil to proceed — split out for
@@ -1983,8 +2003,7 @@ module Gori
       # refuses an ignored term the same way. `store` is closed first when the caller has one open.
       def self.warn_query_terms(cmd : String, q : String, strict : Bool = false, store : Store? = nil) : Nil
         if reason = query_terms_error(q, strict)
-          puts failure_json(reason, "invalid_argument", "QUERY_SYNTAX") if json_stdout?
-          abort_closing(store, "gori run #{cmd}: #{reason}")
+          usage_abort("gori run #{cmd}: #{reason}", "QUERY_SYNTAX", store)
         end
         # `SCOPE_SHAPE_ONLY`, not the project's real lens: this runs BEFORE the store is opened
         # at every caller (deliberately — `authorize` says out loud that hearing about a bad
@@ -2193,20 +2212,20 @@ module Gori
 
       private def self.parse_count(v : String, flag : String? = nil) : Int32
         n = v.to_i?
-        abort "gori run: invalid #{flag || "count"} '#{v}' (expected a positive integer)" unless n && n > 0
+        usage_abort "gori run: invalid #{flag || "count"} '#{v}' (expected a positive integer)" unless n && n > 0
         n
       end
 
       # A single-valued flag given twice: the parser kept the last one in silence, so
       # `history delete -q A -q B` deleted B's matches. Refused, like a repeated `--project`.
       private def self.once(prev : String?, v : String, flag : String) : String
-        abort "gori run: #{flag} is given twice — pass it once" if prev
+        usage_abort "gori run: #{flag} is given twice — pass it once" if prev
         v
       end
 
       # Two flags for one setting that disagree (`--http1 --http2`): refused, not last-wins.
       private def self.agree(prev : Bool?, v : Bool, flags : String) : Bool
-        abort "gori run: #{flags} disagree — pass one" if !prev.nil? && prev != v
+        usage_abort "gori run: #{flags} disagree — pass one" if !prev.nil? && prev != v
         v
       end
 
@@ -2339,11 +2358,11 @@ module Gori
               when "sarif"                        then :sarif
               when "names"                        then :names
               when "urls"                         then :urls
-              else                                     abort "gori run: unknown --format '#{v}'"
+              else                                     usage_abort "gori run: unknown --format '#{v}'"
               end
         unless allowed.includes?(sym)
           note = refused.try { |(f, n)| " — #{n}" if f == sym }
-          abort "gori run: --format #{v} not valid here (use #{allowed.join("|")})#{note}"
+          usage_abort "gori run: --format #{v} not valid here (use #{allowed.join("|")})#{note}"
         end
         sym
       end

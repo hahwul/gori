@@ -127,7 +127,7 @@ module Gori
           # A query that compiles to NOTHING (e.g. `status:>=foo`) becomes the match-all EMPTY
           # filter — here that would scan every flow, the opposite of what was asked. Refuse it.
           if !q.strip.empty? && parsed == QL::EMPTY
-            abort "gori run probe: query #{truncate_query(q).inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)"
+            Run.usage_abort("gori run probe: query #{truncate_query(q).inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)", "QUERY_SYNTAX")
           end
           filter = parsed
         end
@@ -348,7 +348,7 @@ module Gori
             busy_abort("gori run probe dismiss", "NOT applied (project busy) — the findings are unchanged") unless store.dismiss_probe_by_host(hst)
             puts "Dismissed #{n} open finding#{n == 1 ? "" : "s"} on #{hst}."
           elsif iid = id
-            issue = store.get_probe_issue(iid) || abort("gori run probe dismiss: no probe finding with id #{iid}")
+            issue = store.get_probe_issue(iid) || not_found_abort("gori run probe dismiss", "no probe finding with id #{iid}", store: store)
             landed = Probe::Triage.toggle_dismiss(store, issue)
             busy_abort "gori run probe dismiss", "NOT applied (project busy) — finding ##{iid} is unchanged" if landed == issue.status
             puts "Finding ##{issue.id} is now #{landed.label}."
@@ -387,7 +387,7 @@ module Gori
         abort "gori run probe promote: <id> is required (see `gori run probe issues`)" unless id
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
-          issue = store.get_probe_issue(id) || abort("gori run probe promote: no probe finding with id #{id}")
+          issue = store.get_probe_issue(id) || not_found_abort("gori run probe promote", "no probe finding with id #{id}", store: store)
           res = Probe::Triage.promote(store, issue)
           case res.outcome
           in Probe::Triage::Outcome::Promoted

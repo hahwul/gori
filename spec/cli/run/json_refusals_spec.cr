@@ -158,3 +158,56 @@ describe "gori run — one positional, counted inside unknown_args" do
     src.scan("before.reject").size.should eq(1)
   end
 end
+
+# Fifteen refusals printed nothing on stdout under `--json` (not-found on `repeater
+# update/move/timing/race/ws`, `notes update`, `retest …`, `session edit/baseline/refresh`,
+# `oast resume`, `project switch`, `wordlist rename`, `probe dismiss/promote`, `evidence
+# freeze/link`), and so did `send`'s pre-send checks and the shared usage refusals.
+describe "gori run --json — the refusals that printed nothing" do
+  it "reads --json off argv before any parser runs, and never past --" do
+    {
+      %w[history --limit 0 --json] => true,
+      %w[history --format=JSONL]   => true,
+      %w[history --format json]    => true,
+      %w[history --format text]    => false,
+      %w[capture -- curl --json]   => false,
+      %w[send -d x --format=har]   => false,
+    }.each do |argv, want|
+      Gori::CLI::Run.json_requested?(argv).should eq(want), failure_message: argv.join(' ')
+    end
+  end
+
+  it "routes each not-found through not_found_abort" do
+    {
+      {"repeater.cr", "not_found_abort(\"gori run repeater move\", \"no repeater session"},
+      {"repeater.cr", "get_repeater(id) || not_found_abort(cmd, \"no repeater session"},
+      {"repeater.cr", "not_found_abort(cmd, \"no repeater session #\#{id}\") unless rec"},
+      {"repeater.cr", "err == ws_not_found_line(id)"},
+      {"notes.cr", "resolve_note_index(store, doc, n, note_id, \"gori run notes update\", format)"},
+      {"session.cr", "not_found_abort(\"gori run session refresh\""},
+      {"session.cr", "not_found_abort(\"gori run session edit\""},
+      {"session.cr", "not_found_abort(\"gori run session baseline\""},
+      {"oast.cr", "oast_bind_session(store, id, \"resume\", json)"},
+      {"project_default.cr", "not_found_abort(\"gori run project switch\""},
+      {"wordlist.cr", "wordlist_error(\"rename\", ex, format)"},
+      {"probe.cr", "not_found_abort(\"gori run probe promote\""},
+      {"evidence.cr", "not_found_abort(\"gori run evidence freeze\", \"no issue"},
+      {"evidence.cr", "not_found_abort(\"gori run evidence freeze\", snap"},
+    }.each do |file, needle|
+      File.read(File.join(JsonRefusals::ROOT, file)).should contain(needle), failure_message: "#{file}: #{needle}"
+    end
+    File.read(File.join(JsonRefusals::ROOT, "retest.cr")).should_not match(/abort "gori run retest \w+: no /)
+  end
+
+  it "gives send's pre-send refusals the delivered:false object" do
+    body = JsonRefusals.method("send.cr", "send_arg_abort")
+    body.should contain(%(failure_json(reason, "invalid_argument", "INVALID_ARGUMENT", delivered: false)))
+    # The helper's own line is the only bare one left.
+    File.read(File.join(JsonRefusals::ROOT, "send.cr")).scan(%(abort "gori run send: )).size.should eq(1)
+  end
+
+  it "says ok in the project and repeater delete replies" do
+    JsonRefusals.method("project.cr", "cmd_project_delete").should contain(%(j.field "ok", true))
+    File.read(File.join(JsonRefusals::ROOT, "repeater.cr")).should contain(%("ok"        => failed.empty?))
+  end
+end

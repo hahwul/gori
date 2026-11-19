@@ -589,6 +589,7 @@ module Gori
         if format == :json
           puts(JSON.build do |j|
             j.object do
+              j.field "ok", true
               j.field "deleted", true
               j.field "name", project.name
               j.field "id", id
