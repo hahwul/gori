@@ -35,6 +35,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     else
       @quit_armed = false
       @toast = nil
+      @toast_seen = nil          # as a key does: a click repeating the same toast is fresh feedback
       press_left(layout, mx, my) # left (middle treated as left)
     end
   end
