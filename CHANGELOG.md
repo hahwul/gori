@@ -10,7 +10,7 @@
 
 - Probe: CSP findings now account for CSP3 script element and event handler directives and the combined restrictions of multiple enforcing policies (#1937).
 
-- Probe: passive checks detect credentials in cross-origin Referer headers, cleartext SAML bearer assertions, and more GitLab token formats. Accepted cross-site WebSockets carrying cookies appear as informational findings.
+- Probe: passive checks detect credentials in cross-origin Referer headers, cleartext SAML bearer assertions, and more GitLab token formats. Accepted cross-site WebSockets carrying cookies appear as informational findings (#1939).
 
 - TUI: unsaved issue drafts require a save or an explicit discard, simultaneous edits to a note are preserved as separate notes, and closing a note with links requires confirmation (#1929).
 
