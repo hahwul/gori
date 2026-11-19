@@ -2134,7 +2134,10 @@ module Gori
       # as `issues shwo` is: run as free text it answered with exit 0 and the wrong rows. A typo
       # here is one letter dropped, doubled or swapped with its neighbour (`verb_typo?`), never a
       # letter replaced: that is how a real search word sits next to a verb (`shop`/`show`,
-      # `clean`/`clear`). Only verbs of four letters or more, so `tab` is not read as `tag`.
+      # `clean`/`clear`). Nor a letter added or dropped at either end: that is a plural, a
+      # tense or a stem (`rule`/`rules`, `shown`/`show`, `param`/`params`, `deleted`), so a
+      # real typo is an interior edit (`isues`, `parms`). Only verbs of four letters or more,
+      # so `tab` is not read as `tag`.
       def self.reserved_query_verb_error(leftover : Array(String), sub : String,
                                          reserved : Array(String), verbs : String) : String?
         first = leftover.first?
@@ -2146,10 +2149,11 @@ module Gori
         "To search for it, pass -q '#{first}'. Verbs: #{verbs}"
       end
 
-      # `word` is `verb` with one letter dropped or added, or two neighbours swapped.
+      # `word` is `verb` with one interior letter dropped or added, or two neighbours swapped.
       private def self.verb_typo?(word : String, verb : String) : Bool
         short, long = word.size < verb.size ? {word, verb} : {verb, word}
         if long.size == short.size + 1
+          return false if long.starts_with?(short) || long.ends_with?(short)
           (0...long.size).any? { |i| long.delete_at(i) == short }
         elsif word.size == verb.size
           (0...word.size - 1).any? { |i| word[i] == verb[i + 1] && word[i + 1] == verb[i] && word.delete_at(i, 2) == verb.delete_at(i, 2) }

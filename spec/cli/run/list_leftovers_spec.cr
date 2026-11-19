@@ -104,7 +104,8 @@ describe Gori::CLI::Run do
       msg = Gori::CLI::Run.reserved_query_verb_error(["isues"], "probe", probe, "issues, …").not_nil!
       msg.should contain("unknown subcommand 'isues' — did you mean 'issues'?")
       msg.should contain("pass -q 'isues'")
-      Gori::CLI::Run.reserved_query_verb_error(["rule"], "probe", probe, "").not_nil!.should contain("'rules'")
+      Gori::CLI::Run.reserved_query_verb_error(["dimiss"], "probe", probe, "").not_nil!.should contain("'dismiss'")
+      Gori::CLI::Run.reserved_query_verb_error(["promte"], "probe", probe, "").not_nil!.should contain("'promote'")
       Gori::CLI::Run.reserved_query_verb_error(%w[shwo 13], "history", ["delete", "rm", "clear", "show"], "")
         .not_nil!.should contain("'show'")
       Gori::CLI::Run.reserved_query_verb_error(["parms"], "sitemap", ["tag", "params", "js", "export"], "")
@@ -120,7 +121,17 @@ describe Gori::CLI::Run do
       # A replaced letter is how a real search word sits next to a verb.
       Gori::CLI::Run.reserved_query_verb_error(["shop"], "history", history, "").should be_nil
       Gori::CLI::Run.reserved_query_verb_error(["clean"], "history", history, "").should be_nil
-      Gori::CLI::Run.reserved_query_verb_error(["deletee"], "history", history, "").not_nil!.should contain("'delete'")
+      # Nor a letter added or dropped at an end: a plural, a tense, a stem.
+      probe = ["issues", "dismiss", "promote", "delete", "rm", "rules", "mode"]
+      %w[model rule issue deleted].each do |w|
+        Gori::CLI::Run.reserved_query_verb_error([w], "probe", probe, "").should be_nil
+      end
+      %w[shown shows how deleted clears].each do |w|
+        Gori::CLI::Run.reserved_query_verb_error([w], "history", history, "").should be_nil
+      end
+      %w[param exports].each do |w|
+        Gori::CLI::Run.reserved_query_verb_error([w], "sitemap", ["tag", "params", "js", "export"], "").should be_nil
+      end
       Gori::CLI::Run.reserved_query_verb_error(["tab"], "sitemap", ["tag", "params", "js", "export"], "").should be_nil
     end
   end
