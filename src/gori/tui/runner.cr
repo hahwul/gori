@@ -495,15 +495,15 @@ module Gori::Tui
         # hostname by design).
         "capture OFF — #{err}. History/Repeater work; #{bind_fix(err)} in settings (^P) then press c"
       elsif lock_unavailable
-        "capture OFF — cannot create the capture lock; check write permission on #{dir} (#{err})"
+        "capture OFF — cannot create the capture lock · check write permission on #{dir} (#{err})"
       else
         "view-only — #{err}. History/Repeater work; press c to take over if it closed"
       end
     end
 
+    # Outcome first, inside 80×24's 59 toast columns; `fit_hints` drops the cause after ` · `.
     def self.orphaned_line(count : Int32) : String
-      "#{Gori.plural(count, "flow")} from the last session #{count == 1 ? "was" : "were"} left incomplete " \
-      "(gori did not exit cleanly) — marked orphaned"
+      "#{Gori.plural(count, "flow")} left incomplete by the last session · marked orphaned (gori did not exit cleanly)"
     end
 
     def run : Symbol

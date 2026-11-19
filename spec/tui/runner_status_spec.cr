@@ -82,6 +82,9 @@ describe "Runner.bind_error_line" do
     line.should start_with("capture OFF — cannot create the capture lock")
     line.should contain("/p/demo")
     line.should_not contain("take over")
+    # A long project path is the detail 80×24 drops, never the outcome.
+    long = Runner.bind_error_line("Permission denied", false, true, "/Users/someone/Projects/#{"x" * 40}")
+    Chrome.fit_hints(long, 59).should eq("capture OFF — cannot create the capture lock …")
   end
 
   it "keeps the view-only and port wording for the other two causes" do
@@ -93,8 +96,10 @@ end
 
 describe "Runner.orphaned_line" do
   it "says how many in-flight flows the last session left, cause first" do
-    Runner.orphaned_line(5).should start_with("5 flows from the last session were left incomplete")
-    Runner.orphaned_line(1).should start_with("1 flow from the last session was left incomplete")
+    Runner.orphaned_line(5).should start_with("5 flows left incomplete by the last session")
+    Runner.orphaned_line(1).should start_with("1 flow left incomplete by the last session")
+    # 80×24's 59 toast columns keep the outcome; the cause is the segment that drops.
+    Chrome.fit_hints(Runner.orphaned_line(9999), 59).should eq("9999 flows left incomplete by the last session …")
   end
 end
 

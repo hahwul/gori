@@ -910,11 +910,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     {ids, dups, nil}
   end
 
-  # The note for a freeze whose bytes the issue already holds (L#7); nil when none did.
+  # The note for a freeze whose bytes the issue already holds (L#7); nil when none did. Short
+  # enough for 80×24's 59 toast columns whole.
   def self.already_frozen_line(ids : Array(Int64)) : String?
     return if ids.empty?
-    return "already frozen as evidence ##{ids[0]} (identical bytes) — nothing new written" if ids.size == 1
-    "#{ids.size} already frozen (identical bytes) — nothing new written"
+    return "already frozen as evidence ##{ids[0]} — nothing written" if ids.size == 1
+    "#{ids.size} already frozen (same bytes) — nothing written"
   end
 
   # The tail every "issue created" toast carries when the form was opened holding copies
