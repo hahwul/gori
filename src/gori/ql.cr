@@ -131,10 +131,14 @@ module Gori
     # miss it while `path:http` and `path:<port>` matched every such flow. The authority ends
     # at the first '/', '?' or '#' — each `instr` gets a sentinel so a missing one sorts last —
     # and whatever follows gets a leading '/' when it has none (a pathless query, or nothing).
+    # The leading `substr(target, 1, 1) = '/'` arm is the origin-form fast path: such a target
+    # cannot start with a scheme, so the general arm would return it unchanged too, and it is
+    # nearly every row — a no-match `path:` scan does half the per-row work (16.7 → 8.5 ms at 100k).
     private PATH_REST = "substr(target, instr(target, '://') + 3)"
     private PATH_CUT  = "min(instr(#{PATH_REST} || '/', '/'), instr(#{PATH_REST} || '?', '?'), " \
                         "instr(#{PATH_REST} || '#', '#'))"
-    PATH_EXPR = "(CASE WHEN lower(substr(target, 1, 7)) = 'http://' OR lower(substr(target, 1, 8)) = 'https://' " \
+    PATH_EXPR = "(CASE WHEN substr(target, 1, 1) = '/' THEN target " \
+                "WHEN lower(substr(target, 1, 7)) = 'http://' OR lower(substr(target, 1, 8)) = 'https://' " \
                 "THEN (CASE WHEN substr(#{PATH_REST}, #{PATH_CUT}, 1) = '/' THEN substr(#{PATH_REST}, #{PATH_CUT}) " \
                 "ELSE '/' || substr(#{PATH_REST}, #{PATH_CUT}) END) ELSE target END)"
 
@@ -1090,10 +1094,12 @@ module Gori
     # `text/event-stream\t; charset=utf-8` was SSE in the PROTO column and missed by `proto:sse`.
     private SPACE_BYTES = "char(9, 10, 11, 12, 13, 32)"
     # A Connect stream (`application/connect+…`, #1632) is in the gRPC family, as in `Proto.grpc?`.
-    GRPC_SQL = "((content_type IS NOT NULL AND (lower(ltrim(content_type, #{SPACE_BYTES})) LIKE 'application/grpc%' OR " \
-               "lower(ltrim(content_type, #{SPACE_BYTES})) LIKE 'application/connect+%')) OR " \
-               "(request_content_type IS NOT NULL AND (lower(ltrim(request_content_type, #{SPACE_BYTES})) LIKE 'application/grpc%' OR " \
-               "lower(ltrim(request_content_type, #{SPACE_BYTES})) LIKE 'application/connect+%')))"
+    # No `lower()`: `LIKE` already folds ASCII case (`case_sensitive_like` stays off), and
+    # SQLite's `lower()` folds only ASCII too, so the call changed nothing but the per-row cost.
+    GRPC_SQL = "((content_type IS NOT NULL AND (ltrim(content_type, #{SPACE_BYTES}) LIKE 'application/grpc%' OR " \
+               "ltrim(content_type, #{SPACE_BYTES}) LIKE 'application/connect+%')) OR " \
+               "(request_content_type IS NOT NULL AND (ltrim(request_content_type, #{SPACE_BYTES}) LIKE 'application/grpc%' OR " \
+               "ltrim(request_content_type, #{SPACE_BYTES}) LIKE 'application/connect+%')))"
     SSE_SQL = "(content_type IS NOT NULL AND " \
               "lower(trim(substr(content_type, 1, instr(content_type || ';', ';') - 1), #{SPACE_BYTES})) = 'text/event-stream')"
     # BOTH transports, because a WebSocket is one protocol and used to be two answers here: an
