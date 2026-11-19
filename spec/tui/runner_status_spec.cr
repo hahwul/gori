@@ -116,8 +116,27 @@ describe "Runner.import_done_line" do
     msg.should start_with("imported 8 flows from HAR — 2 of 10 did NOT commit")
   end
 
-  it "is a plain success line when there is nothing to warn about" do
+  it "is a plain success line, with no ring push, when there is nothing to warn about" do
     Runner.import_done_line(Gori::Import::Result.new(3), "HAR", "/tmp/s.har", false)
       .should eq({"imported 3 flows from HAR · /tmp/s.har", false})
+  end
+end
+
+# While the strip's `/` bar takes keys its letters type, so the footer must not keep
+# advertising `e rename · t mark · f find` (L#6). `Runner.new` owns a terminal, so the order of
+# the checks is pinned on the source, comments stripped (they name the tokens looked for).
+describe "the sub-tab strip footer while its filter is being typed" do
+  src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner.cr"))
+    .lines.reject(&.lstrip.starts_with?('#'))
+
+  it "answers with the filter's editing hint before any strip hint" do
+    at = src.index(&.includes?("if @focus == :subtabs")).not_nil!
+    src[at + 1].should contain("return SUBTAB_FILTER_HINT if")
+    src[at + 1].should contain("subtab_filter_editing?")
+  end
+
+  it "fits the 80×24 row and names only what the bar answers" do
+    Runner::SUBTAB_FILTER_HINT.should eq("type to filter · ↹ complete · ↵ apply · esc clear")
+    Screen.display_width(Runner::SUBTAB_FILTER_HINT).should be <= 59
   end
 end

@@ -3478,7 +3478,7 @@ module Gori::Tui
       else
         case @focus
         when :menu    then "TABS"
-        when :subtabs then "SUBTABS"
+        when :subtabs then @tabs[@active_tab]?.try(&.subtab_filter_editing?) ? "EDITOR" : "SUBTABS"
         else
           body_focus_label(@tabs[@active_tab]?)
         end
@@ -3561,6 +3561,9 @@ module Gori::Tui
         # labels already say, and `^D quit`, which Help lists and the project picker offers.
         return Hotkeys.expand(@session.registry, "←/→ switch tab · ↹/↵ enter · {capture.toggle} capture · {intercept.toggle} intercept · q projects · ^P palette · {help.hotkeys} help") if @focus == :menu
         if @focus == :subtabs
+          # Typing in the strip's `/` bar: its letters are text now, so the strip's own keys
+          # (`e rename`, `t mark`, `f find`) would advertise letters that type.
+          return SUBTAB_FILTER_HINT if @tabs[@active_tab]?.try(&.subtab_filter_editing?)
           # On the ⌕ affordance the strip's own keys are the wrong story — ↵ lists every
           # sub-tab here instead of entering one. Only ever reached when the pill is really
           # on screen (see subtab_find_focused?), so this never advertises a missing stop.
@@ -6109,6 +6112,9 @@ module Gori::Tui
     private def notes_locked? : Bool
       (@active_tab == :notes && @focus == :body) || notes_controller.view.dirty?
     end
+
+    # The footer while the strip's `/` bar takes keys — the words History's filter bar uses.
+    SUBTAB_FILTER_HINT = "type to filter · ↹ complete · ↵ apply · esc clear"
 
     CAPTURE_OFF_TOAST = "proxy stopped"
     CAPTURE_ON_TOAST  = "proxy listening"
