@@ -819,4 +819,33 @@ describe "Gori::Sitemap.attach_js_refs!" do
     hosts.size.should eq(1)
     hosts[0].children.map(&.label).should contain("api")
   end
+
+  # `Store#add_js_refs` — the source-map unpack's write (#1932): it appends to the body scan's
+  # references without touching the scan marker, and dedups on UNIQUE(host, path, flow_id).
+  describe "Store#add_js_refs" do
+    it "appends references to a scanned flow without wiping its body-scan refs or marker" do
+      with_store do |store|
+        fid = jr_flow(store, "/app.js", %(fetch("/api/body")))
+        JR.scan(store).flows_scanned.should eq(1)
+        marker_count(store).should eq(1)
+        recovered = Gori::Store::JsRef.new("https", "shop.test", 443, "/api/from-map",
+          "/api/from-map", "\"/api/from-map\"", 0, 1, 0, "referer")
+        store.add_js_refs(fid, [recovered]).should be_true
+        refs_of(store).map(&.path).sort!.should eq(["/api/body", "/api/from-map"])
+        # The flow stays scanned (its marker is untouched), so a plain scan does not redo it.
+        marker_count(store).should eq(1)
+      end
+    end
+
+    it "ignores a reference whose (host, path) the flow already holds" do
+      with_store do |store|
+        fid = jr_flow(store, "/app.js", %(fetch("/api/dup")))
+        JR.scan(store)
+        dup = Gori::Store::JsRef.new("https", "shop.test", 443, "/api/dup",
+          "/api/dup", "\"/api/dup\"", 0, 1, 0, "referer")
+        store.add_js_refs(fid, [dup]).should be_true
+        refs_of(store).map(&.path).should eq(["/api/dup"])
+      end
+    end
+  end
 end

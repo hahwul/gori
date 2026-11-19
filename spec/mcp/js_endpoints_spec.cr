@@ -1,5 +1,6 @@
 require "../spec_helper"
 require "json"
+require "base64"
 
 # MCP `scan_js_endpoints` / `list_js_endpoints` / `list_sitemap include_unrequested` — the agent
 # surface of `Gori::JsRefs` (spec/js_refs_spec.cr owns the engine). Pinned here: the scan is a
@@ -169,6 +170,45 @@ describe "MCP list_sitemap include_unrequested" do
       out = je(tools, "set_sitemap_tag", %({"host":"shop.test","path":"/api/hidden","tag":"look"}))
       out["matches_endpoint"].should be_false
       out["warning"].as_s.should contain("JavaScript-referenced node")
+    end
+  end
+end
+
+describe "MCP unpack_sourcemap" do
+  it "parses an inline data: source map and stores the recovered endpoints for list_js_endpoints" do
+    with_store do |store|
+      map = {version: 3, sources: ["src/api.js"],
+             sourcesContent: [%(fetch("/api/v1/secret");axios.get('/internal/admin'))]}.to_json
+      b64 = Base64.strict_encode(map)
+      id = je_flow(store, "/app.js", "var x=1;\n//# sourceMappingURL=data:application/json;base64,#{b64}\n")
+      tools = tools_for(store)
+      out = je(tools, "unpack_sourcemap", %({"flow_id":#{id}}))
+      out["origin"].should eq("inline")
+      out["references"].should eq(2)
+      out["stored"].should be_true
+      out["endpoints"].as_a.map(&.["path"].as_s).sort!.should eq(["/api/v1/secret", "/internal/admin"])
+      # Stored against the flow → the agent reads them back through the existing listing.
+      listed = je(tools, "list_js_endpoints")
+      listed["endpoints"].as_a.map(&.["path"].as_s).sort!.should eq(["/api/v1/secret", "/internal/admin"])
+    end
+  end
+
+  it "refuses an out-of-scope .map fetch with SCOPE_BLOCKED" do
+    with_store do |store|
+      Gori::Scope.load(store).add("include", "host", "shop.test")
+      id = je_flow(store, "/app.js", "var x=1;\n//# sourceMappingURL=https://cdn.evil.test/app.js.map\n")
+      res = tools_for(store).call("unpack_sourcemap", JSON.parse(%({"flow_id":#{id}})))
+      res.is_error.should be_true
+      res.error_code.should eq("SCOPE_BLOCKED")
+    end
+  end
+
+  it "reports a clean no-op when the flow names no source map" do
+    with_store do |store|
+      id = je_flow(store, "/app.js", %(fetch("/api/x")))
+      out = je(tools_for(store), "unpack_sourcemap", %({"flow_id":#{id}}))
+      out["references"].should eq(0)
+      out["note"].as_s.should contain("no source map reference")
     end
   end
 end

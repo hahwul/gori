@@ -31,6 +31,10 @@ module Gori::Tui
       # time, and the spare slots absorb a result the operator has already navigated away from.
       @reflect_results = Channel(ReflectDone).new(4)
       @reflect_inflight = false
+      # The source-map unpack's hand-off (#1932), the same buffered shape: the fetch+parse runs
+      # off the UI fiber, the store write happens on it (`apply_unpack`).
+      @unpack_results = Channel(UnpackDone).new(4)
+      @unpack_inflight = false
       # A view that has gone missing since it was picked. Held rather than announced here: this
       # runs while the shell is still booting, where a status line is overwritten before anyone
       # reads it. `on_enter` says it at the moment the operator actually looks at History.
@@ -872,6 +876,72 @@ module Gori::Tui
         apply_reflection(done)
       end
       dirty
+    end
+
+    private record UnpackDone, flow_id : Int64, report : Gori::Sourcemap::Report
+
+    # Fetch (or inline-parse) the selected flow's source map and recover the endpoints its
+    # original sources hide (#1932), the active follow-up to the passive `sourcemap` detector.
+    # The row supplies the target, so there is nothing to prompt; it runs off the UI fiber,
+    # through `Outbound.interactive` (Layer 1 waived because the operator picked the row,
+    # Sandbox still hard-stopping the fetch), and the recovered references are STORED on the UI
+    # fiber (`apply_unpack`) so the send fiber never waits on the writer.
+    def unpack_sourcemap : Nil
+      row = @history.selected_row
+      return @host.status("source map: no flow selected") unless row
+      return @host.status("source map: already unpacking") if @unpack_inflight
+      detail = @host.session.store.get_flow(row.id)
+      return @host.status("source map: flow no longer available") unless detail
+      outbound = Gori::Outbound.interactive(@host.session.scope)
+      overrides = @host.session.host_overrides
+      verify = Settings.verify_upstream?
+      results = @unpack_results
+      store = @host.session.store
+      fid = row.id
+      @unpack_inflight = true
+      @host.status("source map ##{fid}: fetching…")
+      spawn(name: "gori-sourcemap-unpack") do
+        report = begin
+          # `persist: false` — the store write is the UI fiber's, done in `apply_unpack`.
+          Gori::Sourcemap.unpack(store, detail, outbound, verify: verify, overrides: overrides, persist: false)
+        rescue ex
+          ::Log.error(exception: ex) { "sourcemap unpack fiber died" }
+          Gori::Sourcemap::Report.empty(error: ex.message || "unpack failed")
+        end
+        select
+        when results.send(UnpackDone.new(fid, report))
+        else
+          # The operator left the project: drop the late result.
+        end
+      ensure
+        @unpack_inflight = false
+      end
+    end
+
+    # Apply a finished unpack on the UI fiber: store the recovered references here (the write
+    # the send fiber was kept off) and report. Returns whether the frame is dirty.
+    def drain_unpack : Bool
+      dirty = false
+      while done = poll(@unpack_results)
+        dirty = true
+        apply_unpack(done)
+      end
+      dirty
+    end
+
+    private def apply_unpack(done : UnpackDone) : Nil
+      report = done.report
+      if err = report.error
+        return @host.status("source map ##{done.flow_id}: #{err}")
+      end
+      if report.refs.empty?
+        return @host.status("source map ##{done.flow_id}: #{report.origin.try(&.to_s.downcase) || "parsed"}, no endpoints recovered")
+      end
+      stored = @host.session.store.add_js_refs(done.flow_id, report.refs)
+      origin = report.origin.try(&.to_s.downcase) || "parsed"
+      line = "source map ##{done.flow_id}: #{origin}, #{report.refs.size} endpoint#{report.refs.size == 1 ? "" : "s"} recovered"
+      line += stored ? " — see the Sitemap's JS references (`J` to scan)" : " — but NOT stored (project busy), try again"
+      @host.status(line)
     end
 
     private def apply_reflection(done : ReflectDone) : Nil

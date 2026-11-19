@@ -11,6 +11,9 @@ module Gori
         property path_prefix : String? = nil
         property? scan = false
         property? rescan = false
+        property unpack : Int64? = nil
+        property? allow_unscoped = false
+        property? insecure = false
         property max_flows = JsRefs::DEFAULT_MAX_FLOWS
         property? max_flows_given = false
         property? all = false
@@ -32,20 +35,20 @@ module Gori
         Run.warn_dropped_query_terms("sitemap js", dropped)
         Run.refuse_unknown_query_fields("sitemap js", query, o.lenient?)
         scanning = o.scan? || o.rescan?
-        # The query picks the flows a scan READS. A listing is keyed by the reference, not by a
-        # flow, so a query without a scan would silently filter nothing — refuse it by name.
-        if query && !query.strip.empty? && !scanning
-          abort "gori run sitemap js: a query narrows the flows --scan reads; pass --scan (or --host/--path to narrow the list)"
-        end
-        abort "gori run sitemap js: --max-flows bounds what --scan reads; pass --scan or --rescan" if o.max_flows_given? && !scanning
+        unpacking = !o.unpack.nil?
+        sitemap_js_refuse_argv(o, query, scanning, unpacking)
 
         # Parse before the open: abort skips ensure, so a bad query must not leave a store open.
         filter = scanning ? sitemap_filter(query) : QL::EMPTY
-        store = open_store(resolve_read_project(o.proj.name, o.proj.db),
-          read_only: !scanning && !filter.uses_fts?, long_running: scanning)
+        # --unpack writes recovered references and makes an outbound request, so it needs a
+        # writable, long-running store exactly as --scan does.
+        writes = scanning || unpacking
+        project = resolve_read_project(o.proj.name, o.proj.db)
+        store = open_store(project, read_only: !writes && !filter.uses_fts?, long_running: writes)
         filter = sitemap_flow_filter(store, "sitemap js", query, filter, false, "flows out of the scan") if scanning
         report = begin
           sitemap_js_scan(store, filter, o) if scanning
+          sitemap_js_unpack(store, project, o) if unpacking
           sitemap_js_list(store, o)
         rescue ex
           abort "gori run sitemap js: #{ex.message}"
@@ -55,18 +58,38 @@ module Gori
         emit_sitemap_js(report, o)
       end
 
+      # The refusals knowable from argv alone, before the store opens (an abort then leaves no
+      # store behind). A flag that only means something with --scan or --unpack is refused by name.
+      private def self.sitemap_js_refuse_argv(o : SitemapJsArgs, query : String?,
+                                              scanning : Bool, unpacking : Bool) : Nil
+        # The query picks the flows a scan READS. A listing is keyed by the reference, not by a
+        # flow, so a query without a scan would silently filter nothing — refuse it by name.
+        if query && !query.strip.empty? && !scanning
+          abort "gori run sitemap js: a query narrows the flows --scan reads; pass --scan (or --host/--path to narrow the list)"
+        end
+        abort "gori run sitemap js: --max-flows bounds what --scan reads; pass --scan or --rescan" if o.max_flows_given? && !scanning
+        abort "gori run sitemap js: --allow-unscoped applies to --unpack (which fetches the .map)" if o.allow_unscoped? && !unpacking
+      end
+
       private def self.sitemap_js_parser(o : SitemapJsArgs) : OptionParser
         option_parser("gori run sitemap js") do |p|
           p.banner = "Usage: gori run sitemap js [--scan [QL query]] [options]\n\n" \
                      "List the endpoints captured JavaScript references — string literals in JS\n" \
                      "responses and inline <script> blocks, like fetch(\"/api/v1/users\") — that no\n" \
-                     "captured request has reached. Nothing is sent: --scan reads bodies already in\n" \
-                     "the project (the newest unscanned JS/HTML responses) and stores what they\n" \
-                     "reference. A reference to a host gori never captured is listed only when a scope\n" \
-                     "include names it (--all-hosts lists it anyway)."
+                     "captured request has reached. --scan reads bodies already in the project (the\n" \
+                     "newest unscanned JS/HTML responses) and stores what they reference, sending\n" \
+                     "nothing. --unpack FLOW_ID is the one ACTIVE option: it fetches the source map\n" \
+                     "that flow points at and recovers the endpoints hidden in its original sources.\n" \
+                     "A reference to a host gori never captured is listed only when a scope include\n" \
+                     "names it (--all-hosts lists it anyway)."
           project_options(p, o.proj, "read")
           p.on("--scan", "First scan the JS/HTML responses not scanned yet (writes derived rows, sends nothing)") { o.scan = true }
           p.on("--rescan", "Like --scan, but read already-scanned responses again") { o.rescan = true }
+          p.on("--unpack=FLOW_ID", "ACTIVE: fetch the source map FLOW_ID points at (//# sourceMappingURL) and store the endpoints hidden in its original sources") do |v|
+            o.unpack = parse_count(v, "--unpack").to_i64
+          end
+          p.on("--allow-unscoped", "With --unpack: fetch the .map even when its host is outside (or without) the project scope") { o.allow_unscoped = true }
+          p.on("--insecure", "With --unpack: skip upstream TLS verification when fetching the .map") { o.insecure = true }
           p.on("-qQL", "--query=QL", "With --scan: only scan flows matching this QL query") { |v| o.query = once(o.query, v, "-q/--query") }
           p.on("--max-flows=N", "With --scan: newest responses to read (default #{JsRefs::DEFAULT_MAX_FLOWS})") do |v|
             o.max_flows = parse_count(v, "--max-flows")
@@ -103,6 +126,36 @@ module Gori
           STDERR.puts "gori run sitemap js: read the newest #{r.flows_scanned} responses (--max-flows); " \
                       "unscanned ones remain — run --scan again"
         end
+      end
+
+      # ACTIVE: fetch (or inline-parse) a flow's source map and store the endpoints its original
+      # sources reveal. The one active path of this command — the scope gate it goes through is
+      # the project's, waivable with --allow-unscoped, Sandbox still applying.
+      private def self.sitemap_js_unpack(store : Store, project : Project, o : SitemapJsArgs) : Nil
+        return unless id = o.unpack
+        detail = store.get_flow(id)
+        return (STDERR.puts "gori run sitemap js: --unpack: no flow with id #{id}") unless detail
+        overrides = Gori::HostOverrides.load(store)
+        outbound = project_outbound(project, o.allow_unscoped?)
+        report = begin
+          Gori::Sourcemap.unpack(store, detail, outbound, verify: !o.insecure?, overrides: overrides)
+        ensure
+          outbound.close
+        end
+        STDERR.puts "gori run sitemap js: #{sitemap_js_unpack_summary(id, report)}"
+      end
+
+      def self.sitemap_js_unpack_summary(id : Int64, r : Gori::Sourcemap::Report) : String
+        if err = r.error
+          return "--unpack ##{id}: #{err}"
+        end
+        origin = r.origin.try(&.to_s.downcase) || "parsed"
+        parts = ["--unpack ##{id}: #{origin} source map",
+                 "#{r.sources} source#{r.sources == 1 ? "" : "s"}",
+                 Gori.plural(r.refs.size, "endpoint")]
+        parts << "stored" if r.stored
+        parts << "stopped at a safety bound" if r.sources_capped || r.refs_capped
+        parts.join(", ")
       end
 
       # One line: what was read and found, and every cap that cut the reading short.

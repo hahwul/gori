@@ -38,6 +38,9 @@ abstract class Gori::Verb::ExecContext
   # Fetch the selected flow's target schema by gRPC server reflection (#827). An OUTBOUND
   # request, made only here — never on capture and never on opening a flow (P4).
   abstract def history_grpc_reflect : Nil
+  # Fetch (or inline-parse) the selected flow's source map and recover the endpoints hidden in
+  # its original sources (#1932). An OUTBOUND request (unless the map is inline), opt-in here.
+  abstract def history_unpack_sourcemap : Nil
   # History destructive actions (confirmation-gated; list shortcuts dispatch these intents).
   abstract def history_delete : Nil # delete the selected/open flow
   abstract def history_clear : Nil  # wipe every History flow for this project

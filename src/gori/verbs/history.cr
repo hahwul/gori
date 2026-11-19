@@ -237,6 +237,15 @@ module Gori
         "history.probe-active", "Run active scan", "Run the Probe active checks against the selected flow (shows the request count first)",
         Verb::Scope::Body, available: history_targets, mnemonic: 'A', group: :send) { |ctx| ctx.probe_active_selected; nil }
 
+      # Unpack the selected JS flow's source map (#1932): fetch the referenced `.map` (or parse an
+      # inline `data:` one), recover the endpoints its original sources hide, and store them as JS
+      # references. ACTIVE (a fetch unless inline), so it is the passive `sourcemap` detector's
+      # opt-in follow-up — a once-per-bundle action, so `menu: :palette` (Ctrl-P), chords clear.
+      r.register Verb::Definition.new(
+        "history.unpack-sourcemap", "Unpack source map", "Fetch the selected flow's source map and recover the endpoints hidden in its original sources",
+        Verb::Scope::Body, available: history_selected, menu: :palette, group: :send,
+        keywords: %w[sourcemap javascript endpoints]) { |ctx| ctx.history_unpack_sourcemap; nil }
+
       # Delete the selected/marked flows after confirmation. Bare `d` is the direct shortcut and
       # the menu letter too (the lexicon's `:delete`), now that Discover sits in Send flow to….
       r.register Verb::Definition.new(
