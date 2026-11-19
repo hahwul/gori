@@ -193,7 +193,8 @@ describe "gori run --json — the refusals that printed nothing" do
   it "knows every flag that takes the next word as its value" do
     valued = Set(String).new
     plain = Set(String).new
-    (Dir.glob(File.join(JsonRefusals::ROOT, "**", "*.cr")) << "#{JsonRefusals::ROOT}.cr").each do |path|
+    # Forward slashes: `Dir.glob` reads a backslash as an escape, so a Windows-joined pattern matched nothing.
+    (Dir.glob("#{Path[JsonRefusals::ROOT].to_posix}/**/*.cr") << "#{JsonRefusals::ROOT}.cr").each do |path|
       File.read(path).scan(/p\.on\(([^)]*)/) do |m|
         m[1].scan(/"(-[A-Za-z]|--[a-z0-9-]+)([= ]?[A-Z<\[]?)/) do |f|
           (f[2].empty? ? plain : valued) << f[1]
