@@ -2110,11 +2110,33 @@ module Gori
       # that IS a reserved verb is still the flag-before-verb discard: `history --project=X
       # delete 42` listed instead of deleting, `probe --project=X dismiss 5` scanned with
       # the free-text `dismiss 5`. Same sentence as `list_leftover_error`.
+      #
+      # A bare first word one typo from a verb (`probe isues`, `history shwo 13`) is refused too,
+      # as `issues shwo` is: run as free text it answered with exit 0 and the wrong rows. A typo
+      # here is one letter dropped, doubled or swapped with its neighbour (`verb_typo?`), never a
+      # letter replaced: that is how a real search word sits next to a verb (`shop`/`show`,
+      # `clean`/`clear`). Only verbs of four letters or more, so `tab` is not read as `tag`.
       def self.reserved_query_verb_error(leftover : Array(String), sub : String,
                                          reserved : Array(String), verbs : String) : String?
         first = leftover.first?
-        return nil unless first && reserved.includes?(first)
-        list_leftover_error(leftover, sub, verbs)
+        return nil unless first
+        return list_leftover_error(leftover, sub, verbs) if reserved.includes?(first)
+        return nil unless first.matches?(/\A[a-z][a-z-]*\z/)
+        return nil unless near = reserved.find { |v| v.size >= 4 && verb_typo?(first, v) }
+        "gori run #{sub}: unknown subcommand '#{first}' — did you mean '#{near}'? " \
+        "To search for it, pass -q '#{first}'. Verbs: #{verbs}"
+      end
+
+      # `word` is `verb` with one letter dropped or added, or two neighbours swapped.
+      private def self.verb_typo?(word : String, verb : String) : Bool
+        short, long = word.size < verb.size ? {word, verb} : {verb, word}
+        if long.size == short.size + 1
+          (0...long.size).any? { |i| long.delete_at(i) == short }
+        elsif word.size == verb.size
+          (0...word.size - 1).any? { |i| word[i] == verb[i + 1] && word[i + 1] == verb[i] && word.delete_at(i, 2) == verb.delete_at(i, 2) }
+        else
+          false
+        end
       end
 
       # One `what` positional naming an id (`rewriter rm <id>`, `intercept get <item-id>`):

@@ -97,6 +97,32 @@ describe Gori::CLI::Run do
         "issues, dismiss, promote, delete/rm, rules, mode")
       msg.not_nil!.should contain("unknown subcommand 'dismiss'")
     end
+
+    # `probe isues` printed the repeater findings and exited 0; `issues shwo` was refused.
+    it "refuses a bare word one typo from a verb and points free text at -q" do
+      probe = ["issues", "dismiss", "promote", "delete", "rm", "rules", "mode"]
+      msg = Gori::CLI::Run.reserved_query_verb_error(["isues"], "probe", probe, "issues, …").not_nil!
+      msg.should contain("unknown subcommand 'isues' — did you mean 'issues'?")
+      msg.should contain("pass -q 'isues'")
+      Gori::CLI::Run.reserved_query_verb_error(["rule"], "probe", probe, "").not_nil!.should contain("'rules'")
+      Gori::CLI::Run.reserved_query_verb_error(%w[shwo 13], "history", ["delete", "rm", "clear", "show"], "")
+        .not_nil!.should contain("'show'")
+      Gori::CLI::Run.reserved_query_verb_error(["parms"], "sitemap", ["tag", "params", "js", "export"], "")
+        .not_nil!.should contain("'params'")
+    end
+
+    it "still searches a word near no verb, a field term, and a short word near a short verb" do
+      history = ["delete", "rm", "clear", "show"]
+      Gori::CLI::Run.reserved_query_verb_error(["api"], "history", history, "").should be_nil
+      Gori::CLI::Run.reserved_query_verb_error(["shows:x"], "history", history, "").should be_nil
+      Gori::CLI::Run.reserved_query_verb_error(["42"], "history", history, "").should be_nil
+      Gori::CLI::Run.reserved_query_verb_error(["am"], "history", history, "").should be_nil
+      # A replaced letter is how a real search word sits next to a verb.
+      Gori::CLI::Run.reserved_query_verb_error(["shop"], "history", history, "").should be_nil
+      Gori::CLI::Run.reserved_query_verb_error(["clean"], "history", history, "").should be_nil
+      Gori::CLI::Run.reserved_query_verb_error(["deletee"], "history", history, "").not_nil!.should contain("'delete'")
+      Gori::CLI::Run.reserved_query_verb_error(["tab"], "sitemap", ["tag", "params", "js", "export"], "").should be_nil
+    end
   end
 end
 
