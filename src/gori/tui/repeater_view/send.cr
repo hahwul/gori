@@ -487,9 +487,9 @@ class Gori::Tui::RepeaterView
     # back to the captured original (when loaded from History).
     @prev_result = @result
     @result = result
+    @result_stopped = @live.try(&.stopped?) || false # before `remember_send`, which keeps it
     remember_send(result) if remember
     @result_times = @live.try(&.times) # the stream this result ends keeps its arrival times
-    @result_stopped = @live.try(&.stopped?) || false
     live_end
     @group_results = nil # a single ^R send takes the pane back from a group transcript
     # The rpc path this result belongs to, frozen at send time so the gRPC transcript's `.proto`

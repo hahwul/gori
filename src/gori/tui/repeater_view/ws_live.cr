@@ -124,6 +124,7 @@ class Gori::Tui::RepeaterView
     @ws_sent_marks.clear
     # Seed @result so the HANDSHAKE RESPONSE card renders the 101, the seed `apply_ws` makes.
     @result = Repeater::Result.new(result.handshake_head, Bytes.empty, nil, result.duration_us, result.error)
+    @result_stopped = false
     @resp_alt = {0, 0, 0, 0}
     @scroll = 0 # a new session starts at its first row, as `apply_ws` does
     @resp_cursor.reset

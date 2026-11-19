@@ -157,7 +157,7 @@ class Gori::Tui::RepeaterView
   # unexpanded, which is why it is not read back from the History flow) and what came back.
   # Session-only, oldest first; a restore-then-send appends, it never truncates.
   record SendEntry, target : String, request : String, http2 : Bool, auto_cl : Bool, sni : String?,
-    tls_preset : String?, result : Repeater::Result, at : Time
+    tls_preset : String?, result : Repeater::Result, at : Time, stopped : Bool = false
 
   SEND_HISTORY_CAP = 50
   getter send_history = [] of SendEntry
@@ -172,7 +172,7 @@ class Gori::Tui::RepeaterView
   private def remember_send(result : Repeater::Result) : Nil
     return unless send_history_kind? && (sent = @sent_request)
     target, text, http2, auto_cl, sni = sent
-    @send_history << SendEntry.new(target, text, http2, auto_cl, sni, @tls_preset, result, Time.local)
+    @send_history << SendEntry.new(target, text, http2, auto_cl, sni, @tls_preset, result, Time.local, @result_stopped)
     @send_history.shift if @send_history.size > SEND_HISTORY_CAP
   end
 
@@ -201,6 +201,7 @@ class Gori::Tui::RepeaterView
     @sent_request = {entry.target, entry.request, entry.http2, entry.auto_cl, entry.sni}
     @prev_result = @result
     @result = entry.result
+    @result_stopped = entry.stopped
     @result_times = nil
     @group_results = nil
     reset_result_caches
@@ -567,6 +568,7 @@ class Gori::Tui::RepeaterView
     else
       @result = nil
     end
+    @result_stopped = src.@result_stopped
     @result_times = src.@result_times.try(&.dup)
     @prev_result = nil
     @original_lines = [] of String
