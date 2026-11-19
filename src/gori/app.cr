@@ -236,8 +236,9 @@ module Gori
           return if outcome == :quit
           notice = db_error || notice
         end
+        resume_search = nil.as(Tui::ProjectSearchOverlay?)
         loop do
-          picker = Tui::ProjectPicker.new(term, projects, notice: notice)
+          picker = Tui::ProjectPicker.new(term, projects, notice: notice, resume_search: resume_search)
           project = picker.run
           break unless project # nil => quit gori
           # Reassigned every pass: a picker-chosen project that won't open reports it the
@@ -245,6 +246,7 @@ module Gori
           # `focus_flow_id` is set when the pick came from a cross-project search hit (#1229).
           outcome, notice = open_or_report_guard(project, term, picker.focus_flow_id)
           break if outcome == :quit
+          resume_search = picker.search_on_return
         end
       ensure
         term.close # restore the terminal even on error

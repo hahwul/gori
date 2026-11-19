@@ -35,11 +35,7 @@ module Gori::Tui
     # where a status line arrives too late to be read (the loop breaks immediately after
     # `commit_pending_edits`).
     #
-    # Gated on INS exactly as `commit` is, so the prompt describes what will actually happen. A
-    # dirty buffer the READ/INS chip stepped out of is dropped at quit too — but by the INS gate,
-    # not by this conflict, and a line blaming a peer for it would send the operator looking for
-    # a collision that is not the reason. That silence is older than this guard and is its own
-    # question.
+    # READ drafts go through the unsaved-edits confirmation in ExitGuard.
     #
     # `@host.session.store`, not a cached row: the answer has to be about the version on disk at
     # the moment the operator is being asked, which is the moment they can still act on it.
@@ -545,7 +541,7 @@ module Gori::Tui
         # `esc` means (`leave_notes_editor`). Without it this one gesture would be the only
         # way out of the detail that silently drops an unsaved writeup, which is exactly the
         # text a conflict refusal has just told the operator to look at.
-        issue_close if leave_notes_editor
+        issue_close
         return true
       end
       card = @issues.notes_card_rect(inner)
@@ -594,6 +590,24 @@ module Gori::Tui
       return true unless @issues.notes_insert_mode?
       save_notes_or_report
       !@issues.notes_insert_mode?
+    end
+
+    # Replacing the detail would discard a READ draft. Return to the editor so the
+    # operator can save or discard it with the usual keys.
+    def prepare_detail_departure : Bool
+      return leave_notes_editor if @issues.notes_insert_mode?
+      return true unless read_draft?
+      if @host.active_tab == :issues
+        @issues.enter_notes_insert!
+        @host.status("unsaved issue notes — esc saves, ^W discards")
+      else
+        @host.status("unsaved issue notes — return to Issues to save or discard them")
+      end
+      false
+    end
+
+    private def read_draft? : Bool
+      @issues.detail_open? && !@issues.notes_insert_mode? && @issues.notes_dirty?
     end
 
     def handle_wheel(step : Int32) : Bool
@@ -863,8 +877,15 @@ module Gori::Tui
       @host.status("notes changed by another session — esc will refuse to overwrite; ^W discards yours")
     end
 
-    # A confirmed peer conflict may be discarded; a storage failure keeps the exit open.
     def commit : Bool
+      commit_notes(allow_pending_conflict: true)
+    end
+
+    def commit_on_exit : Bool
+      !read_draft? && commit_notes(allow_pending_conflict: false)
+    end
+
+    private def commit_notes(*, allow_pending_conflict : Bool) : Bool
       # Still INS-gated, deliberately, now that `IssuesView#notes_dirty?` can be true in READ
       # (the READ/INS chip leaves the editor without saving). `esc` is this pane's save key and
       # the chip is not — flushing a buffer the operator stepped out of would persist an edit
@@ -885,7 +906,7 @@ module Gori::Tui
       # by finding the writeup gone.
       if @issues.notes_conflict?(@host.session.store)
         @host.status("notes NOT saved — another session rewrote them; esc in the notes pane overwrites theirs, ^W takes theirs")
-        return true
+        return allow_pending_conflict
       end
       return true if @issues.save_notes(@host.session.store)
       @host.status("notes NOT saved — project busy")
@@ -978,7 +999,7 @@ module Gori::Tui
     end
 
     def issue_close : Nil
-      @issues.close_detail
+      @issues.close_detail if prepare_detail_departure
     end
 
     # `⇧N`/`⇧P` inside the drill-in: open the next/previous issue WITHOUT going back to the list.
@@ -990,13 +1011,13 @@ module Gori::Tui
     # about. Same rule the sub-tab strip follows: save the outgoing one FIRST.
     def issue_step_item(delta : Int32) : Nil
       return unless @issues.detail_open?
-      return unless leave_notes_editor
       # Anchored on the issue the detail HAS OPEN, and clamped BEFORE the list is touched:
       # `select_index` re-seeds the ⇧-range mark anchor even when the index does not move,
       # so a step at either end would quietly destroy a range the operator had built.
       here = @issues.detail_row_index || return
       target = here + delta
       return if target < 0 || target >= @issues.row_count
+      return unless prepare_detail_departure
       notes = @issues.notes_focused?
       # `select_index`, not `move`: `move` routes to the PREVIEW pane whenever that side holds
       # focus, and its focus survives opening the detail (the preview is not drawn there, so

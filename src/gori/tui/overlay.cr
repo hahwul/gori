@@ -278,6 +278,15 @@ module Gori::Tui
       @batching = false
     end
 
+    # Returns true when background work changed the frame.
+    def tick(now : Time::Instant) : Bool
+      false
+    end
+
+    # Release work tied to this card. The on_close callback handles navigation.
+    def deactivate : Nil
+    end
+
     # Why ↵ cannot commit this card now, after moving the focus to what blocks it; the Runner
     # puts it on the status line and keeps the card up. Nil lets the commit run.
     def commit_blocker : String?

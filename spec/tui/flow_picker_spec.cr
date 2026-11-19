@@ -17,6 +17,15 @@ private def sample_picker(target : Symbol = :a) : FlowPicker
   ], target)
 end
 
+private def pick_flows_now(picker : FlowPicker) : Nil
+  picker.tick(Time.instant + FlowPicker::SEARCH_DELAY + 1.millisecond)
+  deadline = Time.instant + 5.seconds
+  until picker.tick(Time.instant)
+    raise "flow picker search did not finish" if Time.instant > deadline
+    sleep 1.millisecond
+  end
+end
+
 describe Gori::Tui::FlowPicker do
   it "starts on the newest row with the whole snapshot visible" do
     p = sample_picker
@@ -73,6 +82,9 @@ describe Gori::Tui::FlowPicker do
     h = OverlayHarness.new(sample_picker)
     h.type("zzzz")
     h.rendered?("no flows match").should be_true
+    h.press(Termisu::Input::Key::Enter).should eq(:open)
+    h.commits.should eq(0)
+    sample_picker.hint.should contain("↵ choose")
   end
 
   it "separates an empty project from one the Scope lens emptied" do
@@ -81,11 +93,49 @@ describe Gori::Tui::FlowPicker do
     # vs press `s`). The link picker keeps the unlensed default and the older sentence.
     lensed = OverlayHarness.new(FlowPicker.new([] of Gori::Store::FlowRow, :a, scoped: true))
     lensed.rendered?("no flows in scope").should be_true
-    lensed.rendered?("s toggles the lens").should be_true
+    lensed.rendered?("Esc, then disable Scope lens").should be_true
     lensed.rendered?("no flows captured yet").should be_false
 
     OverlayHarness.new(FlowPicker.new([] of Gori::Store::FlowRow, :link))
       .rendered?("no flows captured yet").should be_true
+  end
+
+  it "filters the whole store before limiting what the picker shows" do
+    with_store do |store|
+      ids = ["/old_%", "/old_XY", "/other", "/old_%"].each_with_index.map do |path, index|
+        host = index == 3 ? "other.test" : "app.test"
+        store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: index.to_i64, scheme: "https", host: host, port: 443,
+          method: "GET", target: "https://#{host}#{path}", http_version: "HTTP/1.1",
+          head: "GET #{path} HTTP/1.1\r\n\r\n".to_slice, body: nil,
+          source: Gori::FlowSource::Kind::Proxy))
+      end.to_a
+
+      picker = FlowPicker.for_store(store, :a, Gori::QL.parse("host:app.test"), limit: 2)
+      h = OverlayHarness.new(picker)
+      pick_flows_now(picker)
+      picker.selected_row.try(&.id).should eq(ids[2])
+      h.rendered?("2 shown · refine filter").should be_true
+
+      h.type("get /OLD_%")
+      picker.selected_row.should be_nil
+      h.press(Termisu::Input::Key::Enter).should eq(:open)
+      pick_flows_now(picker)
+      picker.entry_count.should eq(1)
+      picker.selected_row.try(&.id).should eq(ids[0])
+      h.rendered?("2 shown · refine filter").should be_false
+    end
+  end
+
+  it "distinguishes a failed query from an empty scoped result" do
+    with_store do |store|
+      broken = Gori::QL::Filter.new("missing_column = 1", [] of DB::Any)
+      picker = FlowPicker.for_store(store, :a, broken, scoped: true)
+      pick_flows_now(picker)
+      h = OverlayHarness.new(picker)
+      h.rendered?("could not search flows").should be_true
+      h.rendered?("no flows in scope").should be_false
+    end
   end
 end
 

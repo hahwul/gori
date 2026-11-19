@@ -14,8 +14,14 @@ private def key(k : Key, mods : Mod = Mod::None, char : Char? = nil) : Termisu::
   Termisu::Event::Key.new(k, mods, char)
 end
 
+private SEARCH_AREA = Rect.new(0, 0, 90, 24)
+
+private def press(ov : ProjectSearchOverlay, ev : Termisu::Event::Key, area : Rect = SEARCH_AREA) : ProjectSearchOverlay::Outcome
+  ov.handle_key(ev, area)
+end
+
 private def type(ov : ProjectSearchOverlay, text : String) : Nil
-  text.each_char { |c| ov.handle_key(key(Key.from_char(c.downcase), Mod::None, c)) }
+  text.each_char { |c| press(ov, key(Key.from_char(c.downcase), Mod::None, c)) }
 end
 
 private def with_dir(&)
@@ -71,6 +77,30 @@ private def screen_rows(ov : ProjectSearchOverlay, w = 90, h = 24) : Array(Strin
 end
 
 describe ProjectSearchOverlay do
+  it "ignores Enter while the card is hidden and preserves the selected hit" do
+    with_dir do |dir|
+      proj, ids = project_with(dir, "p", [{"resize.test", "/one", nil}, {"resize.test", "/two", nil}])
+      ov = ProjectSearchOverlay.new([proj])
+      type(ov, "resize.test")
+      search_now(ov)
+      press(ov, key(Key::Down))
+      ov.selected_pick.should eq({proj, ids.first})
+
+      short = Rect.new(0, 0, 100, 11)
+      ov.hint(short).should eq("esc close")
+      press(ov, key(Key::Enter), short).kind.should eq(:stay)
+      ov.wheel(-3, short)
+      ov.selected_pick.should eq({proj, ids.first})
+
+      press(ov, key(Key::Enter)).flow_id.should eq(ids.first)
+      ov.resume([] of Gori::Project, {} of String => String)
+      ov.query.should eq("resize.test")
+      ov.selected_pick.should eq({proj, ids.first})
+      ov.status_line.should eq("1/1 searched · 2 hits")
+      press(ov, key(Key::Escape), short).kind.should eq(:close)
+    end
+  end
+
   it "debounces typing, then opens the project AND the flow under the cursor" do
     with_dir do |dir|
       alpha, alpha_ids = project_with(dir, "alpha", [{"a.test", "/x", "session=tok_123"}, {"a.test", "/y", nil}])
@@ -84,12 +114,12 @@ describe ProjectSearchOverlay do
 
       ov.selected_pick.should eq({alpha, alpha_ids[0]})
       # ↓ steps over beta's group header straight onto its hit.
-      ov.handle_key(key(Key::Down))
+      press(ov, key(Key::Down))
       ov.selected_pick.should eq({beta, beta_ids[0]})
-      ov.handle_key(key(Key::Down)) # the last hit: stays put
+      press(ov, key(Key::Down)) # the last hit: stays put
       ov.selected_pick.should eq({beta, beta_ids[0]})
-      ov.handle_key(key(Key::Up))
-      out = ov.handle_key(key(Key::Enter))
+      press(ov, key(Key::Up))
+      out = press(ov, key(Key::Enter))
       out.kind.should eq(:open)
       out.project.should eq(alpha)
       out.flow_id.should eq(alpha_ids[0])
@@ -101,11 +131,11 @@ describe ProjectSearchOverlay do
       proj, _ = project_with(dir, "p", [{"now.test", "/", nil}])
       ov = ProjectSearchOverlay.new([proj])
       type(ov, "now.test")
-      ov.handle_key(key(Key::Enter)).kind.should eq(:stay)
+      press(ov, key(Key::Enter)).kind.should eq(:stay)
       ov.pending?.should be_false
       ov.running?.should be_true
       search_now(ov)
-      ov.handle_key(key(Key::Enter)).kind.should eq(:open)
+      press(ov, key(Key::Enter)).kind.should eq(:open)
     end
   end
 
@@ -117,9 +147,9 @@ describe ProjectSearchOverlay do
       ov.start
       # The fiber has not been scheduled yet, so the search is still running here.
       ov.running?.should be_true
-      ov.handle_key(key(Key::Escape)).kind.should eq(:stay)
+      press(ov, key(Key::Escape)).kind.should eq(:stay)
       ov.running?.should be_false
-      ov.handle_key(key(Key::Escape)).kind.should eq(:close)
+      press(ov, key(Key::Escape)).kind.should eq(:close)
     end
   end
 
@@ -132,9 +162,9 @@ describe ProjectSearchOverlay do
       ov.running?.should be_true
       # The first edit stops the old run outright — not merely outvotes it by generation, which
       # would leave its fiber opening every project's database for a needle nobody wants.
-      ov.handle_key(key(Key::Backspace))
+      press(ov, key(Key::Backspace))
       ov.running?.should be_false
-      7.times { ov.handle_key(key(Key::Backspace)) }
+      7.times { press(ov, key(Key::Backspace)) }
       type(ov, "new.test")
       search_now(ov)
       ov.selected_pick.should eq({proj, ids[1]})
@@ -156,12 +186,12 @@ describe ProjectSearchOverlay do
       # A short card: ten skipped rows do not fit, so the last ones exist only below the fold.
       screen_rows(ov, h: 14).join("\n").should_not contain("broken-12 ")
       11.times do
-        ov.handle_key(key(Key::Down))
+        press(ov, key(Key::Down))
         screen_rows(ov, h: 14)
       end
       screen_rows(ov, h: 14).join("\n").should contain("broken-12 ")
       # A skipped row takes the cursor but opens nothing.
-      ov.handle_key(key(Key::Enter)).kind.should eq(:stay)
+      press(ov, key(Key::Enter)).kind.should eq(:stay)
       ov.selected_pick.should be_nil
     end
   end
@@ -212,7 +242,7 @@ describe ProjectSearchOverlay do
         Fiber.yield
       end
       ov.status_line.should start_with("scanning 2/3")
-      ov.handle_key(key(Key::Down)) # onto broken-2, deliberately
+      press(ov, key(Key::Down)) # onto broken-2, deliberately
       search_now(ov)
       # p's group landed ABOVE the skipped rows; the cursor must still be on broken-2.
       ov.selected_pick.should be_nil
@@ -234,7 +264,7 @@ describe ProjectSearchOverlay do
 
   it "quits the picker on ctrl-c" do
     ov = ProjectSearchOverlay.new([] of Gori::Project)
-    ov.handle_key(key(Key::LowerC, Mod::Ctrl)).kind.should eq(:quit)
+    press(ov, key(Key::LowerC, Mod::Ctrl)).kind.should eq(:quit)
   end
 
   it "draws the progress line, each project's group and the ones it could not search" do

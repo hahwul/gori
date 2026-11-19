@@ -192,23 +192,54 @@ module Gori
     # the write, and the merge's whole promise is that a peer's note is kept.
     def self.save(store : Store, mine : Array(NoteEntry), deleted : Set(Int64),
                   cur_id : Int64?, next_id : Int64) : Doc?
+      save_edits(store, mine, deleted, cur_id, next_id).try(&.doc)
+    end
+
+    record SaveResult, doc : Doc, copies : Hash(Int64, Int64)
+
+    # A session supplies the persisted text it edited. Compare it inside the same
+    # transaction that writes the document, and keep both versions when it changed.
+    def self.save_edits(store : Store, mine : Array(NoteEntry), deleted : Set(Int64),
+                        cur_id : Int64?, next_id : Int64, *, baseline : Hash(Int64, String)? = nil) : SaveResult?
       legacy = store.setting(LEGACY_KEY)
-      merged = nil.as(Doc?)
+      result = nil.as(SaveResult?)
       # Which notes this save actually REMOVED from the persisted set — computed against the
       # document the transaction read, not against `deleted`, which also names ids a peer had
       # already dropped. See `drop_links`.
       removed = [] of Int64
       committed = store.mutate_setting(DOCS_KEY) do |raw|
         before = doc_from(raw, legacy)
-        doc = merge(before, mine, deleted, cur_id, next_id)
+        copies = {} of Int64 => Int64
+        edits = baseline ? preserve_conflicts(before, mine, baseline, next_id, copies) : mine
+        current = cur_id.try { |id| copies[id]? || id }
+        doc = merge(before, edits, deleted, current, next_id)
         live = doc.notes.map(&.id).to_set
         removed = before.notes.map(&.id).reject { |id| live.includes?(id) }
-        merged = doc
+        result = SaveResult.new(doc, copies)
         serialize(doc.cur, doc.notes, doc.next_id)
       end
       return nil unless committed
       drop_links(store, removed)
-      merged
+      result
+    end
+
+    private def self.preserve_conflicts(before : Doc, mine : Array(NoteEntry),
+                                        baseline : Hash(Int64, String), next_id : Int64,
+                                        copies : Hash(Int64, Int64)) : Array(NoteEntry)
+      latest = before.notes.to_h { |note| {note.id, note.text} }
+      used = latest.keys.to_set
+      mine.each { |note| used << note.id }
+      candidate = {before.next_id, next_id, 1_i64}.max
+      mine.map do |note|
+        disk = latest[note.id]?
+        next note if disk == baseline[note.id]? || disk == note.text
+        while used.includes?(candidate)
+          candidate = candidate == Int64::MAX ? 1_i64 : candidate + 1
+        end
+        used << candidate
+        copies[note.id] = candidate
+        NoteEntry.new(candidate, note.text)
+      end
     end
 
     # Parse the JSON document set; nil on malformed data so callers can fall back.

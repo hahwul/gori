@@ -1927,20 +1927,11 @@ Refines: [P4](#p4). PR #809.
 
 Scope is a display lens rather than a capture boundary: out-of-scope flows remain canonical
 project data, but a list used to select a flow should not immediately reveal rows the active lens
-just hid in History and Sitemap. The Comparer picker therefore applies `Scope#filter` at its Store
-query, before the 2,000-row limit. With the lens off, the filter is `QL::EMPTY` and the picker keeps
-showing every captured flow.
+just hid in History and Sitemap. The Comparer passes `Scope#filter` to the flow picker so the
+Store applies scope before limiting the results. The entity-link picker keeps its unscoped query.
 
-The shared `FlowPicker` stays a presentation object over rows supplied by its caller. Applying the
-lens at the Comparer open-site changes only that workflow; the entity-link picker keeps its own
-unscoped row policy.
-
-P4 is the reason the lens cannot be silent about it. A modal narrowed by a mode the modal never
-mentions is a decision applied behind the operator's back, so the picker is TOLD its rows were
-lensed and an all-hidden list reads `no flows in scope` (plus `⇧S toggles the lens`) rather than
-`no flows captured yet` — the Sitemap's split, on a card that previously had no way to be wrong.
-For the same reason the open-site passes `raise_on_error: true`: `Store#search` otherwise degrades
-a SQLite failure to an empty result, which on this card is indistinguishable from an empty scope.
+An empty Comparer list names the active filters and tells the operator to close the picker before
+changing them. The Store search reports a SQLite failure separately from an empty result.
 
 ### 2026-08-26: upstream proxying is fail-closed for app-owned egress
 
@@ -5918,3 +5909,28 @@ Extends the 2026-11-13 result-jump correction. A Notifications or Activity link 
 an ID opens that session or History flow. If the target is gone, the current screen and
 selection stay in place and show why. Discover results live in memory, so their IDs must
 identify a run across windows and avoid the range used by old per-window counters in Activity.
+
+### 2026-11-19: flow searches keep their selection and filter before limiting results
+
+Refines [P4](#p4) and [P6](#p6). The Comparer and entity-link flow pickers match literal words
+against method, host, path and status in the Store. They search before applying their existing
+2,000- and 500-row display limits and say when more rows matched. Debounced, cancellable reads
+keep the picker and capture responsive. The current filter must have a result before Enter can
+pick one.
+
+The project picker's cross-project search checks that the card fits before accepting a result.
+Opening a hit stops the scan and retains its query, results and cursor for the return trip.
+Typing a new query uses the current project roster.
+
+### 2026-11-19: drafts survive READ navigation and overlapping note edits
+
+An Issues writeup can be dirty in READ after the mode badge was clicked. A detail change returns
+to INS so the operator can save or discard the draft. An exit with a READ draft uses the existing
+unsaved-edits confirmation. Switching the tab alone retains the draft in memory.
+The exit guard also checks for a peer edit when the operator confirms leaving, since a peer
+can write while the initial confirmation is open.
+
+Notes checks the edited note's baseline inside the Store write transaction. When that note was
+changed or deleted by a peer, save the local version under a fresh id and notify the operator.
+Links stay associated with their original note id. Closing a note that has links asks for
+confirmation even when its text is blank.

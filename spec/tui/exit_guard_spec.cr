@@ -12,6 +12,10 @@ private class ExitCommitProbe
   def save_all : Bool
     commit
   end
+
+  def commit_on_exit : Bool
+    commit
+  end
 end
 
 private class SaveExitHarness

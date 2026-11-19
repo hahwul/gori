@@ -787,6 +787,7 @@ module Gori::Tui
             # Self-gated on Settings.statusline_active? — a no-op (zero cost) while the row
             # is off or has no command, and it only reports dirty when the row's bytes change.
             dirty = true if @statusline.tick(now)
+            dirty = true if active_overlay.try(&.tick(now))
             # Resource meter: re-sample CPU/RSS on its own interval. Like the clock below, it
             # only reports true when the RENDERED string changes, so a parked gori doesn't
             # repaint on a timer just to redraw the same "CPU 0%".
@@ -2071,6 +2072,7 @@ module Gori::Tui
     # Open a migrated modal: it becomes @active_overlay and syncs @overlay to its key
     # (so modal_overlay? + residual `@overlay ==` checks keep working during migration).
     private def open_overlay(ov : Overlay) : Nil
+      active_overlay.try { |previous| previous.deactivate unless previous.same?(ov) }
       ov.over_detail = detail_shown?
       @active_overlay = ov
       @overlay = ov.key
@@ -2121,7 +2123,9 @@ module Gori::Tui
     # the History tab only: a commit that moved the operator to another tab has already said
     # where they go. The ^P jump takes it along, so the palette closes onto the same flow.
     private def leave_overlay : Nil
-      back = active_overlay.try(&.over_detail?) && @active_tab == :history
+      overlay = active_overlay
+      overlay.try(&.deactivate)
+      back = overlay.try(&.over_detail?) && @active_tab == :history
       @active_overlay = nil
       @overlay = back ? OverlayKind::Detail : OverlayKind::None
     end
@@ -2715,6 +2719,7 @@ module Gori::Tui
     # create's toast ends with — the way back, named — or "" when the issue could not be
     # opened (a store that lost it), in which case nothing is recorded and nothing is claimed.
     private def open_filed_issue(id : Int64) : String
+      return " · kept the open Issues draft" unless issues_controller.prepare_detail_departure
       origin_tab = @active_tab
       origin_focus = @focus
       drill_in = origin_tab == :history && !history_controller.view.detail_flow_id.nil?
@@ -2750,6 +2755,7 @@ module Gori::Tui
       # Still the opening that filed it: left by `←` or a click and opened again from the list,
       # the issue is no longer "just filed".
       return false unless issues_controller.view.detail_opens == origin.opened
+      return true unless issues_controller.prepare_detail_departure
       @filing_origin = nil
       issues_controller.view.close_detail
       @active_tab, @focus, @overlay = Runner.filing_return_state(origin)

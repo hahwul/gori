@@ -81,12 +81,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   private def link_add_flow_picker(lo : LinksOverlay) : PickerOverlay
-    fp = FlowPicker.new(@session.store.recent_flows(500), :link)
+    fp = FlowPicker.for_store(@session.store, :link)
     fp.on_commit = -> {
       if row = fp.selected_row
         commit_link_to_owner(lo.owner_kind, lo.owner_id, Store::LinkRefKind::Flow, row.id)
+        true
+      else
+        false
       end
-      true
     }
     fp
   end

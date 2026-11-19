@@ -123,6 +123,19 @@ module Gori
       [] of FlowRow
     end
 
+    # Match literal words against the flow label before limiting the result window.
+    # Use the same Unicode fold as the label's in-memory substring filter.
+    def search_flow_labels(query : String, filter : QL::Filter, limit : Int32, *,
+                           control : QueryControl) : Array(FlowRow)
+      label = "(method || ' ' || host || #{QL::PATH_EXPR} || ' ' || coalesce(status, ''))"
+      terms = query.split.uniq!
+      unless terms.empty?
+        predicate = Array.new(terms.size, "gori_ci_contains(#{label}, ?)").join(" AND ")
+        filter = QL.and(filter, QL::Filter.new(predicate, terms.map(&.as(DB::Any))))
+      end
+      search(filter, limit, raise_on_error: true, control: control)
+    end
+
     # How many flows match `filter`: `search` without the rows, for a caller whose question is a
     # number (#1648). The same WHERE clause `search` runs, so a count and a page cannot disagree
     # about what matched. Raises on a failed query rather than degrading like `search`: a 0 that
