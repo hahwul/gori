@@ -91,6 +91,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     history_controller.grpc_reflect
   end
 
+  # See HistoryController#unpack_sourcemap — fetch the selected flow's source map and recover
+  # the endpoints hidden in its original sources (#1932). Off the UI fiber.
+  def history_unpack_sourcemap : Nil
+    history_controller.unpack_sourcemap
+  end
+
   forward history_delete : Nil,
     history_clear : Nil,
     to: history_controller

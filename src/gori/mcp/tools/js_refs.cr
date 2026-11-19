@@ -1,5 +1,7 @@
 require "json"
 require "../../js_refs"
+require "../../sourcemap"
+require "../../host_overrides"
 require "../serialize"
 
 module Gori
@@ -92,6 +94,85 @@ module Gori
         end)
       end
 
+      # Fetch (or inline-parse) the source map a captured JS response points at and feed its
+      # recovered ORIGINAL sources through the same extractor `scan_js_endpoints` uses, so the
+      # endpoints a minified bundle hid surface. ACTIVE: unless the map is an inline `data:` URI,
+      # it makes ONE real outbound request, gated by scope (refused unless allow_unscoped). The
+      # recovered references are stored against the flow, so `list_js_endpoints` then lists them.
+      @[Tool("unpack_sourcemap", gated: true, agent_action: true, permission: "send")]
+      private def unpack_sourcemap(h) : Result
+        return err("request cancelled", "CANCELLED") if cancelled?
+        id = required_id(h, "flow_id")
+        detail = store.get_flow(id)
+        return not_found("no flow with id #{id}") unless detail
+        ob = agent_outbound(Scope.load(store), bool_arg(h, "allow_unscoped", false))
+        report = Sourcemap.unpack(store, detail, ob,
+          verify: !bool_arg(h, "insecure", false) && @verify_upstream,
+          overrides: HostOverrides.load(store))
+        if err = report.error
+          if err.starts_with?(Repeater::Sender::SCOPE_REFUSAL_PREFIX)
+            return err(err, "SCOPE_BLOCKED", field: "allow_unscoped")
+          end
+          # A missing reference / unreachable map / malformed JSON is a clean outcome, not a
+          # tool failure: the call succeeded, there was just nothing to recover.
+          if report.origin.nil? || report.refs.empty?
+            return Result.new(JSON.build do |j|
+              j.object do
+                j.field "flow_id", id
+                j.field "references", 0
+                j.field "note", err
+              end
+            end)
+          end
+        end
+        rows = report.refs.first(JS_ENDPOINTS_LIMIT.max)
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "flow_id", id
+            j.field "reference", report.reference.try { |r| Serialize.text(r) }
+            j.field "origin", report.origin.try(&.to_s.downcase)
+            j.field "sources", report.sources
+            j.field "references", report.refs.size
+            j.field "stored", report.stored
+            j.field "sources_capped", report.sources_capped
+            j.field "refs_capped", report.refs_capped
+            j.field("endpoints") do
+              j.array do
+                rows.each { |r| sourcemap_endpoint_row(j, r) }
+              end
+            end
+            j.field "endpoints_truncated", report.refs.size > rows.size
+            if note = unpack_note(report)
+              j.field "note", note
+            end
+          end
+        end)
+      end
+
+      private def unpack_note(r : Sourcemap::Report) : String?
+        if r.refs.empty?
+          "the source map held no endpoint references"
+        elsif !r.stored
+          "recovered #{r.refs.size} reference(s) but could not store them (project busy) — they are not in list_js_endpoints; call again"
+        elsif r.sources_capped || r.refs_capped
+          "stopped early at a safety bound (sources_capped/refs_capped) — some sources were not read"
+        end
+      end
+
+      private def sourcemap_endpoint_row(j : JSON::Builder, r : Store::JsRef) : Nil
+        {
+          scheme:     r.scheme,
+          host:       Serialize.text(r.host),
+          port:       r.port,
+          path:       Serialize.text(r.path),
+          url:        Serialize.text(Store::FlowRow.url_of(r.scheme, r.host, r.port, r.target)),
+          line:       r.line,
+          literal:    Serialize.text(r.literal),
+          templated:  r.flags & JsRefs::FLAG_TEMPLATED != 0,
+          in_comment: r.flags & JsRefs::FLAG_COMMENT != 0,
+        }.to_json(j)
+      end
+
       private def js_scan_note(r : JsRefs::ScanReport) : String?
         if r.write_failures > 0
           "#{r.write_failures} flow(s) were NOT recorded (project busy) and stay unscanned — call again"
@@ -175,6 +256,18 @@ module Gori
           s.field "rescan", boolprop("re-read scanned responses")
           s.field "strict", boolprop("refuse an unrecognized query term (otherwise dropped and named in `ignored_terms`)")
           s.field "lenient", boolprop("free-text an unknown `field:`")
+        end
+
+        tool j, "unpack_sourcemap",
+          "Fetch (or inline-parse) the source map a captured JS response points at " \
+          "(//# sourceMappingURL / SourceMap header) and recover the endpoints hidden in its " \
+          "original sources, feeding them through the same extractor scan_js_endpoints uses. " \
+          "ACTIVE: a real outbound request unless the map is an inline data: URI; gated by scope " \
+          "(refused unless allow_unscoped). The recovered references are stored against the flow, " \
+          "so list_js_endpoints then lists them." do |s|
+          s.field "flow_id", intprop("the captured JS flow whose source map to unpack (required)")
+          s.field "allow_unscoped", boolprop("fetch even when the map's host is outside (or without) a configured scope (default false)")
+          s.field "insecure", boolprop("skip upstream TLS verification when fetching the map (default false)")
         end
       end
     end

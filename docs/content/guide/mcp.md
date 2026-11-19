@@ -94,7 +94,7 @@ By default `gori mcp` advertises every tool, so an agent can reach the workbench
 
 | Start with | Tools | `tools/list` | Tokens | For |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 200 | ~201 KB | ~51k | Everything (the default) |
+| `gori mcp` | 201 | ~202 KB | ~52k | Everything (the default) |
 | `--read-only` | 65 | ~57 KB | ~15k | Read tools and pure compute; no live requests |
 | `--tools=@analysis` | 5 | ~8 KB | ~2k | Analyze one bound capture; no project switching or TUI mailbox |
 | `--tools=@recon` | 39 | ~41 KB | ~11k | Read and map the capture, scan it passively, replay a request, record issues and notes |

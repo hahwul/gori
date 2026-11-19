@@ -653,6 +653,9 @@ module Gori::Tui
             # A finished gRPC reflection fetch (#827): applied on THIS fiber because
             # `Schemas.adopt` writes to the store, which the send fiber must never wait on.
             dirty = true if history_controller.drain_reflection
+            # A finished source-map unpack (#1932): applied here because `add_js_refs` writes to
+            # the store, which the fetch fiber must never wait on — same rule as the reflection.
+            dirty = true if history_controller.drain_unpack
             dirty = true if @active_tab == :history && history_controller.tick_live_detail
             if (rev = @session.interceptor.revision) != last_rev
               last_rev = rev

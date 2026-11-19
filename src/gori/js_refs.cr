@@ -477,6 +477,16 @@ module Gori
       {script, Base::Guessed}
     end
 
+    # The base a flow's external-script references resolve against (its captured request's
+    # Referer, else its own origin), or nil when the flow URL is unparseable. Exposed for the
+    # source-map unpack (`Gori::Sourcemap`, #1932): the ORIGINAL sources a `.map` carries ARE
+    # this bundle's content, so a root-relative path in them targets the same document its
+    # minified form's would — the same base `extract` would compute for the body scan.
+    def flow_script_base(detail : Store::FlowDetail) : {Discover::Url::Parts, Base}?
+      page = Discover::Url.parse(detail.row.url) || return nil
+      script_base(detail.request_head, page)
+    end
+
     private def referer(head : Bytes) : String?
       Proxy::Codec::Http1.parse_request_head(head).headers.get?("Referer").try(&.strip.presence)
     rescue

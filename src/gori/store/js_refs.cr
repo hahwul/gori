@@ -62,6 +62,30 @@ module Gori
       }
     end
 
+    # Append `refs` to flow `flow_id`'s stored references WITHOUT touching its scan marker — the
+    # active source-map unpack (#1932) adds the endpoints recovered from a `.map` to the ones the
+    # body scan already found, rather than replacing them (which is what `record_js_scan` does on
+    # a rescan). `INSERT OR IGNORE` dedups on UNIQUE(host, path, flow_id), so a path the body
+    # scan already recorded for this flow is kept once. These rows are ordinary references: a
+    # later `record_js_scan` of the same flow deletes and rewrites its rows, dropping them until
+    # it is unpacked again. Answers whether it committed; a flow deleted underneath writes nothing
+    # (the `WHERE EXISTS`-style guard), so a stale id is a harmless no-op, not a poisoned write.
+    def add_js_refs(flow_id : Int64, refs : Array(JsRef)) : Bool
+      return true if refs.empty?
+      now = now_us
+      exec_task_ok ->(c : DB::Connection) {
+        if c.query_one?("SELECT 1 FROM flows WHERE id = ?", flow_id, as: Int32)
+          refs.each do |r|
+            c.exec("INSERT OR IGNORE INTO js_refs (flow_id, scheme, host, port, path, target, literal, " \
+                   "body_offset, line, flags, base, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+              flow_id, r.scheme, r.host, r.port, r.path, r.target, r.literal, r.offset, r.line,
+              r.flags, r.base, now)
+          end
+        end
+        nil
+      }
+    end
+
     # The SQL predicate "this flow has not been scanned by extractor `version` or newer", for a
     # scan's candidate filter. A subquery on the marker table's primary key, so it composes
     # with any QL filter without a join.

@@ -4,6 +4,8 @@
 
 - Param Miner: every probe now carries a unique cache-busting query parameter so mining a cacheable endpoint is neither served a stale cached response nor poisoned into a shared cache; on by default, opt out with `gori run mine --no-cachebuster`, MCP `cachebuster:false`, or the TUI mine config overlay checkbox (#1930).
 
+- Source maps: an opt-in step fetches the `.map` a JS response points at (or parses an inline `data:` one), recovers the endpoints hidden in its original sources, and feeds them into the existing JS endpoint listing — via `unpack_sourcemap` (MCP), `gori run sitemap js --unpack`, and the History "Unpack source map" action (#1932).
+
 - TUI: unsaved issue drafts require a save or an explicit discard, simultaneous edits to a note are preserved as separate notes, and closing a note with links requires confirmation (#1929).
 
 - TUI: project-wide search restores its results and selection after viewing a flow and blocks opening hidden results, while project-name search supports caret movement and click-to-edit. The Comparer and link pickers find older flows and keep the filter open when it has no matches (#1929).
