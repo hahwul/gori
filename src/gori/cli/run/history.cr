@@ -350,6 +350,7 @@ module Gori
         limit = 50
         format = :text
         lenient = false
+        strict = false
         in_scope = false
         hide_static = false
         include_sensitive = false
@@ -377,6 +378,7 @@ module Gori
           p.on("--in-scope", "Only flows in the project's configured scope (the TUI's `s` lens; capture still records everything)") { in_scope = true }
           p.on("--hide-static", "Leave out static assets — images, fonts, media (the TUI's hide-static lens; same as -q -static:true)") { hide_static = true }
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text (old behaviour)") { lenient = true }
+          p.on("--strict", "Refuse a query with a term QL would drop (an invalid value) instead of warning — MCP's strict:true") { strict = true }
           p.on("--column=SPEC", "Show an extracted value per row: [LABEL=][req|res:]kind:selector — e.g. header:x-request-id, RID=jsonpath:data.id, position:0:32 (repeatable; replaces this project's configured History columns)") { |v| column_specs << v }
           p.on("--no-columns", "Don't draw this project's configured History columns (see the TUI's Columns… on the History tab)") { no_columns = true }
           format_flag(p, [:text, :json, :jsonl, :har], "Output: text (default) | json (one array) | jsonl (one object per line) | har (one HAR 1.2 log)") { |f| format = f }
@@ -504,7 +506,7 @@ module Gori
           if scope_unconfigured
           elsif q = query
             filter = QL.parse(q, scope: lens)
-            Run.warn_query_terms("history", q)
+            Run.warn_query_terms("history", q, strict, store)
             # Two states where a `scope:` query runs CLEAN and lists nothing; an empty listing
             # cannot say which. Worded once, in `Run`, so the next surface to want them cannot
             # word them differently.

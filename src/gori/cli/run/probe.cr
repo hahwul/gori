@@ -50,6 +50,7 @@ module Gori
         aggressive = false
         insecure = false
         lenient = false
+        strict = false
         in_scope = false
         persist = false
         persist_failed = false
@@ -86,6 +87,7 @@ module Gori
           # way to say otherwise.
           p.on("-k", "--insecure-upstream", "With --active, do not verify upstream TLS certificates") { insecure = true }
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text (old behaviour)") { lenient = true }
+          p.on("--strict", "Refuse a query with a term QL would drop (an invalid value) instead of warning — MCP's strict:true") { strict = true }
           p.on("--persist", "Also write the findings into the project's persisted list (what `probe issues` and the TUI Probe tab show), merged as the live scanner merges them") { persist = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
@@ -116,7 +118,7 @@ module Gori
           parsed = QL.parse(q, scope: QL::SCOPE_SHAPE_ONLY)
           # Both halves, not just invalid-regex: an UNRECOGNIZED field is dropped by QL and
           # broadens the scan, which is the direction that matters here — see Run.warn_query_terms.
-          Run.warn_query_terms("probe", q)
+          Run.warn_query_terms("probe", q, strict)
           # `--active` sends probes for every selected flow, so a dropped term that widened the
           # selection is refused rather than warned about.
           if active && !(unusable = QL.analyze(q, scope: QL::SCOPE_SHAPE_ONLY).ignored).empty?

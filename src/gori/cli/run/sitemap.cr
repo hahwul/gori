@@ -166,6 +166,7 @@ module Gori
         untested = false
         format = :text
         lenient = false
+        strict = false
 
         args = normalize_query_flag(args)
         neg_terms, opt_args = split_ql_negations(args)
@@ -181,6 +182,7 @@ module Gori
           p.on("--hide-static", "Leave out static assets — images, fonts, media (the TUI's hide-static lens; same as -q -static:true)") { hide_static = true }
           p.on("--no-group", "Don't fold path-param ids (/users/<uuid>, /users/1,2,3…)") { group = false }
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text (old behaviour)") { lenient = true }
+          p.on("--strict", "Refuse a query with a term QL would drop (an invalid value) instead of warning — MCP's strict:true") { strict = true }
           # A SEPARATE axis from --no-group: query folding is about one endpoint requested
           # many ways, id folding about many endpoints sharing a route. Overloading --no-group
           # to mean both would make "show me every literal id" also dump every fuzz payload.
@@ -204,7 +206,7 @@ module Gori
 
         # Parse/validate the QL BEFORE opening the store: abort skips ensure blocks, so a
         # bad query must not leave a store handle open.
-        filter = sitemap_filter(query)
+        filter = sitemap_filter(query, strict)
 
         store = open_store(resolve_read_project(proj.name, proj.db),
           read_only: !filter.uses_fts?)
@@ -259,7 +261,7 @@ module Gori
 
       # QL.parse + the same un-compilable-query rejection as history (a non-blank query
       # collapsing to EMPTY would silently dump every endpoint).
-      private def self.sitemap_filter(query : String?) : QL::Filter
+      private def self.sitemap_filter(query : String?, strict : Bool = false) : QL::Filter
         return QL::EMPTY unless q = query
         # Shape-only: this runs before the store is open (see the caller), and a `scope:` term
         # compiles to a real clause under either lens. `scope:` on this command is per-FLOW,
@@ -268,7 +270,7 @@ module Gori
         filter = QL.parse(q, scope: QL::SCOPE_SHAPE_ONLY)
         # Both halves — an unrecognized field is dropped and BROADENS the tree. See
         # Run.warn_query_terms.
-        Run.warn_query_terms("sitemap", q)
+        Run.warn_query_terms("sitemap", q, strict)
         if !q.strip.empty? && filter == QL::EMPTY
           abort "gori run sitemap: query #{q.inspect} did not match any field (check syntax, e.g. host:example.com method:POST path:/api status:>=500)"
         end

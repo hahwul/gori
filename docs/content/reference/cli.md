@@ -293,6 +293,7 @@ gori run history -q 'status:5xx' --limit 100 --format json
 | `--in-scope` | Only flows in the project's configured scope: the TUI's `s` lens, opt-in and independent of whether that lens is enabled. Capture still records everything; empty when no scope rules exist |
 | `--hide-static` | Leave out images, fonts and audio/video: the TUI's [hide-static lens](/guide/proxy/#hide-static), the same as `-q -static:true`, and independent of whether that lens is on |
 | `--lenient` | Don't refuse a query naming an unknown field; search that token as text |
+| `--strict` | Refuse a query with a term QL would drop (an invalid value) instead of warning, as MCP `strict:true` does |
 | `--column=SPEC` | Show an extracted value per row (repeatable). `[LABEL=][req\|res:]kind:selector`, e.g. `header:x-request-id`, `RID=req:header:authorization`, `jsonpath:data.id`, `regex:token=(\w+)`, `position:0:32`. Any `--column` **replaces** this project's configured [History columns](/guide/proxy/#columns) |
 | `--no-columns` | Don't draw this project's configured History columns |
 | `--format=FMT` | `text`, `json` (one array), `jsonl` (one object per line), or `har` |
@@ -394,6 +395,7 @@ gori run diff --from q1-audit --to q3-retest --format md
 | `--from-db=PATH` / `--to-db=PATH` | Explicit SQLite files instead of registry projects |
 | `-q`, `--query=QL` | Narrow **both** sides with a [QL query](/reference/query-language/) |
 | `--lenient` | Don't refuse a query naming an unknown field; search that token as text |
+| `--strict` | Refuse a query with a term QL would drop (an invalid value) instead of warning, as MCP `strict:true` does |
 | `--in-scope` | Only hosts inside each project's own scope rules |
 | `-n`, `--limit=N` | Max endpoint groups to read per side (default 40000) |
 | `--verdict=LIST` | List only these verdicts (`added,gone,changed,unchanged,removed`) |
@@ -794,6 +796,7 @@ gori run authorize --query 'host:acme.test method:GET' --identities identities.j
 | `<flow-id>…`, `--flow=ID` | Captured flows to replay, in the order given (repeatable) |
 | `-q`, `--query=QL` | Also replay every flow matching this QL query, appended after the ids |
 | `--lenient` | Don't refuse a query naming an unknown field; search that token as text |
+| `--strict` | Refuse a query with a term QL would drop (an invalid value) instead of warning, as MCP `strict:true` does |
 | `-n`, `--limit=N` | Max flows `--query` may contribute (default 50). Every row becomes one request *per identity* |
 | `--identities=FILE` | Identity set as JSON (`-` = stdin from a pipe or a redirect, a terminal is refused); default: the project's saved set |
 | `--unsafe-methods` (`--unsafe`) | Also replay `POST`/`PUT`/`PATCH`/`DELETE`; each identity re-runs the side effect |
@@ -908,7 +911,7 @@ gori run probe --severity high --category cors
 gori run probe -a
 ```
 
-`--severity` is `info`\|`low`\|`medium`\|`high`\|`critical`. `--fail-on=LEVEL` makes the scan exit `3` when an issue it reports is at or above LEVEL (after `--severity`/`--category`/`--in-scope`), so it can gate a CI job. `--category` is `headers`\|`cookies`\|`tech`\|`infoleak`\|`cors`\|`client`\|`active`\|`custom`. `-a`/`--active` includes light-touch active checks. `-q`/`--query` filters with QL, and `--lenient` accepts a query that names an unknown field instead of refusing it. `--in-scope` reports only issues on hosts in the project's configured scope (the TUI's `s` lens, opt-in and independent of `--active`/`--allow-unscoped`). Every flow is still scanned.
+`--severity` is `info`\|`low`\|`medium`\|`high`\|`critical`. `--fail-on=LEVEL` makes the scan exit `3` when an issue it reports is at or above LEVEL (after `--severity`/`--category`/`--in-scope`), so it can gate a CI job. `--category` is `headers`\|`cookies`\|`tech`\|`infoleak`\|`cors`\|`client`\|`active`\|`custom`. `-a`/`--active` includes light-touch active checks. `-q`/`--query` filters with QL, `--lenient` accepts a query that names an unknown field instead of refusing it, and `--strict` refuses one with a term QL would drop. `--in-scope` reports only issues on hosts in the project's configured scope (the TUI's `s` lens, opt-in and independent of `--active`/`--allow-unscoped`). Every flow is still scanned.
 
 With `--active`, `--unsafe` also probes unsafe methods (`POST`/`PUT`/`PATCH`/`DELETE`), whose re-sends may mutate server data. `--aggressive` raises the per-rule caps and widens the forbidden-bypass header set (and implies `--unsafe`). Both stay scope-gated unless you also pass `--allow-unscoped`. `-k`/`--insecure-upstream` skips upstream TLS verification for the active re-sends. Use them only against authorized targets.
 
@@ -1035,7 +1038,7 @@ A malformed entry is skipped and the rest of the file still imports. The result 
 gori run sitemap --in-scope --format paths
 ```
 
-`-q`/`--query=QL` filters endpoints with the same QL as history (also positional), plus the Sitemap's own `tag:` for path memos ([Where It Applies](/reference/query-language/#where-it-applies)). `-n`/`--limit=N` caps the endpoints scanned (default 10000), `--in-scope` limits to in-scope hosts, and `--hide-static` leaves out images, fonts and audio/video (per flow, like the TUI tree). `--no-group` disables id folding and `--no-fold-query` disables query-string folding (the two are separate axes). `--js-refs` also draws the paths captured JavaScript references and nobody requested (see `sitemap js`; `js_refs` and `unrequested` in JSON, and never in `paths`). `--untested` keeps only the endpoints with no flow recorded in History by an active tool (Repeater, Fuzzer, Miner, Sequencer, Authorize, Probe, Retest) and no saved fuzz run, while every endpoint that has one shows `touched_by` (tool → recorded flows or saved fuzz results, per path without its query) in text and JSON. A sweep that was neither recorded nor saved leaves nothing to count. `--format` is `text` (tree), `json`, or `paths`, and `--lenient` accepts a query that names an unknown field instead of refusing it.
+`-q`/`--query=QL` filters endpoints with the same QL as history (also positional), plus the Sitemap's own `tag:` for path memos ([Where It Applies](/reference/query-language/#where-it-applies)). `-n`/`--limit=N` caps the endpoints scanned (default 10000), `--in-scope` limits to in-scope hosts, and `--hide-static` leaves out images, fonts and audio/video (per flow, like the TUI tree). `--no-group` disables id folding and `--no-fold-query` disables query-string folding (the two are separate axes). `--js-refs` also draws the paths captured JavaScript references and nobody requested (see `sitemap js`; `js_refs` and `unrequested` in JSON, and never in `paths`). `--untested` keeps only the endpoints with no flow recorded in History by an active tool (Repeater, Fuzzer, Miner, Sequencer, Authorize, Probe, Retest) and no saved fuzz run, while every endpoint that has one shows `touched_by` (tool → recorded flows or saved fuzz results, per path without its query) in text and JSON. A sweep that was neither recorded nor saved leaves nothing to count. `--format` is `text` (tree), `json`, or `paths`, `--lenient` accepts a query that names an unknown field instead of refusing it, and `--strict` refuses one with a term QL would drop.
 
 The tree has one root per origin (scheme, host and port), so `http://127.0.0.1:19021`, `http://127.0.0.1:19022` and `https://127.0.0.1:8443` are three roots. `paths` prints each endpoint as a full URL (`GET  https://127.0.0.1:8443/only-tls`), with the default port left out. Each `json` host object keeps `host` as the bare host and adds `scheme`, `port` and `origin` (the prefix `paths` prints). A tag belongs to the host, so it shows under every origin of that host.
 

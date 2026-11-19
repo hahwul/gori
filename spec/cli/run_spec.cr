@@ -1481,3 +1481,22 @@ describe "gori run <write> --format json — a refused duplicate" do
     src.should contain(%(with the existing rule's id as \\"existing_id\\"))
   end
 end
+
+# `history --help` (QL's DOC) calls an invalid `~` regex a HARD ERROR and MCP answers it
+# `QUERY_SYNTAX`; the CLI only warned and printed `[]` with exit 0, which a script reads as
+# "nothing matched". `--strict` is MCP's `strict:true`: a dropped term refuses too.
+describe "CLI::Run.query_terms_error" do
+  it "refuses an invalid regex, strict or not" do
+    Gori::CLI::Run.query_terms_error("host~[unclosed").not_nil!.should contain(%(invalid regex in "host~[unclosed"))
+    Gori::CLI::Run.query_terms_error("host:a path~(", strict: true).not_nil!.should contain("invalid regex")
+  end
+
+  it "lets a dropped term through with a warning unless --strict" do
+    Gori::CLI::Run.query_terms_error("host:a status:2OO").should be_nil
+    Gori::CLI::Run.query_terms_error("host:a status:2OO", strict: true).not_nil!.should contain(%(--strict refuses "status:2OO"))
+  end
+
+  it "passes a clean query either way" do
+    Gori::CLI::Run.query_terms_error("host:a path~^/api", strict: true).should be_nil
+  end
+end

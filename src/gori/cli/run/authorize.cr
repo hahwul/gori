@@ -17,6 +17,7 @@ module Gori
         allow_unscoped = false
         insecure = false
         lenient = false
+        strict = false
         timeout = Authorize::ACTIVE_TIMEOUT
         format = :text
 
@@ -40,6 +41,7 @@ module Gori
           p.on("--flow=ID", "Replay this captured flow (repeatable; same as a positional id)") { |v| flow_ids << parse_flow_id(v, "gori run authorize") }
           p.on("-qQL", "--query=QL", "Also replay every flow matching this QL query (host: path: status: …)") { |v| query = once(query, v, "-q/--query") }
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text") { lenient = true }
+          p.on("--strict", "Refuse a query with a term QL would drop (an invalid value) instead of warning — MCP's strict:true") { strict = true }
           p.on("-nN", "--limit=N", "Max flows --query may contribute (default #{Authorize::Plan::DEFAULT_LIMIT})") { |v| limit = parse_count(v, "--limit") }
           p.on("--identities=FILE", "Identity set as JSON ('-' = stdin, which needs a pipe or a redirect — a terminal is refused); default: the project's saved set") { |v| identities_file = v }
           project_options(p, proj, "read")
@@ -56,7 +58,7 @@ module Gori
         # An unrecognized/uncompilable term makes the selection BROADER than asked, and every
         # extra row here is `identities.size` more requests on a target.
         Run.refuse_unknown_query_fields("authorize", query, lenient)
-        query.try { |q| Run.warn_query_terms("authorize", q) }
+        query.try { |q| Run.warn_query_terms("authorize", q, strict) }
 
         # …and ABOVE the read, because the read can block: "no flow id and no --query" is
         # complete the moment the arguments are parsed, and reporting it after a `-` pipe has

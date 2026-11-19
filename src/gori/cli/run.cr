@@ -1976,9 +1976,15 @@ module Gori
         notes
       end
 
-      def self.warn_query_terms(cmd : String, q : String) : Nil
-        QL.invalid_regex_terms(q).each do |t|
-          STDERR.puts "gori run #{cmd}: warning: invalid regex in #{t.inspect} — that term matches nothing"
+      #
+      # An invalid `~` regex is refused, not warned about: QL's DOC calls it a HARD ERROR and MCP
+      # answers it `QUERY_SYNTAX`, because the never-match clause it compiles to makes an empty
+      # listing that reads as "nothing matched". `strict` (`--strict`, MCP's `strict:true`)
+      # refuses an ignored term the same way. `store` is closed first when the caller has one open.
+      def self.warn_query_terms(cmd : String, q : String, strict : Bool = false, store : Store? = nil) : Nil
+        if reason = query_terms_error(q, strict)
+          puts failure_json(reason, "invalid_argument", "QUERY_SYNTAX") if json_stdout?
+          abort_closing(store, "gori run #{cmd}: #{reason}")
         end
         # `SCOPE_SHAPE_ONLY`, not the project's real lens: this runs BEFORE the store is opened
         # at every caller (deliberately — `authorize` says out loud that hearing about a bad
@@ -1994,6 +2000,19 @@ module Gori
         broader = analysis.applied.empty? ? "" : ", so the result is BROADER than the query asks for"
         STDERR.puts "gori run #{cmd}: warning: ignored #{ignored.map(&.inspect).join(", ")} " \
                     "— unrecognized or invalid#{broader}"
+      end
+
+      # `warn_query_terms`' refusal, or nil to run — split out because `abort` is not spec-able.
+      def self.query_terms_error(q : String, strict : Bool = false) : String?
+        unless (bad = QL.invalid_regex_terms(q)).empty?
+          return "invalid regex in #{bad.map(&.inspect).join(", ")} — it would match nothing, " \
+                 "so an empty result would read as \"no matches\" (fix the pattern or drop the term)"
+        end
+        return nil unless strict
+        ignored = QL.analyze(q, scope: QL::SCOPE_SHAPE_ONLY).ignored
+        return nil if ignored.empty?
+        "--strict refuses #{ignored.map(&.inspect).join(", ")} — unrecognized or invalid, " \
+        "so QL would drop it (omit --strict to run leniently)"
       end
 
       # QL negation terms ("-field:value" / "-field~rx") begin with '-', so OptionParser
