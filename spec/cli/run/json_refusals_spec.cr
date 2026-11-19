@@ -12,6 +12,10 @@ module Gori::CLI::Run
   def self.one_positional_list_for_spec(args : Array(String)) : Array(String)
     one_positional_list(args, "gori run x", "name") { }
   end
+
+  def self.value_flags_for_spec : Set(String)
+    VALUE_FLAGS
+  end
 end
 
 module JsonRefusals
@@ -172,9 +176,32 @@ describe "gori run --json — the refusals that printed nothing" do
       %w[history --format text]    => false,
       %w[capture -- curl --json]   => false,
       %w[send -d x --format=har]   => false,
+      # Another flag's value, as OptionParser reads it: a search for "--json", not the flag.
+      %w[history -q --json]             => false,
+      %w[fuzz 3 --payloads --json]      => false,
+      %w[history --query --format json] => false,
+      %w[history -k --json]             => true,
+      %w[issues --count --json]         => true,
+      %w[history -q x --json]           => true,
     }.each do |argv, want|
       Gori::CLI::Run.json_requested?(argv).should eq(want), failure_message: argv.join(' ')
     end
+  end
+
+  # `VALUE_FLAGS` against the parsers: every flag defined with a value (`--query=QL`, `-qQL`),
+  # less the few that are valueless in another subcommand.
+  it "knows every flag that takes the next word as its value" do
+    valued = Set(String).new
+    plain = Set(String).new
+    (Dir.glob(File.join(JsonRefusals::ROOT, "**", "*.cr")) << "#{JsonRefusals::ROOT}.cr").each do |path|
+      File.read(path).scan(/p\.on\(([^)]*)/) do |m|
+        m[1].scan(/"(-[A-Za-z]|--[a-z0-9-]+)([= ]?[A-Z<\[]?)/) do |f|
+          (f[2].empty? ? plain : valued) << f[1]
+        end
+      end
+    end
+    want = valued - plain - Set{"--format"}
+    Gori::CLI::Run.value_flags_for_spec.should eq(want)
   end
 
   it "routes each not-found through not_found_abort" do

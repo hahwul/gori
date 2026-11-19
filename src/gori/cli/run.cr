@@ -169,15 +169,54 @@ module Gori
         dispatch_subcommand(args)
       end
 
+      # The flags that take the NEXT word as their value (`-q x`, `--query x`), whatever it
+      # looks like: `-q --json` searches for "--json". Pinned to the parsers by
+      # `spec/cli/run/json_refusals_spec.cr`. Left out: `-k`, `--count`, `--encode`,
+      # `--record-history` and `--regex`, which take a value in one subcommand and none in another.
+      private VALUE_FLAGS = Set.new(%w[
+        -b -d -f -H -l -n -o -p -q -r -s -t -v -w -X
+        --alg --algorithm --assert --auto-reply --bind-from --body --body-file --browser
+        --brute --bucket --burp --ca-dir --case --category --cluster --code --color --column
+        --concurrency --containment --context --cookie --copy-header --curl --cvss --data
+        --db --delay --description --detail --detail-file --device-port --direction --export
+        --extensions --extract --extractor --fail-on --fault --fc --fg --fh --field --fields
+        --file --filter --find-context --find-from --find-max --fl --flow --for --form-key
+        --fr --from --from-db --from-flow --fs --ft --fw --grpc-field --hang --har --hash
+        --head --header --hex --hook --host --id --identities --idle-ms --input --insomnia
+        --interval --ip --issue --json-field --json-pointer --jsonpath --keep --key --kind
+        --level --limit --listen --location --locations --macro --macro-every --macro-expect
+        --macro-on-failure --mark --match --max --max-body --max-bytes --max-depth
+        --max-endpoints --max-flows --max-requests --max-samples --mc --message
+        --message-frame --method --mg --mh --ml --mode --mr --ms --mt --mw --name --note
+        --note-position --notes --notes-file --null --numbers --oas --offset --op --opcode
+        --order --origin --output --owner --pane --part --path --pattern --payload
+        --payload-from --payload-from-locations --payload-from-max-flows
+        --payload-from-max-values --payloads --port --position --postman --prefix --preset
+        --project --provider --proxy --query --race --race-warmup --range --rate --raw
+        --raw-file --redact --ref --ref-id --refresh --refresh-before --regex-replace
+        --region --remote-debugging-port --remove --repeater --request --request-file
+        --request-raw --respond --response-file --retries --rm-header --role --rule --salt
+        --samples --scope --secret --secrets --selector --serial --server --session --set
+        --set-header --severity --shell --side --slot --sni --sort --sse-events --sse-time
+        --status --stop-after-matches --stop-on --strip-prefix --style --suffix --tag --tags
+        --target --text --throttle --timeout --timestamp --title --tls-preset --to --to-db
+        --token --token-cookie --token-header --tokens --type --unpack --url --urls --value
+        --verdict --view --warmup --when --wordlist --ws-match --wsdl
+      ])
+
       # Whether argv asks for JSON, read before any parser runs: `--limit 0 --json` refuses
       # inside `--limit`'s handler, before `format_flag` has seen `--json`. `format_flag` still
-      # settles it once the flag is parsed. Never past `--`, which is another program's argv.
+      # settles it once the flag is parsed. Never past `--`, which is another program's argv,
+      # and never a word another flag takes as its value (`--payloads --json`).
       def self.json_requested?(args : Array(String)) : Bool
         words = args.take_while { |a| a != "--" }
-        words.each_with_index.any? do |a, i|
+        i = 0
+        while a = words[i]?
           f = a == "--format" ? words[i + 1]?.to_s : a.starts_with?("--format=") ? a.lchop("--format=") : nil
-          a == "--json" || f.try(&.downcase.in?("json", "jsonl")) || false
+          return true if a == "--json" || f.try(&.downcase.in?("json", "jsonl"))
+          i += a == "--format" || VALUE_FLAGS.includes?(a) ? 2 : 1
         end
+        false
       end
 
       # A usage refusal: the line on STDERR, and under `--json` the failed-call object on stdout
