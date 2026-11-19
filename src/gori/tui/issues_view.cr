@@ -790,11 +790,11 @@ module Gori::Tui
     # What an export writes and how its card names it: the marks if any are set, else what
     # the filter shows, else nil: every issue. The marks win over the filter as they do for
     # every batch verb: a mark the filter hides is still one the operator chose.
+    # A mark whose issue a peer deleted resolves to nothing and counts as no mark: otherwise an
+    # all-stale mark set exports an empty list, refused as "no issues match the filter".
     def export_selection : {Array(Int64), String}?
-      unless @marks.empty?
-        ids = marked_ids
-        return {ids, Gori.plural(ids.size, "marked issue")}
-      end
+      ids = marked_ids
+      return {ids, Gori.plural(ids.size, "marked issue")} unless ids.empty?
       {@issues.map(&.id), "#{Gori.plural(@issues.size, "issue")} matching the filter"} if filtering?
     end
 

@@ -23,6 +23,23 @@ private def loaded_fuzzer : FuzzerView
   view
 end
 
+# ⇧↹ off TARGET leaves for the tab bar without a pane step (`pane_advance` is false at the
+# ring's end), and ↹ came back through `focus_first` still in INS: typing edited the URL.
+describe "FuzzerView TARGET INS on a ring re-entry" do
+  it "enters TARGET in READ from either end of the ring" do
+    view = FuzzerView.new
+    view.focus_first
+    view.enter_target_insert!
+    view.pane_advance(-1).should be_false
+    view.focus_first
+    view.target_insert?.should be_false
+    view.enter_target_insert!
+    view.focus_last
+    view.focus.should eq(:results)
+    view.target_insert?.should be_false
+  end
+end
+
 describe "FuzzerView sorted-view throttle" do
   # The memo keys on @results_rev, which bumps per appended result, so a live run rebuilt the
   # sorted view on EVERY frame. Measured at RESULT_CAP: sort_by(:status) is 615µs and 2.54 MB

@@ -108,6 +108,21 @@ describe "HistoryController detail esc" do
       ctl.view.open_detail(session.store).should be_true
       ctl.view.set_detail_focus(:body)
       Chrome.fit_hints(ctl.body_hint(:body), 57).should start_with("↑/↓ move · ^F find · ")
+      # Only the Runner's hard-coded ^F reaches the detail (`editor.find` is Editor-scope): a
+      # keyset's own find key (vim's `/`) named here did nothing.
+      prev_set, prev_os = Gori::Settings.editor_keyset, Gori::Settings.keymap_os
+      begin
+        Gori::Hotkeys::KEYSETS.each do |set|
+          Gori::Hotkeys::PROFILES.each do |os|
+            Gori::Settings.editor_keyset = set
+            Gori::Settings.keymap_os = os
+            ctl.body_hint(:body).should start_with("↑/↓ move · ^F find · ")
+          end
+        end
+      ensure
+        Gori::Settings.editor_keyset = prev_set
+        Gori::Settings.keymap_os = prev_os
+      end
     end
   end
 end

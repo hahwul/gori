@@ -60,6 +60,51 @@ describe Gori::Tui::DiscardGuard do
     end
   end
 
+  # A click outside the card threw a dirty form away without a word; it now asks as esc does,
+  # also when the card cannot be drawn, and a press inside disarms like any key.
+  it "asks once before a click outside discards an edit" do
+    discard_cases.each do |(name, open, change)|
+      ov = open.call
+      change.call(ov)
+      h = OverlayHarness.new(ov)
+      h.click(0, 0).should eq(:open), name
+      ov.discard_armed?.should be_true
+      h.click(0, 0).should eq(:closed), name
+      h.commits.should eq(0)
+    end
+    ov = RewriterRuleOverlay.adding
+    ov.set_selected(0)
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerX, char: 'x'))
+    ov.handle_click(Rect.new(0, 0, 80, 24), 0, 0).should eq(:stay)
+    box = ov.overlay_box(Rect.new(0, 0, 80, 24)).not_nil!
+    ov.handle_click(Rect.new(0, 0, 80, 24), box.x + 2, box.y + 1) # inside: disarms
+    ov.discard_armed?.should be_false
+    tiny = Rect.new(0, 0, 20, 4)
+    ov.overlay_box(tiny).should be_nil
+    ov.handle_click(tiny, 1, 1).should eq(:stay)
+    ov.handle_click(tiny, 1, 1).should eq(:cancel)
+  end
+
+  # The second press of a double click falls back to an ordinary click when no field takes it,
+  # which answered the question the first press had just asked, before a frame could show it.
+  it "does not let a double click outside both ask and answer" do
+    ov = ScopeRuleOverlay.adding
+    ov.set_selected(2)
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerX, char: 'x'))
+    area = Rect.new(0, 0, 80, 24)
+    ov.handle_click(area, 0, 0).should eq(:stay)
+    ov.handle_double_click(area, 0, 0).should eq(:stay)
+    ov.discard_armed?.should be_true
+    ov.handle_click(area, 0, 0).should eq(:cancel) # a deliberate second click still discards
+  end
+
+  it "closes a form that never opted in on one click outside, typed or not" do
+    ov = CustomColorOverlay.adding
+    ov.set_selected(0)
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerX, char: 'x'))
+    ov.handle_click(Rect.new(0, 0, 80, 24), 0, 0).should eq(:cancel)
+  end
+
   it "keeps a pasted esc from arming or answering the question" do
     ov = ScopeRuleOverlay.adding
     ov.takes_pasted?(esc_key).should be_false

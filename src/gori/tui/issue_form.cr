@@ -200,7 +200,8 @@ module Gori::Tui
 
     def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
       box = overlay_box(area)
-      return :cancel if box.nil? || !box.contains?(mx, my)
+      return discard_or_ask if box.nil? || !box.contains?(mx, my) # over edits, asks as esc does
+      @discard_armed = false
       if my == box.y + TITLE_ROW
         focus_title
         # Rebased by the window the last frame drew (0 when the row was not focused).

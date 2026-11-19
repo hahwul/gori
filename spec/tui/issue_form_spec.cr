@@ -238,6 +238,14 @@ describe Gori::Tui::IssueForm do
     h.press(Termisu::Input::Key::Escape).should eq(:closed)
     h.commits.should eq(0)
 
+    clicked = IssueForm.new
+    c = OverlayHarness.new(clicked)
+    c.type("XSS")
+    c.click(0, 0).should eq(:open) # a click outside asks as esc does
+    clicked.discard_armed?.should be_true
+    c.click(0, 0).should eq(:closed)
+    c.commits.should eq(0)
+
     sev = IssueForm.new
     sev.severity_cycle(1)
     OverlayHarness.new(sev).press(Termisu::Input::Key::Escape).should eq(:open)

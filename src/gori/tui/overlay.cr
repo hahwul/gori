@@ -513,10 +513,12 @@ module Gori::Tui
   # (`HotkeysOverlay#escape_browse`): one esc on a half-typed form used to close it with nothing
   # kept. A form that opts in records `@opened_state = form_state` at the end of `initialize`
   # and runs `discard_key` first in its key ladder; an untouched form still closes on one esc.
+  # A click outside the card asks the same question (`discard_or_ask`); a form that never
+  # opted in (`@opened_state` still nil) closes on either at once, as it always did.
   module DiscardGuard
     DISCARD_HINT = "not saved yet — esc again discards" # whole at 80 columns beside the longest badge
 
-    @opened_state = ""
+    @opened_state : String? = nil
     @discard_armed = false
     getter? discard_armed
 
@@ -529,12 +531,28 @@ module Gori::Tui
     # The outcome for esc (:cancel, or :stay with the question armed), nil for any other key,
     # which disarms it.
     private def discard_key(ev : Termisu::Event::Key) : Symbol?
+      return discard_or_ask if ev.key.escape?
+      @discard_armed = false
+      nil
+    end
+
+    # Esc, or a click outside the card: :cancel when the form is untouched, did not opt in, or
+    # already asked; otherwise arm the question and :stay.
+    private def discard_or_ask : Symbol
       armed = @discard_armed
       @discard_armed = false
-      return nil unless ev.key.escape?
-      return :cancel if armed || form_state == @opened_state
+      opened = @opened_state
+      return :cancel if armed || opened.nil? || form_state == opened
       @discard_armed = true
       :stay
+    end
+
+    # A double click's second press must not answer the question its first press just asked:
+    # the default hands a miss back as an ordinary click, and that one would discard unseen.
+    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :stay if @discard_armed && (box.nil? || !box.contains?(mx, my))
+      super
     end
 
     # A clipboard is neither the question nor its answer: a pasted esc reaches neither.
@@ -695,10 +713,11 @@ module Gori::Tui
     end
 
     # Click a row to select it; a click on the commit row commits; a click outside the card
-    # cancels. Mirrors the ↑/↓ + ↵ keyboard model.
+    # cancels — over unsaved edits, after asking as esc does. Mirrors the ↑/↓ + ↵ keyboard model.
     def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
       box = overlay_box(area)
-      return :cancel if box.nil? || !box.contains?(mx, my)
+      return discard_or_ask if box.nil? || !box.contains?(mx, my)
+      @discard_armed = false # a press inside the card is a key like any other
       if idx = row_at(box, mx, my)
         set_selected(idx)
         return :commit if on_save_row?

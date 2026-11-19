@@ -538,7 +538,7 @@ module Gori::Tui
         view.edit_undo if view.pane_drawn?(:request) # never undo an editor that is off screen (#1421)
       elsif key.escape?
         if (view = current_view) && view.chain_pane_active?
-          view.discard_chain_pane # esc in the CHAIN pane → cancel + back to the request editor (^Q again saves)
+          view.handle_chain_pane_key(ev) # an open converter list closes first; else cancel + back (^Q again saves)
         elsif (view = current_view) && view.focus == :target && view.editing_sni?
           view.exit_sni_field # leave the SNI field, back to the URL (value kept)
         elsif (view = current_view) && view.focus == :request && view.request_hex?

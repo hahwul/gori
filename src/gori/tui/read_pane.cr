@@ -209,9 +209,13 @@ module Gori::Tui
       return if empty?
       @cursor.clear_selection
       li = i.clamp(0, @size - 1)
-      cx = cx.clamp(0, @line_at.call(li).size) if cx > 0 # a ^F match's char index; ^G passes 0
+      if cx > 0 # a ^F match's char index; ^G passes 0
+        line = @line_at.call(li)
+        cx = cx.clamp(0, line.size)
+        cx = Wrap.find_jump_cx(line, cx) if @wrap && !wrap_on? # too long to pan to: the line start
+      end
       @cursor.move_to(li, {cx, 0}.max)
-      ensure_visible
+      ensure_visible(find: cx > 0)
     end
 
     # Home / End / PageUp / PageDown, with ⇧ extending. Returns false when `ev` is none of
@@ -641,7 +645,7 @@ module Gori::Tui
     end
 
     # Keep the caret's line inside the window. Selection-follow, like every list in the tree.
-    private def ensure_visible : Nil
+    private def ensure_visible(*, find : Bool = false) : Nil
       return if @last_h <= 0
       if wrapping?
         cw = @last_cw
@@ -650,7 +654,7 @@ module Gori::Tui
         @scroll, @scroll_sub = Wrap.ensure_visible(@scroll, @scroll_sub, @cursor.cy, csub, @last_h, layout_fn(cw))
         return
       end
-      ensure_visible_x
+      ensure_visible_x(find)
       cy = @cursor.cy
       if cy < @scroll
         @scroll = cy
@@ -678,7 +682,8 @@ module Gori::Tui
     # counting at `cw + 1` columns: a minified body line reaches megabytes, and measuring it
     # whole every frame to conclude "wider than 80" is the one O(line) question this pane has
     # no reason to ask.
-    private def ensure_visible_x : Nil
+    # `find`: a ^F jump seats the match mid-pane (`Wrap.find_xscroll`), not at the edge.
+    private def ensure_visible_x(find : Bool = false) : Nil
       return unless @wrap # opt-in pane, wrap switched off app-wide
       cw = @last_cw
       if cw <= 0 || empty?
@@ -691,6 +696,10 @@ module Gori::Tui
         return
       end
       curx = Wrap.row_col(line, nil, 0, @cursor.cx.clamp(0, line.size))
+      if find
+        @xscroll = Wrap.find_xscroll(curx, cw)
+        return
+      end
       @xscroll = curx if curx < @xscroll
       @xscroll = curx - cw + 1 if curx >= @xscroll + cw
       @xscroll = 0 if @xscroll < 0

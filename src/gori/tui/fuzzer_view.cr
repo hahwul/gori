@@ -622,12 +622,17 @@ module Gori::Tui
     # Every focus change exits the ^S SNI sub-field — the rule `RepeaterView#set_focus`
     # states: SNI editing is an explicit per-visit sub-mode, so navigating away while in it
     # and coming back must not silently route URL keystrokes into @sni.
+    # The ring's ends are entries too (`Runner#focus_advance` from the tab bar): `set_focus`
+    # keeps INS when focus is already on TARGET, which is where a ring that left from TARGET
+    # comes back to, so READ is set as `focus_resume` sets it.
     def focus_first : Nil
       set_focus(:target)
+      focus_resume
     end
 
     def focus_last : Nil
       set_focus(:results)
+      focus_resume
     end
 
     # Re-entry from the tab bar / strip: the pane stays, the SNI sub-field does not (the

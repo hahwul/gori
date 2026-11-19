@@ -85,5 +85,9 @@ describe "Gori::Tui::RepeaterView — TARGET INS does not outlive the visit" do
     view.enter_target_insert!
     view.focus_resume # back from the tab bar / strip
     view.target_insert?.should be_false
+
+    view.enter_target_insert!
+    view.focus_first # ↹ from the tab bar, after leaving TARGET for it without a pane step
+    view.target_insert?.should be_false
   end
 end

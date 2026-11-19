@@ -47,6 +47,7 @@ module Gori::Tui
       @cx = 0
       @scroll = 0
       @xscroll = 0      # leftmost visible display COLUMN (horizontal scroll); only moves when @follow_x is on
+      @find_x = false   # a ^F jump is pending its pan (`goto_line` → `ensure_visible_x`)
       @last_h = 0       # viewport height from the last render — lets scroll_view (wheel) clamp
       @last_cw = 0      # content width from the last render — the wrap mappings outside render need it
       @follow_x = false # follow the cursor horizontally (long lines scroll into view); off ⇒ legacy right-clip
@@ -1222,6 +1223,10 @@ module Gori::Tui
     # out-of-range clamps). render's ensure_visible scrolls its visual row into view next frame.
     def goto_line(n : Int32, cx : Int32 = 0) : Nil
       @cy = (n - 1).clamp(0, @lines.size - 1)
+      # Too long to pan to: the line start. Otherwise the next frame's pan seats the match
+      # mid-pane (`ensure_visible_x`).
+      cx = Wrap.find_jump_cx(@lines[@cy], cx) if follow_x? && !wrap_on?
+      @find_x = cx > 0
       @cx = cx.clamp(0, @lines[@cy].size)
       snap_cx_to_cluster(0) if cx > 0
       snap_cx_out_of_conceal(0) # a match inside a hidden ¦chain: INS must not type into it
@@ -1497,6 +1502,7 @@ module Gori::Tui
       # (or leave the caret anchored to a continuation row that no longer exists).
       if wrapping?
         @xscroll = 0
+        @find_x = false # nothing to pan under wrap
         ensure_visible_wrapped(cw, rect.h)
       else
         @scroll_sub = 0
@@ -2243,6 +2249,7 @@ module Gori::Tui
     # resets to 0 (no needless side-scroll). No-op unless @follow_x, so every other
     # editor keeps @xscroll == 0 and renders exactly as before.
     private def ensure_visible_x(cw : Int32) : Nil
+      find, @find_x = @find_x, false # one frame: later ones follow the caret as usual
       return unless follow_x?
       return if cw <= 0
       line = @lines[@cy]
@@ -2280,6 +2287,13 @@ module Gori::Tui
       end
       cx = @cx.clamp(0, line.size)
       curx = (concealed ? Wrap.row_col(line, cr, 0, cx, reveal: @reveal) : Wrap.draw_width(line[0, cx], @reveal)) + pw
+      pan_to_caret(curx, cw, find)
+    end
+
+    # A ^F jump seats the caret column mid-pane (`Wrap.find_xscroll`); any other move follows
+    # it to the nearer edge.
+    private def pan_to_caret(curx : Int32, cw : Int32, find : Bool) : Nil
+      return @xscroll = Wrap.find_xscroll(curx, cw) if find
       @xscroll = curx if curx < @xscroll                # caret left of the window → snap left
       @xscroll = curx - cw + 1 if curx >= @xscroll + cw # caret past the right edge → snap right
       @xscroll = 0 if @xscroll < 0
