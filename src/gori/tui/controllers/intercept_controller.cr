@@ -590,6 +590,19 @@ module Gori::Tui
       @intercept.text_insert?
     end
 
+    # --- bracketed paste, in bulk (see TabController#accepts_bulk_paste?) ---
+    # The TEXT editor in INS only, like the Repeater request: the hex editor frames its own
+    # nibbles and READ has no caret to paste at.
+    def accepts_bulk_paste? : Bool
+      @intercept.text_insert?
+    end
+
+    def paste_text(text : String) : Bool
+      return false unless @intercept.edit_paste(text)
+      report_replaced(@intercept.edit_last_replaced) # a paste over a selection REPLACES it
+      true
+    end
+
     def handle_editor_tab(ev : Termisu::Event::Key) : Bool
       return false unless @intercept.text_insert?
       @intercept.edit_insert('\t')

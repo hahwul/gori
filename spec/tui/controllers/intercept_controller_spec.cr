@@ -117,3 +117,56 @@ describe InterceptController do
     end
   end
 end
+
+private POST_RAW = "POST /api/x HTTP/1.1\r\nHost: acme.test\r\nContent-Length: 2\r\n\r\nhi"
+
+# An Intercept INS editor holding POST_RAW, caret at the end of the body.
+private def with_held_post(& : InterceptController, Gori::Interceptor::Item ->)
+  TuiContract.with_session("intercept-paste") do |session|
+    ic = session.interceptor
+    ic.toggle
+    ic.enqueue_request(POST_RAW.to_slice, method: "POST", target: "/api/x", host: "acme.test",
+      port: 80, scheme: "http").should_not be_nil
+    ctl = InterceptController.new(TuiContract::Host.new(session).tap(&.tab=(:intercept)))
+    ctl.on_enter
+    ctl.pane_advance(1)
+    ctl.editor_enter_insert
+    5.times { ctl.view.edit_move(1, 0) }
+    ctl.view.edit_end
+    yield ctl, ctl.view.selected_item.not_nil!
+  end
+end
+
+# A paste into the held request is one edit with one Content-Length reflection (typed, it
+# was one whole-buffer reflection per character), and it forwards what typing it would.
+describe "InterceptController bulk paste" do
+  pasted = "&a=1\n\tb=22 é"
+
+  it "forwards the bytes and the Content-Length that typing the paste would" do
+    typed = ""
+    with_held_post do |ctl, it|
+      pasted.each_char do |c|
+        ev = c == '\n' ? Termisu::Event::Key.new(Termisu::Input::Key::Enter) : char_key(c)
+        c == '\t' ? ctl.handle_editor_tab(Termisu::Event::Key.new(Termisu::Input::Key::Tab)) : ctl.handle_body_key(ev)
+      end
+      typed = String.new(ctl.view.forward_bytes(it))
+    end
+    with_held_post do |ctl, it|
+      ctl.accepts_bulk_paste?.should be_true
+      ctl.paste_text(pasted).should be_true
+      String.new(ctl.view.forward_bytes(it)).should eq(typed)
+      typed.should contain("Content-Length: #{("hi" + pasted).bytesize}\r\n")
+      ctl.view.edit_undo # one step undoes the whole paste, Content-Length with it
+      String.new(ctl.view.forward_bytes(it)).should eq(POST_RAW)
+    end
+  end
+
+  it "is the TEXT editor in INS only" do
+    with_held_post do |ctl, it|
+      ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape)) # INS → READ
+      ctl.accepts_bulk_paste?.should be_false
+      ctl.paste_text("x").should be_false
+      String.new(ctl.view.forward_bytes(it)).should eq(POST_RAW)
+    end
+  end
+end

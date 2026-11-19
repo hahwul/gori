@@ -773,6 +773,16 @@ module Gori::Tui
       mark_editor_edit
     end
 
+    # A bracketed paste in INS, verbatim and as ONE edit: typed, every pasted character paid
+    # a whole-buffer Content-Length reflection, and 60 KB took ~96 s while the client waited.
+    # The reflection runs once, over the same final buffer typing would have left.
+    def edit_paste(text : String) : Bool
+      return false unless text_insert?
+      @editor.insert_text(text)
+      mark_editor_edit
+      true
+    end
+
     def edit_backspace : Nil
       return unless text_editing?
       before = @editor.edits

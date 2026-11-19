@@ -45,8 +45,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   #
   # Called BEFORE the two questions below rather than folded into either, because it has to
   # change the answer to both: with the pane now in INSERT, `begin_bulk_paste?` takes the
-  # bulk-capable editors (Notes, the Repeater request, the Fuzzer template, and the Decoder /
-  # JWT / Cookie multi-line inputs) and `paste_runs_as_commands?` stops refusing the rest (the
+  # bulk-capable editors (Notes, the Repeater request, the Intercept held request, the Fuzzer
+  # template, and the Decoder / JWT / Cookie multi-line inputs) and `paste_runs_as_commands?` stops refusing the rest (the
   # Issue notes, the Project description, the single-line TARGET, CHAIN, SECRET and SALT rows),
   # which then get the per-keystroke path they already use in INSERT. Neither predicate needed
   # a new clause.
