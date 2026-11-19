@@ -107,7 +107,7 @@ describe "retention settings" do
       db = DB.open("sqlite3:#{path}?journal_mode=wal&busy_timeout=5000")
       Gori::Store::Schema.migrate!(db)
       # A capture owner passes Settings.retention_flows; prune_interval is squeezed so the sweep
-      # fires within the example rather than after 2000 inserts.
+      # fires within the example rather than after Store::PRUNE_INTERVAL inserts.
       Gori::Settings.retention_max_flows = 5
       store = Gori::Store.new(db, nil, retention_flows: Gori::Settings.retention_flows, prune_interval: 10)
       begin

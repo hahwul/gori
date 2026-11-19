@@ -242,7 +242,13 @@ module Gori
     # sweeps regardless of what it passes.
     RETENTION_UNLIMITED = 0
     # Inserts between retention sweeps — amortizes the prune cost.
-    PRUNE_INTERVAL = 2_000
+    #
+    # A sweep deletes at most twice this many flows (see `prune`), so it is also what bounds one
+    # sweep's writer stall: each one runs on the writer fiber, and the rows it removes are the
+    # OLDEST, i.e. cold, so SQLite walks every one's overflow chain from disk to free it. At 2000
+    # a sweep at the default cap froze capture and the TUI for 0.3–2.5 s; at 500 it is a quarter
+    # of the rows per sweep, and the fixed part (two COUNTs, the h2 reap) is a few ms.
+    PRUNE_INTERVAL = 500
 
     # Newest `events` rows kept. Every surface writes them (job lifecycle, agent actions, binding
     # warnings, config changes — `spec/store/event_source_registry_spec.cr` is what counts the
@@ -1729,7 +1735,15 @@ module Gori
       trim_events(conn)
       return if @writer_conn_suspect # as above: do not run the retention sweep on a dead connection
       return if @retention_flows <= 0
-      return unless cutoff = oldest_excess_cutoff(conn, "flows", @retention_flows)
+      # At most TWICE what arrived since the last sweep, not the whole excess. One sweep is one
+      # writer transaction, and the whole process is one thread: an over-cap project (a cap
+      # lowered later, a `retention 0` capture or an archive import opened under the default cap)
+      # once deleted 402k flows in a single sweep and froze capture and the TUI for 106 s. Twice
+      # still takes the excess down by at least one interval per sweep while capture runs, and a
+      # project at its cap is back under it in one sweep, as before. Read before the writer loop
+      # zeroes the counter; a batch of imports can carry it past the interval.
+      at_most = Math.max(@inserts_since_prune, @prune_interval) * 2
+      return unless cutoff = oldest_excess_cutoff(conn, "flows", @retention_flows, at_most: at_most)
       dropped = 0_i64
       write_transaction(conn) do |c|
         dropped, reaped_conns = Store.delete_flows_through(c, cutoff)
@@ -1851,7 +1865,8 @@ module Gori
     end
 
     # The id of the newest row that has to go for `table` to hold at most `keep` rows, or nil
-    # when it already does. Everything `id <= cutoff` is then exactly the oldest excess.
+    # when it already does. Everything `id <= cutoff` is then exactly the oldest excess — or,
+    # with `at_most`, only its oldest `at_most` rows, so the caller deletes a bounded chunk.
     #
     # Counted and then seeked from the LOW end, not by walking the newest `keep` rows down from
     # the top: `COUNT(*)` reads the smallest index (or the table's leaf pages without decoding a
@@ -1863,12 +1878,13 @@ module Gori
     # peer process (a second gori on the project running its own sweep) could delete low rows in
     # between, and the stale count would push the offset past the excess and drop rows that were
     # meant to stay — irreversibly. The old single-statement form could only ever under-delete.
-    private def oldest_excess_cutoff(conn : DB::Connection, table : String, keep : Int32) : Int64?
+    private def oldest_excess_cutoff(conn : DB::Connection, table : String, keep : Int32,
+                                     at_most : Int32 = Int32::MAX) : Int64?
       return nil if keep <= 0 # a non-positive cap is "unlimited", as the old `LIMIT` read it
       conn.query_one?(
         "SELECT id FROM #{table} WHERE (SELECT COUNT(*) FROM #{table}) > ?1 " \
-        "ORDER BY id LIMIT 1 OFFSET (SELECT COUNT(*) FROM #{table}) - ?1 - 1",
-        keep, as: Int64)
+        "ORDER BY id LIMIT 1 OFFSET min((SELECT COUNT(*) FROM #{table}) - ?1, ?2) - 1",
+        keep, at_most, as: Int64)
     end
 
     # One gori.log line per sweep that actually removed history, naming the setting that
