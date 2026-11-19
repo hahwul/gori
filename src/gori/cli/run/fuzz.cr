@@ -60,6 +60,7 @@ module Gori
         mode = Fuzz::Mode::Sniper
         mode_given = false
         sources = [] of Fuzz::PayloadSource
+        stdin_read = false
         payload_from = PayloadFromFlags.new
         macro_flags = RequestMacroFlags.new
         processors = [] of Fuzz::Processor
@@ -134,7 +135,10 @@ module Gori
           p.on("--ws-keep-key", "WebSocket: send the template's own Sec-WebSocket-Key instead of a fresh one per session (lets an absent/short/duplicate/non-base64 key be the thing under test)") { ws_keep_key = true }
           p.on("--ws-http-only", "Sweep a WebSocket template as plain HTTP: the handshake goes out as an ordinary request and its own answer (a 101, or the 2xx of an RFC 8441 extended CONNECT) is read as the response, instead of the framed exchange. The bytes are unchanged — this selects the engine, not a rewrite") { ws_http_only = true }
           p.on("--mode=MODE", "#{Fuzz::Mode.names.join(" | ")} (default sniper)") { |v| mode = parse_mode(v); mode_given = true }
-          p.on("-wPATH", "--wordlist=PATH", "Payload set: a wordlist file, or the NAME of a saved list (`gori run wordlist`); repeatable, order → positions") { |v| sources << Fuzz::WordlistFile.new(v) }
+          p.on("-wPATH", "--wordlist=PATH", "Payload set: a wordlist file, the NAME of a saved list (`gori run wordlist`), or - for stdin (once); repeatable, order → positions") do |v|
+            sources << (v == "-" ? stdin_wordlist(stdin_read) : Fuzz::WordlistFile.new(v))
+            stdin_read ||= v == "-"
+          end
           p.on("--preset=NAME", "Payload set: a built-in preset (#{Fuzz::Presets.names.join("|")}); NAME:FILE merges a user file into it") { |v| sources << parse_preset(v) }
           p.on("--payloads=LIST", "Payload set: inline comma list (a,b,c)") { |v| sources << Fuzz::InlineList.new(v.split(',')) }
           p.on("--numbers=SPEC", "Payload set: FROM-TO[:STEP] (e.g. 1-100 or 0-255:5)") { |v| sources << parse_numbers(v) }
@@ -901,6 +905,16 @@ module Gori
             String.new(Fuzz::Template.escape_literal_markers(m.payload)),
             Run.seed_shape(m.shape, captured: captured), evidence)
         end
+      end
+
+      # `-w -`: the list piped on stdin, as `import --har -` and `wordlist save --from -` read it.
+      # Read here, once; a second `-w -` would find stdin already drained.
+      private def self.stdin_wordlist(seen : Bool, io : IO = STDIN) : Fuzz::PayloadSource
+        abort "gori run fuzz: -w - is given twice — stdin can be read once" if seen
+        text = read_stdin_text(io, "gori run fuzz", "wordlist", stdin_pipe_hint("gori run fuzz", flag: "-w -"))
+        lines = text.lines
+        abort "gori run fuzz: stdin gave no payloads for -w -" if lines.empty?
+        Fuzz::InlineList.new(lines)
       end
 
       # `--message-frame`. The grammar is shared with `gori run repeater send` and MCP
