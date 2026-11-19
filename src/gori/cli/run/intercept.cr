@@ -349,7 +349,8 @@ module Gori
                                      bytes : Bytes? = nil, arg : String? = nil) : {String, String?}
         outcome = store.send_intercept_command(verb, item_id: item_id, bytes: bytes, arg: arg)
         return {outcome.status, outcome.detail} if outcome.is_a?(Store::InterceptAck)
-        abort "gori run intercept: #{intercept_send_refusal(outcome)}"
+        # Retryable, as MCP answers it (`PROJECT_BUSY`): an instance may start draining, or ack in time.
+        busy_abort("gori run intercept", intercept_send_refusal(outcome), store)
       end
 
       # This command's words for a command that got no ack. Public and pure so a spec can pin
@@ -365,15 +366,45 @@ module Gori
         end
       end
 
+      # A refused ack's `{error_kind, error_code}`, coded as MCP's intercept tools code it; nil
+      # for a status that is a success.
+      INTERCEPT_ACK_FAILURES = {
+        "no_such_item" => {"not_found", "NOT_FOUND"},
+        "stale"        => {"stale", "SESSION_CHANGED"},
+        "refused"      => {"refused", "REFUSED"},
+        "error"        => {"error", "INTERNAL"},
+      }
+
+      # The `--json` ack. A refusal keeps `status`/`ok`/`detail` and adds the failed-call
+      # object's `error`/`error_kind`/`error_code`/`retryable`, so one reader serves every command.
+      def self.intercept_ack_json(status : String, detail : String?, note : String? = nil) : String
+        failure = INTERCEPT_ACK_FAILURES[status]?
+        JSON.build do |j|
+          j.object do
+            j.field "status", status
+            j.field "ok", failure.nil?
+            j.field "detail", detail
+            j.field "note", note if note
+            if failure
+              j.field "error", detail || status
+              j.field "error_kind", failure[0]
+              j.field "error_code", failure[1]
+              j.field "retryable", false
+            end
+          end
+        end
+      end
+
       private def self.emit_intercept_ack(status : String, detail : String?, format : Symbol,
                                           note : String? = nil) : Nil
-        ok = !status.in?("no_such_item", "stale", "error", "refused")
+        ok = !INTERCEPT_ACK_FAILURES.has_key?(status)
         if format == :json
-          puts(JSON.build { |j| j.object { j.field "status", status; j.field "ok", ok; j.field "detail", detail; j.field "note", note if note } })
+          puts intercept_ack_json(status, detail, note)
         else
           # `term_safe`: an edit's receipt names its start line from the operator's own
-          # `--raw-file` (#1430), which can carry an ESC the codec never saw.
-          puts "#{status}#{detail ? ": #{CLI::Output.term_safe(detail)}" : ""}"
+          # `--raw-file` (#1430), which can carry an ESC the codec never saw. A refusal goes to
+          # STDERR, so a pipe reading STDOUT never takes it for a receipt.
+          (ok ? STDOUT : STDERR).puts "#{status}#{detail ? ": #{CLI::Output.term_safe(detail)}" : ""}"
           STDERR.puts "note: #{CLI::Output.term_safe(note)}" if note
         end
         exit 1 unless ok
