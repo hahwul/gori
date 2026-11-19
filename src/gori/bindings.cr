@@ -962,17 +962,18 @@ module Gori
     # Write one observed value into the table it belongs in: the ACTIVE slot's when that slot
     # claims this rule, else the global one. `candidates` has already refused every other
     # combination, so this is a two-way choice rather than a search. False when the table
-    # already held this rule's same value: nothing changed, so its bound time stays when the
-    # value was bound (what a `ttl` refresh counts from, see `SessionRefresh#compute_due`).
+    # already held this rule's same value: the revision need not move, though the bound time does.
     private def bind(rule : Store::ExtractRule, value : String, active : SessionSlot?,
                      now : Time) : Bool
       owner = (active && active.claims?(rule.name)) ? active.name : nil
       @mutex.synchronize do
         table = owner ? (@slot_values[owner] ||= {} of String => Bound) : @values
         prior = table[rule.name]?
-        next false if prior && prior.value == value && prior.rule_id == rule.id
+        # Always re-stamped: `RequestMacro::Runner#settle` and `SessionRefresh#rebound_since`
+        # read a moved `bound_at` as "this step rebound it", and a token the server re-sets to
+        # the same value is still a successful refresh.
         table[rule.name] = Bound.new(value, rule.id, now)
-        true
+        !(prior && prior.value == value && prior.rule_id == rule.id)
       end
     end
 

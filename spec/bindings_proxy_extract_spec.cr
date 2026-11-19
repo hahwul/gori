@@ -502,3 +502,19 @@ describe "Gori::Bindings — the proxy response seam (#501 slice 2)" do
     end
   end
 end
+
+describe "Gori::Bindings same-value rebind" do
+  it "still moves bound_at, so a macro or slot refresh sees the rebind" do
+    with_store do |store|
+      b = Gori::Bindings.load(store)
+      b.add("CSRF", "", Gori::ExtractKind::Cookie, "csrf").should be_nil
+      head = "HTTP/1.1 200 OK\r\nSet-Cookie: csrf=abc\r\n\r\n".to_slice
+      b.observe_response(head, nil, method: "GET", host: "acme.test", target: "/form", scheme: "https", status: 200)
+      before = Gori::RequestMacro::Runner.visible(b)
+      sleep 5.milliseconds
+      b.observe_response(head, nil, method: "GET", host: "acme.test", target: "/form", scheme: "https", status: 200)
+      after = Gori::RequestMacro::Runner.visible(b)
+      after.compact_map { |(name, at)| at && at != before[name]? ? name : nil }.should eq(["CSRF"])
+    end
+  end
+end

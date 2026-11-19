@@ -78,6 +78,10 @@ module Gori::Proxy
 
   # Default sink: writes straight through to the SQLite store.
   class StoreSink < FlowSink
+    # The largest body or WebSocket payload queued without waiting for its commit. The writer
+    # channel holds 1024 ops, so this bounds what queued capture can pin at ~64 MiB.
+    DEFER_MAX = 64 * 1024
+
     def initialize(@store : Store)
     end
 
@@ -96,12 +100,17 @@ module Gori::Proxy
 
     def on_response_deferred(resp : Store::CapturedResponse) : Nil
       return if resp.flow_id <= 0
+      # ponytail: a size cutoff, not a byte budget. A big body waits for its commit as before, so
+      # queued writes hold at most DEFER_MAX each; a per-connection in-flight budget if this bites.
+      return @store.update_response(resp) if (resp.body.try(&.size) || 0) > DEFER_MAX
       @store.update_response_deferred(resp)
     end
 
     def on_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes,
                       shape : Gori::Proxy::WS::Shape = Gori::Proxy::WS::Shape::DEFAULT) : Nil
       return if flow_id <= 0
+      # The peer picks the message size (up to 16 MiB), so only small ones ride the queue.
+      return @store.insert_ws_message(flow_id, direction, opcode, payload, shape: shape) if payload.size > DEFER_MAX
       @store.queue_ws_message(flow_id, direction, opcode, payload, shape: shape)
     end
 
