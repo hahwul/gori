@@ -10,6 +10,8 @@
 
 - Probe: CSP findings now account for CSP3 script element and event handler directives and the combined restrictions of multiple enforcing policies (#1937).
 
+- Probe: passive checks detect credentials in cross-origin Referer headers, cleartext SAML bearer assertions, and more GitLab token formats. Accepted cross-site WebSockets carrying cookies appear as informational findings.
+
 - TUI: unsaved issue drafts require a save or an explicit discard, simultaneous edits to a note are preserved as separate notes, and closing a note with links requires confirmation (#1929).
 
 - TUI: project-wide search restores its results and selection after viewing a flow and blocks opening hidden results, while project-name search supports caret movement and click-to-edit. The Comparer and link pickers find older flows and keep the filter open when it has no matches (#1929).

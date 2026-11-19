@@ -12,6 +12,8 @@ module Gori
       # earns the High severity. A shape an app routinely and correctly ships to its own client
       # does not belong in this list however secret-looking it is — see JWT below.
       module Secrets
+        PLACEHOLDER_VALUES = Set{"true", "false", "0", "1", "on", "off", "yes", "no", "null", "undefined"}
+
         PATTERNS = [
           # The two key ids AWS itself publishes as documentation placeholders are screened out.
           # `AKIAIOSFODNN7EXAMPLE` (and its `ASIA` temporary-credential twin) is the SigV4
@@ -26,7 +28,9 @@ module Gori
           {/\bAIza[0-9A-Za-z_\-]{35}\b/, "Google API key"},
           {/\bgh[pousr]_[0-9A-Za-z]{36}\b/, "GitHub token"},
           {/\bgithub_pat_[0-9A-Za-z_]{22,}\b/, "GitHub fine-grained token"},
-          {/\bglpat-[0-9A-Za-z_\-]{20}\b/, "GitLab token"},
+          # GitLab's stable rules cover classic and routable PATs, with an optional version field on routable tokens.
+          {/\bglpat-(?:[0-9A-Za-z_\-]{20}|[0-9A-Za-z_\-]{27,300}\.(?:[0-9a-z]{2}\.)?[0-9a-z]{9})(?![0-9A-Za-z_\-])/, "GitLab token"},
+          {/\bglptt-(?:[0-9A-Za-z_\-]{20}|[0-9A-Za-z_\-]{40})(?![0-9A-Za-z_\-])/, "GitLab pipeline trigger token"},
           {/\bxox[baprs]-[0-9A-Za-z\-]{10,}/, "Slack token"},
           # Stripe LIVE keys only (test keys aren't sensitive); the prefix is distinctive.
           {/\b(?:sk|rk)_live_[0-9A-Za-z]{20,}\b/, "Stripe secret key"},

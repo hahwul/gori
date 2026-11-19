@@ -1,15 +1,18 @@
 require "uri"
 require "./rule"
+require "./secrets"
+require "../../saml"
 
 module Gori
   module Probe
     module Passive
-      # Credentials over cleartext `http://` (category "headers"), the two shapes `Auth` does not
+      # Credentials over cleartext `http://` (category "headers"), the shapes `Auth` does not
       # cover. `Auth` speaks for the `Authorization: Basic` / `WWW-Authenticate: Basic` header pair;
       # this rule speaks for the ordinary login form, which is how nearly every application actually
       # transmits a password:
       #   * a REQUEST over http:// whose body carries a password-shaped parameter with a real value
-      #     — the password has already crossed the network in the clear (High); and
+      #     — the password has already crossed the network in the clear (High);
+      #   * a form POST that carries a cleartext SAML bearer assertion (High); and
       #   * a RESPONSE over http:// that renders a `<input type="password">` — the credentials have
       #     not been sent yet, but the form that will send them was itself delivered over a channel
       #     an attacker can rewrite, so neither the field nor its `action` can be trusted (Medium).
@@ -23,7 +26,7 @@ module Gori
       class CleartextCredentials < Rule
         def info : RuleInfo
           RuleInfo.new("cleartext_credentials", "Cleartext credential submission",
-            "Flags a password submitted in a request body over http://, and a password input served over http://.",
+            "Flags passwords and SAML bearer assertions submitted over http://, and password inputs served over http://.",
             Category::HEADERS)
         end
 
@@ -39,7 +42,7 @@ module Gori
         # Values that are a password field's NAME rather than its value — `showPassword=false`,
         # `remember_pwd=on`. A real password is none of these, and a form that ships UI state under
         # a password-ish name is otherwise a guaranteed High.
-        NON_SECRET_VALUES = Set{"true", "false", "0", "1", "on", "off", "yes", "no", "null", "undefined"}
+        NON_SECRET_VALUES = Secrets::PLACEHOLDER_VALUES
 
         # A JSON member whose NAME is credential-shaped, capturing the name and its non-empty
         # STRING value. The first arm covers suffixed password names; the rest mirror the exact
@@ -79,11 +82,24 @@ module Gori
           # the boundary structure, and a name-only match would report an empty login form as a
           # transmitted password. A multipart login page is still caught by the response side.
           return if ct.includes?("multipart/")
+          check_saml(ctx, body, acc) if ctx.req.method == "POST" && MediaType.essence(ct) == "application/x-www-form-urlencoded"
           name = ct.includes?("json") ? json_password(body) : form_password(body)
           return if name.nil?
           acc << det(ctx, "cleartext_credentials",
             "Password submitted in a request body over cleartext HTTP",
             Store::Severity::High, name)
+        end
+
+        private def check_saml(ctx : Context, body : String, acc : Array(Detection)) : Nil
+          return unless ctx.row.state.complete?
+          return if ctx.detail.request_body_truncated? || body.bytesize >= Context::BODY_CAP
+          return unless Saml.form_post_bearer_response?(body)
+          # A SAML target can contain credentials or identity data. Link the stored flow and
+          # keep only its origin in the finding, just as the evidence omits the assertion.
+          origin = Url.request_url(ctx.scheme, ctx.host, "/", ctx.row.port)
+          acc << Detection.new("cleartext_saml_assertion", Category::HEADERS, ctx.host, origin,
+            "SAML bearer assertion submitted over cleartext HTTP", Store::Severity::High,
+            "SAMLResponse (HTTP-POST, bearer subject confirmation)", ctx.fid)
         end
 
         # The login page itself arrived over cleartext, so an on-path attacker can rewrite the form

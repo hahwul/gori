@@ -1,3 +1,5 @@
+require "base64"
+require "digest/sha1"
 require "../codec/message"
 require "../codec/http1"
 
@@ -47,6 +49,13 @@ module Gori::Proxy::WS
   # the offer back with a Match&Replace rule, or an origin violating §4.1) is still relayed
   # untouched: there the two peers do agree, and gori's store is the only thing that suffers.
   module Handshake
+    ACCEPT_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+    # RFC 6455 §4.2.2 computes the accept value from the key's ASCII characters.
+    def self.accept_value(key : String) : String
+      Base64.strict_encode(Digest::SHA1.digest(key + ACCEPT_GUID))
+    end
+
     # The field-name gori removes, lower-cased for the byte compare.
     EXTENSIONS_NAME = "sec-websocket-extensions"
 
