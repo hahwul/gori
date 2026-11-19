@@ -137,6 +137,7 @@ module Gori
           "every end is named by a flag (--owner, --id, --note-position, --ref, --ref-id)") do |p|
           p.banner = "Usage: gori run links #{verb} --owner=issue|note --id=N|--note-position=N --ref=KIND --ref-id=M\n\n" \
                      "#{action} an evidence pointer. Note --note=N uses the stable id; --note-position=N uses the 1-based position shown by `gori run notes`. --ref is flow|repeater|fuzz|miner.#{tail}"
+          yes_flag(p) unless add
           project_options(p, proj, "update")
           link_owner_options(p, owner)
           p.on("--ref=KIND", "Target kind: flow|repeater|fuzz|miner (required)") { |v| ref_s = v.strip.downcase }

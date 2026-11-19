@@ -547,6 +547,7 @@ module Gori
           p.banner = "Usage: gori run session rm <name> [options]\n\n" \
                      "Delete a session slot. Any extract rule it claimed goes back to writing the\n" \
                      "GLOBAL binding table, which is where an unclaimed rule has always written."
+          yes_flag(p)
           project_options(p, proj, "write")
           format_flag(p, [:text, :json], delete_format_help("name")) { |f| format = f }
         end

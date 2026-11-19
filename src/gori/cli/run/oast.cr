@@ -384,6 +384,7 @@ module Gori
 
         leftover = one_positional_list(args, "gori run oast providers delete", "<id>") do |p|
           p.banner = "Usage: gori run oast providers delete <id>"
+          yes_flag(p)
           project_options(p, proj, "update")
           format_flag(p, [:text, :json], delete_format_help) { |f| format = f }
         end

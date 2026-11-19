@@ -175,6 +175,7 @@ module Gori
         format = :text
         name = views_one_positional(args, "rm", "<name>") do |p|
           p.banner = "Usage: gori run views rm <name> [--scope=project|global]"
+          yes_flag(p)
           project_options(p, proj, "update")
           p.on("--scope=SCOPE", "Which <name>: project (default) | global") { |v| scope = parse_view_scope(v) }
           format_flag(p, [:text, :json], delete_format_help("name")) { |f| format = f }

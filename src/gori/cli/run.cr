@@ -2255,6 +2255,12 @@ module Gori
         p.on("--json", "Same as --format=json") { pick.call(:json) } if allowed.includes?(:json)
       end
 
+      # `-y`/`--yes` on a delete that asks for no confirmation: accepted and ignored, so a script
+      # can pass it to every delete (a dozen of them require it). It never adds a requirement.
+      private def self.yes_flag(p : OptionParser) : Nil
+        p.on("-y", "--yes", "Accepted and ignored (this delete asks no confirmation)") { }
+      end
+
       # `--project=NAME` / `--db=PATH`, the two ways a command names its project. A class and
       # not a record because OptionParser fills it in from callbacks.
       class ProjectFlags

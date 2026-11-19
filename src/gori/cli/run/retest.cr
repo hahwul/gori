@@ -217,6 +217,7 @@ module Gori
                      "[id] column of `gori run retest steps`), not its position — a position moves.\n" \
                      "The Repeater session and any entity link to it are untouched: a retest step is\n" \
                      "a test plan, not a link."
+          yes_flag(p)
           project_options(p, proj, "update")
           format_flag(p, [:text, :json], delete_format_help) { |f| format = f }
         end
@@ -474,6 +475,7 @@ module Gori
           p.banner = "Usage: gori run retest forget RUN\n\n" \
                      "Delete one run summary and its result rows. The retest steps stay, and the\n" \
                      "History flows each send recorded stay — this drops the report, not the evidence."
+          yes_flag(p)
           project_options(p, proj, "update")
           format_flag(p, [:text, :json], delete_format_help) { |f| format = f }
         end

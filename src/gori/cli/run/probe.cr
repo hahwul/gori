@@ -702,6 +702,7 @@ module Gori
         positional = one_positional_list(args, "gori run probe rules delete", "<custom-rule-id>") do |p|
           p.banner = "Usage: gori run probe rules delete <custom-rule-id>\n\n" \
                      "Delete a project custom rule. A built-in can only be DISABLED, never deleted."
+          yes_flag(p)
           project_options(p, proj, "write")
           format_flag(p, [:text, :json], delete_format_help) { |f| format = f }
         end
