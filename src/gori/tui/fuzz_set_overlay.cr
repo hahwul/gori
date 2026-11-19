@@ -158,6 +158,29 @@ module Gori::Tui
       focused == :values || super
     end
 
+    # A pasted wordlist is the paste the keystroke path is quadratic in (an undo snapshot of
+    # the whole list per pasted line: 100k lines froze the TUI for 29 s), so the List editor
+    # takes it whole — from the Type row too, where ^L opens and a printable drops into the
+    # values anyway (`handle_type_row`).
+    def accepts_bulk_paste? : Bool
+      list_editor? && @saving.nil? && (focused == :values || focused == :type)
+    end
+
+    # The buffer the keystroke path would build, in one edit. On the Type row a leading ↵/↹ is
+    # refused there (`takes_pasted?`), and a refusal drops the rest of the paste; a ↹ inside the
+    # values moves the row, which the last row clamps to a no-op — so neither is inserted.
+    def paste_text(text : String) : Bool
+      if focused == :type
+        if text.starts_with?('\n') || text.starts_with?('\t')
+          @notice = Runner::PASTE_MODAL_REFUSED
+          return true
+        end
+        @sel = rows.index(:values) || @sel
+      end
+      @values.insert_text(text.delete('\t'))
+      true
+    end
+
     private def focused : Symbol
       rows[@sel]? || :type
     end
