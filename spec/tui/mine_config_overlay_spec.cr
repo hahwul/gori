@@ -72,7 +72,7 @@ describe Gori::Tui::MineConfigOverlay do
   it "cycles max-requests, concurrency and notification on their rows and reports the Start row" do
     ov = MineConfigOverlay.new(seed([Gori::Miner::Location::Query], [Gori::Miner::Location::Query]))
     # rows: [0]=query, [1]=max requests, [2]=concurrency, [3]=notification, [4]=keep-alive,
-    #       [5]=macro step, [6]=macro cadence, [7]=macro on failure, [8]=start
+    #       [5]=cache-buster, [6]=macro step, [7]=macro cadence, [8]=macro on failure, [9]=start
     ov.build_config.max_requests.should be_nil # uncapped is the first choice, and the default
     ov.move(1)                                 # max requests row
     ov.adjust(1)
@@ -85,7 +85,7 @@ describe Gori::Tui::MineConfigOverlay do
     ov.build_config.notify.should eq(Gori::Miner::NotifyMode::Off)
     ov.move(1) # keep-alive row
     ov.on_start_row?.should be_false
-    3.times { ov.move(1) } # the three macro rows (#1350)
+    4.times { ov.move(1) } # the cache-buster and three macro rows (#1350)
     ov.on_start_row?.should be_false
     ov.move(1) # start row
     ov.on_start_row?.should be_true
@@ -102,17 +102,17 @@ describe Gori::Tui::MineConfigOverlay do
 
     it "picks one saved session by id, with the cadence and failure policy beside it" do
       ov = MineConfigOverlay.new(seed(q, q), macro_sessions: sessions)
-      ov.set_selected(5) # macro step
+      ov.set_selected(6) # macro step
       ov.adjust(1)
-      ov.set_selected(6) # cadence: request → 2
+      ov.set_selected(7) # cadence: request → 2
       ov.adjust(1)
-      ov.set_selected(7) # on failure: skip → stop
+      ov.set_selected(8) # on failure: skip → stop
       ov.adjust(1)
       spec = ov.build_config.request_macro.not_nil!
       spec.steps.should eq(["3"])
       spec.cadence.every.should eq(2)
       spec.on_failure.should eq(Gori::RequestMacro::OnFailure::Stop)
-      ov.set_selected(5)
+      ov.set_selected(6)
       ov.adjust(1) # the second session
       ov.build_config.request_macro.not_nil!.steps.should eq(["7"])
       ov.adjust(1) # …and back to off
@@ -121,11 +121,11 @@ describe Gori::Tui::MineConfigOverlay do
 
     it "leaves the cadence and failure rows inert while no step is picked" do
       ov = MineConfigOverlay.new(seed(q, q), macro_sessions: sessions)
-      ov.set_selected(6)
-      ov.adjust(1)
       ov.set_selected(7)
       ov.adjust(1)
-      ov.set_selected(5)
+      ov.set_selected(8)
+      ov.adjust(1)
+      ov.set_selected(6)
       ov.adjust(1) # now a step is picked
       spec = ov.build_config.request_macro.not_nil!
       spec.cadence.every.should eq(1) # the earlier presses changed nothing
@@ -134,7 +134,7 @@ describe Gori::Tui::MineConfigOverlay do
 
     it "has nothing to pick in a project with no saved session, and says so" do
       ov = MineConfigOverlay.new(seed(q, q))
-      ov.set_selected(5)
+      ov.set_selected(6)
       ov.adjust(1)
       ov.toggle
       ov.build_config.request_macro.should be_nil
@@ -145,7 +145,7 @@ describe Gori::Tui::MineConfigOverlay do
 
     it "draws the picked step's name" do
       ov = MineConfigOverlay.new(seed(q, q), macro_sessions: sessions)
-      ov.set_selected(5)
+      ov.set_selected(6)
       ov.adjust(1)
       backend = MemoryBackend.new(100, 30)
       ov.render(Screen.new(backend), Rect.new(0, 0, 100, 30))
@@ -163,6 +163,24 @@ describe Gori::Tui::MineConfigOverlay do
     # ←/→ flips it too, so the row behaves like the cyclers it sits under.
     ov.adjust(1)
     ov.build_config.keep_alive?.should be_true
+  end
+
+  it "cache-busts by default and turns it off from its own row (#1930)" do
+    ov = MineConfigOverlay.new(seed([Gori::Miner::Location::Query], [Gori::Miner::Location::Query]))
+    ov.build_config.cachebuster?.should be_true
+    ov.set_selected(5) # the cache-buster row, just under keep-alive, for a one-location seed
+    ov.toggle
+    ov.build_config.cachebuster?.should be_false
+    ov.adjust(1)
+    ov.build_config.cachebuster?.should be_true
+  end
+
+  it "reflects the session's cache-buster setting when reconfiguring (#1930)" do
+    ov = MineConfigOverlay.new(seed([Gori::Miner::Location::Query], [Gori::Miner::Location::Query]))
+    cfg = Gori::Miner::Config.new
+    cfg.cachebuster = false
+    ov.prefill(cfg)
+    ov.build_config.cachebuster?.should be_false
   end
 
   it "defaults notification to when-found" do

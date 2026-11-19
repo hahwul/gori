@@ -303,6 +303,16 @@ module Gori
       # length is malformed at the ORIGIN rather than a way to misframe the next probe, and it
       # retires the connection when the peer says so (see `H2Pool.reusable_request?`).
       property? keep_alive : Bool
+      # Append a unique cache-busting query parameter (`__gcb=<rand>`) to every probe the run
+      # sends — baseline calibration, bucket probes and confirmation rounds alike — so mining a
+      # CACHEABLE endpoint neither reads a shared cache's stored response (which would answer a
+      # fresh probe with a stale body and wreck the diff) nor writes the probe INTO that cache
+      # under a key a real user hits. ON by default: a miner that silently poisons the cache the
+      # target's users share is the kind of collateral an authorised test must not leave behind.
+      # Off is the escape hatch for an endpoint that keys on `__gcb` (vanishingly rare) or an
+      # operator deliberately probing cache behaviour. gori-authored decoration on gori's OWN
+      # probe, never operator bytes being replayed (P7) — see `Miner::CachebusterBackend`.
+      property? cachebuster : Bool
 
       # Per-Burp ceilings; query/form are additionally clamped by the URL byte budget
       # in Inject so a stuffed line can't exceed common request-line limits.
@@ -323,7 +333,8 @@ module Gori
                      @user_wordlist = nil,
                      @hook = nil,
                      @notify = NotifyMode::WhenFound, @keep_alive = true,
-                     @request_macro = nil, @sse = Repeater::StreamBound::SWEEP)
+                     @request_macro = nil, @sse = Repeater::StreamBound::SWEEP,
+                     @cachebuster = true)
       end
 
       def bucket_for(loc : Location) : Int32

@@ -32,6 +32,7 @@ module Gori
         max_requests : Int64? = nil
         hook : String? = nil
         keep_alive = true
+        cachebuster = true
         format = :text
         allow_unscoped = false
         bind_from : Int64? = nil
@@ -72,6 +73,7 @@ module Gori
           # for a scheme that needs a command to compute the value.
           request_macro_flags(p, macro_flags, "request")
           p.on("--no-keep-alive", "Dial a fresh connection for every probe (default: reuse)") { keep_alive = false }
+          p.on("--no-cachebuster", "Do NOT append a unique cache-busting query param per probe (default: do, so a cacheable endpoint is neither served from nor poisoned into a shared cache)") { cachebuster = false }
           p.on("--bind-from=FLOW-ID", "Replay this captured flow FIRST so its response fills session bindings ($BIND.NAME; bare syntax: $NAME)") { |v| bind_from = parse_flow_id(v, "gori run mine") }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens (bare syntax: $NAME)") { |v| slot = v.strip }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
@@ -120,6 +122,7 @@ module Gori
         config.seed_names = seed_names
         config.hook = hook
         config.keep_alive = keep_alive
+        config.cachebuster = cachebuster
         config.request_macro = request_macro
         # `--locations=` with no usable value (empty, or only blanks/commas) is an operator
         # mistake, not a request to auto-detect — abort instead of silently mining defaults.
