@@ -76,14 +76,17 @@ module Gori
           in .issue_gone? then abort "gori run evidence freeze: issue ##{iid} was deleted before the copy was written"
           in .quota?
             abort "gori run evidence freeze: evidence quota reached (#{store.evidence_bytes} of #{Evidence::QUOTA_BYTES} bytes used) — delete a frozen copy first"
-          in .busy? then busy_abort("gori run evidence freeze", "nothing frozen (project busy or unwritable)")
-          in .ok?   then nil
+          in .busy?            then busy_abort("gori run evidence freeze", "nothing frozen (project busy or unwritable)")
+          in .ok?, .duplicate? then nil
           end
           meta = store.get_evidence_meta(id) || abort("gori run evidence freeze: frozen evidence ##{id} vanished before it could be read back")
+          dup = status.duplicate?
           if format == :json
-            puts(JSON.build { |j| j.object { MCP::Serialize.evidence_meta(j, meta); j.field "linked", link } })
+            puts(JSON.build { |j| j.object { MCP::Serialize.evidence_meta(j, meta); j.field "linked", link; j.field("already_frozen", true) if dup } })
           else
-            puts "Frozen evidence ##{id} on issue ##{iid} from #{meta.source_label}#{link ? " (linked)" : ""}: " \
+            # The same bytes from the same source are the same evidence: said, not written twice.
+            lead = dup ? "Already frozen as evidence ##{id} on issue ##{iid} (identical bytes, nothing new written)" : "Frozen evidence ##{id} on issue ##{iid}"
+            puts "#{lead} from #{meta.source_label}#{link ? " (linked)" : ""}: " \
                  "#{Output.term_line(Evidence.label(meta))} → #{Evidence.outcome(meta)}, #{evidence_bytes_text(meta.bytes)}"
             puts "  sha256 req #{meta.request_sha256}"
             puts "  sha256 res #{meta.response_sha256 || "— (no response)"}"

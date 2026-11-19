@@ -159,7 +159,8 @@ describe "the Issues detail's RELATED card with frozen evidence" do
       issue = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
       snap = Gori::Evidence.from_flow(store.get_flow(src).not_nil!)
       a, _ = store.freeze_evidence(issue, snap)
-      b, _ = store.freeze_evidence(issue, snap)
+      # A second SOURCE: the same bytes again are the same copy, not a second row.
+      b, _ = store.freeze_evidence(issue, Gori::Evidence.from_flow(store.get_flow(frozen_flow(store, "/z")).not_nil!))
       view = IssuesView.new
       view.menu_registry = Gori::Verbs.registry
       view.reload(store)

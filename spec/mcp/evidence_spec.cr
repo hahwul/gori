@@ -56,6 +56,24 @@ describe "MCP frozen evidence" do
     end
   end
 
+  # A second freeze of the same bytes is not an error and not a second row (L#7).
+  it "answers a re-freeze of the same bytes with the existing copy and a note" do
+    with_store do |store|
+      fid = mcp_seed_flow(store, "acme.test", "GET", "/twice", 200)
+      iid = store.insert_issue("twice", Gori::Store::Severity::Low, "acme.test", nil)
+      tools = tools_for(store)
+      args = %({"issue_id":#{iid},"ref_kind":"flow","ref_id":#{fid}})
+      first = mcp_ok_json(tools, "freeze_evidence", args)
+      first["already_frozen"]?.should be_nil
+      again = mcp_ok_json(tools, "freeze_evidence", args)
+      again["frozen"].as_bool.should be_true
+      again["already_frozen"].as_bool.should be_true
+      again["note"].as_s.should contain("nothing new was written")
+      again["evidence"]["id"].as_i64.should eq(first["evidence"]["id"].as_i64)
+      mcp_ok_json(tools, "list_evidence", %({"issue_id":#{iid}}))["total"].as_i.should eq(1)
+    end
+  end
+
   it "marks a frozen flow source detached after History reuses its id" do
     with_store do |store|
       fid = mcp_seed_flow(store, "acme.test", "GET", "/original", 200)
@@ -152,8 +170,9 @@ describe "MCP frozen evidence" do
       rid = sent_repeater(store)
       iid = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
       tools = tools_for(store)
+      rid2 = sent_repeater(store) # the same bytes from the same tab would be the same copy
       a = mcp_ok_json(tools, "freeze_evidence", %({"issue_id":#{iid},"ref_kind":"repeater","ref_id":#{rid}}))["evidence"]["id"].as_i64
-      b = mcp_ok_json(tools, "freeze_evidence", %({"issue_id":#{iid},"ref_kind":"repeater","ref_id":#{rid}}))["evidence"]["id"].as_i64
+      b = mcp_ok_json(tools, "freeze_evidence", %({"issue_id":#{iid},"ref_kind":"repeater","ref_id":#{rid2}}))["evidence"]["id"].as_i64
       mcp_ok_json(tools, "delete_evidence", %({"id":#{a}}))["deleted"].as_bool.should be_true
       mcp_ok_json(tools, "list_evidence", %({"issue_id":#{iid}}))["evidence"].as_a.map(&.["id"].as_i64).should eq([b])
       tools.call("delete_evidence", JSON.parse(%({"id":#{a}}))).error_code.should eq("NOT_FOUND")
@@ -188,7 +207,7 @@ describe "MCP frozen evidence" do
       kept = mcp_ok_json(tools, "freeze_evidence",
         %({"issue_id":#{iid},"ref_kind":"repeater","ref_id":#{rid}}))["evidence"]["id"].as_i64
       orphan = mcp_ok_json(tools, "freeze_evidence",
-        %({"issue_id":#{iid},"ref_kind":"repeater","ref_id":#{rid}}))["evidence"]["id"].as_i64
+        %({"issue_id":#{iid},"ref_kind":"repeater","ref_id":#{sent_repeater(store)}}))["evidence"]["id"].as_i64
       mcp_ok_json(tools, "unlink_evidence", %({"id":#{orphan},"issue_id":#{iid}}))["orphaned"].as_bool.should be_true
 
       # The per-issue listing can no longer reach the orphan — which is why the archive

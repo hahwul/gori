@@ -202,3 +202,11 @@ describe "History's Add issue" do
     write.should contain("not frozen: #{"#"}{refusal}")
   end
 end
+
+# Freezing bytes the issue already holds writes nothing and says which copy holds them (L#7).
+describe "Runner.already_frozen_line" do
+  it "names the copy, and counts several" do
+    Runner.already_frozen_line([5_i64]).should eq("already frozen as evidence #5 (identical bytes) — nothing new written")
+    Runner.already_frozen_line([5_i64, 6_i64]).should start_with("2 already frozen")
+  end
+end

@@ -878,16 +878,34 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # refuse every later one the same way). Answers {ids written, the refusal or nil} — the
   # caller composes ONE toast from both, so a refusal is never overwritten by a success
   # line that does not mention it.
+  #
+  # A copy the issue already holds (same source, same bytes) is not written again. Its id
+  # stands in the list — it IS the copy for that ref, which keeps a caller's "first N refs"
+  # arithmetic true — unless every one was such a copy: then nothing was frozen, and the
+  # sentence says which copy already holds the bytes instead of claiming a new one.
   private def write_frozen(issue_id : Int64, snaps : Array(Evidence::Snapshot), link : Bool) : {Array(Int64), String?}
     ids = [] of Int64
+    dups = [] of Int64
     snaps.each do |snap|
       id, status = @session.store.freeze_evidence(issue_id, snap, link: link)
+      if status.duplicate?
+        ids << id
+        dups << id
+        next
+      end
       return {ids, freeze_refusal(issue_id, status)} unless status.ok?
       ids << id
       refresh_evidence_availability
       log_evidence_frozen(issue_id, id, snap)
     end
+    return {[] of Int64, Runner.already_frozen_line(dups)} if !dups.empty? && dups.size == ids.size
     {ids, nil}
+  end
+
+  # The note for a freeze whose bytes the issue already holds (L#7).
+  def self.already_frozen_line(ids : Array(Int64)) : String
+    return "already frozen as evidence ##{ids[0]} (identical bytes) — nothing new written" if ids.size == 1
+    "#{ids.size} already frozen (identical bytes) — nothing new written"
   end
 
   # The tail every "issue created" toast carries when the form was opened holding copies
@@ -912,8 +930,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     in .issue_gone? then "issue ##{issue_id} no longer exists — nothing was frozen"
     in .quota?
       "evidence quota reached (#{Fmt.size(@session.store.evidence_bytes)} of #{Fmt.size(Evidence::QUOTA_BYTES)}) — delete a frozen copy first"
-    in .busy? then "could not freeze (store busy) — nothing was written, try again"
-    in .ok?   then "" # unreachable: callers ask only on a refusal
+    in .busy?            then "could not freeze (store busy) — nothing was written, try again"
+    in .ok?, .duplicate? then "" # unreachable: `write_frozen` asks only on a refusal
     end
   end
 

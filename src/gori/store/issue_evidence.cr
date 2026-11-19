@@ -10,6 +10,10 @@ module Gori
       IssueGone # the issue was deleted between the operator's pick and the write
       Quota     # this copy would push the project past `Evidence::QUOTA_BYTES`
       Busy      # the batch never committed (SQLite busy/locked, or the store is closing)
+      # This issue already holds a copy of the same source with the same bytes (both digests):
+      # nothing was written, and the tuple carries THAT copy's id. Same bytes are the same
+      # evidence — a re-freeze after the source changed differs by digest and is written.
+      Duplicate
     end
 
     # Freeze one exchange as evidence linked to `issue_id`. ONE transaction for the copy,
@@ -23,7 +27,7 @@ module Gori
     # raising — matters too: the writer batches ops from every fiber into one transaction, and
     # a raise here would roll back a neighbour's unrelated write.
     #
-    # Returns `{id, status}`; `id` is 0 unless the status is Ok. Like `insert_issue`, the id is
+    # Returns `{id, status}`; `id` is 0 unless the status is Ok or Duplicate. Like `insert_issue`, the id is
     # trusted only once the batch reports COMMITTED — the rowid read inside the closure belongs
     # to a row that may yet roll back.
     def freeze_evidence(issue_id : Int64, snap : Evidence::Snapshot, *, link : Bool = false,
@@ -35,8 +39,14 @@ module Gori
         # A proc has no early `next`, so the two refusals fall through one `if` ladder.
         exists = c.scalar("SELECT COUNT(*) FROM issues WHERE id = ?", issue_id).as(Int64) > 0
         used = c.scalar("SELECT COALESCE(SUM(bytes), 0) FROM issue_evidence").as(Int64)
+        same = exists ? identical_evidence(c, issue_id, snap) : nil
         if !exists
           status = FreezeStatus::IssueGone
+        elsif same
+          row_id = same
+          status = FreezeStatus::Duplicate
+          # "link & freeze" still files the live link the operator asked for.
+          link_source(c, issue_id, snap, ts) if link
         elsif used + snap.bytes > quota
           status = FreezeStatus::Quota
         else
@@ -46,7 +56,22 @@ module Gori
         nil
       }
       return {0_i64, FreezeStatus::Busy} unless ok
-      status.ok? ? {row_id, status} : {0_i64, status}
+      status.ok? || status.duplicate? ? {row_id, status} : {0_i64, status}
+    end
+
+    # The id of a copy linked to `issue_id` from the same source with the same digests, or nil.
+    private def identical_evidence(c : DB::Connection, issue_id : Int64, snap : Evidence::Snapshot) : Int64?
+      c.query_one?(
+        "SELECT e.id FROM issue_evidence e JOIN evidence_issue_links l ON l.evidence_id = e.id " \
+        "WHERE l.issue_id = ? AND e.source_kind = ? AND e.source_id = ? AND e.request_sha256 = ? " \
+        "AND e.response_sha256 IS ? ORDER BY e.id LIMIT 1",
+        issue_id, snap.source_kind.label, snap.source_id, snap.request_sha256, snap.response_sha256, as: Int64)
+    end
+
+    private def link_source(c : DB::Connection, issue_id : Int64, snap : Evidence::Snapshot, ts : Int64) : Nil
+      c.exec(
+        "INSERT OR IGNORE INTO entity_links (owner_kind, owner_id, ref_kind, ref_id, created_at) VALUES ('issue', ?, ?, ?, ?)",
+        issue_id, snap.source_kind.label, snap.source_id, ts)
     end
 
     # The INSERT pair, on an open connection inside the writer's transaction; answers the
@@ -73,11 +98,7 @@ module Gori
       c.exec(
         "INSERT INTO evidence_issue_links (evidence_id, issue_id, created_at) VALUES (?, ?, ?)",
         id, issue_id, ts)
-      if link
-        c.exec(
-          "INSERT OR IGNORE INTO entity_links (owner_kind, owner_id, ref_kind, ref_id, created_at) VALUES ('issue', ?, ?, ?, ?)",
-          issue_id, snap.source_kind.label, snap.source_id, ts)
-      end
+      link_source(c, issue_id, snap, ts) if link
       id
     end
 

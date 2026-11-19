@@ -50,13 +50,19 @@ module Gori
         in .quota?
           return err("evidence quota reached (#{store.evidence_bytes} of #{Evidence::QUOTA_BYTES} bytes used) — delete a frozen copy first",
             "QUOTA_EXCEEDED")
-        in .busy? then return busy("nothing frozen (store busy or unwritable)")
-        in .ok?   then nil
+        in .busy?            then return busy("nothing frozen (store busy or unwritable)")
+        in .ok?, .duplicate? then nil
         end
         meta = store.get_evidence_meta(id)
         Result.new(JSON.build do |j|
           j.object do
             j.field "frozen", true
+            # Said, as `link_evidence` says `already_linked`: the issue already held these exact
+            # bytes from this source, so the id is that copy's and nothing new was written.
+            if status.duplicate?
+              j.field "already_frozen", true
+              j.field "note", "evidence ##{id} on this issue already holds these bytes from this source; nothing new was written"
+            end
             j.field "linked", link
             if meta
               j.field("evidence") { j.object { Serialize.evidence_meta(j, meta) } }
