@@ -70,6 +70,26 @@ module Gori
                  http2 : Bool, source : FlowSource::Kind, surface : FlowSource::Surface,
                  source_ref : String? = nil, websocket : Bool = false,
                  &on_error : Exception -> _) : Int64?
+        p = pair(r, scheme: scheme, host: host, port: port, http2: http2, source: source,
+          surface: surface, source_ref: source_ref, websocket: websocket)
+        return nil unless p
+        fid = nil.as(Int64?)
+        batch = Batch(Nil).new(store, ->(ex : Exception) { on_error.call(ex); nil })
+        batch.add(p, nil)
+        batch.flush { |_, id| fid = id }
+        fid
+      rescue ex
+        on_error.call(ex)
+        nil
+      end
+
+      # The flow `record` writes, as the request/response pair `Store#insert_import_batch_ids`
+      # commits (the response's `flow_id` is a placeholder the batch fills in), or nil when
+      # there is nothing to record. See `record` for the `websocket` and `wire` rules.
+      def pair(r : Result, *, scheme : String, host : String, port : Int32,
+               http2 : Bool, source : FlowSource::Kind, surface : FlowSource::Surface,
+               source_ref : String? = nil,
+               websocket : Bool = false) : {Store::CapturedRequest, Store::CapturedResponse?}?
         # `wire` FIRST: `request` is the rendered template, and the send seam rewrote it — the
         # `$NAME` pass and the active session slot's header overlay both run below the matcher
         # (`Fuzz::Sender#send`). Recording the template wrote flows without the identity the
@@ -82,44 +102,100 @@ module Gori
         head, body = Env.split_head_body(recorded_request(request, scheme, host, port, http2))
         # A line `split(' ')` cannot frame is filed the way the proxy files it (#1423).
         method, target, version = FlowMapper.authored_request(head, http2: http2)
-        fid = store.insert_flow(Store::CapturedRequest.new(
+        req = Store::CapturedRequest.new(
           created_at: Time.utc.to_unix_ms * 1000_i64,
           scheme: scheme, host: host, port: port,
           method: method, target: target,
           http_version: http2 ? "HTTP/2" : version,
           head: head, body: body, body_size: body.try(&.size.to_i64),
-          source: source, source_surface: surface, source_ref: source_ref))
-        # A store that ROLLED BACK reports 0, it does not raise — the commonest failure here
-        # (busy/locked/closed) and, until this was reported, the silent one: every result
-        # yielded nil and the run printed "recorded 0 flows" with no reason anywhere.
-        if fid <= 0
-          on_error.call(Gori::Error.new("the flow insert did not commit (project busy or read-only)"))
-          return nil
-        end
-        write_response(store, fid, r)
-        fid
-      rescue ex
-        on_error.call(ex)
-        nil
+          source: source, source_surface: surface, source_ref: source_ref)
+        {req, response(r)}
       end
 
-      # The response half of `record`: the parsed head when there is one, else the error row.
-      # Split out so `record` stays inside the complexity limit once the WebSocket guard above
-      # is counted — it is a self-contained step, not a branch of the recording decision.
-      private def write_response(store : Store, fid : Int64, r : Result) : Nil
+      # The response half of `pair`: the parsed head when there is one, else the error row.
+      private def response(r : Result) : Store::CapturedResponse
         rhead = r.head
         if rhead && !rhead.empty? && (resp = (Proxy::Codec::Http1.parse_response_head(rhead) rescue nil))
           # A body the origin cut short is an Error row, as `Repeater::HistoryRecord` files the
           # same Result; a bound gori chose to stop an event stream at is not (#1631).
           error = r.error
           error ||= "upstream response body was incomplete" if r.incomplete? && !r.bounded
-          store.update_response(FlowMapper.response(resp, flow_id: fid, body: r.body,
+          FlowMapper.response(resp, flow_id: 0_i64, body: r.body,
             duration_us: r.duration_us,
             state: error ? Store::FlowState::Error : Store::FlowState::Complete,
-            error: error, body_size: r.body.try(&.size.to_i64)))
+            error: error, body_size: r.body.try(&.size.to_i64))
         else
-          store.update_response(FlowMapper.error_response(fid, r.error || "no response recorded",
-            duration_us: r.duration_us))
+          FlowMapper.error_response(0_i64, r.error || "no response recorded",
+            duration_us: r.duration_us)
+        end
+      end
+
+      # Buffers recorded flows so a sweep commits them a chunk at a time, ONE writer
+      # transaction per chunk. Recording one result per `insert_flow` + `update_response`
+      # round-trip made the writer commit (and fsync) twice per row, which capped a recording
+      # sweep at ~1.1k rps against 20k+ without it (P6). `T` is whatever the surface needs to
+      # finish the row once its id is known (the CLI prints it, MCP stores it).
+      #
+      # A chunk is due at `SIZE` rows or once its oldest row is `MAX_AGE` old, checked on each
+      # `due?` (so a row waits at most until the next result after that). The caller flushes
+      # once more when the run ends, on every path. A chunk that did not commit (the store
+      # rolled back or is closing) reports ONE error to `on_error` and finishes its rows with a
+      # nil id, as a failed single insert did.
+      class Batch(T)
+        SIZE    = 256
+        MAX_AGE = 100.milliseconds
+
+        @pairs = [] of {Store::CapturedRequest, Store::CapturedResponse?}
+        @payloads = [] of T
+        @since : Time::Instant? = nil
+
+        def initialize(@store : Store, @on_error : Exception -> Nil)
+        end
+
+        def size : Int32
+          @pairs.size
+        end
+
+        def add(pair : {Store::CapturedRequest, Store::CapturedResponse?}, payload : T) : Nil
+          @since ||= Time.instant
+          @pairs << pair
+          @payloads << payload
+        end
+
+        # Reports a failure that happened before a row reached the batch (its projection
+        # raised) through the same handler, so a surface says it once either way.
+        def fail(ex : Exception) : Nil
+          @on_error.call(ex)
+        end
+
+        def due? : Bool
+          return true if @pairs.size >= SIZE
+          since = @since
+          !since.nil? && Time.instant - since >= MAX_AGE
+        end
+
+        # Commits the buffered flows and yields each payload with its new flow id (nil when the
+        # chunk did not commit), in the order they were added.
+        def flush(& : T, Int64? ->) : Nil
+          return if @pairs.empty?
+          pairs, payloads = @pairs, @payloads
+          @pairs = [] of {Store::CapturedRequest, Store::CapturedResponse?}
+          @payloads = [] of T
+          @since = nil
+          ids = begin
+            @store.insert_import_batch_ids(pairs)
+          rescue ex
+            @on_error.call(ex)
+            nil
+          end
+          # A store that ROLLED BACK answers empty, it does not raise — the commonest failure
+          # here (busy/locked/closed) and, until it was reported, the silent one: every result
+          # yielded nil and the run printed "recorded 0 flows" with no reason anywhere.
+          if ids && ids.size != pairs.size
+            @on_error.call(Gori::Error.new("the flow insert did not commit (project busy or read-only)"))
+            ids = nil
+          end
+          payloads.each_with_index { |payload, i| yield payload, ids.try(&.[i]?) }
         end
       end
 

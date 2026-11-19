@@ -245,11 +245,16 @@ module Gori
       # never leave the job wedged at :running, which would hang a polling client
       # forever and keep jobs_busy refusing (blocking switch_project/delete_project).
       private def run_fuzz_job(fjob : FuzzJob, engine : Fuzz::Engine) : Nil
+        history = Fuzz::HistoryRecord::Batch({Fuzz::Result, String}).new(store, ->(ex : Exception) do
+          fjob.drain_errors += 1
+          Log.warn(exception: ex) { "fuzz history record failed" } if fjob.drain_errors <= DRAIN_LOG_CAP
+          nil
+        end)
         # CLI (`--ac`) and the TUI both call calibrate_baseline before the sweep.
         # fuzz_config already set Config/Matcher.auto_calibrate from the arg, but nothing
         # here ever sampled — so auto_calibrate:true was a documented silent no-op.
         engine.calibrate_baseline if engine.auto_calibrate?
-        engine.run { |ev| drain_fuzz_event(fjob, ev) }
+        engine.run { |ev| drain_fuzz_event(fjob, ev, history) }
       rescue ex
         Log.error(exception: ex) { "fuzz job #{fjob.id} crashed" }
         fjob.error_msg ||= ex.message || "internal fuzz job error"
@@ -257,14 +262,18 @@ module Gori
         # Keep status :running until the final batch + summary commit. Project switching is
         # gated by that state, so this ordering prevents the writer from following @store to a
         # different project between the last event and the flush.
-        fjob.release_ordering # first: the engine has returned, and a raise below must not skip it
+        # A crashed run still keeps what it queued for History; contained, so it cannot skip
+        # the release below.
+        history.try { |h| flush_fuzz_history(fjob, h) } rescue nil
+        fjob.release_ordering # the engine has returned, and a raise below must not skip it
         finish_fuzz_persistence(fjob, fjob.status == :running ? :error : fjob.status)
         finalize_job(fjob)
       end
 
       # Apply one fuzz event to the job, contained: a callback failure records the
       # error and marks the job but never unwinds out of engine.run (see above).
-      private def drain_fuzz_event(fjob : FuzzJob, ev : Fuzz::Event) : Nil
+      private def drain_fuzz_event(fjob : FuzzJob, ev : Fuzz::Event,
+                                   history : Fuzz::HistoryRecord::Batch({Fuzz::Result, String})) : Nil
         case ev
         when Fuzz::ProgressEvent then apply_fuzz_progress(fjob, ev.progress)
         when Fuzz::ResultEvent
@@ -272,9 +281,11 @@ module Gori
           # A write failure is absorbed by Persistence and never stops outbound traffic.
           fjob.persistence.try(&.append(ev.result))
           fjob.clusters.add(ev.result)
-          flow_id, flow_ref = maybe_record_fuzz_flow(fjob, ev.result)
-          store_fuzz_result(fjob, ev.result, flow_id, flow_ref)
+          # A recorded row is stored once its History chunk commits, so it carries its flow id.
+          store_fuzz_result(fjob, ev.result, nil, nil) unless buffer_fuzz_flow(fjob, ev.result, history)
+          flush_fuzz_history(fjob, history) if history.due?
         when Fuzz::DoneEvent
+          flush_fuzz_history(fjob, history)
           apply_fuzz_progress(fjob, ev.progress)
           fjob.stop_reason = ev.stop_reason
           terminal = fuzz_terminal_status(fjob, ev.progress, ev.stopped, ev.stop_reason)
@@ -304,41 +315,49 @@ module Gori
         fjob.error_msg ||= ex.message || "internal fuzz drain error"
       end
 
-      # Record a fuzz result's rendered request + response as a History flow when
-      # record_history asks (matched → matched results, all → every sent request),
-      # returning the new flow id. Bounded by FUZZ_HISTORY_MAX to cap DB growth for
-      # `all`. Recording must never break the run — a failure just yields nil.
-      private def maybe_record_fuzz_flow(fjob : FuzzJob, r : Fuzz::Result) : {Int64?, String?}
-        return {nil, nil} if fjob.record_history == :none
-        return {nil, nil} unless fjob.record_history == :all || r.matched?
-        req = r.request
-        return {nil, nil} unless req
-        if fjob.recorded_flows >= FUZZ_HISTORY_MAX
-          fjob.history_truncated = true
-          return {nil, nil}
-        end
-        flow_ref = fjob.next_history_source_ref
-        fid = record_fuzz_flow(fjob, req, fjob.origin, fjob.http2?, r, flow_ref)
-        fjob.recorded_flows += 1 if fid
-        {fid, fid ? flow_ref : nil}
-      end
-
-      # Reconstruct a History flow (request head/body + response head/body) from a fuzz Result.
-      # Stored raw; get_flow redacts sensitive headers on read.
+      # Queue a fuzz result's rendered request + response as a History flow when
+      # record_history asks (matched → matched results, all → every sent request), answering
+      # whether it was queued. Bounded by FUZZ_HISTORY_MAX to cap DB growth for `all`, counting
+      # the rows still queued. Recording must never break the run — a failure is counted
+      # against this job's drain budget and the row is stored without a flow id.
       #
       # The projection itself lives in `Fuzz::HistoryRecord` and is shared with
       # `gori run fuzz --record-history` — it used to be a byte-identical second copy here, which
       # is how the two would have drifted on the next fix. What stays MCP's is the REPORTING:
       # recording runs per result, so a store that fails every insert must not log once per
       # request — the failure is counted against this job's drain budget instead.
-      private def record_fuzz_flow(fjob : FuzzJob, request : Bytes, origin : Fuzz::Origin,
-                                   http2 : Bool, r : Fuzz::Result, flow_ref : String) : Int64?
-        Fuzz::HistoryRecord.record(store, r,
-          scheme: origin.scheme, host: origin.host, port: origin.port, http2: http2,
-          source: Gori::FlowSource::Kind::Fuzzer, surface: Gori::FlowSource::Surface::Mcp,
-          source_ref: flow_ref, websocket: fjob.websocket?) do |ex|
-          fjob.drain_errors += 1
-          Log.warn(exception: ex) { "fuzz history record failed" } if fjob.drain_errors <= DRAIN_LOG_CAP
+      # Stored raw; get_flow redacts sensitive headers on read.
+      private def buffer_fuzz_flow(fjob : FuzzJob, r : Fuzz::Result,
+                                   history : Fuzz::HistoryRecord::Batch({Fuzz::Result, String})) : Bool
+        return false if fjob.record_history == :none
+        return false unless fjob.record_history == :all || r.matched?
+        return false unless r.request
+        if fjob.recorded_flows + history.size >= FUZZ_HISTORY_MAX
+          fjob.history_truncated = true
+          return false
+        end
+        flow_ref = fjob.next_history_source_ref
+        origin = fjob.origin
+        pair = begin
+          Fuzz::HistoryRecord.pair(r,
+            scheme: origin.scheme, host: origin.host, port: origin.port, http2: fjob.http2?,
+            source: Gori::FlowSource::Kind::Fuzzer, surface: Gori::FlowSource::Surface::Mcp,
+            source_ref: flow_ref, websocket: fjob.websocket?)
+        rescue ex
+          history.fail(ex)
+          nil
+        end
+        return false unless pair
+        history.add(pair, {r, flow_ref})
+        true
+      end
+
+      # Commit the queued History rows and store each with the flow id it landed as.
+      private def flush_fuzz_history(fjob : FuzzJob,
+                                     history : Fuzz::HistoryRecord::Batch({Fuzz::Result, String})) : Nil
+        history.flush do |(r, flow_ref), fid|
+          fjob.recorded_flows += 1 if fid
+          store_fuzz_result(fjob, r, fid, fid ? flow_ref : nil)
         end
       end
 

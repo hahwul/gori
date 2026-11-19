@@ -180,4 +180,68 @@ describe Gori::Fuzz::HistoryRecord do
       File.delete?("#{path}-shm")
     end
   end
+
+  # The chunked write both surfaces record through: one writer transaction per chunk instead of
+  # two blocking commits per row, which capped a recording sweep at ~1.1k rps.
+  describe "Batch" do
+    it "commits the queued rows in one write and hands each payload its own flow id, in order" do
+      with_store do |store|
+        errors = [] of Exception
+        batch = Gori::Fuzz::HistoryRecord::Batch(Int32).new(store, ->(ex : Exception) { errors << ex; nil })
+        3.times do |i|
+          r = result_with("GET /r#{i} HTTP/1.1\r\nHost: t.test\r\n\r\n",
+            "HTTP/1.1 20#{i} OK\r\nContent-Length: 2\r\n\r\n", matched: true)
+          batch.add(Gori::Fuzz::HistoryRecord.pair(r, scheme: "http", host: "t.test", port: 80, http2: false,
+            source: Gori::FlowSource::Kind::Fuzzer, surface: Gori::FlowSource::Surface::Cli).not_nil!, i)
+        end
+        batch.size.should eq(3)
+        seen = [] of {Int32, Int64?}
+        batch.flush { |i, fid| seen << {i, fid} }
+        batch.size.should eq(0)
+        errors.should be_empty
+        seen.map(&.[0]).should eq([0, 1, 2])
+        seen.each do |(i, fid)|
+          row = store.flow_row(fid.not_nil!).not_nil!
+          row.target.should eq("/r#{i}")
+          row.status.should eq(200 + i)
+          row.state.complete?.should be_true
+        end
+      end
+    end
+
+    it "is due at SIZE rows and not before" do
+      with_store do |store|
+        batch = Gori::Fuzz::HistoryRecord::Batch(Nil).new(store, ->(_ex : Exception) { nil })
+        batch.due?.should be_false
+        r = result_with("GET / HTTP/1.1\r\n\r\n", "HTTP/1.1 200 OK\r\n\r\n", matched: true)
+        pair = Gori::Fuzz::HistoryRecord.pair(r, scheme: "http", host: "t.test", port: 80, http2: false,
+          source: Gori::FlowSource::Kind::Fuzzer, surface: Gori::FlowSource::Surface::Cli).not_nil!
+        (Gori::Fuzz::HistoryRecord::Batch::SIZE - 1).times { batch.add(pair, nil) }
+        batch.due?.should be_false
+        batch.add(pair, nil)
+        batch.due?.should be_true
+      end
+    end
+
+    it "reports a chunk that did not commit once and finishes its rows with no id" do
+      path = File.tempname("gori-fuzzhist-batch-closed", ".db")
+      store = Gori::Store.open(path)
+      store.close
+      errors = [] of Exception
+      batch = Gori::Fuzz::HistoryRecord::Batch(Int32).new(store, ->(ex : Exception) { errors << ex; nil })
+      r = result_with("GET / HTTP/1.1\r\n\r\n", "HTTP/1.1 200 OK\r\n\r\n", matched: true)
+      pair = Gori::Fuzz::HistoryRecord.pair(r, scheme: "http", host: "t.test", port: 80, http2: false,
+        source: Gori::FlowSource::Kind::Fuzzer, surface: Gori::FlowSource::Surface::Cli).not_nil!
+      batch.add(pair, 1)
+      batch.add(pair, 2)
+      seen = [] of {Int32, Int64?}
+      batch.flush { |i, fid| seen << {i, fid} }
+      seen.should eq([{1, nil}, {2, nil}])
+      errors.size.should eq(1)
+    ensure
+      File.delete?(path.not_nil!)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
 end
