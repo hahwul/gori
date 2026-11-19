@@ -88,8 +88,11 @@ module Gori::Tui
       InterceptController.queue_keys(f, d, mark, fa, y, filt, catch)
     end
 
+    # `/` is the CATCH condition — what gets held from now on — not a search of the queue, so
+    # the queue's hint says "condition" as the idle hint does: "filter" invited typing a search
+    # that silently changed the catch rule (W#5).
     def self.queue_keys(f : String, d : String, mark : String, fa : String, y : String, filt : String, catch : String) : String
-      "↑/↓ move · #{f} fwd · #{d} drop · ↵/e edit · #{mark} mark · ⇧↑/↓ range · #{fa} all · #{y} copy · #{filt} filter · #{catch} catch · space cmds · esc tabs"
+      "↑/↓ move · #{f} fwd · #{d} drop · ↵/e edit · #{mark} mark · ⇧↑/↓ range · #{fa} all · #{y} copy · #{filt} condition · #{catch} catch · space cmds · esc tabs"
     end
 
     def self.idle_keys(toggle : String, direction : String, filt : String) : String

@@ -1523,6 +1523,12 @@ describe "Intercept queue hint on a narrow row" do
     fitted.should contain("d drop")
     fitted.should contain("space cmds")
   end
+
+  it "calls `/` the catch condition, as the idle hint does — it is not a queue search" do
+    full = InterceptController.queue_keys("f", "d", "t", "⇧F", "y", "/", "c")
+    full.should contain("/ condition")
+    full.should_not contain("/ filter")
+  end
 end
 
 # With nothing held the queue footer named forward, drop and edit — keys with no row to act
