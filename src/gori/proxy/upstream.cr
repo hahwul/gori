@@ -1145,15 +1145,26 @@ module Gori::Proxy
     # What `proxy_tls_context` and `client_context` both start from: no kTLS, then system
     # trust or no verification.
     private def self.base_client_context(verify : Bool) : OpenSSL::SSL::Context::Client
-      ctx = OpenSSL::SSL::Context::Client.new
+      ctx = verify ? OpenSSL::SSL::Context::Client.new : insecure_client_context
       {% if OpenSSL.has_constant?(:KTLS) %}
         ctx.remove_options(OpenSSL::SSL::Options::ENABLE_KTLS) # see ContextFactory.lean_server
       {% end %}
-      if verify
-        apply_system_trust(ctx) unless env_ca_override?
-      else
-        ctx.verify_mode = OpenSSL::SSL::VerifyMode::NONE
-      end
+      apply_system_trust(ctx) if verify && !env_ca_override?
+      ctx
+    end
+
+    # `Context::Client.new` with verification off, minus the one thing it does that a context
+    # which verifies nothing never reads: `set_default_verify_paths`, which parses OpenSSL's
+    # whole default CA bundle — a third of a one-shot `gori run send -k https://…` process. The
+    # options, modes and verify param are the ones `Client.new` sets, so the ClientHello is the
+    # same bytes (spec/proxy/upstream_spec.cr compares the two).
+    private def self.insecure_client_context : OpenSSL::SSL::Context::Client
+      ctx = OpenSSL::SSL::Context::Client.insecure
+      ctx.add_options(OpenSSL::SSL::Options.flags(ALL, NO_TLS_V1, NO_TLS_V1_1,
+        NO_SESSION_RESUMPTION_ON_RENEGOTIATION, NO_RENEGOTIATION))
+      ctx.add_modes(OpenSSL::SSL::Modes.flags(AUTO_RETRY, RELEASE_BUFFERS))
+      ctx.default_verify_param = "ssl_server"
+      ctx.verify_mode = OpenSSL::SSL::VerifyMode::NONE
       ctx
     end
 
