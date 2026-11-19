@@ -189,7 +189,8 @@ module Gori
         leftover = parse_args(args, "gori run oast providers") do |p|
           p.banner = "Usage: gori run oast providers [list] [options]\n\n" \
                      "List saved OAST providers. `id` is scope-qualified: p_<n> is this project's,\n" \
-                     "g_<hex> is a global one from settings.json (read-only here)."
+                     "g_<hex> is a global one from settings.json (read-only here).\n\n" \
+                     "Or run with a subcommand: add, update, enable, disable, delete/rm (each takes -h)"
           project_options(p, proj, "read")
           p.on("--show-tokens", "Print provider auth tokens instead of [REDACTED]") { show_tokens = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }

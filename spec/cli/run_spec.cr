@@ -1500,3 +1500,22 @@ describe "CLI::Run.query_terms_error" do
     Gori::CLI::Run.query_terms_error("host:a path~^/api", strict: true).should be_nil
   end
 end
+
+# Four parent `--help` pages showed only the list's options, never the verbs the top-level
+# help says they have; `rewriter --help` and `project scope --help` always named theirs.
+describe "gori run — a parent's --help names its subcommands" do
+  it "lists them on probe rules, oast providers, session and wordlist" do
+    root = File.join(__DIR__, "..", "..", "src", "gori", "cli", "run")
+    {
+      {"probe.cr", "Usage: gori run probe rules [list]", "add, update, enable, disable, delete/rm"},
+      {"oast.cr", "Usage: gori run oast providers [list]", "add, update, enable, disable, delete/rm"},
+      {"session.cr", "Usage: gori run session [list] [options]", "show, add, from-flow, from-request, edit, rm/delete"},
+      {"wordlist.cr", "Usage: gori run wordlist [list]", "show, save, rename, delete"},
+    }.each do |file, usage, verbs|
+      src = File.read(File.join(root, file))
+      at = src.index(usage).not_nil!
+      banner = src[at, 900].split(/\n\s*(?:project_options|p\.on|format_flag)/).first
+      banner.should contain("Or run with a subcommand: #{verbs}"), failure_message: file
+    end
+  end
+end

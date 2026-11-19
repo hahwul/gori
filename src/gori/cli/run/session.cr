@@ -194,7 +194,9 @@ module Gori
                      "every one of them; a send (Repeater/Fuzz/intercept forward) applies the ONE\n" \
                      "named by --slot.\n\n" \
                      "Header VALUES are [REDACTED] — a session cookie is a credential and this list\n" \
-                     "is scrollback. --show-values prints them."
+                     "is scrollback. --show-values prints them.\n\n" \
+                     "Or run with a subcommand: show, add, from-flow, from-request, edit, rm/delete,\n" \
+                     "baseline, refresh (each takes -h)"
           project_options(p, proj, "read")
           p.on("--show-values", "Print set-header values instead of [REDACTED]") { show_values = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }

@@ -477,7 +477,8 @@ module Gori
           p.banner = "Usage: gori run probe rules [list] [options]\n\n" \
                      "List every scan rule — built-in passive, built-in active, and custom match\n" \
                      "rules — with whether it is enabled. A scan on ANY surface (here, the TUI, or\n" \
-                     "MCP) honours this config."
+                     "MCP) honours this config.\n\n" \
+                     "Or run with a subcommand: add, update, enable, disable, delete/rm (each takes -h)"
           project_options(p, proj, "read")
           p.on("--kind=KIND", "Only list rules of this kind (passive|active|custom)") { |v| kind = parse_rule_kind(v) }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
