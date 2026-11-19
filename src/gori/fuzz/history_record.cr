@@ -136,17 +136,21 @@ module Gori
       # sweep at ~1.1k rps against 20k+ without it (P6). `T` is whatever the surface needs to
       # finish the row once its id is known (the CLI prints it, MCP stores it).
       #
-      # A chunk is due at `SIZE` rows or once its oldest row is `MAX_AGE` old, checked on each
-      # `due?` (so a row waits at most until the next result after that). The caller flushes
-      # once more when the run ends, on every path. A chunk that did not commit (the store
-      # rolled back or is closing) reports ONE error to `on_error` and finishes its rows with a
-      # nil id, as a failed single insert did.
+      # A chunk is due at `SIZE` rows, at `MAX_BYTES` of bodies (256 rows of 8 MiB bodies held
+      # 2 GiB), or once its oldest row is `MAX_AGE` old, checked on each `due?` and by `idle`
+      # when the event loop is about to block. The caller flushes once more when the run ends,
+      # on every path. A chunk that did not commit (the store rolled back or is closing)
+      # reports ONE error to `on_error` and finishes its rows with a nil id, as a failed single
+      # insert did.
       class Batch(T)
-        SIZE    = 256
-        MAX_AGE = 100.milliseconds
+        SIZE      = 256
+        MAX_AGE   = 100.milliseconds
+        MAX_BYTES = 32_i64 * 1024 * 1024
 
         @pairs = [] of {Store::CapturedRequest, Store::CapturedResponse?}
-        @payloads = [] of T
+        # Each payload with whether it has a pair (`add_unrecorded` queues one without).
+        @payloads = [] of {T, Bool}
+        @bytes = 0_i64
         @since : Time::Instant? = nil
 
         def initialize(@store : Store, @on_error : Exception -> Nil)
@@ -159,7 +163,14 @@ module Gori
         def add(pair : {Store::CapturedRequest, Store::CapturedResponse?}, payload : T) : Nil
           @since ||= Time.instant
           @pairs << pair
-          @payloads << payload
+          @payloads << {payload, true}
+          @bytes += (pair[0].body.try(&.size) || 0) + (pair[1].try(&.body).try(&.size) || 0)
+        end
+
+        # A row that is not recorded but must come out after the ones queued before it, so a
+        # surface printing in `flush` order keeps arrival order. `flush` yields it a nil id.
+        def add_unrecorded(payload : T) : Nil
+          @payloads << {payload, false}
         end
 
         # Reports a failure that happened before a row reached the batch (its projection
@@ -169,20 +180,31 @@ module Gori
         end
 
         def due? : Bool
-          return true if @pairs.size >= SIZE
+          return true if @pairs.size >= SIZE || @bytes >= MAX_BYTES
           since = @since
           !since.nil? && Time.instant - since >= MAX_AGE
+        end
+
+        # For an event loop about to block (`Engine#run`'s `idle`): flushes through the block
+        # when due, else answers how long until it is (nil when nothing is queued).
+        def idle(& : ->) : Time::Span?
+          since = @since || return nil
+          left = MAX_AGE - (Time.instant - since)
+          return left unless due? || left <= Time::Span.zero
+          yield
+          nil
         end
 
         # Commits the buffered flows and yields each payload with its new flow id (nil when the
         # chunk did not commit), in the order they were added.
         def flush(& : T, Int64? ->) : Nil
-          return if @pairs.empty?
+          return if @payloads.empty?
           pairs, payloads = @pairs, @payloads
           @pairs = [] of {Store::CapturedRequest, Store::CapturedResponse?}
-          @payloads = [] of T
+          @payloads = [] of {T, Bool}
+          @bytes = 0_i64
           @since = nil
-          ids = begin
+          ids = pairs.empty? ? nil : begin
             @store.insert_import_batch_ids(pairs)
           rescue ex
             @on_error.call(ex)
@@ -195,7 +217,12 @@ module Gori
             @on_error.call(Gori::Error.new("the flow insert did not commit (project busy or read-only)"))
             ids = nil
           end
-          payloads.each_with_index { |payload, i| yield payload, ids.try(&.[i]?) }
+          i = 0
+          payloads.each do |payload, paired|
+            next yield payload, nil unless paired
+            yield payload, ids.try(&.[i]?)
+            i += 1
+          end
         end
       end
 

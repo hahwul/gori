@@ -967,8 +967,6 @@ module Gori
         # even under --fail-if-no-matches (a `--stop-on 'regex:admin'` need not have "matched").
         condition_met = false
         last_progress = nil.as(Fuzz::Progress?)
-        interrupted = Run.install_interrupt_trap("fuzz-interrupt",
-          "interrupted — stopping and emitting what completed…") { engine.stop }
         # The array writer opens before the engine starts and closes from ensure. Rows are emitted
         # one at a time (no Result buffer), while interrupt/setup exceptions still leave `[]` or
         # a valid partial array on stdout.
@@ -1007,15 +1005,31 @@ module Gori
           end
           nil
         end
+        # The flush right after the stop: a second Ctrl-C `exit`s past every ensure below, and
+        # the answered rows still in the batch were then neither recorded nor printed. Safe
+        # beside the loop's own flush, which takes the batch's arrays before it commits.
+        # ponytail: a main fiber parked mid-write on a full stdout pipe can interleave with
+        # these rows; a shared write lock would close that.
+        interrupted = Run.install_interrupt_trap("fuzz-interrupt",
+          "interrupted — stopping and emitting what completed…") do
+          engine.stop
+          flush_records.call
+        end
+        # When the next event is not queued yet: the batch commits once due (it would otherwise
+        # wait for the next event to be checked), and the rows printed so far leave the buffer.
+        idle = -> do
+          wait = record_batch.try(&.idle { flush_records.call })
+          STDOUT.flush
+          wait
+        end
         # Block-buffered while the rows stream (see `Output.bulk`): a fast sweep into a pipe paid
-        # one `write(2)` per row. A reader following the pipe still gets them every
-        # `STREAM_FLUSH`, and every STDERR line below is preceded by a flush so it cannot
-        # overtake the rows printed before it.
+        # one `write(2)` per row. A reader following the pipe still gets them whenever the loop
+        # waits (`idle`) and every `STREAM_FLUSH` of a stream that never does, and every STDERR
+        # line below is preceded by a flush so it cannot overtake the rows printed before it.
         flushed_at = Time.instant
-        result_at = flushed_at - STREAM_FLUSH
         CLI::Output.bulk do
           say_request_line_rewrite # the run is about to send it — see `warn_request_line_rewrite`
-          engine.run do |ev|
+          engine.run(idle) do |ev|
             case ev
             when Fuzz::ProgressEvent
               last_progress = ev.progress
@@ -1036,6 +1050,8 @@ module Gori
               end
               if pair && (batch = record_batch)
                 batch.add(pair, r)
+              elsif (batch = record_batch) && batch.size > 0
+                batch.add_unrecorded(r) # behind the queued rows, so the stream keeps arrival order
               else
                 emit.call(r, nil)
               end
@@ -1057,16 +1073,11 @@ module Gori
               STDOUT.flush
               STDERR.puts "fuzz error: #{ev.message}"
             end
-            # Also at once after a result that came alone (the one before it is STREAM_FLUSH
-            # old), so a slow sweep's reader sees each row as it lands, not when the next does.
-            # ponytail: a fast burst followed by a stall waits for the next event (a reply or a
-            # timeout); a flusher fiber would need a lock shared with every write here.
             now = Time.instant
-            if now - flushed_at >= STREAM_FLUSH || (ev.is_a?(Fuzz::ResultEvent) && now - result_at >= STREAM_FLUSH)
+            if now - flushed_at >= STREAM_FLUSH
               STDOUT.flush
               flushed_at = now
             end
-            result_at = now if ev.is_a?(Fuzz::ResultEvent)
           end
         ensure
           # A broken stdout pipe must not strand a durable row in `running`: finalize the

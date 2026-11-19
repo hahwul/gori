@@ -250,6 +250,7 @@ module Gori
           Log.warn(exception: ex) { "fuzz history record failed" } if fjob.drain_errors <= DRAIN_LOG_CAP
           nil
         end)
+        fjob.history = history
         # CLI (`--ac`) and the TUI both call calibrate_baseline before the sweep.
         # fuzz_config already set Config/Matcher.auto_calibrate from the arg, but nothing
         # here ever sampled — so auto_calibrate:true was a documented silent no-op.

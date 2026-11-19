@@ -223,6 +223,58 @@ describe Gori::Fuzz::HistoryRecord do
       end
     end
 
+    # `--record-history` printed an unrecorded row at once and the recorded rows before it
+    # only when their chunk committed, so the CLI stream left arrival order.
+    it "yields an unrecorded row in add order, with no id" do
+      with_store do |store|
+        batch = Gori::Fuzz::HistoryRecord::Batch(Int32).new(store, ->(_ex : Exception) { nil })
+        r = result_with("GET / HTTP/1.1\r\n\r\n", "HTTP/1.1 200 OK\r\n\r\n", matched: true)
+        pair = Gori::Fuzz::HistoryRecord.pair(r, scheme: "http", host: "t.test", port: 80, http2: false,
+          source: Gori::FlowSource::Kind::Fuzzer, surface: Gori::FlowSource::Surface::Cli).not_nil!
+        batch.add(pair, 1)
+        batch.add_unrecorded(2)
+        batch.add(pair, 3)
+        batch.size.should eq(2)
+        seen = [] of {Int32, Bool}
+        batch.flush { |i, fid| seen << {i, !fid.nil?} }
+        seen.should eq([{1, true}, {2, false}, {3, true}])
+      end
+    end
+
+    # 256 rows of 8 MiB bodies held 2 GiB before the chunk was due.
+    it "is due once the queued bodies pass MAX_BYTES" do
+      with_store do |store|
+        batch = Gori::Fuzz::HistoryRecord::Batch(Nil).new(store, ->(_ex : Exception) { nil })
+        big = "x" * (8 * 1024 * 1024)
+        r = result_with("POST / HTTP/1.1\r\n\r\n#{big}", "HTTP/1.1 200 OK\r\n\r\n", matched: true)
+        pair = Gori::Fuzz::HistoryRecord.pair(r, scheme: "http", host: "t.test", port: 80, http2: false,
+          source: Gori::FlowSource::Kind::Fuzzer, surface: Gori::FlowSource::Surface::Cli).not_nil!
+        3.times { batch.add(pair, nil) }
+        batch.due?.should be_false
+        batch.add(pair, nil)
+        batch.due?.should be_true
+      end
+    end
+
+    # A row waited for the NEXT event to be checked, however long that took.
+    it "answers the wait until due when idle, and flushes once due" do
+      with_store do |store|
+        batch = Gori::Fuzz::HistoryRecord::Batch(Nil).new(store, ->(_ex : Exception) { nil })
+        flushed = 0
+        batch.idle { flushed += 1 }.should be_nil
+        r = result_with("GET / HTTP/1.1\r\n\r\n", "HTTP/1.1 200 OK\r\n\r\n", matched: true)
+        pair = Gori::Fuzz::HistoryRecord.pair(r, scheme: "http", host: "t.test", port: 80, http2: false,
+          source: Gori::FlowSource::Kind::Fuzzer, surface: Gori::FlowSource::Surface::Cli).not_nil!
+        batch.add(pair, nil)
+        wait = batch.idle { flushed += 1 }.not_nil!
+        (wait > Time::Span.zero && wait <= Gori::Fuzz::HistoryRecord::Batch::MAX_AGE).should be_true
+        flushed.should eq(0)
+        sleep Gori::Fuzz::HistoryRecord::Batch::MAX_AGE
+        batch.idle { flushed += 1 }.should be_nil
+        flushed.should eq(1)
+      end
+    end
+
     it "reports a chunk that did not commit once and finishes its rows with no id" do
       path = File.tempname("gori-fuzzhist-batch-closed", ".db")
       store = Gori::Store.open(path)

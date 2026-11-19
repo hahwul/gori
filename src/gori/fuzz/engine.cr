@@ -1302,10 +1302,32 @@ module Gori::Fuzz
     end
 
     # Blocking drain — for synchronous consumers (CLI, the MCP background fiber).
-    def run(& : Event ->) : Nil
+    #
+    # `idle`, when given, runs each time the next event is not already queued, i.e. the drain
+    # is about to block: a consumer flushes what it buffered there, so a row does not wait for
+    # the NEXT event to show. It answers how long the drain may then block before asking
+    # again (nil: until an event comes).
+    def run(idle : (-> Time::Span?)? = nil, & : Event ->) : Nil
       start
-      while ev = @events.receive?
+      while ev = next_event(idle)
         yield ev
+      end
+    end
+
+    private def next_event(idle : (-> Time::Span?)?) : Event?
+      return @events.receive? unless idle
+      loop do
+        select
+        when ev = @events.receive?
+          return ev
+        else
+        end
+        return @events.receive? unless wait = idle.call
+        select
+        when ev = @events.receive?
+          return ev
+        when timeout(wait)
+        end
       end
     end
 
