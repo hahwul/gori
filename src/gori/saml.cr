@@ -3,6 +3,7 @@ require "compress/deflate"
 require "uri"
 require "./pretty"
 require "./entity"
+require "./import/xml_mini"
 
 module Gori
   # Decodes the SAML message a flow carries. SAML travels base64-encoded (and, for
@@ -21,6 +22,14 @@ module Gori
     # Ceiling on a decoded (and inflated) document we'll surface, so a deflate bomb or
     # a pathological assertion can't blow up the detail view. Far above any real SAML.
     MAX_XML = 4 * 1024 * 1024
+
+    private SAML_RESPONSE         = "SAMLResponse"
+    private PROTOCOL_NS           = "urn:oasis:names:tc:SAML:2.0:protocol"
+    private ASSERTION_NS          = "urn:oasis:names:tc:SAML:2.0:assertion"
+    private BEARER_METHOD         = "urn:oasis:names:tc:SAML:2.0:cm:bearer"
+    private POST_FORM_CAP         = 64 * 1024
+    private POST_XML_LIMITS       = Import::XmlMini::Limits.new(max_bytes: 48 * 1024, max_nodes: 4096, max_depth: 64)
+    private POST_NAMESPACE_BUDGET = 128
 
     # A synthetic head so Pretty.format routes the decoded bytes through its XML
     # reflow (it keys on the Content-Type). Computed once.
@@ -102,8 +111,7 @@ module Gori
     # auto-detecting the binding: a base64 payload that is itself XML is HTTP-POST;
     # one that raw-inflates to XML is HTTP-Redirect. nil when it's neither.
     def decode_value(value : String) : {String, Symbol}?
-      raw = Base64.decode(value.gsub(/\s/, "")) rescue return nil
-      return nil if raw.empty?
+      raw = decode_base64(value) || return nil
       if looks_like_xml?(raw)
         return raw.size <= MAX_XML ? {String.new(raw), :post} : nil
       end
@@ -111,6 +119,21 @@ module Gori
         return {inflated, :redirect}
       end
       nil
+    end
+
+    # Observed HTTP-POST binding in an already-decoded form body. Only this binding sends
+    # base64 XML without DEFLATE, and the bearer assertion must be a direct child of the
+    # protocol Response, not an example in a comment, extension, or unrelated XML document.
+    def form_post_bearer_response?(body : String) : Bool
+      return false if body.bytesize > POST_FORM_CAP
+      return false unless body.includes?(SAML_RESPONSE) || body.includes?('%')
+      body.split('&') do |pair|
+        offset = pair.byte_index('=') || next
+        name = pair.byte_slice(0, offset)
+        next unless name == SAML_RESPONSE || (name.includes?('%') && URI.decode_www_form(name) == SAML_RESPONSE)
+        return true if bearer_response_value?(pair.byte_slice(offset + 1))
+      end
+      false
     end
 
     # Re-encode edited XML back into a wire parameter value (url-encoded) for repeater —
@@ -140,6 +163,49 @@ module Gori
     end
 
     # --- internals ----------------------------------------------------------
+
+    private def bearer_response_value?(encoded : String) : Bool
+      value = URI.decode_www_form(encoded, plus_to_space: false)
+      raw = decode_base64(value) || return false
+      return false unless looks_like_xml?(raw)
+      xml = String.new(raw)
+      return false unless xml.valid_encoding? && bounded_namespaces?(xml)
+      response = Import::XmlMini.parse(xml, POST_XML_LIMITS)
+      return false unless response.uri == PROTOCOL_NS && response.local == "Response" && saml_metadata?(response)
+      status = response.element?(PROTOCOL_NS, "Status").try(&.element?(PROTOCOL_NS, "StatusCode"))
+      return false unless status.try(&.attr?("Value")).try(&.presence)
+      response.elements(ASSERTION_NS, "Assertion").any? do |assertion|
+        next false unless saml_metadata?(assertion) && assertion.element?(ASSERTION_NS, "Issuer").try(&.text.presence)
+        subject = assertion.element?(ASSERTION_NS, "Subject")
+        subject.try(&.elements(ASSERTION_NS, "SubjectConfirmation").any? { |confirmation| confirmation.attr?("Method") == BEARER_METHOD })
+      end
+    rescue Error
+      false
+    end
+
+    private def saml_metadata?(node : Import::XmlMini::Node) : Bool
+      node.attr?("Version") == "2.0" && !!node.attr?("ID").try(&.presence) && !!node.attr?("IssueInstant").try(&.presence)
+    end
+
+    # A namespace declaration copies the in-scope map in XmlMini. Cap declarations as
+    # well as nodes so a wide, namespace-heavy document cannot amplify the passive work.
+    private def bounded_namespaces?(xml : String) : Bool
+      count = 0
+      offset = 0
+      while found = xml.byte_index("xmlns", offset)
+        count += 1
+        return false if count > POST_NAMESPACE_BUDGET
+        offset = found + 5
+      end
+      true
+    end
+
+    private def decode_base64(value : String) : Bytes?
+      bytes = Base64.decode(value.gsub(/\s/, ""))
+      bytes unless bytes.empty?
+    rescue Base64::Error | ArgumentError
+      nil
+    end
 
     private def has_param?(s : String) : Bool
       s.includes?("SAMLResponse=") || s.includes?("SAMLRequest=")

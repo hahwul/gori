@@ -3,6 +3,7 @@ require "./passive/context"
 require "./passive/rule"
 require "./passive/tech"
 require "./passive/secret_in_url"
+require "./passive/referer_credentials"
 require "./passive/security_headers"
 require "./passive/mime_confusion"
 require "./passive/cacheable_api"
@@ -23,6 +24,7 @@ require "./passive/cleartext_credentials"
 require "./passive/shared_cache"
 require "./passive/internal_host_leak"
 require "./passive/ws_payloads"
+require "./passive/websocket_origin"
 require "./passive/secrets"
 require "./passive/js_scan"
 require "./passive/dom_xss"
@@ -51,6 +53,7 @@ module Gori
       RULES = [
         Tech.new,
         SecretInUrl.new,
+        RefererCredentials.new,
         SecurityHeaders.new,
         MimeConfusion.new,
         CacheableApi.new,
@@ -71,6 +74,7 @@ module Gori
         SharedCache.new,
         InternalHostLeak.new,
         WsPayloads.new,
+        WebSocketOrigin.new,
         DomXss.new,
         DomClobbering.new,
         PrototypePollution.new,

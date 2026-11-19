@@ -1,8 +1,8 @@
 require "base64"
-require "digest/sha1"
 require "../proxy/upstream"
 require "../proxy/codec/http1"
 require "../proxy/ws/frame"
+require "../proxy/ws/handshake"
 require "./flow_request"
 require "./ws_deflate"
 require "./h2_ws_stream"
@@ -31,7 +31,7 @@ module Gori
     #
     # Compression is opt-in and limited to independent messages; captured proxy frames stay raw.
     module WsEngine
-      GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11" # RFC 6455 §1.3 accept magic
+      GUID = Proxy::WS::Handshake::ACCEPT_GUID
 
       DEFAULT_IDLE      = 3.seconds           # gap of server silence that ends the drain
       HANDSHAKE_TIMEOUT = 15.seconds          # generous read bound for the connect + 101 upgrade
@@ -1101,7 +1101,7 @@ module Gori
           return "handshake accept NOT verified: the request carried #{sent}, so there is no " \
                  "single key to derive one from (the server answered #{got ? got.inspect : "none"})"
         end
-        want = Base64.strict_encode(Digest::SHA1.digest(keys[0] + GUID))
+        want = Proxy::WS::Handshake.accept_value(keys[0])
         unless got
           return "handshake accept MISSING: the server sent 101 with no Sec-WebSocket-Accept " \
                  "header (RFC 6455 §4.2.2 requires #{want.inspect})"

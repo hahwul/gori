@@ -711,7 +711,8 @@ describe "Gori::Probe.cwe" do
     # token is the design, not a weakness (see Passive::Secrets::JWT). cookie_broad_domain is an
     # Info hardening note (a Domain scoped to a parent domain) that no CWE fits cleanly — 1275 is
     # SameSite, 565/732/668 all overreach — so it stays unmapped rather than borrowing a wrong id.
-    unmapped.sort.should eq(["cookie_broad_domain", "jwt_in_body", "jwt_in_ws"])
+    # ws_cross_site_cookie describes an accepted handshake. Cross-site access may be intentional.
+    unmapped.sort.should eq(["cookie_broad_domain", "jwt_in_body", "jwt_in_ws", "ws_cross_site_cookie"])
   end
 
   it "renders the canonical CWE-<id> identifier and name" do
