@@ -137,9 +137,13 @@ module Gori
     # marker whose lock CAN be taken has no living owner (flock died with its process), so
     # this is where SIGKILL'd servers get cleaned up. Never raises — the callers are a render
     # loop and a picker probe, and a filesystem hiccup must read as "nobody attached".
-    def self.live(db_path : String, kind : String = KIND_MCP) : Array(Entry)
+    #
+    # `dir` is `dir_for(db_path, kind)` already resolved, for a caller that polls: resolving it
+    # is a `realpath`, one `getattrlist` per path component, and the TUI asks every 750 ms on
+    # its one scheduler thread.
+    def self.live(db_path : String, kind : String = KIND_MCP, dir : String? = nil) : Array(Entry)
       entries = [] of Entry
-      each_live(db_path, kind) { |path| entries << parse_entry(path, kind) }
+      each_live(db_path, kind, dir: dir) { |path| entries << parse_entry(path, kind) }
       entries.sort_by { |e| e.attached_at.try(&.to_unix_ms) || Int64::MAX }
     rescue
       [] of Entry
@@ -199,9 +203,9 @@ module Gori
     # and yield the path of each LIVE one. The shared core of `live` and `count`: liveness and
     # the stale sweep are decided here once, so the two callers cannot drift on either.
     private def self.each_live(db_path : String, kind : String,
-                               unsure : Proc(Nil)? = nil, & : String ->) : Nil
+                               unsure : Proc(Nil)? = nil, dir : String? = nil, & : String ->) : Nil
       return unless markable?(db_path)
-      dir = dir_for(db_path, kind)
+      dir ||= dir_for(db_path, kind)
       return unless Dir.exists?(dir)
       Dir.each_child(dir) do |child|
         # Dot-prefixed names are in-flight temp files (see `announce`) — not ours to judge

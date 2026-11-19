@@ -58,6 +58,22 @@ describe Gori::AgentPresence do
     end
   end
 
+  # The TUI polls every 750 ms and resolves the directory once (a realpath per poll blocked
+  # its loop under disk contention), so `live` must read the directory it is handed.
+  it "reads a pre-resolved marker directory the same as the one it resolves" do
+    with_project do |_registry, project|
+      presence = announce(project.db_path)
+      begin
+        dir = Gori::AgentPresence.dir_for(project.db_path)
+        Gori::AgentPresence.live(project.db_path, dir: dir).map(&.path)
+          .should eq(Gori::AgentPresence.live(project.db_path).map(&.path))
+        Gori::AgentPresence.live(project.db_path, dir: "#{dir}-elsewhere").should be_empty
+      ensure
+        presence.close
+      end
+    end
+  end
+
   it "close removes the marker and empties live" do
     with_project do |_registry, project|
       presence = announce(project.db_path)
