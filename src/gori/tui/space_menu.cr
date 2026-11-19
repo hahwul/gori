@@ -726,7 +726,10 @@ module Gori::Tui
     # row style).
     def render(screen : Screen, body : Rect) : Nil
       b = box(body)
-      return if b.empty?
+      if b.empty?
+        Overlay.too_small(screen, body, "menu too small") unless @entries.empty?
+        return
+      end
       Frame.card(screen, b, card_title, border: Theme.border_focus)
 
       g = grid(body)

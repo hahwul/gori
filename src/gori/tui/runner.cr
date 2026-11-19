@@ -2858,17 +2858,20 @@ module Gori::Tui
 
     private def handle_palette_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
-      c = ev.char || key.to_char
       if key.escape?
         close_overlay
-      elsif key.enter?
+        return
+      end
+      return unless (body = command_body) && !@palette.overlay_box(body).empty?
+
+      c = ev.char || key.to_char
+      if key.enter?
         palette_enter(ev)
       elsif @palette.edit(ev, self) # ↑/↓, ⌃/⌥←→, Home/End, Delete, ⌥⌫, ←/→ — before ⌫ and the printables
       elsif key.backspace?
         @palette.backspace(self)
       elsif c && !c.control? && !ev.ctrl? && !ev.alt? # termisu reads Tab as '\t'
         @palette.append(c, self)
-        @palette.set_preedit("") if @palette.responds_to?(:set_preedit)
       end
     end
 
@@ -2879,6 +2882,11 @@ module Gori::Tui
     # chosen verb runs scoped to where space was pressed (P1).
     private def handle_space_menu_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
+      body = command_body
+      if body.nil? || @space_menu.box(body).empty?
+        close_space_menu if key.escape?
+        return
+      end
       if key.escape? || key.backspace?
         close_space_menu unless @space_menu.back
       elsif key.up? || key.back_tab?
@@ -2886,9 +2894,9 @@ module Gori::Tui
       elsif key.down? || key.tab?
         @space_menu.move(1)
       elsif key.left?
-        space_menu_move_column(-1)
+        @space_menu.move_column(-1, body)
       elsif key.right?
-        space_menu_move_column(1)
+        @space_menu.move_column(1, body)
       elsif key.enter?
         activate_space_entry(@space_menu.selected_entry)
       elsif (c = ev.char) && !ev.ctrl? && !ev.alt?
@@ -2903,9 +2911,9 @@ module Gori::Tui
         elsif c == 'k'
           @space_menu.move(-1)
         elsif c == 'h'
-          space_menu_move_column(-1)
+          @space_menu.move_column(-1, body)
         elsif c == 'l'
-          space_menu_move_column(1)
+          @space_menu.move_column(1, body)
         else
           close_space_menu # an unmapped leader key dismisses (helix feel)
         end
@@ -2914,14 +2922,11 @@ module Gori::Tui
       end
     end
 
-    # ←/→ (and h/l) in the space menu: how many columns the popup has is a function of
-    # the body it is drawn into, so recompute the same geometry render uses. Silently
-    # inert when the menu is a single column or already at the outer one — an arrow key
-    # must never dismiss the menu the way an unmapped leader key does.
-    private def space_menu_move_column(delta : Int32) : Nil
+    # Key batches can include a resize before the next frame. Use the current
+    # backend size so a command card that no longer fits cannot run its old selection.
+    private def command_body : Rect?
       w, h = @backend.size
-      return unless Layout.usable?(w, h)
-      @space_menu.move_column(delta, Layout.compute(w, h, statusline_active?).body)
+      Layout.compute(w, h, statusline_active?).body if Layout.usable?(w, h)
     end
 
     # ↵, a click or a row's key: a family row descends, a verb row runs, and the inert
@@ -2957,10 +2962,10 @@ module Gori::Tui
     end
 
     private def reopen_sticky_family(point : {Verb::Family, Int32}, here : ActionContext) : Nil
-      w, h = @backend.size
-      return unless Layout.usable?(w, h) && Layout.compute(w, h, statusline_active?).body.h >= 3
+      return unless body = command_body
       @space_menu.open(here.scope, here.section, self, banner: here.banner, subtabs: here.subtabs)
       return unless @space_menu.resume(point)
+      return if @space_menu.box(body).empty?
       @space_menu_here = here
       @space_menu_open = true
     end
@@ -4626,11 +4631,8 @@ module Gori::Tui
         @toast = "no commands for this area"
         return
       end
-      # Need a body tall enough to draw the card (≥3 rows); below that the popup
-      # renders nothing yet would still capture input. Bail with a hint rather than
-      # trap the user behind an invisible modal (only hit at the minimum 40×8 size).
-      w, h = @backend.size
-      if Layout.compute(w, h, statusline_active?).body.h < 3
+      # Opening from scratch needs room for the card and at least one entry.
+      if !(body = command_body) || @space_menu.box(body).empty?
         @toast = "terminal too short for the menu"
         return
       end

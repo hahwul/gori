@@ -51,6 +51,20 @@ describe Gori::Tui::SpaceMenu do
     menu.entry_for('Q').try(&.verb).should be_nil # no entry bound to this key
   end
 
+  it "replaces a menu that no longer fits with a close hint" do
+    ctx = FakeExecContext.new
+    ctx.selected = 5_i64
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+    menu.open(Gori::Verb::Scope::Body, :common, ctx)
+    area = Layout.compute(40, 8).body
+    backend = MemoryBackend.new(40, 8)
+
+    menu.render(Screen.new(backend), area)
+    menu.box(area).empty?.should be_true
+    backend.contains?("menu too small · esc to close").should be_true
+    menu.row_at(area, area.x + 2, area.y + 1).should be_nil
+  end
+
   # The regression: project.copy ('Y') and project.select-line ('x') sat in Verb::Scope::Body
   # gated only on project_desc_read_mode?, which is tab-blind and true from boot (ProjectView's
   # pane defaults to :desc). Both rendered in the History list's menu, where their handlers'

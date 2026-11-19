@@ -39,6 +39,22 @@ private class RunnerSpecShell < Gori::Tui::Runner
     handle_key(TuiContract.key(key))
   end
 
+  def type(text : String) : Nil
+    text.each_char { |char| handle_key(TuiContract.plain(char)) }
+  end
+
+  def resize_terminal(width : Int32, height : Int32) : Nil
+    handle(Termisu::Event::Resize.new(width, height))
+  end
+
+  def space_menu_level : Gori::Verb::Family?
+    @space_menu.level
+  end
+
+  def space_menu_open? : Bool
+    @space_menu_open
+  end
+
   def notification_hint : String
     active_overlay.not_nil!.hint
   end
@@ -62,6 +78,58 @@ describe Gori::Tui::Runner do
       example.run
     ensure
       Gori::Tui::TrafficEmptyState.registry = registry
+    end
+  end
+
+  it "blocks a hidden palette selection and runs the same selection once it fits" do
+    TuiContract.with_session("runner-short-palette") do |session|
+      runner = RunnerSpecShell.new(session, RunnerSpecTerminal.allocate)
+      runner.focus_tab(:history)
+      runner.resize_terminal(80, 9)
+      runner.open_palette
+      runner.press(Termisu::Input::Key::Escape)
+      runner.overlay.should eq(:none)
+
+      runner.resize_terminal(80, 24)
+      runner.open_palette
+      runner.type("go to project")
+      runner.resize_terminal(80, 9)
+      runner.press(Termisu::Input::Key::Enter)
+      runner.overlay.should eq(:palette)
+      runner.active_tab.should eq(:history)
+
+      runner.resize_terminal(80, 12)
+      runner.press(Termisu::Input::Key::Enter)
+      runner.overlay.should eq(:none)
+      runner.active_tab.should eq(:project)
+    end
+  end
+
+  it "blocks Enter and mnemonics in a hidden Space menu and keeps Escape available" do
+    TuiContract.with_session("runner-short-space") do |session|
+      runner_spec_flow(session.store, "/one")
+      runner = RunnerSpecShell.new(session, RunnerSpecTerminal.allocate)
+      runner.focus_tab(:history)
+      settle_history(runner.history, session.store)
+      runner.resize_terminal(40, 8)
+      runner.open_space_menu
+      runner.space_menu_open?.should be_false
+
+      runner.resize_terminal(80, 24)
+      runner.open_space_menu
+      runner.space_menu_open?.should be_true
+      runner.resize_terminal(40, 8)
+      runner.press(Termisu::Input::Key::Enter)
+      runner.type("Z")
+      runner.space_menu_open?.should be_true
+      runner.space_menu_level.should be_nil
+
+      runner.resize_terminal(80, 24)
+      runner.type("Z")
+      runner.space_menu_level.should_not be_nil
+      runner.resize_terminal(40, 8)
+      runner.press(Termisu::Input::Key::Escape)
+      runner.space_menu_open?.should be_false
     end
   end
 
