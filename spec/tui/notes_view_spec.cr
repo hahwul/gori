@@ -382,7 +382,7 @@ describe Gori::Tui::NotesView do
       end
     end
 
-    it "still lets this session's edit win on the note it did change" do
+    it "keeps both versions when two sessions edit the same note" do
       with_store do |store|
         id = Gori::Notes.create(store, "base").not_nil!
         view = NotesView.new
@@ -392,7 +392,16 @@ describe Gori::Tui::NotesView do
         Gori::Notes.update(store, id, "peer")
         view.save(store).should be_true
 
-        Gori::Notes.load(store).notes.map(&.text).should eq(["mine base"])
+        doc = Gori::Notes.load(store)
+        doc.notes.map(&.text).should eq(["peer", "mine base"])
+        doc.notes.first.id.should eq(id)
+        doc.note_id(doc.cur).should eq(view.current_note_id)
+        view.current_note_id.should_not eq(id)
+        view.current_text.should eq("mine base")
+        view.saved_copy_count.should eq(1)
+        view.save(store).should be_true
+        view.saved_copy_count.should eq(0)
+        Gori::Notes.load(store).notes.should eq(doc.notes)
       end
     end
 

@@ -6,8 +6,7 @@ require "../spec_helper"
 # source scan cannot reach are covered where they live: the lens SQL in `spec/scope_spec.cr`, the
 # "no flows in scope" card in `spec/tui/flow_picker_spec.cr`.
 #
-# Comments are stripped first. The comment above the fetch NAMES `recent_flows` to explain why
-# the call moved, so a whole-body `includes?` would pass on the strength of that prose.
+# Comments are stripped so the assertions read the actual wiring.
 private def comparer_pick_body : String
   path = File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner", "comparer.cr")
   lines = File.read(path).lines.reject(&.lstrip.starts_with?('#'))
@@ -23,7 +22,8 @@ describe "the Comparer flow picker's row source" do
   it "applies the Scope lens in the query, before the row limit" do
     # Through the hide-static lens too (#1239), ANDed onto the scope lens before the search.
     comparer_pick_body.should match(/lens = @scope\.filter\b/)
-    comparer_pick_body.should match(/store\.search\(\s*lens\s*,\s*\d+/)
+    comparer_pick_body.should contain("QL.and(lens, QL.hide_static)")
+    comparer_pick_body.should match(/FlowPicker\.for_store\(@session\.store, slot, lens,/)
   end
 
   it "keeps no unlensed snapshot path, at any limit" do
@@ -32,12 +32,6 @@ describe "the Comparer flow picker's row source" do
   end
 
   it "tells the picker its rows were lensed, so an empty card can say which emptiness it is" do
-    comparer_pick_body.should match(/FlowPicker\.new\([^\n]*scoped:/)
-  end
-
-  it "surfaces a failed lens query instead of degrading it to an empty picker" do
-    # store#search defaults to swallowing a SQLite failure and returning [] (the live render
-    # loop must never crash). Here that degrade is indistinguishable from "nothing in scope".
-    comparer_pick_body.should contain("raise_on_error: true")
+    comparer_pick_body.should match(/FlowPicker\.for_store\([^\n]*scoped: @scope\.active\?/)
   end
 end

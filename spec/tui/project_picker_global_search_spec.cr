@@ -55,16 +55,18 @@ describe "the picker's :global_search mode" do
     method_body(src, "run").should contain("@search.try(&.set_preedit(ev.text))")
     method_body(src, "run").should contain("@search.try(&.tick) if @mode == :global_search")
     method_body(src, "handle_picker_mouse").should match(/when :global_search\s+then handle_global_search_mouse\(/)
-    method_body(src, "picker_wheel").should match(/when :global_search\s+then @search\.try\(&\.wheel\(delta\)\)/)
+    method_body(src, "picker_wheel").should match(/when :global_search\s+then @search\.try\(&\.wheel\(delta, search_area\)\)/)
     method_body(src, "render").should contain("@search.try(&.render(")
     method_body(src, "render_list").should contain("when @mode == :global_search")
   end
 
-  it "cancels the search on every way out, and carries a hit's flow id with its project" do
+  it "clears a cancelled search and carries its snapshot when opening a hit" do
     src = code("tui", "project_picker.cr")
     finish = method_body(src, "finish_global_search")
-    finish.scan(/close_global_search/).size.should eq(3) # :quit, :close, :open
-    finish.should contain("@focus_flow_id = outcome.flow_id")
+    finish.scan(/close_global_search/).size.should eq(2) # :quit and :close
+    finish.should contain("open_global_search_hit(outcome)")
+    method_body(src, "open_global_search_hit").should contain("@focus_flow_id = outcome.flow_id")
+    method_body(src, "search_on_return").should contain("@search if @focus_flow_id")
     method_body(src, "close_global_search").should contain("@search.try(&.close)")
   end
 end
@@ -73,6 +75,8 @@ describe "opening a project on a search hit's flow" do
   it "hands the picker's focus_flow_id to the session's Runner" do
     app = code("app.cr")
     app.should contain("open_or_report_guard(project, term, picker.focus_flow_id)")
+    app.should contain("resume_search = picker.search_on_return")
+    app.should contain("resume_search: resume_search")
     method_body(app, "open_or_report_guard").should contain("open_and_run(project, term, focus_flow_id)")
     method_body(app, "open_and_run").should contain("runner.focus_flow_on_start = focus_flow_id")
   end

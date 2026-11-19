@@ -164,10 +164,15 @@ describe "Gori::Tui::NotesController — a closed note's links" do
       store.add_link(Gori::Store::LinkOwnerKind::Note, id, Gori::Store::LinkRefKind::Flow, 7_i64)
       controller.save_notes.should be_true
       controller.view.unpersisted?(id).should be_false # the commit made it persisted
+      host = controller.@host.as(NotesFakeHost)
+      host.hold_confirm = true
 
       # The close is a delete and persists itself — a peer listing the notes no longer sees it —
       # and the links go with that commit, the post-commit cleanup a refused write never reaches.
       controller.notes_close
+      store.list_links(Gori::Store::LinkOwnerKind::Note, id).size.should eq(1)
+      controller.view.current_note_id.should eq(id)
+      host.held_confirm.not_nil!.call
       store.list_links(Gori::Store::LinkOwnerKind::Note, id).should be_empty
       Gori::Notes.doc_from(store.setting(Gori::Notes::DOCS_KEY), nil).notes.map(&.id).should_not contain(id)
     end
@@ -179,6 +184,26 @@ describe "Gori::Tui::NotesController — a closed note's links" do
       controller.@host.as(NotesFakeHost).session.store.close # every write from here answers false
       controller.notes_close
       controller.@host.as(NotesFakeHost).statuses.last.should contain("NOT yet removed from the project")
+    end
+  end
+end
+
+describe "Notes selection during a conflict save" do
+  it "selects the requested note after saving a conflicting edit as a copy" do
+    with_notes_controller do |controller|
+      store = controller.@host.as(NotesFakeHost).session.store
+      controller.save_notes.should be_true
+      current = controller.view.current_note_id
+      first = controller.view.note_at(1).not_nil!.id
+      target = controller.view.note_at(2).not_nil!.id
+      controller.view.replace_current("local draft")
+      Gori::Notes.update(store, current, "peer draft").should eq(Gori::Notes::Write::Committed)
+      Gori::Notes.delete(store, first).should eq(Gori::Notes::Write::Committed)
+
+      controller.jump_subtab(2)
+
+      controller.view.current_note_id.should eq(target)
+      Gori::Notes.load(store).notes.map(&.text).should contain("local draft")
     end
   end
 end

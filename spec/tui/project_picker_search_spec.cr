@@ -1,10 +1,54 @@
 require "../spec_helper"
+require "../support/memory_backend"
 
 include Gori::Tui
 
-# The project picker's search and its row labels. The picker owns a live Termisu and cannot
-# be built in a spec, so both rules live in class methods — the same shape `meta_segments`
-# and `ProjectMarks` use for the delete set.
+private class ProjectSearchTerminal < Termisu
+  def size : {Int32, Int32}
+    {80, 24}
+  end
+end
+
+private class ProjectSearchPicker < ProjectPicker
+  def key(key : Termisu::Input::Key, char : Char? = nil) : Gori::Project | Symbol?
+    handle_list(Termisu::Event::Key.new(key, char: char))
+  end
+
+  def input : String
+    query
+  end
+
+  def click_query_start : Gori::Project | Symbol?
+    box, _ = ProjectPicker.card_metrics(80, 24)
+    render_search_row(Screen.new(MemoryBackend.new(80, 24)), box)
+    handle_list_mouse(box.x + 5, box.y + 3)
+  end
+end
+
+describe "ProjectPicker search field" do
+  it "positions the caret by key or click and opens the project only on Enter" do
+    root = File.tempname("gori-picker-input")
+    begin
+      registry = Gori::ProjectRegistry.new(root)
+      registry.create("alpha")
+      picker = ProjectSearchPicker.new(ProjectSearchTerminal.allocate, registry)
+      "lpha".each_char { |c| picker.key(Termisu::Input::Key.from_char(c), c) }
+      picker.key(Termisu::Input::Key::Home)
+      picker.key(Termisu::Input::Key::LowerA, 'a')
+      picker.input.should eq("alpha")
+
+      picker.click_query_start.should be_nil
+      picker.key(Termisu::Input::Key::Delete)
+      picker.input.should eq("lpha")
+      picker.key(Termisu::Input::Key::Enter).as(Gori::Project).name.should eq("alpha")
+    ensure
+      FileUtils.rm_rf(root)
+    end
+  end
+end
+
+# The ranking and label rules also live in class methods so they can be tested on
+# synthetic registry entries.
 #
 # What is being pinned: the picker used to look at the display NAME and nothing else, while
 # `gori run project list --query` and MCP `list_projects{query}` narrow on the name, the

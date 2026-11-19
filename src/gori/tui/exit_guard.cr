@@ -26,7 +26,7 @@ module Gori::Tui
         {"Fuzzer", fuzzer_controller.save_all},
         {"Miner", miner_controller.save_all},
         {"Sequencer", sequencer_controller.save_all},
-        {"Issues", issues_controller.commit},
+        {"Issues", issues_controller.commit_on_exit},
         {"Decoder", decoder_controller.commit},
         {"Rewriter", rewriter_controller.commit},
       ].reject { |_, saved| saved }.map(&.[0])

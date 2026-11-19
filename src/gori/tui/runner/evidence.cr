@@ -543,6 +543,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   private def open_evidence_issue(id : Int64) : Nil
+    return unless issues_controller.prepare_detail_departure
     unless issues_controller.view.open_detail_id(id, @session.store)
       @toast = "Issue ##{id} is gone"
       return

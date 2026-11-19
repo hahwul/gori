@@ -411,14 +411,13 @@ describe "the Issues notes refusal, once the operator has read it" do
       ctrl.notes_conflict_pending?.should be_false # typed, but nobody else has written
       store.update_issue(id, notes: "THEIRS")
       ctrl.notes_conflict_pending?.should be_true
+      ctrl.commit_on_exit.should be_false
+      ctrl.view.notes_copy_all.should eq("mine original")
+      store.get_issue(id).not_nil!.notes.should eq("THEIRS")
     end
   end
 
-  it "does not blame a peer for a buffer the INS gate drops anyway" do
-    # `commit` only saves while the pane is in INS, so a buffer the NOR/INS chip stepped out of
-    # is dropped at quit whether or not anybody else wrote — by that gate, not by this conflict.
-    # A prompt saying "another session rewrote them" over it would send the operator hunting a
-    # collision that is not the reason they lost the text.
+  it "routes drafts in READ through the unsaved-edits exit guard" do
     with_issues_controller do |ctrl, _host, store|
       id = open_issue(ctrl, store, notes: "original")
       ctrl.view.enter_notes_insert!
@@ -427,6 +426,24 @@ describe "the Issues notes refusal, once the operator has read it" do
       store.update_issue(id, notes: "THEIRS")
       ctrl.view.notes_dirty?.should be_true # there IS unsaved text
       ctrl.notes_conflict_pending?.should be_false
+      ctrl.commit_on_exit.should be_false
+      ctrl.view.notes_copy_all.should eq("mine original")
+    end
+  end
+
+  it "returns to the editor before a READ draft can be lost by closing the detail" do
+    with_issues_controller do |ctrl, host, store|
+      id = open_issue(ctrl, store, notes: "original")
+      ctrl.view.enter_notes_insert!
+      type(ctrl, "mine ")
+      ctrl.view.exit_notes_insert!
+
+      ctrl.issue_close
+      ctrl.view.detail_issue.not_nil!.id.should eq(id)
+      ctrl.view.notes_insert_mode?.should be_true
+      ctrl.view.notes_copy_all.should eq("mine original")
+      host.last_status.should contain("esc saves")
+      store.get_issue(id).not_nil!.notes.should eq("original")
     end
   end
 end

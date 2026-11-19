@@ -41,7 +41,7 @@ describe "ProjectPicker.settings_key?" do
     source = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "project_picker.cr"))
       .lines.reject(&.lstrip.starts_with?('#')).join('\n')
     ladder = source[/private def handle_list\b.*?\n    end/m].not_nil!
-    asked = ladder.index("ProjectPicker.settings_key?(ev, @query)").not_nil!
-    asked.should be < ladder.index("LineEdit.typed_char(ev)").not_nil!
+    asked = ladder.index("ProjectPicker.settings_key?(ev, query)").not_nil!
+    asked.should be < ladder.rindex("edit_project_query(ev)").not_nil!
   end
 end

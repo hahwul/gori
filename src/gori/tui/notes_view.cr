@@ -33,7 +33,7 @@ module Gori::Tui
     class Note
       include SubtabRef # a sub-tab strip may hold a mark on this note (#683)
 
-      getter id : Int64
+      property id : Int64
       getter area : TextArea
 
       def initialize(@id : Int64, text : String = "")
@@ -68,6 +68,7 @@ module Gori::Tui
     # clobbers in-progress typing (focus alone is insufficient: Tab / tab-switch /
     # sub-tab-switch leave the buffer dirty without saving).
     getter? dirty : Bool
+    getter saved_copy_count : Int32 = 0
 
     def initialize
       @notes = [Note.new(1_i64)] of Note # never empty — always at least one note to type into
@@ -96,6 +97,7 @@ module Gori::Tui
       # startup reload failed, and another tab writes a note — must not send it as an edit that
       # empties that note. Typed into, it differs from "" and is sent like any other.
       @baseline = {1_i64 => ""}
+      @saved_texts = {} of Int64 => String
       @mode = InputMode::Read
       @read = TextReadState.new
       # The two stored rows (DOCS_KEY, LEGACY_KEY) the note list was last merged FROM — see
@@ -228,6 +230,7 @@ module Gori::Tui
       @next_id = {@next_id, doc.next_id}.max
       doc.notes.each { |e| @unpersisted.delete(e.id) }
       @baseline = baseline
+      @saved_texts = doc.notes.to_h { |entry| {entry.id, entry.text} }
       @dirty = false
       # Leave @mode alone — soft merge must not force READ. `@read` is left alone too, and
       # that is right for BOTH branches above only because of `TextReadState#bind`: the skip
@@ -594,8 +597,7 @@ module Gori::Tui
 
     # Persist iff edited (no-op otherwise — cheap to call on every exit path). Merges
     # against the currently-persisted set first, so a second TUI session on the same
-    # project doesn't clobber this session's notes (and vice-versa): peer notes are
-    # kept, this session's edits win per-note, and this session's closes are honoured.
+    # project keeps both versions of overlapping edits alongside changes to other notes.
     #
     # Returns whether the notes are persisted — TRUE for the clean no-op, false ONLY when a
     # write was attempted and rolled back. `NotesController#save_notes` says so on the status
@@ -606,6 +608,7 @@ module Gori::Tui
     # buffer still matches its baseline is not ours to write: the persisted copy (a peer's
     # edit, or a peer's delete) stands.
     def save(store : Store) : Bool
+      @saved_copy_count = 0
       return true unless @dirty || @cur_moved
       mine = [] of Notes::NoteEntry
       @notes.each do |n|
@@ -618,8 +621,19 @@ module Gori::Tui
       # and this session was told it had saved. The active note goes by stable ID — `@current`
       # is an index into THIS session's list, and the merged order is the persisted one plus
       # our appends. See Notes.merge.
-      merged = Notes.save(store, mine, @deleted_ids, @notes[@current]?.try(&.id), @next_id)
-      return false unless merged
+      result = Notes.save_edits(store, mine, @deleted_ids, @notes[@current]?.try(&.id), @next_id, baseline: @saved_texts)
+      return false unless result
+      merged = result.doc
+      @saved_copy_count = result.copies.size
+      if @saved_copy_count > 0
+        @notes.each do |note|
+          if id = result.copies[note.id]?
+            note.id = id
+          end
+        end
+        # Keep our live TextArea on the new id and load the peer's version separately.
+        soft_merge_from(merged)
+      end
       # `next_id` advances on a COMMIT only: the ids the merge handed out are the ones now on
       # disk, and a rolled-back transaction handed out none. That same commit is what makes a
       # newly-minted note persisted, so its id leaves `@unpersisted` here and nowhere else.
@@ -628,7 +642,13 @@ module Gori::Tui
       # What we sent is what is on disk now. An unsent note keeps its old baseline even when
       # the merged document carries a peer's newer text for it: the buffer still holds the old
       # one until the next `reload`, and the two must agree or a later save would send it.
-      mine.each { |n| @baseline[n.id] = n.text }
+      if result.copies.empty?
+        mine.each do |n|
+          @baseline[n.id] = n.text
+          @saved_texts[n.id] = n.text
+        end
+      end
+      @deleted_ids.each { |id| @saved_texts.delete(id) }
       # The list is our edits now, not a merge of any stored row — see `reload`.
       @merged_raw = nil
       # …and `@dirty` only comes down on a write that COMMITTED. Clearing it regardless meant

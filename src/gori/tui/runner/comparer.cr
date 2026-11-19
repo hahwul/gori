@@ -1,39 +1,23 @@
 # Comparer (diff two flows) — ExecContext verb implementations, reopens Gori::Tui::Runner (see
 # tui/runner.cr for the event loop, Host facade, overlays, and rendering).
 class Gori::Tui::Runner < Gori::Verb::ExecContext
-  # Open the flow picker to choose the flow for slot :a / :b. Snapshots recent flows
-  # through the active Scope lens; the picker filters them in memory. Loading the pick
-  # into the slot is the injected commit, so the same picker also serves the entity-link
-  # flow (see Runner#build_link_add_picker) with no mode flag in the picker itself.
+  # Search the flows visible through the same lenses as History.
   def comparer_pick(slot : Symbol) : Nil
-    # `raise_on_error: true`, not the TUI default: the lens is an OR chain of per-rule
-    # `gori_ci_contains` / REGEXP callbacks, so this query CAN fail where `recent_flows`
-    # could not — and the default degrade-to-`[]` would open a card claiming the project
-    # holds nothing. Say what happened instead (history_view.cr takes the same exit).
-    rows =
-      begin
-        # Through the hide-static lens as well as the scope lens: a picker must not offer the
-        # rows the lens the operator switched on just hid from History and the Sitemap.
-        lens = @scope.filter
-        lens = QL.and(lens, QL.hide_static) if history_controller.view.hide_static?
-        @session.store.search(lens, 2000, raise_on_error: true)
-      rescue ex
-        @toast = "could not list flows: #{ex.message}"
-        return
-      end
-    fp = FlowPicker.new(rows, slot, scoped: @scope.active?)
+    hide_static = history_controller.view.hide_static?
+    lens = @scope.filter
+    lens = QL.and(lens, QL.hide_static) if hide_static
+    fp = FlowPicker.for_store(@session.store, slot, lens, scoped: @scope.active?, hide_static: hide_static, limit: 2000)
     fp.on_commit = -> { comparer_load_slot(fp, slot) }
     open_overlay(fp)
   end
 
   private def comparer_load_slot(fp : FlowPicker, slot : Symbol) : Bool
-    if row = fp.selected_row
-      if detail = @session.store.get_flow(row.id)
-        comparer_controller.view.set_slot(slot, detail)
-        @toast = "comparer: set #{slot.to_s.upcase} — #{row.method} #{Gori::Url.authority(row.scheme, row.host, row.port)}"
-      else
-        @toast = "flow no longer available"
-      end
+    return false unless row = fp.selected_row
+    if detail = @session.store.get_flow(row.id)
+      comparer_controller.view.set_slot(slot, detail)
+      @toast = "comparer: set #{slot.to_s.upcase} — #{row.method} #{Gori::Url.authority(row.scheme, row.host, row.port)}"
+    else
+      @toast = "flow no longer available"
     end
     true
   end

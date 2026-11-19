@@ -378,17 +378,16 @@ module Gori::Tui
     # Filter-aware: ←/→ skip hidden chips; ^1-9 to a hidden chip escapes the filter.
     def move_subtab(dir : Int32) : Nil
       if t = step_visible(@notes.current_index, dir)
-        save_notes
-        @notes.switch_note(t)
-        refresh_link_preview
+        jump_subtab(t)
       end
     end
 
     def jump_subtab(idx : Int32) : Nil
-      return unless 0 <= idx < @notes.count
+      return unless target = @notes.note_at(idx)
       clear_subtab_filter if (h = subtab_hidden) && h.includes?(idx)
       save_notes
-      @notes.switch_note(idx)
+      # A conflict save can insert another version and change the strip order.
+      @notes.switch_note_by_id(target.id)
       refresh_link_preview
     end
 
@@ -412,9 +411,18 @@ module Gori::Tui
     # own quit path, and puts that conflict in the leave modal instead). Escalating there
     # needs the quit confirm, which lives in `runner.cr`.
     def save_notes(refused : String = "notes NOT saved — project busy; your text is still here, esc to retry") : Bool
-      return true if @notes.save(@host.session.store)
-      @host.status(refused)
-      false
+      unless @notes.save(@host.session.store)
+        @host.status(refused)
+        return false
+      end
+      count = @notes.saved_copy_count
+      if count > 0
+        refresh_link_preview
+        notice = "notes changed in another session — saved your edits as #{Gori.plural(count, "new note")}"
+        @host.notifications.push(:warn, notice, goto: Jobs::Goto.new(:notes))
+        @host.status(notice)
+      end
+      true
     end
 
     # A close's own save: the note is already gone from the strip, so "your text is still
@@ -497,17 +505,23 @@ module Gori::Tui
     # asking; a batch always asks, because it can discard notes that are not on screen.
     def notes_close : Nil
       if refs = batch_subtab_refs
-        @host.confirm("CLOSE NOTES", "Close #{marked_subtab_phrase(refs.size)}?\nTheir text will be discarded.",
+        @host.confirm("CLOSE NOTES", "Close #{marked_subtab_phrase(refs.size)}?\nTheir text and links will be removed.",
           confirm_label: "close", danger: true) { close_marked_notes(refs) }
         return
       end
-      if @notes.current_blank?
+      links = begin
+        @host.session.store.list_links(Store::LinkOwnerKind::Note, @notes.current_note_id)
+      rescue DB::Error | SQLite3::Exception
+        return @host.status("note NOT removed — could not check its links")
+      end
+      if @notes.current_blank? && links.empty?
         do_notes_close
         return
       end
       # By identity at answer time: a peer reload under the modal can move the selection.
       ref = subtab_ref(@notes.current_index)
-      @host.confirm("CLOSE NOTE", "Close “#{@notes.current_label}”?\nIts text will be discarded.",
+      loss = links.empty? ? "Its text will be discarded." : "Its text and #{Gori.plural(links.size, "link")} will be removed."
+      @host.confirm("CLOSE NOTE", "Close “#{@notes.current_label}”?\n#{loss}",
         confirm_label: "close", danger: true) do
         (idx = ref && subtab_index_of(ref)) ? do_notes_close(idx) : @host.status("already closed")
       end

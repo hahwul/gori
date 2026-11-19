@@ -11,6 +11,7 @@ require "../update"
 require "../fuzzy"
 require "./geometry"
 require "./screen"
+require "./text_field"
 require "./fmt"
 require "./theme"
 require "./frame"
@@ -141,7 +142,8 @@ module Gori::Tui
     # the update notice but in red, because without it a failed open is indistinguishable
     # from an empty gori: the operator lands on "no projects yet" and concludes their
     # capture is gone. See App#open_and_run.
-    def initialize(@term : Termisu, @registry : ProjectRegistry, notice : String? = nil)
+    def initialize(@term : Termisu, @registry : ProjectRegistry, notice : String? = nil,
+                   resume_search : ProjectSearchOverlay? = nil)
       @open_error = notice
       # Held as the base Backend: TermisuBackend is generic over the terminal type.
       @backend = TermisuBackend.new(@term).as(Backend)
@@ -156,10 +158,10 @@ module Gori::Tui
       @discriminators = ProjectPicker.row_discriminators(@entries).as(Hash(String, String))
       # Shown only under the card for the project row the cursor is on — never on the rows.
       @tags_by_dir = ProjectPicker.tags_by_dir(@entries).as(Hash(String, Array(String)))
-      @query = "" # current search filter; only editable when Search row selected
+      @project_query = TextField.new
       @selected = ProjectPicker.initial_selection(@projects.size)
       @results_scroll = 0
-      @mode = :list # :list | :new | :confirm | :space | :rename | :settings | :theme | :compress | archive forms | + BUSY_LABELS
+      @mode = resume_search ? :global_search : :list
       @name = ""
       @desc = ""
       @tag_input = TagInput.new([] of String, [] of {String, Int32})
@@ -191,7 +193,8 @@ module Gori::Tui
       @compact_project = nil.as(Project?)
       # ctrl-f: the cross-project flow search, and the flow a hit asked `run`'s caller to open
       # the chosen project on (see focus_flow_id).
-      @search = nil.as(ProjectSearchOverlay?)
+      @search = resume_search
+      @search.try &.resume(@projects, @discriminators)
       @focus_flow_id = nil.as(Int64?)
       @pending_compact = nil.as(Store::CompactPlan?)
       # Which action a shared ConfirmDialog commits (:delete wipes the dir, :compress runs Store.compact).
@@ -244,6 +247,10 @@ module Gori::Tui
     # project — a getter beside the return value rather than a wider return type, because
     # the picker is rebuilt for every pass of the app loop and so cannot carry it stale.
     getter focus_flow_id : Int64?
+
+    def search_on_return : ProjectSearchOverlay?
+      @search if @focus_flow_id
+    end
 
     def run : Project?
       start_update_check
@@ -306,6 +313,8 @@ module Gori::Tui
             @archive_import_overlay.try(&.set_preedit(ev.text))
           elsif @mode == :archive_import_name
             @archive_name_overlay.try(&.set_preedit(ev.text))
+          elsif @mode == :list
+            @project_query.set_preedit(ev.text) if @selected == 2
           else
             @preedit = ev.text
           end
@@ -474,7 +483,7 @@ module Gori::Tui
       3 + fp.size
     end
 
-    # Saved projects filtered by @query (see `ProjectPicker.narrow`).
+    # Saved projects filtered by query (see `ProjectPicker.narrow`).
     # List layout: 0=New, 1=Temp, 2=Search bar (typing only active here), 3+=projects.
     # `@projects` itself while nothing is narrowing — the overwhelmingly common state, and
     # this is called several times per frame plus more per keystroke (render, entry_count,
@@ -482,8 +491,8 @@ module Gori::Tui
     # its argument unmapped for a blank needle; the `map` that turns entries back into
     # projects is what would allocate an N-element array on every one of those calls.
     private def filtered_projects : Array(Project)
-      return @projects if ProjectRegistry.needle(@query).nil?
-      ProjectPicker.narrow(@entries, @query).map(&.project)
+      return @projects if ProjectRegistry.needle(query).nil?
+      ProjectPicker.narrow(@entries, query).map(&.project)
     end
 
     # Which projects the search keeps, and in what order.
@@ -595,8 +604,8 @@ module Gori::Tui
 
     private def handle_list(ev : Termisu::Event::Key) : Project | Symbol?
       key = ev.key
-      @preedit = "" # any committed key ends an in-progress IME composition
-      @flash = nil  # a fresh keystroke dismisses the last compaction result line
+      @project_query.set_preedit("")
+      @flash = nil # a fresh keystroke dismisses the last compaction result line
       # Arrows are pure navigation (never filter). Typing a printable key jumps into
       # the Search row and filters — matching the "type to search" hint + the universal
       # picker expectation — so a user who lands on New/Temp and types a project name to
@@ -619,14 +628,7 @@ module Gori::Tui
         if space_opens_menu?
           open_space_menu
         elsif @selected == 2
-          @query += " "
-          @results_scroll = 0
-        end
-      elsif key.backspace?
-        if @selected == 2 && !@query.empty?
-          @query = @query[0, @query.size - 1]
-          @selected = 2
-          @results_scroll = 0
+          edit_project_query(ev)
         end
       elsif key.escape?
         # Marks first — esc is the reflex for dropping a selection everywhere else in gori,
@@ -634,26 +636,21 @@ module Gori::Tui
         # delete. Only then does esc mean "clear the query", and only then "quit".
         if !@marks.empty?
           @marks.clear
-        elsif @query.empty?
+        elsif query.empty?
           return :quit
         else
-          @query = ""
+          @project_query.set("")
           @selected = 0
         end
       elsif ev.ctrl_c?
         return :quit
-      elsif ProjectPicker.settings_key?(ev, @query)
+      elsif ProjectPicker.settings_key?(ev, query)
         # BEFORE the printable arm below, which would type the bare comma into the search.
         @preferences.open_default
         @mode = :settings
-      elsif c = LineEdit.typed_char(ev)
-        # Any printable key filters: enter the Search row (if not already) and append.
-        @selected = 2
-        @query += c
-        @results_scroll = 0
       elsif ev.ctrl? && key.lower_n?
         # ctrl-n: quick new. If query has text, prefill (or direct-create).
-        name = ProjectPicker.quick_create_name(@query)
+        name = ProjectPicker.quick_create_name(query)
         if name.nil?
           start_new
         elsif proj = safe_create(name)
@@ -667,8 +664,22 @@ module Gori::Tui
         mark_all
       elsif ProjectPicker.global_search_chord?(ev)
         open_global_search
+      else
+        edit_project_query(ev)
       end
       nil
+    end
+
+    private def query : String
+      @project_query.value
+    end
+
+    private def edit_project_query(ev : Termisu::Event::Key) : Nil
+      return unless @selected == 2 || LineEdit.typed_char(ev)
+      before = query
+      return unless @project_query.handle_edit_key(ev)
+      @selected = 2
+      @results_scroll = 0 if before != query
     end
 
     # ctrl-, as in a session. tmux with extended-keys off (its default) cannot encode
@@ -894,7 +905,7 @@ module Gori::Tui
 
     private def start_new : Nil
       @mode = :new
-      @name, tags = ProjectPicker.new_form_prefill(@query)
+      @name, tags = ProjectPicker.new_form_prefill(query)
       @desc = ""
       @tag_input = TagInput.new(tags, ProjectRegistry.tag_counts(@entries))
       @new_field = :name
@@ -1241,12 +1252,12 @@ module Gori::Tui
     # token is clickable) both read it, so the row can never offer a button the chord doesn't
     # honour. The empty Search row opens Import; a non-empty search keeps spaces as query text.
     private def space_opens_menu? : Bool
-      @selected >= 3 || (@selected == 2 && @query.empty?)
+      @selected >= 3 || (@selected == 2 && query.empty?)
     end
 
     private def open_space_menu : Nil
       project = selected_project
-      return unless project || (@selected == 2 && @query.empty?)
+      return unless project || (@selected == 2 && query.empty?)
       @space_project = project
       @space_selected = 0
       @mode = :space
@@ -1515,7 +1526,7 @@ module Gori::Tui
       begin
         project = prepared.import_into(@registry, overlay.name)
         close_archive_import
-        @query = ""
+        @project_query.set("")
         @results_scroll = 0
         reload_projects
         if index = filtered_projects.index { |candidate| candidate.dir == project.dir }
@@ -1781,7 +1792,7 @@ module Gori::Tui
 
     private def handle_global_search(ev : Termisu::Event::Key) : Project | Symbol?
       return close_global_search unless search = @search
-      finish_global_search(search.handle_key(ev))
+      finish_global_search(search.handle_key(ev, search_area))
     end
 
     private def handle_global_search_mouse(w : Int32, h : Int32, mx : Int32, my : Int32) : Project | Symbol?
@@ -1789,9 +1800,8 @@ module Gori::Tui
       finish_global_search(search.click(Rect.new(0, 0, w, h), mx, my))
     end
 
-    # Every way out of the mode goes through `close_global_search`, which cancels the search
-    # fiber: a run left going would keep opening project databases behind whatever the operator
-    # does next, including the session a hit is about to open.
+    # The overlay has already stopped any search before handing a hit over. Keep its
+    # snapshot so returning from that project can restore the cursor and query.
     private def finish_global_search(outcome : ProjectSearchOverlay::Outcome) : Project | Symbol?
       case outcome.kind
       when :quit
@@ -1800,13 +1810,25 @@ module Gori::Tui
       when :close
         close_global_search
       when :open
-        close_global_search
-        if project = outcome.project
-          @focus_flow_id = outcome.flow_id
-          return project
-        end
+        return open_global_search_hit(outcome)
       end
       nil
+    end
+
+    private def open_global_search_hit(outcome : ProjectSearchOverlay::Outcome) : Project?
+      return unless hit_project = outcome.project
+      project = @registry.list.find { |candidate| candidate.dir == hit_project.dir }
+      unless project && File.file?(project.db_path)
+        set_flash("that project is no longer available", ok: false)
+        return nil
+      end
+      @focus_flow_id = outcome.flow_id
+      project
+    end
+
+    private def search_area : Rect
+      w, h = @backend.size
+      Rect.new(0, 0, w, h)
     end
 
     private def close_global_search : Nil
@@ -1910,7 +1932,13 @@ module Gori::Tui
         return run_hint_action(action)
       end
       return nil unless idx = entry_at(mx, my)
-      if idx == @selected
+      if idx == 2
+        @marks.end_gesture if @selected != 2
+        @selected = 2
+        @results_scroll = 0
+        @project_query.click_to_cursor(mx, my)
+        nil
+      elsif idx == @selected
         activate
       else
         # Like a plain arrow, moving the cursor by click ends a ⇧arrow range and hands its
@@ -1929,7 +1957,7 @@ module Gori::Tui
       when :theme                              then (@theme_card.move_field(delta); preview_theme)
       when :space                              then @space_selected = (@space_selected + delta.sign).clamp(0, space_entries.size - 1)
       when :compress                           then @compact.try(&.move(delta.sign))
-      when :global_search                      then @search.try(&.wheel(delta))
+      when :global_search                      then @search.try(&.wheel(delta, search_area))
       when :archive_export_path                then @archive_export_overlay.try(&.move(delta))
       when :archive_import_path                then @archive_import_overlay.try(&.move(delta))
       when :confirm                            then @confirm.try(&.handle_wheel(delta))
@@ -2237,7 +2265,7 @@ module Gori::Tui
       # top border)
       div_y = box.y + 1 + actions
       Frame.tee_divider(screen, box, div_y, bg: Theme.panel)
-      count = @query.empty? ? "Projects (#{fp.size})" : "Matches (#{fp.size})"
+      count = query.empty? ? "Projects (#{fp.size})" : "Matches (#{fp.size})"
       # The live mark count rides the divider the way the in-app mark chip rides the filter
       # row — including how much of the set the current search is hiding, since a mark
       # outlives the query that scrolled it off screen and still aims the next delete.
@@ -2250,11 +2278,11 @@ module Gori::Tui
 
       ensure_results_visible(res_rows)
       if fp.empty?
-        msg = @query.empty? ? "no projects yet" : "no matches"
+        msg = query.empty? ? "no projects yet" : "no matches"
         screen.text(box.x + 3, list_top, msg, Theme.muted, Theme.panel)
         # The moment a name search comes up empty is the moment the operator may have meant
         # "which project SAW this" — say where that search lives (#1229).
-        if !@query.empty? && res_rows > 1
+        if !query.empty? && res_rows > 1
           screen.text(box.x + 3, list_top + 1, Hotkeys.retag("^F searches every project's flows"),
             Theme.muted, Theme.panel, width: {cw - 5, 1}.max)
         end
@@ -2299,7 +2327,7 @@ module Gori::Tui
                when @mode == :compress
                  "↑/↓ select   ‹/› keep   space toggle   ↵ compress   esc close"
                when @mode == :global_search
-                 @search.try(&.hint) || ""
+                 @search.try(&.hint(Rect.new(0, 0, w, h))) || ""
                when @mode == :archive_export_path
                  @archive_export_overlay.try(&.hint) || ""
                when @mode == :archive_import_path
@@ -2415,7 +2443,7 @@ module Gori::Tui
       ]
       # A project row opens its action menu; the empty Search row exposes Import even when
       # the registry is empty. A non-empty query keeps space as an input character.
-      if @selected == 2 && @query.empty?
+      if @selected == 2 && query.empty?
         tokens << HintToken.new("space import", :space)
       elsif @selected >= 3
         tokens << HintToken.new("space actions", :space)
@@ -2430,7 +2458,7 @@ module Gori::Tui
       if @selected >= 3
         tokens << HintToken.new("tab mark")
         tokens << HintToken.new("esc clear") unless @marks.empty?
-      elsif !(@selected == 2 && @query.empty?)
+      elsif !(@selected == 2 && query.empty?)
         tokens << HintToken.new(SEARCH_HINT)
       end
       if @selected < 3
@@ -2515,7 +2543,7 @@ module Gori::Tui
       when :temp           then return open_temp
       when :quit           then return :quit
       when :new
-        name = ProjectPicker.quick_create_name(@query)
+        name = ProjectPicker.quick_create_name(query)
         return safe_create(name) if name
         start_new
       when :delete     then request_delete
@@ -2653,22 +2681,11 @@ module Gori::Tui
       screen.cell(box.x + 1, y, selected ? '▎' : ' ', Theme.accent, bg)
       screen.text(box.x + 3, y, "›", selected ? Theme.accent : Theme.muted, bg)
       qx = box.x + 5
-      # When focused, always render via input_line — even when empty — so the
-      # caret (and the terminal hardware cursor it sets) is anchored at the field.
-      # Otherwise the terminal draws IME composition at a stale position (top-left).
-      # The placeholder hint only shows when the row is not focused.
-      if selected
-        screen.input_line(qx, y, @query, @query.size, @preedit, Theme.text_bright, bg, width: box.w - 7)
-      elsif @query.empty?
-        # Names the four spellings that ADDRESS a project rather than just "projects": the
-        # slug and the short id are what tell apart two checkouts sharing a display name,
-        # and nothing else on this screen says they are accepted here.
-        # `width:` like both sibling branches: the old 18-column placeholder happened to fit
-        # every card, so the missing cap was invisible until this one grew to 30 and started
-        # overdrawing the card's right border on a narrow terminal.
-        screen.text(qx, y, "search name, slug, id, path or #tag…", Theme.muted, bg, width: box.w - 7)
+      if selected || !query.empty?
+        @project_query.render(screen, qx, y, box.w - 7, selected, Theme.text_bright, bg)
       else
-        screen.text(qx, y, @query, Theme.text, bg, width: box.w - 7)
+        @project_query.forget_geometry
+        screen.text(qx, y, "search name, slug, id, path or #tag…", Theme.muted, bg, width: box.w - 7)
       end
     end
 

@@ -65,13 +65,13 @@ describe "project archive modes in ProjectPicker" do
 
   it "exposes import from the empty Search row and export/import from project actions" do
     source = picker_archive_code("tui", "project_picker.cr")
-    source.should contain("@selected >= 3 || (@selected == 2 && @query.empty?)")
-    picker_archive_method(source, "open_space_menu").should contain("@selected == 2 && @query.empty?")
+    source.should contain("@selected >= 3 || (@selected == 2 && query.empty?)")
+    picker_archive_method(source, "open_space_menu").should contain("@selected == 2 && query.empty?")
     choose = picker_archive_method(source, "activate_space_entry")
     choose.should contain("when :archive_import")
     choose.should contain("when :archive_export")
     picker_archive_method(source, "handle_list").should contain("if space_opens_menu?")
-    picker_archive_method(source, "commit_archive_import").should contain("@query = \"\"")
+    picker_archive_method(source, "commit_archive_import").should contain("@project_query.set(\"\")")
   end
 end
 

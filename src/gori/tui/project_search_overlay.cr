@@ -59,6 +59,7 @@ module Gori::Tui
     @edited_at : Time::Instant? = nil
     @needle : String? = nil
     @scanned = 0
+    @scan_total = 0
     @hits = 0
     @skipped = 0
     @unindexed = 0
@@ -67,6 +68,12 @@ module Gori::Tui
     # `labels` is the picker's discriminator map (project dir → what tells two same-named
     # projects apart), so a group header names a project exactly the way its list row does.
     def initialize(@projects : Array(Project), @labels : Hash(String, String) = {} of String => String)
+    end
+
+    # Keep the result snapshot and its selection. The next query uses the current roster.
+    def resume(projects : Array(Project), labels : Hash(String, String)) : Nil
+      @projects = projects
+      @labels = labels
     end
 
     def query : String
@@ -97,7 +104,6 @@ module Gori::Tui
     def start : Nil
       @edited_at = nil
       stop
-      @generation += 1
       reset_results
       return unless needle = ProjectSearch.needle(query)
       @needle = needle
@@ -106,6 +112,7 @@ module Gori::Tui
       @control = control
       @running = true
       projects = @projects
+      @scan_total = projects.size
       spawn(name: "gori-project-search") do
         ProjectSearch.run(projects, needle, control: control) { |result| absorb(result, gen) }
       rescue ex
@@ -119,6 +126,7 @@ module Gori::Tui
 
     # Cancel the run in flight, keeping what it found so far.
     def stop : Nil
+      @generation += 1
       @control.try(&.cancel)
       @control = nil
       @running = false
@@ -127,17 +135,21 @@ module Gori::Tui
     # Called on every way out of the mode, so no search outlives the overlay.
     def close : Nil
       @edited_at = nil
+      @field.set_preedit("")
       stop
     end
 
     # esc stops a running search first, and closes only once nothing is running. ↵ opens the
     # cursor hit — unless the query has changed since the last search, when it searches NOW:
     # the rows on screen belong to no needle, and ↵ right after typing means "go".
-    def handle_key(ev : Termisu::Event::Key) : Outcome
+    def handle_key(ev : Termisu::Event::Key, area : Rect) : Outcome
       key = ev.key
       if ev.ctrl_c?
         close
         return Outcome.new(:quit)
+      end
+      unless overlay_box(area)
+        return key.escape? ? close_outcome : STAY
       end
       case
       when key.escape?
@@ -178,7 +190,6 @@ module Gori::Tui
       before = @field.value
       return unless @field.handle_edit_key(ev) && @field.value != before
       stop
-      @generation += 1 # a result already on its way belongs to the old needle
       reset_results
       @edited_at = Time.instant
     end
@@ -253,8 +264,8 @@ module Gori::Tui
       @user_moved = true
     end
 
-    def wheel(delta : Int32) : Nil
-      move(delta)
+    def wheel(delta : Int32, area : Rect) : Nil
+      move(delta) if overlay_box(area)
     end
 
     # The pick under the cursor, for a spec and for the hint.
@@ -303,7 +314,8 @@ module Gori::Tui
       {box.bottom - 1 - (box.y + LIST_OFFSET), 0}.max
     end
 
-    def hint : String
+    def hint(area : Rect) : String
+      return "esc close" unless overlay_box(area)
       stop_or_close = @running ? "esc stop" : "esc close"
       "↑/↓ select   ↵ open   pgup/pgdn page   #{stop_or_close}"
     end
@@ -339,9 +351,8 @@ module Gori::Tui
     # it has found. Short needles say that bodies were not looked at, rather than leave an
     # empty list to be read as "no project ever saw this".
     def status_line : String
-      total = @projects.size
-      return Gori.plural(total, "project") unless @needle
-      head = @running ? "scanning #{@scanned}/#{total}" : "#{@scanned}/#{total} searched"
+      return Gori.plural(@projects.size, "project") unless @needle
+      head = @running ? "scanning #{@scanned}/#{@scan_total}" : "#{@scanned}/#{@scan_total} searched"
       parts = [head, Gori.plural(@hits, "hit")]
       parts << "#{@skipped} skipped" if @skipped > 0
       parts << "#{@unindexed} unindexed" if @unindexed > 0
@@ -377,7 +388,7 @@ module Gori::Tui
         elsif pending? || @running
           {"searching…", nil}
         else
-          {"no flow matches in #{Gori.plural(@projects.size, "project")}", nil}
+          {"no flow matches in #{Gori.plural(@scan_total, "project")}", nil}
         end
       screen.text(box.x + 3, y, msg, Theme.muted, Theme.panel, width: {box.w - 5, 1}.max)
       screen.text(box.x + 3, y + 1, detail, Theme.muted, Theme.panel, width: {box.w - 5, 1}.max) if detail && h > 1
