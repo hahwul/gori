@@ -1194,6 +1194,11 @@ module Gori::Fuzz
       @matcher.constrained?
     end
 
+    # Whether the run reads values out of each response (`extract`/`extractors`).
+    def extracting? : Bool
+      !@matcher.extractors.empty?
+    end
+
     # How many calibration samples fit under `max_requests` while leaving one candidate — and,
     # when the run has a macro, the steps that candidate's epoch runs. Each sample is priced
     # the same way (`1 + Lane#macro_requests`), so a per-request macro cannot spend the cap on

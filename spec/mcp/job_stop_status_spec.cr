@@ -231,7 +231,20 @@ describe "MCP fuzz match note" do
       bare = start_fuzz(tools, port)
       wait_terminal(tools, "fuzz", bare)
       call_json(tools, "fuzz_status", {job_id: bare}.to_json)["match_note"].as_s.should contain("every response counts as matched")
-      call_json(tools, "fuzz_results", {job_id: bare}.to_json)["match_note"].as_s.should contain("match:{regex:")
+      call_json(tools, "fuzz_results", {job_id: bare}.to_json)["match_note"].as_s.should contain("match:{regex:…} or extract")
+
+      # An `extract` already passed is not suggested again.
+      extracting = call_json(tools, "fuzz_start", {
+        template:       "GET /f?q=§FUZZ§ HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n",
+        url:            "http://127.0.0.1:#{port}",
+        payloads:       [{list: ["a"]}],
+        extract:        "q=(\\w+)",
+        allow_unscoped: true,
+      }.to_json)["job_id"].as_s
+      wait_terminal(tools, "fuzz", extracting)
+      note = call_json(tools, "fuzz_status", {job_id: extracting}.to_json)["match_note"].as_s
+      note.should contain("match:{regex:")
+      note.should_not contain("extract")
 
       ruled = call_json(tools, "fuzz_start", {
         template:       "GET /f?q=§FUZZ§ HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n",

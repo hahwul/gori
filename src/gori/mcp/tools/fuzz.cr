@@ -642,8 +642,9 @@ module Gori
       # With no predicate every response passes, so a reflection sweep reads as all hits.
       private def emit_match_note(j : JSON::Builder, fjob : FuzzJob) : Nil
         return if fjob.engine.matcher_constrained? || fjob.engine.auto_calibrate?
+        hint = fjob.engine.extracting? ? "pass match:{regex:…}" : "pass match:{regex:…} or extract"
         j.field "match_note", "no match/filter rule, so every response counts as matched; " \
-                              "pass match:{regex:…} or extract to find a reflection"
+                              "#{hint} to find a reflection"
       end
 
       # The positions in `fjob.results` that `fuzz_results` pages, and how many it holds back.
