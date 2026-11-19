@@ -1566,6 +1566,26 @@ module Gori::Tui
     # Apply any repeater results that finished since the last tick (the round-trip ran on
     # a background fiber; view state is mutated HERE, on the UI fiber that owns it).
     # Returns true if anything was applied (→ the shell re-runs search + marks dirty).
+    # The send toast's note for a response that did not arrive whole. `(stopped)` is kept for
+    # a stop someone chose — the operator's, or a cancelled event stream; any other cut names
+    # who made it, from the classifier the CLI's sentence and MCP use
+    # (`CLI::Run.incomplete_cause`). A whole-read budget used to say "(stopped)" with nobody
+    # having pressed stop, and the 8 MiB ceiling a bare "(incomplete)" that read as the server's.
+    # Short, because the status row has 59 columns at 80×24.
+    def self.cut_note(result : Repeater::Result, stopped : Bool) : String
+      return " (stopped)" if stopped || result.bounded == "cancelled"
+      return "" unless result.bounded || result.incomplete?
+      why = case CLI::Run.incomplete_cause(result, result.timed_out?)
+            when :events   then "stopped at the event bound"
+            when :time     then "stopped at the time bound"
+            when :budget   then "gori's read budget — raise timeout"
+            when :cap      then "cut at gori's #{CLI::Run::CAPTURE_MIB} MiB capture cap"
+            when :deadline then "origin idle past the read deadline"
+            else                "origin closed mid-body"
+            end
+      " (#{why})"
+    end
+
     def drain_results : Bool
       # Seeded from the inline-refusal flag, not false: a refusal never rides a channel (see
       # #apply_refusal), so this is how the shell learns a response pane changed under it.
@@ -1577,6 +1597,7 @@ module Gori::Tui
         # mutate an orphaned view and flash a toast for a gone session.
         next unless tab = @repeaters.find(&.view.same?(view))
         view.apply(result)
+        stopped = view.result_stopped?
         # Persist a SUCCESSFUL send as the tab's last response (V11) so it survives a
         # reopen. Only on success: a later failed resend must not wipe a good response.
         if (id = tab.db_id) && result.ok?
@@ -1591,8 +1612,12 @@ module Gori::Tui
         head = view.sent_head_unterminated? ? " · #{CLI::Run.unterminated_head_chip}" : ""
         where = result_origin(view)
         if result.ok?
-          cut = result.bounded ? " (stopped)" : result.incomplete? ? " (incomplete)" : ""
+          cut = RepeaterController.cut_note(result, stopped)
           @host.status("sent → #{result.response.try(&.status)} in #{Fmt.dur(result.duration_us)}#{cut}#{evidence_literal_note(view)}#{head}#{note}#{where}", :done)
+        elsif stopped
+          # A stop is the operator's, not a failure: plain, and kept out of the ring.
+          got = result.head.empty? ? "no response" : "partial response kept"
+          @host.status("stopped after #{Fmt.dur(result.duration_us)} — #{got}#{note}#{where}")
         else
           @host.status("repeater error: #{result.error}#{head}#{note}#{where}", :error)
         end

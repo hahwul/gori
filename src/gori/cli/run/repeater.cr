@@ -2893,25 +2893,44 @@ module Gori
       # `self.` and public so MCP renders the identical three sentences: two copies of a
       # three-way classification is how two surfaces come to disagree about one flow.
       def self.incomplete_reason(result : Repeater::Result, timed_out : Bool = false) : String
-        cap = Proxy::Codec::Body::CAPTURE_READ_MAX
-        case result.bounded
-        when "events"
-          return "incomplete — gori stopped the event stream at its event bound (--sse-events / sse_max_events)"
-        when "time"
-          return "incomplete — gori stopped the event stream at its time bound (--sse-time / sse_max_ms)"
-        when "cancelled"
-          return "incomplete — the send was cancelled while the event stream was open"
-        when "budget"
-          return "incomplete — the body was still arriving when gori stopped reading at its " \
-                 "whole-read budget (three times the timeout; raise the timeout to read the rest)"
-        end
-        if (b = result.body) && b.size >= cap
-          "incomplete — gori stopped reading at its #{cap // (1024 * 1024)} MiB capture ceiling"
-        elsif timed_out
+        case incomplete_cause(result, timed_out)
+        when :events
+          "incomplete — gori stopped the event stream at its event bound (--sse-events / sse_max_events)"
+        when :time
+          "incomplete — gori stopped the event stream at its time bound (--sse-time / sse_max_ms)"
+        when :cancelled
+          "incomplete — the send was cancelled while the event stream was open"
+        when :budget
+          "incomplete — the body was still arriving when gori stopped reading at its " \
+          "whole-read budget (three times the timeout; raise the timeout to read the rest)"
+        when :cap
+          "incomplete — gori stopped reading at its #{CAPTURE_MIB} MiB capture ceiling"
+        when :deadline
           "incomplete — the origin stopped sending and the read deadline expired; " \
           "it did not close the connection (raise the timeout to read the rest)"
         else
           "incomplete — origin closed before the framed body finished"
+        end
+      end
+
+      CAPTURE_MIB = Proxy::Codec::Body::CAPTURE_READ_MAX // (1024 * 1024)
+
+      # The classification behind `incomplete_reason`, for a surface with no room for its
+      # sentence (the TUI's status row): :events, :time, :cancelled, :budget, :cap, :deadline
+      # or :closed. One classifier, so the short word and the sentence cannot disagree.
+      def self.incomplete_cause(result : Repeater::Result, timed_out : Bool = false) : Symbol
+        case result.bounded
+        when "events"    then return :events
+        when "time"      then return :time
+        when "cancelled" then return :cancelled
+        when "budget"    then return :budget
+        end
+        if (b = result.body) && b.size >= Proxy::Codec::Body::CAPTURE_READ_MAX
+          :cap
+        elsif timed_out
+          :deadline
+        else
+          :closed
         end
       end
 

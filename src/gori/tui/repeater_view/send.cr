@@ -476,6 +476,11 @@ class Gori::Tui::RepeaterView
 
   # `remember: false` for a send gori refused before dialling: it never reached the wire, so it
   # is no attempt to go back to (#1808), and a run of scope refusals would push real sends out.
+  # The last applied result ended on the operator's own Stop (`LiveBody#stop`). The engine
+  # reports the socket gori closed as an ordinary read failure, which drew a red transport
+  # error for something nobody's connection did.
+  getter? result_stopped : Bool = false
+
   def apply(result : Repeater::Result, remember : Bool = true) : Nil
     # The prior send becomes the diff baseline (diff vs the *previous* request,
     # not always the original captured flow). For the first send we still fall
@@ -484,6 +489,7 @@ class Gori::Tui::RepeaterView
     @result = result
     remember_send(result) if remember
     @result_times = @live.try(&.times) # the stream this result ends keeps its arrival times
+    @result_stopped = @live.try(&.stopped?) || false
     live_end
     @group_results = nil # a single ^R send takes the pane back from a group transcript
     # The rpc path this result belongs to, frozen at send time so the gRPC transcript's `.proto`
