@@ -458,3 +458,72 @@ describe Gori::Tui::FuzzSetOverlay do
     end
   end
 end
+
+# The Type row's eight labels (#B1): the last one, Bytes, used to be dropped for want of room,
+# so selecting it highlighted nothing.
+private def type_row(ov : FuzzSetOverlay, w : Int32, h : Int32) : {MemoryBackend, Int32, Rect}
+  backend = MemoryBackend.new(w, h)
+  area = Rect.new(0, 0, w, h)
+  ov.render(Screen.new(backend), area)
+  box = ov.overlay_box(area).not_nil!
+  {backend, box.y + 1, box}
+end
+
+describe "FuzzSetOverlay Type row" do
+  # 76x20 is the body an 80x24 terminal hands the card (a 72-column card).
+  it "draws all eight types and lights the selected Bytes at 120x34 and 80x24" do
+    ov = FuzzSetOverlay.for_list
+    ov.handle_key(okey(Termisu::Input::Key::Left)) # List wraps back to Bytes
+    [{116, 30}, {76, 20}].each do |(w, h)|
+      backend, y, _ = type_row(ov, w, h)
+      row = backend.row(y)
+      %w[List Numbers Wordlist Null Brute Preset Project Bytes].each { |l| row.should contain(l) }
+      backend.bg_at(row.index!("Bytes"), y).should eq(Theme.accent_bg)
+    end
+  end
+
+  it "keeps the selected label on a card too narrow for all eight" do
+    ov = FuzzSetOverlay.for_list
+    ov.handle_key(okey(Termisu::Input::Key::Left)) # Bytes
+    backend, y, _ = type_row(ov, 56, 20)
+    row = backend.row(y)
+    row.should contain("Bytes")
+    backend.bg_at(row.index!("Bytes"), y).should eq(Theme.accent_bg)
+  end
+end
+
+describe "FuzzSetOverlay numeric fields" do
+  it "blocks esc on a bound that is not a number, focused and named, and applies once fixed" do
+    ov = FuzzSetOverlay.for_list
+    ov.handle_key(okey(Termisu::Input::Key::Right)) # Numbers
+    ov.handle_key(okey(Termisu::Input::Key::Down))  # From
+    ov.handle_key(okey(Termisu::Input::Key::Down))  # To
+    5.times { ov.handle_key(okey(Termisu::Input::Key::Backspace)) }
+    otype(ov, "ten")
+    ov.handle_key(okey(Termisu::Input::Key::Up)) # leave the field: the block must bring focus back
+    ov.handle_key(okey(Termisu::Input::Key::Escape)).should eq(:stay)
+    render_text(ov).should contain("To must be a whole number")
+    3.times { ov.handle_key(okey(Termisu::Input::Key::Backspace)) } # the cursor is back on To
+    otype(ov, "10")
+    ov.handle_key(okey(Termisu::Input::Key::Escape)).should eq(:commit)
+    ov.build_spec.not_nil!.value.should eq("1-10:1")
+  end
+
+  it "blocks a click-away too, and leaves non-numeric types alone" do
+    ov = FuzzSetOverlay.for_list
+    4.times { ov.handle_key(okey(Termisu::Input::Key::Right)) } # Brute
+    ov.handle_key(okey(Termisu::Input::Key::Down))
+    ov.handle_key(okey(Termisu::Input::Key::Down)) # Min
+    otype(ov, "x")
+    ov.handle_click(Rect.new(0, 0, 120, 30), 0, 0).should eq(:stay)
+    FuzzSetOverlay.for_list.handle_key(okey(Termisu::Input::Key::Escape)).should eq(:commit)
+  end
+
+  it "lets an emptied bound keep its default instead of trapping the card" do
+    ov = FuzzSetOverlay.for_list
+    ov.handle_key(okey(Termisu::Input::Key::Right))            # Numbers
+    3.times { ov.handle_key(okey(Termisu::Input::Key::Down)) } # Step
+    5.times { ov.handle_key(okey(Termisu::Input::Key::Backspace)) }
+    ov.handle_key(okey(Termisu::Input::Key::Escape)).should eq(:commit)
+  end
+end

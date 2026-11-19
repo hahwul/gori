@@ -37,9 +37,20 @@ module Gori::Tui
     # must handle — the focus-exit keys (up/down/tab/esc/enter) once the popup is closed —
     # so the view can commit the chain and move focus back to the editor.
     def handle_key(ev : Termisu::Event::Key) : Bool
-      return true if complete_key(ev)   # popup owns tab/enter/arrows/esc while open
-      return false if exit_key?(ev.key) # focus-exit keys → the owning view handles them
+      return true if complete_key(ev)         # popup owns tab/enter/arrows/esc while open
+      return true if ev.key.tab? && list_all? # nothing typed yet: Tab lists the catalog
+      return false if exit_key?(ev.key)       # focus-exit keys → the owning view handles them
       edit_key(ev)
+    end
+
+    # Tab on an EMPTY token (an empty chain, or just past a separator) opens every converter.
+    # `refilter` keeps the list shut there, so the Tab the card advertises as "completes"
+    # committed and left the pane instead. A typed token keeps the old path.
+    private def list_all? : Bool
+      ts, te = token_span
+      return false unless @chain[ts...te].strip.empty?
+      @complete.set(Decoder.shared_registry.match("").map(&.name).uniq!, ts, te)
+      @complete.open?
     end
 
     private def exit_key?(key : Termisu::Input::Key) : Bool

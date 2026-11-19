@@ -89,8 +89,18 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       open_space_menu # the active tab's command menu, reachable from the strip
     else
       # Strip-local keys stay claimed; only an actual Global chord may pass through.
-      dispatch_global_chord(ev)
+      fuzzer_strip_hint(ev) unless dispatch_global_chord(ev)
     end
+  end
+
+  # A Fuzzer chord pressed on its strip (^R run, ^A mark, ^O sets — what the empty RESULTS card
+  # advertises) acts on the session, and the strip returns before the keymap, so it did nothing
+  # and said nothing. Said, not rerouted.
+  private def fuzzer_strip_hint(ev : Termisu::Event::Key) : Nil
+    return unless @active_tab == :fuzzer && ev.ctrl? && !ev.alt?
+    chord = Keybind.from_event(ev)
+    return unless ev.key.lower_o? || (chord && resolve_verb_id(chord, Verb::Scope::Fuzzer))
+    status("that key works inside the session — ↓ enters it")
   end
 
   # Sub-tab new/close/commit dispatched across the multi-session tabs. The active

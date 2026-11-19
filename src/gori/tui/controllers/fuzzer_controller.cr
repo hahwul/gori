@@ -1248,7 +1248,9 @@ module Gori::Tui
       engine, err = v.build_engine(!@host.session.config.insecure_upstream?,
         @host.session.scope, @host.session.host_overrides, @host.session.store)
       unless engine
-        @host.status(err || "can't run")
+        # :error so the Notifications card keeps it: a plan refusal is a sentence the 59-column
+        # toast cuts mid-way, and the next keypress replaced it.
+        @host.status(err || "can't run", :error)
         return
       end
       total = begin
