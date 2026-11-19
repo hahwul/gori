@@ -261,6 +261,114 @@ describe Gori::Probe::Passive::SecurityHeaders do
     end
   end
 
+  describe "CSP3 script capabilities" do
+    it "uses element and attribute directives before their fallbacks" do
+      with_store do |store|
+        [
+          "default-src 'none'; script-src-elem https:",
+          "default-src 'none'; script-src-elem 'unsafe-inline'",
+          "default-src 'none'; script-src-attr 'unsafe-inline'",
+          "default-src 'unsafe-inline'; script-src-elem 'none'",
+        ].each do |policy|
+          head = "HTTP/1.1 200 OK\r\nContent-Security-Policy: #{policy}\r\n\r\n"
+          codes(sec(store, resp_head: head)).should contain("weak_csp"), policy
+        end
+
+        [
+          "script-src https: 'unsafe-inline'; script-src-elem 'self'; script-src-attr 'none'",
+          "script-src https: 'unsafe-inline'; script-src-elem; script-src-attr",
+          "default-src 'none'; script-src-elem 'unsafe-inline' 'nonce-abc'; script-src-attr 'unsafe-inline' 'strict-dynamic'",
+          "default-src 'none'; script-src-attr https: data:",
+        ].each do |policy|
+          head = "HTTP/1.1 200 OK\r\nContent-Security-Policy: #{policy}\r\n\r\n"
+          codes(sec(store, resp_head: head)).should_not contain("weak_csp"), policy
+        end
+      end
+    end
+
+    it "evaluates unsafe-eval using the page-wide script policy" do
+      with_store do |store|
+        narrow = "script-src-elem 'self'; script-src-attr 'none'"
+        weak = "HTTP/1.1 200 OK\r\nContent-Security-Policy: default-src 'unsafe-eval'; #{narrow}\r\n\r\n"
+        codes(sec(store, resp_head: weak)).should contain("weak_csp")
+
+        safe = "HTTP/1.1 200 OK\r\nContent-Security-Policy: default-src 'none'; " \
+               "script-src-elem 'self' 'unsafe-eval'; script-src-attr 'unsafe-eval'\r\n\r\n"
+        codes(sec(store, resp_head: safe)).should_not contain("weak_csp")
+      end
+    end
+
+    it "finds only capabilities allowed by every policy in either header representation" do
+      with_store do |store|
+        [", ", "\r\nContent-Security-Policy: "].each do |separator|
+          [
+            {"script-src 'unsafe-eval'", "script-src 'unsafe-inline'"},
+            {"default-src 'none'; script-src-elem https:", "default-src 'none'; script-src-elem data:"},
+            {"script-src *; object-src 'none'", "script-src 'none'"},
+            {"default-src 'none'; script-src-elem 'unsafe-inline'", "default-src 'none'; script-src-attr 'unsafe-inline'"},
+          ].each do |(first, second)|
+            head = "HTTP/1.1 200 OK\r\nContent-Security-Policy: #{first}#{separator}#{second}\r\n\r\n"
+            codes(sec(store, resp_head: head)).should_not contain("weak_csp"), head
+          end
+
+          shared = "HTTP/1.1 200 OK\r\nContent-Security-Policy: default-src 'none'; script-src-elem http:" \
+                   "#{separator}default-src 'none'; script-src-elem https:\r\n\r\n"
+          codes(sec(store, resp_head: shared)).should contain("weak_csp")
+        end
+      end
+    end
+
+    it "ignores report-only fields when checking effective script behavior" do
+      with_store do |store|
+        report_only = "HTTP/1.1 200 OK\r\nContent-Security-Policy-Report-Only: script-src *\r\n\r\n"
+        found = codes(sec(store, resp_head: report_only))
+        found.should contain("csp_report_only")
+        found.should_not contain("weak_csp")
+
+        enforce = "HTTP/1.1 200 OK\r\nContent-Security-Policy: default-src 'none'; script-src-attr 'unsafe-inline'\r\n" \
+                  "Content-Security-Policy-Report-Only: default-src 'none'\r\n\r\n"
+        codes(sec(store, resp_head: enforce)).should contain("weak_csp")
+      end
+    end
+
+    it "honors an enforcing sandbox's script restriction" do
+      with_store do |store|
+        policy = "default-src 'none'; script-src-elem 'unsafe-inline'"
+        enforce = "HTTP/1.1 200 OK\r\nContent-Security-Policy: #{policy}"
+        codes(sec(store, resp_head: "#{enforce}; sandbox allow-same-origin\r\n\r\n")).should_not contain("weak_csp")
+        codes(sec(store, resp_head: "#{enforce}, , sandbox\r\n\r\n")).should_not contain("weak_csp")
+        codes(sec(store, resp_head: "#{enforce}; sandbox allow-scripts\r\n\r\n")).should contain("weak_csp")
+        codes(sec(store, resp_head: "#{enforce}\r\nContent-Security-Policy-Report-Only: sandbox\r\n\r\n")).should contain("weak_csp")
+      end
+    end
+
+    it "ignores a non-ASCII directive without discarding the rest of the policy" do
+      with_store do |store|
+        head = "HTTP/1.1 200 OK\r\nContent-Security-Policy: default-src 'none'; "
+        ["✦", String.new(Bytes[255])].each do |non_ascii|
+          malformed = "#{head}script-src-elem https: #{non_ascii}\r\n\r\n"
+          codes(sec(store, resp_head: malformed)).should_not contain("weak_csp")
+        end
+
+        valid = "#{head}script-src-elem https:; ignored ✦\r\n\r\n"
+        codes(sec(store, resp_head: valid)).should contain("weak_csp")
+      end
+    end
+
+    it "checks the script element allowlist for a missing base-uri" do
+      with_store do |store|
+        head = "HTTP/1.1 200 OK\r\nContent-Security-Policy: script-src-elem 'self'\r\n\r\n"
+        codes(sec(store, resp_head: head)).should contain("csp_missing_base_uri")
+
+        restricted = "HTTP/1.1 200 OK\r\nContent-Security-Policy: script-src-elem 'self', " \
+                     "base-uri 'none'; frame-ancestors 'none'\r\n\r\n"
+        found = codes(sec(store, resp_head: restricted))
+        found.should_not contain("csp_missing_base_uri")
+        found.should_not contain("missing_x_frame_options")
+      end
+    end
+  end
+
   it "surfaces both new codes through the registered Passive.analyze pipeline" do
     with_store do |store|
       detail = capture_flow(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Security-Policy: default-src 'self'\r\n\r\n")

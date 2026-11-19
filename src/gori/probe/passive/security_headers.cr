@@ -32,7 +32,7 @@ module Gori
 
         def info : RuleInfo
           RuleInfo.new("security_headers", "Security headers",
-            "Checks for missing or weak HSTS, CSP (incl. report-only-only and a missing base-uri), " \
+            "Checks for missing or weak HSTS, CSP (including CSP3 script directives, report-only and missing base-uri), " \
             "X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, and " \
             "Cross-Origin-Opener-Policy.",
             Category::HEADERS)
@@ -163,13 +163,12 @@ module Gori
         end
 
         private def check_doc_headers(ctx : Context, h, acc : Array(Detection)) : Nil
-          # EVERY enforcing CSP field, not the last: a browser enforces each as its own policy
-          # and a resource must pass all of them (an app's Helmet header plus a proxy's
-          # `add_header` is the common pair), so the policy is weak only when every one is.
+          # A field can carry several comma-separated policies. The browser enforces each one
+          # independently, just as it does when an intermediary leaves them as separate fields.
           csps = h.get_all("Content-Security-Policy")
-          if csp = csps.first?
-            policies = csps.map { |c| parse_csp(c) }
-            acc << hdr(ctx, "weak_csp", "Weak Content-Security-Policy", Store::Severity::Low, csp[0, 80]) if policies.all? { |d| weak_csp?(d) }
+          if first_csp = csps.first?
+            weak_script, base_uri, resource_sources, framed_ok = assess_csp(csps)
+            acc << hdr(ctx, "weak_csp", "Weak Content-Security-Policy", Store::Severity::Low, first_csp[0, 80]) if weak_script
             # base-uri is one of the few directives with NO fallback to default-src: omit it and
             # the document's base URL stays attacker-controllable. An injected `<base href>` (a
             # single tag, no script execution needed) re-points every RELATIVE script/resource URL
@@ -178,13 +177,12 @@ module Gori
             # ENFORCING policy (this branch) — a report-only header blocks nothing, and the
             # report-only-only case already gets csp_report_only.
             #
-            # Gated on there being a resource-source allowlist to WALK AROUND — script-src, its
-            # default-src fallback, or object-src. A transport/clickjacking-only policy
+            # Gated on there being a resource-source allowlist to WALK AROUND — script-src-elem,
+            # its fallbacks, or object-src. A transport/clickjacking-only policy
             # (`upgrade-insecure-requests`, `frame-ancestors 'none'`) restricts no script source,
             # so there is nothing for a rebased relative URL to bypass and base-uri is moot;
             # firing there would be pure noise (this is also the only context CSP Evaluator flags).
-            if policies.none?(&.has_key?("base-uri")) &&
-               policies.any? { |d| d.has_key?("script-src") || d.has_key?("default-src") || d.has_key?("object-src") }
+            if !base_uri && resource_sources
               acc << hdr(ctx, "csp_missing_base_uri", "CSP without base-uri (base-tag hijacking)", Store::Severity::Low)
             end
           else
@@ -199,7 +197,6 @@ module Gori
           # A CSP frame-ancestors directive only substitutes for X-Frame-Options when it is
           # actually restrictive (not '*'). Only the enforcing CSP counts — Report-Only does not
           # block framing.
-          framed_ok = policies.try &.any? { |d| (fa = d["frame-ancestors"]?) && !fa.empty? && !fa.includes?("*") }
           # Only DENY / SAMEORIGIN actually restrict framing; the obsolete ALLOW-FROM (and any
           # other value) is ignored by modern browsers, so a present-but-ineffective XFO is no
           # protection — flag it too, not just a missing header (validate the value like XCTO).
@@ -305,15 +302,18 @@ module Gori
           weak
         end
 
+        private alias CspPolicy = Hash(String, Array(String))
+
         # Parse a CSP into {directive => [sources]}, all lowercased. A directive repeated within
         # one policy is FIRST-wins (CSP3 "parse a serialized CSP": a duplicate directive name is
         # ignored) — mirror what the browser enforces, so `script-src 'self'; script-src
         # 'unsafe-inline'` is judged on the first, safe `script-src` (not the last).
-        private def parse_csp(csp : String) : Hash(String, Array(String))
-          csp = csp.scrub # a non-UTF-8 byte would make the PCRE split below raise (cf. cors.cr)
+        private def parse_csp(csp : String) : CspPolicy
           dirs = {} of String => Array(String)
-          csp.split(';').each do |segment|
-            toks = segment.strip.downcase.split(/\s+/).reject(&.empty?)
+          csp.split(';') do |segment|
+            # CSP3 §2.2.1 ignores a non-ASCII directive in its entirety.
+            next unless segment.ascii_only?
+            toks = segment.downcase.split(/[ \t\r\n\f]+/, remove_empty: true)
             next if toks.empty?
             dirs[toks[0]] ||= toks[1..]
           end
@@ -336,31 +336,66 @@ module Gori
         UNSAFE_INLINE  = {"'unsafe-inline'", "unsafe-inline"}
         STRICT_DYNAMIC = {"'strict-dynamic'", "strict-dynamic"}
 
-        # Weak when the SCRIPT context (script-src, else the default-src fallback) is unsafe —
-        # accounting for CSP Level 3 nullification so a modern, safe policy is NOT a false
-        # positive:
-        #   * ABSENT entirely (neither script-src nor default-src) ⇒ scripts unrestricted (as
-        #     XSS-permissive as no CSP, yet the header's presence suppresses missing_csp).
-        #   * 'unsafe-eval' ⇒ always weak (a nonce / 'strict-dynamic' does NOT nullify eval()).
-        #   * 'unsafe-inline' ⇒ weak ONLY when no nonce/hash source AND no 'strict-dynamic':
-        #     browsers IGNORE 'unsafe-inline' in the presence of either, so a nonce-based CSP
-        #     that keeps 'unsafe-inline' for CSP2-browser fallback is safe, not weak.
-        #   * a bare '*', 'data:', or a bare 'http:'/'https:' SCHEME source ⇒ any-origin (an
-        #     allowlist that is effectively allow-all: any host over that scheme can serve
-        #     scripts) / data-URI scripts (XSS), weak UNLESS 'strict-dynamic' is present (it makes
-        #     host/scheme sources be ignored). A specific host like 'https://cdn.example.com' is a
-        #     distinct token and does NOT trip this — only the bare scheme does.
-        # (`unsafe-inline` confined to style-src is a common, low-risk pattern; only the SCRIPT
-        # context is inspected, so it still does NOT trip this.)
-        private def weak_csp?(dirs : Hash(String, Array(String))) : Bool
-          script = dirs["script-src"]? || dirs["default-src"]?
-          return true if script.nil?
-          return true if script.any? { |s| UNSAFE_EVAL.includes?(s) }
-          nonce_or_hash = script.any? { |s| SCRIPT_NONCE_HASH.matches?(s) }
-          strict_dynamic = script.any? { |s| STRICT_DYNAMIC.includes?(s) }
-          return true if !nonce_or_hash && !strict_dynamic && script.any? { |s| UNSAFE_INLINE.includes?(s) }
-          return true if !strict_dynamic && script.any? { |s| s == "*" || s == "data:" || s == "http:" || s == "https:" }
-          false
+        @[Flags]
+        private enum ScriptCapability
+          Eval
+          InlineElement
+          InlineHandler
+          WebSource
+          DataSource
+        end
+
+        # Complementary policies can each allow a different kind of script without sharing any
+        # permissive path. Fold the capabilities and directive presence as each policy is
+        # parsed so a large comma-separated header cannot retain a hash for every policy.
+        private def assess_csp(fields : Array(String)) : {Bool, Bool, Bool, Bool}
+          shared = ScriptCapability::All
+          base_uri = resource_sources = framed_ok = false
+          fields.each do |field|
+            field.split(',') do |serialized|
+              next if serialized.strip.empty?
+              policy = parse_csp(serialized)
+              shared &= weak_script_capabilities(policy) unless shared.none?
+              base_uri ||= policy.has_key?("base-uri")
+              resource_sources ||= {"script-src-elem", "script-src", "default-src", "object-src"}.any? { |name| policy.has_key?(name) }
+              if (ancestors = policy["frame-ancestors"]?) && !ancestors.empty? && !ancestors.includes?("*")
+                framed_ok = true
+              end
+            end
+          end
+          {!shared.none?, base_uri, resource_sources, framed_ok}
+        end
+
+        private def weak_script_capabilities(policy : CspPolicy) : ScriptCapability
+          # An enforcing sandbox blocks scripts globally unless it explicitly allows them.
+          return ScriptCapability::None if (sandbox = policy["sandbox"]?) && !sandbox.includes?("allow-scripts")
+          # CSP3 §6.8.3: element and attribute directives override these fallbacks. The eval
+          # check is page-wide and still uses script-src (or default-src) only.
+          script = policy["script-src"]? || policy["default-src"]?
+          elements = policy["script-src-elem"]? || script
+          handlers = policy["script-src-attr"]? || script
+          capabilities = external_script_capabilities(elements)
+          capabilities |= ScriptCapability::Eval if script.nil? || script.any? { |s| UNSAFE_EVAL.includes?(s) }
+          capabilities |= ScriptCapability::InlineElement if unrestricted_inline?(elements)
+          capabilities |= ScriptCapability::InlineHandler if unrestricted_inline?(handlers)
+          capabilities
+        end
+
+        private def unrestricted_inline?(sources : Array(String)?) : Bool
+          return true unless sources
+          sources.any? { |s| UNSAFE_INLINE.includes?(s) } &&
+            sources.none? { |s| STRICT_DYNAMIC.includes?(s) || SCRIPT_NONCE_HASH.matches?(s) }
+        end
+
+        private def external_script_capabilities(sources : Array(String)?) : ScriptCapability
+          return ScriptCapability::WebSource | ScriptCapability::DataSource unless sources
+          return ScriptCapability::None if sources.any? { |s| STRICT_DYNAMIC.includes?(s) }
+          # All three broad web source expressions match HTTPS. A policy that allows only data
+          # URLs shares no broad external source with a policy that allows only web URLs.
+          capabilities = ScriptCapability::None
+          capabilities |= ScriptCapability::WebSource if sources.any? { |s| s == "*" || s == "http:" || s == "https:" }
+          capabilities |= ScriptCapability::DataSource if sources.includes?("data:")
+          capabilities
         end
 
         private def hdr(ctx : Context, code : String, title : String, sev : Store::Severity, evidence : String? = nil) : Detection
