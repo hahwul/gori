@@ -97,3 +97,27 @@ describe "Runner.orphaned_line" do
     Runner.orphaned_line(1).should start_with("1 flow from the last session was left incomplete")
   end
 end
+
+# The import's warning rode AFTER ` · path`, so `fit_hints` dropped it with the path and a
+# duplicate import read exactly like the first (W#1).
+describe "Runner.import_done_line" do
+  dup = "50 flows are already in this project from an earlier import of a file named \"s.har\""
+
+  it "keeps a warning ahead of the path, so the row's segment cut leaves it" do
+    msg, warned = Runner.import_done_line(Gori::Import::Result.new(50, notes: [dup]), "HAR", "/tmp/s.har", false)
+    warned.should be_true
+    msg.should eq("imported 50 flows from HAR — #{dup} · /tmp/s.har")
+    Chrome.fit_hints(msg, 59).should start_with("imported 50 flows from HAR — 50 flows are already")
+  end
+
+  it "names a partial write first too" do
+    msg, warned = Runner.import_done_line(Gori::Import::Result.new(8, attempted: 10), "HAR", "/tmp/s.har", false)
+    warned.should be_true
+    msg.should start_with("imported 8 flows from HAR — 2 of 10 did NOT commit")
+  end
+
+  it "is a plain success line when there is nothing to warn about" do
+    Runner.import_done_line(Gori::Import::Result.new(3), "HAR", "/tmp/s.har", false)
+      .should eq({"imported 3 flows from HAR · /tmp/s.har", false})
+  end
+end

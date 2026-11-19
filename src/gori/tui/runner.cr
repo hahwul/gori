@@ -4935,7 +4935,7 @@ module Gori::Tui
       reqs.each { |req| repeater_controller.repeater_from_request(req.origin, req.text, req.http2?, nil) }
       notes = (parsed.notes + reqs.flat_map(&.notes)).uniq
       opened = reqs.size == 1 ? "#{reqs.first.method} #{reqs.first.url}" : "#{reqs.size} sub-tabs"
-      status("repeater: opened #{opened} from curl#{curl_notes_tail(notes)} · ^R send", :done)
+      status("repeater: opened #{opened} from curl#{Runner.curl_notes_tail(notes)} · ^R send", :done)
       true
     end
 
@@ -4952,7 +4952,7 @@ module Gori::Tui
       msg = "imported #{Gori.plural(count, "flow")} from cURL"
       msg += " (#{result.skipped} refused)" if result.skipped > 0
       result.shortfall_note.try { |note| msg += " — #{note}" }
-      status("#{msg}#{curl_notes_tail(result.notes)}", :done)
+      status("#{msg}#{Runner.curl_notes_tail(result.notes)}", :done)
       true
     end
 
@@ -4962,7 +4962,7 @@ module Gori::Tui
     end
 
     # The first note in full (usually the ignored transport flags), and how many more.
-    private def curl_notes_tail(notes : Array(String)) : String
+    def self.curl_notes_tail(notes : Array(String)) : String
       first = notes.first? || return ""
       more = notes.size > 1 ? " (+#{notes.size - 1} more)" : ""
       " — #{first}#{more}"
@@ -5052,20 +5052,32 @@ module Gori::Tui
       end
       result = ev.result || return
       sitemap_controller.reload
+      cancelled = !!@import_cancel
+      msg, warned = Runner.import_done_line(result, ev.label, ev.path, cancelled)
+      @jobs.finish(ev.job, cancelled ? :stopped : :done, "#{result.count} flows")
+      # A warning is kept where it can be read again: the toast is gone on the next key.
+      @notifications.push(:warn, msg, source: "import") if warned
+      status(msg, warned ? :plain : :done)
+    end
+
+    # The import's toast, and whether it carries a warning. The warnings — a partial write
+    # (the import is chunked, so a short count must not read as a smaller file), what the
+    # import could not carry, or that it duplicated an earlier one (`Import::Result`) — go
+    # BEFORE the path: `Chrome.fit_hints` drops a toast's ` · ` segments from the right, and a
+    # warning glued to the path was dropped with it, so a re-import read exactly like the first.
+    def self.import_done_line(result : Import::Result, label : String, path : String, cancelled : Bool) : {String, Bool}
       count = result.count
-      msg = if @import_cancel
-              "import cancelled — #{Gori.plural(count, "flow")} from #{ev.label} were written before the stop"
+      msg = if cancelled
+              "import cancelled — #{Gori.plural(count, "flow")} from #{label} were written before the stop"
             else
-              "imported #{Gori.plural(count, "flow")} from #{ev.label} · #{ev.path}"
+              "imported #{Gori.plural(count, "flow")} from #{label}"
             end
       msg += " (#{result.skipped} entries skipped)" if result.skipped > 0
-      # The import is chunked, so a partial write is possible — say so rather than letting a
-      # short count read as a successful import of a smaller file (see Import::Result).
-      result.shortfall_note.try { |note| msg += " — #{note}" } unless @import_cancel
-      # What the import could not carry, or that it duplicated an earlier one (`Import::Result`).
+      shortfall = cancelled ? nil : result.shortfall_note
+      shortfall.try { |note| msg += " — #{note}" }
       msg += curl_notes_tail(result.notes)
-      @jobs.finish(ev.job, @import_cancel ? :stopped : :done, "#{count} flows")
-      status(msg, :done)
+      msg += " · #{path}" unless cancelled
+      {msg, !shortfall.nil? || !result.notes.empty?}
     end
 
     # --- Export path popup (Notes → Export note, Issues → Export issues) -----
