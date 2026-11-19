@@ -792,6 +792,30 @@ describe Gori::Tui::RepeaterView do
     view.request_side_matches?("http://h", row, false, true, nil).should be_false
   end
 
+  # Reconcile asks with the row's stored bytes on every commit tick, and an unchanged row is
+  # answered from a memo instead of re-serialising the pane. The memo must never outlive an
+  # edit, a re-seed or a different row.
+  it "request_side_matches? on stored bytes follows edits, undo and re-seeds" do
+    row = "POST /x HTTP/1.1\r\nHost: h\r\nContent-Length: 99\r\n\r\nhello"
+    other = "GET /y HTTP/1.1\r\nHost: h\r\n\r\n"
+    view = RepeaterView.new
+    view.restore("http://h", row, false, true)
+    2.times { view.request_side_matches?("http://h", row.to_slice, false, true, nil).should be_true }
+    view.request_side_matches?("http://h", other.to_slice, false, true, nil).should be_false
+    view.request_side_matches?("http://other", row.to_slice, false, true, nil).should be_false
+
+    view.focus_pane(:request)
+    view.edit_end
+    view.edit_insert('X')
+    view.request_side_matches?("http://h", row.to_slice, false, true, nil).should be_false
+    view.edit_undo
+    view.request_side_matches?("http://h", row.to_slice, false, true, nil).should be_true
+
+    view.apply_peer_request("http://h", other, false, true, sni: "")
+    view.request_side_matches?("http://h", row.to_slice, false, true, nil).should be_false
+    view.request_side_matches?("http://h", other.to_slice, false, true, nil).should be_true
+  end
+
   # The flip side of exactness, and a deliberate behaviour change: a peer that rewrote ONLY
   # the line endings changed the bytes gori will put on the wire, so reconcile must NOT skip.
   # It re-applies once and then matches (the editor now holds the peer's endings), so this

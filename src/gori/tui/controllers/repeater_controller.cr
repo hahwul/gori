@@ -1853,7 +1853,7 @@ module Gori::Tui
         next if repeater_tab_locked?(tab)
         # Only re-apply when the PERSISTED request side actually changed (data_version
         # also bumps on capture/response writes, so most polls touch an identical row).
-        next if v.request_side_matches?(row.target, String.new(row.request), row.http2?,
+        next if v.request_side_matches?(row.target, row.request, row.http2?,
                   row.auto_content_length?, row.sni, row.ws_keep_key?, row.ws_http_only?,
                   row.tls_preset)
         # Soft sync: request/target/flags only. Full restore() would reset focus to

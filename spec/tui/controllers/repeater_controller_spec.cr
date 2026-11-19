@@ -546,6 +546,29 @@ describe "RepeaterController#reconcile chip labels (#1807)" do
   end
 end
 
+describe "RepeaterController#reconcile request side" do
+  # An unchanged row is answered from a per-tab memo on every tick; a peer's edit, even one
+  # that keeps the request's length, still lands on the next one.
+  it "skips an unchanged row and still applies a peer's request edit" do
+    seed = ->(store : Gori::Store) do
+      store.insert_repeater("http://h.test/", "GET /aaa HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, false, true, nil, 0)
+      nil
+    end
+    with_repeater_controller(seed) do |ctl, host|
+      store = host.session.store
+      id = store.repeaters_meta.first.id
+      3.times { ctl.reconcile }
+      ctl.current_view.not_nil!.request_text.should contain("/aaa")
+      store.update_repeater(id, "http://h.test/", "GET /bbb HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, false, true)
+      ctl.reconcile
+      ctl.current_view.not_nil!.request_text.should contain("/bbb")
+      store.update_repeater(id, "http://h2.test/", "GET /bbb HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, false, true)
+      ctl.reconcile
+      ctl.current_view.not_nil!.target.should eq("http://h2.test/")
+    end
+  end
+end
+
 describe "RepeaterController#restore_send (#1808)" do
   it "saves the restored request and its response on the row" do
     seed = ->(store : Gori::Store) do
