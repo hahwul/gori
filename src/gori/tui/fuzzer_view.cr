@@ -634,6 +634,7 @@ module Gori::Tui
     # rule above — going away and coming back must not route URL keystrokes into @sni).
     def focus_resume : Nil
       @target_field = :url
+      @target_mode = InputMode::Read # a pane is entered in READ (i/↵ edits), however it was left
     end
 
     def focus_pane(pane : Symbol) : Nil
@@ -662,6 +663,7 @@ module Gori::Tui
     end
 
     private def set_focus(pane : Symbol) : Nil
+      @target_mode = InputMode::Read if pane != :target # INS is per visit, as RepeaterView#set_focus
       @focus = pane
       @target_field = :url
     end

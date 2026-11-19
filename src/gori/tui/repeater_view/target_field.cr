@@ -92,16 +92,16 @@ module Gori::Tui::TargetField
     @target_field == :sni ? (@scx = cx) : (@tcx = cx)
   end
 
-  # Forward-delete the char under the caret on the target/SNI field — a content edit.
-  def target_delete : Nil
+  # A `LineEdit` key (^A/^E/^U/^W, word motion, Home/End/Delete) on the active field, so the
+  # field takes the shell's line keys ahead of the tab's chords like every other bar (#1379).
+  def target_line_edit(action : Symbol) : Nil
+    text, cx = LineEdit.apply(action, target_active_line, target_active_cx)
+    @dirty = true if text != target_active_line
     if @target_field == :sni
-      return if @scx >= @sni.size
-      @sni = "#{@sni[0, @scx]}#{@sni[@scx + 1..]}"
+      @sni, @scx = text, cx
     else
-      return if @tcx >= @target.size
-      @target = "#{@target[0, @tcx]}#{@target[@tcx + 1..]}"
+      @target, @tcx = text, cx
     end
-    @dirty = true
   end
 
   def target_read_move(dc : Int32, selecting : Bool = false) : Nil

@@ -1842,6 +1842,12 @@ module Gori::Tui
         return
       end
 
+      # A one-line field being typed into takes ^A/^E/^U/^W like every `/` bar above, ahead of
+      # the ^W close below (`TabController#line_field_editing?`, LineEdit.action).
+      if @overlay.none? && @focus == :body && LineEdit.action(ev) && (lt = @tabs[@active_tab]?) && lt.line_field_editing?
+        return if lt.handle_body_key(ev)
+      end
+
       # ^N / ^W create and close a sub-tab from ANY focus level, on every tab that has a
       # strip — the same `subtab_new` / `subtab_close` contract `handle_subtabs_key` runs
       # (which is claimed above, so the strip keeps its own copy). They were per-tab guards
@@ -3501,6 +3507,7 @@ module Gori::Tui
         return pt.hint
       end
       if ov = active_overlay # migrated modals carry their own hint (Overlay seam)
+        return DiscardGuard::DISCARD_HINT if ov.is_a?(DiscardGuard) && ov.discard_armed?
         return ov.hint
       end
       case @overlay

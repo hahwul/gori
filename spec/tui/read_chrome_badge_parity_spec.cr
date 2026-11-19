@@ -130,6 +130,8 @@ describe "READ-mode chrome + border badge parity" do
       hits.should contain(ins_at + 2)
     end
 
+    # Unlike the request, TARGET's INS is per visit: leaving the card drops it to READ, so the
+    # unfocused card reads READ, and its chip hit-tests the same way.
     it "does the same on the Repeater TARGET card" do
       view = RepeaterView.new
       view.restore("https://h.test", "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n", false, true)
@@ -139,8 +141,8 @@ describe "READ-mode chrome + border badge parity" do
       rect = Rect.new(0, 0, 120, 24)
       b = MemoryBackend.new(120, 24)
       view.render(Screen.new(b), rect)
-      b.row(0).should contain("INS")
-      col = b.row(0).index("INS").not_nil!
+      b.row(0).should contain("READ")
+      col = b.row(0).index("READ").not_nil!
       view.chrome_hit(rect, col, 0).should eq(:target_mode)
     end
 
@@ -153,8 +155,8 @@ describe "READ-mode chrome + border badge parity" do
       rect = Rect.new(0, 0, 120, 30)
       b = MemoryBackend.new(120, 30)
       view.render(Screen.new(b), rect)
-      b.row(0).should contain("INS")
-      col = b.row(0).index("INS").not_nil!
+      b.row(0).should contain("READ")
+      col = b.row(0).index("READ").not_nil!
       view.target_chrome_hit(rect, col, 0).should eq(:mode)
     end
 

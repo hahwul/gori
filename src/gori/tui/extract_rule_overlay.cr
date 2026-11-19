@@ -124,6 +124,11 @@ module Gori::Tui
         range:    TextField.new(pos_end > 0 ? "#{pos_start}:#{pos_end}" : ""),
       }
       @kind_i = KINDS.index(kind) || 0
+      @opened_state = form_state
+    end
+
+    private def form_state : String
+      "#{super}|#{@kind_i}"
     end
 
     def self.adding : ExtractRuleOverlay
@@ -251,7 +256,9 @@ module Gori::Tui
 
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
-      return :cancel if key.escape?
+      if outcome = discard_key(ev)
+        return outcome
+      end
       return :stay if field_nav?(ev)
 
       if @sel == ROW_KIND

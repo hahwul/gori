@@ -1816,6 +1816,12 @@ module Gori::Tui
       false
     end
 
+    # A one-line field in the body is being typed into (the Repeater/Fuzzer TARGET in INS): the
+    # shell hands it the `LineEdit` keys ahead of its own ^W close and ^E $EDITOR (#1379).
+    def line_field_editing? : Bool
+      false
+    end
+
     # ALWAYS consume while editing (a Tab that escaped would move the focus ring mid-edit).
     def handle_list_filter_key(ev : Termisu::Event::Key) : Bool
       false

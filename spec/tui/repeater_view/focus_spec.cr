@@ -63,3 +63,27 @@ describe "Gori::Tui::RepeaterView — panes the frame did not draw" do
     view.focus.should eq(:request) # nowhere on screen to move it; the controller gates the keys
   end
 end
+
+# TARGET's INS is per visit: leaving it by any route (↵/↓/↹ ring, click, the strip and back)
+# lands READ, so a later ↑ back onto it does not type into the URL.
+describe "Gori::Tui::RepeaterView — TARGET INS does not outlive the visit" do
+  it "drops TARGET to READ when focus leaves it or comes back from the strip" do
+    view = RepeaterView.new
+    view.load_blank
+    view.focus_first
+    view.enter_target_insert!
+    view.pane_advance(1)
+    view.target_insert?.should be_false
+    view.focus_first
+    view.target_insert?.should be_false
+
+    view.enter_target_insert!
+    view.focus_pane(:response)
+    view.target_insert?.should be_false
+
+    view.focus_first
+    view.enter_target_insert!
+    view.focus_resume # back from the tab bar / strip
+    view.target_insert?.should be_false
+  end
+end

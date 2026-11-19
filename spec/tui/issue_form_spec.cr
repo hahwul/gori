@@ -221,6 +221,30 @@ describe Gori::Tui::IssueForm do
     esc.commits.should eq(0)
   end
 
+  # A typed title went with one esc, and the next `n` opened an empty form (DiscardGuard).
+  it "asks once before esc discards a typed title, a picked severity or a scored cvss" do
+    form = IssueForm.new
+    h = OverlayHarness.new(form)
+    h.type("XSS")
+    h.press(Termisu::Input::Key::Escape).should eq(:open)
+    form.discard_armed?.should be_true
+    h.press(Termisu::Input::Key::Left).should eq(:open) # any other key disarms
+    form.discard_armed?.should be_false
+    h.press(Termisu::Input::Key::Escape).should eq(:open)
+    h.press(Termisu::Input::Key::Escape).should eq(:closed)
+    h.commits.should eq(0)
+
+    sev = IssueForm.new
+    sev.severity_cycle(1)
+    OverlayHarness.new(sev).press(Termisu::Input::Key::Escape).should eq(:open)
+
+    cvss = IssueForm.new("t", heading: "EDIT ISSUE", edit_id: 1_i64)
+    cvss.set_cvss_value("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H") # from the calculator
+    OverlayHarness.new(cvss).press(Termisu::Input::Key::Escape).should eq(:open)
+
+    OverlayHarness.new(IssueForm.new("GET /x", edit_id: 1_i64)).press(Termisu::Input::Key::Escape).should eq(:closed)
+  end
+
   it "stays open when the injected commit rejects" do
     h = OverlayHarness.new(IssueForm.new, commit: false)
     h.press(Termisu::Input::Key::Enter).should eq(:open)

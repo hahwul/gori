@@ -2565,3 +2565,20 @@ describe "Gori::Tui::FuzzerView run without a match rule" do
     view.results_count_label.should contain("1 hit")
   end
 end
+
+describe "FuzzerView TARGET INS does not outlive the visit" do
+  it "drops TARGET to READ when focus leaves it or comes back from the strip" do
+    view = loaded_fuzzer
+    view.focus_first
+    view.enter_target_insert!
+    view.pane_advance(1)
+    view.focus.should eq(:template)
+    view.target_insert?.should be_false
+    view.focus_first
+    view.target_insert?.should be_false
+
+    view.enter_target_insert!
+    view.focus_resume
+    view.target_insert?.should be_false
+  end
+end

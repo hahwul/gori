@@ -509,6 +509,40 @@ module Gori::Tui
     end
   end
 
+  # Esc over unsaved edits asks once before throwing them away, as the hotkey editor does
+  # (`HotkeysOverlay#escape_browse`): one esc on a half-typed form used to close it with nothing
+  # kept. A form that opts in records `@opened_state = form_state` at the end of `initialize`
+  # and runs `discard_key` first in its key ladder; an untouched form still closes on one esc.
+  module DiscardGuard
+    DISCARD_HINT = "not saved yet — esc again discards" # whole at 80 columns beside the longest badge
+
+    @opened_state = ""
+    @discard_armed = false
+    getter? discard_armed
+
+    # Everything the form would save, as one comparable string: the text fields by default; a
+    # form with cyclers or a sub-editor appends those.
+    private def form_state : String
+      text_fields.join('\u0000', &.value)
+    end
+
+    # The outcome for esc (:cancel, or :stay with the question armed), nil for any other key,
+    # which disarms it.
+    private def discard_key(ev : Termisu::Event::Key) : Symbol?
+      armed = @discard_armed
+      @discard_armed = false
+      return nil unless ev.key.escape?
+      return :cancel if armed || form_state == @opened_state
+      @discard_armed = true
+      :stay
+    end
+
+    # A clipboard is neither the question nor its answer: a pasted esc reaches neither.
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      super && !ev.key.escape?
+    end
+  end
+
   # The row form: a card of `label: value` rows, one selected, each drawn as a band with a `▎`
   # marker, the LAST row the button that commits (Save / Run / Start). Ten forms — Rewriter,
   # Colormarker, Probe custom, extract, column, Scope, OAST provider, custom colour, Sequencer,
@@ -516,6 +550,8 @@ module Gori::Tui
   # prelude. A subclass answers `row_count`, `card_title`, `too_small_what` and
   # `draw_row_body`, and keeps its own key cases.
   abstract class FormOverlay < Overlay
+    include DiscardGuard
+
     @sel = 0
     @form_scroll = 0
 
