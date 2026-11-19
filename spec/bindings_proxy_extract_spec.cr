@@ -435,6 +435,22 @@ describe "Gori::Bindings — the proxy response seam (#501 slice 2)" do
       end
     end
 
+    # The other half: a rule re-binding the SAME value on every response moved nothing, and
+    # treating it as a rebind made every other rule's miss news again on every response.
+    it "does not reset another rule's miss when a rebind leaves the value unchanged" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid").should be_nil
+        b.add("TOK", "", Gori::ExtractKind::Cookie, "tok").should be_nil
+        rev = b.rev
+        20.times { observe(b, "HTTP/1.1 200 OK\r\nSet-Cookie: sid=abc\r\n\r\n") }
+        # TOK's miss is news twice: before SESSION first bound, and once after.
+        store.events_after(0, 100).count { |e| e.kind == "extract_miss" }.should eq 2
+        b.rev.should eq(rev + 1)
+        b.values["SESSION"].should eq("abc")
+      end
+    end
+
     # A deliberate `#observe` (one Repeater send) is one operator action, so it is never
     # throttled — they asked for that send and want to hear about each one.
     it "does not throttle a deliberate single send" do
