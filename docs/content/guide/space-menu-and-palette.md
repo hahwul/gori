@@ -25,13 +25,13 @@ Press `Space` in any list or pane. A card opens with the actions for where you a
 
 <figure class="tui-shot">
   <img src="/images/tui/space-menu.svg" alt="gori space menu open over the History tab, its rows grouped under VIEW, SEND, TRIAGE, COPY, SCOPE, COMMON, DANGER and WIPE, each with a letter on the left and, for some, a shortcut on the right" width="1206" height="520">
-  <figcaption><kbd>Space</kbd> on a History row. The letter on the left runs the row; the key on the right is the shortcut that does the same without the menu; <code>›</code> opens a second card.</figcaption>
+  <figcaption><kbd>Space</kbd> on a History row. The letter on the left runs the row, the key on the right is the shortcut that does the same without the menu, and <code>›</code> opens a second card.</figcaption>
 </figure>
 
 How to read the card:
 
-- **The letter on the left runs the row.** Press `y` and the flow is copied; the menu closes.
-- **The key on the right is the row's shortcut.** `r Send to Repeater ^R` means `Ctrl-R` sends to the Repeater from the list, with no menu at all. A row without one is reached through the menu (or the palette).
+- **The letter on the left runs the row.** Press `y` to copy the flow and close the menu.
+- **The key on the right is the row's shortcut.** `r Send to Repeater ^R` means `Ctrl-R` sends to the Repeater from the list, without the menu. A row without one is reached through the menu (or the palette).
 - **A `›` row opens a second card.** See [Second cards](#cards).
 - **Rows are grouped by purpose**: VIEW, SEND, TRIAGE, COPY, and so on. Delete sits under DANGER and a whole-tab wipe under WIPE, always last, and a wipe asks before it acts.
 
@@ -69,7 +69,7 @@ Three things make them quick:
 - **`>`, `⇧Z` and `⇧P` open their card directly**, without `Space`: `>` `f` sends the selected flow to the Fuzzer.
 - **Display… and Protocol… stay open.** After you flip a toggle the card comes back at the same row, so you can flip several in one visit. Each row shows its state: `●` on, `○` off, or a value such as the TLS preset's name. `Esc` closes it.
 
-On a tab with a sub-tab strip, focus the strip itself (or the tab bar) and `Space` lists the sub-tab actions directly, with no `T` in front. `Ctrl-N` and `Ctrl-W` (new and close sub-tab) work from any pane.
+On a tab with a sub-tab strip, focus the strip (or the tab bar) and `Space` lists the sub-tab actions directly, with no `T` in front. `Ctrl-N` and `Ctrl-W` (new and close sub-tab) work from any pane.
 
 ## Letters you can guess {#letters}
 
@@ -97,18 +97,18 @@ Press `Ctrl-P` on any tab and start typing the name of what you want.
 
 <figure class="tui-shot">
   <img src="/images/tui/command-palette.svg" alt="gori command palette over the History tab with the query send: THIS TAB lists Send to Comparer, Send to Fuzzer, Send to Sequencer and Send to Authorize with their keys or menu paths on the right, then APP lists matching app commands" width="1206" height="520" loading="lazy" decoding="async">
-  <figcaption><kbd>Ctrl-P</kbd>, then <code>send</code>, on History. The tab's own actions come first, each with the key or menu path that reaches it; app-wide commands follow.</figcaption>
+  <figcaption><kbd>Ctrl-P</kbd>, then <code>send</code>, on History. The tab's own actions come first, each with the key or menu path that reaches it, and app-wide commands follow.</figcaption>
 </figure>
 
 - **With nothing typed**, the palette lists the app-wide commands: settings, **Open browser**, **Go to** a tab, **Guided tour**, and the like.
 - **Once you type**, it also searches the actions of the pane you opened it from. Those come first under `THIS TAB`, and app-wide matches follow under `APP`.
-- **The right-hand column shows the shorter route.** `shift-i` is a key; `␣ > c` is a menu path: `Space`, then `>`, then `c`.
+- **The right-hand column shows the shorter route.** `shift-i` is a key, and `␣ > c` is a menu path: `Space`, then `>`, then `c`.
 - `↑` / `↓` select, `↵` runs, `Esc` closes. Opened over a flow's detail, it searches the detail's actions, and `Esc` returns you to it.
 - If you have rows marked, the title reads `COMMANDS · 3 MARKED`, and the action you pick applies to all of them.
 
 ### Actions only the palette lists {#palette-only}
 
-To keep the space menu short, a few kinds of action have no row in it. Some repeat a key you already have, such as Mark word (`Ctrl-K`); others you need only now and then, such as **Minimize request** or **Go to line**. Type the name into `Ctrl-P` from the tab it belongs to and it appears under `THIS TAB`. Help names the route for each one: its key, or `^P → <name>`.
+To keep the space menu short, a few kinds of action have no row in it. Some repeat a key you already have, such as Mark word (`Ctrl-K`). Others you need only now and then, such as **Minimize request** or **Go to line**. Type the name into `Ctrl-P` from the tab it belongs to and it appears under `THIS TAB`. Help names the route for each one: its key, or `^P → <name>`.
 
 The full list is in [Hotkeys → Actions only the palette lists](/guide/hotkeys/#palette-only).
 
@@ -135,9 +135,9 @@ You need a project with a few captured flows. The [Quick Start](/getting-started
 ## When a key does nothing {#troubleshooting}
 
 - **`Space` typed a space.** You are editing text (the pane's badge reads `INS`). Press `Esc` to go back to `READ`, then `Space`.
-- **A letter from a guide does nothing.** Menu letters belong to the pane you are in. Open the menu to see what this pane offers, or search the action's name with `Ctrl-P`: it may be one of the [palette-only actions](#palette-only).
+- **A letter from a guide does nothing.** Menu letters belong to the pane you are in. Open the menu to see what this pane offers, or search the action's name with `Ctrl-P`. It may be one of the [palette-only actions](#palette-only).
 - **You rebound a shortcut.** A rebind changes the key on the right of a row, never the row's letter. The menu and the palette both show your new key.
-- **You picked the vim keyset.** The keyset changes how you move and select in editors; it leaves every menu letter where it was. See [Editor keysets](/guide/hotkeys/#editor-keysets).
+- **You picked the vim keyset.** The keyset changes how you move and select in editors and leaves every menu letter where it was. See [Editor keysets](/guide/hotkeys/#editor-keysets).
 
 ## Next Steps
 

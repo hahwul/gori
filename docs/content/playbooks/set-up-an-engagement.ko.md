@@ -7,15 +7,15 @@ weight = 10
 group = "기초"
 +++
 
-요청 하나를 캡처하기 전에 테스트의 경계부터 정합니다. 어느 프로젝트가 트래픽을 담을지, 어떤 호스트가 스코프에 들어가는지, 그리고 gori가 그 밖의 무언가를 건드려도 되는지 정합니다. 이 플레이북은 그 셋을 다루며 약 5분이 걸립니다. 헤드리스와 에이전트의 전송은 스코프를 잡지 않은 대상을 거부하고, 샌드박스는 TUI를 포함한 모든 표면을 막습니다.
+요청을 캡처하기 전에 테스트의 경계부터 정합니다. 어느 프로젝트에 트래픽을 담을지, 어떤 호스트가 스코프에 들어가는지, gori가 그 밖의 대상을 건드려도 되는지입니다. 이 플레이북에서는 이 셋을 다루며 5분 정도 걸립니다. 헤드리스와 에이전트의 전송은 스코프를 잡지 않은 대상을 거부하고, 샌드박스는 TUI를 포함한 모든 표면을 막습니다.
 
-> **시작하기 전에.** 먼저 [Quick Start](/ko/getting-started/quick-start/)를 끝내 gori가 실행 중이고 탭 사이를 이동할 수 있게 하세요. 테스트 권한이 있는 호스트를 하나 떠올려 두세요. 예시는 `api.example.com`을 대역으로 씁니다.
+> **시작하기 전에.** 먼저 [Quick Start](/ko/getting-started/quick-start/)를 끝내 gori를 실행하고 탭 사이를 이동할 수 있어야 합니다. 테스트 권한이 있는 호스트를 하나 정해 두세요. 예시에서는 `api.example.com`을 가상의 대상으로 씁니다.
 
 ## 1. 프로젝트 만들기 {#1-create-a-project}
 
-프로젝트는 하나의 SQLite 데이터베이스입니다. 자체 history, scope, issues, notes를 가지며 다른 모든 엔게이지먼트와 격리됩니다. 스코프와 샌드박스는 프로젝트마다 설정되므로 대상 하나에 프로젝트 하나를 두세요.
+프로젝트는 SQLite 데이터베이스 하나입니다. history, scope, issues, notes를 따로 가지며 다른 엔게이지먼트와 격리됩니다. 스코프와 샌드박스는 프로젝트마다 설정되므로 대상 하나에 프로젝트 하나를 두세요.
 
-TUI에서는 커맨드 팔레트(`Ctrl-P`, 이어서 *project* 입력)로 프로젝트 피커를 열어 새로 시작합니다. 또는 프록시가 뜨기 전에 셸에서 만들어, 스크립트가 스코프와 env를 먼저 깔아 둘 수도 있습니다:
+TUI에서는 커맨드 팔레트(`Ctrl-P`, 이어서 *project* 입력)로 프로젝트 피커를 열어 새 프로젝트를 만듭니다. 프록시를 띄우기 전에 셸에서 만들 수도 있어, 스크립트로 스코프와 env를 먼저 설정해 둘 수 있습니다:
 
 ```bash
 gori run project create "Acme API" --description="staging engagement" --tag=web --tag=acme
@@ -27,7 +27,7 @@ gori run project create "Acme API" --description="staging engagement" --tag=web 
 
 ## 2. 스코프 정하기 {#2-draw-your-scope}
 
-**Project** 탭을 열고 **Scope** 서브탭으로 이동한 뒤 `↓` 또는 `Enter`로 안으로 들어갑니다. 스코프는 **include**와 **exclude** 규칙의 목록이며, 각 규칙은 **host**, **string**, 또는 **regex**로 매칭합니다. 대상에 대한 include를 하나 추가하고, 관심 없는 노이즈를 exclude로 걸러 냅니다:
+**Project** 탭을 열고 **Scope** 서브탭으로 이동한 뒤 `↓` 또는 `Enter`로 안으로 들어갑니다. 스코프는 **include**와 **exclude** 규칙의 목록이며, 각 규칙은 **host**, **string**, 또는 **regex**로 매칭합니다. 대상을 include로 하나 추가하고, 필요 없는 노이즈는 exclude로 걸러 냅니다:
 
 ```bash
 gori run project scope add --kind=include --type=host  --pattern=api.example.com
@@ -36,7 +36,7 @@ gori run project scope add --kind=exclude --type=regex --pattern='\.(css|js|png|
 
 스코프는 **허용 목록(allowlist)**으로 평가됩니다. include 규칙 중 하나 이상이 매칭하고 exclude 규칙이 하나도 매칭하지 않을 때 플로우가 스코프 안에 듭니다. 이 정의가 다음 두 단계를 좌우합니다.
 
-**체크포인트.** `gori run project scope`(또는 Scope 서브탭)에 두 규칙이 모두 나열됩니다. TUI에서는 아직 걸러지는 것이 없습니다. 이제 `gori run`은 이 스코프 밖 호스트로의 액티브 전송을 거부합니다.
+**체크포인트.** `gori run project scope`(또는 Scope 서브탭)에 두 규칙이 모두 나열됩니다. TUI에서는 아직 걸러지는 것이 없습니다. 이제 `gori run`은 이 스코프 밖 호스트로 보내는 액티브 전송을 거부합니다.
 
 ## 3. 스코프 렌즈로 시야 좁히기 {#3-focus-your-view-with-the-scope-lens}
 
@@ -52,15 +52,15 @@ gori run project scope add --kind=exclude --type=regex --pattern='\.(css|js|png|
 gori run project sandbox on
 ```
 
-켜져 있는 동안 프록시는 스코프가 허용하는 요청만 흘려보내고, 나머지는 origin에 닿기 전에 차단합니다. 차단된 요청은 `X-Gori-Sandbox: blocked` 헤더를 단 `403`으로 돌아오며(HTTP/2에서는 스트림이 취소됩니다), 그 시도는 여전히 중단된 플로우로 기록되어 무엇이 빠져나가려 했는지 볼 수 있습니다.
+켜져 있는 동안 프록시는 스코프가 허용하는 요청만 흘려보내고, 나머지는 origin에 닿기 전에 차단합니다. 차단된 요청은 `X-Gori-Sandbox: blocked` 헤더를 단 `403`으로 돌아오며(HTTP/2에서는 스트림이 취소됩니다), 그 시도도 중단된 플로우로 기록되어 무엇이 나가려 했는지 볼 수 있습니다.
 
 스코프가 허용 목록이므로 **include 규칙이 없는 샌드박스는 모든 것을 차단합니다**. 샌드박스가 켜져 있는 동안 상단 바에 빨간 `sandbox` 칩이 표시됩니다.
 
-**체크포인트.** `sandbox` 칩이 켜져 있습니다. 스코프 밖 사이트로의 요청은 실패하고, `api.example.com`으로의 요청은 통과합니다. 터미널에서 둘 다 시험하려면 `gori run shell`을 쓰세요. curl, git, Python, Go, Node 트래픽이 실행 중인 gori를 거치고 그 CA를 신뢰하는 터미널을 엽니다. 차단을 풀려면 샌드박스를 끄세요.
+**체크포인트.** `sandbox` 칩이 켜져 있습니다. 스코프 밖 사이트로 보낸 요청은 실패하고, `api.example.com`으로 보낸 요청은 통과합니다. 터미널에서 둘 다 시험하려면 `gori run shell`을 쓰세요. curl, git, Python, Go, Node 트래픽이 실행 중인 gori를 거치고 gori의 CA를 신뢰하는 터미널이 열립니다. 차단을 풀려면 샌드박스를 끄세요.
 
 ## 5. DNS를 건드리지 않고 호스트 리다이렉트 (선택) {#5-redirect-a-host-without-touching-dns-optional}
 
-대상의 이름이 공개 DNS가 아닌 다른 곳(스테이징 서버, 로컬 인스턴스)으로 해석되어야 한다면, **Project → Host overrides** 서브탭에 **host override**를 추가하세요. TCP 다이얼 대상만 바꿀 뿐, SNI·인증서 이름·`Host` 헤더는 원래 이름 그대로라 서버는 평범한 요청으로 봅니다:
+대상의 이름이 공개 DNS가 아닌 다른 곳(스테이징 서버, 로컬 인스턴스)으로 해석되어야 한다면, **Project → Host overrides** 서브탭에 **host override**를 추가하세요. TCP 연결 대상만 바뀌고 SNI·인증서 이름·`Host` 헤더는 원래 이름을 유지하므로, 서버에는 일반 요청으로 보입니다:
 
 ```bash
 gori run project host-override add --host=api.example.com --ip=10.0.0.1
@@ -68,14 +68,14 @@ gori run project host-override add --host=api.example.com --ip=10.0.0.1
 
 고객사 프록시나 SOCKS 점프 호스트를 거쳐 나가야 하는 엔게이지먼트라면, **Project settings** 패널의 NETWORK 필드에서 이 프로젝트만의 upstream을 지정하거나, 헤드리스로 `gori run project network set upstream_proxy=socks5h://127.0.0.1:1080`을 실행하세요. `gori run project network`는 키마다 프로젝트가 직접 지정했는지, 전역 값을 물려받는지 보여 줍니다.
 
-**체크포인트.** `gori run project host-override`에 항목이 나열되고, `api.example.com`으로의 요청이 이제 `10.0.0.1`로 연결됩니다.
+**체크포인트.** `gori run project host-override`에 항목이 나열되고, `api.example.com`으로 보낸 요청이 이제 `10.0.0.1`로 연결됩니다.
 
 ## 스코프가 먼저인 이유 {#why-scope-comes-first}
 
-헤드리스와 에이전트 표면은 샌드박스가 켜져 있든 아니든 스코프를 강제합니다. `gori run`은 설정된 스코프 밖 호스트로의 액티브 전송을 거부하고, MCP의 모든 액션 도구는 스코프에 들지 않는 대상을 `SCOPE_BLOCKED` 오류로 거부하며, 스코프가 아직 없어도 마찬가지입니다. TUI에서는 대상을 직접 입력했으므로 Repeater와 스윕이 이 검사를 건너뛰고, 샌드박스만 이들을 가둡니다. 둘이 함께 빗나간 재전송이나 퍼징 실행이 의도치 않은 호스트에 닿는 것을 막습니다. 이후의 모든 플레이북은 여기서 잡은 스코프를 물려받습니다.
+헤드리스와 에이전트 표면은 샌드박스가 켜져 있든 아니든 스코프를 강제합니다. `gori run`은 설정된 스코프 밖 호스트로 보내는 액티브 전송을 거부하고, MCP의 모든 액션 도구는 스코프에 들지 않는 대상을 `SCOPE_BLOCKED` 오류로 거부하며, 스코프가 아직 없어도 마찬가지입니다. TUI에서는 대상을 직접 입력했으므로 Repeater와 스윕이 이 검사를 건너뛰고, 샌드박스만 적용됩니다. 스코프 검사와 샌드박스는 잘못 나간 재전송이나 퍼징 실행이 의도하지 않은 호스트에 닿지 않게 막습니다. 이후의 모든 플레이북은 여기서 잡은 스코프를 물려받습니다.
 
 ## 다음 단계 {#next-steps}
 
-- [공격면 매핑](/ko/playbooks/map-the-attack-surface/): 스코프가 걸린 캡처를 사이트맵으로
+- [공격면 매핑](/ko/playbooks/map-the-attack-surface/): 스코프를 적용한 캡처를 사이트맵으로 만들기
 - [Proxy & History](/ko/guide/proxy/#scope): 스코프, 샌드박스, 호스트 오버라이드 전체 레퍼런스
-- [Query Language](/ko/reference/query-language/): 호스트 말고도 더 많은 조건으로 History 필터링
+- [Query Language](/ko/reference/query-language/): 호스트 외의 조건으로 History 필터링

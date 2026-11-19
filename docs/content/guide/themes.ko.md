@@ -8,13 +8,13 @@ group = "커스터마이즈"
 shot = "theme-dancheong"
 +++
 
-gori는 32개의 내장 컬러 테마를 제공합니다: `goridark`(기본값), `goriday`, `dancheong`, `hanji`, `latte`, `espresso`, `tokyonight`, `gruvbox`, `nord`, `dracula`, `solarized_light`, `rosepine_dawn`, `catppuccin_mocha`, `monokai`, `everforest`, `onedark`, `kanagawa`, `github_dark`, `zenburn`, `synthwave84`, `cyberpunk`, `matrix`, `cobalt2`, `high_contrast`, `github_light`, `gruvbox_light`, `one_light`, `ayu_light`, `rosepine`, `tokyonight_day`, `solarized_dark`, `everforest_light`.
+gori는 내장 컬러 테마 32개를 제공합니다. `goridark`(기본값), `goriday`, `dancheong`, `hanji`, `latte`, `espresso`, `tokyonight`, `gruvbox`, `nord`, `dracula`, `solarized_light`, `rosepine_dawn`, `catppuccin_mocha`, `monokai`, `everforest`, `onedark`, `kanagawa`, `github_dark`, `zenburn`, `synthwave84`, `cyberpunk`, `matrix`, `cobalt2`, `high_contrast`, `github_light`, `gruvbox_light`, `one_light`, `ayu_light`, `rosepine`, `tokyonight_day`, `solarized_dark`, `everforest_light`입니다.
 
 ## 테마 전환 {#switching-themes}
 
 `Ctrl-,`(또는 상단 바의 `⚙` 칩)로 Preferences를 열고 **Appearance**로 이동한 뒤 **Theme** 행에서 `↵`를 누릅니다. 이 행은 현재 테마를 인라인으로 미리 보여줍니다. 이름과 팔레트 스와치가 함께 표시됩니다. `Ctrl-P` → **Settings: Theme**으로 같은 선택기를 한 번에 열 수도 있습니다.
 
-선택기는 세로로 스크롤되는 목록입니다. 각 행은 테마 팔레트의 작은 스와치를 보여주며, 행을 선택하면 실시간으로 미리보기가 나타납니다. `Enter`는 선택을 적용하고 유지하며, `Esc`는 되돌립니다.
+선택기는 세로로 스크롤되는 목록입니다. 각 행은 테마 팔레트의 작은 스와치를 보여주며, 행을 선택하면 실시간으로 미리보기가 나타납니다. `Enter`는 선택을 적용해 저장하고, `Esc`는 되돌립니다.
 
 `Ctrl-,`는 프로젝트 선택기에서도 동작하므로, 프로젝트를 열기 전 첫 실행에서 테마를 정할 수 있습니다. 폼 섹션은 모두 그곳에서도 편집할 수 있지만, 오프너는 Theme만 동작합니다. 나머지 오프너(Tabs, Env, Hotkeys, 키셋 연습장, 호스트네임 오버라이드, User-Agents)는 프로젝트를 열어야 합니다.
 
@@ -55,7 +55,7 @@ gori는 32개의 내장 컬러 테마를 제공합니다: `goridark`(기본값),
 ~/.gori/themes/<name>.json
 ```
 
-(`~/.gori`는 gori 홈 디렉터리입니다. `$GORI_HOME`으로 재정의하세요.) 파일 이름이 테마 이름입니다. `ocean.json`은 테마 `ocean`이 됩니다. 커스텀 테마는 선택기에서 내장 테마 다음에 파일 이름 순으로 나타납니다. gori는 시작 시, 그리고 테마 선택기를 열 때마다 다시 로드하므로, 파일을 넣고 재시작 없이 선택기를 다시 열 수 있습니다.
+(`~/.gori`는 gori 홈 디렉터리입니다. `$GORI_HOME`으로 재정의하세요.) 파일 이름이 테마 이름입니다. `ocean.json`은 테마 `ocean`이 됩니다. 커스텀 테마는 선택기에서 내장 테마 다음에 파일 이름 순으로 나타납니다. gori는 시작할 때와 테마 선택기를 열 때마다 테마를 다시 로드하므로, 파일을 넣고 재시작 없이 선택기를 다시 열 수 있습니다.
 
 ### 형식 {#format}
 
@@ -73,7 +73,7 @@ gori는 32개의 내장 컬러 테마를 제공합니다: `goridark`(기본값),
 
 ### 전체 테마 {#a-full-theme}
 
-모든 필드이며, 생략 시 `base`에서 상속합니다.
+모든 필드를 나열한 것입니다. 생략한 필드는 `base`에서 상속합니다.
 
 ```json
 {

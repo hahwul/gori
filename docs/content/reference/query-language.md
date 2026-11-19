@@ -64,7 +64,7 @@ NOT (req.body:token OR resp.body:token)
 ```
 
 `res.` is a synonym of `resp.`, and `req.size` / `resp.size` are synonyms of `reqsize` /
-`respsize`. Fields that only ever have one side (`host`, `method`, `status`, …) take no prefix.
+`respsize`. Fields that have only one side (`host`, `method`, `status`, …) take no prefix.
 
 ## Source: `src:` {#src-provenance}
 
@@ -179,7 +179,7 @@ status:>=4xx        a class shorthand takes a comparison too
 
 ## Regular Expressions
 
-Use `~` for a regex match on `host`, `path`, `url`, `method`, `scheme`, `header`, `body` or `ws` (and the `req.`/`resp.` sides of `header` and `body`). The `~` is its own field/value separator. Do **not** put a colon before it. Matching is case-sensitive; prefix `(?i)` for case-insensitive.
+Use `~` for a regex match on `host`, `path`, `url`, `method`, `scheme`, `header`, `body` or `ws` (and the `req.`/`resp.` sides of `header` and `body`). The `~` is its own field/value separator. Do **not** put a colon before it. Matching is case-sensitive. Prefix `(?i)` for case-insensitive.
 
 ```text
 path~/admin/
@@ -195,8 +195,8 @@ dropped and reported, like a bad numeric value, and is not searched as text.
 
 `ws:needle` matches a flow whose socket carried a message containing `needle` (case-insensitive).
 `ws~regex` matches by regex. Both directions are searched, TEXT and BINARY payloads alike, as the
-stored bytes: a NUL earlier in a payload does not hide a later hit. Ping, pong and close frames are
-not messages and never match, and neither do the `[gori] ` notice rows gori writes about a socket. Notices are told apart by that prefix, so a peer message that starts with `[gori] ` is skipped too.
+stored bytes, so a NUL earlier in a payload does not hide a later hit. Ping, pong and close frames
+are not messages and never match, and neither do the `[gori] ` notice rows gori writes about a socket. Notices are told apart by that prefix, so a peer message that starts with `[gori] ` is skipped too.
 `-ws:x` keeps every flow that carried no such message, including flows that are not sockets at all.
 
 ```text
@@ -328,7 +328,7 @@ Both the Intercept and colour-rule bars Tab-complete field names and known value
 
 Queries and colour rules read `body:` differently:
 
-- In a **query**, `body:` reads a trigram index: fast, but bounded to the first 8 KiB of each side and skipping binary and compressed bodies. `body~regex` scans the stored bytes instead, with no bound.
+- In a **query**, `body:` reads a trigram index, which is fast but bounded to the first 8 KiB of each side and skips binary and compressed bodies. `body~regex` scans the stored bytes instead, with no bound.
 - In a **colour rule**, `body:` always scans, and reads the first 64 KiB of each side. Indexing happens after capture, and a rule paints the row as it arrives, so it has to scan. The 64 KiB bound keeps a screenful of large bodies from stalling the list. A colour rule therefore paints rows the identical query does not list, but a match past 64 KiB is not painted.
 
 Every `body:` term, on every surface, reads the bytes **as they went over the wire**, so none of them finds a string inside a gzipped body. That includes an extract rule's condition, which is evaluated before the response is decoded. Only the extraction that follows sees decompressed text. To match on compressed content, match something outside it: a header, the path, or the response size.

@@ -7,7 +7,7 @@ weight = 75
 group = "Workbenches"
 +++
 
-Most access-control bugs are invisible from one session. When you are logged in as an admin, `/admin/users` returns the list and looks correct, but that says nothing about what an anonymous client, a read-only user or another tenant gets. **Authorize** takes a request you already captured, replays it under several identities, and compares each response against a baseline. An identity that is served what the baseline was served is a likely authorization bypass. It is gori's counterpart to Burp's Autorize / Auth Analyzer and to AuthMatrix.
+Most access-control bugs are invisible from one session. When you are logged in as an admin, `/admin/users` returns the list and looks correct, but that does not show what an anonymous client, a read-only user or another tenant gets. **Authorize** takes a request you already captured, replays it under several identities, and compares each response against a baseline. An identity that is served what the baseline was served is a likely authorization bypass. It is gori's counterpart to Burp's Autorize / Auth Analyzer and to AuthMatrix.
 
 The **Authorize** tab is off the bar by default. Press **`0`** and type "auth", use the command palette (`Ctrl-P` → **Go to Authorize**), or give it one of the nine slots in Preferences (`Ctrl-,`) → **Network & Tabs** → **Tabs**.
 
@@ -20,7 +20,7 @@ An identity is a **session slot**: a name, a static header overlay applied to th
 | **set** | Upsert a header: replace the value of every header of that name (case-insensitive, original casing kept), or append it when absent |
 | **remove** | Drop every header of that name |
 
-An "anonymous" identity removes `Cookie` and `Authorization`. An "admin" or "low-priv" identity sets them to another session's values. An API identity sets `X-Api-Key`. The overlay touches header lines only. The request line, the body, and `Content-Length` never move, so you compare the same request under different credentials.
+An "anonymous" identity removes `Cookie` and `Authorization`. An "admin" or "low-priv" identity sets them to another session's values. An API identity sets `X-Api-Key`. The overlay touches header lines only. The request line, the body, and `Content-Length` do not change, so you compare the same request under different credentials.
 
 Press `i` on the tab to open the identities card. A fresh project starts with two: **as-captured** (no overlay) and **anonymous** (drops `Cookie` and `Authorization`).
 
@@ -33,15 +33,15 @@ Press `i` on the tab to open the identities card. A fresh project starts with tw
 | `b` | Make this one the baseline |
 | `esc` | Close |
 
-The add / edit form has four fields: a **name** (unique and compared case-insensitively, with a duplicate refused on all three surfaces), the headers to **remove** (`drop headers:`), comma-separated, the headers to **set**, one `Name: value` per line, and **refresh before** (`off`, `jwt-exp` or `ttl=10m`; see [Refreshing a slot](#refreshing-a-slot)). The slot's refresh steps are listed read-only on the line above it. `⇥` moves between fields, `↵` saves (inside the set-headers editor it inserts a newline). A header line whose name is not a valid token, or whose value carries a CR or LF, is refused, and the error names the line.
+The add / edit form has four fields: a **name** (unique and compared case-insensitively, with a duplicate refused on all three surfaces), the headers to **remove** (`drop headers:`, comma-separated), the headers to **set** (one `Name: value` per line), and **refresh before** (`off`, `jwt-exp` or `ttl=10m`; see [Refreshing a slot](#refreshing-a-slot)). The slot's refresh steps are listed read-only on the line above it. `⇥` moves between fields, `↵` saves (inside the set-headers editor it inserts a newline). A header line whose name is not a valid token, or whose value carries a CR or LF, is refused, and the error names the line.
 
-Identities are saved with the project, so `gori run authorize` and the MCP tools default to the same set you configured here. The list shows header names only, so a session cookie is not painted on screen. The form shows values.
+Identities are saved with the project, so `gori run authorize` and the MCP tools default to the same set you configured here. The list shows header names only, so a session cookie is not shown on screen. The form shows values.
 
 Changing the identity set marks every result already on screen as pending again, since those verdicts were produced under the old set.
 
 ## Session Slots: One List, Two Readers
 
-This tab sends one request as every slot and compares the answers. Every other send path uses one slot: pick it, and every request from then on goes out as that slot.
+This tab sends one request as every slot and compares the answers. Every other send path uses one slot. Pick it, and every request from then on goes out as that slot.
 
 Picking the active slot and editing the list are separate actions:
 
@@ -51,14 +51,14 @@ Picking the active slot and editing the list are separate actions:
 | `gori run` | `--slot NAME` on the sending command | `gori run session list \| show \| add \| from-flow \| from-request \| edit \| rm \| baseline \| refresh` |
 | MCP | `set_active_session_slot` | `list_session_slots`, `create_session_slot`, `update_session_slot`, `delete_session_slot` |
 
-What the active slot changes, on `send_request`, a Repeater or Fuzzer send, and an intercept forward:
+The active slot changes two things on `send_request`, a Repeater or Fuzzer send, and an intercept forward:
 
-- its **header overlay** is applied to the final wire bytes, after `$BIND.NAME` substitution, header lines only, so `Content-Length` never moves and the body is byte-exact;
+- Its **header overlay** is applied to the final wire bytes after `$BIND.NAME` substitution, to header lines only, so `Content-Length` does not change and the body is byte-exact.
 - `$BIND.NAME` resolves against its binding table. An extract rule a slot claims writes that slot's table, and a rule no slot claims writes the global table. `Authorization: Bearer $BIND.SESSION` then means admin's token on the `admin` slot and the low-priv user's on `low-priv`, from one saved string.
 
-A slot header resolves `$BIND.NAME` and `$GEN.NAME` only. An `$ENV.KEY` in one goes out as typed, and `gori run session add`/`edit` and MCP's slot writes warn when a header names one. Write the value itself.
+A slot header resolves `$BIND.NAME` and `$GEN.NAME` only. An `$ENV.KEY` in one goes out as typed, and `gori run session add`/`edit` and MCP's slot writes warn when a header names one. Write the value instead.
 
-Three things the active slot does not do:
+There are three things the active slot does not do:
 
 - **It does not apply to an Authorize run.** This tab supplies each identity itself, once per send, so a run ignores whichever slot is active. Otherwise the active slot's `Cookie` would overwrite every identity, including the one that removes it, and every queued row would report a bypass that does not exist. The second point above still applies: each identity's `$BIND.NAME` resolves from that identity's binding table as its overlay goes on, so `Cookie: session=$BIND.SESSION` on both `admin` and `low-priv` sends two different sessions.
 - **It is never persisted.** Reopening a project, or a new `gori mcp` connection, starts as-captured. A slot's values are memory-only, so a restored "admin is active" would send an overlay whose `$BIND.SESSION` is literal and get a `401` with no visible cause.
@@ -76,11 +76,11 @@ A slot is a snapshot, so a long run can outlive its token. Give the slot **refre
 | `gori run` | `session edit NAME --refresh 12,14` | `session refresh NAME` | `--refresh-before` |
 | MCP | `update_session_slot{refresh}` | `refresh_session_slot` | none: only `off` |
 
-A **refresh before** policy runs the refresh on its own, before a send that goes out as the slot: `jwt-exp` when a JWT bound in the slot is within 30 s of its `exp`, or `ttl=10m` when that long has passed since the last successful refresh (or, before one, since the slot's oldest binding). A refresh that leaves the JWT still about to expire counts as a failure. It applies to every identity an Authorize run sends as, not only to the active slot. It acts before a send and never reads a response. A `401` in this tab is a verdict and does not trigger a login and retry.
+A **refresh before** policy runs the refresh automatically before a send that goes out as the slot: `jwt-exp` when a JWT bound in the slot is within 30 s of its `exp`, or `ttl=10m` when that long has passed since the last successful refresh (or, before one, since the slot's oldest binding). A refresh that leaves the JWT still about to expire counts as a failure. It applies to every identity an Authorize run sends as, not only to the active slot. It acts before a send and never reads a response. A `401` in this tab is a verdict and does not trigger a login and retry.
 
 Only the operator arms a policy. An automatic refresh in the TUI sends the steps with the slot's live credentials and skips the up-front scope check. An agent over `gori mcp` can therefore set `refresh_before` only to `off`, and when it changes the steps of an armed slot (its `refresh` list, or the request or target of one of its Repeater sessions) the policy turns off and the reply says so. It can still run the steps by hand with `refresh_session_slot`, which is gated like any agent send.
 
-Each refresh step lands in History with source `refresh` (`src:refresh`, SRC `RFRSH`), each refresh writes one event, and the `session:NAME` chip shows `⟳` while one runs and `!` after one failed. A failure also raises a notification and leaves the send going out with the value it had. A failed automatic refresh waits 30 s before it tries again, and after 3 failures in a row it switches itself off until a manual refresh succeeds. A step whose Repeater session was deleted stays in the list as `(deleted)` and refuses to run. Values stay per process. A refresh in the TUI does not update a running `gori mcp`.
+Each refresh step lands in History with source `refresh` (`src:refresh`, SRC `RFRSH`), each refresh writes one event, and the `session:NAME` chip shows `⟳` while one runs and `!` after one failed. A failure also raises a notification and leaves the send going out with the value it had. A failed automatic refresh waits 30 s before it tries again, and after 3 failures in a row it switches off until a manual refresh succeeds. A step whose Repeater session was deleted stays in the list as `(deleted)` and refuses to run. Values stay per process. A refresh in the TUI does not update a running `gori mcp`.
 
 ## The Baseline
 
@@ -93,9 +93,9 @@ A run needs at least one identity besides the baseline, and all three surfaces r
 1. In **History**, select the flows worth testing and `Space` `>` `a` (**Send flow to…** → **Send to Authorize**). From **Sitemap**, the same verb queues the selected endpoint's captured flow.
 2. On the **Authorize** tab, press `i` and set up the identities you want to compare.
 3. `Ctrl-R` replays every queued request that has no result yet, `⇧R` re-runs everything, and `t` runs the request under the cursor.
-4. Read the table. The top pane is one row per request with an aggregate verdict; `⇥` drills into the selected request's identities in the bottom pane.
+4. Read the table. The top pane is one row per request with an aggregate verdict. `⇥` drills into the selected request's identities in the bottom pane.
 
-Each identity gets its own connection, which costs a handshake per trial. Connection-oriented authentication (NTLM, Negotiate, common on internal engagements) authenticates the connection, not the message, so a reused socket would serve an identity that dropped `Cookie` the baseline's content and report a bypass that does not exist.
+Each identity gets its own connection, which costs a handshake per trial. Connection-oriented authentication (NTLM, Negotiate, common on internal engagements) authenticates the connection, not the message, so on a reused socket an identity that dropped `Cookie` would still be served the baseline's content, and the run would report a bypass that does not exist.
 
 `Ctrl-X` stops. The stop is polled between requests and between identities, so it takes effect at the next send. A request cut short mid-identity yields no verdict, so a partial set of trials never reads as "enforced". With [passive replay](#passive-replay) on, a stop also pauses passive replay until your next `Ctrl-R`, or until you switch passive off and on with `p`.
 
@@ -227,9 +227,9 @@ Four MCP tools drive the same engine as a background job: `authorize_start` (ret
 
 `authorize_results` puts the answer first. `access_control` names the outcome in one token (`BYPASS`, `enforced`, `review`, `error`, or `nothing_sent`; the last two both mean nothing was compared), `summary` says it in a sentence, and `bypasses` lists every request where a non-baseline identity was served the baseline's response, flat and never paged. Past the 40 KB reply budget the rest are named by flow id in `bypasses_unshown_ids`, and their detail is in the `results` rows marked `bypass: true`.
 
-Six more manage the slots themselves: `list_session_slots` (with the active one named, header values `[REDACTED]` unless you ask), `create_session_slot`, `update_session_slot`, `delete_session_slot`, `set_active_session_slot`, which picks the identity every other tool's sends go out as, for the life of that server process, and `refresh_session_slot`, which runs a slot's refresh steps now.
+Six more manage the slots: `list_session_slots` (with the active one named, header values `[REDACTED]` unless you ask), `create_session_slot`, `update_session_slot`, `delete_session_slot`, `set_active_session_slot` (picks the identity every other tool's sends go out as, for the life of that server process), and `refresh_session_slot` (runs a slot's refresh steps now).
 
-A run is capped at 2,000 sends, and the cap counts `flows × identities`: a 500-row query under five identities (2,500 sends) is refused up front, naming both factors, instead of being truncated. Layer-1 scope is strict here. An out-of-scope target needs `allow_unscoped:true`.
+A run is capped at 2,000 sends, and the cap counts `flows × identities`. A 500-row query under five identities (2,500 sends) is refused up front, naming both factors, instead of being truncated. Layer-1 scope is strict here. An out-of-scope target needs `allow_unscoped:true`.
 
 ## A Run That Sent Nothing Is Not Evidence
 
@@ -244,4 +244,4 @@ A genuine `enforced` means access control held for the identities you tested, on
 - [Proxy & History](/guide/proxy/): capture the traffic and set the scope this tab replays inside
 - [Scanning & Issues](/guide/scanning/): file a confirmed bypass as an Issue
 - [Scripting](/guide/scripting/): run the same comparison headless, in CI
-- [MCP Server](/guide/mcp/): hand the whole loop to an agent
+- [MCP Server](/guide/mcp/): hand the loop to an agent

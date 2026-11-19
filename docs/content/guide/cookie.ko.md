@@ -7,20 +7,20 @@ weight = 55
 group = "워크벤치"
 +++
 
-**Cookie** 탭은 프레임워크가 서명한 세션 쿠키를 위한 워크벤치입니다: **Flask**(itsdangerous), **Rack**, **Django**. 쿠키를 파트로 디코드하고, 후보 서명 secret을 검증하거나 워드리스트로 브루트포스한 뒤, 세션을 편집해 재서명합니다. [Decoder](/ko/guide/decoder/)의 읽기 전용 `cookie-decode` / `flask-decode` / `rack-decode` / `django-decode` 컨버터는 파트를 보여주기만 합니다.
+**Cookie** 탭은 프레임워크가 서명한 세션 쿠키, 즉 **Flask**(itsdangerous), **Rack**, **Django** 쿠키를 다루는 워크벤치입니다. 쿠키를 파트로 디코드하고, 후보 서명 secret을 검증하거나 워드리스트로 브루트포스한 뒤, 세션을 편집해 재서명합니다. [Decoder](/ko/guide/decoder/)의 읽기 전용 `cookie-decode` / `flask-decode` / `rack-decode` / `django-decode` 컨버터는 파트를 보여주기만 합니다.
 
-어디서든(예: **History** 상세 패널, **Notes** 등) 쿠키를 선택하고 `Space` `S`(**Send selection to…**) → `k` **Cookie**를 누르면 그 쿠키로 새 워크벤치 서브탭을 채웁니다. 세션은 휘발성이라 디스크에는 아무것도 기록되지 않습니다. 이 탭은 기본적으로 바 밖에 있습니다. **`0`**을 누르고 "cookie"를 입력하거나, 커맨드 팔레트(`Ctrl-P` → **Go to Cookie**)를 쓰거나, Preferences에서 슬롯을 내주세요.
+어디서든(**History** 상세 패널, **Notes** 등) 쿠키를 선택하고 `Space` `S`(**Send selection to…**) → `k` **Cookie**를 누르면 그 쿠키로 새 워크벤치 서브탭이 열립니다. 세션은 휘발성이라 디스크에는 아무것도 기록되지 않습니다. 이 탭은 기본적으로 바 밖에 있습니다. **`0`**을 누르고 "cookie"를 입력하거나, 커맨드 팔레트(`Ctrl-P` → **Go to Cookie**)를 쓰거나, Preferences에서 슬롯을 내주세요.
 
 ## 두 개의 렌즈 {#two-lenses}
 
-세션 하나를 두 가지 뷰로 보며, `Ctrl-T`로 전환합니다. 각 렌즈의 최상위 카드 테두리에 전환 칩이 있습니다(INPUT에는 ` →FORGE `, PAYLOAD에는 ` →DECODE `). 칩을 클릭해도 전환됩니다.
+세션 하나를 두 가지 뷰로 보며, `Ctrl-T`로 전환합니다. 각 렌즈의 맨 위 카드 테두리에 전환 칩이 있습니다(INPUT에는 ` →FORGE `, PAYLOAD에는 ` →DECODE `). 칩을 클릭해도 전환됩니다.
 
-- **Decode**: INPUT에 쿠키를 붙여 넣으면 파트가 DECODED에 실시간으로 디코드됩니다. **OPTIONS**는 읽는 방식을 고정합니다: 포맷(`Ctrl-A`로 `auto` / `flask` / `rack` / `django` 순환, `auto`는 문장 부호로 감지), Django HMAC 알고리즘, 서명 salt. **SECRET**은 후보 키를 담으며, 입력하는 동안 검증 결과(`✓ verified` / `✗ bad key`)가 실시간으로 표시됩니다. 크랙하려면 읽기 패널(READ 모드의 INPUT 또는 DECODED)에서 `c`를 누르세요. SECRET을 비롯한 편집 패널에서는 `c`가 글자로 입력됩니다(아래 참고).
+- **Decode**: INPUT에 쿠키를 붙여 넣으면 파트가 DECODED에 실시간으로 디코드됩니다. **OPTIONS**는 읽는 방식, 즉 포맷(`Ctrl-A`로 `auto` / `flask` / `rack` / `django` 순환, `auto`는 문장 부호로 감지), Django HMAC 알고리즘, 서명 salt를 고정합니다. **SECRET**에는 후보 키를 넣으며, 입력하는 동안 검증 결과(`✓ verified` / `✗ bad key`)가 실시간으로 표시됩니다. 크랙하려면 읽기 패널(READ 모드의 INPUT 또는 DECODED)에서 `c`를 누르세요. SECRET을 비롯한 편집 패널에서는 `c`가 글자로 입력됩니다(아래 참고).
 - **Forge**: PAYLOAD에서 세션을 편집하고(Flask/Django는 JSON 객체, Rack은 불투명한 base64 값), SECRET을 설정하면 재서명된 쿠키가 OUTPUT에 실시간으로 나타납니다.
 
 `Space` → **Load decoded payload**는 현재 Decode 쪽에서 디코드된 payload를 Forge 편집기로 불러와 값을 고치고 재서명할 수 있게 합니다. 결과는 읽기 패널에서는 `y`로, 편집 중에는 `Ctrl-Y`로(위조된 쿠키는 `Space` → **Copy forged cookie**로) 복사하세요.
 
-> [JWT](/ko/guide/jwt/) 탭은 디코드만 하고 검증하지 않습니다. Cookie 탭은 검증합니다. SECRET의 `✓`는 입력한 키가 이 쿠키를 서명한다는 뜻입니다. Forge는 지정한 secret, salt, 알고리즘으로 재서명합니다.
+> [JWT](/ko/guide/jwt/) 탭은 디코드만 하고 검증하지 않습니다. Cookie 탭은 검증합니다. SECRET의 `✓`는 입력한 키가 이 쿠키의 서명 키라는 뜻입니다. Forge는 지정한 secret, salt, 알고리즘으로 재서명합니다.
 
 ## 세 가지 포맷 {#the-three-formats}
 
@@ -36,11 +36,11 @@ group = "워크벤치"
 
 - **파일 경로**는 워드리스트로 읽습니다(한 줄에 후보 하나).
 - **콤마로 구분된 목록**(`admin,secret,changeme`)은 인라인으로 시도합니다.
-- **단일 secret**은 원소가 하나인 목록입니다. 크랙은 실시간 검증과 같은 검사를 합니다.
+- **단일 secret**은 원소가 하나인 목록이므로, 크랙은 실시간 검증과 같은 검사를 합니다.
 
 성공하면 필드가 찾아낸 secret으로 바뀌고 결과가 `✓`로 바뀌어 Forge 렌즈에서 바로 쓸 수 있습니다.
 
-> Django **세션** 쿠키(`django.contrib.sessions`)는 기본이 아닌 salt로 서명되므로, 기본 salt로 크랙하면 실패합니다. 포맷이 Django로 해석되면 **OPTIONS**에 ` salt:signing ` 배지가 나타납니다. 이 배지를 클릭하면(또는 `Space` → **Toggle Django salt**) salt 필드가 `django.contrib.sessions.backends.signed_cookies`로 바뀝니다. 이후 verify·crack·forge가 모두 그 salt를 씁니다. 직접 아무 salt나 입력할 수도 있습니다. CLI의 `--salt`도 마찬가지이며, 기본 salt로 Django `--verify`나 `--crack`이 실패하면 세션 salt를 알려 주는 힌트가 출력됩니다.
+> Django **세션** 쿠키(`django.contrib.sessions`)는 기본이 아닌 salt로 서명되므로, 기본 salt로 크랙하면 실패합니다. 포맷이 Django로 해석되면 **OPTIONS**에 ` salt:signing ` 배지가 나타납니다. 이 배지를 클릭하면(또는 `Space` → **Toggle Django salt**) salt 필드가 `django.contrib.sessions.backends.signed_cookies`로 바뀝니다. 이후 verify·crack·forge가 모두 그 salt를 씁니다. 원하는 salt를 직접 입력할 수도 있습니다. CLI의 `--salt`도 마찬가지이며, 기본 salt로 Django `--verify`나 `--crack`이 실패하면 세션 salt를 알려 주는 힌트가 출력됩니다.
 
 ## 헤드리스 {#headless}
 
@@ -53,12 +53,12 @@ gori run cookie --forge --type flask --payload '{"admin":true}' --secret s3cret
 cat cookie.txt | gori run cookie                             # stdin에서 쿠키
 ```
 
-쿠키는 인자나 stdin에서 옵니다. 프로젝트나 캡처는 관여하지 않고, 모든 계산은 로컬에서 합니다. `--type`은 포맷을 고정하고(기본: 자동 감지), `--salt`는 Flask/Django 서명 salt를, `--algorithm`은 Django HMAC 알고리즘(`sha256` 또는 `sha1`)을 지정하며, `--format`은 `text` 또는 `json`입니다. `--forge`의 기본 알고리즘은 `sha256`입니다. `--verify`/`--crack`에서는 이 값을 비워 두면 쿠키의 서명 길이로 알고리즘을 판별하므로, SHA-1을 쓰는 구형 앱이 잘못된 키로 오인되지 않습니다. Flask/Django `--forge`는 `--payload` JSON을, Rack은 불투명한 `--value`를 받습니다. `--timestamp UNIX`는 위조한 쿠키에 현재 시각 대신 그 초를 찍습니다. [CLI 레퍼런스](/ko/reference/cli/#run-cookie)를 참고하세요.
+쿠키는 인자나 stdin으로 받습니다. 프로젝트나 캡처를 쓰지 않고, 모든 계산은 로컬에서 합니다. `--type`은 포맷을 고정하고(기본: 자동 감지), `--salt`는 Flask/Django 서명 salt를, `--algorithm`은 Django HMAC 알고리즘(`sha256` 또는 `sha1`)을 지정하며, `--format`은 `text` 또는 `json`입니다. `--forge`의 기본 알고리즘은 `sha256`입니다. `--verify`/`--crack`에서는 이 값을 비워 두면 쿠키의 서명 길이로 알고리즘을 판별하므로, SHA-1을 쓰는 구형 앱이 잘못된 키로 오인되지 않습니다. Flask/Django `--forge`는 `--payload` JSON을, Rack은 불투명한 `--value`를 받습니다. `--timestamp UNIX`는 위조한 쿠키에 현재 시각 대신 그 초를 찍습니다. [CLI 레퍼런스](/ko/reference/cli/#run-cookie)를 참고하세요.
 
 MCP에서는 `cookie_decode` / `cookie_verify` / `cookie_crack` / `cookie_forge`가 네트워크나 상태를 건드리지 않는 읽기 도구라, `--read-only`에서도 사용할 수 있습니다.
 
 ## 다음 단계 {#next-steps}
 
-- [JWT](/ko/guide/jwt/): JSON Web Token을 위한 형제 워크벤치
+- [JWT](/ko/guide/jwt/): JSON Web Token을 다루는 자매 워크벤치
 - [Decoder](/ko/guide/decoder/): 더 긴 변환 체인 안에서 쿠키 디코드
-- [Repeater & Fuzzer](/ko/guide/repeater-and-fuzzer/): 위조한 쿠키를 대상에 발사
+- [Repeater & Fuzzer](/ko/guide/repeater-and-fuzzer/): 위조한 쿠키를 대상에 전송

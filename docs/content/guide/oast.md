@@ -8,9 +8,9 @@ group = "Workbenches"
 shot = "oast"
 +++
 
-Some bugs never show up in the response. A blind SSRF, a blind XXE, an out-of-band SQL injection, or a stored payload that only fires in a back-office browser all reach out to *some other server* instead of answering you. **OAST** (Out-of-band Application Security Testing) gives you that server: gori registers a payload URL with an interaction listener, you plant the payload in a request, and any DNS, HTTP, or SMTP callback the target makes to it shows up as a hit.
+Some bugs never show up in the response. A blind SSRF, a blind XXE, an out-of-band SQL injection, or a stored payload that only fires in a back-office browser all reach out to *some other server* instead of answering you. **OAST** (Out-of-band Application Security Testing) gives you that server. gori registers a payload URL with an interaction listener, you plant the payload in a request, and any DNS, HTTP, or SMTP callback the target makes to it shows up as a hit.
 
-The **OAST** tab is off the bar by default: press **`0`** and type "oast", use the command palette (`Ctrl-P` → **Go to OAST**), or give it a slot in Preferences. It has two sub-tabs: **Callbacks** (the hits, default) and **Providers** (the listeners you've configured).
+The **OAST** tab is off the bar by default. Press **`0`** and type "oast", use the command palette (`Ctrl-P` → **Go to OAST**), or give it a slot in Preferences. It has two sub-tabs: **Callbacks** (the hits, default) and **Providers** (the listeners you've configured).
 
 <figure class="tui-shot">
   <img src="/images/tui/oast.svg" alt="gori OAST tab with a Callbacks table of four decrypted hits on an interactsh payload: two DNS A lookups and two HTTP GET requests, each with a source IP and the payload as destination" width="1206" height="520">
@@ -19,8 +19,8 @@ The **OAST** tab is off the bar by default: press **`0`** and type "oast", use t
 
 ## The Loop
 
-1. On the **OAST** tab, press `Ctrl-R` to start listening: gori registers with the selected provider and begins polling. A new project has no provider yet, so add one first on the **Providers** sub-tab (`a`; public interactsh is prefilled).
-2. Press `g` (get payload) to mint a **payload** (a unique hostname/URL) and copy it; `g` starts the listener itself if one isn't running, and `y` copies the current one again. Or insert it straight into a request from **Repeater** / **Fuzzer** (`Space` → **Insert OAST payload** drops it at the cursor). From **History**, `Space` → **Copy OAST payload**.
+1. On the **OAST** tab, press `Ctrl-R` to start listening. gori registers with the selected provider and begins polling. A new project has no provider yet, so add one first on the **Providers** sub-tab (`a`; public interactsh is prefilled).
+2. Press `g` (get payload) to mint a **payload** (a unique hostname/URL) and copy it. `g` starts the listener if one isn't running, and `y` copies the current one again. Or insert it into a request from **Repeater** / **Fuzzer** (`Space` → **Insert OAST payload** drops it at the cursor). From **History**, `Space` → **Copy OAST payload**.
 3. Plant it wherever the target might dereference a URL or resolve a hostname: a URL parameter, a `Host`/`X-Forwarded-For` header, an XML entity, a webhook field.
 4. When the target's infrastructure resolves the name or connects back, the callback lands in **Callbacks** with its protocol (`dns` / `http` / `smtp`), source IP, timestamp, and the full sub-identifier so you can tell which payload fired.
 
@@ -28,7 +28,7 @@ A callback is proof the target reached a server it shouldn't have. The absence o
 
 ## Providers
 
-Each listener is a **provider**. Add one from the **Providers** sub-tab (`a` add, `e` edit, `t` enable / disable, `d` delete); a public preset auto-fills the server host when you pick its type.
+Each listener is a **provider**. Add one from the **Providers** sub-tab (`a` add, `e` edit, `t` enable / disable, `d` delete). A public preset auto-fills the server host when you pick its type.
 
 The bar above the callbacks table selects which provider `g` and `Ctrl-R` act on. `←` / `→` cycle it (the bar draws the pick as `‹ name ›`), and **All** shows every provider's callbacks at once. Getting a payload or starting a listener needs one provider, so on **All** with two or more providers enabled, `g` and `Ctrl-R` open a picker card. Pick a row with `↵` and the bar follows. With a single enabled provider the action runs without asking.
 
@@ -55,7 +55,7 @@ Many callbacks arrive late: a stored payload that only fires when someone opens 
 
 Callbacks are durable per-project history. gori does not resume a listener on startup, so reopening a project does not reconnect you to a third-party provider without asking.
 
-All three surfaces resume the same sessions. `gori run oast list` / `resume` / `release` and the MCP `list_oast_sessions` / `oast_resume` / `oast_release` act on the rows this picker shows, and a resumed headless listener writes its callbacks into the project, where the tab shows them too. `gori run oast listen` and MCP `oast_start` are ad-hoc by default: they register with no project behind them, and those registrations end with the process. `--save` / `persist: true` writes the same kind of row, so a headless or agent-driven listener lands in this picker too.
+All three surfaces resume the same sessions. `gori run oast list` / `resume` / `release` and the MCP `list_oast_sessions` / `oast_resume` / `oast_release` act on the rows this picker shows, and a resumed headless listener writes its callbacks into the project, where the tab shows them too. `gori run oast listen` and MCP `oast_start` are ad-hoc by default. They register with no project behind them, and those registrations end with the process. `--save` / `persist: true` writes the same kind of row, so a headless or agent-driven listener lands in this picker too.
 
 A resumed session polls with the saved provider it was started with, even when several saved providers point at the same server with different tokens. A session saved by an older gori did not record its provider, so gori matches it by the token it registered with. When that still leaves more than one provider, the tab does not resume it (it points at `gori run oast resume ID`), and `gori run oast resume` and `oast_resume` poll with the session's own stored token and say so.
 
@@ -77,11 +77,11 @@ No surface resumes on its own. Opening a project, binding an MCP server, or star
 
 ## Filing a Callback
 
-A callback shows that the target's infrastructure contacted a server it had no reason to contact. `Shift-F` (or `Space` → **Add issue**) files the selected callback as an **Issue**, prefilled with its protocol and source and carrying the raw interaction in as the notes. It opens at **HIGH**; Tab to the severity row and use `←` / `→` to re-rate it before you commit.
+A callback shows that the target's infrastructure contacted a server it had no reason to contact. `Shift-F` (or `Space` → **Add issue**) files the selected callback as an **Issue**, prefilled with its protocol and source and carrying the raw interaction in as the notes. It opens at **HIGH**. Tab to the severity row and use `←` / `→` to re-rate it before you commit.
 
 ## Headless
 
-`gori run oast listen` is an ad-hoc, store-free listener by default: it registers a payload, prints it to stdout, then streams callbacks until you stop it. With `--save` it is a project session: its callbacks are written into the project, the registration is kept on exit, and the out-of-band probe rules have something to mint against.
+`gori run oast listen` is an ad-hoc, store-free listener by default. It registers a payload, prints it to stdout, then streams callbacks until you stop it. With `--save` it is a project session. Its callbacks are written into the project, the registration is kept on exit, and the out-of-band probe rules have something to mint against.
 
 ```bash
 gori run oast presets                          # list the built-in public providers
@@ -138,11 +138,11 @@ gori run oast release 7                        # deregister it; its callbacks st
 
 `resume` keeps the registration on exit (Ctrl-C only stops polling) and persists every callback it catches into the project, so the OAST tab shows the same hits. `listen --save` behaves the same way from its first poll. `release` tears down either.
 
-A saved session is also what arms the blind active checks. `ssrf_oast`, `xxe_oast`, `cmd_injection_oast` and `rfi_oast` plant a payload and wait for the target to call home, so they mint against a stored session. With none they plan and send nothing, and `gori run probe --active` (and MCP `probe_scan`, under `out_of_band`) says so, so that an empty result does not read as "no blind vulnerability".
+A saved session is also what arms the blind active checks. `ssrf_oast`, `xxe_oast`, `cmd_injection_oast` and `rfi_oast` plant a payload and wait for the target to call home, so they mint against a stored session. With none they plan and send nothing, and `gori run probe --active` (and MCP `probe_scan`, under `out_of_band`) reports it, so an empty result does not read as "no blind vulnerability".
 
 The saved providers (the **Providers** sub-tab's rows) are manageable headless too, with `gori run oast providers add|update|enable|disable|delete|list`, and both `listen` and `resume` take `--interval SEC` (default 5) for the poll cadence.
 
-See the [CLI Reference](/reference/cli/#run-oast) for every flag. Over MCP, an agent drives the same engine with `oast_presets` / `oast_payload` / `oast_poll` / `list_oast_sessions` (read; `oast_payload` and `oast_poll` are still withheld under `--read-only`) and `oast_start` / `oast_stop` / `oast_resume` / `oast_release` (action). `oast_start` is the ad-hoc twin of `listen`, and takes `persist: true` for the `--save` behaviour. `oast_resume` returns a `session_id` that `oast_poll` and `oast_payload` take, and its polls are persisted like the CLI's. `oast_stop` on a persisted or resumed session stops polling but keeps it resumable, as `Ctrl-X` does.
+See the [CLI Reference](/reference/cli/#run-oast) for every flag. Over MCP, an agent drives the same engine with `oast_presets` / `oast_payload` / `oast_poll` / `list_oast_sessions` (read; `oast_payload` and `oast_poll` are still withheld under `--read-only`) and `oast_start` / `oast_stop` / `oast_resume` / `oast_release` (action). `oast_start` is the ad-hoc counterpart of `listen`, and takes `persist: true` for the `--save` behaviour. `oast_resume` returns a `session_id` that `oast_poll` and `oast_payload` take, and its polls are persisted like the CLI's. `oast_stop` on a persisted or resumed session stops polling but keeps it resumable, as `Ctrl-X` does.
 
 > A callback means the target contacted a third-party interaction server, and public interactsh/webhook servers see that callback's metadata. Only run OAST against systems you are authorized to test, and prefer a self-hosted server for sensitive engagements.
 

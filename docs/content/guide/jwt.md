@@ -15,22 +15,22 @@ The **JWT** tab is a workbench for JSON Web Tokens: decode one, edit its claims 
   <figcaption>The <strong>JWT</strong> tab decodes a token live (header, payload, signature) and lists ready-to-send attack payloads: alg:none, weak-secret, and header injection.</figcaption>
 </figure>
 
-Select a token anywhere (a **History** detail pane, **Notes**, …) and `Space` `S` (**Send selection to…**) → `j` **JWT** to seed a new workbench sub-tab with it. Sessions are ephemeral: nothing is written to disk. The tab is off the bar by default: press **`0`** and type "jwt", use the command palette (`Ctrl-P` → **Go to JWT**), or give it a slot in Preferences.
+Select a token anywhere (a **History** detail pane, **Notes**, …) and `Space` `S` (**Send selection to…**) → `j` **JWT** to seed a new workbench sub-tab with it. Sessions are ephemeral, and nothing is written to disk. The tab is off the bar by default. Press **`0`** and type "jwt", use the command palette (`Ctrl-P` → **Go to JWT**), or give it a slot in Preferences.
 
 ## Two Lenses
 
-One session, two views, toggled with `Ctrl-T`. The top card of each lens carries the switch on its border (` →ENCODE ` on INPUT, ` →DECODE ` on HEADER), and clicking it also toggles:
+A session has two views, toggled with `Ctrl-T`. The top card of each lens carries the switch on its border (` →ENCODE ` on INPUT, ` →DECODE ` on HEADER), and clicking it also toggles:
 
 - **Decode**: paste a token into INPUT and the header, payload, and signature decode live. Below them is a selectable list of generated **attack payloads**.
 - **Encode**: edit the HEADER and PAYLOAD as JSON, choose an algorithm (`Ctrl-A` cycles the HMAC family, then `RS`/`PS`/`ES` at 256/384/512, `EdDSA`, and `none`), set a SECRET, and the re-signed token appears live in OUTPUT. For an asymmetric algorithm the card becomes **KEY** and takes a path to a PEM private key instead of a typed secret.
 
 `Space` → **Load decoded claims** loads the token currently decoded on the Decode side into the Encode editors, ready to edit a claim and re-sign. Copy any result with `y`.
 
-> A signature is decoded and shown but **never verified on the Decode side**, so a decode tells you what a token claims, not whether it is trusted. Encode signs with the key and algorithm you give it, and `gori run jwt --verify` (or MCP `jwt_verify`) answers the trust question when you hold the key.
+> A signature is decoded and shown but **never verified on the Decode side**, so a decode tells you what a token claims, not whether it is trusted. Encode signs with the key and algorithm you give it, and `gori run jwt --verify` (or MCP `jwt_verify`) verifies the signature when you hold the key.
 
 ## Algorithms
 
-HMAC (`HS256` / `HS384` / `HS512`) signs with a secret you type. The asymmetric families sign with a PEM key you supply. gori generates none, so forging an `RS256` token still requires the `RS256` private key:
+HMAC (`HS256` / `HS384` / `HS512`) signs with a secret you type. The asymmetric families sign with a PEM key you supply. gori does not generate keys, so forging an `RS256` token still requires the `RS256` private key:
 
 | Family | Algorithms | Key |
 |--------|------------|-----|
@@ -80,10 +80,10 @@ cat token.txt | gori run jwt --attacks         # token from stdin
 
 The token comes from the argument or stdin. No project or capture is involved, and everything is computed locally. `--format` is `text` or `json`. On `--encode`, `--set KEY=VALUE` patches one claim (repeatable, and the value is JSON when it parses, so `admin=true` is a boolean and `role=admin` a string) and `--payload JSON` replaces the claims object. The two are mutually exclusive. `--set-header FIELD=VALUE` and `--header JSON` do the same to the header, where a `kid` / `jku` / `jwk` header-injection payload is built. `alg` always comes from `--alg`. Given both `--header` and `--payload`, `--encode` mints a fresh token and reads none. Given only one, the other half still comes from the token (pass `""` or `</dev/null` to start it from `{}`). `--secret` and `--key` fill the same slot, so pass one. `--verify` needs `--secret` or `--key` (pass `--secret ''` to check the empty secret), prints `verified: yes|no` with a `reason` on a no, and exits 1 unless the token verifies, as `gori run cookie --verify` does. With `--format json` a no also carries a `code`. After `signature_mismatch` or `key_mismatch` (a key of the wrong type for the token's alg) another key might succeed. `unsigned`, `alg_unsupported`, `signature_malformed`, `jwe` and the rest mean no key will. Passing both `--secret` and `--key` is refused, `--secret ''` included. See the [CLI Reference](/reference/cli/#run-jwt).
 
-Over MCP, `jwt_decode` / `jwt_verify` / `jwt_encode` / `jwt_attacks` are read tools available even under `--read-only`: they touch no network and write nothing. `jwt_encode` takes the same `header`, `set` / `payload` edits and the same `key`, and mints with no `token` when `header` or `payload` is given. `jwt_attacks` takes `public_key`. `key` / `public_key` accept a **path**, so those two arguments read a file the caller names. Pass the PEM inline if the client should not reach the filesystem.
+Over MCP, `jwt_decode` / `jwt_verify` / `jwt_encode` / `jwt_attacks` are read tools available even under `--read-only`, since they touch no network and write nothing. `jwt_encode` takes the same `header`, `set` / `payload` edits and the same `key`, and mints with no `token` when `header` or `payload` is given. `jwt_attacks` takes `public_key`. `key` / `public_key` accept a **path**, so those two arguments read a file the caller names. Pass the PEM inline if the client should not reach the filesystem.
 
 ## Next Steps
 
 - [Decoder](/guide/decoder/): decode a JWT inside a longer transform chain
 - [Sequencer](/guide/sequencer/): grade the randomness of a token that is not a JWT
-- [Repeater & Fuzzer](/guide/repeater-and-fuzzer/): fire an attack payload at the target
+- [Repeater & Fuzzer](/guide/repeater-and-fuzzer/): send an attack payload to the target

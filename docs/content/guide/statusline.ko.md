@@ -8,16 +8,16 @@ group = "커스터마이즈"
 shot = "statusline"
 +++
 
-**statusline**은 TUI 맨 아래에 선택적으로 붙는 행입니다. gori가 일정 간격으로 셸 명령을 실행하고 그 stdout을 그 행에 그립니다. 직접 만드는 상태 바이고, Claude Code의 상태 표시줄에서 영감을 받았습니다. 기본적으로 꺼져 있으며, 무언가 바꾸기 전까지 `statusline` 섹션은 `settings.json`에 들어가지 않습니다.
+**statusline**은 TUI 맨 아래에 선택적으로 붙는 행입니다. gori가 일정 간격으로 셸 명령을 실행하고 stdout을 이 행에 그립니다. 직접 만드는 상태 바이고, Claude Code의 상태 표시줄에서 영감을 받았습니다. 기본적으로 꺼져 있으며, 무언가 바꾸기 전까지 `statusline` 섹션은 `settings.json`에 들어가지 않습니다.
 
 <figure class="tui-shot">
   <img src="/images/tui/statusline.svg" alt="상태 바 아래 맨 마지막 행에 statusline이 붙은 gori History 탭. token 58m left, 빨간색 1 × 5xx, 그리고 todo 2와 첫 미완료 항목 본문이 차례로 보이는 모습" width="1206" height="520">
-  <figcaption><strong>statusline</strong>은 상태 바 아래 맨 마지막 행입니다. 이 행은 <a href="#script">아래의 스크립트</a>입니다. 테스트 중인 토큰이 얼마나 남았는지, 타깃이 5xx를 뱉었는지, 할 일이 몇 개 남았는지를 보여 줍니다. 위쪽 바에는 나오지 않는 정보입니다.</figcaption>
+  <figcaption><strong>statusline</strong>은 상태 바 아래 맨 마지막 행입니다. 이 행은 <a href="#script">아래의 스크립트</a>가 출력한 것입니다. 테스트 중인 토큰이 얼마나 남았는지, 타깃이 5xx를 반환했는지, 할 일이 몇 개 남았는지를 보여 줍니다. 위쪽 바에는 나오지 않는 정보입니다.</figcaption>
 </figure>
 
 ## 켜기 {#turning-it-on}
 
-`Ctrl-,`로 Preferences를 열고 **General**로 가면 **Statusline** 행들이 있습니다. **Statusline** 토글(기본 꺼짐), `Command` 입력란, 그리고 `Interval`과 `Timeout` 초입니다. 토글을 켜고 명령을 주면 상태 바 아래에 행이 나타납니다.
+`Ctrl-,`로 Preferences를 열고 **General**로 가면 **Statusline** 행들이 있습니다. **Statusline** 토글(기본 꺼짐), `Command` 입력란, `Interval`과 `Timeout` 초입니다. 토글을 켜고 명령을 입력하면 상태 바 아래에 행이 나타납니다.
 
 `settings.json`으로는 이렇습니다:
 
@@ -46,9 +46,9 @@ shot = "statusline"
 
 ## 프리셋 {#presets}
 
-상단 바는 이미 gori가 자기 자신에 대해 아는 것들을 나릅니다. 프로젝트, 캡처 상태, 바인딩
-주소, 스캔 모드. statusline은 바에 없는 것을 보여줄 때 쓸모가 있습니다. gori 바깥의
-사실이거나, gori가 갖고는 있지만 세어 주지 않는 것입니다.
+상단 바에는 프로젝트, 캡처 상태, 바인딩 주소, 스캔 모드 같은 gori 자신의 상태가 이미
+나옵니다. statusline은 바에 없는 것을 보여줄 때 쓸모가 있습니다. gori 바깥의
+정보이거나, gori가 갖고는 있지만 세어 주지 않는 것입니다.
 
 아래는 모두 설정 폼의 입력란처럼 한 줄이며, `command`에 바로 넣으면 됩니다.
 `\u001b`는 `jq`가 이스케이프 문자를 적는 방식입니다. 색상은 선택 사항입니다. 각 명령 아래는 그
@@ -60,7 +60,7 @@ jq -rn --argjson exp "$(gori run jwt "$(cat "${GORI_HOME:-$HOME/.gori}/token.jwt
 ```
 {% end %}
 
-{% preset(title="타깃이 5xx를 뱉기 시작했는지", src="/images/tui/statusline-errors.svg", alt="빨간색 statusline 한 줄: 1 × 5xx", note="타이머로 도는 History 쿼리입니다. History에 걸린 필터와 상관없이 프로젝트 전체를 조회하고, 타깃이 멀쩡한 동안은 아무것도 출력하지 않습니다. 무언가 깨졌을 때만 행이 나타납니다.") %}
+{% preset(title="타깃이 5xx를 반환하기 시작했는지", src="/images/tui/statusline-errors.svg", alt="빨간색 statusline 한 줄: 1 × 5xx", note="타이머로 도는 History 쿼리입니다. History에 걸린 필터와 상관없이 프로젝트 전체를 조회하고, 타깃이 멀쩡한 동안은 아무것도 출력하지 않습니다. 무언가 깨졌을 때만 행이 나타납니다.") %}
 ```sh
 p=$(jq -r .project); gori run history --project "$p" -q 'status:>=500' -n 100000 --format json 2>/dev/null | jq -r 'length | if . == 0 then "" else "\u001b[31m\(.) × 5xx\u001b[0m" end'
 ```
@@ -73,8 +73,8 @@ p=$(jq -r .project); gori run notes --all --project "$p" | awk '/^- \[ \]/ { n++
 {% end %}
 
 [컨텍스트](#context)의 모든 필드도 쓸 수 있습니다(`\(.flows)`, `\(.issues)`, 모드
-플래그들). 다만 상단 바를 먼저 보세요. 칩을 되풀이하는 세그먼트는 새로 알려주는 것이
-없습니다. 쓸모 있는 것은 gori의 데이터와 gori가 알 수 없는 사실을 엮는 쪽입니다:
+플래그). 다만 상단 바를 먼저 보세요. 칩을 되풀이하는 세그먼트는 새로 알려주는 것이
+없습니다. gori의 데이터와 gori가 알 수 없는 정보를 엮을 때 쓸모가 있습니다:
 
 ```sh
 # 프로젝트, 그리고 그것을 테스트하고 있는 브랜치.
@@ -117,7 +117,7 @@ printf '\n'
 
 이 스크립트가 이 페이지 맨 위 사진의 행을 출력합니다. 위의 프리셋 셋을 합치고, 각 조각은
 비어 있지 않을 때만 출력합니다. stdin은 파이프이므로 컨텍스트를 `$ctx`에 한 번만 읽습니다
-([아래 참고](#context)). 마지막 문장은 평범한 `printf`이므로 조용한 실행도 exit 0으로 끝나고,
+([아래 참고](#context)). 마지막 문장은 평범한 `printf`이므로 출력이 없는 실행도 exit 0으로 끝나고,
 행에 `⋯ (exit 1)`이 찍히지 않습니다.
 
 `interval`은 5 이상을 주세요. 실행마다 짧은 프로세스 셋을 띄우는데, 부담은 작지만 매초 할
@@ -152,22 +152,22 @@ printf '\n'
 | `capturing` | bool | 프록시가 현재 캡처 중인지 여부 |
 | `flows` | integer | 캡처한 플로우 수 |
 | `proxy.host` / `proxy.port` / `proxy.addr` | string / integer / string | 프록시가 리스닝 중인 주소 |
-| `upstream` | string | **캐치올** 업스트림 프록시 주소/URI, 직접 연결이면 비어 있음. [업스트림 규칙](/ko/reference/config/#upstream-rules)에 걸린 목적지는 다른 경로로 나가며, 이 필드는 그것을 반영하지 않음 |
+| `upstream` | string | **캐치올** 업스트림 프록시 주소/URI, 직접 연결이면 비어 있음. [업스트림 규칙](/ko/reference/config/#upstream-rules)에 걸린 목적지는 다른 경로로 나가며, 이 필드에는 반영되지 않음 |
 | `upstream_rules` | integer | 적용 중인 [업스트림 규칙](/ko/reference/config/#upstream-rules) 수. 0이 아니면 라우팅이 목적지별로 갈라지므로 `upstream` 하나로는 트래픽 경로를 설명할 수 없음 |
 | `upstream_env` | string | `upstream`이 비어 있고 규칙에도 걸리지 않을 때 트래픽을 보내는 프로세스 프록시 환경변수, 예: `HTTPS_PROXY → http proxy corp.example:3128`. 규칙 테이블이 범위를 좁히면 `· destinations no upstream rule claims`가 덧붙음(프로젝트의 **Destination host**가 좁히면 `the project destination filter admits`, 둘 다면 `and`로 이어짐); 환경변수에 닿는 경로가 없으면(프로젝트 고정, 비어 있지 않은 `upstream`, `*` 규칙) 비어 있음. 자격증명은 절대 담지 않음 |
-| `scope.active` / `scope.rules` | bool / integer | [스코프](/ko/guide/proxy/#scope) 필터가 작동 중인지(렌즈가 켜져 있고 **동시에** 규칙이 하나 이상), 그리고 규칙이 몇 개인지 |
-| `scope.sandbox` | bool | [Sandbox](/ko/guide/proxy/#sandbox)가 스코프 밖 목적지를 기록만 하지 않는 것이 아니라 아예 차단하고 있는지 |
+| `scope.active` / `scope.rules` | bool / integer | [스코프](/ko/guide/proxy/#scope) 필터가 작동 중인지(렌즈가 켜져 있고 **동시에** 규칙이 하나 이상), 규칙이 몇 개인지 |
+| `scope.sandbox` | bool | [Sandbox](/ko/guide/proxy/#sandbox)가 스코프 밖 목적지를 기록에서 빼는 데 그치지 않고 차단하고 있는지 |
 | `intercept.enabled` | bool | catch가 켜져 있는지. 켜져 있는 동안 실제 클라이언트가 붙잡혀 있음 |
 | `intercept.queued` | integer | 지금 결정을 기다리는 메시지 수 |
 | `intercept.direction` | string | `requestonly`(기본값) · `responseonly` · `both`. 어느 쪽 방향을 붙잡는지 |
 | `probe` | string | [스캐너](/ko/guide/scanning/#probe-the-scanner) 모드: `off` · `passive` · `active` · `aggressive` |
 | `issues` | integer | 이 프로젝트에 기록된 이슈 수 |
 | `jobs.running` | integer | 진행 중인 백그라운드 작업 수 (fuzz · mine · discover 등). 활동 칩이 세는 것과 같은 작업이라, 전송 중인 Repeater 요청은 포함되지 않음 |
-| `jobs.label` | string \| null | 상태 바의 활동 칩이 말하는 문구, 예: `"fuzzing 1"`. 실행 중인 것이 없으면 `null` |
+| `jobs.label` | string \| null | 상태 바의 활동 칩에 표시되는 문구, 예: `"fuzzing 1"`. 실행 중인 것이 없으면 `null` |
 
-`scope`부터 아래 필드는 gori가 다음에 무엇을 할지를 설명하며, 상단 바의 칩들과 같은 사실을 담습니다. 필드는 추가만 되고 `version`은 `1`로 유지되므로, 이전 컨텍스트에 맞춰 쓴 스크립트도 계속 동작합니다.
+`scope`부터 아래 필드는 gori가 다음에 무엇을 할지를 설명하며, 상단 바의 칩과 같은 내용입니다. 필드는 추가만 되고 `version`은 `1`로 유지되므로, 이전 컨텍스트에 맞춰 쓴 스크립트도 계속 동작합니다.
 
-**stdin은 한 번만 읽힙니다.** 파이프이므로 먼저 읽는 명령이 전부 가져가고 두 번째는 아무것도 못 받습니다. `"$(jq -r .project)" "$(jq -r .flows)"`는 플로우 수를 조용히 빈 값으로 출력합니다. 위 프리셋들처럼 `jq` 하나로 전체를 읽거나, 먼저 담아 두세요:
+**stdin은 한 번만 읽힙니다.** 파이프이므로 먼저 읽는 명령이 전부 가져가고 두 번째는 아무것도 못 받습니다. `"$(jq -r .project)" "$(jq -r .flows)"`는 플로우 수를 경고 없이 빈 값으로 출력합니다. 위 프리셋처럼 `jq` 하나로 전체를 읽거나, 먼저 담아 두세요:
 
 ```sh
 ctx=$(cat); printf '%s · %s flows' "$(echo "$ctx" | jq -r .project)" "$(echo "$ctx" | jq -r .flows)"
@@ -175,9 +175,9 @@ ctx=$(cat); printf '%s · %s flows' "$(echo "$ctx" | jq -r .project)" "$(echo "$
 
 ## 명령이 실패했을 때 {#failures}
 
-아무것도 출력하지 못하고 실패한 명령은 행을 비워 두는 대신 종료 상태를 보고합니다. 명령을 찾지 못했으면 `⋯ (exit 127)`, 시그널로 끝났으면 `⋯ (killed)`. `timeout`을 넘긴 실행은 종료되고 행은 `⋯ (timed out)`이 되며, gori가 명령을 아예 시작하지 못하면 `⋯ (statusline failed)`(내부 오류라면 `⋯ (statusline error)`)가 됩니다. 정상 종료했는데 출력이 없으면 행은 비어 있습니다. 어느 쪽이든 stderr는 버려집니다.
+아무것도 출력하지 못하고 실패한 명령은 행을 비워 두는 대신 종료 상태를 보고합니다. 명령을 찾지 못했으면 `⋯ (exit 127)`, 시그널로 끝났으면 `⋯ (killed)`입니다. `timeout`을 넘긴 실행은 종료되고 행은 `⋯ (timed out)`이 되며, gori가 명령을 시작하지 못하면 `⋯ (statusline failed)`(내부 오류라면 `⋯ (statusline error)`)가 됩니다. 정상 종료했는데 출력이 없으면 행은 비어 있습니다. 어느 쪽이든 stderr는 버려집니다.
 
-이 표식들은 주의 색으로 그려지므로, 고장 난 statusline을 나쁜 소식을 전하는 statusline으로 착각할 일이 없습니다.
+이 표식은 주의 색으로 그려지므로, 고장 난 statusline을 나쁜 소식을 전하는 statusline으로 착각할 일이 없습니다.
 
 `timeout`은 `interval`과 따로 둡니다. 실행이 겹치지 않으므로 `interval`보다 느린 스크립트는 죽지 않고 할 수 있는 한 빨리 갱신됩니다. 실행을 끝내는 것은 `timeout`뿐입니다.
 
@@ -185,4 +185,4 @@ ctx=$(cat); printf '%s · %s flows' "$(echo "$ctx" | jq -r .project)" "$(echo "$
 
 ## 명령을 실을 수 있는 다른 자리 {#where-else-a-command-can-run}
 
-statusline은 데이터가 아니라 명령을 담는 다섯 설정 중 하나입니다. 나머지는 [프로세스 훅](/ko/guide/scripting/#process-hooks)과 외부 에디터입니다. `gori settings export`로 내보낸 프로필은 이들을 모두 실어 나를 수 있고, 전송의 양쪽 끝이 [그 사실을 말해 줍니다](/ko/reference/cli/#profiles-that-carry-commands).
+statusline은 데이터가 아니라 명령을 담는 다섯 설정 중 하나입니다. 나머지는 [프로세스 훅](/ko/guide/scripting/#process-hooks)과 외부 에디터입니다. `gori settings export`로 내보낸 프로필에는 이 설정이 모두 들어갈 수 있고, 내보내는 쪽과 가져오는 쪽 모두 [그 사실을 알려 줍니다](/ko/reference/cli/#profiles-that-carry-commands).

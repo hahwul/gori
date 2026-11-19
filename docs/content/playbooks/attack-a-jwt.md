@@ -9,13 +9,13 @@ group = "Workbenches"
 
 This playbook takes a token off a captured request, reads its claims, changes one, re-signs it, and fires the classic verification-bypass payloads (alg:none, a weak-secret guess, header injection) to find out which the server accepts. Budget about ten minutes.
 
-> **Before you begin.** Set up a project and scope for a host you're authorized to test ([Set up an engagement](/playbooks/set-up-an-engagement/)), and capture a flow that carries a JWT; an `Authorization: Bearer eyJ…` header is the usual source. The examples target `api.example.com`.
+> **Before you begin.** Set up a project and scope for a host you're authorized to test ([Set up an engagement](/playbooks/set-up-an-engagement/)), and capture a flow that carries a JWT. An `Authorization: Bearer eyJ…` header is the usual source. The examples target `api.example.com`.
 
 ## 1. Send a token to the JWT tab
 
-The **JWT** tab is off the bar by default: press **`0`** and type "jwt", or `Ctrl-P` → **Go to JWT**. Give it one of the nine slots in Preferences if you work in tokens often. To find the token, open the captured flow in **History**, select the token text after `Bearer ` in the request detail, and `Space` `S` (**Send selection to…**) → `j` **JWT**. That seeds a new JWT sub-tab and decodes the token live into its **header**, **payload**, and **signature** on the Decode lens.
+The **JWT** tab is off the bar by default. Press **`0`** and type "jwt", or use `Ctrl-P` → **Go to JWT**. Give it one of the nine slots in Preferences if you work with tokens often. To find the token, open the captured flow in **History**, select the token text after `Bearer ` in the request detail, and press `Space` `S` (**Send selection to…**) → `j` **JWT**. That seeds a new JWT sub-tab and decodes the token live into its **header**, **payload**, and **signature** on the Decode lens.
 
-The decode shows what the token *claims* and never checks the signature, so a token that decodes cleanly is not necessarily one the server trusts. The rest of this playbook answers that question.
+The decode shows what the token *claims* without checking the signature, so a token that decodes cleanly is not necessarily one the server trusts. The rest of this playbook tests whether the server verifies it.
 
 <figure class="tui-shot">
   <img src="/images/tui/jwt.svg" alt="gori JWT tab with a decoded HS256 token: the INPUT token under a →ENCODE lens chip, the decoded header JSON, and an ATTACKS list of generated payloads including alg=none case variants and signature stripping" width="1206" height="520">
@@ -26,9 +26,9 @@ The decode shows what the token *claims* and never checks the signature, so a to
 
 ## 2. Tamper a claim
 
-Switch to the Encode lens with `Ctrl-T`, or `Space` → **Load decoded claims** to load the decoded token straight into the Encode editors. Edit the **PAYLOAD** JSON: escalate a `role`, swap a `sub`, extend an `exp`. Pick the algorithm with `Ctrl-A` (it cycles the HMAC family, then `RS`/`PS`/`ES` at 256/384/512, `EdDSA`, and `none`), set a **SECRET** for an HMAC algorithm (or, for an asymmetric one, point the **KEY** card at a PEM private key), and the re-signed token appears live in OUTPUT. Copy it with `y`.
+Switch to the Encode lens with `Ctrl-T`, or `Space` → **Load decoded claims** to load the decoded token into the Encode editors. Edit the **PAYLOAD** JSON: escalate a `role`, swap a `sub`, extend an `exp`. Pick the algorithm with `Ctrl-A`, which cycles the HMAC family, then `RS`/`PS`/`ES` at 256/384/512, `EdDSA`, and `none`. Set a **SECRET** for an HMAC algorithm, or point the **KEY** card at a PEM private key for an asymmetric one. The re-signed token appears live in OUTPUT. Copy it with `y`.
 
-The same claim edit runs headless, taking the token from the argument or stdin. `--set KEY=VALUE` patches one claim (repeatable), or `--payload` replaces the claims wholesale:
+The same claim edit runs headless, taking the token from the argument or stdin. `--set KEY=VALUE` patches one claim (repeatable), or `--payload` replaces all the claims:
 
 ```bash
 gori run jwt eyJhbGci... --encode --set role=admin --secret s3cret       # escalate one claim
@@ -37,7 +37,7 @@ gori run jwt eyJhbGci... --encode --payload '{"sub":"1","admin":true}' --secret 
 
 A `--set` value is parsed as JSON when it can be, so `admin=true` is a boolean and `role=admin` a string. Over MCP, `jwt_encode` takes the same `set` / `payload` edits.
 
-If the token is `ES256` / `RS256` / `EdDSA` and you hold the signing key, `--key` takes it (inline PEM or a path), and `--verify` answers the question the decode cannot:
+If the token is `ES256` / `RS256` / `EdDSA` and you hold the signing key, `--key` takes it (inline PEM or a path), and `--verify` checks the signature, which the decode does not:
 
 ```bash
 gori run jwt eyJhbGci... --encode --alg ES256 --key ./private.pem --set role=admin
@@ -64,16 +64,16 @@ gori run jwt eyJhbGci... --attacks
 gori run jwt eyJhbGci... --attacks --key ./server-public.pem   # ...plus algorithm confusion
 ```
 
-To hand-craft a header-injection token rather than take the generated set (point `kid` at a file, or set a `jku`/`jwk` to key material you control), edit the header on `--encode` with `--set-header FIELD=VALUE` (repeatable) or `--header JSON`; `alg` still comes from `--alg`:
+To hand-craft a header-injection token rather than take the generated set (point `kid` at a file, or set a `jku`/`jwk` to key material you control), edit the header on `--encode` with `--set-header FIELD=VALUE` (repeatable) or `--header JSON`. `alg` still comes from `--alg`:
 
 ```bash
 gori run jwt eyJhbGci... --encode --set-header kid=../../dev/null --secret ''   # empty-key kid traversal
 gori run jwt --encode --header '{"jku":"https://you/jwks.json"}' --payload '{"sub":"admin"}' --alg RS256 --key ./yours.pem
 ```
 
-The public key is whatever the target publishes: a JWKS `x5c` certificate works as well as a bare `PUBLIC KEY` block, and gori reduces either to the SPKI PEM a server would hold.
+The public key is whatever the target publishes. A JWKS `x5c` certificate works as well as a bare `PUBLIC KEY` block, and gori reduces either to the SPKI PEM a server would hold.
 
-Over MCP the `jwt_attacks` tool returns the same list, taking the same key as `public_key`. (`jwt_decode` / `jwt_verify` / `jwt_encode` cover steps 1 and 2. A hand-crafted header goes to `jwt_encode` as `header`, the whole header JSON, since there is no per-field `--set-header` counterpart.) All of them are read tools available even under `--read-only`. They touch no network and write nothing, though a `key` / `public_key` given as a path is read from disk.
+Over MCP the `jwt_attacks` tool returns the same list, taking the same key as `public_key`. `jwt_decode` / `jwt_verify` / `jwt_encode` cover steps 1 and 2. A hand-crafted header goes to `jwt_encode` as `header`, the whole header JSON, since there is no per-field `--set-header` counterpart. All of them are read tools available even under `--read-only`. They touch no network and write nothing, though a `key` / `public_key` given as a path is read from disk.
 
 An **encrypted** token (five segments rather than three) is a JWE, and none of this applies to it. gori shows its protected header (`alg`, `enc`, `kid`) and generates no payloads, since there is no claims segment to tamper with and no signature to strip.
 
@@ -81,10 +81,10 @@ An **encrypted** token (five segments rather than three) is a JWE, and none of t
 
 ## 4. Replay and confirm
 
-A forged token proves nothing until the server sees it. Pick a payload (your tampered token from step 2, or a preset from step 3), copy it with `y`, paste it into the `Authorization` header of the captured request in **Repeater**, and re-send with `Ctrl-R`. Read the status against what the endpoint should return for a bad token:
+To find out whether a forged token works, send it to the server. Pick a payload (your tampered token from step 2, or a preset from step 3), copy it with `y`, paste it into the `Authorization` header of the captured request in **Repeater**, and re-send with `Ctrl-R`. Read the status against what the endpoint should return for a bad token:
 
-- A `401` or `403` means the server rejected the forgery; it verified the signature.
-- A `200` where you expected a reject means it did *not* verify; the token was accepted on your terms.
+- A `401` or `403` means the server verified the signature and rejected the forgery.
+- A `200` where you expected a reject means it did *not* verify the signature and accepted the forged token.
 
 **Checkpoint.** You can tell an accepted forgery (a success status) from a rejected one (`401` / `403`), and you know which presets, if any, the server let through.
 

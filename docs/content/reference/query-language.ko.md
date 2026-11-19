@@ -4,7 +4,7 @@ description = "History, Sitemap, Probe, Issues, Intercept, MCP 도구 전반에�
 weight = 30
 +++
 
-gori에는 플로우를 걸러내는 작은 쿼리 언어(QL)가 있습니다. 같은 문법이 TUI 필터 바, `gori run`(`-q`/`--query` 또는 위치 인자), 그리고 MCP 도구에서 동일하게 동작합니다. 내장 레퍼런스는 TUI Help의 **Query** 페이지와 `ql_reference` MCP 도구로도 볼 수 있습니다.
+gori에는 플로우를 걸러내는 작은 쿼리 언어(QL)가 있습니다. 같은 문법을 TUI 필터 바, `gori run`(`-q`/`--query` 또는 위치 인자), MCP 도구에서 씁니다. 내장 레퍼런스는 TUI Help의 **Query** 페이지와 `ql_reference` MCP 도구로도 볼 수 있습니다.
 
 ## 필드 {#fields}
 
@@ -67,12 +67,12 @@ NOT (req.body:token OR resp.body:token)
 ## 출처: `src:` {#src-provenance}
 
 `src:`는 요청을 와이어에 실어 보낸 주체로 플로우를 고릅니다. `src:proxy`는 클라이언트가 gori를
-거쳐 보낸 트래픽이고, 나머지 값은 gori 자신이 만든 요청입니다. `src:import`는 다른 도구가
+거쳐 보낸 트래픽이고, 나머지 값은 gori가 직접 만든 요청입니다. `src:import`는 다른 도구가
 남긴 캡처를 읽어 들인 것입니다.
 
 | 값 | 매칭 대상 |
 |-------|---------|
-| `proxy` | 캡처 프록시가 중계한 클라이언트의 요청. 평범한 캡처 트래픽 |
+| `proxy` | 캡처 프록시가 중계한 클라이언트의 요청. 일반적인 캡처 트래픽 |
 | `repeater` | Repeater 전송(TUI, `gori run repeater send --record-history`, MCP `send_request`) |
 | `fuzzer` | `--record-history` / `record_history`로 기록된 퍼즈 결과 |
 | `discover` | 크롤러가 가져온 것(Discover는 기본으로 저장합니다) |
@@ -91,9 +91,9 @@ src:repeater status:200               내가 다시 보낸 것 중 200으로 돌
 src:fuzzer resp.body:root:            퍼즈 히트. 내 페이로드를 발견으로 착각하지 않도록
 ```
 
-History의 **SRC** 열은 이 값들을 짧은 태그로 찍습니다(`PROXY`, `RPTR`, `FUZZ`, `CRAWL`,
+History의 **SRC** 열은 이 값들을 짧은 태그로 표시합니다(`PROXY`, `RPTR`, `FUZZ`, `CRAWL`,
 `IMPRT` …). `src:`는 그 태그도 받으므로 `src:rptr`과 `src:repeater`는 같은 쿼리입니다.
-`source:`는 `src:`의 긴 철자로 함께 받습니다.
+`source:`도 `src:`의 긴 표기로 받습니다.
 
 알아 둘 경우가 두 가지 있습니다.
 
@@ -104,7 +104,7 @@ History의 **SRC** 열은 이 값들을 짧은 태그로 찍습니다(`PROXY`, `
   없습니다. 컬럼이 생기기 전에도 gori는 Repeater 전송·크롤·import를 History에 썼으므로,
   예전 행을 `proxy`로 채우지 않습니다. SRC 열에는 `—`가 뜨고 `src:proxy`와 `-src:proxy` 양쪽
   모두 이 행을 건너뜁니다. Pending 플로우가 `status:`와 `-status:` 양쪽에서 빠지는 것과
-  같습니다. 업그레이드 이후에 캡처된 플로우만 출처를 가집니다.
+  같습니다. 업그레이드 이후에 캡처된 플로우에만 출처가 있습니다.
 
 `src:`로 흔히 하는 두 가지 좁히기는 **뷰**로도 준비돼 있습니다. History에서 `v`를 눌러
 `History`(`src:proxy`)나 `History + Repeater`를 고르면, 다른 필터를 입력하는 동안에도 목록이
@@ -113,9 +113,9 @@ History의 **SRC** 열은 이 값들을 짧은 태그로 찍습니다(`PROXY`, `
 
 ## 진입점: `via:` {#via-surface}
 
-`src:`는 어떤 도구가 보냈는지를 말합니다. `via:`는 어느 gori 진입점이 움직였는지를 말합니다: `tui`, `cli`
-(`gori run`), `mcp`(에이전트). MCP `send_request`는 Repeater 탭에서 보낸 것과 같이
-`src:repeater`로 기록되므로, 둘을 가르는 것이 `via:`입니다.
+`src:`는 어떤 도구가 보냈는지를, `via:`는 어느 gori 진입점에서 보냈는지를 나타냅니다. 값은 `tui`, `cli`
+(`gori run`), `mcp`(에이전트)입니다. MCP `send_request`는 Repeater 탭에서 보낸 것과 같이
+`src:repeater`로 기록되므로, 둘은 `via:`로 구분합니다.
 
 ```text
 via:mcp                               에이전트가 보내거나 가져온 것 전부
@@ -130,7 +130,7 @@ gori가 진입점을 기록하기 전에 보낸 플로우도 마찬가지입니�
 
 `scope:in`은 프로젝트 스코프 안쪽의 플로우를 고릅니다. TUI의 `s` 렌즈와
 `gori run history --in-scope`가 적용하는 include/exclude 경계와 같습니다.
-`scope:out`은 그 바깥을 고릅니다. 보통 항목이므로 부정할 수도, 괄호로 묶을 수도 있습니다:
+`scope:out`은 그 바깥을 고릅니다. 일반 항목이므로 부정할 수도, 괄호로 묶을 수도 있습니다:
 
 ```text
 scope:in status:5xx                   타깃에서 난 서버 에러
@@ -178,7 +178,7 @@ status:>=4xx        클래스 약어에도 비교 연산자를 붙일 수 있음
 
 ## 정규 표현식 {#regular-expressions}
 
-`host`, `path`, `url`, `method`, `scheme`, `header`, `body`, `ws`(그리고 `header`와 `body`는 `req.`/`resp.` 한쪽)에 정규식 매칭을 하려면 `~`를 씁니다. `~`는 자체적으로 필드/값 구분자 역할을 하므로 앞에 콜론을 붙이지 **마세요**. 매칭은 대소문자를 구분하며, 대소문자를 무시하려면 `(?i)`를 앞에 붙입니다.
+`host`, `path`, `url`, `method`, `scheme`, `header`, `body`, `ws`(`header`와 `body`의 `req.`/`resp.` 한쪽 포함)에 정규식 매칭을 하려면 `~`를 씁니다. `~`가 필드/값 구분자이므로 앞에 콜론을 붙이지 **마세요**. 매칭은 대소문자를 구분하며, 대소문자를 무시하려면 `(?i)`를 앞에 붙입니다.
 
 ```text
 path~/admin/
@@ -196,7 +196,7 @@ method~^P(OST|UT|ATCH)$                쓰기 메서드 전부를 한 항목으�
 `ws:needle`은 소켓이 `needle`을 담은 메시지를 주고받은 플로우와 매칭합니다(대소문자 무시).
 `ws~regex`는 정규식으로 매칭합니다. 양방향 모두, TEXT와 BINARY 페이로드를 가리지 않고 저장된
 바이트 그대로 검색하므로 페이로드 앞쪽의 NUL이 뒤의 히트를 가리지 않습니다. ping·pong·close
-프레임은 메시지가 아니라 매칭되지 않고, gori가 소켓에 대해 남기는 `[gori] ` 알림 행도 마찬가지입니다. 알림은 이 접두어로 구분하므로, `[gori] `로 시작하는 상대방 메시지도 건너뜁니다.
+프레임은 메시지가 아니라 매칭되지 않고, gori가 소켓에 남기는 `[gori] ` 알림 행도 마찬가지입니다. 알림은 이 접두어로 구분하므로, `[gori] `로 시작하는 상대방 메시지도 건너뜁니다.
 `-ws:x`는 그런 메시지가 없는 플로우를 모두 남기며, 소켓이 아닌 플로우도 포함됩니다.
 
 ```text
@@ -204,14 +204,14 @@ ws:admin                               admin을 언급한 소켓은?
 proto:ws ws~(?i)token=[a-f0-9]{32}     아무 프레임에나 실린 토큰
 ```
 
-`ws:` 뒤에는 인덱스가 없어서 프로젝트의 모든 소켓 트랜스크립트를 훑습니다. 캡처는 느려지지 않습니다.
-비용은 이 필드를 쓰는 쿼리만 치릅니다.
+`ws:`에는 인덱스가 없어서 프로젝트의 모든 소켓 트랜스크립트를 훑습니다. 캡처는 느려지지 않습니다.
+비용은 이 필드를 쓰는 쿼리에만 듭니다.
 
 플로우 하나의 트랜스크립트만 좁히려면, History의 MESSAGES 패널에서 `^F`로 검색한 뒤 스페이스
 메뉴의 **Narrow messages to ^F query**를 고르거나(다시 고르면 전체 표시), `gori run show <id>
 --ws-match=QUERY`, 또는 MCP `get_flow`의 `ws_query`를 씁니다. 모두 `ws:needle`, `ws~regex` 또는
 접두어 없는 needle을 받고, QL 필드와 같이 매칭하며, 각 표면이 평소 불러오는 범위보다 오래된
-메시지까지 닿습니다.
+메시지까지 찾습니다.
 
 ## JSON-RPC 메서드 {#json-rpc-methods}
 
@@ -248,7 +248,7 @@ llm:claude status:>=400                Claude 모델 호출 중 실패한 것
 
 ## 항목 결합 {#combining-terms}
 
-- 공백으로 구분된 항목들은 **AND**로 결합됩니다. `AND`를 직접 써도 됩니다.
+- 공백으로 구분된 항목은 **AND**로 결합됩니다. `AND`를 직접 써도 됩니다.
 - `OR`는 둘 중 하나를 매칭합니다. `NOT`과 `-` 접두사는 모두 부정입니다.
 - 괄호로 묶을 수 있습니다. 우선순위는 `NOT`, `AND`, `OR` 순입니다.
 - `field:`가 없는 단순 단어는 method, host, target을 대상으로 하는 자유 텍스트 검색입니다.
@@ -266,10 +266,10 @@ NOT (host:cdn OR host:static)         둘 다 아닌 것
 login                                 자유 텍스트 검색
 ```
 
-`AND`, `OR`, `NOT`은 대문자로 쓸 때만 연산자로 인식합니다. 따라서 "and", "or", "not"이라는
-단어를 검색하는 것도 그대로 됩니다. 대문자라도 따옴표로 감싸면 리터럴이 됩니다.
+`AND`, `OR`, `NOT`은 대문자로 쓸 때만 연산자로 인식하므로 "and", "or", "not"이라는
+단어도 검색할 수 있습니다. 대문자라도 따옴표로 감싸면 리터럴이 됩니다.
 
-큰따옴표는 공백이 포함된 값을 하나의 항목으로 유지합니다:
+큰따옴표로 묶으면 공백이 포함된 값도 항목 하나로 다룹니다:
 
 ```text
 host:"my host"                        공백까지 포함한 하나의 host 값
@@ -290,9 +290,9 @@ host:"my host"                        공백까지 포함한 하나의 host 값
 | 화면 | 필드 |
 |------|------|
 | History, `gori run history`, MCP | 위 표 전체 |
-| Sitemap, `gori run sitemap`, MCP `list_sitemap` | 위와 동일, 여기에 노드별 경로 메모용 `tag:` 추가: 대소문자 구분 없이 메모의 일부와 비교하고, 태그가 붙은 경로와 그 아래 전부, 그리고 거기로 이어지는 경로가 매칭됩니다. `-tag:`는 그 하위 트리를 빼고, 모든 `tag:` 항목은 쿼리의 나머지와 AND로 묶입니다 |
-| 컬러 규칙(Colormarker) | 위와 동일. History 필터 바에 쓰는 그 쿼리를 그대로 받습니다 |
-| Intercept 캐치 조건, Extract 규칙 조건 | `host`, `port`, `path`, `url`, `method`, `scheme`, `status`, `proto`, `header`, `body`. **나머지 필드는 모두 거부**(아래 참고). 여기서 `proto`는 `ws`나 `http`만 답합니다. gRPC와 SSE는 캡처된 응답의 Content-Type으로 판단하므로 `proto:grpc`, `proto:sse`와 TLS 표기는 절대 매칭되지 않습니다 |
+| Sitemap, `gori run sitemap`, MCP `list_sitemap` | 위와 동일, 여기에 노드별 경로 메모용 `tag:` 추가: 대소문자 구분 없이 메모의 일부와 비교하고, 태그가 붙은 경로, 그 아래 전부, 거기로 이어지는 경로가 매칭됩니다. `-tag:`는 그 하위 트리를 빼고, 모든 `tag:` 항목은 쿼리의 나머지와 AND로 묶입니다 |
+| 컬러 규칙(Colormarker) | 위와 동일. History 필터 바와 같은 쿼리를 받습니다 |
+| Intercept 캐치 조건, Extract 규칙 조건 | `host`, `port`, `path`, `url`, `method`, `scheme`, `status`, `proto`, `header`, `body`. **나머지 필드는 모두 거부**(아래 참고). 여기서 `proto`는 `ws`나 `http`만 답합니다. gRPC와 SSE는 캡처된 응답의 Content-Type으로 판단하므로 `proto:grpc`, `proto:sse`와 TLS 표기는 매칭되지 않습니다 |
 | Probe | `severity`(`sev`), `status`(`st`), `category`(`cat`), `host`, `code` |
 | Issues | `severity`(`sev`), `status`(`st`), `host`, `title`, `cvss` |
 | 하위 탭 스트립 `/` 필터(Repeater와 다른 도구 탭), MCP `get_repeater_context` `filter` | `tag`, `name`, `host`(`target`), `method`(`verb`), `status`: 마지막 전송 결과로, 앞부분 일치로 비교하는 코드(`status:4`는 모든 4xx), `error`, `unsent` 중 하나 |
@@ -302,12 +302,12 @@ host:"my host"                        공백까지 포함한 하나의 host 값
 답할 수 없는 History 필드는 거부합니다. `scope:`(프로젝트의 스코프 규칙은 메시지의
 일부가 아님), `size:`·`reqsize:`·`respsize:`·`dur:`(교환이 아직 끝나지 않음), `stub:`·`rewritten:`·`static:`·
 `src:`·`via:`·`cache:`·`rpc:`·`llm:`·`ws:`(게이트가 쥔 것은 트랜스크립트가 아니라 메시지 하나이고, 그 `body:`가 이미
-그 메시지를 뜻함), 그리고 한쪽 방향만 보는 `req.`/`resp.` 표기가 그렇습니다. 거부된 필드를 대신
+그 메시지를 뜻함), 한쪽 방향만 보는 `req.`/`resp.` 표기가 그렇습니다. 거부된 필드를 대신
 자유 텍스트로 검색하는 일도 없습니다. 입력하는 자리에서 그렇게 알려주고, 그런 필드를
 담은 Extract 규칙은 저장되지 않으며, MCP `intercept_set_filter`와 `gori run intercept filter`는
 그 조건을 거부합니다.
 
-Probe와 Issues는 심각도 이름(`info`, `low`, `medium`/`med`, `high`, `critical`/`crit`)과 트리아지 상태(`open`, `confirmed`/`conf`, `false-positive`/`fp`, `resolved`/`done`, 그리고 open이 아닌 모든 상태를 뜻하는 `closed`)를 받습니다. 심각도는 비교를 지원하므로 `sev:>=high`도 동작합니다. Issues는 수치 비교 연산자(`cvss:>=7.0`, `cvss:<4.0`), 일치 점수(`cvss:7.5`), 벡터 부분일치(`cvss:3.1`)를 지원하는 `cvss:`도 받습니다.
+Probe와 Issues는 심각도 이름(`info`, `low`, `medium`/`med`, `high`, `critical`/`crit`)과 트리아지 상태(`open`, `confirmed`/`conf`, `false-positive`/`fp`, `resolved`/`done`, open이 아닌 모든 상태를 뜻하는 `closed`)를 받습니다. 심각도는 비교를 지원하므로 `sev:>=high`도 동작합니다. Issues는 수치 비교 연산자(`cvss:>=7.0`, `cvss:<4.0`), 일치 점수(`cvss:7.5`), 벡터 부분일치(`cvss:3.1`)를 지원하는 `cvss:`도 받습니다.
 
 ```text
 sev:>=high -status:fp                 Issues: high와 critical, 오탐 제외
@@ -324,14 +324,14 @@ Intercept 바와 컬러 규칙 바 모두 입력하는 동안 필드 이름과 �
 `header:`와 `body:`는 메시지의 바이트를 검색하므로, 필터가 실행되는 시점에 그 바이트가 있는 곳에서만 동작합니다.
 
 - **History, Sitemap, 컬러 규칙**은 이미 캡처된 플로우를 봅니다. 그래서 두 필드 모두 요청·응답 양쪽에서 항상 동작합니다.
-- **Intercept와 Extract 규칙 조건**은 흐르는 중인 메시지를 봅니다. `header:`는 HTTP 요청·응답 게이트와 Extract 규칙 조건에서 동작하고, 홀드된 WebSocket 메시지에서는 동작하지 않습니다. WebSocket 메시지에는 자기 헤드가 없기 때문입니다. `body:`는 페이로드가 손에 있는 경우(홀드된 WebSocket 메시지와 Extract 규칙 조건)에서 동작하고, HTTP 홀드 게이트에서는 동작하지 않습니다. 그 게이트가 본문을 버퍼링할지 결정하기 때문입니다.
+- **Intercept와 Extract 규칙 조건**은 흐르는 중인 메시지를 봅니다. `header:`는 HTTP 요청·응답 게이트와 Extract 규칙 조건에서 동작하지만, 자기 헤드가 없는 홀드된 WebSocket 메시지에서는 동작하지 않습니다. `body:`는 페이로드가 이미 있는 경우(홀드된 WebSocket 메시지와 Extract 규칙 조건)에 동작하지만, 본문을 버퍼링할지 결정하는 HTTP 홀드 게이트에서는 동작하지 않습니다.
 
 쿼리와 컬러 규칙은 `body:`를 다르게 읽습니다.
 
-- **쿼리**에서 `body:`는 트라이그램 인덱스를 읽습니다. 빠르지만 각 방향 첫 8 KiB로 제한되고 바이너리·압축 본문은 건너뜁니다. `body~정규식`은 대신 저장된 바이트를 그대로 훑고 제한이 없습니다.
+- **쿼리**에서 `body:`는 트라이그램 인덱스를 읽습니다. 빠르지만 각 방향 첫 8 KiB로 제한되고 바이너리·압축 본문은 건너뜁니다. `body~정규식`은 저장된 바이트를 제한 없이 훑습니다.
 - **컬러 규칙**에서 `body:`는 항상 훑고, 각 방향 첫 64 KiB를 읽습니다. 인덱싱은 캡처 이후에 일어나고 규칙은 행이 도착할 때 칠하므로 훑어야 합니다. 64 KiB 한계는 큰 본문이 가득한 화면에서 목록이 멈추지 않게 합니다. 그래서 컬러 규칙은 똑같은 쿼리가 목록에 못 띄우는 행도 칠하지만, 64 KiB를 넘어가는 매치는 칠하지 않습니다.
 
-모든 화면의 `body:`는 **와이어에 흐른 그대로의 바이트**를 읽습니다. 그래서 어느 것도 gzip 본문 안의 문자열은 찾지 못합니다. Extract 규칙 조건도 마찬가지입니다. 조건은 응답을 디코드하기 *전에* 평가되고, 압축 해제된 텍스트를 보는 것은 그 뒤에 이어지는 추출뿐입니다. 압축된 내용을 걸러야 한다면 그 바깥을 거세요: 헤더, 경로, 또는 응답 크기.
+모든 화면의 `body:`는 **와이어에 흐른 그대로의 바이트**를 읽습니다. 그래서 어느 것도 gzip 본문 안의 문자열은 찾지 못합니다. Extract 규칙 조건도 마찬가지입니다. 조건은 응답을 디코드하기 *전에* 평가되고, 압축 해제된 텍스트를 보는 것은 그 뒤에 이어지는 추출뿐입니다. 압축된 내용을 걸러야 한다면 그 바깥의 헤더, 경로, 응답 크기로 거세요.
 
 ## 주의할 점 {#caveats}
 

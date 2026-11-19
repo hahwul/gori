@@ -109,13 +109,13 @@ shot once per `SHOTS` palette like the scenes are (the traffic top-up happens
 only on the first pass, so light and dark show the same flows).
 
 Its window chrome carries the `𝓰𝓸𝓻𝓲` wordmark instead of a `gori · Scene`
-caption. It stands for the tool, not for one screen. Decorative glyphs say
-nothing out loud, so the shot passes `SHOT_ARIA` and `ansi2svg.py` writes that
-as the SVG's `aria-label` instead of the title.
+caption. It stands for the tool, not for one screen. A screen reader cannot
+read decorative glyphs, so the shot passes `SHOT_ARIA` and `ansi2svg.py` writes
+that as the SVG's `aria-label` instead of the title.
 
 It is also the only shot with Miss Ring on (`write_settings <theme> companion`); she
-ships on now, so the doc scenes switch her off explicitly instead. She occupies
-three rows of exactly the corner most of them are photographing. Her corner is why
+ships on now, so the doc scenes switch her off. She occupies three rows of the
+corner most of them are photographing. Her corner is why
 `seed_readme_extra` stops at ten: the flow list has to end a few rows short of
 the bottom or she covers live SIZE/DUR cells.
 

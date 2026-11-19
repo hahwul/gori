@@ -1,6 +1,6 @@
 +++
 title = "gori 빠른 시작"
-description = "직접 따라 하는 튜토리얼: CA를 신뢰하고, 실제 요청을 캡처해 살펴본 뒤 Repeater에서 재전송합니다."
+description = "직접 따라 하는 튜토리얼입니다. CA를 신뢰하고, 실제 요청을 캡처해 살펴본 뒤 Repeater에서 재전송합니다."
 weight = 20
 +++
 
@@ -8,7 +8,7 @@ weight = 20
 
 각 단계는 **체크포인트**로 끝납니다. 다음으로 넘어가기 전에 보여야 하는 상태입니다. 화면이 다르다면 거기서 멈추고 바로잡으세요.
 
-> **시작하기 전에.** [gori를 설치](/ko/getting-started/installation/)하고 브라우저를 준비하세요. 자신의 브라우징을 캡처하게 되므로, 테스트 권한이 있는 사이트(자신의 앱, 스테이징 서버, 또는 의도적으로 취약하게 만든 연습용 타깃)를 고르세요. 정확한 결과가 필요한 부분에서는 안정적인 일회용 타깃인 `example.com`을 사용합니다.
+> **시작하기 전에.** [gori를 설치](/ko/getting-started/installation/)하고 브라우저를 준비하세요. 자신의 브라우징을 캡처하므로, 테스트 권한이 있는 사이트(자신의 앱, 스테이징 서버, 또는 의도적으로 취약하게 만든 연습용 타깃)를 고르세요. 정확한 결과가 필요한 부분에서는 안정적인 일회용 타깃인 `example.com`을 사용합니다.
 
 ## 1. gori 시작하기 {#1-start-gori}
 
@@ -22,15 +22,15 @@ gori
 
 프로젝트 선택 화면에서 **New project**를 고르고 이름을 입력한 뒤 `Enter`를 누르세요. 첫 프로젝트는 바로 열립니다. 이후 프로젝트는 `Enter`가 선택 사항인 설명과 태그로 넘어가므로 모두 세 번 누르고, 첫 프로젝트에서도 `↓`로 그 칸에 갈 수 있습니다. 태그 칸에서는 `,`나 `Enter`로 태그를 추가하고, `Tab`으로 다른 프로젝트에서 이미 쓰는 태그를 완성합니다. 선택 화면 검색창에 `#태그`를 입력하면 그 태그가 붙은 프로젝트를 찾습니다. 첫 실행에서 가이드 투어를 마치면 이 화면으로 돌아옵니다.
 
-어떤 프로젝트가 토큰, 호스트, 엔드포인트 같은 무언가를 캡처했는지 찾으려면 프로젝트 선택 화면에서 `Ctrl-F`를 누르고 입력하세요. gori가 모든 프로젝트의 플로우를 호스트와 경로로 검색하고, 세 글자 이상 입력하면 본문 텍스트로도 검색한 뒤 결과를 프로젝트별로 보여 줍니다. `Enter`를 누르면 그 플로우의 상세 화면이 펼쳐진 채로 해당 프로젝트가 열립니다. `Esc`는 아직 진행 중인 검색을 멈추고, 검색이 끝난 뒤에는 검색 창을 닫습니다.
+토큰, 호스트, 엔드포인트 등을 어느 프로젝트에서 캡처했는지 찾으려면 프로젝트 선택 화면에서 `Ctrl-F`를 누르고 입력하세요. gori가 모든 프로젝트의 플로우를 호스트와 경로로 검색하고, 세 글자 이상 입력하면 본문 텍스트로도 검색한 뒤 결과를 프로젝트별로 보여 줍니다. `Enter`를 누르면 그 플로우의 상세 화면이 펼쳐진 채로 해당 프로젝트가 열립니다. `Esc`는 아직 진행 중인 검색을 멈추고, 검색이 끝난 뒤에는 검색 창을 닫습니다.
 
-기본적으로 프록시는 `127.0.0.1:8070`에서 수신합니다. 한 번의 실행에서만 재정의하려면(프로젝트 자체 바인드가 설정되어 있으면 여전히 그쪽이 우선합니다):
+기본적으로 프록시는 `127.0.0.1:8070`에서 수신합니다. 한 번만 재정의하려면(프로젝트에 바인드가 설정되어 있으면 그쪽이 우선합니다):
 
 ```bash
 gori --listen 0.0.0.0 --port 8080
 ```
 
-**체크포인트.** 프로젝트 세션이 **History** 탭에서 열렸습니다. Project, Target, History, … 탭과 프록시 주소 `127.0.0.1:8070`을 보여주는 상단 바가 보입니다.
+**체크포인트.** 프로젝트 세션이 **History** 탭에서 열렸습니다. 탭 바에 Project, Target, History, …가, 상단 바에 프록시 주소 `127.0.0.1:8070`이 보입니다.
 
 ## 2. CA 신뢰 후 첫 플로우 캡처 {#2-trust-the-ca-and-capture-your-first-flow}
 
@@ -46,7 +46,7 @@ TUI 안에서:
 
 gori는 이미 CA를 신뢰하고 HTTP/HTTPS를 프록시로 경유하는 일회용 프로파일로 브라우저를 실행합니다. 그 브라우저에서 사이트를 방문하세요(`https://example.com`을 먼저, 그다음 테스트 중인 사이트를).
 
-> **Firefox 참고.** CA 자동 신뢰에는 `PATH`에 있는 `certutil`(NSS)이 필요합니다. 없으면 gori가 프록시는 설정하지만 Firefox가 CA를 신뢰하지 않아 HTTPS 사이트에서 보안 경고가 뜹니다. 먼저 설치하고(macOS는 `brew install nss`, Debian/Ubuntu는 `apt install libnss3-tools`, Fedora는 `dnf install nss-tools`) 브라우저를 다시 열거나, 같은 창에서 직접 신뢰 등록하세요: `about:preferences#privacy`를 열고 **인증서 보기**, **인증기관** 탭으로 가서 `gori ca`가 출력한 파일을 **가져오기** 하면 됩니다.
+> **Firefox 참고.** CA 자동 신뢰에는 `PATH`에 있는 `certutil`(NSS)이 필요합니다. 없으면 gori가 프록시는 설정하지만 Firefox가 CA를 신뢰하지 않아 HTTPS 사이트에서 보안 경고가 뜹니다. 먼저 설치하고(macOS는 `brew install nss`, Debian/Ubuntu는 `apt install libnss3-tools`, Fedora는 `dnf install nss-tools`) 브라우저를 다시 열거나, 같은 창에서 직접 신뢰 등록하세요. `about:preferences#privacy`를 열고 **인증서 보기**, **인증기관** 탭으로 가서 `gori ca`가 출력한 파일을 **가져오기** 하면 됩니다.
 
 ### Option B: 클라이언트를 직접 지정하기 {#option-b-point-any-client-yourself}
 
@@ -56,7 +56,7 @@ CA 경로를 출력하고 그 파일을 시스템 또는 브라우저 신뢰 저
 gori ca
 ```
 
-그런 다음 클라이언트가 `127.0.0.1:8070`을 HTTP **및** HTTPS 프록시로 사용하도록 설정하세요. 다른 터미널에서 간단한 동작 확인:
+그런 다음 클라이언트가 `127.0.0.1:8070`을 HTTP **및** HTTPS 프록시로 사용하도록 설정하세요. 다른 터미널에서 간단히 동작을 확인합니다:
 
 ```bash
 curl -x http://127.0.0.1:8070 https://example.com
@@ -64,7 +64,7 @@ curl -x http://127.0.0.1:8070 https://example.com
 
 gori는 필요할 때 루트로 호스트별 리프 인증서를 발급하므로, 루트만 한 번 신뢰하면 됩니다.
 
-커맨드라인 도구에는 `gori run shell`(또는 팔레트의 **Open shell**)은 OS 설정을 건드리지 않고, curl, git, Python, Go, Node 트래픽이 실행 중인 gori를 거치며 그 CA를 신뢰하는 셸을 엽니다. `gori run shell -- curl https://example.com`은 명령 하나만 그렇게 실행합니다. [`gori run shell`](/ko/reference/cli/#run-shell)을 참고하세요.
+커맨드라인 도구를 쓸 때는 `gori run shell`(또는 팔레트의 **Open shell**)로 셸을 엽니다. 이 셸에서는 OS 설정을 건드리지 않아도 curl, git, Python, Go, Node 트래픽이 실행 중인 gori를 거치고 gori의 CA를 신뢰합니다. `gori run shell -- curl https://example.com`은 명령 하나만 그렇게 실행합니다. [`gori run shell`](/ko/reference/cli/#run-shell)을 참고하세요.
 
 > gori의 개인 키는 `0600` 권한으로 기록되며 이 머신 밖으로 나가지 않습니다. 이전의 모든 신뢰를 무효화하려 할 때만 팔레트(**Regenerate CA certificate**)에서 교체하세요.
 
@@ -96,25 +96,25 @@ gori run android undo              # 프록시와 포트 매핑 해제
 
 `--system`은 root 권한으로 gori의 루트 인증서를 시스템 저장소에 넣으므로, 앱은 network security config 없이도 신뢰합니다. 기기를 재부팅하면 사라집니다. root가 필요하며 Android 14+(API 34)는 아직 지원하지 않습니다. 기본값인 `--user`는 인증서를 `/sdcard/Download/gori-ca.crt`에 올리고 보안 설정을 열어 **CA 인증서**로 설치하게 합니다. API 24 이상을 대상으로 하는 앱은 network security config에서 허용해야만 사용자 CA를 신뢰합니다. TUI에서는 팔레트의 **Set up Android device**가 같은 단계를 실행합니다. [`gori run android`](/ko/reference/cli/#run-android)를 참고하세요.
 
-**체크포인트.** **History**로 전환하세요(`3`). 최소 한 개의 행이 보여야 합니다. `200` 상태의 `GET https://example.com/` 요청입니다. History가 비어 있다면 트래픽이 gori에 닿지 않는 것입니다. 프록시 설정(Option B)을 다시 확인하거나 **Open browser**(Option A)를 사용하세요.
+**체크포인트.** **History**로 전환하세요(`3`). 행이 하나 이상 보여야 합니다. `200` 상태의 `GET https://example.com/` 요청입니다. History가 비어 있다면 트래픽이 gori에 닿지 않고 있습니다. 프록시 설정(Option B)을 다시 확인하거나 **Open browser**(Option A)를 사용하세요.
 
 ## 3. 두 가지 탐색 표면 익히기 {#3-learn-the-two-discovery-surfaces}
 
-탭별 단축키를 외울 필요는 없습니다. 키 두 개로 모든 동작에 닿습니다.
+탭별 단축키를 외울 필요는 없습니다. 키 두 개면 모든 동작을 찾을 수 있습니다.
 
 | 표면 | 키 | 용도 |
 |---------|-----|----------------|
 | **space 메뉴** | `Space` | 지금 있는 패널(History 행, 플로우 상세, Repeater 편집기, …)에서 가장 자주 하는 동작, 동작마다 글자 하나 |
 | **커맨드 팔레트** | `Ctrl-P` | 모든 동작을 이름을 입력해 찾기: 그 패널의 동작이 먼저, 이어서 설정이나 **Open browser** 같은 앱 전역 동작 |
 
-둘 다 동작 옆에 그 단축키를 보여주므로, 열어 보는 것 자체가 키를 익히는 방법입니다. 방금 캡처한 플로우로 바로 해 보세요.
+둘 다 동작 옆에 단축키를 보여주므로, 열어 보는 것만으로도 키를 익힐 수 있습니다. 방금 캡처한 플로우로 바로 해 보세요.
 
 1. **History**에서 `↓`로 플로우를 고른 뒤 `Space`를 누릅니다. 행 왼쪽 글자는 그 행을 실행하고, 오른쪽 키(**Send to Repeater** 옆의 `^R`)는 메뉴 없이 같은 일을 합니다. `>` **Send flow to…**처럼 `›`가 붙은 행은 두 번째 카드를 열고, `Esc`는 한 단계 뒤로 갑니다. 메뉴가 닫힐 때까지 `Esc`를 누르세요.
-2. `Ctrl-P`를 누르고 `send`를 입력합니다. History의 동작이 `THIS TAB` 아래 먼저 나오고, 각각 닿는 키나 메뉴 경로가 함께 보입니다(`␣ > c`는 `Space`, `>`, `c` 순서). `Esc`를 누릅니다.
+2. `Ctrl-P`를 누르고 `send`를 입력합니다. History의 동작이 `THIS TAB` 아래 먼저 나오고, 각 동작을 실행하는 키나 메뉴 경로가 함께 보입니다(`␣ > c`는 `Space`, `>`, `c` 순서). `Esc`를 누릅니다.
 
 <figure class="tui-shot">
   <img src="/images/tui/command-palette.svg" alt="History 탭 위에서 send를 입력한 gori 커맨드 팔레트. THIS TAB 아래 보내기 동작이 키나 메뉴 경로와 함께 나오고, 이어서 APP 아래 일치하는 앱 명령이 나오는 화면" width="1206" height="520">
-  <figcaption>History에서 <code>send</code>를 입력한 커맨드 팔레트(<kbd>Ctrl-P</kbd>): 그 탭의 동작이 더 빠른 길과 함께 먼저 나오고, 앱 전역 명령이 뒤따릅니다.</figcaption>
+  <figcaption>History에서 <code>send</code>를 입력한 커맨드 팔레트(<kbd>Ctrl-P</kbd>). 그 탭의 동작이 더 짧은 경로와 함께 먼저 나오고, 앱 전역 명령이 이어집니다.</figcaption>
 </figure>
 
 [space 메뉴와 팔레트](/ko/guide/space-menu-and-palette/)에서 `Z` **Display…**, `P` **Protocol…** 카드와 팔레트에만 있는 동작까지 자세히 다룹니다.
@@ -189,12 +189,12 @@ method:POST body:password
    ```
 4. `Esc`로 편집 모드를 벗어난 뒤 `Ctrl-R`로 **전송**합니다.
 
-   편집 중 복사하기: `Shift`+화살표는 두 모드 모두에서 선택하지만, 복사 키는 다릅니다. READ에서는 `y`입니다. INS에서 `y`는 리터럴 문자라 선택 위에 입력하면 선택을 덮어쓰므로 `Ctrl-Y`를 쓰세요. `Esc`도 선택을 INS 밖으로 들고 나오므로 `Esc` 뒤 `y`도 됩니다. 키 입력이 선택을 덮어썼다면 `Ctrl-Z`가 한 번에 되돌립니다.
+   편집 중에 복사할 때, `Shift`+화살표는 두 모드에서 똑같이 선택하지만 복사 키는 다릅니다. READ에서는 `y`입니다. INS에서 `y`는 리터럴 문자라 선택 위에 입력하면 선택을 덮어쓰므로 `Ctrl-Y`를 쓰세요. `Esc`로 INS를 나와도 선택이 유지되므로 `Esc` 뒤 `y`도 됩니다. 키 입력이 선택을 덮어썼다면 `Ctrl-Z` 한 번으로 되돌립니다.
 5. 응답과 타이밍, 이전 응답 대비 diff가 오른쪽에 나타납니다. `Tab`으로 target → request → response를 순회합니다.
 
 <figure class="tui-shot">
   <img src="/images/tui/repeater.svg" alt="편집 가능한 요청 패널이 응답 패널 옆에 있고, sent → 200 in 114ms라는 상태 줄이 보이는 gori Repeater 탭" width="1206" height="520" loading="lazy" decoding="async">
-  <figcaption><strong>Repeater</strong>는 요청의 어느 부분이든 편집해 재전송합니다. 응답, 타이밍, 그리고 마지막 응답 대비 diff가 나란히 놓입니다.</figcaption>
+  <figcaption><strong>Repeater</strong>는 요청의 어느 부분이든 편집해 재전송합니다. 응답, 타이밍, 마지막 응답 대비 diff가 나란히 놓입니다.</figcaption>
 </figure>
 
 **체크포인트.** Repeater 상태 줄에 `sent → 200 in … ms` 같은 문구가 보이고, `Ctrl-R`로 원하는 만큼 재전송할 수 있습니다.
@@ -214,7 +214,7 @@ method:POST body:password
 | `Space` | 포커스된 패널 | space 메뉴: 이 패널의 동작, 동작마다 글자 하나 |
 | `Ctrl-P` | 어디서나 | 커맨드 팔레트: 아무 동작이나 이름으로 찾기 |
 | `?` | 어디서나 | Help: 키 목록 팝업, 지금 탭의 섹션부터 |
-| `Ctrl-,` | 어디서나 | Preferences(모든 설정을 담은 하나의 모달) |
+| `Ctrl-,` | 어디서나 | Preferences(모든 설정을 담은 모달 하나) |
 | `c` / `i` / `s` | 어디서나 | 캡처 / 인터셉트 / 스코프 렌즈 |
 | `[` `]` · `1`-`9` | 어디서나 | 탭 전환 |
 | `/` | History | 쿼리 언어 필터 |
@@ -235,11 +235,11 @@ gori wizard
 
 첫 실행에서는 기본 주소(`127.0.0.1:8070`)를 쓸 수 있으면 마법사가 테마 스텝에서 시작하고, `Shift-Tab`으로 바인드 스텝에 돌아갈 수 있습니다. `gori wizard`는 항상 바인드 스텝에서 시작합니다. 수신 IP의 기본값 `127.0.0.1`은 이 컴퓨터에서만 접속할 수 있고, `0.0.0.0`을 고르면 다른 기기에서도 접속할 수 있습니다. 첫 `Enter`는 IP에서 포트로 이동하고 다음 `Enter`는 계속 진행합니다. 이 값은 `settings.json`의 공유 기본값이 됩니다. 프로젝트별 주소는 Project 탭에서 따로 고정할 수 있습니다. 포트가 이미 사용 중이면 `Enter`를 한 번 더 눌러 그대로 유지할 수 있습니다. `Esc`를 두 번 누르면 마법사를 건너뜁니다.
 
-마지막 **Review** 스텝은 선택한 값을 요약하고, 현재 [에디터 키셋](/ko/guide/hotkeys/#editor-keysets)과 바꾸는 곳을 알려 줍니다(마법사는 키셋을 바꾸지 않습니다). 편집 가능한 행이 하나 있습니다. **Shortcuts**입니다. `←`/`→`로 gori 내장 키 조합 패밀리(`^P` `^N` `^W` `^1-9`)의 모디파이어를 `Ctrl`과 `Option (⌥)` 사이에서 전환합니다. Option을 고르면 Ctrl은 그대로 두고 `⌥` 별칭을 추가합니다. 터미널이나 멀티플렉서가 Ctrl 형태를 전달하지 않을 때 쓰세요. macOS의 Option-as-Meta 요구사항은 [커맨드 모디파이어](/ko/guide/hotkeys/#command-modifier)를 참고하세요.
+마지막 **Review** 스텝은 선택한 값을 요약하고, 현재 [에디터 키셋](/ko/guide/hotkeys/#editor-keysets)과 바꾸는 곳을 알려 줍니다(마법사는 키셋을 바꾸지 않습니다). 편집할 수 있는 행은 **Shortcuts** 하나입니다. `←`/`→`로 gori 내장 키 조합 패밀리(`^P` `^N` `^W` `^1-9`)의 모디파이어를 `Ctrl`과 `Option (⌥)` 사이에서 전환합니다. Option을 고르면 Ctrl은 그대로 두고 `⌥` 별칭을 추가합니다. 터미널이나 멀티플렉서가 Ctrl 형태를 전달하지 않을 때 쓰세요. macOS의 Option-as-Meta 요구사항은 [커맨드 모디파이어](/ko/guide/hotkeys/#command-modifier)를 참고하세요.
 
 ## 가이드 UI 투어 {#guided-ui-tour}
 
-목업 UI로 진행하는 안내입니다. 탭/패널 이동, space 메뉴(두 번째 카드 포함), 커맨드 팔레트 검색, READ/INS 편집 모드를 차례로 익힌 뒤 트래픽 자체로 넘어갑니다. 클라이언트를 어디로 향하게 하고 CA를 어떻게 신뢰시키는지, 캡처 스위치, 인터셉트입니다. 실제 프록시 세션 없이 안전하게 실행할 수 있습니다. 각 레슨은 짧은 데모를 보여 주고 실제 키를 눌러 보게 합니다. 앞의 네 가지 동작은 실습 샌드박스에서 직접 해 보고, 투어는 도움말과 종료 방법, 첫 세션 체크리스트로 끝납니다. 목업 메뉴는 재지정한 키를 포함해 설치된 gori와 같은 글자와 키를 씁니다.
+목업 UI로 진행하는 안내입니다. 탭/패널 이동, space 메뉴(두 번째 카드 포함), 커맨드 팔레트 검색, READ/INS 편집 모드를 차례로 익힌 뒤 트래픽으로 넘어갑니다. 트래픽에서는 클라이언트를 어디로 향하게 하고 CA를 어떻게 신뢰시키는지, 캡처 스위치, 인터셉트를 다룹니다. 실제 프록시 세션 없이 안전하게 실행할 수 있습니다. 각 레슨은 짧은 데모를 보여 주고 실제 키를 눌러 보게 합니다. 앞의 네 가지 동작은 실습 샌드박스에서 직접 해 보고, 투어는 도움말과 종료 방법, 첫 세션 체크리스트로 끝납니다. 목업 메뉴는 재지정한 키를 포함해 설치된 gori와 같은 글자와 키를 씁니다.
 
 ```bash
 gori tutorial
@@ -247,14 +247,14 @@ gori tutorial
 
 <figure class="tui-shot">
   <img src="/images/tui/tutorial.svg" alt="탭과 패널, 동작 메뉴, 커맨드 팔레트, 편집 모드라는 네 가지 핵심 동작을 설명하는 gori 가이드 투어 환영 카드" width="1206" height="538" loading="lazy" decoding="async">
-  <figcaption>가이드 투어는 탭과 패널, space 메뉴, 팔레트, 그리고 READ / INS 편집 모드를 안내합니다. 각 키를 눌러 본 뒤, 안전한 샌드박스에서 네 가지를 모두 연습하세요.</figcaption>
+  <figcaption>가이드 투어는 탭과 패널, space 메뉴, 팔레트, READ / INS 편집 모드를 안내합니다. 각 키를 눌러 본 뒤, 안전한 샌드박스에서 네 가지를 모두 연습하세요.</figcaption>
 </figure>
 
 이 투어는 첫 실행 마법사의 마지막에도 제안되며, 세션 안에서는 팔레트 명령 **Guided tour**(`Ctrl-P`)로 열 수 있습니다. 마지막 카드는 투어를 마치면 프로젝트 선택 화면, `--db` 세션, 셸, 현재 세션 중 어디로 이어지는지 안내합니다.
 
 ## 다음 단계 {#next-steps}
 
-- [설정](/ko/getting-started/configuration/): 저장소 구조, 네트워크 설정, 그리고 CA
+- [설정](/ko/getting-started/configuration/): 저장소 구조, 네트워크 설정, CA
 - [Proxy & History](/ko/guide/proxy/): 캡처, 인터셉트, 스코프, 가져오기, match & replace
 - [Repeater & Fuzzer](/ko/guide/repeater-and-fuzzer/): 테스트 워크벤치와 env 토큰
 - [Query Language](/ko/reference/query-language/): 전체 필터 문법

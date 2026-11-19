@@ -28,8 +28,8 @@ once the project has a scope, and the TUI does not ask.
 | **HTTP/3** | No | No | No | No |
 
 The [Proxy & History guide](/guide/proxy/) explains the buffering, WebSocket, gRPC, and HTTP/3
-details. "Full" capture is still subject to the configured body-storage cap: traffic continues
-byte-exact after the cap and the flow reports both captured and wire sizes.
+details. "Full" capture is still subject to the configured body-storage cap. Traffic continues
+byte-exact after the cap, and the flow reports both captured and wire sizes.
 
 ## Entry points
 
@@ -45,19 +45,19 @@ byte-exact after the cap and the flow reports both captured and wire sizes.
 | Run Fuzzer, Miner, Discover, Sequencer, and Authorize engines | Yes | Yes | Yes |
 | UI navigation, pane focus, themes, and hotkey editing | Yes | Not applicable | Not applicable |
 
-The exact command and tool inventories live in the [CLI reference](/reference/cli/) and
+The command and tool inventories live in the [CLI reference](/reference/cli/) and
 [MCP guide](/guide/mcp/). MCP starts without a listener and normally attaches to an existing
 project. `--read-only` removes mutation and live-request tools.
 
 ## Current boundaries
 
-- **Body and short-circuit rules are decided per HTTP/2 connection.** No rule kind costs a host
-  HTTP/2 any more, but whether a connection runs body and stub rules is decided when it opens,
-  so one enabled on a host with no such rule reaches it on the client's next connection. A body
-  rule rewrites a unary gRPC call and lets streaming gRPC and SSE stream.
+- **Body and short-circuit rules are decided per HTTP/2 connection.** No rule kind forces a host
+  off HTTP/2 any more, but whether a connection runs body and stub rules is decided when it
+  opens. A body or stub rule enabled on a host that had none takes effect on the client's next connection. A
+  body rule rewrites a unary gRPC call and lets streaming gRPC and SSE stream.
 - **RFC 8441 messages cannot be intercepted or rewritten live.** gori captures a WebSocket over
   HTTP/2 and reopens it in Repeater/Fuzzer, but per-message Intercept and Match & Replace on
-  messages are HTTP/1.1 only: both would have to reframe a DATA payload to a different length,
+  messages are HTTP/1.1 only. Both would have to reframe a DATA payload to a different length,
   which deadlocks against the peer's flow-control window. Replay dials h2, waits for the
   origin's `SETTINGS_ENABLE_CONNECT_PROTOCOL`, and treats the `2xx` (not a `101`) as the
   socket opening. An origin that does not advertise the setting gets a refusal that names it,

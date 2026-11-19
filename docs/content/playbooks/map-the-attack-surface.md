@@ -23,7 +23,7 @@ The tree is a live view over the capture. Anything you browse next appears as so
 
 <figure class="tui-shot">
   <img src="/images/tui/sitemap.svg" alt="gori Sitemap tab showing captured hosts expanded into a tree of paths with method chips and per-host path counts" width="1206" height="520">
-  <figcaption>The <strong>Sitemap</strong> folds your capture into a <code>host → path</code> tree with method chips and scope markers, the shape of the surface you're about to test.</figcaption>
+  <figcaption>The <strong>Sitemap</strong> folds your capture into a <code>host → path</code> tree with method chips and scope markers.</figcaption>
 </figure>
 
 **Checkpoint.** Your target host expands into a tree of paths, each carrying its method chip.
@@ -60,7 +60,7 @@ Captured JavaScript names endpoints too, and reading it sends nothing. `Space` `
 
 For each Discover finding, gori stores the request it framed and the response the origin sent. Select a discovered node and press `o` to open that exchange in the same detail view History uses (`Enter` only expands or collapses a node): headers, body, pretty-printed JSON. From there `^R` sends it to the **Repeater** to work on by hand.
 
-As you triage, mark the paths that matter with `t` (a run of `t` marks consecutive rows), and use the `Space` menu to tag them or add the host to scope from right here, so the endpoints you care about survive the next capture. None of this sends traffic.
+As you triage, mark the paths that matter with `t` (a run of `t` marks consecutive rows), and use the `Space` menu to tag them or add the host to scope from here, so the endpoints you care about survive the next capture. None of this sends traffic.
 
 `p` on a host or subtree lists every parameter name its requests carried, where it appeared and whether a value came back reflected (**Target → Params**, `gori run sitemap params`). `⇧E` writes the selected host or subtree as an OpenAPI 3.0.3 document, with templated paths and inferred schemas but never a credential value (`gori run sitemap export`). Once testing starts, `gori run sitemap --untested` (MCP `list_sitemap{untested:true}`) keeps only the endpoints no active tool has tested yet, judged from the flows Repeater, Fuzzer, Miner, Sequencer, Authorize, Probe and Retest recorded in History and from saved fuzz runs.
 

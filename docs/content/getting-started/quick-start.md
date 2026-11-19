@@ -18,7 +18,7 @@ With no subcommand, gori opens the project picker. The proxy starts when you ope
 gori
 ```
 
-The first launch runs a short [setup wizard](#first-run-wizard) (theme and the Miss Ring mascot, plus the global bind when the default port is taken), then offers a [guided UI tour](#guided-ui-tour). The offer lands on **Skip**. Pick the tour there, or run it later from the palette. This page covers the same ground against live traffic.
+The first launch runs a short [setup wizard](#first-run-wizard) (theme and the Miss Ring mascot, plus the global bind when the default port is taken), then offers a [guided UI tour](#guided-ui-tour). The offer defaults to **Skip**. Pick the tour there, or run it later from the palette. This page covers the same ground against live traffic.
 
 At the picker, select **New project**, enter a name and press `Enter`. Your first project opens at once. For a later one `Enter` moves on to the optional description and tags (three `Enter` in all), and `↓` reaches those fields on the first one too. On the tags row, `,` or `Enter` adds a tag and `Tab` completes one of the tags your other projects already use. Type `#tag` in the picker's search to find the projects carrying it. The guided tour returns you to this picker when it finishes on first launch.
 
@@ -56,7 +56,7 @@ Print the CA path and import that file into your system or browser trust store a
 gori ca
 ```
 
-Then set the client's HTTP **and** HTTPS proxy to `127.0.0.1:8070`. Quick smoke test from another terminal:
+Then set the client's HTTP **and** HTTPS proxy to `127.0.0.1:8070`. Run a quick smoke test from another terminal:
 
 ```bash
 curl -x http://127.0.0.1:8070 https://example.com
@@ -82,7 +82,7 @@ A phone can't read the CA off your filesystem, so gori serves it over the networ
 3. Open a browser there and go to **`http://gori.proxy/`** (`http://gori/` works too).
 4. Download the certificate and trust it. On iOS that is two steps: install the profile, then enable it under **Settings → General → About → Certificate Trust Settings**. On Android, install it under **Settings → Security → Encryption & credentials → Install a certificate → CA certificate**.
 
-`gori.proxy` is a reserved name gori answers for itself, so it works once the proxy is configured and never reaches the network. To skip configuring the proxy first, browse to `http://<your-LAN-IP>:8070/` for the same page.
+`gori.proxy` is a reserved name that gori answers itself, so it works once the proxy is configured and never reaches the network. To skip configuring the proxy first, browse to `http://<your-LAN-IP>:8070/` for the same page.
 
 ### Option D: Set up an Android emulator over adb
 
@@ -189,12 +189,12 @@ Most of your time goes into this loop. Take a captured request, change something
    ```
 4. Press `Esc` to leave edit mode, then `Ctrl-R` to **send**.
 
-   Copying while you edit: `Shift`+arrows select in both modes, but the copy key differs. In READ it is `y`. In INS `y` is a literal character, and typing it over a selection replaces the selection, so use `Ctrl-Y`. `Esc` also carries the selection out of INS, so `Esc` then `y` works too. If a keystroke replaces a selection, `Ctrl-Z` puts it back in one step.
+   When you copy while editing, `Shift`+arrows select in both modes, but the copy key differs. In READ it is `y`. In INS `y` is a literal character, and typing it over a selection replaces the selection, so use `Ctrl-Y`. `Esc` also carries the selection out of INS, so `Esc` then `y` works too. If a keystroke replaces a selection, `Ctrl-Z` puts it back in one step.
 5. The response, its timing, and a diff against the previous reply appear on the right. `Tab` cycles target → request → response.
 
 <figure class="tui-shot">
   <img src="/images/tui/repeater.svg" alt="gori Repeater tab showing an editable request pane beside the response pane, with a status line reading sent → 200 in 114ms" width="1206" height="520" loading="lazy" decoding="async">
-  <figcaption><strong>Repeater</strong> edits any part of a request and re-sends it; the response, timing, and a diff against the last reply sit side by side.</figcaption>
+  <figcaption><strong>Repeater</strong> edits any part of a request and re-sends it. The response, timing, and a diff against the last reply sit side by side.</figcaption>
 </figure>
 
 **Checkpoint.** The Repeater status line reads something like `sent → 200 in … ms`, and you can re-send with `Ctrl-R` as many times as you like.
@@ -239,7 +239,7 @@ The final **Review** step recaps what you picked, names your [editor keyset](/gu
 
 ## Guided UI tour
 
-A mock-UI walkthrough of tab/pane navigation, the space menu (including its second cards), the command palette's search, READ/INS edit mode, then the traffic itself: where to point a client and how to trust the CA, the capture switch, and intercept. It is safe to run without a live proxy session. Each lesson shows a short demo and asks you to try the real key. A hands-on sandbox covers the first four moves, and the tour ends with Help and quitting, then a first-session checklist. The mock menus use the same letters and keys as your install, rebinds included.
+The tour is a mock-UI walkthrough of tab/pane navigation, the space menu (including its second cards), the command palette's search, and READ/INS edit mode. It then covers traffic: where to point a client and how to trust the CA, the capture switch, and intercept. It is safe to run without a live proxy session. Each lesson shows a short demo and asks you to try the real key. A hands-on sandbox covers the first four moves, and the tour ends with Help and quitting, then a first-session checklist. The mock menus use the same letters and keys as your install, rebinds included.
 
 ```bash
 gori tutorial

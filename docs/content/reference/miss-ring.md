@@ -24,8 +24,7 @@ configure her. This page is about how she is drawn.
 
 The motif is Loki's Miss Minutes crossed with Claude's mascot: huge lashed eyes,
 soft rounded forms, a face with almost nothing in it. The *silhouette* is the
-gori mark itself, a ring, painted in whatever the
-live theme calls its brand gold.
+gori mark, a ring, painted in the live theme's brand gold.
 
 Getting her into a terminal meant giving all of that up except the ring and five
 glyphs. This is the whole sprite, as your terminal paints it:
@@ -36,7 +35,7 @@ glyphs. This is the whole sprite, as your terminal paints it:
 
 ## The grid {#grid}
 
-She is eight columns by three rows, and every cell holds exactly one glyph:
+She is eight columns by three rows, and every cell holds one glyph:
 
 <pre class="sprite"><code class="nohighlight"> ▄▀▀▀▄ ˙
 ▐´●u●`▌
@@ -48,11 +47,11 @@ She is eight columns by three rows, and every cell holds exactly one glyph:
 - **Row 2**: the floor. Column 7 is empty.
 
 **Why she is round and not oval.** A terminal row is about twice as tall as a
-cell is wide, so three rows buy six units of height. To read as a circle
+cell is wide, so three rows give six units of height. To read as a circle
 rather than an egg, the equator has to be six *cells* across, not seven. Half
-blocks put it exactly there: the left wall starts half a cell in, the right wall
+blocks put it there: the left wall starts half a cell in, the right wall
 ends half a cell early, and the crown then tapers half a cell per step. A circle
-of diameter six wants 6.0 / 5.2 / 3.3 cells at those three bands, and the
+of diameter six needs 6.0 / 5.2 / 3.3 cells at those three bands, and the
 profile lands on 6.0 / 5.0 / 3.0.
 
 **The cost is her arms.** A half-block wall begins at the midpoint of its cell,
@@ -75,7 +74,7 @@ The mouth is spelled with `u`, `o`, `_`, `·` or `n`, and never with a cup like
 where the lashes are, so it would put the mouth *above* the eyes. `ᴗ`, which
 sits at the right height, is missing from most monospace fonts and falls through
 to a proportional face or a box. `u` is the same cup, at the same height, in
-every monospace font there is.
+every monospace font.
 
 Colour is a second grid laid over the first, with one role per cell, so a new
 expression never means restating the ring's shading:
@@ -86,7 +85,7 @@ HlemelS.
 
 `H` highlight · `R` the base gold · `S` shadow · `C` a dimmed corner ·
 `e` pupil · `l` lash · `m` mouth · `o` the hole · `X` badge · `.` the plate
-behind her. The light source is fixed to the upper left, which is why the crown
+behind her. The light source is fixed to the upper left, so the crown
 runs highlight-then-base. The interior is a *hole*, painted the plate colour, so
 the terminal shows through the way a real ring's does. Filling it with a light
 colour laid a bright bar through the middle of a three-row sprite, and the eye
@@ -94,7 +93,7 @@ read the bar before it read the ring.
 
 ## Poses {#poses}
 
-The five cells inside the ring are the whole of an expression: two brows, two
+An expression is the five cells inside the ring: two brows, two
 eyes and a mouth. The eyes say what she is doing. The brows say how she feels
 about it. Both lashes lean inward for the open resting face, both turn over for
 the furrowed one, and one at a time for the quizzical one.
@@ -148,10 +147,10 @@ could not fit into a face:
   <figcaption>Miss Ring in <code>body</code> placement, saying the one thing she says unprompted: <em>hi! ready when you are</em>.</figcaption>
 </figure>
 
-Two placements. `body` puts the full 8 × 3 sprite in the bottom-right corner of
-the tab body, with room above her for a speech bubble. Clicking her opens the
-notification ring. `bar` folds her into an eight-cell chip in the status row:
-the middle row plus the badge borrowed from the cell above it, which is why
+There are two placements. `body` puts the full 8 × 3 sprite in the bottom-right
+corner of the tab body, with room above her for a speech bubble. Clicking her
+opens the notification ring. `bar` folds her into an eight-cell chip in the
+status row: the middle row plus the badge borrowed from the cell above it, so
 every idle gesture lives in the face and not in the glint. Resting, a failure,
 and dozing:
 

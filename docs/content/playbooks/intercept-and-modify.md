@@ -28,13 +28,13 @@ Now only the POSTs to your target are held. The rest pass through. The History f
 
 > **WebSocket is the exception.** A WebSocket message is held **only** when the catch condition contains `proto:ws`. A blank condition or a host filter alone does not arm it. HTTP is the other way round, where a blank condition holds everything. A busy chat or trading socket would stall on a filter that broad.
 
-**Checkpoint.** The Intercept tab shows catch is on, and your condition sits in the filter bar.
+**Checkpoint.** The Intercept tab shows catch is on, and your condition is in the filter bar.
 
 ## 2. Catch a request and edit it
 
 Trigger the matching request from your client: a browser click, a `curl`, a Repeater send. It stops in the Intercept queue. Select it and press `↵` / `e` to open its raw bytes in the editor (the same INS-mode editor the Repeater uses), change what you need (a header value, a JSON field, the path), then press `Ctrl-R` to **forward** the edited request. `Esc` leaves the editor without sending and keeps the edit, so `f` on the queue forwards it too. Inside the editor, `f` types an `f`.
 
-Headless, the same queue is drivable from a second terminal against a running TUI:
+Headless, you can drive the same queue from a second terminal against a running TUI:
 
 ```bash
 gori run intercept                       # list held items + catch state

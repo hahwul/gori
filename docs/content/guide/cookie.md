@@ -9,18 +9,18 @@ group = "Workbenches"
 
 The **Cookie** tab is a workbench for framework signed session cookies: **Flask** (itsdangerous), **Rack**, and **Django**. Decode one into its parts, verify a candidate signing secret or brute-force it from a wordlist, then edit the session and re-sign it. The [Decoder](/guide/decoder/)'s read-only `cookie-decode` / `flask-decode` / `rack-decode` / `django-decode` converters only show the parts.
 
-Select a cookie anywhere (a **History** detail pane, **Notes**, …) and `Space` `S` (**Send selection to…**) → `k` **Cookie** to seed a new workbench sub-tab with it. Sessions are ephemeral: nothing is written to disk. The tab is off the bar by default: press **`0`** and type "cookie", use the command palette (`Ctrl-P` → **Go to Cookie**), or give it a slot in Preferences.
+Select a cookie anywhere (a **History** detail pane, **Notes**, …) and `Space` `S` (**Send selection to…**) → `k` **Cookie** to seed a new workbench sub-tab with it. Sessions are ephemeral, and nothing is written to disk. The tab is off the bar by default. Press **`0`** and type "cookie", use the command palette (`Ctrl-P` → **Go to Cookie**), or give it a slot in Preferences.
 
 ## Two Lenses
 
-One session, two views, toggled with `Ctrl-T`. The top card of each lens carries the switch on its border (` →FORGE ` on INPUT, ` →DECODE ` on PAYLOAD), and clicking it also toggles:
+A session has two views, toggled with `Ctrl-T`. The top card of each lens carries the switch on its border (` →FORGE ` on INPUT, ` →DECODE ` on PAYLOAD), and clicking it also toggles:
 
-- **Decode**: paste a cookie into INPUT and its parts decode live in DECODED. **OPTIONS** pins how it is read: the format (`Ctrl-A` cycles `auto` / `flask` / `rack` / `django`; `auto` detects it from the punctuation), the Django HMAC algorithm, and a signing salt. **SECRET** holds a candidate key, and its verify verdict (`✓ verified` / `✗ bad key`) is live as you type. To crack it, press `c` from a read pane (INPUT in READ mode, or DECODED); in SECRET and the other editable panes `c` types the letter (see below).
+- **Decode**: paste a cookie into INPUT and its parts decode live in DECODED. **OPTIONS** pins how it is read: the format (`Ctrl-A` cycles `auto` / `flask` / `rack` / `django`; `auto` detects it from the punctuation), the Django HMAC algorithm, and a signing salt. **SECRET** holds a candidate key, and its verify verdict (`✓ verified` / `✗ bad key`) is live as you type. To crack it, press `c` from a read pane (INPUT in READ mode, or DECODED). In SECRET and the other editable panes `c` types the letter (see below).
 - **Forge**: edit the session in PAYLOAD (a JSON object for Flask/Django, the opaque base64 value for Rack), set a SECRET, and the re-signed cookie appears live in OUTPUT.
 
 `Space` → **Load decoded payload** loads the payload currently decoded on the Decode side into the Forge editor, ready to edit a value and re-sign. Copy any result with `y` from a read pane, or `Ctrl-Y` while editing (the forged cookie with `Space` → **Copy forged cookie**).
 
-> The [JWT](/guide/jwt/) tab decodes without verifying. The Cookie tab verifies: a `✓` in SECRET means the key you typed signs this cookie. Forge re-signs with the secret, salt, and algorithm you give it.
+> The [JWT](/guide/jwt/) tab decodes without verifying. The Cookie tab verifies. A `✓` in SECRET means the key you typed signs this cookie. Forge re-signs with the secret, salt, and algorithm you give it.
 
 ## The Three Formats
 
@@ -36,7 +36,7 @@ The **SECRET** field doubles as the source for `c` (crack), so there is no separ
 
 - a **path to a file** is read as a wordlist, one candidate per line;
 - a **comma-separated list** (`admin,secret,changeme`) is tried inline;
-- a **lone secret** is a one-element list: the crack runs the same check as the live verify.
+- a **lone secret** is a one-element list, so the crack runs the same check as the live verify.
 
 On a hit the field is replaced with the winning secret and the verdict flips to `✓`, ready for the Forge lens.
 
@@ -61,4 +61,4 @@ Over MCP, `cookie_decode` / `cookie_verify` / `cookie_crack` / `cookie_forge` ar
 
 - [JWT](/guide/jwt/): the sibling workbench for JSON Web Tokens
 - [Decoder](/guide/decoder/): decode a cookie inside a longer transform chain
-- [Repeater & Fuzzer](/guide/repeater-and-fuzzer/): fire a forged cookie at the target
+- [Repeater & Fuzzer](/guide/repeater-and-fuzzer/): send a forged cookie to the target

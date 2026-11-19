@@ -15,13 +15,13 @@ If a session cookie, CSRF token, password-reset code, or API key is predictable,
   <figcaption>Sending a captured flow to the <strong>Sequencer</strong> auto-detects the session cookie and lets you set the sample size and concurrency before collecting.</figcaption>
 </figure>
 
-The **Sequencer** tab is off the bar by default. Press **`0`** and type "seq", or use the command palette (`Ctrl-P` → **Go to Sequencer**); give it one of the nine slots in Preferences → **Network & Tabs** → **Tabs**.
+The **Sequencer** tab is off the bar by default. Press **`0`** and type "seq", use the command palette (`Ctrl-P` → **Go to Sequencer**), or give it one of the nine slots in Preferences → **Network & Tabs** → **Tabs**.
 
 ## Two Ways to Feed It
 
 **Live.** Point it at a request that hands out a fresh token, and gori replays that request many times, pulling the token out of each response. From **History**, select the flow that sets the token and `Space` `>` `s` (**Send flow to…** → **Send to Sequencer**). A **SEND TO SEQUENCER** card opens over the current tab with the likely session cookie auto-detected. Set the token location, sample goal and concurrency there, and **Start** collects in the background without leaving the tab. On the Sequencer tab, `c` reconfigures a session, `Ctrl-R` collects again, and `Ctrl-X` stops.
 
-**Manual.** Already have a list of tokens? Select them in a text pane (one per line) and `Space` `S` (**Send selection to…**) → `s` **Sequencer** for a pure statistical analysis with no network traffic. Each send from another tab opens a new manual session. A send made on the Sequencer tab itself, while an idle manual session is focused, appends to it and re-analyzes. Headless, the same is `gori run sequence --tokens FILE`.
+**Manual.** If you already have a list of tokens, select them in a text pane (one per line) and `Space` `S` (**Send selection to…**) → `s` **Sequencer** for a pure statistical analysis with no network traffic. Each send from another tab opens a new manual session. A send made on the Sequencer tab itself, while an idle manual session is focused, appends to it and re-analyzes. Headless, the same is `gori run sequence --tokens FILE`.
 
 Extract the token from any of these locations:
 
@@ -37,7 +37,7 @@ Live collection defaults to **concurrency 1**, because session tokens are often 
 
 ## Reading the Grade
 
-The headline is **effective entropy** in bits: a conservative estimate of the unpredictability each token carries, measured across the sample. It sets the base rating, and every statistical test below that fails drops it one tier:
+The headline is **effective entropy** in bits, a conservative estimate of the unpredictability each token carries, measured across the sample. It sets the base rating, and every statistical test below that fails drops it one tier:
 
 | Rating | Effective entropy |
 |--------|-------------------|
@@ -46,13 +46,13 @@ The headline is **effective entropy** in bits: a conservative estimate of the un
 | **Weak** | >= 30 bits |
 | **Critical** | below 30 bits |
 
-Any **duplicate** or **sequential** token drops the verdict to Critical, whatever the entropy. Underneath, gori runs a battery of statistical tests over the token's symbol bitstream (monobit, poker, runs, longest-run, per-bit bias, cumulative sums, approximate entropy, and a spectral test), a chi-square on byte frequencies, a lag-1 serial correlation, and a compression check against the alphabet's entropy floor. The tests judged on a p-value share a Bonferroni-corrected threshold, so a clean token is no likelier to be flagged as the battery grows.
+Any **duplicate** or **sequential** token drops the verdict to Critical, regardless of the entropy. Underneath, gori runs a battery of statistical tests over the token's symbol bitstream (monobit, poker, runs, longest-run, per-bit bias, cumulative sums, approximate entropy, and a spectral test), a chi-square on byte frequencies, a lag-1 serial correlation, and a compression check against the alphabet's entropy floor. The tests judged on a p-value share a Bonferroni-corrected threshold, so a clean token is no likelier to be flagged as the battery grows.
 
 A small sample (fewer than 20 usable tokens) softens hard failures to warnings and rates the run **Inconclusive**, since a sample that small caps the entropy figure. A duplicate or a sequential run still rates it Critical.
 
 ### Structure Is Not Secret
 
-Real tokens usually carry a skeleton: a `sess_v1_` prefix, a version byte, base64 padding. The **Structure** row reports how many positions never vary across the sample, and every byte-level test then measures the *varying* region only. A position that varies over only a small slice of the alphabet, like a UUIDv4's variant nibble (`8`/`9`/`a`/`b`), counts as partially fixed: the tests skip it too, and it adds only its own measured entropy to the estimate.
+Real tokens usually carry a skeleton: a `sess_v1_` prefix, a version byte, base64 padding. The **Structure** row reports how many positions never vary across the sample, and every byte-level test then measures the *varying* region only. A position that varies over only a small slice of the alphabet, like a UUIDv4's variant nibble (`8`/`9`/`a`/`b`), counts as partially fixed. The tests skip it too, and it adds only its measured entropy to the estimate.
 
 A token of `sess_v1_` plus 24 random hex characters looks like a 19-character alphabet if you count the prefix. That is not a power of two, so the bit-test battery is switched off as not-applicable, and chi-square and compression fail on a distribution skewed only by the prefix. Measured over the varying region, the same sample is lower-hex, with the full battery active and every row passing.
 

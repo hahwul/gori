@@ -8,17 +8,17 @@ gori is written in [Crystal](https://crystal-lang.org/). Pick a pre-built channe
 
 ## Quick install (curl)
 
-macOS and Linux one-liner. Detects OS/arch, downloads the matching [GitHub Release](https://github.com/hahwul/gori/releases/latest) asset, and puts `gori` on your `PATH`:
+A one-liner for macOS and Linux. It detects the OS and architecture, downloads the matching [GitHub Release](https://github.com/hahwul/gori/releases/latest) asset, and puts `gori` on your `PATH`:
 
 ```bash
 curl -fsSL https://gori.hahwul.com/install.sh | bash
 ```
 
-Installs under `/usr/local` when writable, otherwise `~/.local`. Override with `GORI_INSTALL_PREFIX`. After install, `gori update` self-updates the binary (or guides you through Chocolatey / Homebrew / Snap / AUR when those channels own the install).
+It installs under `/usr/local` when writable, otherwise `~/.local`. Override with `GORI_INSTALL_PREFIX`. After install, `gori update` self-updates the binary (or guides you through Chocolatey / Homebrew / Snap / AUR when those channels own the install).
 
 ### If you hit a GitHub rate limit
 
-The installer asks the GitHub API which release is latest, and that API allows only **60 unauthenticated requests per hour per IP**, so behind shared CI or NAT egress it can answer `403`. Both the installer and `gori update` fall back to the rate-limit-free release redirect automatically, so they keep working; you should see a line like `resolved v0.9.4 via ... (no API call)`.
+The installer asks the GitHub API which release is latest, and that API allows only **60 unauthenticated requests per hour per IP**, so behind shared CI or NAT egress it can answer `403`. Both the installer and `gori update` fall back to the rate-limit-free release redirect automatically, so they keep working. You should see a line like `resolved v0.9.4 via ... (no API call)`.
 
 To use the authenticated 5000/hour limit, export a token first. Prefixing it onto `curl` does not work, because the script runs in the piped `bash`, which does not inherit a `curl`-scoped variable:
 
@@ -31,7 +31,7 @@ curl -fsSL https://gori.hahwul.com/install.sh | bash
 
 ### Direct download (Dockerfiles, CI)
 
-Every release also carries a version-less copy of each asset, so you can pull the latest build from a stable URL with no version lookup and no API call. These start at v0.2.0; earlier releases only carry the versioned names:
+Every release also carries a version-less copy of each asset, so you can pull the latest build from a stable URL with no version lookup and no API call. These start at v0.2.0, and earlier releases carry only the versioned names:
 
 ```bash
 # Linux x86_64 / arm64: a static binary
@@ -44,9 +44,9 @@ curl -fsSL -o gori.tar.gz https://github.com/hahwul/gori/releases/latest/downloa
 curl -fsSL -o gori.exe https://github.com/hahwul/gori/releases/latest/download/gori-windows-x86_64.exe
 ```
 
-The versioned names (`gori-v0.9.4-linux-x86_64`) stay published alongside them; use those when you want to pin a build.
+The versioned names (`gori-v0.9.4-linux-x86_64`) stay published alongside them. Use those when you want to pin a build.
 
-Each release also publishes a `SHA256SUMS` listing every asset under both naming schemes. The installer and `gori update` check against it automatically; to verify a direct download yourself:
+Each release also publishes a `SHA256SUMS` listing every asset under both naming schemes. The installer and `gori update` check against it automatically. To verify a direct download yourself:
 
 ```bash
 curl -fsSL -O https://github.com/hahwul/gori/releases/latest/download/SHA256SUMS
@@ -103,7 +103,7 @@ Strict confinement keeps the snap out of hidden directories in your home, so its
 
 ## Nix
 
-The repository is a [flake](https://wiki.nixos.org/wiki/Flakes), so you can run gori without installing it at all:
+The repository is a [flake](https://wiki.nixos.org/wiki/Flakes), so you can run gori without installing it:
 
 ```bash
 nix run github:hahwul/gori
@@ -133,9 +133,9 @@ Or pin it as an input to a NixOS / home-manager configuration:
 
 Unlike the other channels this one builds from source. nixpkgs is still a Crystal release behind what gori needs, so the flake pins its own compiler and a cold build compiles that too. That takes several minutes and is cached from then on. Brotli and Zstd decoding are included, and nothing else is needed on the host.
 
-Covers Linux (x86_64 and arm64) and Apple Silicon macOS. nixpkgs has dropped Intel macOS, so on those machines use [Homebrew](#homebrew) or a [pre-built binary](#pre-built-binary).
+The flake covers Linux (x86_64 and arm64) and Apple Silicon macOS. nixpkgs has dropped Intel macOS, so on those machines use [Homebrew](#homebrew) or a [pre-built binary](#pre-built-binary).
 
-`nix develop` gives you a shell with Crystal, shards, `just` and the linked libraries, which is all you need to [hack on gori itself](https://github.com/hahwul/gori/blob/main/.github/CONTRIBUTING.md).
+`nix develop` gives you a shell with Crystal, shards, `just` and the linked libraries, which is all you need to [hack on gori](https://github.com/hahwul/gori/blob/main/.github/CONTRIBUTING.md).
 
 ## Docker
 
@@ -222,7 +222,7 @@ sudo ln -sf /usr/local/opt/gori/gori /usr/local/bin/gori
 
 ### Windows
 
-The Windows binary is statically linked: nothing else to install, and no DLL beside it. Rename it to `gori.exe` and put it in a folder on your `PATH`:
+The Windows binary is statically linked, so there is nothing else to install and no DLL beside it. Rename it to `gori.exe` and put it in a folder on your `PATH`:
 
 ```powershell
 New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\Programs\gori" | Out-Null

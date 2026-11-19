@@ -38,7 +38,7 @@ Pi requires an MCP adapter such as [pi-mcp-adapter](https://github.com/nicobailo
 
 Each command prints the file it wrote and the launch command it recorded. Codex and Grok use a TOML `[mcp_servers.gori]` table and Hermes a YAML `mcp_servers:` entry. The other clients use JSON. Restart the client (or reopen the session) afterward so it reloads its MCP servers.
 
-Only Claude Desktop and Hermes vary per platform. Hermes reads `$HERMES_HOME` when it is set, and otherwise `~/.hermes` (`%LOCALAPPDATA%\hermes` on Windows). Claude Desktop's location follows Electron's app-data directory: `~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows, and `$XDG_CONFIG_HOME/Claude/` (default `~/.config/Claude/`) on Linux, which gori reads so a Nix or home-manager session that moves it is followed too. A Flatpak build reads that variable inside its own sandbox, so copy the printed file into `~/.var/app/<app-id>/config/Claude/` yourself.
+Only Claude Desktop and Hermes vary per platform. Hermes reads `$HERMES_HOME` when it is set, and otherwise `~/.hermes` (`%LOCALAPPDATA%\hermes` on Windows). Claude Desktop's location follows Electron's app-data directory: `~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows, and `$XDG_CONFIG_HOME/Claude/` (default `~/.config/Claude/`) on Linux. gori reads that variable, so a Nix or home-manager session that moves it is followed too. A Flatpak build reads that variable inside its own sandbox, so copy the printed file into `~/.var/app/<app-id>/config/Claude/` yourself.
 
 To wire it up by hand, point any MCP client at the `gori mcp` command over stdio, with no extra arguments.
 
