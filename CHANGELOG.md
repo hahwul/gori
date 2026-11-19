@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- TUI: the command palette keeps the selected result visible in short terminals. If the palette or Space menu no longer fits, resize to resume or press Esc to close it (#1928).
+
 - TUI: History Copy uses URLs for marked flows, and selecting more than two flows leaves the current comparison intact. Notifications and Activity report when a linked result is gone (#1927).
 
 - TUI: leaving a project asks before discarding temporary JWT, Cookie and Comparer work. Short config forms scroll to the selected field, hidden forms cannot start a run, and Retest keeps its run and close keys visible (#1925).

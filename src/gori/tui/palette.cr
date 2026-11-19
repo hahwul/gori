@@ -166,7 +166,8 @@ module Gori::Tui
     # Returns an empty Rect (w/h 0) when too small to draw (render's early-return).
     def overlay_box(area : Rect) : Rect
       w = {area.w - 4, 60}.min
-      h = {area.h - 2, 16}.min
+      # The compact card uses the full height if needed for its query and one result.
+      h = {(area.h - 2).clamp(4, 16), area.h}.min
       return Rect.new(0, 0, 0, 0) if w < 10 || h < 4
       x = area.x + (area.w - w) // 2
       y = area.y + (area.h - h) // 2
@@ -177,13 +178,13 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       if box.empty?
-        Overlay.too_small(screen, area, "command palette needs a larger window")
+        Overlay.too_small(screen, area, "palette too small")
         return
       end
       w = box.w
       Frame.card(screen, box, title, border: Theme.border_focus)
 
-      # query line (caret always at end; preedit shown underlined there)
+      # Query line, with preedit underlined at the caret.
       screen.text(box.x + 2, box.y + 1, "›", Theme.accent, Theme.panel)
       screen.input_line(box.x + 4, box.y + 1, @query, @qcx, @preedit, Theme.text_bright, Theme.panel, width: w - 6)
       # The browse lists app commands only, so say the search reaches further: a tab's
@@ -192,14 +193,14 @@ module Gori::Tui
         screen.text(box.x + 6, box.y + 1, hint, Theme.muted, Theme.panel, width: {w - 8, 0}.max)
       end
 
-      Frame.tee_divider(screen, box, box.y + 2)
+      top = list_top(box)
+      Frame.tee_divider(screen, box, box.y + 2) if top > box.y + 2
 
-      list_top = box.y + 3
-      list_h = box.bottom - 1 - list_top
       if @results.empty?
-        screen.text(box.x + 3, list_top, "no commands match", Theme.muted, Theme.panel)
+        screen.text(box.x + 3, top, "no commands match", Theme.muted, Theme.panel, width: box.w - 4)
         return
       end
+      list_h = box.bottom - 1 - top
       rows = display_rows
       ensure_visible(rows, list_h)
       # Resolve chords through the EFFECTIVE keymap (user override → OS profile → default)
@@ -209,7 +210,7 @@ module Gori::Tui
       overrides = Hotkeys.rebindable_overrides(@registry)
       (0...list_h).each do |i|
         break unless row = rows[@scroll + i]?
-        ry = list_top + i
+        ry = top + i
         if idx = row[1]
           draw_entry(screen, box, ry, idx, overrides)
         else
@@ -237,10 +238,14 @@ module Gori::Tui
       glyph, gfg = category_badge(verb.category)
       screen.cell(box.x + 3, ry, glyph, gfg, bg)
       title_fg = active ? Theme.text_bright : Theme.text
-      screen.text(box.x + 5, ry, @tab_titles[verb.id]? || verb.title, title_fg, bg, width: box.w - 21)
-      if hint = fast_path(verb, overrides, tab: idx < @tab_count)
-        screen.text(box.right - hint.size - 2, ry, hint, Theme.muted, bg)
+      hint = fast_path(verb, overrides, tab: idx < @tab_count)
+      title_x = box.x + 5
+      hint_x = box.right - 2
+      if hint
+        hint_x -= Screen.draw_width(hint)
+        screen.text(hint_x, ry, hint, Theme.muted, bg)
       end
+      screen.text(title_x, ry, @tab_titles[verb.id]? || verb.title, title_fg, bg, width: {hint_x - title_x - 1, 0}.max)
     end
 
     # The dim hint column: the verb's effective chord, else — for a tab row — its space-menu
@@ -287,24 +292,24 @@ module Gori::Tui
     # `rows` is the FUZZY-FILTERED list the draw loop walks — every keystroke on the query
     # rebuilds it shorter under the same @scroll, which is what the tail clamp catches. The
     # selection is found by its DRAWN row, so a group header above it is counted. The first
-    # entry's header is kept on screen with it: at the top the window scrolls to row 0.
+    # entry's header stays on screen with it when both rows fit.
     private def ensure_visible(rows : Array({String, Int32?}), h : Int32) : Nil
       at = rows.index { |r| r[1] == @selected } || 0
-      at = 0 if at == 1 && @tab_count > 0
+      at = 0 if h > 1 && at == 1 && @tab_count > 0
       @scroll = Viewport.scroll_to_show(at, @scroll, h, rows.size)
     end
 
-    # Inverts render's result-list loop: list starts at box.y + 3, rows fill the
-    # box-x+1..right-1 band, height = box.bottom - 1 - list_top. Returns the result
-    # index under (mx,my), or nil outside the list / past the last real result.
+    private def list_top(box : Rect) : Int32
+      box.y + (box.h == 4 ? 2 : 3)
+    end
+
+    # The result index under (mx,my), or nil outside the rows drawn by render.
     def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
       return nil if box.empty?
-      list_top = box.y + 3
-      list_h = box.bottom - 1 - list_top
+      top = list_top(box)
       return nil if mx < box.x + 1 || mx >= box.right - 1
-      i = my - list_top
-      return nil if i < 0 || i >= list_h
-      display_rows[@scroll + i]?.try(&.[1])
+      return nil if my < top || my >= box.bottom - 1
+      display_rows[@scroll + my - top]?.try(&.[1])
     end
 
     # Selects a result by index (clamped), mirroring move/ensure_visible bounds.

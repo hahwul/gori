@@ -121,6 +121,31 @@ describe Gori::Tui::PaletteState do
     backend.contains?("Command palette").should be_true # the matched verb title
   end
 
+  it "keeps a result visible and clickable as the terminal shrinks to one result row" do
+    ctx = FakeExecContext.new
+    palette = PaletteState.new(Gori::Verbs.registry)
+    palette.reset(ctx)
+    "go to project".each_char { |c| palette.append(c, ctx) }
+
+    {12, 11, 10}.each do |height|
+      area = Layout.compute(40, height).body
+      backend = MemoryBackend.new(40, height)
+      box = palette.overlay_box(area)
+      palette.render(Screen.new(backend), area)
+      backend.row(box.y + 1).should contain("go to project")
+      backend.row(box.y + 2).should contain("Go to Project")
+      palette.row_at(box, box.x + 5, box.y + 2).should eq(palette.selected)
+      palette.row_at(box, box.x + 5, box.bottom - 1).should be_nil
+    end
+
+    area = Layout.compute(40, 9).body
+    backend = MemoryBackend.new(40, 9)
+    palette.render(Screen.new(backend), area)
+    palette.overlay_box(area).empty?.should be_true
+    backend.contains?("esc to close").should be_true
+    backend.contains?("Go to Project").should be_false
+  end
+
   it "scrolls the visible window so a selection past the fold stays on-screen" do
     ctx = FakeExecContext.new
     palette = PaletteState.new(Gori::Verbs.registry)
@@ -405,6 +430,14 @@ describe Gori::Tui::PaletteState, "tab actions" do
     box = palette.overlay_box(Rect.new(0, 0, 80, 24))
     palette.row_at(box, box.x + 5, tab_header).should be_nil
     palette.row_at(box, box.x + 5, app_header + 1).should eq(1)
+
+    # The group header yields to the selected command when there is one row.
+    short = Rect.new(0, 0, 40, 4)
+    compact = MemoryBackend.new(40, 4)
+    palette.render(Screen.new(compact), short)
+    box = palette.overlay_box(short)
+    compact.row(2).should contain("Pan and zap")
+    palette.row_at(box, box.x + 5, box.y + 2).should eq(0)
   end
 
   it "ranks a real tab action ahead of the Global jump that shares its words" do

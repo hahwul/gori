@@ -548,12 +548,15 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # free-scroll panes (History detail, Repeater response) scroll independently.
   private def handle_wheel(layout : Layout, mx : Int32, my : Int32, dir : Int32) : Nil
     step = dir * 3
-    return @space_menu.move(step) if @space_menu_open
+    if @space_menu_open
+      @space_menu.move(step) unless @space_menu.box(layout.body).empty?
+      return
+    end
     # Through handle_wheel, not move, so these two honour the same Overlay hook the
     # five @active_overlay modals get (the base routes it to move by default).
     return @copy_picker.try(&.handle_wheel(step)) if copy_as_shown?
     return @send_picker.try(&.handle_wheel(step)) if send_to_shown?
-    return wheel_overlay(step) if modal_overlay?
+    return wheel_overlay(step, layout.body) if modal_overlay?
     return unless layout.body.contains?(mx, my)
     # Pass the pointer + body rect so a multi-pane tab (Project) scrolls the pane
     # under the cursor; single-target tabs ignore the coords (base delegates to handle_wheel).
@@ -561,13 +564,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   # Wheel inside a centered modal scrolls its list (no movement for the button modals).
-  private def wheel_overlay(step : Int32) : Nil
+  private def wheel_overlay(step : Int32, area : Rect) : Nil
     if ov = active_overlay # migrated modals scroll themselves
       ov.handle_wheel(step)
       return
     end
-    case @overlay
-    when .palette? then @palette.move(step)
-    end
+    @palette.move(step) if @overlay.palette? && !@palette.overlay_box(area).empty?
   end
 end
