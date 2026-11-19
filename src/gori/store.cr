@@ -1656,6 +1656,12 @@ module Gori
           # each time — the batch or the prune above may have retired the connection they ran
           # on, and indexing must not inherit a dead one.
           index_replies.each(&.send(index_batch_safely || 0))
+          # The callers just answered (and the subscribers just published to) hand work back
+          # to this fiber without ever leaving the run queue empty, and the scheduler polls I/O
+          # only when it is: under a sustained burst a new connection's accept, or any fiber
+          # parked on a timer, waited for the whole burst. After the replies, so batching and
+          # reply-after-commit are untouched. Same shape as `index_pending!`'s yield (#1791).
+          Fiber.yield
         end
         @writer_loop_exited = true # the loop is done; anything that raises now is the release
       ensure

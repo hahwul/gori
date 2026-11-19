@@ -980,3 +980,37 @@ describe "Gori::Store#index_pending!" do
     end
   end
 end
+
+describe "Gori::Store writer loop" do
+  # Capturing fibers and the writer wake each other through the reply channels, so under a
+  # sustained burst the run queue never emptied and the event loop (a new connection's accept,
+  # a timer) was not polled until the burst ended.
+  it "lets a fiber parked on the event loop run during a sustained write burst" do
+    path = File.tempname("gori-test", ".db")
+    store = Gori::Store.open(path, background_index: false)
+    begin
+      stop = false
+      writers = Channel(Nil).new
+      4.times do
+        spawn do
+          deadline = Time.instant + 2.seconds
+          until stop || Time.instant > deadline
+            store.insert_flow(sample_request)
+          end
+          writers.send(nil)
+        end
+      end
+      started = Time.instant # no Fiber.yield first: that is a park on the event loop too
+      sleep 1.millisecond
+      waited = Time.instant - started
+      stop = true
+      4.times { writers.receive }
+      waited.should be < 1.second
+    ensure
+      store.close
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+end
