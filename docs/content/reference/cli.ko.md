@@ -21,11 +21,11 @@ gori [command] [options]
 | `tutorial` | 가이드형 TUI 투어 (탐색, space 메뉴, 팔레트, 편집 모드, 프록시와 CA, 캡처, 인터셉트) |
 | `update` | 채널 인식 자체 업데이트 (바이너리 / Chocolatey / Homebrew / Snap / AUR / Nix) |
 
-전역 플래그: `-v` / `-V` / `--version`, `-h` / `--help`, 그리고 `--config PATH`(이번 실행에만 쓸 설정 파일, 아래 [`--config PATH`](#config-path) 참고).
+전역 플래그: `-v` / `-V` / `--version`, `-h` / `--help`, `--config PATH`(이번 실행에만 쓸 설정 파일, 아래 [`--config PATH`](#config-path) 참고).
 
 ## gori tui {#gori-tui}
 
-인터셉트 프록시와 TUI를 시작합니다. 서브커맨드를 주지 않으면 이것이 기본값입니다.
+인터셉트 프록시와 TUI를 시작합니다. 서브커맨드를 주지 않았을 때의 기본값입니다.
 
 ```bash
 gori
@@ -44,7 +44,7 @@ gori tui --listen 0.0.0.0 --port 8080
 
 ## gori run {#gori-run}
 
-비대화형 스위트입니다. 각 서브커맨드는 프로젝트 단위로 동작합니다. `--project`와 `--db`가 모두 없으면 `GORI_PROJECT`가 가리키는 프로젝트, [`project switch`](#project-switch)로 고정한 프로젝트, 가장 최근에 활성화한 프로젝트 순으로 씁니다. 어느 것을 골랐는지는 stderr에 한 번 알립니다(`gori run: using project demo (from GORI_PROJECT)`). 셋 중 마지막은 다른 프로젝트에 쓰기가 일어날 때마다 옮겨 가기 때문입니다. 존재하지 않는 프로젝트를 가리키는 `GORI_PROJECT`나 고정은 건너뛰지 않고 거부합니다. `--project`와 `--db`는 택일입니다. 둘 다 주면 사용법 오류입니다. 실제 사용 패턴은 [스크립팅 가이드](/ko/guide/scripting/)를 참고하세요.
+비대화형 스위트입니다. 각 서브커맨드는 프로젝트 단위로 동작합니다. `--project`와 `--db`가 모두 없으면 `GORI_PROJECT`가 가리키는 프로젝트, [`project switch`](#project-switch)로 고정한 프로젝트, 가장 최근에 활성화한 프로젝트 순으로 씁니다. 셋 중 마지막은 다른 프로젝트에 쓰기가 일어날 때마다 바뀌므로, 어느 것을 골랐는지 stderr에 한 번 알립니다(`gori run: using project demo (from GORI_PROJECT)`). 존재하지 않는 프로젝트를 가리키는 `GORI_PROJECT`나 고정은 건너뛰지 않고 거부합니다. `--project`와 `--db`는 택일입니다. 둘 다 주면 사용법 오류입니다. 사용 패턴은 [스크립팅 가이드](/ko/guide/scripting/)를 참고하세요.
 
 ```bash
 gori run <subcommand> [verb] [options]
@@ -123,7 +123,7 @@ gori run <subcommand> [verb] [options]
 | `project host-override` | 프로젝트 호스트 → IP 접속 오버라이드 목록 / 추가 / 수정 / 삭제 |
 | `project network` | 프로젝트 자체 네트워크 설정(`net.*`: 업스트림 프록시와 자격증명, 목적지 호스트, 타임아웃, 캡처 상한, bind) 목록 / 조회 / 설정 / 해제 |
 
-읽기 서브커맨드에 공통인 플래그: `--project=NAME`, `--db=PATH`, `--format=FMT` (보통 `text` 또는 `json`), 그리고 `--format`이 `json`을 제공하는 모든 명령에서 `--format=json`과 같은 `--json`. 모르는 옵션이나 서브커맨드를 주면 가장 가까운 실제 이름(`did you mean --format?`)과 `--help` 위치를 한 줄로 stderr에 출력합니다. 서브커맨드를 MCP 도구 이름으로 치면 그에 해당하는 명령을 알려 줍니다(`gori run list_history`에는 `gori run history`). `--json`에서 없는 id(또는 `links --issue N`처럼 부모 id)를 조회한 명령과, 없는 흐름이나 세션을 다시 보내려 한 명령(`repeater`, `repeater send`, `fuzz`, `mine`, `sequence`, `authorize`), `--json`을 받는 단건 `delete`/`rm`(그리고 `project scope update` / `project host-override update`)으로 없는 행을 가리킨 명령은 `send`가 거부된 전송에 찍는 것과 같은 객체 `{"ok":false,"error":…,"error_kind":"not_found","error_code":"NOT_FOUND","retryable":false}`를 stdout에 출력하고, stderr의 평문 한 줄과 종료 코드 1은 그대로입니다. 중복이라 거부된 쓰기(`project scope add`/`update`, `project host-override add`/`update`)는 같은 모양에 `"error_kind":"duplicate"`, MCP와 같은 `"error_code":"INVALID_ARGUMENT"`, 이미 있는 행의 id인 `existing_id`를 담습니다. 다른 gori가 프로젝트를 잡고 있거나 파일에 쓸 수 없어 커밋되지 않은 쓰기는 같은 모양에 `"error_kind":"busy"`, MCP와 같은 `"error_code":"PROJECT_BUSY"`, `"retryable":true`를 담습니다. 열리지 않는 프로젝트는 다른 gori가 잡고 있으면 `PROJECT_BUSY`, 그 밖에는 `NO_PROJECT`이고, 아무것도 가리키지 않는 `--project`나 `--db`는 `NOT_FOUND`입니다. `--json`을 받는 단건 삭제는 `{"ok":true,"deleted":true,"id":…}`로 답합니다(이름이나 키로 가리키는 행은 `name`, `key`, `target`). 테이블을 비우는 삭제(`probe delete --all`, `grpc forget --all`)는 `{"ok":true,"deleted":true,"count":N}`로 답합니다. `--json`을 받는지는 각 삭제의 `--help`에 나옵니다. 전역 플래그는 **동사 뒤에** 옵니다. `gori run rewriter rm 1 --project=x`는 되고, `gori run rewriter --project=x rm 1`은 사용법 오류입니다.
+읽기 서브커맨드의 공통 플래그는 `--project=NAME`, `--db=PATH`, `--format=FMT`(보통 `text` 또는 `json`)와, `--format`이 `json`을 제공하는 모든 명령에서 `--format=json`과 같은 `--json`입니다. 모르는 옵션이나 서브커맨드를 주면 가장 가까운 실제 이름(`did you mean --format?`)과 `--help` 위치를 한 줄로 stderr에 출력합니다. 서브커맨드를 MCP 도구 이름으로 치면 그에 해당하는 명령을 알려 줍니다(`gori run list_history`에는 `gori run history`). `--json`에서 없는 id(또는 `links --issue N`처럼 부모 id)를 조회한 명령과, 없는 플로우나 세션을 다시 보내려 한 명령(`repeater`, `repeater send`, `fuzz`, `mine`, `sequence`, `authorize`), `--json`을 받는 단건 `delete`/`rm`(그리고 `project scope update` / `project host-override update`)으로 없는 행을 가리킨 명령은 `send`가 거부된 전송에 찍는 것과 같은 객체 `{"ok":false,"error":…,"error_kind":"not_found","error_code":"NOT_FOUND","retryable":false}`를 stdout에 출력하고, stderr의 평문 한 줄과 종료 코드 1은 그대로입니다. 중복이라 거부된 쓰기(`project scope add`/`update`, `project host-override add`/`update`)는 같은 모양에 `"error_kind":"duplicate"`, MCP와 같은 `"error_code":"INVALID_ARGUMENT"`, 이미 있는 행의 id인 `existing_id`를 담습니다. 다른 gori가 프로젝트를 잡고 있거나 파일에 쓸 수 없어 커밋되지 않은 쓰기는 같은 모양에 `"error_kind":"busy"`, MCP와 같은 `"error_code":"PROJECT_BUSY"`, `"retryable":true`를 담습니다. 열리지 않는 프로젝트는 다른 gori가 잡고 있으면 `PROJECT_BUSY`, 그 밖에는 `NO_PROJECT`이고, 아무것도 가리키지 않는 `--project`나 `--db`는 `NOT_FOUND`입니다. `--json`을 받는 단건 삭제는 `{"ok":true,"deleted":true,"id":…}`로 답합니다(이름이나 키로 가리키는 행은 `name`, `key`, `target`). 테이블을 비우는 삭제(`probe delete --all`, `grpc forget --all`)는 `{"ok":true,"deleted":true,"count":N}`로 답합니다. `--json`을 받는지는 각 삭제의 `--help`에 나옵니다. 전역 플래그는 **동사 뒤에** 옵니다. `gori run rewriter rm 1 --project=x`는 되고, `gori run rewriter --project=x rm 1`은 사용법 오류입니다.
 
 읽기 서브커맨드는 스토어를 읽기 전용으로 열고 캡처 락을 잡지 않으므로, 라이브 TUI가 캡처 중인 프로젝트를 대상으로 실행해도 안전합니다. `body:` 질의는 검색 인덱스를 비우므로 쓰기입니다. gori 프로젝트가 아닌 `--db` 파일(다른 도구의 SQLite 데이터베이스나 빈 파일)은 파일에 손대기 전에 거부합니다. 데이터베이스를 만드는 명령(`import --db`, `capture --db`)은 빈 파일은 계속 초기화하지만, 다른 도구의 테이블이 든 파일은 거부합니다.
 
@@ -131,9 +131,9 @@ gori run <subcommand> [verb] [options]
 
 #### 출력 계약 {#output-contract}
 
-STDOUT은 데이터를 나릅니다. 경고, 개수, 내보내기 확인 메시지는 STDERR로 가므로 파이프가 깨끗하게 유지됩니다. 읽는 쪽이 파이프를 먼저 닫아도(`… | head`) 조용히 `0`으로 끝납니다.
+데이터는 STDOUT으로 나갑니다. 경고, 개수, 내보내기 확인 메시지는 STDERR로 가므로 파이프가 깨끗하게 유지됩니다. 읽는 쪽이 파이프를 먼저 닫아도(`… | head`) 조용히 `0`으로 끝납니다.
 
-`text` 출력의 캡처 텍스트는 STDOUT이 터미널이든 아니든 제어 문자와 보이지 않는 문자를 이름으로 보여 줍니다(`⟨ESC⟩`, `⟨NBSP⟩`, `⟨ZWSP⟩`, `⟨RLO⟩`). 그래서 요청에 든 이스케이프 시퀀스가 터미널을 조작하지 못하고, 숨은 문자도 눈에 보입니다. `show`와 `repeater`의 text 뷰는 CRLF를 포함해 줄바꿈을 그대로 유지합니다. `--format json`은 이런 문자를 있는 그대로 싣고 잘못된 UTF-8만 치환하며, `--format raw`는 정확한 바이트입니다.
+`text` 출력의 캡처 텍스트는 STDOUT이 터미널이든 아니든 제어 문자와 보이지 않는 문자를 이름으로 보여 줍니다(`⟨ESC⟩`, `⟨NBSP⟩`, `⟨ZWSP⟩`, `⟨RLO⟩`). 그래서 요청에 든 이스케이프 시퀀스가 터미널을 조작하지 못하고, 숨은 문자도 눈에 보입니다. `show`와 `repeater`의 text 뷰는 CRLF를 포함해 줄바꿈을 유지합니다. `--format json`은 이런 문자를 있는 그대로 싣고 잘못된 UTF-8만 치환하며, `--format raw`는 바이트를 그대로 출력합니다.
 
 모든 명령에서 `--format json`은 JSON 문서 하나이고, `--format jsonl`은 한 줄에 객체 하나입니다.
 
@@ -147,14 +147,14 @@ STDOUT은 데이터를 나릅니다. 경고, 개수, 내보내기 확인 메시�
 | 종료 코드 | 의미 |
 |-----------|------|
 | `0` | 성공 |
-| `1` | 오류: 전송 실패, 열 수 없는 프로젝트, 적용되지 못한 변경, 또는 어떤 요청도 응답을 받지 못한 `fuzz` / `mine` / `discover` / `sequence` / `authorize` / `cache-deception` 실행(죽었거나 거부하는 대상은 깨끗한 "결과 없음"이 아닙니다) |
+| `1` | 오류: 전송 실패, 열 수 없는 프로젝트, 적용되지 못한 변경, 또는 어떤 요청도 응답을 받지 못한 `fuzz` / `mine` / `discover` / `sequence` / `authorize` / `cache-deception` 실행(대상이 죽었거나 거부하는 것은 "결과 없음"과 다릅니다) |
 | `3` | 판정 게이트 발동: `run fuzz --fail-if-no-matches`가 완료했지만 매칭이 없음(그리고 `--stop-on` / `--stop-after-matches` 조건도 충족되지 않음), 또는 `run probe --fail-on=LEVEL`이 LEVEL 이상의 이슈를 보고함 |
-| `126` / `127` | `run shell -- CMD`가 CMD를 실행하지 못함(`126`) 또는 찾지 못함(`127`). CMD가 실행되면 종료 코드는 CMD 자신의 것입니다 |
+| `126` / `127` | `run shell -- CMD`가 CMD를 실행하지 못함(`126`) 또는 찾지 못함(`127`). CMD가 실행되면 CMD의 종료 코드를 그대로 돌려줍니다 |
 | `130` | SIGINT/SIGTERM으로 중단. `capture`(`--for`나 `--max`로 끝나면 `0`), `fuzz`, `mine`, `discover`, `sequence`, `authorize`, `cache-deception`, `repeater minimize`는 모아 둔 것을 먼저 내보낸 뒤 `130`으로 종료하므로, 스크립트의 `&& next-step`이 잘린 실행을 끝난 실행으로 오해하지 않습니다 |
 
-`--fail-if-no-matches` 없이 실행하면, 매칭이 없으면서 *동시에* 모든 전송이 실패한 fuzz는 `1`로 끝납니다. "결과 없음"과 "대상에 닿지도 못함"이 구분됩니다. 플래그를 주면 `3`이 우선합니다. 정지 조건이 충족된 실행은 두 규칙 모두에서 빠집니다. 시간 초과된 전송은 매칭되지 않은 오류 행으로 남으면서도 `--stop-on 'time:>=5000'`을 충족할 수 있습니다.
+`--fail-if-no-matches` 없이 실행하면, 매칭이 없으면서 *동시에* 모든 전송이 실패한 fuzz는 `1`로 끝나므로, "결과 없음"과 "대상에 닿지도 못함"이 구분됩니다. 플래그를 주면 `3`이 우선합니다. 정지 조건이 충족된 실행은 두 규칙 모두에서 빠집니다. 시간 초과된 전송은 매칭되지 않은 오류 행으로 남으면서도 `--stop-on 'time:>=5000'`을 충족할 수 있습니다.
 
-생성 명령은 `--format json`을 받고, 새로 만든 행으로 답합니다. `repeater create`, `issues create`, `notes create`, `views add`, `colormarker add`, `rewriter add`, `rewriter extract add`, `probe rules add`, `oast providers add`, `links add`, `project scope add`, `project host-override add`는 쓰기가 커밋된 뒤 다시 읽어 온 객체 하나를 STDOUT에 출력하며, 그 모양은 같은 계열의 목록이 같은 행에 대해 출력하는 것과 같습니다. 스크립트는 `jq .id`로 id를 가져가면 됩니다. id는 그 계열의 다른 명령이 받는 값입니다. 대부분은 숫자이고, probe 규칙은 규칙 이름(`custom_p_7`), OAST 프로바이더는 프로바이더 키(`p_3`)입니다. 뷰는 이름으로 다루므로 id 대신 `name`과 `key`를 담습니다. `notes create`는 텍스트 줄이 가리키는 위치인 `index`를, `links add`는 `created`를 더합니다. `created`는 이미 링크돼 있던 쌍이면 `false`이고, 그때는 기존 링크의 id가 담깁니다. 텍스트 출력은 바뀌지 않습니다.
+생성 명령은 `--format json`을 받고, 새로 만든 행으로 답합니다. `repeater create`, `issues create`, `notes create`, `views add`, `colormarker add`, `rewriter add`, `rewriter extract add`, `probe rules add`, `oast providers add`, `links add`, `project scope add`, `project host-override add`는 쓰기가 커밋된 뒤 다시 읽어 온 객체 하나를 STDOUT에 출력하며, 그 모양은 같은 계열의 목록 명령이 그 행을 출력할 때와 같습니다. 스크립트는 `jq .id`로 id를 가져가면 됩니다. id는 그 계열의 다른 명령이 받는 값입니다. 대부분은 숫자이고, probe 규칙은 규칙 이름(`custom_p_7`), OAST 프로바이더는 프로바이더 키(`p_3`)입니다. 뷰는 이름으로 다루므로 id 대신 `name`과 `key`를 담습니다. `notes create`는 텍스트 줄이 가리키는 위치인 `index`를, `links add`는 `created`를 더합니다. `created`는 이미 링크돼 있던 쌍이면 `false`이고, 그때는 기존 링크의 id가 담깁니다. 텍스트 출력은 바뀌지 않습니다.
 
 ```bash
 issue=$(gori run issues create --title "IDOR on /v1/users/{id}" --severity high --format json | jq .id)
@@ -180,7 +180,7 @@ gori run capture --port 8070 --format json --for 5m
 
 ### run shell {#run-shell}
 
-OS 설정을 건드리지 않고, 도구들이 실행 중인 gori를 거치며 gori의 CA를 신뢰하는 터미널을 엽니다. 팔레트의 **Open browser**에 대응하는 터미널 기능입니다.
+OS 설정을 건드리지 않고, 도구가 실행 중인 gori를 거치며 gori의 CA를 신뢰하는 터미널을 엽니다. 팔레트의 **Open browser**에 대응하는 터미널 기능입니다.
 
 ```bash
 gori run shell                            # 대화형 $SHELL; `exit`로 나감
@@ -207,9 +207,9 @@ gori run shell --print --shell fish | source
 [ -n "$GORI_SHELL" ] && PS1="(gori) $PS1"
 ```
 
-셸이 바꾸거나 지운 값은 `GORI_SHELL_ORIG_<NAME>`(예: `GORI_SHELL_ORIG_HTTPS_PROXY`)으로 기록됩니다. 셸 안에서 띄운 gori(`gori run send`, 두 번째 캡처)는 셸의 프록시 변수를 자기 업스트림으로 쓰지 않으므로, 그 트래픽이 두 번 캡처되지 않습니다. 대신 기록된 프록시와 `NO_PROXY`를 쓰고, 직접 설정한 업스트림은 그대로 적용됩니다. gori 셸 안에서 다시 연 셸도 기록된 값에서 시작하므로 바깥 gori의 CA를 계속 신뢰하지 않습니다.
+셸이 바꾸거나 지운 값은 `GORI_SHELL_ORIG_<NAME>`(예: `GORI_SHELL_ORIG_HTTPS_PROXY`)으로 기록됩니다. 셸 안에서 띄운 gori(`gori run send`, 두 번째 캡처)는 셸의 프록시 변수를 자기 업스트림으로 쓰지 않으므로, 그 트래픽이 두 번 캡처되지 않습니다. 대신 기록된 프록시와 `NO_PROXY`를 쓰고, 직접 설정한 업스트림은 그대로 적용됩니다. gori 셸 안에서 다시 연 셸도 기록된 값에서 시작하므로 바깥 gori의 CA를 더는 신뢰하지 않습니다.
 
-다루지 않는 것: 1.27보다 오래된 툴체인으로 빌드한 macOS의 Go 프로그램은 키체인으로 검증합니다. Go는 `localhost`와 루프백 주소를 프록시하지 않습니다. Node는 `NODE_USE_ENV_PROXY`를 지원하는 릴리스(v22.21, v24.10에서 stable)에서만 프록시를 씁니다. Java는 `JAVA_TOOL_OPTIONS`로 truststore가 필요합니다. 자체 신뢰 저장소를 고정한 도구는 다루지 않습니다.
+다루지 않는 것: 1.27보다 오래된 툴체인으로 빌드한 macOS의 Go 프로그램은 키체인으로 검증합니다. Go는 `localhost`와 루프백 주소를 프록시하지 않습니다. Node는 `NODE_USE_ENV_PROXY`를 지원하는 릴리스(v22.21, v24.10에서 stable)에서만 프록시를 씁니다. Java는 `JAVA_TOOL_OPTIONS`로 truststore를 지정해야 합니다. 자체 신뢰 저장소를 고정한 도구는 다루지 않습니다.
 
 ### run browser {#run-browser}
 
@@ -238,7 +238,7 @@ npx @playwright/mcp@latest --cdp-endpoint http://127.0.0.1:9222
 npx chrome-devtools-mcp@latest --browserUrl http://127.0.0.1:9222
 ```
 
-그 프로필이 이미 실행 중인 브라우저에 열려 있으면 실행을 거부합니다. 실행 중인 브라우저는 이를 새 창 요청으로 받아들이고 포트를 열지 않기 때문입니다.
+그 프로필이 이미 실행 중인 브라우저에 열려 있으면, 브라우저가 이를 새 창 요청으로 받아들여 포트를 열지 않으므로 실행을 거부합니다.
 
 {% alert(type="warning") %}
 DevTools 포트가 열려 있으면 로컬의 어떤 프로세스든 인증 없이 브라우저를 완전히 조작할 수 있습니다. 쿠키를 읽고 모든 사이트에서 스크립트를 실행할 수 있으며, 그 프로필에 로그인된 세션도 포함됩니다. gori는 요청할 때만, 루프백에만 이 포트를 열고, 명령이 끝나면 닫습니다. 브라우저를 조작하는 에이전트는 MCP `send_request`처럼 프로젝트 스코프로 제한되지 않습니다. 그 트래픽은 다른 브라우저와 똑같이 캡처됩니다.
@@ -296,19 +296,19 @@ gori run history -q 'status:5xx' --limit 100 --format json
 
 서브커맨드: `history show <id>` (`run show`와 동일), `history delete <id>…` (id 하나 또는 여러 개를 한 트랜잭션으로. 모르는 id가 하나라도 있으면 호출 전체를 거부), `history delete -q QL --yes`, `history clear --yes`. `--json`이면 delete는 `{"ok":true,"deleted":true,"ids":[…]}`(id가 하나여도 같음. `-q`는 일치한 flow를 나열)로, `clear`는 `{"ok":true,"deleted":true,"count":N}`으로 답합니다.
 
-이 프로젝트의 [History 컬럼](/ko/guide/proxy/#columns)은 기본으로 함께 그려지므로, 헤드리스 목록도 TUI의 History 탭과 같은 값을 보여 줍니다. 컬럼 없는 기본 목록은 `--no-columns`로 봅니다. `text`에서는 행 끝에 `label=value`로 붙고 빈 값도 포함해 모든 컬럼이 나옵니다. `json`에서는 `columns` 객체로 실립니다(컬럼이 없으면 키 자체가 없습니다). `=`는 첫 `:`보다 **앞에** 올 때만 라벨 구분자이므로 `regex:token=(\w+)`는 `regex:token`이라는 컬럼이 아니라 패턴 그대로입니다. 컬럼 하나당 출력되는 행마다 읽기 한 번이 추가되고, 본문을 읽는 세 종류는 본문을 최대 512 KiB까지 읽습니다.
+이 프로젝트의 [History 컬럼](/ko/guide/proxy/#columns)은 기본으로 함께 그려지므로, 헤드리스 목록도 TUI의 History 탭과 같은 값을 보여 줍니다. 컬럼 없는 기본 목록은 `--no-columns`로 봅니다. `text`에서는 행 끝에 `label=value`로 붙고 빈 값도 포함해 모든 컬럼이 나옵니다. `json`에서는 `columns` 객체로 실립니다(컬럼이 없으면 키도 없습니다). `=`는 첫 `:`보다 **앞에** 올 때만 라벨 구분자이므로 `regex:token=(\w+)`는 `regex:token`이라는 컬럼이 아니라 패턴입니다. 컬럼 하나당 출력되는 행마다 읽기 한 번이 추가되고, 본문을 읽는 세 종류는 본문을 최대 512 KiB까지 읽습니다.
 
-`json`/`jsonl`의 각 행은 플로우의 절대 `url`과 요청 헤더를 담은 `headers` 객체(같은 이름이 반복되면 배열이 됩니다), 그리고 오류가 난 플로우가 실패한 이유인 `error`(다른 행에서는 `null`, `capture`의 JSON 줄에도 들어갑니다)를 함께 싣습니다. 본문은 넣지 않습니다. 본문은 `run show`로 보세요.
+`json`/`jsonl`의 각 행에는 플로우의 절대 `url`, 요청 헤더를 담은 `headers` 객체(같은 이름이 반복되면 배열이 됩니다), 오류가 난 플로우의 실패 이유인 `error`(다른 행에서는 `null`, `capture`의 JSON 줄에도 들어갑니다)가 실립니다. 본문은 넣지 않습니다. 본문은 `run show`로 보세요.
 
-그 객체의 민감한 헤더 값은 기본으로 `[REDACTED]`로 가려지며, 무엇이든 가려졌으면 행에 `sensitive_headers_redacted: true`가 붙습니다. 캡처된 바이트가 필요하면 `--include-sensitive`를 쓰세요. `Set-Cookie`는(`header:set-cookie` 컬럼, `show`, evidence 익스포트, SARIF) 쿠키 이름과 속성은 남기고 값만 가립니다: `sid=[REDACTED]; Path=/; Secure; HttpOnly`. 어느 쪽이든 헤더 이름과 와이어 순서, 반복 횟수는 남습니다. [obs-fold](https://www.rfc-editor.org/rfc/rfc9110#section-5.2) 이어짐 줄은 원래 필드에 합쳐진 뒤 함께 가려집니다.
+그 객체의 민감한 헤더 값은 기본으로 `[REDACTED]`로 가려지며, 무엇이든 가려졌으면 행에 `sensitive_headers_redacted: true`가 붙습니다. 캡처된 바이트가 필요하면 `--include-sensitive`를 쓰세요. `Set-Cookie`(`header:set-cookie` 컬럼, `show`, evidence 익스포트, SARIF)는 쿠키 이름과 속성은 남기고 값만 가립니다(`sid=[REDACTED]; Path=/; Secure; HttpOnly`). 어느 쪽이든 헤더 이름과 와이어 순서, 반복 횟수는 남습니다. [obs-fold](https://www.rfc-editor.org/rfc/rfc9110#section-5.2) 이어짐 줄은 원래 필드에 합쳐진 뒤 함께 가려집니다.
 
 같은 규칙이 민감한 헤더를 셀렉터로 지정한 `header:` 컬럼과 모든 `cookie:` 컬럼에도 적용됩니다. 이름을 지정한 쿠키의 값은 그 행이 이미 가리고 있는 `Cookie` 헤더의 일부이기 때문입니다. `regex:`, `jsonpath:`, `position:` 컬럼은 가리지 않습니다. 이 컬럼들은 메시지의 어느 바이트에서든 자격 증명을 뽑아낼 수 있습니다. `url`과 `target`의 일부인 쿼리 스트링 속 자격 증명과 `text` 목록도 가리지 않습니다. `--format har`은 문서를 다시 재생할 수 있도록 캡처된 메시지를 온전히 담습니다.
 
-각 행에는 `source`도 실립니다. 이 플로우가 어디서 왔는지(`proxy`, `repeater`, `fuzzer`, `discover`, `import` …)이며, 출처를 기록하기 전에 캡처된 플로우는 `null`입니다. 값이 있을 때 `source_surface`(`tui` / `cli` / `mcp`)와 `source_ref`도 함께 나옵니다. text 형식은 평범한 캡처 트래픽이 아닌 행에 `[repeater]` 같은 칩을 찍습니다. [`src:`](/ko/reference/query-language/#src-provenance)로 필터링하며, MCP `list_history`와 `get_flow`도 같은 키를 냅니다.
+각 행에는 `source`도 실립니다. 플로우의 출처(`proxy`, `repeater`, `fuzzer`, `discover`, `import` …)이며, 출처를 기록하기 전에 캡처된 플로우는 `null`입니다. 값이 있을 때 `source_surface`(`tui` / `cli` / `mcp`)와 `source_ref`도 함께 나옵니다. text 형식은 일반 캡처 트래픽이 아닌 행에 `[repeater]` 같은 칩을 찍습니다. [`src:`](/ko/reference/query-language/#src-provenance)로 필터링하며, MCP `list_history`와 `get_flow`도 같은 키를 냅니다.
 
 `history delete -q QL`은 쿼리에 매칭되는 플로우를 전부 삭제하며 `--yes`가 필요합니다. `--yes` 없이 실행하면 몇 개가 지워질지 출력하고 거부합니다. QL이 모르는 필드를 쓴 쿼리(`methd:`)도 거부합니다. id도 `-q`도 없으면 거부합니다. 프로젝트를 비우려면 `history clear --yes`를 쓰세요.
 
-`--format har`은 결과 집합을 하나의 HAR 1.2 log로 STDOUT에 씁니다. 오래된 항목이 먼저 오므로, 쿼리 결과를 동료에게 넘기거나 Burp, Charles, 브라우저 네트워크 패널에 그대로 불러올 수 있습니다. [HAR 내보내기](#har-export)를 참고하세요.
+`--format har`은 결과 집합을 하나의 HAR 1.2 log로 STDOUT에 씁니다. 오래된 항목이 먼저 오므로, 쿼리 결과를 동료에게 넘기거나 Burp, Charles, 브라우저 네트워크 패널에 불러올 수 있습니다. [HAR 내보내기](#har-export)를 참고하세요.
 
 ### run show {#run-show}
 
@@ -316,9 +316,9 @@ gori run history -q 'status:5xx' --limit 100 --format json
 gori run show <flow-id> --format raw
 ```
 
-`--format`은 `text`, `json`, `raw`(정확한 바이트), `har`(항목 하나짜리 HAR log), 또는 **요청을 코드로** 직렬화하는 `curl`, `python`(requests), `fetch`(JavaScript), `go`(net/http), `httpie`, `csrf`(스스로 제출하는 HTML CSRF PoC)입니다. 각각 TUI의 `Space` → `Y` **Copy as…**에서 같은 이름의 항목이 복사하는 것과 바이트 단위로 동일한 텍스트를 냅니다. `transcript`는 LLM API 호출을 보고서용 Markdown으로 씁니다. 요청 메시지를 역할별로 적고 이어서 응답과 도구 호출을 적으며(**LLM transcript** 항목), LLM 호출이 아닌 플로우에는 거부합니다. `--request-only` / `--response-only`로 출력을 제한하며, `har`와 `transcript`에는 적용되지 않습니다. 요청을 코드로 내는 형식에서는 `--response-only`를 거부합니다. 세 가지 주의사항은 STDOUT의 스니펫 밖, STDERR로 나갑니다. 캡처 한도에서 잘린 요청 본문은 짧은 채로 실리고, WebSocket 플로우는 업그레이드 핸드셰이크만 직렬화되며 프레임은 담기지 않고, 명령줄에 실을 수 없는 `curl`·`httpie` 본문(NUL, httpie는 UTF-8이 아닌 바이트도)은 빠지며 정확한 바이트를 얻을 `--request-only --format raw`를 알려 줍니다. 디코드된 SAML/JWT/GraphQL/파라미터, WebSocket 메시지, SSE 이벤트가 있으면 함께 포함됩니다.
+`--format`은 `text`, `json`, `raw`(바이트 그대로), `har`(항목 하나짜리 HAR log), 또는 **요청을 코드로** 직렬화하는 `curl`, `python`(requests), `fetch`(JavaScript), `go`(net/http), `httpie`, `csrf`(스스로 제출하는 HTML CSRF PoC)입니다. 각각 TUI의 `Space` → `Y` **Copy as…**에서 같은 이름의 항목이 복사하는 것과 바이트 단위로 동일한 텍스트를 냅니다. `transcript`는 LLM API 호출을 보고서용 Markdown으로 씁니다. 요청 메시지를 역할별로 적고 이어서 응답과 도구 호출을 적으며(**LLM transcript** 항목), LLM 호출이 아닌 플로우에는 거부합니다. `--request-only` / `--response-only`로 출력을 제한하며, `har`와 `transcript`에는 적용되지 않습니다. 요청을 코드로 내는 형식에서는 `--response-only`를 거부합니다. 세 가지 주의사항은 STDOUT의 스니펫 밖, STDERR로 나갑니다. 캡처 한도에서 잘린 요청 본문은 짧은 채로 실리고, WebSocket 플로우는 업그레이드 핸드셰이크만 직렬화되며 프레임은 담기지 않고, 명령줄에 실을 수 없는 `curl`·`httpie` 본문(NUL, httpie는 UTF-8이 아닌 바이트도)은 빠지며 바이트 그대로 받을 수 있는 `--request-only --format raw`를 알려 줍니다. 디코드된 SAML/JWT/GraphQL/파라미터, WebSocket 메시지, SSE 이벤트가 있으면 함께 포함됩니다.
 
-`--headers-only`와 `--max-body=BYTES`는 `text`와 `json` 뷰를 간추립니다. `--headers-only`는 각 본문을 크기를 알려주는 한 줄로 바꾸고(`[body omitted by --headers-only: 149504 bytes]`; JSON에서는 body 객체가 `encoding`과 `size`를 유지한 채 `omitted: true`를 얻습니다), `--max-body`는 디코드된 각 본문의 앞쪽 BYTES바이트를 찍은 뒤 `[… truncated by --max-body: showing 2048 of 149504 bytes]`를 붙입니다(JSON에서는 `text`/`base64`가 그 앞부분을 담고, `size`는 전체 크기, `shown_size`는 보여준 부분, `truncated`는 true입니다). 둘 중 하나만 있어도 본문에서 파생되는 섹션(디코드 뷰, gRPC 메시지, WebSocket 프레임, SSE 이벤트)은 빠집니다. 트랜스크립트는 그래도 개수와 함께 이름이 남습니다(`=== SSE EVENTS (40) — not printed under --max-body ===`, 또는 `{"count": 40, "omitted": true}`). 이 둘은 전체 메시지를 쓰는 다른 형식들과 함께 쓸 수 없고, 서로도 함께 쓸 수 없습니다.
+`--headers-only`와 `--max-body=BYTES`는 `text`와 `json` 뷰를 간추립니다. `--headers-only`는 각 본문을 크기를 알려주는 한 줄로 바꿉니다(`[body omitted by --headers-only: 149504 bytes]`; JSON에서는 body 객체가 `encoding`과 `size`를 유지한 채 `omitted: true`가 추가됩니다). `--max-body`는 디코드된 각 본문의 앞쪽 BYTES바이트를 찍은 뒤 `[… truncated by --max-body: showing 2048 of 149504 bytes]`를 붙입니다(JSON에서는 `text`/`base64`가 그 앞부분을 담고, `size`는 전체 크기, `shown_size`는 보여준 부분, `truncated`는 true입니다). 둘 중 하나만 있어도 본문에서 파생되는 섹션(디코드 뷰, gRPC 메시지, WebSocket 프레임, SSE 이벤트)은 빠집니다. 트랜스크립트는 그래도 개수와 함께 이름이 남습니다(`=== SSE EVENTS (40) — not printed under --max-body ===`, 또는 `{"count": 40, "omitted": true}`). 이 둘은 전체 메시지를 쓰는 다른 형식들과 함께 쓸 수 없고, 서로도 함께 쓸 수 없습니다.
 
 `--ws-match=QUERY`는 트랜스크립트를 싣는 모든 형식에서 매칭되는 WebSocket 메시지만 찍습니다. `ws:needle`(대소문자 무시), `ws~regex`, 또는 접두어 없는 needle을 받고, [`ws:` 쿼리 필드](/ko/reference/query-language/#websocket-messages)와 같은 방식으로 매칭합니다. 소켓의 메시지 중 몇 개를 남겼는지는 STDERR 한 줄로 알려 줍니다.
 
@@ -330,16 +330,16 @@ gori run show <flow-id> --format raw
 
 `--redact [PROFILE]`는 캡처한 바이트 대신 플로우의 **정제된 파생본**을 씁니다. [리댁션 프로파일](#run-redact)이 지목한 값이 키가 붙은 자리표시자 `[REDACTED:3f1c9ab4]`로 바뀝니다. 같은 값은 같은 태그를 받으므로, 읽는 사람은 둘 중 어느 것도 보지 않은 채로 "요청의 토큰이 응답의 토큰과 같다"는 사실만 확인할 수 있습니다. 태그는 값의 해시가 아니라 설치마다 한 번 만들어지는 비밀 키로 계산한 HMAC이므로, 네 자리 PIN이나 워드리스트 비밀번호 같은 짧은 값도 태그에서 복원할 수 없습니다.
 
-플로우를 렌더링 전에 한 번만 정제하므로 모든 `--format`에 적용됩니다. `raw`, `text`, `json`, `har`, 그리고 요청을 코드로 내는 여섯 형식 전부입니다. `--no-redact`는 이 프로젝트나 이 설치에서 리댁션이 기본이더라도 캡처한 바이트를 그대로 씁니다. `--redact-preview`는 무엇이 바뀔지(요청/응답, JSON 포인터 또는 폼 키, 발동한 규칙, 자리표시자)를 나열하고 문서는 출력하지 않습니다.
+플로우를 렌더링 전에 한 번만 정제하므로 모든 `--format`에 적용됩니다. `raw`, `text`, `json`, `har`, 요청을 코드로 내는 여섯 형식 전부입니다. `--no-redact`는 이 프로젝트나 이 설치에서 리댁션이 기본이더라도 캡처한 바이트를 그대로 씁니다. `--redact-preview`는 무엇이 바뀔지(요청/응답, JSON 포인터 또는 폼 키, 발동한 규칙, 자리표시자)를 나열하고 문서는 출력하지 않습니다.
 
-무엇을 덮고 무엇을 덮지 않는지:
+다루는 것과 다루지 않는 것:
 
 - **본문만 다룹니다.** 헤드, URL, 쿼리 스트링은 건드리지 않으며 STDERR 한 줄이 그 사실을 알립니다. `Cookie` 헤더나 `?token=` 쿼리 스트링 속 크리덴셜(HAR의 `url`, curl의 인자, 행의 `target`)은 프로파일의 대상이 아닙니다.
-- **저장된 바이트는 바뀌지 않습니다.** History, Repeater, Comparer, `get_response_body_chunk`는 캡처를 계속 읽습니다. 정제는 나가는 길에서만 일어납니다. 내보내기 전후의 재전송은 바이트 단위로 동일합니다.
-- **JSON 본문은 다시 직렬화됩니다.** 따라서 정제된 JSON은 원본이 아니라 gori의 공백과 키 순서를 갖습니다. 정확한 프레이밍 자체가 증거라면 `--no-redact`를 쓰세요.
-- **헤드는 정제된 본문을 설명하도록 고쳐집니다.** `Content-Length`가 다시 쓰이고, 읽기 위해 압축을 풀거나 청크를 해제해야 했던 본문은 `Content-Encoding` / `Transfer-Encoding`을 잃습니다(STDERR로 알립니다).
-- **gori가 읽을 수 없는 본문은 전부 보류됩니다.** 유효한 UTF-8이 아닌 본문과 모든 `multipart/*`가 여기에 해당합니다(gori는 아직 파트를 분해하지 않으므로 업로드된 파일과 폼 필드를 구분할 수 없습니다). 자리표시자가 몇 바이트가 빠졌고 왜 그랬는지 말해 줍니다.
-- **파싱되지 않는 본문은 보수적인 텍스트 패스로 물러납니다.** 프로파일 자신의 패턴, 필드 이름을 `"name": "value"` / `name=value` 텍스트 규칙으로 다시 표현한 것(잘린 값도 허용), 그리고 어디에 나타나든 모호하지 않은 두 가지 내장 형태(JWS/JWE 컴팩트 직렬화와 PEM `PRIVATE KEY` 블록)입니다.
+- **저장된 바이트는 바뀌지 않습니다.** History, Repeater, Comparer, `get_response_body_chunk`는 캡처를 계속 읽습니다. 정제는 출력할 때만 합니다. 내보내기 전후의 재전송은 바이트 단위로 동일합니다.
+- **JSON 본문은 다시 직렬화됩니다.** 따라서 정제된 JSON은 원본이 아니라 gori의 공백과 키 순서를 갖습니다. 원본 프레이밍이 증거라면 `--no-redact`를 쓰세요.
+- **헤드는 정제된 본문을 설명하도록 고쳐집니다.** `Content-Length`가 다시 쓰이고, 읽기 위해 압축을 풀거나 청크를 해제해야 했던 본문에서는 `Content-Encoding` / `Transfer-Encoding`이 빠집니다(STDERR로 알립니다).
+- **gori가 읽을 수 없는 본문은 전부 보류됩니다.** 유효한 UTF-8이 아닌 본문과 모든 `multipart/*`가 여기에 해당합니다(gori는 아직 파트를 분해하지 않으므로 업로드된 파일과 폼 필드를 구분할 수 없습니다). 자리표시자에 빠진 바이트 수와 이유가 적힙니다.
+- **파싱되지 않는 본문에는 보수적인 텍스트 패스를 적용합니다.** 프로파일의 패턴, 필드 이름을 `"name": "value"` / `name=value` 텍스트 규칙으로 다시 표현한 것(잘린 값도 허용), 어디에 나타나든 모호하지 않은 두 가지 내장 형태(JWS/JWE 컴팩트 직렬화와 PEM `PRIVATE KEY` 블록)입니다.
 
 모든 주의사항과 개수는 STDERR로 나가고 STDOUT은 문서로 남습니다. 그래서 `gori run show 42 --format har --redact > evidence.har`는 여전히 순수한 HAR입니다.
 
@@ -374,7 +374,7 @@ diff 위에 양쪽의 `status · size · time`과 A→B 델타가 출력됩니�
 
 ### run diff {#run-diff}
 
-리테스트 리포트입니다. [`run compare`](#run-compare)가 **메시지 두 개**를 비교한다면, 이건 **프로젝트 두 개**를 엔드포인트 단위로 비교합니다.
+리테스트 리포트입니다. [`run compare`](#run-compare)가 **메시지 두 개**를 비교한다면, 이 명령은 **프로젝트 두 개**를 엔드포인트 단위로 비교합니다.
 
 ```bash
 gori run diff --from q1-audit --to q3-retest --format md
@@ -398,7 +398,7 @@ gori run diff --from q1-audit --to q3-retest --format md
 
 #### 엔드포인트 동일성 {#endpoint-identity}
 
-두 점검은 서로 다른 식별자를 캡처하므로, 리터럴 경로로 키를 잡으면 모든 행이 removed 한 번 added 한 번으로 두 번 보고됩니다. 그래서 [Sitemap](#run-sitemap)이 그리는 폴딩 템플릿을 키로 씁니다: `/users/{uuid}`, `/items/{n}`, `/search`(쿼리 변형은 경로로 접힘). 폴딩은 **양쪽의 합집합**에 대해 한 번만 돌기 때문에, 한쪽에서만 폴딩 임계치를 넘긴 라우트도 반대쪽과 서로 매칭됩니다.
+두 점검은 서로 다른 식별자를 캡처하므로, 리터럴 경로로 키를 잡으면 모든 행이 removed 한 번 added 한 번으로 두 번 보고됩니다. 그래서 [Sitemap](#run-sitemap)이 그리는 폴딩 템플릿을 키로 씁니다. `/users/{uuid}`, `/items/{n}`, `/search`(쿼리 변형은 경로로 접힘) 같은 형태입니다. 폴딩은 **양쪽의 합집합**에 대해 한 번만 돌기 때문에, 한쪽에서만 폴딩 임계치를 넘긴 라우트도 반대쪽과 서로 매칭됩니다.
 
 #### 다섯 가지 판정 {#the-five-verdicts}
 
@@ -410,21 +410,21 @@ gori run diff --from q1-audit --to q3-retest --format md
 | `unchanged` | 양쪽 모두 캡처됐고 동등함 |
 | `removed` | A에는 있는데 **B는 그 엔드포인트로 요청하지 않음**. 커버리지 공백이지 삭제의 근거가 *아님* |
 
-리테스트가 얕으면 방문한 엔드포인트도 적어지므로 `removed`를 `gone`과 따로 셉니다. 모든 출력이 그 단서를 맨 앞에 두고, `--verdict`로 목록을 좁혀도 개수는 다섯 판정 전부를 덮습니다.
+리테스트가 얕으면 방문한 엔드포인트도 적어지므로 `removed`를 `gone`과 따로 셉니다. 모든 출력이 그 단서를 맨 앞에 두고, `--verdict`로 목록을 좁혀도 개수에는 다섯 판정이 모두 들어갑니다.
 
-`changed` 판정은 바이트 동일성이 아니라 허용 밴드로 내립니다. `repeater minimize`와 `mine`이 쓰는 것과 같은 캘리브레이션입니다. 그래서 캡처 사이에 길이가 흔들리는 페이지는 `unchanged`로 읽힙니다. 상태 코드는 **클래스**로 비교합니다. `200`이 `201`이 된 건 리테스트 발견이 아니지만 `200`이 `403`이 된 건 발견이고, 그건 별도의 `auth` 축으로 보고됩니다.
+`changed` 판정은 바이트 동일성이 아니라 허용 밴드로 내립니다. `repeater minimize`와 `mine`이 쓰는 것과 같은 캘리브레이션입니다. 그래서 캡처 사이에 길이가 흔들리는 페이지는 `unchanged`로 판정됩니다. 상태 코드는 **클래스**로 비교합니다. `200`이 `201`이 된 건 리테스트 발견이 아니지만 `200`이 `403`이 된 건 발견이며 별도의 `auth` 축으로 보고됩니다.
 
 #### 이슈 리테스트 {#issue-retest}
 
-리포트 끝에는 기준 프로젝트에서 아직 열려 있는 이슈들과, 그 이슈가 걸려 있던 엔드포인트가 어떻게 됐는지가 붙습니다: "여전히 같은 방식으로 응답함, 발견 항목이 아직 유효할 가능성이 높음", "이제 404/410으로 응답함", "새 캡처에서 요청된 적 없음, 닫기 전에 리테스트할 것". 요청은 보내지 않습니다.
+리포트 끝에는 기준 프로젝트에서 아직 열려 있는 이슈들과, 그 이슈가 걸려 있던 엔드포인트가 어떻게 됐는지가 붙습니다("여전히 같은 방식으로 응답함, 발견 항목이 아직 유효할 가능성이 높음", "이제 404/410으로 응답함", "새 캡처에서 요청된 적 없음, 닫기 전에 리테스트할 것"). 요청은 보내지 않습니다.
 
 #### 커버리지와 스코프 {#coverage-and-scope}
 
-개수 위에 양쪽의 플로우 수, 엔드포인트 수, 호스트 수, 캡처 기간이 함께 출력됩니다. B의 커버리지가 A보다 얇은지 볼 수 있습니다. 두 프로젝트의 스코프 규칙이 다르면 그 사실도 적습니다. 그쪽 프록시가 기록하지 않아서 엔드포인트가 없는 것일 수 있기 때문입니다.
+개수 위에 양쪽의 플로우 수, 엔드포인트 수, 호스트 수, 캡처 기간이 함께 출력되므로, B의 커버리지가 A보다 얇은지 알 수 있습니다. 두 프로젝트의 스코프 규칙이 다르면 그 사실도 적습니다. 그쪽 프록시가 기록하지 않아서 엔드포인트가 없는 것일 수 있기 때문입니다.
 
 ### run intercept {#run-intercept}
 
-캡처 락을 쥔 TUI의 라이브 인터셉트 큐를 조작합니다. 인터셉트는 TUI 전용입니다. 헤드리스 `gori run capture`는 메시지를 붙잡지 않으며, `list`를 뺀 서브커맨드는 상태를 게시하는 캡처 인스턴스가 없으면 거부합니다(`list`는 STDERR로 알리거나 `--format json`에서 `{"available": false, …}`를 내고 `0`으로 끝납니다).
+캡처 락을 쥔 TUI의 라이브 인터셉트 큐를 조작합니다. 인터셉트는 TUI 전용입니다. 헤드리스 `gori run capture`는 메시지를 붙잡지 않으며, `list`를 뺀 서브커맨드는 상태를 게시하는 캡처 인스턴스가 없으면 거부합니다. `list`는 STDERR로 알리거나 `--format json`에서 `{"available": false, …}`를 내고 `0`으로 끝납니다.
 
 ```bash
 gori run intercept                              # 붙잡힌 항목 + 인터셉트 상태
@@ -445,7 +445,7 @@ gori run intercept inject 42 --direction in --data '{"role":"admin"}'
 | `enable` / `disable` | 라이브 캐치 켜기 / 끄기 |
 | `filter <query>` | 조건부 인터셉트 쿼리 설정. `""`를 넘기면 해제 |
 | `direction <both\|request\|response>` | 캐치가 붙잡을 구간 선택 (기본값 `request`) |
-| `inject <flow-id>` | TUI가 아직 중계 중인 WebSocket에 프레임 하나를 밀어 넣음(HTTP/1.1 전용): `--direction out\|in`(기본값 `out`, 클라이언트 → 서버), `--opcode text\|binary\|ping\|pong\|close`(기본값 `text`), `--data=TEXT` 또는 정확한 바이트는 `--file=PATH`. 그대로 보내며 붙잡힌 메시지보다 먼저 나감. 데이터 프레임은 그 방향의 조각난 메시지가 끝나기를 최대 5초 기다림. 플로우의 호스트에 스코프 게이트(`--allow-unscoped`로 면제). [프레임 주입](/ko/guide/proxy/#websocket-inject) 참고 |
+| `inject <flow-id>` | TUI가 아직 중계 중인 WebSocket에 프레임 하나를 밀어 넣음(HTTP/1.1 전용): `--direction out\|in`(기본값 `out`, 클라이언트 → 서버), `--opcode text\|binary\|ping\|pong\|close`(기본값 `text`), `--data=TEXT`, 바이트 그대로는 `--file=PATH`. 그대로 보내며 붙잡힌 메시지보다 먼저 나감. 데이터 프레임은 그 방향의 조각난 메시지가 끝나기를 최대 5초 기다림. 플로우의 호스트에 스코프 게이트(`--allow-unscoped`로 면제). [프레임 주입](/ko/guide/proxy/#websocket-inject) 참고 |
 
 `list`와 `get`은 `--include-sensitive`를 주지 않으면 민감한 헤더 값을 가립니다. 쓰기 서브커맨드는 프로젝트 데이터베이스를 거쳐 TUI의 ack를 폴링합니다.
 
@@ -485,7 +485,7 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 | `--max-body=BYTES` | 디코드된 응답 본문을 최대 BYTES바이트까지 출력한 뒤, 전체 크기를 알려주는 마커를 붙임 |
 | `--format=FMT` | `text` (기본값) 또는 `json` |
 
-`--headers-only`와 `--max-body`는 출력만 바꾸고, 전송되거나 저장되는 것은 바꾸지 않습니다. 본문은 `[body omitted by --headers-only: 149504 bytes]`로 대체되거나, 잘린 뒤 `[… truncated by --max-body: showing 2048 of 149504 bytes]`가 뒤따릅니다. 크기는 디코드된 본문의 크기(청크 해제, 압축 해제 후)이며, 자르지 않은 덤프가 찍는 것과 같은 값입니다. `--format json`에서는 `body` 객체가 `size`로 전체 디코드 크기를 유지합니다. `--max-body`는 `text`/`base64`에 그 앞부분을 담고 `shown_size`를 더하며 `truncated: true`를, `--headers-only`는 바이트를 빼고 `omitted: true`를 더합니다. 두 플래그는 함께 쓸 수 없습니다. `--headers-only --diff`는 두 헤드만 비교합니다. `--max-body`는 메시지 전체를 비교하는 `--diff`와 함께 쓸 수 없습니다. 이 둘은 `repeater send`, `repeater h2`, [`send`](#run-send), [`show`](#run-show)에서 같은 형태로 동작합니다.
+`--headers-only`와 `--max-body`는 출력만 바꾸고, 전송되거나 저장되는 것은 바꾸지 않습니다. 본문은 `[body omitted by --headers-only: 149504 bytes]`로 대체되거나, 잘린 뒤 `[… truncated by --max-body: showing 2048 of 149504 bytes]`가 뒤따릅니다. 크기는 디코드된 본문의 크기(청크 해제, 압축 해제 후)이며, 자르지 않은 덤프가 찍는 것과 같은 값입니다. `--format json`에서는 `body` 객체가 `size`로 전체 디코드 크기를 유지합니다. `--max-body`는 `text`/`base64`에 앞부분을 담고 `shown_size`와 `truncated: true`를 더하며, `--headers-only`는 바이트를 빼고 `omitted: true`를 더합니다. 두 플래그는 함께 쓸 수 없습니다. `--headers-only --diff`는 두 헤드만 비교합니다. `--max-body`는 메시지 전체를 비교하는 `--diff`와 함께 쓸 수 없습니다. 이 둘은 `repeater send`, `repeater h2`, [`send`](#run-send), [`show`](#run-show)에서 같은 형태로 동작합니다.
 
 **`repeater list`**: 저장된 Repeater 세션 목록 (`--format text|json`). 각 행에 마지막 전송 결과가 붙습니다. 텍스트 줄은 상태(코드, `error`, `unsent`)와 저장된 본문 크기를 보여 주고, JSON은 `last_error`, `last_duration_us` 옆에 `summary`(`GET /`), `last_status`, `last_size`(응답이 없으면 null, 디코딩 전 저장된 본문의 바이트 수)를 더합니다.
 
@@ -512,15 +512,15 @@ MCP `create_repeater`처럼 생성 시점에 거부합니다. `--tags`는 MCP와
 
 `--request-stdin`은 파이프나 리다이렉트(`--request-stdin < req.http`)를 읽으며, 터미널은
 거부합니다. 터미널은 입력한 바이트를 되돌려 출력하므로, `Cookie`와 `Authorization`을
-포함한 원시 요청이 스크롤백에, 그리고 PTY로 캡처한 로그에 남습니다. 또한 `^D`는 읽기를 끝내지 않고 대기 중인
+포함한 원시 요청이 스크롤백과 PTY로 캡처한 로그에 남습니다. `^D`는 읽기를 끝내지 않고 대기 중인
 줄을 내보내기만 하므로, 끝에 개행이 없는 요청은 `^D`가 두 번 필요하고 한 번만 보내는 PTY 자동화는
 무한히 대기합니다.
 
 같은 규칙은 플래그로 지정한 모든 stdin 경로에 적용됩니다. `issues --notes-stdin`,
-그리고 stdin을 `-`로 쓰는 네 가지(`sequence --tokens -`, `authorize --identities=-`,
-`rewriter --response-file=-`, 그리고 `--…-file` 계열 플래그의 `-`)가 그렇고, 터미널로 해석되는
+stdin을 `-`로 쓰는 네 가지(`sequence --tokens -`, `authorize --identities=-`,
+`rewriter --response-file=-`, `--…-file` 계열 플래그의 `-`)가 그렇고, 터미널로 해석되는
 *경로*(tty에서의 `--request-file /dev/stdin` 등)까지 포함됩니다. 워드리스트 경로도 포함됩니다. `fuzz -w`, `mine --wordlist`,
-`discover --wordlist`는 `/dev/tty`(그리고 tty 상태의 `/dev/stdin`)를
+`discover --wordlist`는 `/dev/tty`(tty 상태의 `/dev/stdin`도)를
 `wordlist is a terminal, not a file: …`로 거부합니다.
 
 반대로 플래그 없이 gori가 폴백으로 읽는 stdin 경로(`fuzz`, `mine`, `sequence`, `decoder`,
@@ -536,27 +536,27 @@ MCP `create_repeater`처럼 생성 시점에 거부합니다. `--tags`는 MCP와
 | `--request-stdin` | 원시 HTTP 요청을 stdin에서 바이트 그대로 읽음 (`--request-file`이 파일을 읽는 방식과 동일). 요청을 인자 벡터 밖에 둡니다. 파이프나 리다이렉트가 필요하며 터미널은 거부됩니다 (`--request-file` / `--request-raw`과 함께 쓸 수 없음) |
 | `--curl=PATH` | PATH의 curl 명령으로 요청을 만듦(`-`는 stdin). 따로 주지 않으면 대상과 HTTP/2도 가져오며, 무시한 전송 플래그는 stderr에 밝힘 |
 | `--flow=ID` | 캡처한 플로우에서 요청 / 대상 / HTTP/2 복제 |
-| `--name=NAME`, `--tags=TAGS` | 사용자 지정 탭 이름, 그리고 TUI 하위 탭 라벨이 되는 자유 텍스트 태그 |
+| `--name=NAME`, `--tags=TAGS` | 사용자 지정 탭 이름, TUI 하위 탭 라벨이 되는 자유 텍스트 태그 |
 | `--http2` / `--http1` (`--no-http2`) | 프로토콜 선택. `--http1`은 h2로 캡처된 `--flow`를 덮어씁니다 |
 | `--no-auto-cl`, `--sni=HOST` | 자동 `Content-Length` 생략, SNI 오버라이드 |
 | `--keep-request-line` | `--flow`와 함께: 요청 라인을 캡처된 그대로(절대 형식 포함) 저장 |
 | `--ws-keep-key` | WebSocket: 요청 자신의 `Sec-WebSocket-Key`를 전송. 키가 없거나 짧거나 중복이거나 base64가 아닌 경우를 테스트할 수 있습니다 |
 | `--ws-http-only` | WebSocket: 이 세션을 평범한 HTTP로 저장. 업그레이드를 일반 요청으로 보내고 `101`을 응답으로 읽습니다 |
-| `--format=FMT` | `text`(기본값: `Repeater session #7 created successfully.`) 또는 `json`: `repeater list --format json`이 찍는 것과 같은 새 세션(`id`, `tui_index`, `position`, `name`, `target`, `http2`, …)에 `websocket`, 저장된 `ws_messages` 개수, 그리고 `--flow` 시드의 라인이 다시 쓰였을 때의 `request_line_rewritten`을 더한 형태 |
+| `--format=FMT` | `text`(기본값: `Repeater session #7 created successfully.`) 또는 `json`: `repeater list --format json`이 찍는 것과 같은 새 세션(`id`, `tui_index`, `position`, `name`, `target`, `http2`, …)에 `websocket`, 저장된 `ws_messages` 개수, `--flow` 시드의 라인이 다시 쓰였을 때의 `request_line_rewritten`을 더한 형태 |
 
 ```bash
 id=$(gori run repeater create -t https://api.example.com -f req.http --format json | jq .id)
 gori run repeater send "$id"
 ```
 
-**`repeater update <repeater-id>`**: 저장된 세션을 그 자리에서 수정합니다. MCP `update_repeater`의 헤드리스 형태입니다. id가 그대로이므로 이 세션을 가리키는 리테스트 단계와 링크도 계속 동작합니다. 주지 않은 플래그는 저장된 값을 유지합니다. `--target`(`create`처럼 검사), `-f`/`--request-file`, `-r`/`--request-raw`, `--request-stdin`(`create`처럼 하나만), `--name`과 `--tags`(`''`는 비움), `--http2` / `--http1`, `--sni`(`''`는 비움), `--no-auto-cl` / `--auto-cl`. `--format json`은 `repeater list --format json`과 같은 모양으로 세션을 찍습니다.
+**`repeater update <repeater-id>`**: 저장된 세션을 그 자리에서 수정합니다. MCP `update_repeater`의 헤드리스 형태입니다. id가 그대로이므로 이 세션을 가리키는 리테스트 단계와 링크도 계속 동작합니다. 주지 않은 플래그는 저장된 값을 유지합니다. 받는 플래그는 `--target`(`create`처럼 검사), `-f`/`--request-file`, `-r`/`--request-raw`, `--request-stdin`(`create`처럼 하나만), `--name`과 `--tags`(`''`는 비움), `--http2` / `--http1`, `--sni`(`''`는 비움), `--no-auto-cl` / `--auto-cl`입니다. `--format json`은 `repeater list --format json`과 같은 모양으로 세션을 찍습니다.
 
 ```bash
 gori run repeater update 7 --target https://staging.example.com --tags "idor auth"
 generate-request | gori run repeater update 7 --request-stdin
 ```
 
-**`repeater send <repeater-id>`**: 저장된 세션을 실행합니다. HTTP와 WebSocket 모두 해당됩니다. `--target`, `-X`, `-d`는 없고, `--diff`는 세션에 마지막으로 저장된 응답과 비교합니다. 캡처한 흐름 하나를 한 번에 다른 곳으로 보내거나 고쳐서 캡처와 비교하려면 `repeater <flow-id> --target …`을 쓰세요.
+**`repeater send <repeater-id>`**: 저장된 세션을 실행합니다. HTTP와 WebSocket 모두 해당됩니다. `--target`, `-X`, `-d`는 없고, `--diff`는 세션에 마지막으로 저장된 응답과 비교합니다. 캡처한 플로우 하나를 한 번에 다른 곳으로 보내거나 고쳐서 캡처와 비교하려면 `repeater <flow-id> --target …`을 쓰세요.
 
 ```bash
 gori run repeater send 3 --diff
@@ -581,7 +581,7 @@ gori run repeater send 5 --message '{"op":"subscribe"}' --idle-ms 5000
 | `--slot=NAME`, `--tls-preset=NAME` | `repeater <flow-id>`와 동일 |
 | `--ws-keep-key`, `-k`, `--timeout`, `--sse-events`, `--sse-time`, `--allow-unscoped`, `--headers-only`, `--max-body`, `--format` | 위와 동일 (`--headers-only` / `--max-body`는 HTTP 전용입니다: WebSocket 교환은 트랜스크립트를 출력합니다) |
 
-`--path`는 경로만 다른 엔드포인트들에 걸쳐 세션 하나의 요청을 스윕합니다. 경로마다 세션을 만들 필요가 없습니다.
+`--path`를 쓰면 경로만 다른 엔드포인트를 세션 하나로 스윕할 수 있어, 경로마다 세션을 만들 필요가 없습니다.
 
 ```bash
 for n in $(seq 1 38); do
@@ -593,7 +593,7 @@ done
 
 오리진에 닿은 전송은 그 뒤의 쓰기가 실패해도 `0`으로 종료하므로, 셸이 같은 요청을 다시 보내지 않습니다. 어느 쓰기가 실패했는지는 `--format json`이 알려 줍니다. `response_saved`(세션에 응답을 썼으면 나타나고, 프로젝트가 쓰기를 거부했거나 전송 중에 세션이 삭제됐으면 `false`와 함께 `response_save_error`가 붙습니다. 이때 다음 `--diff`는 이전 응답과 비교합니다)와, `--record-history`를 주었다면 `history_saved`가 나오며, 실패하면 `history_error`가 붙고 `recorded_flow_id`는 빠집니다. 텍스트 모드는 같은 문장을 STDERR에 찍습니다.
 
-**`repeater ws <repeater-id>`**: 저장된 repeater로 지속 HTTP/1.1 WebSocket 세션을 엽니다(TUI의 **Live session** 및 MCP의 `ws_session_open` / `ws_session_send` / `get_job` / `stop_job`에 대응하는 `gori run` 표면). stdin에서 읽은 각 줄은 TEXT 메시지로 프레이밍해 보내고(`--binary`를 주면 헥스로 디코드한 BINARY 메시지), 보낸 프레임과 받은 프레임 모두 도착하는 즉시 stdout에 찍습니다. stdin EOF(`--for`가 없을 때), `--for=DURATION`, 또는 `Ctrl-C`가 오면 `CLOSE` 프레임을 보내고 깨끗하게 종료합니다. Windows에서는 파이프로 연결한 stdin 읽기가 블로킹되므로 서버 프레임은 다음 줄이 들어올 때 찍힙니다(콘솔 stdin은 괜찮습니다).
+**`repeater ws <repeater-id>`**: 저장된 repeater로 지속 HTTP/1.1 WebSocket 세션을 엽니다(TUI의 **Live session** 및 MCP의 `ws_session_open` / `ws_session_send` / `get_job` / `stop_job`에 대응하는 `gori run` 명령). stdin에서 읽은 각 줄은 TEXT 메시지로 프레이밍해 보내고(`--binary`를 주면 헥스로 디코드한 BINARY 메시지), 보낸 프레임과 받은 프레임 모두 도착하는 즉시 stdout에 찍습니다. stdin EOF(`--for`가 없을 때), `--for=DURATION`, 또는 `Ctrl-C`가 오면 `CLOSE` 프레임을 보내고 정상 종료합니다. Windows에서는 파이프로 연결한 stdin 읽기가 블로킹되므로 서버 프레임은 다음 줄이 들어올 때 찍힙니다(콘솔 stdin은 괜찮습니다).
 
 ```bash
 printf '{"op":"ping"}\n' | gori run repeater ws 5 --engine-io --for 30s
@@ -615,15 +615,15 @@ gori run repeater move 5 --to 1        # 첫 번째 탭으로
 gori run repeater move 5 --down
 ```
 
-**`repeater delete <repeater-id> [<repeater-id>…] --yes`**: 저장된 세션 하나 이상을 닫고 스트립의 번호를 다시 매깁니다. `--yes`는 필수이며, 첫 삭제 전에 모든 id를 검사합니다. 하나라도 모르는 id가 있으면 호출 전체를 거절합니다. 각 줄은 그 세션이 *가지고 있던* 탭 번호를 말합니다(무엇이든 밀려나기 전에 한 번만 읽습니다). `--format json`은 `deleted`(`was_tui_index` 포함), `failed`, `remaining`을 반환합니다. 지우지 못한 세션이 있으면 종료 코드가 0이 아닙니다.
+**`repeater delete <repeater-id> [<repeater-id>…] --yes`**: 저장된 세션 하나 이상을 닫고 스트립의 번호를 다시 매깁니다. `--yes`는 필수이며, 첫 삭제 전에 모든 id를 검사합니다. 하나라도 모르는 id가 있으면 호출 전체를 거절합니다. 각 줄에는 그 세션이 *원래 있던* 탭 번호가 나옵니다(번호가 밀리기 전에 한 번만 읽습니다). `--format json`은 `deleted`(`was_tui_index` 포함), `failed`, `remaining`을 반환합니다. 지우지 못한 세션이 있으면 종료 코드가 0이 아닙니다.
 
-**`repeater race <repeater-id> <repeater-id> [<repeater-id>…]`**: 저장된 세션 여러 개를 하나의 동기화된 레이스로 발사해, 서로 다른 N개의 요청이 좁은 한 순간에 서버에 닿게 합니다(서로 다른 엔드포인트에 걸친 TOCTOU). HTTP/1.1에서는 요청마다 연결을 따로 열고 모든 요청의 마지막 바이트를 함께 풀어 줍니다. HTTP/2에서는 한 연결을 공유하는 single-packet 공격으로 보냅니다. 모든 세션은 하나의 오리진으로 해소되고 같은 전송을 써야 하며, 아니면 레이스를 거부합니다. `--http2` / `--http1`은 세션에 저장된 설정을 덮어씁니다. `--max-requests=N`은 N보다 큰 묶음을 나누지 않고 거부합니다. `--verbatim`, `--slot=NAME`, `--reframe-grpc`, `--tls-preset=NAME`, `-k`, `--timeout`, `--allow-unscoped`, `--format text|json`은 `repeater send`와 같습니다. `--format json`은 MCP `race_requests`가 돌려주는 객체입니다. `responded`와 `won_2xx` 개수, 그리고 멤버마다 세션 `id`, 상태, 크기, 타이밍, 응답 `head`와 `body`(`repeater send`와 같은 모양)가 담깁니다. 레이스는 저장되지 않으므로 본문은 여기에만 남습니다. `--max-body=BYTES`로 각각을 자를 수 있습니다. 요청 *하나*의 복사본 여러 개로 레이스하려면 `fuzz --race=N`을 쓰세요.
+**`repeater race <repeater-id> <repeater-id> [<repeater-id>…]`**: 저장된 세션 여러 개를 하나의 동기화된 레이스로 발사해, 서로 다른 N개의 요청이 좁은 한 순간에 서버에 닿게 합니다(서로 다른 엔드포인트에 걸친 TOCTOU). HTTP/1.1에서는 요청마다 연결을 따로 열고 모든 요청의 마지막 바이트를 함께 풀어 줍니다. HTTP/2에서는 한 연결을 공유하는 single-packet 공격으로 보냅니다. 모든 세션은 하나의 오리진으로 해소되고 같은 전송을 써야 하며, 아니면 레이스를 거부합니다. `--http2` / `--http1`은 세션에 저장된 설정을 덮어씁니다. `--max-requests=N`은 N보다 큰 묶음을 나누지 않고 거부합니다. `--verbatim`, `--slot=NAME`, `--reframe-grpc`, `--tls-preset=NAME`, `-k`, `--timeout`, `--allow-unscoped`, `--format text|json`은 `repeater send`와 같습니다. `--format json`은 MCP `race_requests`가 돌려주는 객체입니다. `responded`와 `won_2xx` 개수, 멤버마다 세션 `id`, 상태, 크기, 타이밍, 응답 `head`와 `body`(`repeater send`와 같은 모양)가 담깁니다. 레이스는 저장되지 않으므로 본문은 여기에만 남습니다. `--max-body=BYTES`로 각각을 자를 수 있습니다. 요청 *하나*의 복사본 여러 개로 레이스하려면 `fuzz --race=N`을 쓰세요.
 
 ```bash
 gori run repeater race 3 4 --http2
 ```
 
-**`repeater timing <idA> <idB>`**: 정확히 두 개의 저장된 세션을 차등 타이밍으로 분석합니다. 한 번 보내서는 보이지 않을 만큼 작은 차이를 위한 것입니다. 버리는 `--warmup=N`쌍(기본 3, `0`이면 첫 쌍부터 측정)을 보낸 뒤 이 쌍을 `--count=N`번(1-500, 기본 30) 보냅니다. 각 쌍은 `repeater race`처럼 함께 풀어 주거나(HTTP/2 single-packet, HTTP/1.1 last-byte sync), `--interleaved`를 주면 순서를 번갈아 가며 하나씩 차례로 보냅니다. 판정은 지연 시간 한 번이 아니라 응답 순서에서 나옵니다. A가 B보다 늦게 도착한 쌍이 몇 개인지를 양측 부호 검정으로 봅니다. p < 0.01일 때만 `a_slower`나 `b_slower`이고, 그렇지 않으면 `no_difference`, 쓸 수 있는 쌍이 20개 미만이면 `inconclusive`입니다(어느 한쪽이라도 실패한 쌍은 버립니다). 변형마다 최솟값, 사분위수, 최댓값이 함께 찍힙니다. 두 세션은 하나의 오리진과 연결 모양을 공유해야 하며, HTTP/1.1과 HTTP/2가 섞인 쌍에는 `--http1`이나 `--http2`가 필요합니다. `--verbatim`, `--slot=NAME`, `--reframe-grpc`, `--tls-preset=NAME`, `-k`, `--timeout`, `--allow-unscoped`, `--format text|json`은 `repeater send`와 같고, JSON은 MCP `timing_requests`가 돌려주는 객체와 같으며, 실패한 전송이 무엇으로 실패했는지 `error`가 알려 줍니다. 쓸 수 있는 쌍이 하나도 없으면 `1`로 끝납니다.
+**`repeater timing <idA> <idB>`**: 정확히 두 개의 저장된 세션을 차등 타이밍으로 분석합니다. 한 번 보내서는 보이지 않을 만큼 작은 차이를 볼 때 씁니다. 버리는 `--warmup=N`쌍(기본 3, `0`이면 첫 쌍부터 측정)을 보낸 뒤 이 쌍을 `--count=N`번(1-500, 기본 30) 보냅니다. 각 쌍은 `repeater race`처럼 함께 풀어 주거나(HTTP/2 single-packet, HTTP/1.1 last-byte sync), `--interleaved`를 주면 순서를 번갈아 가며 하나씩 차례로 보냅니다. 판정은 지연 시간 한 번이 아니라 응답 순서에서 나옵니다. A가 B보다 늦게 도착한 쌍이 몇 개인지를 양측 부호 검정으로 봅니다. p < 0.01일 때만 `a_slower`나 `b_slower`이고, 그렇지 않으면 `no_difference`, 쓸 수 있는 쌍이 20개 미만이면 `inconclusive`입니다(어느 한쪽이라도 실패한 쌍은 버립니다). 변형마다 최솟값, 사분위수, 최댓값이 함께 찍힙니다. 두 세션은 하나의 오리진과 연결 모양을 공유해야 하며, HTTP/1.1과 HTTP/2가 섞인 쌍에는 `--http1`이나 `--http2`가 필요합니다. `--verbatim`, `--slot=NAME`, `--reframe-grpc`, `--tls-preset=NAME`, `-k`, `--timeout`, `--allow-unscoped`, `--format text|json`은 `repeater send`와 같고, JSON은 MCP `timing_requests`가 돌려주는 객체와 같으며, 실패한 전송이 무엇으로 실패했는지 `error`가 알려 줍니다. 쓸 수 있는 쌍이 하나도 없으면 `1`로 끝납니다.
 
 ```bash
 gori run repeater timing 3 4 --count 100
@@ -637,7 +637,7 @@ gori run repeater timing 3 4 --count 100
 gori run repeater h2 --target https://api.example.com --fields fields.json
 ```
 
-`--fields=FILE`은 `[[name, value], …]` 배열이거나 `{"fields": [[name, value], …], "body": "…"}` 형태의 JSON 파일입니다(바이너리는 `body_base64`). 목록의 어떤 것도 정규화하지 않습니다. 앞의 콜론, 앞 공백이 붙은 값, 대문자 이름도 쓴 그대로 나갑니다. `--target`은 접속할 오리진을 정하며, `:authority`와 `:scheme` 필드는 그와 달라도 됩니다. `-k`/`--insecure-upstream`, `--timeout=SEC`, `--sse-events`/`--sse-time`, `--allow-unscoped`, `--tls-preset=NAME`, `--headers-only`, `--max-body`, `--format text|json`은 `repeater send`와 같습니다.
+`--fields=FILE`은 `[[name, value], …]` 배열이거나 `{"fields": [[name, value], …], "body": "…"}` 형태의 JSON 파일입니다(바이너리는 `body_base64`). 목록의 내용은 정규화하지 않습니다. 앞의 콜론, 앞 공백이 붙은 값, 대문자 이름도 쓴 그대로 나갑니다. `--target`은 접속할 오리진을 정하며, `:authority`와 `:scheme` 필드는 그와 달라도 됩니다. `-k`/`--insecure-upstream`, `--timeout=SEC`, `--sse-events`/`--sse-time`, `--allow-unscoped`, `--tls-preset=NAME`, `--headers-only`, `--max-body`, `--format text|json`은 `repeater send`와 같습니다.
 
 ### run send {#run-send}
 
@@ -669,9 +669,9 @@ gori run send --url https://api.example.com --request-file req.http --headers-on
 
 종료 코드는 교환 성공 여부를 알립니다. `404`나 `500`도 `0`으로 끝나므로(JSON에서는 `ok: true`) `status`를 확인하세요. `1`(`ok: false`)은 응답이 없었거나 gori가 응답을 프레이밍하거나 끝까지 읽지 못했다는 뜻입니다.
 
-WebSocket 핸드셰이크인 요청은 평범한 요청으로 나가고 그 `101`이 응답이 되며, 명령은 이를 STDERR에 알립니다. 프레임을 주고받는 교환에는 세션이 필요합니다: `repeater create` 다음 `repeater send`를 쓰세요.
+WebSocket 핸드셰이크인 요청은 일반 요청으로 나가고 그 `101`이 응답이 되며, 명령은 이를 STDERR에 알립니다. 프레임을 주고받는 교환에는 세션이 필요합니다. `repeater create` 다음 `repeater send`를 쓰세요.
 
-`send`, `repeater <flow-id>`, `repeater send`의 `--format json`은 원시 `head` 옆에 MCP `send_request`의 오류 계약을 싣습니다. 실패한 전송에는 `error_kind`(`connect`, `timeout`, `protocol`, `no_response`, `truncated_request`, `budget`, `busy`, `other`), `error_code`, `retryable`, `delivered`가 붙으므로, 스크립트는 `error` 문장을 매칭하지 않고도 거부된 연결과 타임아웃을 구분할 수 있습니다. 응답에는 `reason`, `http_version`, 파싱된 `headers`(`[{"name","value"}]`, 와이어 순서, UTF-8이 아닌 값에는 `value_lossy`/`value_base64`)가 붙습니다. `match_replace_applied: true`는 `--apply-rules`가 요청을 바꿨다는 뜻이고, `bounded`(`events` 또는 `time`)는 이벤트 스트림이 `--sse-events` / `--sse-time` 한도에서 멈췄다는 뜻입니다. 세 명령 모두 `--format raw`는 받지 않습니다. 그 형식은 [`show`](#run-show)에 있습니다. 응답의 정확한 바이트가 필요하면 `--record-history`로 보낸 뒤 출력된 흐름에 `show <flow-id> --format raw`를 실행하세요.
+`send`, `repeater <flow-id>`, `repeater send`의 `--format json`은 원시 `head` 옆에 MCP `send_request`의 오류 계약을 싣습니다. 실패한 전송에는 `error_kind`(`connect`, `timeout`, `protocol`, `no_response`, `truncated_request`, `budget`, `busy`, `other`), `error_code`, `retryable`, `delivered`가 붙으므로, 스크립트는 `error` 문장을 매칭하지 않고도 거부된 연결과 타임아웃을 구분할 수 있습니다. 응답에는 `reason`, `http_version`, 파싱된 `headers`(`[{"name","value"}]`, 와이어 순서, UTF-8이 아닌 값에는 `value_lossy`/`value_base64`)가 붙습니다. `match_replace_applied: true`는 `--apply-rules`가 요청을 바꿨다는 뜻이고, `bounded`(`events` 또는 `time`)는 이벤트 스트림이 `--sse-events` / `--sse-time` 한도에서 멈췄다는 뜻입니다. 세 명령 모두 `--format raw`는 받지 않습니다. 그 형식은 [`show`](#run-show)에 있습니다. 응답을 바이트 그대로 보려면 `--record-history`로 보낸 뒤 출력된 플로우에 `show <flow-id> --format raw`를 실행하세요.
 
 ### run fuzz {#run-fuzz}
 
@@ -691,7 +691,7 @@ WebSocket 핸드셰이크인 요청은 평범한 요청으로 나가고 그 `101
 | Macro | `--macro=STEPS`는 후보 **앞에서** 저장된 Repeater 세션(`repeater list`의 id 또는 탭 이름, 쉼표 구분, 반복 가능)을 다시 실행해서, 회전하는 CSRF 토큰이나 nonce가 후보가 `$BIND.NAME`을 풀 때 항상 새 값이 되게 합니다. `--macro-every=request\|N\|off`(기본 `request`: 후보마다 새 값을 받고 그래서 스윕은 후보를 한 번에 하나씩 보냅니다. `N`은 값 하나를 N개의 후보가 공유하며 최대 N개까지 동시에 나갑니다). `--macro-expect=NAME`(반복 가능)은 그 바인딩을 다시 바인딩하지 못하면 매크로를 실패로 처리합니다. `--macro-on-failure=skip\|stop`(기본 `skip`: 후보를 보내지 않고, 연속 세 번 실패하면 실행을 끝냅니다). 단계는 활성 `--slot`으로 실행되고 History에 `src:macro`로 기록되며 `--max-requests`에 합산되고 `--rate`에 묶입니다. 이름을 지정한 프로젝트가 필요합니다. `--race=N`과 함께 쓰면 `--macro-every`는 N 이상이어야 합니다. [매크로로 회전하는 토큰 다루기](/ko/guide/repeater-and-fuzzer/#rotating-tokens-with-a-macro) 참고 |
 | Race | `--race=N`은 연결 N개를 열어 각 요청을 마지막 1바이트 직전까지 보낸 뒤 동시에 풀어 놓습니다(last-byte sync). 레이스 그룹은 요청 하나의 복사본 N개이므로 `--mode`와 모든 페이로드/위치 플래그는 무시됩니다. `--race-warmup=FILE`은 레이스 요청을 붙잡기 전에 각 연결에서 이 원시 요청을 먼저 보내고 읽습니다 |
 | Framing | `--verbatim`은 템플릿을 쓰인 그대로 전송합니다. 토큰(`$ENV.KEY`, `$BIND.NAME`, `$GEN.*`)을 확장하지 않고, 단독 LF를 승격하지 않으며, 클라이언트 힌트를 붙이지 않고, `Content-Length`도 그대로 둡니다. 페이로드 치환 후에도 재계산하지 않고, 길이 선언이 없는 본문에 추가하지도 않습니다 (CL / CL-TE 디싱크 페이로드용. `Content-Length`도 청크 `Transfer-Encoding`도 없는 본문은 오리진이 길이 0으로 읽으므로 경고합니다). `--no-update-content-length`는 이 중 `Content-Length` 부분만 끄며 토큰은 그대로 확장합니다. `--reframe-grpc`는 페이로드가 단항 gRPC 메시지에 삽입된 뒤 5바이트 길이 접두사를 다시 계산합니다(기본값은 꺼짐: 오래된 접두사는 고치지 않고 보고만 합니다) |
-| WebSocket | `Upgrade: websocket` 핸드셰이크를 선언한 템플릿은 프레임 교환으로 스윕합니다. 페이로드 하나가 완전한 RFC 6455 세션 하나입니다. `--message=TEXT` / `--message-frame=SPEC`로 송신 프레임을 작성하며(반복 가능, 지정한 순서대로; `SPEC`은 `gori run repeater send`와 같은 문법: `opcode=`, `fin=`, `rsv=`, `mask=`, `mask_key=`, `len=`, 그리고 `hex=`\|`b64=`\|`text=` 중 하나), `--flow`/`--repeater` 시드가 가져온 프레임을 대체합니다. `§…§` 위치는 프레임 안에 표시합니다. 핸드셰이크도 위치 공간이며 둘은 한 번의 실행에서 함께 스윕됩니다. `--idle-ms=N`은 세션별 침묵 대기(100-60000, 기본 3000), `--ws-keep-key`는 템플릿 자체의 `Sec-WebSocket-Key`를 보냅니다. `--ws-http-only`는 핸드셰이크를 평범한 요청으로 스윕합니다. 업그레이드가 성공하면 모든 행이 `101`이므로 행마다 `ws_close_code`와 `ws_frames_in`이 붙습니다. 프레임 경로에서 `--race`, `--http2`, `--record-history`는 거부됩니다(셋 다 `--ws-http-only` 아래에서는 동작하며, 그쪽은 평범한 HTTP 스윕이라 History에도 기록됩니다). `--follow-redirects` / `--timeout` / `--ac`는 무의미하여 한 번 알려 줍니다. 송신 프레임이 없는 WebSocket 시드는 평범한 HTTP로 스윕합니다 `--ws-deflate`는 메시지별 독립 압축을 제안하고 압축 해제한 응답을 매칭하며, 직접 지정한 프레임 모양은 그대로 보냅니다.  |
+| WebSocket | `Upgrade: websocket` 핸드셰이크를 선언한 템플릿은 프레임 교환으로 스윕합니다. 페이로드 하나가 완전한 RFC 6455 세션 하나입니다. `--message=TEXT` / `--message-frame=SPEC`로 송신 프레임을 작성하며(반복 가능, 지정한 순서대로; `SPEC`은 `gori run repeater send`와 같은 문법: `opcode=`, `fin=`, `rsv=`, `mask=`, `mask_key=`, `len=`, 그리고 `hex=`\|`b64=`\|`text=` 중 하나), `--flow`/`--repeater` 시드가 가져온 프레임을 대체합니다. `§…§` 위치는 프레임 안에 표시합니다. 핸드셰이크도 위치 공간이며 둘은 한 번의 실행에서 함께 스윕됩니다. `--idle-ms=N`은 세션별 침묵 대기(100-60000, 기본 3000), `--ws-keep-key`는 템플릿 자체의 `Sec-WebSocket-Key`를 보냅니다. `--ws-http-only`는 핸드셰이크를 평범한 요청으로 스윕합니다. 업그레이드가 성공하면 모든 행이 `101`이므로 행마다 `ws_close_code`와 `ws_frames_in`이 붙습니다. 프레임 경로에서 `--race`, `--http2`, `--record-history`는 거부됩니다(셋 다 `--ws-http-only` 아래에서는 동작하며, 그쪽은 평범한 HTTP 스윕이라 History에도 기록됩니다). `--follow-redirects` / `--timeout` / `--ac`는 무의미하여 한 번 알려 줍니다. 송신 프레임이 없는 WebSocket 시드는 평범한 HTTP로 스윕합니다. `--ws-deflate`는 메시지별 독립 압축을 제안하고 압축 해제한 응답을 매칭하며, 직접 지정한 프레임 모양은 그대로 보냅니다.  |
 | Matchers | `--mc`/`--fc` status, `--mg`/`--fg` `grpc-status` 트레일러(HTTP/2 트레일러, grpc-web은 본문 안의 트레일러 프레임)의 gRPC 상태 (`7`, `>0`, `1-16`), `--ms`/`--fs` size, `--mw`/`--fw` words, `--ml`/`--fl` lines, `--mt`/`--ft` 왕복 시간(**ms**, `--mt '>=5000'`. 시간 기반 블라인드 페이로드가 움직이는 차원입니다. 타임아웃된 전송도 여기서는 매치로 셉니다), `--mr`/`--fr` body regex, `--mh`/`--fh` 응답 HEAD의 대소문자 무시 부분 문자열 (`--mh 'x-powered-by: php'`. body regex는 헤더를 보지 않습니다), `--extract=REGEX`, `--extractor=SPEC` 행마다 이름 붙은 값(반복 가능, 최대 8개. `history --column`과 같은 `[LABEL=]kind:selector`, 응답 쪽만. 텍스트는 `LABEL=⟦값⟧`, JSON은 `extracts`), `--ac` auto-calibrate |
 | Stop | `--stop-after-matches=N`은 매처가 N번 맞으면 실행을 끝냅니다(`1` = 첫 히트). `--stop-on=DIM:SPEC`(반복 가능)은 별도 조건이 성립하면 끝냅니다. `DIM`은 `status`\|`grpc`\|`size`\|`words`\|`lines`\|`time`\|`header`\|`regex`, `!DIM`은 부정입니다(`--stop-on '!regex:Invalid password'`는 본문에 그 문자열이 더 이상 없을 때 멈춤). 어느 쪽이든 실행은 `stopped`가 아니라 `condition_met` 상태로 끝나고, CLI는 `0`으로 종료합니다. 진행 중이던 요청은 `^C`처럼 마무리됩니다. 완료 줄은 정지를 일으킨 결과를 밝히고, `fuzz save`는 그것을 기록합니다: `fuzz list`는 `stop:#N`, `fuzz show`는 `stopped on result N`을 보여 주며, 두 명령의 JSON에는 `stop_index`가 담깁니다(기록되지 않았으면 null). `--race`와는 함께 쓸 수 없습니다 |
 | Keep | `--keep=all`(기본) \| `interesting`: `fuzz save`가 어떤 결과 행을 저장할지 정합니다. `interesting`은 매치된 행과 관측된 사실을 담은 행(오류, 재전송, 잘린 캡처, 정지 행)만 남깁니다. 실행의 `sent`/`matched`/`errors` 카운트는 전체 기준으로 유지되고 각 행은 실제 페이로드 인덱스를 지킵니다. `fuzz list`/`show`가 `keep:interesting`과 몇 개 중 몇 개를 남겼는지 표시합니다 |
@@ -746,7 +746,7 @@ gori run mine <flow-id> --locations query,headers --wordlist params.txt
 | `--slot=NAME` | 이 [세션 슬롯](#run-session)으로 전송합니다: 그 슬롯의 헤더 오버레이, 그리고 `$BIND.NAME`을 위한 그 슬롯의 바인딩 테이블. `--bind-from`보다 먼저 적용되므로 시드가 채우는 슬롯이 곧 실행이 나가는 슬롯입니다 |
 | `--format` | `text`, `json`, 또는 `jsonl` |
 
-기본적으로 연결을 재사용합니다. 마이닝 한 번이 프로브마다가 아니라 워커마다 TCP(https라면 TLS) 핸드셰이크를 한 번씩만 치릅니다. 실행이 끝날 때 나오는 `connections · N dialed · M reused` 줄을 보면 대상이 이를 지켰는지 알 수 있습니다. 대상이 연결 단위로 동작한다면 `--no-keep-alive`로 끕니다.
+기본적으로 연결을 재사용하므로, 마이닝은 TCP(https라면 TLS도) 핸드셰이크를 프로브마다가 아니라 워커마다 한 번만 합니다. 실행이 끝날 때 나오는 `connections · N dialed · M reused` 줄을 보면 대상이 이를 지켰는지 알 수 있습니다. 대상이 연결 단위로 동작한다면 `--no-keep-alive`로 끕니다.
 
 ### run sequence {#run-sequence}
 
@@ -773,7 +773,7 @@ gori run sequence --tokens tokens.txt          # '-'는 stdin을 읽음
 
 ### run authorize {#run-authorize}
 
-선택한 플로우를 아이덴티티마다 재전송합니다. 아이덴티티는 관리자 세션, 저권한 사용자, 익명 클라이언트를 대신하는 헤더 오버레이이며, 각 응답을 기준선과 비교합니다. 기준선이 받은 것을 그대로 받는 아이덴티티가 있다면 접근 제어 우회일 가능성이 높습니다. [Authorize 탭](/ko/guide/authorize/)의 헤드리스 버전입니다.
+선택한 플로우를 아이덴티티(관리자 세션, 저권한 사용자, 익명 클라이언트를 대신하는 헤더 오버레이)마다 재전송하고, 각 응답을 기준선의 응답과 비교합니다. 기준선과 같은 응답을 받은 아이덴티티는 접근 제어 우회일 가능성이 높습니다. [Authorize 탭](/ko/guide/authorize/)의 헤드리스 버전입니다.
 
 ```bash
 gori run authorize 12 13
@@ -800,13 +800,13 @@ gori run authorize --query 'host:acme.test method:GET' --identities identities.j
  {"name": "low-priv",  "set": [{"name": "Cookie", "value": "session=…"}]}]
 ```
 
-`set`은 헤더를 upsert하고 `remove`는 제거합니다. 어떤 항목도 `"baseline": true`를 갖지 않으면 캡처된 그대로의 요청이 기준선입니다. 기준선 외에 최소 한 개의 아이덴티티가 필요합니다.
+`set`은 헤더를 upsert하고 `remove`는 제거합니다. `"baseline": true`인 항목이 없으면 캡처된 그대로의 요청이 기준선입니다. 기준선 외에 최소 한 개의 아이덴티티가 필요합니다.
 
-의미 있게 재전송할 수 없는 플로우는 아무것도 보내기 전에 이유와 함께 STDERR에 나열됩니다(`no identity changes them`, `not a safe method to repeat`, `never completed`, `answered by gori`, `outside project scope`, `already queued`, `no flow with that id`). 선택한 플로우가 전부 건너뛰어지면 거부합니다. 모든 전송이 소켓을 열기 전에 거부되면 `1`로 종료하며 그 사실을 알립니다.
+의미 있게 재전송할 수 없는 플로우는 아무것도 보내기 전에 이유와 함께 STDERR에 나열됩니다(`no identity changes them`, `not a safe method to repeat`, `never completed`, `answered by gori`, `outside project scope`, `already queued`, `no flow with that id`). 선택한 플로우를 전부 건너뛰게 되면 거부합니다. 모든 전송이 소켓을 열기 전에 거부되면 `1`로 종료하며 그 사실을 알립니다.
 
 ### run cache-deception {#run-cache-deception}
 
-선택한 각 플로우를 **웹 캐시 디셉션**으로 검사합니다: 캡처된(인증된) 아이덴티티로 재전송해 캐시를 채우고, 세션 없이 *같은* url을 다시 요청한 뒤 고유한 캐시 무효화 쿼리 매개변수를 붙여 익명 제어 요청을 보냅니다. 제어 응답이 일치하고 캐시 히트 신호가 없을 때 공개 콘텐츠(`served`)로 봅니다. 제어 응답도 캐시 히트라면 쿼리가 무시됐을 수 있으므로 판정은 `review`입니다. 익명 응답이 캐시 히트를 보이고 제어 응답은 다르면 디셉션 가능성(`cached`)이 있습니다. 플로우 하나당 최대 세 번 요청합니다. Authorize 엔진을 사용합니다. 이를 유발하는 조작된 경로(`;`, `.css`, `%00`, dot-segment)는 Fuzzer의 `cache-delimiters` 페이로드 세트입니다.
+선택한 각 플로우에 **웹 캐시 디셉션**이 있는지 검사합니다. 캡처된(인증된) 아이덴티티로 재전송해 캐시를 채우고, 세션 없이 *같은* url을 다시 요청한 뒤 고유한 캐시 무효화 쿼리 매개변수를 붙여 익명 제어 요청을 보냅니다. 제어 응답이 일치하고 캐시 히트 신호가 없을 때 공개 콘텐츠(`served`)로 봅니다. 제어 응답도 캐시 히트라면 쿼리가 무시됐을 수 있으므로 판정은 `review`입니다. 익명 응답이 캐시 히트를 보이고 제어 응답은 다르면 디셉션 가능성(`cached`)이 있습니다. 플로우 하나당 최대 세 번 요청합니다. Authorize 엔진을 사용합니다. 이를 유발하는 조작된 경로(`;`, `.css`, `%00`, dot-segment)는 Fuzzer의 `cache-delimiters` 페이로드 세트입니다.
 
 ```bash
 gori run cache-deception 12
@@ -822,7 +822,7 @@ gori run cache-deception --flow 12 --flow 13 --format json
 | `--project`, `--db` | 읽을 프로젝트 |
 | `--format` | `text`(기본), `json`(끝에 배열 하나), `jsonl`(스트리밍) |
 
-플로우마다 판정 하나를 보고합니다: `cached`(디셉션: 익명이 인증된 응답을 캐시에서 받았고 캐시 무효화 제어 응답은 다름), `served`(캐시 히트 증거가 없거나 캐시 히트가 없는 제어 응답과 일치), `review`(비슷하지만 동일하지 않거나 제어 결과가 불분명하거나, 일치한 제어 응답도 캐시 히트임), `protected`(익명이 다른 응답을 받음), `blocked`(gori가 전송 거부), `errored`. 각 시도의 `cache`는 해당 응답의 캐시 상태이며 최상위 `cache`는 익명 응답 상태입니다. `--unsafe-methods` 없이는 안전한 메서드(`GET`/`HEAD`/`OPTIONS`)만 검사합니다. 재전송할 수 없는 플로우는 STDERR로 알리고 다음 플로우로 넘어갑니다. 검사한 플로우가 하나도 없으면 `1`로 끝납니다.
+플로우마다 판정 하나를 보고합니다. `cached`(디셉션: 익명이 인증된 응답을 캐시에서 받았고 캐시 무효화 제어 응답은 다름), `served`(캐시 히트 증거가 없거나 캐시 히트가 없는 제어 응답과 일치), `review`(비슷하지만 동일하지 않거나 제어 결과가 불분명하거나, 일치한 제어 응답도 캐시 히트임), `protected`(익명이 다른 응답을 받음), `blocked`(gori가 전송 거부), `errored` 중 하나입니다. 각 시도의 `cache`는 해당 응답의 캐시 상태이며 최상위 `cache`는 익명 응답 상태입니다. `--unsafe-methods` 없이는 안전한 메서드(`GET`/`HEAD`/`OPTIONS`)만 검사합니다. 재전송할 수 없는 플로우는 STDERR로 알리고 다음 플로우로 넘어갑니다. 검사한 플로우가 하나도 없으면 `1`로 끝납니다.
 
 ### run session {#run-session}
 
@@ -853,9 +853,9 @@ gori run session refresh admin
 
 모든 동사가 `--project=NAME` / `--db=PATH`를 받습니다.
 
-`--set` 값은 TUI 폼과 같은 헤더 파서를 지납니다. 이름은 RFC 7230 토큰이어야 하고 값에 CR이나 LF가 들어갈 수 없으며, 통과하지 못한 줄은 거부되며 오류가 그 줄을 알려 줍니다.
+`--set` 값은 TUI 폼과 같은 헤더 파서를 거칩니다. 이름은 RFC 7230 토큰이어야 하고 값에는 CR이나 LF가 들어갈 수 없습니다. 통과하지 못한 줄은 거부하고, 오류 메시지에 그 줄을 표시합니다.
 
-**`from-flow`는 캡처된 로그인에서 슬롯을 만듭니다.** 로그인한 플로우를 지목하면 gori가 그 플로우의 *응답*을 읽어 오버레이를 채웁니다. 모든 `Set-Cookie`의 `name=value`를 `Cookie:` 헤더 하나로 접고(속성은 버리며, 응답이 *삭제*하는 쿠키는 건너뜁니다), 이어서 응답 자신의 `Authorization`을, 없으면 JSON 본문 최상위의 `access_token` / `token` / `id_token` 문자열을 `Authorization: Bearer <value>`로, 그것도 없으면 요청 자신의 `Authorization`을 씁니다.
+**`from-flow`는 캡처된 로그인에서 슬롯을 만듭니다.** 로그인한 플로우를 지목하면 gori가 그 플로우의 *응답*을 읽어 오버레이를 채웁니다. 모든 `Set-Cookie`의 `name=value`를 `Cookie:` 헤더 하나로 접고(속성은 버리며, 응답이 *삭제*하는 쿠키는 건너뜁니다), 이어서 응답의 `Authorization`을, 없으면 JSON 본문 최상위의 `access_token` / `token` / `id_token` 문자열을 `Authorization: Bearer <value>`로, 그것도 없으면 요청의 `Authorization`을 씁니다.
 
 ```bash
 gori run session from-flow 4211 --name admin
@@ -874,13 +874,13 @@ gori run repeater 900 --slot admin        # 해당 헤더 스냅샷으로 전송
 
 스냅샷은 리터럴입니다. 스스로 재인증하거나 회전하는 토큰을 갱신하지 않습니다. 수명이 짧은 JWT, 요청마다 바뀌는 CSRF 값처럼 다시 발급해야 하는 값은 `gori run rewriter extract`와 `--bind-from FLOW`를 사용해 실행마다 새로 추출하거나, 슬롯에 [갱신 단계](#refresh-steps)를 붙이세요. 요청마다 바뀌는 값이라면 Fuzzer나 Miner의 [요청 시점 매크로](/ko/guide/repeater-and-fuzzer/#rotating-tokens-with-a-macro)(`--macro`)를 쓰세요.
 
-<a id="refresh-steps"></a>**갱신 단계는 슬롯을 다시 인증합니다.** `--refresh 12,14`는 로그인하는 Repeater 세션(`gori run repeater list`)을 실행 순서대로 지정합니다. 보통 CSRF를 가져오는 요청, 그다음 `$BIND.CSRF`를 싣는 로그인 요청입니다. 각 단계의 응답은 슬롯 자신의 extract 규칙을 거쳐 슬롯을 다시 바인딩합니다. 단계는 *그 슬롯의* `$BIND.NAME` 값을 해소하고 슬롯 헤더 오버레이는 싣지 않으므로, 로그인 요청이 교체하려는 만료된 자격 증명을 보내지 않습니다. 모든 단계는 source `refresh`(`src:refresh`)로 History에 기록되고, 갱신마다 이벤트 하나(`list_events`, source `session`)가 남습니다. 이벤트에는 바인딩 이름만 있고 값은 없습니다.
+<a id="refresh-steps"></a>**갱신 단계는 슬롯을 다시 인증합니다.** `--refresh 12,14`는 로그인하는 Repeater 세션(`gori run repeater list`)을 실행 순서대로 지정합니다. 보통 CSRF를 가져오는 요청, 그다음 `$BIND.CSRF`를 싣는 로그인 요청입니다. 각 단계의 응답은 슬롯의 extract 규칙을 거쳐 슬롯을 다시 바인딩합니다. 단계는 *그 슬롯의* `$BIND.NAME` 값을 해소하고 슬롯 헤더 오버레이는 싣지 않으므로, 로그인 요청이 교체하려는 만료된 자격 증명을 보내지 않습니다. 모든 단계는 source `refresh`(`src:refresh`)로 History에 기록되고, 갱신마다 이벤트 하나(`list_events`, source `session`)가 남습니다. 이벤트에는 바인딩 이름만 있고 값은 없습니다.
 
-`--refresh-before`를 주면 슬롯으로 나가는 전송(모든 전송 명령의 `--slot NAME`, 그리고 Authorize 실행의 각 신원) 직전에 갱신이 스스로 실행됩니다.
+`--refresh-before`를 주면 슬롯으로 나가는 전송(모든 전송 명령의 `--slot NAME`, Authorize 실행의 각 신원) 직전에 갱신이 자동으로 실행됩니다.
 
 | 정책 | 갱신 시점 |
 | --- | --- |
-| `off`(기본) | 스스로는 하지 않습니다. `session refresh`만 |
+| `off`(기본) | 자동으로는 하지 않습니다. `session refresh`만 |
 | `jwt-exp` | 슬롯 테이블에 바인딩된 JWT의 `exp`가 30초 이내로 남았을 때 |
 | `ttl=10m` | 마지막으로 성공한 갱신(없으면 슬롯에서 가장 오래된 바인딩) 이후 그 기간이 지났을 때(`s`, `m`, `h`. 숫자만 쓰면 초) |
 
@@ -888,9 +888,9 @@ gori run repeater 900 --slot admin        # 해당 헤더 스냅샷으로 전송
 
 슬롯이 단계로 쓰는 Repeater 세션을 삭제하면 그 단계는 제자리에 삭제됨으로 표시되어 남고, 갱신은 그 id를 다음에 차지한 세션을 실행하는 대신 그 단계를 거부합니다. `--refresh`나 `--clear-refresh`로 제거하세요.
 
-바인딩 값은 메모리에, 프로세스마다 따로 있습니다. `session refresh`는 이 명령 자신의 테이블을 다시 바인딩하고 그 테이블은 명령이 끝나면 사라지므로, 로그인 순서가 동작하는지 확인할 때 쓰세요. `--slot NAME` 스윕은 자기 프로세스에서 갱신하고, TUI와 실행 중인 `gori mcp`는 각자의 테이블을 가집니다.
+바인딩 값은 메모리에, 프로세스마다 따로 있습니다. `session refresh`는 이 명령의 테이블을 다시 바인딩하고 그 테이블은 명령이 끝나면 사라지므로, 로그인 순서가 동작하는지 확인할 때 쓰세요. `--slot NAME` 스윕은 자기 프로세스에서 갱신하고, TUI와 실행 중인 `gori mcp`는 각자의 테이블을 가집니다.
 
-**`session activate`는 없습니다.** `gori run` 프로세스는 보내고 끝나므로, 전송할 때 신원을 지목하세요: `send`, `repeater`, `repeater send`, `repeater race`, `repeater timing`, `repeater minimize`, `fuzz`, `mine`, `sequence`, `discover`, `retest run`에서 `--slot NAME`. 실행은 첫 요청 전에 STDERR로 `slot: sending as NAME`을 찍습니다.
+**`session activate`는 없습니다.** `gori run` 프로세스는 보내고 끝나므로, 전송할 때 `--slot NAME`으로 신원을 지목하세요. `send`, `repeater`, `repeater send`, `repeater race`, `repeater timing`, `repeater minimize`, `fuzz`, `mine`, `sequence`, `discover`, `retest run`이 받습니다. 실행은 첫 요청 전에 STDERR로 `slot: sending as NAME`을 찍습니다.
 
 ### run probe {#run-probe}
 
@@ -899,11 +899,11 @@ gori run probe --severity high --category cors
 gori run probe -a
 ```
 
-`--severity`는 `info`\|`low`\|`medium`\|`high`\|`critical` 중 하나입니다. `--fail-on=LEVEL`은 스캔이 보고하는 이슈(`--severity`/`--category`/`--in-scope` 적용 후)가 LEVEL 이상이면 `3`으로 종료하게 하므로, CI 잡의 게이트로 쓸 수 있습니다. `--category`는 `headers`\|`cookies`\|`tech`\|`infoleak`\|`cors`\|`client`\|`active`\|`custom`입니다. `-a`/`--active`는 가벼운 액티브 검사도 포함합니다. `-q`/`--query`로 QL 필터를 겁니다. `--lenient`는 없는 필드 이름을 쓴 쿼리를 거절하지 않고 받아들입니다. `--in-scope`는 프로젝트 스코프 안의 호스트에 대한 이슈만 보고합니다. TUI의 `s` 렌즈로, `--active`/`--allow-unscoped`와 무관하게 옵트인이며 모든 플로우는 여전히 스캔됩니다.
+`--severity`는 `info`\|`low`\|`medium`\|`high`\|`critical` 중 하나입니다. `--fail-on=LEVEL`은 스캔이 보고하는 이슈(`--severity`/`--category`/`--in-scope` 적용 후)가 LEVEL 이상이면 `3`으로 종료하게 하므로, CI 잡의 게이트로 쓸 수 있습니다. `--category`는 `headers`\|`cookies`\|`tech`\|`infoleak`\|`cors`\|`client`\|`active`\|`custom`입니다. `-a`/`--active`는 가벼운 액티브 검사도 포함합니다. `-q`/`--query`로 QL 필터를 겁니다. `--lenient`는 없는 필드 이름을 쓴 쿼리를 거절하지 않고 받아들입니다. `--in-scope`는 프로젝트 스코프 안 호스트의 이슈만 보고합니다. TUI의 `s` 렌즈로, `--active`/`--allow-unscoped`와 무관하게 옵트인입니다. 플로우는 여전히 모두 스캔됩니다.
 
-`--active`와 함께 쓰면 `--unsafe`는 안전하지 않은 메서드(`POST`/`PUT`/`PATCH`/`DELETE`)도 프로브하며, 이 재전송은 서버 데이터를 변경할 수 있습니다. `--aggressive`는 룰별 상한을 높이고 forbidden-bypass 헤더 집합을 넓힙니다(그리고 `--unsafe`를 함의합니다). 둘 다 `--allow-unscoped`를 함께 주지 않는 한 스코프 게이트를 따릅니다. `-k`/`--insecure-upstream`은 액티브 재전송의 업스트림 TLS 검증을 생략합니다. 인가된 대상에만 사용하세요.
+`--active`와 함께 쓰면 `--unsafe`는 안전하지 않은 메서드(`POST`/`PUT`/`PATCH`/`DELETE`)도 프로브하며, 이 재전송은 서버 데이터를 변경할 수 있습니다. `--aggressive`는 룰별 상한을 높이고 forbidden-bypass 헤더 집합을 넓히며 `--unsafe`도 함께 켭니다. 둘 다 `--allow-unscoped`를 함께 주지 않는 한 스코프 게이트를 따릅니다. `-k`/`--insecure-upstream`은 액티브 재전송의 업스트림 TLS 검증을 생략합니다. 인가된 대상에만 사용하세요.
 
-`probe`만 쓰면 스캔하고 출력합니다. `--persist`를 주면 찾은 결과를 라이브 스캐너와 같은 방식으로 합쳐 저장된 발견 항목에도 기록하므로, TUI로 연 적 없는 프로젝트에도 판정 목록이 생깁니다. 기록이 실패하면 보고서를 출력한 뒤 그렇다고 알리고 1로 종료합니다. TUI Probe 탭 뒤에 저장되는 발견 항목은 별개의 표면입니다.
+`probe`만 쓰면 스캔하고 출력합니다. `--persist`를 주면 찾은 결과를 라이브 스캐너와 같은 방식으로 합쳐 저장된 발견 항목에도 기록하므로, TUI로 연 적 없는 프로젝트에도 판정 목록이 생깁니다. 기록이 실패하면 보고서를 출력한 뒤 그렇다고 알리고 1로 종료합니다. TUI Probe 탭에 저장되는 발견 항목은 별도 명령으로 다룹니다.
 
 ```bash
 gori run probe issues --severity high            # 아래 동사들이 받는 id가 함께 나오는 트리아지 목록
@@ -954,11 +954,11 @@ gori run discover --target https://target.example --max-depth 3 --extensions php
 | `--no-store` | 결과를 프로젝트에 기록하지 않음 |
 | `--format` | `text`, `json`, 또는 `jsonl` |
 
-기본적으로 origin별로 연결을 재사용합니다. 브루트포스 한 번이 프로브마다가 아니라 워커마다 TCP(https라면 TLS) 핸드셰이크를 한 번씩만 치릅니다. 실행이 끝날 때 나오는 `connections · N dialed · M reused` 줄을 보면 대상이 이를 지켰는지 알 수 있습니다. 대상이 연결 단위로 동작한다면 `--no-keep-alive`로 끕니다.
+기본적으로 origin별로 연결을 재사용하므로, 브루트포스는 TCP(https라면 TLS도) 핸드셰이크를 프로브마다가 아니라 워커마다 한 번만 합니다. 실행이 끝날 때 나오는 `connections · N dialed · M reused` 줄을 보면 대상이 이를 지켰는지 알 수 있습니다. 대상이 연결 단위로 동작한다면 `--no-keep-alive`로 끕니다.
 
 ### run wordlist {#run-wordlist}
 
-전역 wordlist 카탈로그: `$GORI_HOME/wordlists`(`~/.gori/wordlists`) 아래의 이름 붙은 목록이며 하나하나가 평범한 파일입니다. wordlist 경로를 받는 곳(`fuzz -w`, `mine --wordlist`, `discover --wordlist`, `cookie --crack --wordlist`)이면 어느 작업 디렉터리에서든 이름을 쓸 수 있습니다. `/`가 있는 값은 경로이므로 주어진 그대로 읽고, 이름만 있으면 현재 디렉터리를 먼저, 그다음 카탈로그를 찾습니다. 여기서는 프로젝트가 필요 없고 요청도 보내지 않습니다. 모델은 [가이드](/ko/guide/repeater-and-fuzzer/#wordlist-catalog)를 보세요.
+전역 wordlist 카탈로그입니다. `$GORI_HOME/wordlists`(`~/.gori/wordlists`) 아래의 이름 붙은 목록이며 하나하나가 일반 파일입니다. wordlist 경로를 받는 곳(`fuzz -w`, `mine --wordlist`, `discover --wordlist`, `cookie --crack --wordlist`)이면 어느 작업 디렉터리에서든 이름을 쓸 수 있습니다. `/`가 있는 값은 경로이므로 주어진 그대로 읽고, 이름만 있으면 현재 디렉터리를 먼저, 그다음 카탈로그를 찾습니다. 여기서는 프로젝트가 필요 없고 요청도 보내지 않습니다. 개념은 [가이드](/ko/guide/repeater-and-fuzzer/#wordlist-catalog)를 보세요.
 
 ```bash
 gori run sitemap params --host api.example.com --format names | gori run wordlist save api-params.txt
@@ -977,13 +977,13 @@ gori run wordlist delete api-v2-params.txt --yes
 | `rename <old> <new>` (`mv`) | 목록 이름 변경. `--overwrite`가 아니면 이미 있는 `<new>`는 거부합니다 |
 | `delete <name>` (`rm`) | 목록 삭제(`--yes`가 확인이며 프롬프트는 없습니다). 심볼릭 링크는 링크만 지우고 가리키는 파일은 지우지 않습니다 |
 
-이름은 어느 문자든 글자와 숫자, `_`, `.`, `+`, `-`, 안쪽 공백(최대 200바이트, 글자·숫자·`_`로 시작해야 하고 `.`이나 공백으로 끝날 수 없음)입니다. 경로 구분자가 든 값은 거부합니다. 모든 verb가 `-h`를 받습니다. 거부된 변경 verb는 `1`로 종료하며 이유를 알려 줍니다.
+이름에는 문자 체계와 상관없이 글자와 숫자, `_`, `.`, `+`, `-`, 안쪽 공백을 쓸 수 있습니다(최대 200바이트, 글자·숫자·`_`로 시작해야 하고 `.`이나 공백으로 끝날 수 없음). 경로 구분자가 든 값은 거부합니다. 모든 동사가 `-h`를 받습니다. 거부된 변경 동사는 `1`로 종료하며 이유를 알려 줍니다.
 
 ### 명령줄에서 세션 바인딩 쓰기 {#session-bindings-from-the-command-line}
 
-세션 바인딩(로그인 응답에서 채워지는 `$BIND.SESSION` 같은 것. [세션 바인딩](/ko/guide/proxy/#session-bindings) 참고)은 그것을 관측한 gori 프로세스의 메모리에만 존재합니다. `settings.json`에도, 프로젝트 데이터베이스에도 기록되지 않습니다.
+세션 바인딩(로그인 응답에서 채워지는 `$BIND.SESSION` 같은 것. [세션 바인딩](/ko/guide/proxy/#session-bindings) 참고)은 관측한 gori 프로세스의 메모리에만 있습니다. `settings.json`에도, 프로젝트 데이터베이스에도 기록되지 않습니다.
 
-`gori run`은 호출마다 프로세스 하나이며, 스윕은 추출 소스가 아니므로 공격 페이로드를 되비추는 응답이 세션을 바꾸지 못합니다. 선언된 바인딩을 참조하는 헤드리스 `fuzz` / `mine` / `sequence` / `discover` 템플릿은 그것을 채울 수단이 없어, 토큰이 리터럴 텍스트 그대로 나갑니다(거부되지 않습니다).
+`gori run`은 호출마다 프로세스 하나이며, 스윕은 추출 소스가 아니므로 공격 페이로드를 되비추는 응답이 세션을 바꾸지 못합니다. 선언된 바인딩을 참조하는 헤드리스 `fuzz` / `mine` / `sequence` / `discover` 템플릿은 바인딩을 채울 수단이 없어, 토큰이 리터럴 텍스트로 나갑니다(거부되지 않습니다).
 
 `--bind-from FLOW-ID`는 캡처된 플로우 하나(로그인)를 의도적 전송 경로로 재생합니다. 그 응답이 바인딩 테이블을 채우고, 같은 프로세스 안에서 스윕이 이어 실행됩니다.
 
@@ -992,11 +992,11 @@ gori run fuzz 42 --wordlist ids.txt --bind-from 17
 # bind-from: flow #17 replayed → bound $BIND.SESS
 ```
 
-하나의 stdio 세션에서 `gori mcp` 도구를 두 번 호출하는 경우도 같은 방식으로 동작합니다.
+stdio 세션 하나에서 `gori mcp` 도구를 두 번 호출할 때도 같은 방식으로 동작합니다.
 
 ### run import {#run-import}
 
-프로젝트의 History로 플로우를 일괄 임포트합니다. TUI의 Import 오버레이에 대응하는 CLI입니다([Proxy & History → 임포트](/ko/guide/proxy/#import) 참고). 소스 플래그는 정확히 하나만 지정해야 하며, 모든 소스는 PATH가 `-`이면 stdin을 읽습니다(`generator | gori run import --urls -`). stdin은 파이프나 리다이렉트여야 합니다. 트래픽은 보내지 않습니다.
+프로젝트의 History로 플로우를 일괄 임포트합니다. TUI의 Import 오버레이에 대응하는 CLI입니다([Proxy & History → 임포트](/ko/guide/proxy/#import) 참고). 소스 플래그는 하나만 지정해야 하며, 모든 소스는 PATH가 `-`이면 stdin을 읽습니다(`generator | gori run import --urls -`). stdin은 파이프나 리다이렉트여야 합니다. 트래픽은 보내지 않습니다.
 
 ```bash
 gori run import --postman api.postman_collection.json --db ./assessment.db --format json
@@ -1030,7 +1030,7 @@ gori run sitemap --in-scope --format paths
 
 트리의 루트는 오리진(스킴, 호스트, 포트)마다 하나라서, `http://127.0.0.1:19021`, `http://127.0.0.1:19022`, `https://127.0.0.1:8443`은 루트 세 개가 됩니다. `paths`는 엔드포인트마다 기본 포트를 뺀 전체 URL을 출력합니다(`GET  https://127.0.0.1:8443/only-tls`). `json`의 호스트 객체는 `host`에 포트 없는 호스트를 그대로 두고 `scheme`, `port`, `origin`(`paths`가 앞에 붙이는 값)을 더합니다. 태그는 호스트에 붙으므로 그 호스트의 모든 오리진 아래에 보입니다.
 
-**`sitemap tag`**: 경로 하나에 자유 텍스트 메모를 고정합니다. TUI Sitemap에 보이는 그 메모입니다.
+**`sitemap tag`**: 경로 하나에 자유 텍스트 메모를 고정합니다. TUI Sitemap에 보이는 메모와 같습니다.
 
 ```bash
 gori run sitemap tag --host api.example.com --path /v1/users --tag "IDOR candidate"
@@ -1039,7 +1039,7 @@ gori run sitemap tag --list
 gori run sitemap tag --list --json   # [{"host","path","tag"}], MCP list_sitemap_tags와 같은 배열
 ```
 
-**`sitemap params`**: TUI [Params 서브탭](/ko/guide/proxy/#params)과 같은 파라미터 목록입니다. 오리진(스킴, 호스트, 포트), 메서드, 경로, 위치, 이름마다 한 줄씩 나오며, 그 이름이 나온 플로우 수, 서로 다른 값 최대 `--samples`개(기본값 5), 그리고 4바이트 이상인 값이 디코딩된 응답 본문의 앞 256 KiB 안에 그대로 나타나면 `reflected`가 붙습니다(관찰일 뿐 취약점 판정은 아닙니다).
+**`sitemap params`**: TUI [Params 서브탭](/ko/guide/proxy/#params)과 같은 파라미터 목록입니다. 오리진(스킴, 호스트, 포트), 메서드, 경로, 위치, 이름마다 한 줄씩 나옵니다. 각 줄에는 그 이름이 나온 플로우 수와 서로 다른 값 최대 `--samples`개(기본값 5)가 붙고, 4바이트 이상인 값이 디코딩된 응답 본문의 앞 256 KiB 안에 그대로 나타나면 `reflected`도 붙습니다(관찰일 뿐 취약점 판정은 아닙니다).
 
 ```bash
 gori run sitemap params --host api.example.com
@@ -1072,7 +1072,7 @@ gori run sitemap export --in-scope --examples > api.json
 - **파라미터**(query, header, cookie)는 그 operation의 모든 샘플에 있을 때만 `required`입니다. 표준 브라우저 헤더는 빼고, 반복된 쿼리 키는 배열로 씁니다.
 - **본문**: 요청 본문과 상태 코드별 응답에 모든 샘플에서 추론한 스키마가 붙습니다. JSON 스키마는 타입을 합치고(`integer`와 `number`는 `number`로, 다른 타입은 `oneOf`로), 객체 속성은 합집합으로 모으며, 모든 샘플에 있던 멤버만 `required`로 둡니다. 폼은 객체 스키마, 그 밖의 미디어 타입은 문자열이 됩니다.
 - **보안**: `Authorization` 헤더는 `http` bearer, basic, digest 스킴이 됩니다. 다른 자격 증명 헤더(`X-Api-Key`, `X-Auth-Token` 등)와 세션 쿠키는 `apiKey` 스킴이 됩니다. 값은 쓰지 않습니다.
-- **건너뜀**: gori가 직접 보낸 요청(Repeater, Fuzzer, Miner, Discover 등. `--include-gori`를 주면 포함), WebSocket, gRPC, SSE, 응답이 완료되지 않은 플로우, 그리고 OpenAPI에 자리가 없는 메서드(CONNECT, WebDAV)는 건너뛰고 stderr에 개수를 적습니다.
+- **건너뜀**: gori가 직접 보낸 요청(Repeater, Fuzzer, Miner, Discover 등. `--include-gori`를 주면 포함), WebSocket, gRPC, SSE, 응답이 완료되지 않은 플로우, OpenAPI에 자리가 없는 메서드(CONNECT, WebDAV)는 건너뛰고 stderr에 개수를 적습니다.
 
 `-q`/`--query=QL`(위치 인자로도 가능), `--in-scope`, `--hide-static`은 `history`처럼 플로우 단위로 읽을 대상을 좁힙니다. `--host`는 정확한 호스트, `--path=PREFIX`는 경로 접두사입니다. 여러 origin에 걸친 플로우는 문서 하나에 모든 origin을 `servers`로 적고, 그중 일부만 응답한 경로에는 그 origin을 따로 적습니다. API 하나당 문서 하나가 필요하면 `--host`를 쓰세요. `--max-samples=N`(기본값 20)은 operation마다 읽을 플로우 수, `--max-flows=N`(기본값 5000)은 전체 플로우 수, `--max-endpoints=N`(기본값 1000)은 남길 operation 수의 상한입니다. 상한 때문에 문서가 잘리면 stderr에 알려줍니다.
 
@@ -1103,7 +1103,7 @@ gori run oast presets --check --format json
 | `--format=FMT` | `text`(기본) 또는 `json` |
 | `--project=NAME` · `--db=PATH` | `--check`와 함께: 그 프로젝트가 접속하는 방식(고정 업스트림 프록시·타임아웃)으로 프로브 |
 
-`listen`이 실패할 때도 같은 단계를 이름으로 밝힙니다. `tls-verify`라면 프로바이더를 바꾸지 말고 이 머신의 트러스트 스토어를 고치세요. `SSL_CERT_FILE=/path/to/ca-bundle.crt`(또는 `SSL_CERT_DIR=/path/to/certs`)로 실행해 사설 CA나 TLS 검사 프록시의 CA를 신뢰시키세요. gori 자신의 서비스 트래픽에서 이 번들은 추가로 얹히므로(시스템 스토어를 그대로 로드) 공개 프리셋도 계속 동작합니다. `--ca-file` 플래그는 없습니다.
+`listen`이 실패할 때도 같은 단계 이름을 알려 줍니다. `tls-verify`라면 프로바이더를 바꾸지 말고 이 머신의 트러스트 스토어를 고치세요. `SSL_CERT_FILE=/path/to/ca-bundle.crt`(또는 `SSL_CERT_DIR=/path/to/certs`)로 실행해 사설 CA나 TLS 검사 프록시의 CA를 신뢰시키세요. gori의 서비스 트래픽에서 이 번들은 추가로 로드되므로(시스템 스토어도 함께 로드) 공개 프리셋도 계속 동작합니다. `--ca-file` 플래그는 없습니다.
 
 `listen` 옵션:
 
@@ -1117,9 +1117,9 @@ gori run oast presets --check --format json
 | `--save` | 등록을 프로젝트 OAST 세션으로 저장(`oast list` 참고) |
 | `--json` | 각 콜백을 JSON 라인으로 출력(MCP와 동일한 형태) |
 
-`--save`는 즉석 리스너를 프로젝트 리스너로 바꿉니다. 모든 콜백이 프로젝트에 기록되고(그래서 TUI OAST 탭에 같은 히트가 보이고), 종료해도 등록이 유지되어 나중에 `oast resume ID`로 이어받을 수 있으며, 아웃오브밴드 프로브 룰(`ssrf_oast`, `xxe_oast`, `cmd_injection_oast`, `rfi_oast`)이 페이로드를 만들어낼 세션을 갖게 됩니다. 세션이 없으면 이 룰들은 아무것도 계획하지 않고, `gori run probe --active`가 그 사실을 알려줍니다. 세션 명령들과 마찬가지로 `--project` / `--db`를 받습니다. 정리는 `oast release ID`로 합니다.
+`--save`는 즉석 리스너를 프로젝트 리스너로 바꿉니다. 모든 콜백이 프로젝트에 기록되고(그래서 TUI OAST 탭에 같은 히트가 보이고), 종료해도 등록이 유지되어 나중에 `oast resume ID`로 이어받을 수 있으며, 아웃오브밴드 프로브 룰(`ssrf_oast`, `xxe_oast`, `cmd_injection_oast`, `rfi_oast`)이 페이로드를 만들어낼 세션이 생깁니다. 세션이 없으면 이 룰들은 아무것도 계획하지 않고, `gori run probe --active`가 그 사실을 알려줍니다. 세션 명령들과 마찬가지로 `--project` / `--db`를 받습니다. 정리는 `oast release ID`로 합니다.
 
-**`oast list` / `resume` / `release`**: 아래의 프로바이더와 달리 프로젝트에 저장된 리스닝 세션입니다. 프로바이더는 어디서 듣는지를, 세션은 그 위의 살아 있는 등록 하나를 뜻합니다. 등록은 그것을 만든 프로세스보다 오래 남으므로 어제 심어둔 페이로드도 계속 지켜볼 수 있습니다.
+**`oast list` / `resume` / `release`**: 아래의 프로바이더와 달리 프로젝트에 저장된 리스닝 세션입니다. 프로바이더는 어디서 듣는지를, 세션은 그 위의 살아 있는 등록 하나를 뜻합니다. 등록은 만든 프로세스가 끝난 뒤에도 남으므로 어제 심어둔 페이로드도 계속 지켜볼 수 있습니다.
 
 ```bash
 gori run oast list                                       # id, 프로바이더, 페이로드 호스트, 히트 수, 마지막 폴링
@@ -1129,7 +1129,7 @@ gori run oast resume 7 --once --json                     # 한 번만 폴링하�
 gori run oast release 7                                  # 서버 측 등록 해제
 ```
 
-`resume`과 `release`는 세션 **id**(`7`, 또는 `list`가 출력하는 `#7`)를 받습니다. `resume`은 서버 측 상태를 다시 살려 이미 심어둔 페이로드가 계속 resolve되게 한 뒤 폴링합니다. 받은 콜백은 모두 프로젝트에 기록되므로 TUI OAST 탭에서 같은 hit를 보게 되고, `last_poll_at`도 TUI 리스너처럼 갱신됩니다. Ctrl-C는 폴링만 멈추고 등록은 유지합니다. `release`는 등록을 해제합니다. 어느 쪽이든 저장된 콜백은 남습니다. 자동으로 재개되는 것은 없습니다.
+`resume`과 `release`는 세션 **id**(`7`, 또는 `list`가 출력하는 `#7`)를 받습니다. `resume`은 서버 측 상태를 다시 살려 이미 심어둔 페이로드가 계속 resolve되게 한 뒤 폴링합니다. 받은 콜백은 모두 프로젝트에 기록되므로 TUI OAST 탭에 같은 히트가 보이고, `last_poll_at`도 TUI 리스너처럼 갱신됩니다. Ctrl-C는 폴링만 멈추고 등록은 유지합니다. `release`는 등록을 해제합니다. 어느 쪽이든 저장된 콜백은 남습니다. 자동으로 재개되는 것은 없습니다.
 
 | Option | Description |
 |--------|-------------|
@@ -1147,7 +1147,7 @@ gori run oast providers add --name lab --kind custom-http --host https://oast.la
 gori run oast providers enable p_1
 ```
 
-`enable`, `disable`, `update`, `delete`는 표시 이름이 아니라 프로바이더 **id**(`p_1` 또는 그냥 `1`)를 받습니다. `add`가 부여한 id를 출력하고, `list`에도 나옵니다. `list`는 `settings.json`의 전역 프로바이더도 `g_<hex>`로 보여 줍니다. 이것들은 여기서 읽기 전용입니다.
+`enable`, `disable`, `update`, `delete`는 표시 이름이 아니라 프로바이더 **id**(`p_1` 또는 그냥 `1`)를 받습니다. `add`가 부여한 id를 출력하고, `list`에도 나옵니다. `list`는 `settings.json`의 전역 프로바이더도 `g_<hex>`로 보여 줍니다. 전역 프로바이더는 여기서 읽기 전용입니다.
 
 | Option | Description |
 |--------|-------------|
@@ -1160,7 +1160,7 @@ gori run oast providers enable p_1
 
 ### run jwt {#run-jwt}
 
-JWT를 디코드, 검증, 재서명하거나 공격 페이로드를 생성합니다. 저장소 없는 계산입니다. 토큰은 `<token>` 인자나 stdin에서 받습니다. 5개 세그먼트의 암호화 토큰(JWE)은 보호 헤더까지만 디코드합니다. gori는 `alg`/`enc`/`kid`를 읽을 뿐 클레임을 복호화하지 않습니다.
+JWT를 디코드, 검증, 재서명하거나 공격 페이로드를 생성합니다. 프로젝트 없이 로컬에서 계산합니다. 토큰은 `<token>` 인자나 stdin에서 받습니다. 5개 세그먼트의 암호화 토큰(JWE)은 보호 헤더까지만 디코드합니다. gori는 `alg`/`enc`/`kid`를 읽을 뿐 클레임을 복호화하지 않습니다.
 
 ```bash
 gori run jwt eyJhbGci...                        # 디코드(기본)
@@ -1176,8 +1176,8 @@ gori run jwt eyJhbGci... --attacks --key ./public.pem
 | Option | Description |
 |--------|-------------|
 | `--decode` | header / payload / signature 디코드(기본) |
-| `--encode` | `--alg`와 `--secret` / `--key`로 토큰 클레임 재서명. `--header`와 `--payload`를 둘 다 주면 토큰을 읽지 않고, 하나만 주면 나머지 쪽은 여전히 `<token>` 인자나 STDIN에서 읽습니다(`""`나 `</dev/null`을 주면 `{}`에서 시작) |
-| `--verify` | 토큰 자신의 서명을 `--secret` / `--key`로 검증(둘 중 하나 필수, `--secret ''`은 빈 secret 확인). `verified: yes\|no`와 `reason`을 출력하고 검증되지 않으면 1로 종료합니다. `--format json`은 `code`(`signature_mismatch`, `unsigned`, `alg_unsupported`, …)를 더합니다 |
+| `--encode` | `--alg`와 `--secret` / `--key`로 토큰 클레임 재서명. `--header`와 `--payload`를 둘 다 주면 토큰을 읽지 않고, 하나만 주면 나머지 쪽은 `<token>` 인자나 STDIN에서 읽습니다(`""`나 `</dev/null`을 주면 `{}`에서 시작) |
+| `--verify` | 토큰의 서명을 `--secret` / `--key`로 검증(둘 중 하나 필수, `--secret ''`은 빈 secret 확인). `verified: yes\|no`와 `reason`을 출력하고 검증되지 않으면 1로 종료합니다. `--format json`은 `code`(`signature_mismatch`, `unsigned`, `alg_unsupported`, …)를 더합니다 |
 | `--attacks` | 테스트 페이로드 생성(alg:none, weak-secret, header injection) |
 | `--alg=ALG` | `--encode`용 서명 alg: `HS256`(기본) \| `HS384` \| `HS512` \| `RS256/384/512` \| `PS256/384/512` \| `ES256/384/512` \| `EdDSA` \| `none` |
 | `--secret=SECRET` | HS 알고리즘용 HMAC 시크릿 |
@@ -1190,7 +1190,7 @@ gori run jwt eyJhbGci... --attacks --key ./public.pem
 
 ### run cookie {#run-cookie}
 
-서명된 Flask / Rack / Django 세션 쿠키를 디코드, 검증, 브루트포스, 위조합니다. 저장소 없는 계산입니다. 쿠키는 `<cookie>` 인자나 stdin에서 받습니다.
+서명된 Flask / Rack / Django 세션 쿠키를 디코드, 검증, 브루트포스, 위조합니다. 프로젝트 없이 로컬에서 계산합니다. 쿠키는 `<cookie>` 인자나 stdin에서 받습니다.
 
 ```bash
 gori run cookie 'eyJ1c2VyIjoi...'                            # 기본은 decode, 형식은 자동 판별
@@ -1215,7 +1215,7 @@ gori run cookie --forge --type flask --secret s3cret --payload '{"user":"admin"}
 
 ### run decoder {#run-decoder}
 
-값에 대해 [Decoder](/ko/guide/decoder/) 체인을 실행합니다. 단계는 `|`, `>`, `,`로 구분합니다.
+값에 [Decoder](/ko/guide/decoder/) 체인을 실행합니다. 단계는 `|`, `>`, `,`로 구분합니다.
 
 `exec:COMMAND`로 쓴 단계는 컨버터가 아니라 [외부 프로세스 훅](/ko/guide/scripting/#process-hooks)입니다.
 현재 값이 `COMMAND`의 stdin으로 가고 그 stdout이 단계의 출력이 됩니다. 셸 없이 exec되므로 세 구분자는
@@ -1258,7 +1258,7 @@ gori run issues create --title "IDOR on /v1/users/{id}" --severity high --notes-
 report-generator | gori run issues update 7 --status confirmed --notes-stdin
 ```
 
-`--notes`, `--notes-file`, `--notes-stdin`은 함께 쓸 수 없고, 본문은 바이트 그대로 읽힙니다. 여러 줄 UTF-8도 CRLF도 보존됩니다(프로젝트 env var로 바인딩된 값은 다른 이슈 필드와 마찬가지로 `$ENV.NAME`으로 마스킹됩니다). 파일이나 파이프로 넘긴 작성물은 프로세스 목록과 셸 히스토리에 남지 않습니다. `create`에서는 이슈와 한 트랜잭션에 기록됩니다. 노트를 비울 때는 `update`에 `--notes ''`를 씁니다. 아무 바이트도 주지 않은 파일이나 파이프는 거부되므로, 리포트 생성기가 죽어도 기존 작성물이 지워지지 않습니다. `--notes-stdin`도 `--request-stdin`처럼 파이프나 리다이렉트(`--notes-stdin < notes.md`)를 요구하고 터미널은 거부합니다.
+`--notes`, `--notes-file`, `--notes-stdin`은 함께 쓸 수 없고, 본문은 바이트 그대로 읽습니다. 여러 줄 UTF-8도 CRLF도 보존됩니다. 프로젝트 env var로 바인딩된 값은 다른 이슈 필드와 마찬가지로 `$ENV.NAME`으로 마스킹됩니다. 파일이나 파이프로 넘긴 본문은 프로세스 목록과 셸 히스토리에 남지 않습니다. `create`에서는 이슈와 한 트랜잭션에 기록됩니다. 노트를 비울 때는 `update`에 `--notes ''`를 씁니다. 내용이 없는 파일이나 파이프는 거부되므로, 리포트 생성기가 죽어도 기존 노트가 지워지지 않습니다. `--notes-stdin`도 `--request-stdin`처럼 파이프나 리다이렉트(`--notes-stdin < notes.md`)를 요구하고 터미널은 거부합니다.
 
 | Option | Description |
 |--------|-------------|
@@ -1272,7 +1272,7 @@ report-generator | gori run issues update 7 --status confirmed --notes-stdin
 | `update <id>…` | id가 여럿이면 `--severity` / `--status` / `--cvss` / `--host`를 한 번의 쓰기로 각각에 적용하고, 나머지는 id 하나만 받습니다. `-t`/`--title`, `--cvss` (새 점수/벡터. 빈 문자열로 초기화), `-s`/`--severity`, `-n`/`--notes` (빈 문자열로 초기화), `--notes-file=FILE`, `--notes-stdin`, `--status` (`open`\|`confirmed`\|`false-positive` 또는 `fp`\|`resolved`), `--host` (빈 문자열로 초기화), `--flow=ID` (시드 플로우. 빈 문자열로 초기화하며, 이전 시드는 삭제 가능한 링크로 남음) |
 | `delete <id>…` (`rm`) | 이슈와 그 증거 링크를 삭제합니다(id가 하나라도 없으면 아무것도 지우지 않음). `-y`/`--yes`가 필요합니다. `--json`이면 `{"ok":true,"deleted":true,"ids":[…]}`로 답합니다(id가 하나여도 같음). 보고서에는 남기고 닫힌 상태로만 표시하려면 `update <id> --status=resolved`를 쓰세요 |
 
-`--format sarif`는 [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) 로그를 씁니다. GitHub code scanning, DefectDojo, Azure DevOps가 그대로 읽는 형식입니다. 이슈 하나가 result 하나가 되며, severity는 SARIF `level`로 매핑되고(5단계 원본은 `rank`와 룰의 `security-severity`에 보존), `false-positive`/`resolved` 상태는 `suppression`으로 나가 정리한 이슈가 다시 열린 것으로 보이지 않습니다. 연결된 플로우는 실제 헤더와 (디코딩·64 KiB 상한) 본문을 담은 `webRequest`/`webResponse`로 함께 실립니다.
+`--format sarif`는 [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) 로그를 씁니다. GitHub code scanning, DefectDojo, Azure DevOps가 읽는 형식입니다. 이슈 하나가 result 하나가 되며, severity는 SARIF `level`로 매핑되고(5단계 원본은 `rank`와 룰의 `security-severity`에 보존), `false-positive`/`resolved` 상태는 `suppression`으로 나가 정리한 이슈가 다시 열린 것으로 보이지 않습니다. 연결된 플로우는 실제 헤더와 (디코딩·64 KiB 상한) 본문을 담은 `webRequest`/`webResponse`로 함께 실립니다.
 
 이 로그에서 자격 증명 헤더 값은 기본적으로 `[REDACTED]`이며, 무언가 가려졌으면 메시지에 `gori/sensitiveHeadersRedacted: true`가 붙습니다. `history --format json`, `evidence show`와 같은 기본값입니다. `--include-sensitive`를 주면 캡처된 값을 씁니다. 반복된 헤더는 그 필드가 허용하는 방식으로 합칩니다. 리스트 값은 `, `로, `Cookie` 쌍은 `; `로 잇습니다. `Set-Cookie`는 합칠 수 없으므로 필드들을 줄바꿈으로 이어 쓰고, 메시지의 `gori/setCookie` 속성에도 필드마다 하나씩 나열합니다.
 
@@ -1312,11 +1312,11 @@ gori run fuzz --flow 42 --auto --preset sqli > hits.txt && gori run notify "fuzz
 | `--level=LEVEL` | `info`(기본) \| `success` \| `warn` \| `error`. 그 밖의 값은 거부 |
 | `--format json` / `--json` | `{ok, id, project, summary, tui}`. `tui`는 `{live, windows}` 또는 `{unknown: true}`이며, MCP `reply_to_operator`, `get_current_context`와 같은 형태 |
 
-이 줄은 프로젝트 이벤트 피드에 `script` 소스로 기록되므로, 링에는 에이전트 답장에 붙는 `ai` 표시 없이 뜨고 Activity 패널에서 따로 걸러 볼 수 있습니다. TUI가 열려 있든 아니든 기록되고 `notify`는 어느 쪽이든 `0`으로 끝납니다. 출력이 창이 있어 보여줬는지를 알려줍니다. 창이 없었다면 다음에 그 프로젝트를 여는 TUI가, 그동안 도착한 에이전트 답장과 함께 노트 하나로 요약해 보여줍니다.
+이 줄은 프로젝트 이벤트 피드에 `script` 소스로 기록되므로, 링에는 에이전트 답장에 붙는 `ai` 표시 없이 뜨고 Activity 패널에서 따로 걸러 볼 수 있습니다. TUI가 열려 있든 아니든 기록되고 `notify`는 어느 쪽이든 `0`으로 끝납니다. 창이 있어 보여줬는지는 출력에 나옵니다. 창이 없었다면 다음에 그 프로젝트를 여는 TUI가, 그동안 도착한 에이전트 답장과 함께 노트 하나로 요약해 보여줍니다.
 
 ### run links {#run-links}
 
-이슈나 노트가 가리키는 증거입니다. 캡처된 플로우, Repeater 세션, Fuzz / Miner 실행이 대상이 됩니다. Markdown 이슈 내보내기는 이미 이 포인터를 해석해 넣습니다. 이 명령은 포인터를 나열하고 편집합니다.
+이슈나 노트가 가리키는 증거입니다. 캡처된 플로우, Repeater 세션, Fuzz / Miner 실행이 대상입니다. Markdown 이슈 내보내기는 이미 이 포인터를 해석해 넣습니다. 이 명령은 포인터를 나열하고 편집합니다.
 
 ```bash
 gori run links --owner=issue --id=7
@@ -1338,7 +1338,7 @@ gori run links delete --owner=note --id=2 --ref=repeater --ref-id=3
 
 ### run evidence {#run-evidence}
 
-Issue의 동결된 증거입니다. 캡처된 플로우나 Repeater 탭의 교환 하나를, 그것이 취약점을 확인해 준 순간에 복사한 변경 불가 사본입니다. `links`는 live 출처를 가리키고, `evidence`는 보관된 바이트를 담습니다. Repeater의 다음 전송이나 History 보존 정리는 사본에 닿지 못하므로, 응답이 취약점을 확인해 줄 때 한 번, 재테스트 뒤에 한 번 더 동결하세요. 스냅숏 하나를 여러 Issue에 연결할 수 있고, 마지막 Issue 연결을 끊어도 다시 연결하거나 삭제할 때까지 고아 상태로 남습니다.
+Issue의 동결된 증거입니다. 캡처된 플로우나 Repeater 탭의 교환 하나를 취약점이 확인된 순간에 복사한 변경 불가 사본입니다. `links`는 live 출처를 가리키고, `evidence`는 보관된 바이트를 담습니다. Repeater의 다음 전송이나 History 보존 정리는 사본에 영향을 주지 않으므로, 응답으로 취약점이 확인됐을 때 한 번, 재테스트 뒤에 한 번 더 동결하세요. 스냅숏 하나를 여러 Issue에 연결할 수 있고, 마지막 Issue 연결을 끊어도 다시 연결하거나 삭제할 때까지 고아 상태로 남습니다.
 
 ```bash
 gori run evidence freeze --issue=7 --ref=repeater --ref-id=3       # 사본 + live 링크
@@ -1355,7 +1355,7 @@ gori run evidence delete 12 --yes
 | Option | Description |
 |--------|-------------|
 | `--issue=N` | 연결할 Issue. `freeze`, `link`, `unlink`에서 필수. `list`에서는 한 Issue의 사본으로 좁히고, 생략하면 프로젝트 전체 보관함(최신순, 고아 포함)을 출력 |
-| `--ref=KIND` | `freeze`의 출처 종류: `flow` 또는 `repeater`. fuzz / miner 세션은 교환이 하나가 아니라 대상이 아닙니다 |
+| `--ref=KIND` | `freeze`의 출처 종류: `flow` 또는 `repeater`. fuzz / miner 세션에는 단일 교환이 없어 대상이 아닙니다 |
 | `--ref-id=M` | `freeze`의 출처 id |
 | `--no-link` | `freeze`가 사본만 만듭니다. 기본값은 `links add`가 만들 live 링크도 같은 트랜잭션에 함께 기록 |
 | `--allow-drift` | 저장된 응답이 도착한 뒤에 요청이 수정된 Repeater 탭도 `freeze`합니다. 이 옵션 없이는 거부됩니다(아래 참고) |
@@ -1364,11 +1364,11 @@ gori run evidence delete 12 --yes
 
 한 번도 보내지 않은 Repeater 탭은 거부하며, 응답이 아직 도착하지 않은 플로우도 거부합니다. Repeater 복사본은 탭에 저장된 요청(바인딩은 펼치지 않은 상태)과 저장소의 마지막 응답(성공한 전송의 것)을 짝지으므로, 취약점을 확인해 준 전송 직후에 동결하세요.
 
-**요청 드리프트.** Repeater 탭은 요청 하나와 응답 하나를 들고 있고, 요청을 고쳐도 옆의 응답은 그대로입니다. 전송 → 요청 수정 → 동결 순서로 하면 수정된 요청과 이전 교환의 응답이 한 사본에 묶입니다. gori는 각 전송이 나간 요청의 SHA-256을 기록합니다. `freeze`는 그런 탭을 이름을 밝혀 거부하고 다시 보내라고 안내하며, `--allow-drift`를 주면 어긋난 쌍을 그대로 기록하고, TUI는 기록하기 전에 묻습니다. 이 버전보다 오래된 gori가 저장한 응답에는 기록된 다이제스트가 없습니다. 그런 행은 드리프트가 아니라 "알 수 없음"으로 취급합니다. WebSocket 복사본은 핸드셰이크입니다. 프레임 기록은 복사되지 않습니다. 프로젝트의 동결 증거 총량은 256 MB로 제한됩니다. 넘으면 사본을 삭제할 때까지 `freeze`가 거부합니다. `show`는 본문을 디코딩해 텍스트 형식에서는 64 KB에서 자릅니다(저장된 사본은 온전합니다). JSON 형식은 `get_flow`와 같은 모양입니다.
+**요청 드리프트.** Repeater 탭은 요청 하나와 응답 하나를 들고 있고, 요청을 고쳐도 옆의 응답은 그대로입니다. 전송 → 요청 수정 → 동결 순서로 하면 수정된 요청과 이전 교환의 응답이 한 사본에 묶입니다. gori는 각 전송이 나간 요청의 SHA-256을 기록합니다. `freeze`는 그런 탭을 이름을 밝혀 거부하고 다시 보내라고 안내하며, `--allow-drift`를 주면 어긋난 쌍을 그대로 기록하고, TUI는 기록하기 전에 묻습니다. 이 버전보다 오래된 gori가 저장한 응답에는 기록된 다이제스트가 없으므로 드리프트가 아니라 "알 수 없음"으로 취급합니다. WebSocket 복사본은 핸드셰이크입니다. 프레임 기록은 복사되지 않습니다. 프로젝트의 동결 증거 총량은 256 MB로 제한됩니다. 넘으면 사본을 삭제할 때까지 `freeze`가 거부합니다. `show`는 본문을 디코딩해 텍스트 형식에서는 64 KB에서 자릅니다(저장된 사본은 온전합니다). JSON 형식은 `get_flow`와 같은 모양입니다.
 
 ### run retest {#run-retest}
 
-Issue의 리테스트: 결함을 재현하는 Repeater 전송을 순서대로 나열하고, 각 단계에 역할과 기대 결과 하나를 붙인 것, 그리고 최근 실행 기록입니다. `links`는 무엇이 관련되어 있는지를, `evidence`는 결함을 증명한 바이트를 남기지만, 둘 다 실행할 수는 없습니다. 리테스트는 "먼저 #4로 로그인하고, 그다음 #5가 403을 주어야 한다"는 서술을 CI가 실행할 수 있는 형태로 바꿉니다.
+Issue의 리테스트입니다. 결함을 재현하는 Repeater 전송을 순서대로 나열해 각 단계에 역할과 기대 결과 하나를 붙인 것과 최근 실행 기록으로 이루어집니다. `links`는 무엇이 관련되어 있는지를, `evidence`는 결함을 증명한 바이트를 남기지만, 둘 다 실행할 수는 없습니다. 리테스트는 "먼저 #4로 로그인하고, 그다음 #5가 403을 주어야 한다"는 서술을 CI가 실행할 수 있는 형태로 바꿉니다.
 
 ```bash
 gori run retest add --issue=7 --repeater=4 --role=setup                        # 먼저 로그인
@@ -1415,15 +1415,15 @@ gori run retest forget 3                                                       #
 | `json:data.role=admin` | JSON 필드가 리터럴과 같음. 리터럴은 타입 없는 텍스트라 `n=3`은 숫자 `3`과 문자열 `"3"` 모두에 일치 |
 | `json-absent:data.token` | JSON 필드가 없음 |
 | `body:same` | 디코딩된 본문이 직전 `baseline` 단계와 동일 |
-| `body:diff` | 그것과 다름 |
+| `body:diff` | 그 본문과 다름 |
 
-JSON 경로는 `sequence --jsonpath`와 같은 문법입니다: 점 표기(`data.items.0.id`) 또는 괄호 표기(`$.data.items[0]["id"]`). 와일드카드, 필터, `..`, 닫히지 않은 괄호처럼 gori가 읽을 수 없는 경로는 단계를 추가할 때 거부되므로, 읽지 못하는 경로로 `json-absent:`가 통과하지 않습니다. 읽을 수 있는 경로가 없는 필드를 가리키면 평범한 부재입니다.
+JSON 경로는 `sequence --jsonpath`와 같은 문법으로, 점 표기(`data.items.0.id`)나 괄호 표기(`$.data.items[0]["id"]`)를 씁니다. 와일드카드, 필터, `..`, 닫히지 않은 괄호처럼 gori가 읽을 수 없는 경로는 단계를 추가할 때 거부되므로, 읽지 못하는 경로로 `json-absent:`가 통과하지 않습니다. 읽을 수 있는 경로가 없는 필드를 가리키면 필드가 없는 것으로 처리합니다.
 
-각 단계는 실행 시점에 Repeater 탭이 들고 있는 요청을 보냅니다. 그래서 리테스트는 고쳐지는 요청을 따라가고, `gori run evidence`는 당시 모습을 얼립니다. 모든 전송은 프로젝트 스코프와 Sandbox 게이트를 통과하며 History에 `src:retest`로, 이슈와 단계 번호를 달고 기록됩니다. 그래서 탭이 나중에 바뀌어도 결과 행은 자기가 보고한 응답을 열 수 있습니다. 탭에 저장된 응답은 덮어쓰지 않습니다.
+각 단계는 실행 시점에 Repeater 탭이 들고 있는 요청을 보냅니다. 그래서 리테스트는 고쳐지는 요청을 따라가고, `gori run evidence`는 당시 상태를 동결합니다. 모든 전송은 프로젝트 스코프와 Sandbox 게이트를 통과하며 History에 `src:retest`로, 이슈와 단계 번호를 달고 기록됩니다. 그래서 탭이 나중에 바뀌어도 결과 행에서 당시 보고된 응답을 열 수 있습니다. 탭에 저장된 응답은 덮어쓰지 않습니다.
 
-`setup` 단계가 실패하면 측정 단계는 중단되지만 cleanup은 실행됩니다. gori가 전송을 거부하면(스코프, Sandbox, exclude 규칙) 그 뒤는 모두 건너뛰며, cleanup도 `--allow-cleanup` 없이는 보내지 않습니다. 건너뛴 단계도 이유가 적힌 행을 남기므로 부분 실행이 통과처럼 읽히지 않습니다. `body:` 단언은 기준이 없을 때, 그리고 직전 `baseline` 단계가 자기 기대 결과를 못 맞췄을 때 통과가 아니라 `inconclusive`입니다.
+`setup` 단계가 실패하면 측정 단계는 중단되지만 cleanup은 실행됩니다. gori가 전송을 거부하면(스코프, Sandbox, exclude 규칙) 그 뒤는 모두 건너뛰며, cleanup도 `--allow-cleanup` 없이는 보내지 않습니다. 건너뛴 단계도 이유가 적힌 행을 남기므로 부분 실행이 통과로 보이지 않습니다. `body:` 단언은 기준이 없을 때나 직전 `baseline` 단계가 기대 결과를 맞추지 못했을 때 통과가 아니라 `inconclusive`입니다.
 
-판정이 `pass`가 되려면 모든 단계가 실행되고 모든 단언이 결정되어야 합니다. `blocked`는 `fail`보다 우선합니다. gori가 끝내기를 거부한 실행은 대상이 아니라 스코프 설정의 문제를 가리키기 때문입니다. `run`은 `pass`에서 `0`, 그 외에는 `1`로 종료합니다. Issue당 최근 20개 실행이 보존됩니다.
+판정이 `pass`가 되려면 모든 단계가 실행되고 모든 단언이 결정되어야 합니다. gori가 끝내기를 거부한 실행은 대상이 아니라 스코프 설정의 문제이므로 `blocked`는 `fail`보다 우선합니다. `run`은 `pass`에서 `0`, 그 외에는 `1`로 종료합니다. Issue당 최근 20개 실행이 보존됩니다.
 
 ### run rewriter {#run-rewriter}
 
@@ -1473,7 +1473,7 @@ gori run rewriter rm 3
 
 요청 헤드 규칙은 프록시가 전달하는 origin-form 요청 줄(`GET /path`)에 매칭되며, 평문 HTTP 프록시 플로우에 History가 저장하는 absolute-form(`GET http://host/path`)에는 매칭되지 않습니다. 그러니 `--find 'GET /path'`로 쓰세요.
 
-`preview`는 같은 규칙 플래그를 받아, 규칙을 저장하지 않고 저장된 플로우 중 몇 개가 바뀌었을지 보고합니다. `--format json`에는 `skipped`(본문이 너무 커서 JSON 규칙이 미리보기에서 뺀 플로우 수)와, 읽은 500개보다 오래된 플로우가 있을 때만 참인 `scan_capped`가 담깁니다. `rm`(`delete`), `enable`, `disable`은 목록의 규칙 id와 함께 `--scope`도 받습니다. 두 저장소가 규칙 번호를 각자 매기기 때문입니다. 목록은 범위를 `G`/`P` 접두어로 출력하고(`G*`는 이 프로젝트가 해당 전역 규칙의 기본값을 오버라이드했다는 뜻), 프록시가 적용하는 순서 그대로 전역 규칙을 먼저 보여 줍니다. [전역 규칙과 프로젝트 규칙](/ko/guide/proxy/#global-and-project-rules)을 참고하세요.
+`preview`는 같은 규칙 플래그를 받아, 규칙을 저장하지 않고 저장된 플로우 중 몇 개가 바뀌었을지 보고합니다. `--format json`에는 `skipped`(본문이 너무 커서 JSON 규칙이 미리보기에서 뺀 플로우 수)와, 읽은 500개보다 오래된 플로우가 있을 때만 참인 `scan_capped`가 담깁니다. 두 저장소가 규칙 번호를 각자 매기므로 `rm`(`delete`), `enable`, `disable`은 목록의 규칙 id와 함께 `--scope`도 받습니다. 목록은 범위를 `G`/`P` 접두어로 출력하고(`G*`는 이 프로젝트가 해당 전역 규칙의 기본값을 오버라이드했다는 뜻), 프록시가 적용하는 순서대로 전역 규칙을 먼저 보여 줍니다. [전역 규칙과 프로젝트 규칙](/ko/guide/proxy/#global-and-project-rules)을 참고하세요.
 
 **`rewriter update <id>`**: 규칙을 제자리에서 고칩니다. id와 적용 순서상의 위치는 그대로입니다. 위의 규칙 플래그에 `--enabled` / `--disabled`를 더해 받습니다. 생략한 플래그는 저장된 값을 유지하고, `--name ''`, `--host ''`, `--value ''`는 각 값을 지웁니다. id는 목록에 찍힌 그대로(`P#1`, `G#2`) 써도 되며, 그러면 저장소가 정해집니다. 이와 어긋나는 `--scope`는 거부됩니다. 전역 규칙에서 `--enabled` / `--disabled`는 이 프로젝트의 오버라이드를 설정합니다. `short_circuit` 규칙에서는 `--respond=inline|file|dir|fault`로 응답 방식을 정하고(생략하면 기존 방식을 유지하거나 함께 준 플래그를 따름), `--body-file ''`은 인라인 본문으로 되돌리며, `--no-fallthrough`는 `--fallthrough`를 다시 끕니다.
 
@@ -1485,7 +1485,7 @@ gori run rewriter update G#1 --disabled                  # 이 프로젝트에�
 
 본문 규칙은 HTTP/1.1과 HTTP/2 모두에서 필요에 따라 `Content-Length`를 다시 맞추고 청크를 해제합니다. 대화형 편집기는 [Proxy & History](/ko/guide/proxy/)를 참고하세요.
 
-**`rewriter preset`**: [응답 수정 프리셋](/ko/guide/proxy/#rewriter-presets) 설치. 평범한 Match & Replace 규칙을 써 주는 이름 붙은 출발점입니다. 동사: `list`, `add <name>`.
+**`rewriter preset`**: [응답 수정 프리셋](/ko/guide/proxy/#rewriter-presets) 설치. 일반 Match & Replace 규칙을 써 주는 이름 붙은 출발점입니다. 동사: `list`, `add <name>`.
 
 ```bash
 gori run rewriter preset list
@@ -1493,7 +1493,7 @@ gori run rewriter preset add unhide-hidden-fields
 gori run rewriter preset add remove-csp --scope global --disabled
 ```
 
-이름은 `unhide-hidden-fields`, `enable-disabled-fields`, `remove-length-limits`, `strip-validation`, `remove-csp`, `remove-security-headers`, `disable-sri`입니다. `add`는 `--scope=project|global`, `--disabled`(무장하지 않고 설치해 먼저 검토), `--format json`을 받습니다. `--format json`은 MCP `create_rule_from_preset`의 객체를 출력하며, 새 규칙의 `ids`도 거기 담깁니다. 설치되는 규칙은 `rewriter add`와 같은 경로를 지나므로 이후에도 목록에 나오고 편집·삭제됩니다. 같은 프리셋을 두 번 설치하면 규칙이 두 번 추가됩니다.
+이름은 `unhide-hidden-fields`, `enable-disabled-fields`, `remove-length-limits`, `strip-validation`, `remove-csp`, `remove-security-headers`, `disable-sri`입니다. `add`는 `--scope=project|global`, `--disabled`(활성화하지 않고 설치해 먼저 검토), `--format json`을 받습니다. `--format json`은 MCP `create_rule_from_preset`의 객체를 출력하며, 새 규칙의 `ids`도 거기 담깁니다. 설치되는 규칙은 `rewriter add`와 같은 경로를 지나므로 이후에도 목록에 나오고 편집·삭제됩니다. 같은 프리셋을 두 번 설치하면 규칙이 두 번 추가됩니다.
 
 **`rewriter extract`**: [세션 바인딩](/ko/guide/proxy/#session-bindings)을 선언하는 규칙입니다. `$BIND.NAME`을 어느 응답의 어디에서 읽을지 정합니다. 동사: `list`(기본), `add`, `update`, `rm`(`delete`), `enable`, `disable`.
 
@@ -1518,11 +1518,11 @@ gori run rewriter extract add --name CSRF --kind regex --selector 'name="csrf" v
 gori run rewriter extract update 1 --name SID --host ''
 ```
 
-**`rewriter bindings`**: 그 규칙들이 선언한 이름을 나열합니다(`--format text|json`). 값은 여기에 나오지 않습니다. 바인딩 값은 실행 중인 gori의 메모리에만 있고 어디에도 기록되지 않습니다. 살아 있는 값 테이블은 Rewriter 탭의 `bindings` 하위 탭에서 봅니다. 헤드리스 스윕에서는 `--bind-from`이 같은 프로세스 안에서 값을 채웁니다. [명령줄에서 세션 바인딩 쓰기](#session-bindings-from-the-command-line)를 참고하세요.
+**`rewriter bindings`**: 그 규칙들이 선언한 이름을 나열합니다(`--format text|json`). 값은 여기에 나오지 않습니다. 바인딩 값은 실행 중인 gori의 메모리에만 있고 어디에도 기록되지 않습니다. 실시간 값 테이블은 Rewriter 탭의 `bindings` 하위 탭에서 봅니다. 헤드리스 스윕에서는 `--bind-from`이 같은 프로세스 안에서 값을 채웁니다. [명령줄에서 세션 바인딩 쓰기](#session-bindings-from-the-command-line)를 참고하세요.
 
 ### run grpc {#run-grpc}
 
-gRPC [`.proto` 렌즈](/ko/guide/proxy/#proto-schema)를 명령줄에서: 이 프로젝트가 캡처된 gRPC를 어떤 스키마로 렌더하는지, 각 조각이 어디서 왔는지.
+gRPC [`.proto` 렌즈](/ko/guide/proxy/#proto-schema)를 명령줄에서 다룹니다. 이 프로젝트가 캡처된 gRPC를 어떤 스키마로 렌더하는지, 각 조각이 어디서 왔는지 보여 줍니다.
 
 ```bash
 gori run grpc                                  # 무엇이 로드됐는지 (schema가 기본 동사)
@@ -1532,7 +1532,7 @@ gori run grpc forget https://api.test:443      # 캐시된 대상 하나 버리�
 gori run grpc forget --all
 ```
 
-`schema`와 `forget`은 프로젝트 DB 밖을 건드리지 않습니다. `reflect`는 요청을 보냅니다. 대상의 `grpc.reflection.v1` 서비스에(없으면 `v1alpha`로, 실제 배포된 서버 대부분은 아직 이쪽입니다) 서비스 목록, 각 서비스를 선언한 파일, 그 파일들의 import 순으로 그래프가 닫힐 때까지 요청해 결과를 프로젝트에 캐시합니다. 다른 액티브 `gori run` 명령과 같은 스코프 게이트를 지나므로 범위를 벗어난 대상은 연결하기 전에 거부됩니다. 서버가 두 리플렉션 버전 모두 응답하지 않으면 명령이 그 사실을 알립니다. 스스로 다시 받아오는 것은 없습니다.
+`schema`와 `forget`은 프로젝트 DB 밖을 건드리지 않습니다. `reflect`는 요청을 보냅니다. 대상의 `grpc.reflection.v1` 서비스에(없으면 `v1alpha`로, 실제 배포된 서버 대부분은 아직 이쪽입니다) 서비스 목록, 각 서비스를 선언한 파일, 그 파일들의 import 순으로 그래프가 닫힐 때까지 요청해 결과를 프로젝트에 캐시합니다. 다른 액티브 `gori run` 명령과 같은 스코프 게이트를 지나므로 범위를 벗어난 대상은 연결하기 전에 거부됩니다. 서버가 두 리플렉션 버전 모두 응답하지 않으면 명령이 그 사실을 알립니다. 자동으로 다시 받아오지는 않습니다.
 
 | 옵션 | 설명 |
 |------|------|
@@ -1542,11 +1542,11 @@ gori run grpc forget --all
 | `--timeout=SECONDS` | `reflect`: 작업당 타임아웃(기본값: 프로젝트의 io 타임아웃) |
 | `--all` | `forget`: 캐시된 리플렉션 대상 전부 버리기 |
 
-디스크립터 셋 **파일**(Project settings → Proto schema)은 `forget`으로 해제되지 않습니다. 프로젝트 설정에서 경로를 지우세요. 파일과 리플렉션 페치가 어떤 선언에 대해 어긋나면 그 수는 `redefined`로 보고되고 리플렉션으로 받은 선언이 우선합니다.
+디스크립터 셋 **파일**(Project settings → Proto schema)은 `forget`으로 해제되지 않습니다. 프로젝트 설정에서 경로를 지우세요. 파일과 리플렉션 페치의 선언이 어긋나면 그 수는 `redefined`로 보고되고 리플렉션으로 받은 선언이 우선합니다.
 
 ### run graphql {#run-graphql}
 
-GraphQL 엔드포인트의 스키마를 간결한 SDL로 출력합니다. MCP `graphql_schema`의 헤드리스 버전으로, 루트 오퍼레이션과 그 인자·반환 타입, 그다음 거기서 닿는 모든 타입을 보여 줍니다(내장 타입 제외).
+GraphQL 엔드포인트의 스키마를 간결한 SDL로 출력합니다. MCP `graphql_schema`의 헤드리스 버전으로, 루트 오퍼레이션과 그 인자·반환 타입, 그다음 거기서 도달할 수 있는 모든 타입을 보여 줍니다(내장 타입 제외).
 
 ```bash
 gori run graphql schema 42                            # 플로우 42의 응답이 인트로스펙션 결과
@@ -1554,7 +1554,7 @@ gori run graphql schema 42 --send                     # ACTIVE: 그 요청을 �
 gori run graphql schema 42 --filter user --format json
 ```
 
-`--send`가 없으면 아무것도 보내지 않습니다. 플로우의 응답이 이미 인트로스펙션 결과(`data.__schema`)여야 합니다. 그렇지 않은 응답(인트로스펙션을 끈 서버는 `errors`로 답하며, 그 메시지를 함께 보여 줍니다)은 `--send`를 안내하며 거부하고, 캡처 상한에서 잘린 응답도 거부합니다. `--send`는 플로우의 요청을 인트로스펙션 쿼리로 바꿔, 플로우의 헤더를 유지한 채 `repeater send`와 같은 프로젝트 스코프 게이트를 지나 다시 보냅니다. 스키마가 아닌 답은 거부하며, 오래된 서버라면 `--legacy`를 권합니다.
+`--send`가 없으면 아무것도 보내지 않으므로 플로우의 응답이 이미 인트로스펙션 결과(`data.__schema`)여야 합니다. 그렇지 않은 응답은 `--send`를 안내하며 거부하고, 캡처 상한에서 잘린 응답도 거부합니다. 인트로스펙션을 끈 서버는 `errors`로 답하며, 거부할 때 그 메시지를 함께 보여 줍니다. `--send`는 플로우의 요청을 인트로스펙션 쿼리로 바꿔, 플로우의 헤더를 유지한 채 `repeater send`와 같은 프로젝트 스코프 게이트를 지나 다시 보냅니다. 스키마가 아닌 답은 거부하며, 오래된 서버라면 `--legacy`를 권합니다.
 
 | 옵션 | 설명 |
 |------|------|
@@ -1585,7 +1585,7 @@ gori run colormarker rm 3
 | 옵션 | 설명 |
 |--------|-------------|
 | `-w`, `--when=FILTER` | 필수. 플로우가 만족해야 할 조건 (아래 참고) |
-| `--color=NAME` | `red`, `orange`, `yellow`(기본), `green`, `blue`, `purple`. 활성 테마 팔레트로 해석되므로 밝은 테마와 어두운 테마 양쪽에서 제대로 읽힙니다. 또는 사용자 색상의 이름(아래 참고)이며, 이쪽은 절대 hex 값을 그대로 지닙니다 |
+| `--color=NAME` | `red`, `orange`, `yellow`(기본), `green`, `blue`, `purple`. 활성 테마 팔레트로 해석되므로 밝은 테마와 어두운 테마 양쪽에서 제대로 읽힙니다. 또는 사용자 색상의 이름(아래 참고)이며, 이쪽은 절대 hex 값을 지닙니다 |
 | `--style=STYLE` | `full`(기본)은 행 전체 배경을 칠하고, `strip`은 `TIME` 앞 좁은 컬럼에 색 셀 하나를 칠합니다 |
 | `--name=NAME` | 규칙 목록에 표시할 라벨 |
 | `--disabled` | 비활성 상태로 생성 |
@@ -1594,20 +1594,20 @@ gori run colormarker rm 3
 | `--up` / `--down` | `move` 시: 우선순위를 올리거나 내림 |
 | `--limit=N` | `preview` 시: 스캔할 최근 플로우 수(기본 500) |
 
-`update`에서는 모든 필드가 선택이며 규칙의 현재 값이 기본입니다. `--color`만 주면 색만 바꾸고 `--when`만 주면 조건만 바꿉니다. 삭제 후 재생성 대신 이 명령을 쓰세요. 다시 추가한 규칙은 자기 스코프 블록 맨 끝에 놓여 우선순위를 잃습니다. `enable` / `disable`은 따로 있습니다. 전역 규칙에서 그 둘은 이 프로젝트의 오버라이드를 설정하기 때문입니다.
+`update`에서는 모든 필드가 선택이며 규칙의 현재 값이 기본입니다. `--color`만 주면 색만 바꾸고 `--when`만 주면 조건만 바꿉니다. 삭제 후 재생성 대신 이 명령을 쓰세요. 다시 추가한 규칙은 해당 스코프 블록 맨 끝에 놓여 우선순위를 잃습니다. 전역 규칙에서는 이 프로젝트의 오버라이드를 설정하므로 `enable` / `disable`은 따로 있습니다.
 
 행의 색은 우선순위가 정합니다. Match & Replace는 활성화된 모든 규칙이 순서대로 실행되지만, 색상 규칙은 첫 번째로 매칭되는 활성 규칙이 행을 칠하고 나머지는 조회하지 않으므로, `colormarker`에는 `move` 동사가 있고 `rewriter`에는 없습니다. 전역 규칙이 프로젝트 규칙보다 먼저 해석됩니다.
 
-`--when`은 History QL 조건입니다. 자기가 칠하는 목록 위의 필터 바와 문법과 필드가 같으며 `~정규식`과 `AND` / `OR` / `NOT`, `-부정`, `(그룹)`을 모두 포함합니다. 캡처된 행이 스스로 답할 수 있는 항(`host:` `path:` `url:` `method:` `scheme:` `status:` `proto:`)은 쿼리 없이 메모리에서 매칭됩니다. 나머지(`body:` `header:` `size:` `dur:` `stub:` `static:` `src:` `scope:`)는 다시 그릴 때마다 규칙당 한 번의 배치 쿼리로 프로젝트 DB에 대해 해석됩니다. 그냥 두면 조용히 실패할 네 가지는 gori가 경고합니다.
+`--when`은 History QL 조건입니다. 칠할 목록 위의 필터 바와 문법·필드가 같으며 `~정규식`과 `AND` / `OR` / `NOT`, `-부정`, `(그룹)`을 모두 포함합니다. 캡처된 행만으로 판정할 수 있는 항(`host:` `path:` `url:` `method:` `scheme:` `status:` `proto:`)은 쿼리 없이 메모리에서 매칭됩니다. 나머지(`body:` `header:` `size:` `dur:` `stub:` `static:` `src:` `scope:`)는 다시 그릴 때마다 규칙당 한 번의 배치 쿼리로 프로젝트 DB에서 해석됩니다. 그냥 두면 조용히 실패할 네 가지는 gori가 경고합니다.
 
-- **`body:`는 여기서 텍스트 인덱스가 아니라 저장된 바이트를 *스캔*합니다.** 그래서 필터 바의 `body:`가 건너뛰는 바이너리 바디까지 닿지만, 각 방향 앞 64 KiB까지만이고 바이트는 *캡처된 그대로*입니다. 그 경계를 넘어선 매치나 압축된 바디 안의 매치는 칠해지지 않습니다. (경고)
+- **`body:`는 여기서 텍스트 인덱스가 아니라 저장된 바이트를 *스캔*합니다.** 그래서 필터 바의 `body:`가 건너뛰는 바이너리 바디까지 검사하지만, 각 방향 앞 64 KiB까지만이고 바이트는 *캡처된 그대로*입니다. 그 경계를 넘어선 매치나 압축된 바디 안의 매치는 칠해지지 않습니다. (경고)
 - **`host:`는 DNS 레이블 글롭이 아니라 부분문자열입니다.** `host:alpha.test`는 `xalpha.test`도 매칭합니다. (경고)
 - **아직 응답이 없는 플로우에는 status가 없습니다.** `status:` 규칙은 응답이 도착한 뒤에 그 행을 칠합니다. (경고)
 - **`scope:`는 `s` 표시 렌즈와 무관하게 프로젝트의 스코프 규칙을 따릅니다.** 스코프 규칙이 하나도 없으면 *아무것도* 스코프 안에 있지 않으므로 `scope:in`과 `scope:out` 둘 다 아무것도 칠하지 않고, 반대로 부정형(`-scope:in`)은 모든 행을 칠합니다. (경고)
 
-바로 거부되는 것들: 모르는 필드(그대로 두면 `hsot:`가 자유 텍스트 검색이 되어 규칙이 발동하지 않습니다), 컴파일되지 않는 `~` 패턴, 그 필드가 받지 않는 값(`size:>bogus`처럼 쓰면 항이 *버려져* 규칙이 말한 것보다 더 많이 칠하게 됩니다), 그리고 모든 플로우에 매칭되는 조건(빈 값이나 입력 중인 `host:`).
+다음은 바로 거부됩니다. 모르는 필드(그대로 두면 `hsot:`가 자유 텍스트 검색이 되어 규칙이 발동하지 않습니다), 컴파일되지 않는 `~` 패턴, 그 필드가 받지 않는 값(`size:>bogus`처럼 쓰면 항이 *버려져* 규칙에 적힌 것보다 더 많이 칠합니다), 모든 플로우에 매칭되는 조건(빈 값이나 입력 중인 `host:`)입니다.
 
-`preview`는 조건이 최근 플로우 중 몇 개에 매칭되는지와 몇 개를 칠하게 되는지를 함께 보고합니다. 앞선 활성 규칙이 이미 그 행을 차지했다면 두 숫자가 달라집니다. `preview`는 `--scope`도 받습니다. 전역 규칙은 모든 프로젝트 규칙보다 먼저 해석되므로, `--scope=global` 후보에게서 행을 뺏을 수 있는 프로젝트 규칙은 하나도 없습니다. `update`, `rm`(`delete`), `enable`, `disable`, `move`는 목록의 규칙 id와 `--scope`를 받습니다. 두 저장소가 서로 독립적으로 번호를 매기기 때문입니다. 목록은 스코프를 `G`/`P` 접두사로 출력합니다(`G*`는 이 프로젝트가 해당 전역 규칙의 기본값을 오버라이드했다는 뜻).
+`preview`는 조건이 최근 플로우 중 몇 개에 매칭되는지와 몇 개를 칠하게 되는지를 함께 보고합니다. 앞선 활성 규칙이 이미 그 행을 차지했다면 두 숫자가 달라집니다. `preview`는 `--scope`도 받습니다. 전역 규칙은 모든 프로젝트 규칙보다 먼저 해석되므로, `--scope=global` 후보에게서 행을 뺏을 수 있는 프로젝트 규칙은 하나도 없습니다. 두 저장소가 서로 독립적으로 번호를 매기므로 `update`, `rm`(`delete`), `enable`, `disable`, `move`는 목록의 규칙 id와 `--scope`를 받습니다. 목록은 스코프를 `G`/`P` 접두사로 출력합니다(`G*`는 이 프로젝트가 해당 전역 규칙의 기본값을 오버라이드했다는 뜻).
 
 탭은 기본적으로 바 위에 없습니다. `0`으로 열거나, `settings:tabs`에서 Rewriter 옆에 슬롯을 줄 수 있습니다. 대화형 편집기는 [프록시 & History](/ko/guide/proxy/)를 참고하세요.
 
@@ -1630,7 +1630,7 @@ gori run colormarker add --when 'method:DELETE' --color hotpink
 
 ### run views {#run-views}
 
-**History 뷰**를 관리합니다. History 목록을 좁히는, 이름 붙은 QL 쿼리입니다. 뷰는 다른 필터에 AND로 얹히므로, `gori run history --view History -q 'status:5xx'`는 둘 다를 뜻합니다. 기본 뷰 일곱 개가 모든 프로젝트에 들어 있습니다: 출처 3종 `All` / `History`(`src:proxy`) / `History + Repeater`(기본값), 그리고 `WebSocket`·`gRPC`·`SSE`·`Errors`. 저장된 뷰는 컬러 룰처럼 두 저장소에 나뉘어 저장됩니다.
+**History 뷰**를 관리합니다. History 목록을 좁히는, 이름 붙은 QL 쿼리입니다. 뷰는 다른 필터에 AND로 얹히므로, `gori run history --view History -q 'status:5xx'`는 둘 다 적용합니다. 기본 뷰 일곱 개가 모든 프로젝트에 들어 있습니다. 출처 3종 `All` / `History`(`src:proxy`) / `History + Repeater`(기본값)와 `WebSocket`·`gRPC`·`SSE`·`Errors`입니다. 저장된 뷰는 컬러 룰처럼 두 저장소에 나뉘어 저장됩니다.
 
 ```bash
 gori run views                                              # 목록; TUI의 활성 뷰에 ● 표시
@@ -1646,17 +1646,17 @@ gori run views rm 'acme 5xx' --scope global
 | Option | Description |
 |--------|-------------|
 | `-q`, `--query=QL` | `add`와 `set`에 필수. 뷰의 쿼리이며, 필터 바와 `run history -q`가 받는 것과 같은 History QL입니다 |
-| `--scope=SCOPE` | `project`(기본값) 또는 `global`. 글로벌 뷰는 `settings.json`에 살며 모든 프로젝트에 나타납니다. 목록에서는 `builtin`도 받으며, 그 저장소의 뷰만 표시합니다 |
+| `--scope=SCOPE` | `project`(기본값) 또는 `global`. 글로벌 뷰는 `settings.json`에 저장되며 모든 프로젝트에 나타납니다. 목록에서는 `builtin`도 받으며, 그 저장소의 뷰만 표시합니다 |
 | `--to=NAME` | `rename`에서: 새 이름 |
 | `--to=SCOPE` | `scope`에서: 옮길 저장소, `project` 또는 `global` |
 
 `--view`와 피커가 이름을 받으므로 뷰는 이름으로 지목합니다. 이름은 스코프 안에서 유일하며 스코프끼리는 겹칠 수 있습니다. 그럴 때 `--view`는 project → global → 기본 제공 순으로 고릅니다. 프로젝트 환경변수와 호스트 오버라이드가 쓰는 것과 같은 우선순위입니다. 두 저장소는 따로 지목되므로, 모든 변경 명령이 `colormarker rm`처럼 `--scope`를 받습니다. 목록은 스코프를 `G`/`P`/`·` 접두사로 찍습니다.
 
-쿼리는 뷰를 저장할 때 검사합니다. 없는 필드를 쓴 쿼리, 깨진 정규식, 그리고 모든 항이 버려질 쿼리는 거절합니다. TUI, CLI, MCP가 같은 검사를 합니다.
+쿼리는 뷰를 저장할 때 검사합니다. 없는 필드를 쓴 쿼리, 깨진 정규식, 모든 항이 버려질 쿼리는 거절합니다. TUI, CLI, MCP가 같은 검사를 합니다.
 
 기본 제공 뷰는 편집도 삭제도 되지 않으며, 저장된 뷰가 기본 뷰의 이름을 가져갈 수도 없습니다.
 
-지금 보고 있는 뷰를 지우면 그 프로젝트는 `All`로 돌아갑니다. 지운 글로벌 뷰를 가리키던 다른 프로젝트의 포인터는 무해하게 남습니다. 뷰 id는 재사용되지 않기 때문입니다. 대화형 피커는 [프록시 & History](/ko/guide/proxy/#views)를 보세요.
+지금 보고 있는 뷰를 지우면 그 프로젝트는 `All`로 돌아갑니다. 뷰 id는 재사용되지 않으므로, 지운 글로벌 뷰를 가리키던 다른 프로젝트의 포인터는 무해하게 남습니다. 대화형 피커는 [프록시 & History](/ko/guide/proxy/#views)를 보세요.
 
 ### run project {#run-project}
 
@@ -1676,9 +1676,9 @@ gori run project list --query=#bugbounty
 | `--query=TEXT` | 표시 이름·디렉터리 슬러그·짧은 id·바인딩된 워크스페이스 경로·태그에 TEXT를 포함하는 프로젝트만 남김(대소문자 무시). `#TAG`는 TAG로 시작하는 태그가 붙은 프로젝트만 남김 |
 | `--format=FMT` | `text`(기본) 또는 `json` |
 
-`list`는 비어 있는 프로젝트(캡처된 플로우가 0개)를 숨깁니다. 비어 있는지는 파일 크기가 아니라 행 수로 셉니다. 다음 두 개는 아무리 비어 있어도 항상 표시하고 표시자를 붙입니다. `◆`는 `--project` 없이 실행한 `gori run`이 읽는 프로젝트, `◇`는 TUI가 마지막으로 연 프로젝트입니다. `--format json`에서는 각각 `current`, `tui_active` 필드이고, `flows` 개수와 프로젝트 `description`이 함께 나옵니다. 몇 개를 숨겼는지는 stderr로 나가므로 JSON 파이프는 깨끗한 배열로 남습니다.
+`list`는 비어 있는 프로젝트(캡처된 플로우가 0개)를 숨깁니다. 비어 있는지는 파일 크기가 아니라 행 수로 셉니다. 다음 두 개는 비어 있어도 항상 표시하고 표시자를 붙입니다. `◆`는 `--project` 없이 실행한 `gori run`이 읽는 프로젝트, `◇`는 TUI가 마지막으로 연 프로젝트입니다. `--format json`에서는 각각 `current`, `tui_active` 필드이고, `flows` 개수와 프로젝트 `description`이 함께 나옵니다. 몇 개를 숨겼는지는 stderr로 나가므로 JSON 파이프는 깨끗한 배열로 남습니다.
 
-`--query`는 프로젝트를 가리키는 모든 철자에서 부분 문자열을 찾습니다. 정확한 이름·슬러그·짧은 id를 요구하는 `--project`보다 느슨합니다. 나열된 프로젝트의 데이터베이스를 전부 여는 플로우 집계 앞에 적용되므로, 수백 개를 가진 호스트에서는 더 빠르기도 합니다. `--all`과는 별개이며, 제외한 것은 stderr로 밝힙니다. 매치가 0건이면 이 호스트에 몇 개가 있는지를 알려 주고, `◆` 프로젝트가 걸러졌다면 그 이름을 알립니다. 빈 프로젝트 숨김 기본값과 달리 `--query`는 그 행을 고정해 두지 않기 때문입니다. `--format json`은 바인딩된 `workspace`와 `tags`도 함께 싣습니다. MCP `list_projects{query}`도 같은 술어를 씁니다.
+`--query`는 프로젝트를 가리키는 모든 철자에서 부분 문자열을 찾습니다. 정확한 이름·슬러그·짧은 id를 요구하는 `--project`보다 느슨합니다. 나열된 프로젝트의 데이터베이스를 전부 여는 플로우 집계 앞에 적용되므로, 수백 개를 가진 호스트에서는 더 빠르기도 합니다. `--all`과는 별개이며, 제외한 것은 stderr로 밝힙니다. 매치가 0건이면 이 호스트에 몇 개가 있는지를 알려 주고, `◆` 프로젝트가 걸러졌다면 그 이름을 알립니다. 빈 프로젝트 숨김 기본값과 달리 `--query`는 그 행을 고정해 두지 않기 때문입니다. `--format json`은 바인딩된 `workspace`와 `tags`도 함께 싣습니다. MCP `list_projects{query}`도 같은 조건을 씁니다.
 
 #### project create {#project-create}
 
@@ -1698,7 +1698,7 @@ gori run project create api-test --format json
 | `--tag=TAG` | 프로젝트를 분류하는 태그. 여러 번 주거나 쉼표로 구분합니다(`--tag=web,api`) |
 | `--format=FMT` | `text`(기본) 또는 `json` |
 
-이미 있는 이름은 오류 없이 그 프로젝트를 다시 엽니다. `--format json`은 `"created": false`로 알려 줍니다. 다시 열 때 저장된 표시 이름은 그대로 두고(`project rename`으로 바꿉니다), 비어 있지 않은 `--description`을 주면 기존 설명을 덮어쓰고(설명을 지우려면 `project describe --clear`), `--tag`를 하나라도 주면 태그를 교체합니다. 새 이름이 이미 다른 프로젝트의 디렉터리 slug나 짧은 id라면 거부합니다. 그 이름으로는 `--project`가 새로 만든 프로젝트에 닿을 수 없기 때문입니다.
+이미 있는 이름은 오류 없이 그 프로젝트를 다시 엽니다. `--format json`은 `"created": false`로 알려 줍니다. 다시 열 때 저장된 표시 이름은 그대로 두고(`project rename`으로 바꿉니다), 비어 있지 않은 `--description`을 주면 기존 설명을 덮어쓰고(설명을 지우려면 `project describe --clear`), `--tag`를 하나라도 주면 태그를 교체합니다. 새 이름이 이미 다른 프로젝트의 디렉터리 slug나 짧은 id라면 거부합니다. 그 이름으로는 `--project`가 새로 만든 프로젝트를 가리킬 수 없기 때문입니다.
 
 #### project rename {#project-rename}
 
@@ -1731,7 +1731,7 @@ gori run project tag api-test --clear
 
 #### project switch {#project-switch}
 
-`--project` 없는 모든 `gori run` 명령이 읽을 프로젝트를 고정합니다. 고정하지 않으면 가장 최근에 활성화한 프로젝트를 읽는데, 이는 다른 프로젝트에 쓰기를 한 번만 해도 옮겨 갑니다.
+`--project` 없는 모든 `gori run` 명령이 읽을 프로젝트를 고정합니다. 고정하지 않으면 가장 최근에 활성화한 프로젝트를 읽는데, 다른 프로젝트에 한 번만 써도 바뀝니다.
 
 ```bash
 gori run project switch api-test     # 고정 (이름, slug, 짧은 id)
@@ -1773,7 +1773,7 @@ gori run project import engagement.gori --name "API test copy"
 | `<archive>` | `.gori` 프로젝트 아카이브 경로 |
 | `--name=NAME` | 가져온 프로젝트의 표시 이름 (기본값은 아카이브 이름) |
 
-프로젝트를 만들기 전에 아카이브의 flow·세션 슬롯·env 변수 개수와 프로젝트 업스트림 자격증명 설정 여부를 stderr에 출력합니다. 기존 표시 이름·디렉터리 slug·짧은 id와 충돌하면 거부하며, 거부 메시지가 해결책으로 `--name`을 알려 줍니다. 가져온 프로젝트에는 새 짧은 id가 발급되며 로컬 워크스페이스 바인딩과 잠금 파일은 포함되지 않습니다. 이전 DB 스키마는 프로젝트를 처음 열 때 마이그레이션합니다. 현재 빌드가 지원하는 것보다 새로운 스키마는 거부합니다. 가져온 프로젝트는 목록에 추가되지만 자동으로 열리지는 않습니다.
+프로젝트를 만들기 전에 아카이브의 flow·세션 슬롯·env 변수 개수와 프로젝트 업스트림 자격증명 설정 여부를 stderr에 출력합니다. 기존 표시 이름·디렉터리 slug·짧은 id와 충돌하면 거부하며, 거부 메시지에서 해결책으로 `--name`을 안내합니다. 가져온 프로젝트에는 새 짧은 id가 발급되며 로컬 워크스페이스 바인딩과 잠금 파일은 포함되지 않습니다. 이전 DB 스키마는 프로젝트를 처음 열 때 마이그레이션합니다. 현재 빌드가 지원하는 것보다 새로운 스키마는 거부합니다. 가져온 프로젝트는 목록에 추가되지만 자동으로 열리지는 않습니다.
 
 사본은 데이터로만 들어옵니다. 가져오기는 프로젝트 네트워크 설정(`net.*`), 호스트 오버라이드, Rewriter/Colormarker 전역 규칙 오버라이드, Probe 모드를 버리고, 모든 세션 슬롯의 자동 갱신을 끄며, `pipe` 규칙·파일 기반 short-circuit 규칙·`exec` 커스텀 probe 규칙을 비활성화합니다. 검토한 뒤 신뢰하는 것만 다시 켜세요.
 
@@ -1793,7 +1793,7 @@ gori run project rm api-test --yes            # 실제로 삭제
 | `--yes` | 실제로 삭제. 없으면 아무것도 지우지 않습니다 |
 | `--format=FMT` | `text`(기본) 또는 `json` |
 
-미리보기는 플로우/이슈 개수, 디스크 사용량과 함께, 삭제가 지키는 잠금 두 가지를 보여 줍니다. 캡처가 살아 있는지(`capture_lock_held`), 그리고 다른 gori 인스턴스가 DB를 열어 두고 있는지(`open_in_another_instance`. MCP 서버는 캡처 잠금 없이도 쓰기를 하기 때문입니다). `deletable`은 이 둘을 합한 판정이고, 마지막 줄이 `--yes`가 통과할지를 알려 줍니다. 둘 중 하나라도 걸린 프로젝트는 삭제를 거부합니다. 먼저 그 캡처를 중지하거나 다른 인스턴스에서 프로젝트를 닫으세요. `capture_lock_held`가 `null`이면 잠금을 읽지 못한 것이고(쓰기 권한 없는 프로젝트 디렉터리), 이때도 삭제는 거부됩니다.
+미리보기는 플로우/이슈 개수, 디스크 사용량과 함께, 삭제가 지키는 잠금 두 가지를 보여 줍니다. 캡처가 살아 있는지(`capture_lock_held`)와 다른 gori 인스턴스가 DB를 열어 두고 있는지(`open_in_another_instance`. MCP 서버는 캡처 잠금 없이도 쓰기를 합니다)입니다. `deletable`은 이 둘을 합한 판정이고, 마지막 줄에 `--yes`가 통과할지 나옵니다. 둘 중 하나라도 걸린 프로젝트는 삭제를 거부합니다. 먼저 그 캡처를 중지하거나 다른 인스턴스에서 프로젝트를 닫으세요. `capture_lock_held`가 `null`이면 잠금을 읽지 못한 것이고(쓰기 권한 없는 프로젝트 디렉터리), 이때도 삭제는 거부됩니다.
 
 표시 이름은 유일하지 않습니다(같은 basename을 쓰는 두 워크스페이스는 이름을 공유합니다). 이름이 여러 프로젝트에 걸리면 다른 모든 `--project`와 마찬가지로 삭제를 거부하고 각각의 slug와 짧은 id를 보여 줍니다. slug와 짧은 id는 유일하므로 언제나 하나로 확정됩니다.
 
@@ -1831,11 +1831,11 @@ gori run project scope disable
 | `delete <rule-id>` (`rm`) | id로 규칙 제거 |
 | `enable` / `disable` | 스코프 필터링 적용 여부 토글. `--format json`은 `{"enabled":…}` 출력 |
 
-목록은 규칙이 하는 또 다른 일을 두 번째 줄로 출력합니다. 규칙이 하나라도 있으면 활성 여부와 관계없이 `Active-send gate: ON (N rules)`가 찍히는데, 모든 액티브 전송(`send`, `repeater`, `fuzz`, `mine`, `discover`, MCP)이 `--allow-unscoped` 없이는 규칙상 스코프 밖인 대상을 거부하기 때문입니다. exclude 규칙은 `--allow-unscoped`에서도 `fuzz`, `mine`, `discover`를 막고, exclude 규칙만 있는 스코프에서는 모든 대상이 스코프 밖입니다(`scope add`가 그런 스코프를 만들면 경고합니다). `--format json`에서는 `active_send_gate`로, `sandbox`와 함께 실립니다. 규칙이 없으면 `gori run` 전송은 제한이 없고 MCP는 모든 전송을 거부합니다. 단, [Sandbox](#project-sandbox)가 켜져 있으면 `--allow-unscoped`와 관계없이 스코프 밖 전송을 모두 거부하며, 이 줄도 그렇게 표시합니다.
+목록은 두 번째 줄도 출력합니다. 규칙이 하나라도 있으면 활성 여부와 관계없이 `Active-send gate: ON (N rules)`가 나오는데, 모든 액티브 전송(`send`, `repeater`, `fuzz`, `mine`, `discover`, MCP)이 `--allow-unscoped` 없이는 규칙상 스코프 밖인 대상을 거부하기 때문입니다. exclude 규칙은 `--allow-unscoped`에서도 `fuzz`, `mine`, `discover`를 막고, exclude 규칙만 있는 스코프에서는 모든 대상이 스코프 밖입니다(`scope add`가 그런 스코프를 만들면 경고합니다). `--format json`에서는 `active_send_gate`로, `sandbox`와 함께 실립니다. 규칙이 없으면 `gori run` 전송은 제한이 없고 MCP는 모든 전송을 거부합니다. 단, [Sandbox](#project-sandbox)가 켜져 있으면 `--allow-unscoped`와 관계없이 스코프 밖 전송을 모두 거부하며, 이 줄도 그렇게 표시합니다.
 
 #### project sandbox {#project-sandbox}
 
-하드 컨테인먼트 샌드박스 게이트를 조회하거나 설정합니다. TUI Project settings 토글의 헤드리스 등가물입니다. 켜면 캡처 프록시가 스코프가 허용하는 요청만 전달하고 나머지는 모두 차단합니다. 표시 렌즈일 뿐인 `project scope enable`과는 다릅니다.
+하드 컨테인먼트 샌드박스 게이트를 조회하거나 설정합니다. TUI Project settings 토글의 헤드리스 버전입니다. 켜면 캡처 프록시가 스코프가 허용하는 요청만 전달하고 나머지는 모두 차단합니다. 표시 렌즈일 뿐인 `project scope enable`과는 다릅니다.
 
 ```bash
 gori run project sandbox                 # 현재 상태 표시 (기본은 status)
@@ -1874,7 +1874,7 @@ gori run project env delete TOKEN
 
 #### project host-override {#project-host-override}
 
-프로젝트 호스트 오버라이드를 관리합니다. `/etc/hosts`처럼 호스트명에 대해 dial할 TCP 대상만 바꾸고, SNI·인증서 호스트·`Host` 헤더는 원래 이름을 유지합니다. 값에는 포트를 붙일 수 있어(`IP`, `IP:PORT`, `[v6]:PORT`) 호스트명을 다른 포트의 리스너로 돌릴 수 있습니다. IP만 주면 요청 자체의 포트를 그대로 씁니다. 충돌 시 프로젝트 항목이 전역 호스트네임 오버라이드보다 우선합니다. 별칭: `host-overrides`.
+프로젝트 호스트 오버라이드를 관리합니다. `/etc/hosts`처럼 호스트명별로 dial할 TCP 대상만 바꾸고, SNI·인증서 호스트·`Host` 헤더는 원래 이름을 유지합니다. 값에는 포트를 붙일 수 있어(`IP`, `IP:PORT`, `[v6]:PORT`) 호스트명을 다른 포트의 리스너로 돌릴 수 있습니다. IP만 주면 요청의 포트를 그대로 씁니다. 충돌 시 프로젝트 항목이 전역 호스트네임 오버라이드보다 우선합니다. 별칭: `host-overrides`.
 
 ```bash
 gori run project host-override                              # 목록
@@ -1895,7 +1895,7 @@ gori run project host-override delete 1
 
 #### project network {#project-network}
 
-프로젝트 자체 네트워크 설정, 즉 TUI의 **Project settings** 카드가 쓰는 `net.*` 행을 읽고 고칩니다. 여기서 값을 설정하면 이 프로젝트에 한해 `settings.json`의 전역 `network.*`를 이깁니다. `unset`은 그 키를 다시 전역 값으로 되돌립니다. 각 키가 무엇을 하고 어디에 적용되는지는 [프로젝트별 오버라이드](/ko/reference/config/#per-project-overrides)를 참고하세요. 별칭: `net`.
+프로젝트 자체 네트워크 설정, 즉 TUI의 **Project settings** 카드가 쓰는 `net.*` 행을 읽고 고칩니다. 여기서 값을 설정하면 이 프로젝트에 한해 `settings.json`의 전역 `network.*`보다 우선합니다. `unset`은 그 키를 다시 전역 값으로 되돌립니다. 각 키가 무엇을 하고 어디에 적용되는지는 [프로젝트별 오버라이드](/ko/reference/config/#per-project-overrides)를 참고하세요. 별칭: `net`.
 
 ```bash
 gori run project network                                   # 모든 키: 여기서의 값과 출처
@@ -1911,7 +1911,7 @@ gori run project network set outbound_max_rps=10          # 모든 실행, 모�
 | Key (`net.` 접두사는 생략 가능) | Value |
 | ------ | ------- |
 | `bind_host` · `bind_port` | 프록시 리슨 주소와 포트. gori가 실제로 리슨하는 곳, 즉 TUI와 `gori run capture`에만 적용 |
-| `upstream_proxy` | `http://`, `http+tls://`, `socks5://` 또는 `socks5h://` URI. 비워 두면 직접 연결을 고정합니다: 전역 프록시도, `upstream_rules` 항목도, `HTTP(S)_PROXY`도 더 이상 이 프로젝트에 적용되지 않습니다. URI에 담긴 자격증명은 거부됩니다 |
+| `upstream_proxy` | `http://`, `http+tls://`, `socks5://` 또는 `socks5h://` URI. 비워 두면 직접 연결로 고정되어 전역 프록시도, `upstream_rules` 항목도, `HTTP(S)_PROXY`도 더 이상 이 프로젝트에 적용되지 않습니다. URI에 담긴 자격증명은 거부됩니다 |
 | `upstream_destination_host` | 프로젝트의 프록시 라우팅이 적용될 호스트 패턴. 그 외에는 직접 연결됩니다. `*`(기본값)는 이 행을 지웁니다 |
 | `upstream_auth` | 프록시 자격증명: 값은 사용자명이고, 비밀번호는 `--password-stdin`으로 stdin에서 읽으며 인자 벡터로는 받지 않으므로 프로세스 목록에 남지 않습니다. HTTP 프록시에는 HTTP Basic, SOCKS5에는 RFC 1929 |
 | `connect_timeout_secs` · `io_timeout_secs` | 아웃바운드 연결 및 유휴 타임아웃, 초 단위 (최소 1) |
@@ -1922,12 +1922,12 @@ gori run project network set outbound_max_rps=10          # 모든 실행, 모�
 | --------------------- | ------------- |
 | (default) / `list` | 모든 키를 적용 중인 값과 출처(`· project`, `· global`)와 함께 표시. `--format json`은 `value`(프로젝트 자신의 행, 설정 안 됐으면 `null`), `inherited`, `effective`를 싣습니다 |
 | `get KEY` | 적용 중인 값: 프로젝트 자신의 값, 없으면 상속된 값(STDERR에 이름이 나오므로 `$(…)`는 값만 담습니다). 자격증명은 방식과 사용자명만 출력합니다. 비밀번호는 출력하지 않습니다 |
-| `set KEY=VALUE` · `set KEY VALUE` | 값을 고정합니다. 전역 값과 같은 값이라도 고정되므로 이후의 전역 편집이 프로젝트에 닿지 않습니다. Project settings 카드는 저장할 때 전역과 같은 값을 다시 inherit으로 접습니다. `set`은 키 하나만 지목하므로 그렇게 하지 않습니다 |
+| `set KEY=VALUE` · `set KEY VALUE` | 값을 고정합니다. 전역 값과 같은 값이라도 고정되므로 이후의 전역 편집이 프로젝트에 반영되지 않습니다. Project settings 카드는 저장할 때 전역과 같은 값을 다시 inherit으로 접습니다. `set`은 키 하나만 지목하므로 그렇게 하지 않습니다 |
 | `unset KEY` (`rm`, `delete`) | 프로젝트 값을 지워 다시 상속되게 합니다. 설정돼 있지 않은 키를 지워도 오류가 아닙니다 |
 
-자격증명은 Project settings 카드에서와 마찬가지로 입력받은 업스트림에 고정됩니다. `set upstream_auth`는 상속된 전역 업스트림도 같은 쓰기 한 번으로 프로젝트에 고정하므로, 이후의 전역 편집이나 업스트림 규칙이 비밀번호를 다른 프록시로 데려가지 못합니다. `set upstream_proxy`는 저장된 자격증명을 새 주소로 옮깁니다(그에 맞춰 Basic인지 SOCKS5인지 다시 판정합니다). `unset upstream_proxy`는 `unset upstream_auth`를 먼저 하기 전까지 거부됩니다. 여러 행에 걸친 편집은 한 트랜잭션으로 처리하므로, 바쁜 프로젝트가 검증되지 않은 주소 옆에 비밀번호를 저장하는 일은 없습니다. 모든 편집은 자격증명 없이 프로젝트 이벤트 피드에 기록됩니다.
+자격증명은 Project settings 카드에서와 마찬가지로 입력받은 업스트림에 고정됩니다. `set upstream_auth`는 상속된 전역 업스트림도 같은 쓰기 한 번으로 프로젝트에 고정하므로, 이후의 전역 편집이나 업스트림 규칙 때문에 비밀번호가 다른 프록시로 가는 일이 없습니다. `set upstream_proxy`는 저장된 자격증명을 새 주소로 옮깁니다(그에 맞춰 Basic인지 SOCKS5인지 다시 판정합니다). `unset upstream_proxy`는 `unset upstream_auth`를 먼저 하기 전까지 거부됩니다. 여러 행에 걸친 편집은 한 트랜잭션으로 처리하므로, 쓰기가 몰리는 프로젝트에서도 검증되지 않은 주소 옆에 비밀번호가 저장되는 일은 없습니다. 모든 편집은 자격증명 없이 프로젝트 이벤트 피드에 기록됩니다.
 
-이미 프로젝트를 연 gori(TUI, capture, MCP 서버)는 프로젝트를 열 때 이 행들을 읽어 프로젝트를 다시 열기 전까지 유지합니다. 그런 경우 명령이 STDERR에 이를 알립니다.
+이미 프로젝트를 연 gori(TUI, capture, MCP 서버)는 프로젝트를 열 때 이 행들을 읽어 프로젝트를 다시 열기 전까지 유지합니다. 그런 경우 STDERR로 알립니다.
 
 ### run redact {#run-redact}
 
@@ -1944,7 +1944,7 @@ gori run redact default on
 | ---------- | ---- |
 | `profiles` (`list`, 기본) | 여기서 쓸 수 있는 모든 프로파일(프로젝트, `settings.json`, 내장 순)을 범위, 규칙 개수, 안전한 내보내기가 실제로 쓸 하나에 붙는 `*`, 기본 적용 여부와 함께 보여 줍니다. 전체 규칙 목록은 `--format json` |
 | `use <name>` \| `use --none` | 안전한 내보내기가 쓸 프로파일을 고릅니다. `--global`이 없으면 프로젝트에 씁니다 |
-| `default on\|off` \| `default --none` | `--redact` 없이도 공유용 출력을 정제할지. `--global`이 없으면 프로젝트 범위입니다. `--none`은 프로젝트의 답을 지워 전역 설정을 따르게 합니다 |
+| `default on\|off` \| `default --none` | `--redact` 없이도 공유용 출력을 정제할지. `--global`이 없으면 프로젝트 범위입니다. `--none`은 프로젝트의 설정을 지워 전역 설정을 따르게 합니다 |
 | `set <name>` | 반복 가능한 규칙 플래그로 프로파일을 만들거나 **교체**합니다. `--global`이 없으면 프로젝트 범위 |
 | `rm <name>` (`delete`) | 프로파일을 지웁니다. 내장 프로파일은 지울 수 없고, 같은 이름으로 정의해 덮어쓰면 됩니다 |
 
@@ -1953,15 +1953,15 @@ gori run redact default on
 | 플래그 | 매칭 대상 |
 | ------ | --------- |
 | `--json-field NAME` | JSON 객체의 멤버 이름을 대소문자 구분 없이 모든 깊이에서 찾습니다 |
-| `--json-pointer PTR` | [RFC 6901](https://www.rfc-editor.org/rfc/rfc6901) 포인터로 정확히 한 위치만(`/data/user/ssn`) 지목합니다. 어디서나 가리기엔 너무 흔한 필드 이름용입니다. RFC가 "마지막 다음 원소"로 예약한 `-` 토큰은 여기서 아무 인덱스로 읽습니다. `/users/-/token`은 배열 전체를 덮습니다 |
+| `--json-pointer PTR` | [RFC 6901](https://www.rfc-editor.org/rfc/rfc6901) 포인터로 한 위치만(`/data/user/ssn`) 지목합니다. 어디서나 가리기엔 너무 흔한 필드 이름용입니다. RFC가 "마지막 다음 원소"로 예약한 `-` 토큰은 여기서 아무 인덱스로 읽습니다. `/users/-/token`은 배열 전체에 적용됩니다 |
 | `--form-key KEY` | `application/x-www-form-urlencoded` 키를 대소문자 구분 없이 찾습니다. 키는 퍼센트 디코딩한 뒤 비교하고, 본문의 나머지 세그먼트는 바이트 그대로 남습니다 |
-| `--pattern REGEX` | 본문 텍스트(그리고 JSON 문자열 리프와 디코드된 폼 값)에 대한 정규식입니다. 캡처 그룹이 있으면 그룹 1만 교체되고 나머지는 매칭에 쓴 문맥으로 남습니다. `account=(\d+)`는 `account=`를 남기고 숫자만 가져갑니다. 그룹이 없으면 매치 전체가 사라집니다. 위의 세 이름 목록과 마찬가지로 대소문자를 구분하지 않고 컴파일합니다. 컴파일되지 않는 패턴은 `set`이 거부합니다 |
+| `--pattern REGEX` | 본문 텍스트(JSON 문자열 리프와 디코드된 폼 값 포함)에 적용하는 정규식입니다. 캡처 그룹이 있으면 그룹 1만 교체되고 나머지는 매칭에 쓴 문맥으로 남습니다. `account=(\d+)`는 `account=`를 남기고 숫자만 교체합니다. 그룹이 없으면 매치 전체를 교체합니다. 위의 세 이름 목록과 마찬가지로 대소문자를 구분하지 않고 컴파일합니다. 컴파일되지 않는 패턴은 `set`이 거부합니다 |
 
-**범위.** 프로파일은 프로젝트 데이터베이스나 `settings.json` 중 한 곳에 저장됩니다. 사용자 자신의 상시 정책("`password` 필드는 내보내지 않는다")은 전역 프로파일에, 점검 데이터("이 타깃은 그걸 `pwd_hash`라 부르고 계좌번호는 `/data/acct`에 있다")는 다음 점검으로 따라가지 않도록 프로젝트에 두세요. 해석은 구체적인 쪽 우선(프로젝트, 전역, 내장 순)이고 이름이 같으면 먼저 나온 것이 이깁니다. 그래서 프로젝트 프로파일이 전역을, 전역이 같은 이름의 내장을 가립니다.
+**범위.** 프로파일은 프로젝트 데이터베이스나 `settings.json` 중 한 곳에 저장됩니다. 자신의 상시 정책("`password` 필드는 내보내지 않는다")은 전역 프로파일에, 점검 데이터("이 타깃은 그걸 `pwd_hash`라 부르고 계좌번호는 `/data/acct`에 있다")는 다음 점검으로 따라가지 않도록 프로젝트에 두세요. 해석은 구체적인 쪽 우선(프로젝트, 전역, 내장 순)이고 이름이 같으면 먼저 나온 것이 우선합니다. 그래서 프로젝트 프로파일이 전역을, 전역이 같은 이름의 내장을 가립니다.
 
-**내장 `default`**는 크리덴셜, 토큰, 흔한 정부/금융 식별자를 필드 이름으로 덮고(`password`, `client_secret`, `access_token`, `api_key`, `session_id`, `otp`, `pin`, `ssn`, `card_number`, `cvv`, `iban` 등) 정규식은 싣지 않습니다. 값 자체가 발견 내용인 경우가 많은 `email` 같은 필드는 다루지 않습니다. 원하는 것은 직접 만든 프로파일에 넣으세요.
+**내장 `default`**는 크리덴셜, 토큰, 흔한 정부/금융 식별자를 필드 이름으로 다루고(`password`, `client_secret`, `access_token`, `api_key`, `session_id`, `otp`, `pin`, `ssn`, `card_number`, `cvv`, `iban` 등) 정규식은 싣지 않습니다. 값 자체가 발견 내용인 경우가 많은 `email` 같은 필드는 다루지 않습니다. 원하는 것은 직접 만든 프로파일에 넣으세요.
 
-**`default on`은 옵트인입니다.** gori는 꺼진 채로 출시되므로 `gori run show --format raw`를 읽는 스크립트는 계속 캡처한 바이트를 받습니다. 켠 뒤에는 `--no-redact`가 호출 한 번에 한해 캡처한 바이트를 돌려줍니다. 켜져 있으면 TUI의 `Space` → `Y` **Copy as…** 메뉴와 MCP `get_flow`도 정제합니다. 복사 제목은 `COPY REQUEST AS · SANITIZED (3)`로 보이고, `get_flow`는 프로파일 이름과 개수, 그리고 무엇을 보지 않았는지를 담은 `body_redaction` 객체를 돌려줍니다. MCP의 `include_sensitive: true`는 헤더 리댁션과 함께 본문 리댁션도 끕니다.
+**`default on`은 옵트인입니다.** gori는 꺼진 채로 출시되므로 `gori run show --format raw`를 읽는 스크립트는 계속 캡처한 바이트를 받습니다. 켠 뒤에는 `--no-redact`가 호출 한 번에 한해 캡처한 바이트를 돌려줍니다. 켜져 있으면 TUI의 `Space` → `Y` **Copy as…** 메뉴와 MCP `get_flow`도 정제합니다. 복사 제목은 `COPY REQUEST AS · SANITIZED (3)`로 보이고, `get_flow`는 프로파일 이름과 개수, 무엇을 보지 않았는지를 담은 `body_redaction` 객체를 돌려줍니다. MCP의 `include_sensitive: true`는 헤더 리댁션과 함께 본문 리댁션도 끕니다.
 
 **자리표시자 태그**는 `[REDACTED:<16진수 8자리>]`이며, 설치마다 한 번 만들어져 `settings.json`에 보관되는 비밀 키로 값을 HMAC한 결과입니다. 같은 값은 같은 태그를 공유해 보고서 안에서 상관관계를 유지할 수 있습니다. 태그에서 값을 복원할 수는 없으며, 이 설치 밖에서는 아무 의미가 없습니다. 공장 초기화는 salt를 남기므로 이미 쓴 산출물의 자리표시자가 그대로 유효합니다. `gori settings export --sections redaction`은 규칙과 함께 salt도 가져갑니다. 규칙만 건네려면 `gori run redact profiles --format json`을 쓰세요.
 
@@ -1973,7 +1973,7 @@ MCP stdio 서버입니다. 도구 세부사항은 [MCP 가이드](/ko/guide/mcp/
 |--------|-------------|
 | `--db=PATH` | 이 데이터베이스를 제공 (`--project`보다 우선) |
 | `--project=NAME` | 이름이 지정된 프로젝트의 데이터베이스 제공 |
-| `--use-active-project` | Git 워크스페이스 선택을 무시하고 활성 TUI/MRU 프로젝트를 명시적으로 제공 |
+| `--use-active-project` | Git 워크스페이스 선택을 무시하고 활성 TUI/MRU 프로젝트를 제공 |
 | `--no-project` | Git 워크스페이스 안에서도 unbound로 시작 (에이전트가 list/create/switch로 선택) |
 | `--insecure-upstream` | 대상에 요청을 보내는 모든 도구(`send_request`, fuzz, `grpc_reflect`, 세션 갱신 등)에서 업스트림 TLS 검증 생략. OAST 서버는 항상 검증합니다. [커스텀 CA 번들](/ko/guide/oast/#custom-ca-bundles) 참고 |
 | `--read-only` | 액션 도구 비활성화 (`send_request`, 이슈 생성/수정, fuzz/mine). `switch_project`(및 unbound 시 `create_project`)는 `--pin-project`가 아니면 유지 |
@@ -1987,7 +1987,7 @@ MCP stdio 서버입니다. 도구 세부사항은 [MCP 가이드](/ko/guide/mcp/
 | `--install-hermes` | Hermes `~/.hermes/config.yaml` `mcp_servers.gori` 기록 (또는 `$HERMES_HOME`) |
 | `--install-pi` | Pi `~/.pi/agent/mcp.json` `mcpServers.gori` 기록 (또는 `$PI_CODING_AGENT_DIR`). MCP 어댑터 필요 |
 
-`--install-*`은 한 번에 여러 개 지정할 수 있습니다. 클라이언트마다 따로 설정하고 따로 보고하며, 하나가 실패해도 나머지는 그대로 진행됩니다. 커맨드라인의 다른 플래그(`--db`, `--project`, `--no-project`, `--use-active-project`, `--read-only`, `--tools`, `--pin-project`, `--insecure-upstream`, 전역 `--config`)는 모두 설치되는 커맨드에 기록되고, 경로는 절대 경로로 바뀝니다(`--project`는 이름 그대로 기록). 기존 설정 파일은 제자리에서 갱신됩니다. 다른 항목·테이블·주석은 유지되고, 권한도 보존되며, 교체는 원자적입니다.
+`--install-*`은 한 번에 여러 개 지정할 수 있습니다. 클라이언트마다 따로 설정하고 따로 보고하며, 하나가 실패해도 나머지는 계속 진행됩니다. 커맨드라인의 다른 플래그(`--db`, `--project`, `--no-project`, `--use-active-project`, `--read-only`, `--tools`, `--pin-project`, `--insecure-upstream`, 전역 `--config`)는 모두 설치되는 커맨드에 기록되고, 경로는 절대 경로로 바뀝니다(`--project`는 이름 그대로 기록). 기존 설정 파일은 제자리에서 갱신됩니다. 다른 항목·테이블·주석은 유지되고, 권한도 보존되며, 교체는 원자적입니다.
 
 ## gori ca {#gori-ca}
 
@@ -2009,7 +2009,7 @@ gori 루트 CA 인증서의 경로를 출력합니다(최초 사용 시 생성).
 | `--ca-dir=DIR` | CA 디렉터리 (기본값 `~/.gori/ca`, 또는 `$GORI_HOME/ca`) |
 | `--pem` | 경로 대신 인증서 PEM을 stdout으로 출력 |
 | `--der` | 경로 대신 인증서 DER을 출력(Android, Windows, MDM 설치기는 `.crt`/`.cer` 형식을 받음). 터미널에는 쓰지 않으므로 `-o`나 리다이렉트를 쓰세요 |
-| `-o FILE`, `--out=FILE` | `--pem`이나 `--der`와 함께, 인증서를 stdout 대신 FILE에 씀. Windows에서는 `>`보다 이쪽을 쓰세요: PowerShell 7.4 이전은 리다이렉트된 네이티브 명령의 바이트를 텍스트로 다시 인코딩해 DER 파일을 깨뜨립니다 |
+| `-o FILE`, `--out=FILE` | `--pem`이나 `--der`와 함께, 인증서를 stdout 대신 FILE에 씀. Windows에서는 `>`보다 이쪽을 쓰세요. PowerShell 7.4 이전은 리다이렉트된 네이티브 명령의 바이트를 텍스트로 다시 인코딩해 DER 파일을 깨뜨립니다 |
 
 동사(verb)를 먼저 쓰고 플래그를 그 뒤에 씁니다. `gori ca --ca-dir=DIR regenerate`가 아니라 `gori ca regenerate --ca-dir=DIR`입니다. 반대 순서는 사용법 오류입니다. 어느 형태도 위치 인자를 받지 않습니다.
 
@@ -2017,7 +2017,7 @@ gori 루트 CA 인증서의 경로를 출력합니다(최초 사용 시 생성).
 
 ### gori ca info {#gori-ca-info}
 
-신뢰 저장소나 기기에 보이는 루트 정보를 출력해(루트를 새로 만들지 않으며, CA 디렉터리가 비어 있으면 오류), gori가 서명에 쓰는 CA인지 확인할 수 있게 합니다. 경로, subject, 남은 일수(또는 `EXPIRED` / `NOT YET VALID`)가 붙은 유효 기간, `openssl x509 -fingerprint -sha256`과 OS 인증서 뷰어가 보여 주는 콜론 hex 형식의 SHA-256 지문, Chromium `--ignore-certificate-errors-spki-list`가 받는 SPKI 핀, Android 시스템 저장소가 요구하는 `<subject_hash_old>.0` 파일 이름입니다. `--json`은 같은 필드(`path`, `subject`, `not_before`, `not_after`, `expired`, `not_yet_valid`, `days_left`, `sha256`, `spki_sha256`, `android_file`)를 출력합니다.
+신뢰 저장소나 기기에 보이는 루트 정보를 출력해 gori가 서명에 쓰는 CA인지 확인할 수 있게 합니다. 경로, subject, 남은 일수(또는 `EXPIRED` / `NOT YET VALID`)가 붙은 유효 기간, `openssl x509 -fingerprint -sha256`과 OS 인증서 뷰어가 보여 주는 콜론 hex 형식의 SHA-256 지문, Chromium `--ignore-certificate-errors-spki-list`가 받는 SPKI 핀, Android 시스템 저장소가 요구하는 `<subject_hash_old>.0` 파일 이름입니다. 루트를 새로 만들지 않으며, CA 디렉터리가 비어 있으면 오류입니다. `--json`은 같은 필드(`path`, `subject`, `not_before`, `not_after`, `expired`, `not_yet_valid`, `days_left`, `sha256`, `spki_sha256`, `android_file`)를 출력합니다.
 
 ### gori ca regenerate {#gori-ca-regenerate}
 
@@ -2032,7 +2032,7 @@ gori 루트 CA 인증서의 경로를 출력합니다(최초 사용 시 생성).
 
 ### gori ca import {#gori-ca-import}
 
-외부에서 생성한 루트 CA(인증서 + 일치하는 개인 키, 둘 다 PEM)를 gori 자체 CA 대신 채택합니다. 팀이나 여러 머신에서 하나의 CA를 공유하거나, 조직 CA를 재사용하기 위해서입니다. gori는 호스트별 리프 인증서를 즉석에서 서명하므로 두 파일이 모두 필요합니다. 클라이언트는 인증서만 신뢰합니다. `regenerate`처럼 **파괴적**이며, 디스크의 루트를 교체하고 기존 신뢰를 무효화합니다.
+외부에서 생성한 루트 CA(인증서 + 일치하는 개인 키, 둘 다 PEM)를 gori 자체 CA 대신 채택합니다. 팀이나 여러 머신에서 CA 하나를 공유하거나 조직 CA를 재사용할 때 씁니다. gori는 호스트별 리프 인증서를 즉석에서 서명하므로 두 파일이 모두 필요합니다. 클라이언트는 인증서만 신뢰합니다. `regenerate`처럼 **파괴적**이며, 디스크의 루트를 교체하고 기존 신뢰를 무효화합니다.
 
 | Option | Description |
 |--------|-------------|
@@ -2041,7 +2041,7 @@ gori 루트 CA 인증서의 경로를 출력합니다(최초 사용 시 생성).
 | `--yes`, `-y` | 대화형 확인 생략 (stdin이 tty가 아닐 때 필수) |
 | `--ca-dir=DIR` | 설치할 CA 디렉터리 |
 
-무엇이든 디스크에 기록하기 전에 쌍을 먼저 검증합니다: 키는 인증서와 일치해야 하고, 인증서는 CA여야 하며(`basicConstraints CA:TRUE`), gori가 그 키로 리프 인증서를 서명할 수 있어야 합니다. 마지막 검사 때문에 **Ed25519 · Ed448 루트는 거부됩니다**. gori는 리프를 SHA-256으로 서명하는데 이 키들은 이를 지원하지 않습니다. 따라서 EC P-256이나 RSA 루트를 사용하세요. 거부된 쌍은 현재 CA를 건드리지 않고 중단합니다. 만료되었거나 아직 유효하지 않은 인증서는 경고만 남기고 그대로 가져옵니다. tty에서 `import`를 입력하여 확인하거나 `--yes`를 전달하세요. 같은 동작을 TUI 팔레트(**Import CA certificate**)에서도 사용할 수 있습니다.
+디스크에 기록하기 전에 쌍을 먼저 검증합니다. 키는 인증서와 일치해야 하고, 인증서는 CA여야 하며(`basicConstraints CA:TRUE`), gori가 그 키로 리프 인증서를 서명할 수 있어야 합니다. 마지막 검사 때문에 **Ed25519 · Ed448 루트는 거부됩니다**. gori는 리프를 SHA-256으로 서명하는데 이 키들은 이를 지원하지 않습니다. EC P-256이나 RSA 루트를 사용하세요. 거부된 쌍은 현재 CA를 건드리지 않고 중단합니다. 만료되었거나 아직 유효하지 않은 인증서는 경고와 함께 가져옵니다. tty에서 `import`를 입력하여 확인하거나 `--yes`를 전달하세요. 같은 동작을 TUI 팔레트(**Import CA certificate**)에서도 사용할 수 있습니다.
 
 OpenSSL로 루트를 생성한 뒤 가져옵니다:
 
@@ -2082,13 +2082,13 @@ gori settings env-syntax bare
 # so. Captured evidence is left exactly as it was. Switch back with `gori settings env-syntax namespaced`.
 ```
 
-기본 문법은 namespaced입니다. 그래서 `settings.json`에 `env.syntax`가 없다는 것은 그 파일이 네임스페이스보다 먼저 쓰였다는 뜻입니다. 다음 시작에서 `namespaced`를 채택하고, 전역 재작성 규칙을 다시 적고(`settings.json.pre-namespaced-<타임스탬프>` 복사본을 남깁니다), 키를 파일에 씁니다. 각 프로젝트는 문법이 바뀐 뒤 처음 열릴 때 다시 적힙니다. TUI든, 아무 `gori run …`이든, `gori mcp` 서버든 마찬가지입니다. 데이터베이스 옆에 `gori.db.pre-<grammar>-<타임스탬프>` 백업(`VACUUM INTO`이므로 WAL까지 포함)을 쓰고, 토큰 몇 개가 옮겨졌는지 프로젝트마다 한 줄씩 stderr로 알려 줍니다. 다시 적는 대상: Repeater 초안(request, target, SNI, 이름)과 그 WebSocket 메시지, Fuzzer 템플릿, Miner·Sequencer 요청, 재작성 규칙의 치환 텍스트, 세션 슬롯 헤더 값, 그리고 이슈 제목·메모와 노트 본문에 마스킹된 토큰입니다. 그대로 두는 것: 출처가 캡처인 모든 행(`flow_id`가 있는 행이며, 캡처는 확장되지 않습니다), 대상 문법에 같은 바이트를 보내는 표기가 없는 행, 그리고 토큰이 아니라 테이블 키인 이름들(환경 변수, extract 규칙, 규칙 패턴, 페이로드 세트)입니다.
+기본 문법은 namespaced입니다. 그래서 `settings.json`에 `env.syntax`가 없다는 것은 그 파일이 네임스페이스보다 먼저 쓰였다는 뜻입니다. 다음 시작에서 `namespaced`를 채택하고, 전역 재작성 규칙을 다시 적고(`settings.json.pre-namespaced-<타임스탬프>` 복사본을 남깁니다), 키를 파일에 씁니다. 각 프로젝트는 문법이 바뀐 뒤 처음 열릴 때 다시 적힙니다. TUI든, 아무 `gori run …`이든, `gori mcp` 서버든 마찬가지입니다. 데이터베이스 옆에 `gori.db.pre-<grammar>-<타임스탬프>` 백업(`VACUUM INTO`이므로 WAL까지 포함)을 쓰고, 토큰 몇 개가 옮겨졌는지 프로젝트마다 한 줄씩 stderr로 알려 줍니다. 다시 적는 대상은 Repeater 초안(request, target, SNI, 이름)과 그 WebSocket 메시지, Fuzzer 템플릿, Miner·Sequencer 요청, 재작성 규칙의 치환 텍스트, 세션 슬롯 헤더 값, 이슈 제목·메모와 노트 본문에 마스킹된 토큰입니다. 그대로 두는 것은 출처가 캡처인 모든 행(`flow_id`가 있는 행이며, 캡처는 확장되지 않습니다), 대상 문법에 같은 바이트를 보내는 표기가 없는 행, 토큰이 아니라 테이블 키인 이름(환경 변수, extract 규칙, 규칙 패턴, 페이로드 세트)입니다.
 
 `env.syntax = bare`가 옵트아웃이며, 각 프로젝트는 다음에 열릴 때 되돌려 다시 적힙니다. 이때 그대로 두면 해석되기 시작할 리터럴 `$NAME`은 이스케이프됩니다. [환경 변수](/ko/guide/repeater-and-fuzzer/#environment-variables)를 참고하세요. `gori settings import`는 프로필의 `env.syntax`가 이 설치와 다르면 stderr로 알려 줍니다. 임포트는 문법을 바꾸지 않습니다.
 
 ### `gori settings user-agents` {#user-agents}
 
-[`$GEN.USER_AGENT`](/ko/guide/repeater-and-fuzzer/#environment-variables)가 고르는 목록입니다. 플래그 없이 실행하면 출처를 밝히는 `#` 줄 아래에 현재 쓰는 목록을 출력합니다. `--set`은 같은 형식을 그대로 읽으므로, 출력을 저장해 고친 뒤 다시 설정할 수 있습니다. `--set`은 파일의 줄로 내장 목록을 **대체**합니다. 한 줄에 User-Agent 하나이며, 빈 줄과 `#` 줄은 건너뜁니다. 헤더에 넣을 수 없는 줄이 하나라도 있으면 파일 전체를 거절하고 아무것도 바꾸지 않습니다. `--reset`은 내장 목록으로 되돌립니다.
+[`$GEN.USER_AGENT`](/ko/guide/repeater-and-fuzzer/#environment-variables)가 고르는 목록입니다. 플래그 없이 실행하면 출처를 밝히는 `#` 줄 아래에 현재 쓰는 목록을 출력합니다. `--set`은 같은 형식을 읽으므로, 출력을 저장해 고친 뒤 다시 설정할 수 있습니다. `--set`은 파일의 줄로 내장 목록을 **대체**합니다. 한 줄에 User-Agent 하나이며, 빈 줄과 `#` 줄은 건너뜁니다. 헤더에 넣을 수 없는 줄이 하나라도 있으면 파일 전체를 거절하고 아무것도 바꾸지 않습니다. `--reset`은 내장 목록으로 되돌립니다.
 
 ```bash
 gori settings user-agents > ua.txt       # 현재 쓰는 목록
@@ -2151,7 +2151,7 @@ gori가 `settings.json`을 읽지 못하는 상태(파싱 실패, 권한 문제,
 
 `env`, `decoder`, `oast_providers`는 export에서 기본 제외됩니다. `env`는 토큰 값을, `decoder`는 저장된 체인 라이브러리를(열려 있는 하위 탭은 여기가 아니라 프로젝트 저장소에 있습니다), `oast_providers`는 자체 호스팅 interactsh 토큰을 담기 때문입니다. 포함하려면 `--sections`에 이름을 적으세요(`--sections env`). `upstream_rules`는 공유해도 안전합니다. 사용자명과 환경변수 *이름*만 저장하고 비밀번호는 담지 않습니다.
 
-이 설치의 기존 데이터를 읽는 방식을 정하는 값, 즉 토큰 문법(`env.syntax`), 토큰 접두사(`env.prefix`), 리댁션 솔트(`redaction.salt`)는 프로필에 담기지 않고 import로 바뀌지도 않습니다. import는 로컬 값을 유지하며, 프로필의 문법이나 접두사가 달랐으면 stderr로 알립니다. import한 전역 rewriter 규칙, colormarker 규칙, 저장된 뷰는 이 설치의 카운터로 새 번호를 받으므로, 지워진 로컬 규칙에 대한 프로젝트의 오버라이드가 import한 규칙에 붙지 않습니다.
+이 설치의 기존 데이터를 읽는 방식을 정하는 값, 즉 토큰 문법(`env.syntax`), 토큰 접두사(`env.prefix`), 리댁션 솔트(`redaction.salt`)는 프로필에 담기지 않고 import로 바뀌지도 않습니다. import는 로컬 값을 유지하며, 프로필의 문법이나 접두사가 달랐으면 stderr로 알립니다. import한 전역 rewriter 규칙, colormarker 규칙, 저장된 뷰는 이 설치의 카운터로 새 번호를 받으므로, 지워진 로컬 규칙을 가리키던 프로젝트 오버라이드가 import한 규칙에 붙지 않습니다.
 
 `-o`가 실제 사용 중인 `settings.json`을 가리키면 거부됩니다. export에는 기본값 상태인 섹션이 모두 빠지고, `env`, `decoder`, `oast_providers`도 이름을 지정하지 않는 한 빠지므로, 원본 파일에 되쓰면 해당 섹션이 삭제됩니다.
 
@@ -2169,9 +2169,9 @@ export가 그런 섹션을 담게 되면 `-o FILE`은 `0600`으로 생성되고,
 | `statusline` | `command` | **`/bin/sh -c`**. `interval`초마다 실행 |
 | `editor` | `command` | argv. `gori settings --edit`와 TUI의 `^E`에서 실행 |
 
-앞의 셋은 [프로세스 훅](/ko/guide/scripting/#process-hooks)입니다. 다섯 중 위험이 가장 큰 것은 `statusline`입니다. argv exec이 아니라 완전한 셸을 쓰고, 같은 섹션에 자기 `enabled`를 들고 있어 프로필 하나로 바로 무장되며, 트래픽 없이 타이머만으로 실행됩니다. `editor`는 프로필이 값을 지정했을 때만 보고합니다. 비어 있으면 gori는 받는 쪽의 `$VISUAL`/`$EDITOR`/`vi`로 넘어갑니다.
+앞의 셋은 [프로세스 훅](/ko/guide/scripting/#process-hooks)입니다. 다섯 중 위험이 가장 큰 것은 `statusline`입니다. argv exec이 아니라 완전한 셸을 쓰고, 같은 섹션에 자기 `enabled`를 들고 있어 프로필 하나로 바로 활성화되며, 트래픽 없이 타이머만으로 실행됩니다. `editor`는 프로필이 값을 지정했을 때만 보고합니다. 비어 있으면 gori는 받는 쪽의 `$VISUAL`/`$EDITOR`/`vi`로 넘어갑니다.
 
-명령을 실행하지는 않지만 같은 방식으로 나열되고 막히는 모양이 둘 더 있으며, `env`와 `file` 행으로 표시됩니다. `password_env`가 있는 `upstream_rules` 항목(gori가 내 머신에서 그 변수를 읽어 프로필이 지정한 프록시로 보냅니다)과 `body_file`이 있는 `rewriter` short-circuit(매칭된 호스트의 페이지에 로컬 파일을, `respond: dir`이면 디렉터리를 제공합니다)입니다.
+명령을 실행하지는 않지만 같은 방식으로 나열되고 차단되는 형태가 둘 더 있으며, `env`와 `file` 행으로 표시됩니다. `password_env`가 있는 `upstream_rules` 항목(gori가 내 머신에서 그 변수를 읽어 프로필이 지정한 프록시로 보냅니다)과 `body_file`이 있는 `rewriter` short-circuit(매칭된 호스트의 페이지에 로컬 파일을, `respond: dir`이면 디렉터리를 제공합니다)입니다.
 
 `export`는 개수를 stderr로 알리고, stdout의 프로필은 깨끗하게 둡니다:
 
@@ -2193,7 +2193,7 @@ importing them is the same trust decision as running the author's script
 gori settings import: refused — the 5 entries listed above run a local command with your privileges. Read them, then pass --allow-commands. Nothing was written.
 ```
 
-명령을 읽고 나서 `--allow-commands`를 주세요. 대화형 프롬프트는 없습니다. 이 플래그가 확인 절차입니다. 프로필이 담고는 있지만 꺼둔 항목은 `[disabled]`로 표시됩니다. 누군가 켜기 전까지는 아무것도 실행하지 않지만, 파일에는 여전히 들어 있습니다. `--sections`로 범위를 좁히면 이 판단도 함께 좁아집니다. `network`만 적용하는 import는 아무것도 무장시키지 않으므로 항목을 나열하지도, 플래그를 요구하지도 않습니다.
+명령을 읽고 나서 `--allow-commands`를 주세요. 대화형 프롬프트는 없으므로 이 플래그가 확인 절차입니다. 프로필이 담고는 있지만 꺼둔 항목은 `[disabled]`로 표시됩니다. 누군가 켜기 전까지는 아무것도 실행하지 않지만, 파일에는 여전히 들어 있습니다. `--sections`로 범위를 좁히면 이 판단도 함께 좁아집니다. `network`만 적용하는 import는 아무것도 활성화하지 않으므로 항목을 나열하지도, 플래그를 요구하지도 않습니다.
 
 ### `gori settings tls-fingerprint` {#gori-settings-tls-fingerprint}
 
@@ -2221,17 +2221,17 @@ shop.example.com  (matched rule "shop.example.com")
          t13d1513h2_002f,0035,…_0005,000a,…_0403,0804,…
 ```
 
-정책마다 두 개의 leg를 보여줍니다. gori는 복호화하는 MITM 연결에서는 `h2`를 제안합니다. 자신이 HTTP/1.1을 말하게 될 leg(포워드 프록시 dial, Repeater, WebSocket)에서는 제안에서 `h2`를 빼며, `alpn`을 설정하지 않았다면 ALPN 확장을 보내지 않습니다. 그래서 두 leg의 ClientHello가 다릅니다. 각 다이제스트 아래 줄은 그 다이제스트가 해시한 목록입니다. 어떤 필드가 움직였는지 이 줄에서 보이고, 브라우저와 비교할 것도 이 줄입니다.
+정책마다 두 개의 leg를 보여줍니다. gori는 복호화하는 MITM 연결에서는 `h2`를 제안합니다. HTTP/1.1로 통신할 leg(포워드 프록시 dial, Repeater, WebSocket)에서는 제안에서 `h2`를 빼며, `alpn`을 설정하지 않았다면 ALPN 확장을 보내지 않습니다. 그래서 두 leg의 ClientHello가 다릅니다. 각 다이제스트 아래 줄은 그 다이제스트가 해시한 목록입니다. 설정이 어떤 필드를 바꿨는지 이 줄에서 보이고, 브라우저와 비교할 때도 이 줄을 씁니다.
 
-리포트는 dial이 만드는 것과 같은 컨텍스트를 읽습니다. 이 OpenSSL이 거부하는 `groups`/`sigalgs` 문자열은 해당 규칙에 대해 stderr로 보고하고 나머지는 계속 출력합니다.
+리포트는 dial이 만드는 것과 같은 컨텍스트를 읽습니다. 이 OpenSSL이 거부하는 `groups`/`sigalgs` 문자열은 해당 규칙에서 stderr로 보고하고 나머지는 계속 출력합니다.
 
 `--preset NAME`은 보고되는 모든 정책을 per-send 오버라이드와 똑같이 좁혀서 출력합니다([전송 단위 TLS 지문](#per-send-tls-fingerprints) 참고). 이미 `chrome` 규칙이 걸린 호스트에 `--tls-preset curl`이 무엇을 실어 보낼지 확인할 때 씁니다. 클라이언트 인증서·프로토콜 범위·`permissive`는 목적지 것이 그대로 남습니다. ClientHello 모양만 교체됩니다. 모르는 이름은 거부합니다.
 
 ### 전송 단위 TLS 지문 {#per-send-tls-fingerprints}
 
-`outbound_tls`는 목적지 호스트로만 키가 잡힙니다. 한 엔드포인트가 `chrome`일 때와 `curl`일 때 다르게 답하는지 보려면 per-send 오버라이드를 쓰세요. 전송 사이에 전역 규칙을 고치면 그 호스트로 가는 다른 모든 탭과 백그라운드 캡처의 핸드셰이크까지 바뀝니다.
+`outbound_tls`의 키는 목적지 호스트입니다. 한 엔드포인트가 `chrome`일 때와 `curl`일 때 다르게 답하는지 보려면 per-send 오버라이드를 쓰세요. 전송 사이에 전역 규칙을 고치면 그 호스트로 가는 다른 모든 탭과 백그라운드 캡처의 핸드셰이크까지 바뀝니다.
 
-per-send 오버라이드는 목적지 테이블을 건드리지 않고 전송 하나 또는 실행 하나에 대해 프리셋을 지정하며, dial 시점에 해석됩니다:
+per-send 오버라이드는 목적지 테이블을 건드리지 않고 전송 하나 또는 실행 하나에 프리셋을 지정하며, dial 시점에 해석됩니다:
 
 ```bash
 gori run repeater 42 --tls-preset chrome           # 캡처한 플로우를 Chrome처럼 재전송
@@ -2241,18 +2241,18 @@ gori run repeater create --tls-preset chrome …     # 세션에 저장
 gori run fuzz --flow 42 --auto --tls-preset chrome # 스윕 전체를 한 핸드셰이크로
 ```
 
-TUI에서는 Repeater 탭의 `␣Pt`(TARGET 밴드의 ` TLS … ` 칩)이고, 탭과 함께 영속화되므로 다시 연 탭은 이전에 보낸 지문 그대로 보냅니다. Fuzzer는 `^O` 고급 카드의 **TLS fingerprint** 행입니다. MCP는 `send_request{tls_preset}`와 `fuzz_start{tls_preset}`이며, 결과 세트가 어느 핸드셰이크에서 나왔는지 말할 수 있도록 그대로 되돌려 줍니다.
+TUI에서는 Repeater 탭의 `␣Pt`(TARGET 밴드의 ` TLS … ` 칩)이고, 탭과 함께 영속화되므로 다시 연 탭은 이전에 보낸 지문 그대로 보냅니다. Fuzzer는 `^O` 고급 카드의 **TLS fingerprint** 행입니다. MCP는 `send_request{tls_preset}`와 `fuzz_start{tls_preset}`이며, 결과 세트가 어느 핸드셰이크에서 나왔는지 알 수 있도록 그대로 되돌려 줍니다.
 
 오버라이드는 목적지 정책을 좁힙니다:
 
 | 필드 | 오버라이드 하에서 |
 |------|------------------|
-| `preset`, `groups`, `sigalgs`, `ciphers`, `ciphersuites`, `alpn`, `session_tickets`, `ocsp_stapling` | 지정한 프리셋 것으로 **교체**. 이것이 ClientHello 모양이고, 병합하면 목적지 자신의 값이 계속 이기게 됩니다 |
-| `client_cert`, `client_key` | **유지**. 오버라이드는 hello의 모양만 바꾸고 gori가 누구인지는 바꾸지 않습니다 |
-| `min_version`, `max_version` | **유지**. 버전 범위는 그 목적지의 도달 가능성에 대한 사실입니다 |
+| `preset`, `groups`, `sigalgs`, `ciphers`, `ciphersuites`, `alpn`, `session_tickets`, `ocsp_stapling` | 지정한 프리셋 것으로 **교체**. 이것이 ClientHello 모양이고, 병합하면 목적지 값이 계속 우선하게 됩니다 |
+| `client_cert`, `client_key` | **유지**. 오버라이드는 hello의 모양만 바꾸고 gori의 클라이언트 신원은 바꾸지 않습니다 |
+| `min_version`, `max_version` | **유지**. 버전 범위는 그 목적지에 연결할 수 있는지의 문제입니다 |
 | `permissive` | **유지**. 오버라이드는 security level 0을 줄 수도 뺏을 수도 없습니다 |
 
-오버라이드만 다른 두 전송은 서로 다른 SSL 컨텍스트로 연결하므로 핸드셰이크도 두 번입니다. 평문 구간은 ClientHello를 보내지 않으므로 `https` 전용입니다. 목적지 단위 프리셋과 마찬가지로 이것들은 근사치입니다(확장 순서와 GREASE 배치는 OpenSSL의 것). `gori settings tls-fingerprint HOST --preset NAME`으로 확인하세요.
+오버라이드만 다른 두 전송은 서로 다른 SSL 컨텍스트로 연결하므로 핸드셰이크도 두 번입니다. 평문 구간은 ClientHello를 보내지 않으므로 `https` 전용입니다. 목적지 단위 프리셋과 마찬가지로 근사치입니다(확장 순서와 GREASE 배치는 OpenSSL의 것). `gori settings tls-fingerprint HOST --preset NAME`으로 확인하세요.
 
 ### `--config PATH` {#config-path}
 
@@ -2281,7 +2281,7 @@ gori wizard
 gori tutorial
 ```
 
-목업 UI에서 TUI를 대화형으로 둘러봅니다: 탭/패널 탐색(서브탭 줄 포함), space 메뉴(`Space`)와 두 번째 카드, 커맨드 팔레트 검색(`Ctrl-P`), READ/INS 편집 모드, 클라이언트를 어디로 향하게 하고 CA를 어떻게 신뢰시키는지, 캡처 스위치, 인터셉트(편집기 밖의 `i`), 도움말과 종료. 목업 메뉴와 투어가 언급하는 모든 키는 설치된 gori에서 읽어 옵니다. 각 레슨은 동작을 시연하고 직접 해 보도록 안내하며, 단계 표시줄의 ✓는 동작을 끝까지 해냈을 때만 켜집니다(◐는 들르기만 한 단계). 연습 단계에는 앞의 네 가지 동작에 걸친 선택적 확인 항목 여섯 개가 있습니다. 마지막 카드는 투어를 마친 뒤 이어질 프로젝트 선택 화면, `--db` 프로젝트(열기에 실패하면 선택 화면), 셸, 현재 세션에 맞는 다음 단계를 안내합니다. 단독으로 실행한 `gori tutorial`을 마치면 다음에 실행할 명령을 출력합니다. `gori wizard` 끝에서 제공되고, 세션 안에서는 팔레트 명령 **Guided tour**(`Ctrl-P`)로 열 수 있습니다. 실제 프록시 세션 없이도 언제든 안전하게 다시 실행할 수 있습니다. [빠른 시작](/ko/getting-started/quick-start/)과 [space 메뉴와 팔레트](/ko/guide/space-menu-and-palette/)를 참고하세요.
+목업 UI에서 TUI를 대화형으로 둘러봅니다. 탭/패널 탐색(서브탭 줄 포함), space 메뉴(`Space`)와 두 번째 카드, 커맨드 팔레트 검색(`Ctrl-P`), READ/INS 편집 모드, 클라이언트를 어디로 향하게 하고 CA를 어떻게 신뢰시키는지, 캡처 스위치, 인터셉트(편집기 밖의 `i`), 도움말과 종료를 다룹니다. 목업 메뉴와 투어가 언급하는 모든 키는 설치된 gori에서 읽어 옵니다. 각 레슨은 동작을 시연하고 직접 해 보도록 안내하며, 단계 표시줄의 ✓는 동작을 끝까지 해냈을 때만 켜집니다(◐는 들르기만 한 단계). 연습 단계에는 앞의 네 가지 동작에 걸친 선택적 확인 항목 여섯 개가 있습니다. 마지막 카드는 투어를 마친 뒤 이어질 프로젝트 선택 화면, `--db` 프로젝트(열기에 실패하면 선택 화면), 셸, 현재 세션에 맞는 다음 단계를 안내합니다. 단독으로 실행한 `gori tutorial`을 마치면 다음에 실행할 명령을 출력합니다. `gori wizard` 끝에서 제공되고, 세션 안에서는 팔레트 명령 **Guided tour**(`Ctrl-P`)로 열 수 있습니다. 실제 프록시 세션 없이도 언제든 안전하게 다시 실행할 수 있습니다. [빠른 시작](/ko/getting-started/quick-start/)과 [space 메뉴와 팔레트](/ko/guide/space-menu-and-palette/)를 참고하세요.
 
 ## gori update {#gori-update}
 

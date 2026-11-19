@@ -1,18 +1,18 @@
 +++
 title = "gori MCP와 AI 에이전트 설정"
-description = "MCP로 AI 에이전트를 gori에 연결합니다: 클라이언트에 서버 설치, 프로젝트 고정, 첫 요청 보내기."
+description = "MCP로 AI 에이전트를 gori에 연결합니다. 클라이언트에 서버를 설치하고, 프로젝트를 고정하고, 첫 요청을 보냅니다."
 weight = 30
 +++
 
-gori는 하나의 프로젝트와 하나의 엔진 위에 세 가지 진입점을 둡니다. `gori`(사람이 쓰는 TUI), `gori run`([스크립트](/ko/guide/scripting/)용 헤드리스 CLI), `gori mcp`(AI 에이전트용 [MCP 서버](/ko/guide/mcp/))입니다. 이 페이지는 AI 경로를 다룹니다. 에이전트를 gori 프로젝트에 연결하고 첫 요청을 보내기까지 안내합니다.
+gori에는 같은 프로젝트와 엔진을 쓰는 진입점이 세 가지 있습니다. `gori`(사람이 쓰는 TUI), `gori run`([스크립트](/ko/guide/scripting/)용 헤드리스 CLI), `gori mcp`(AI 에이전트용 [MCP 서버](/ko/guide/mcp/))입니다. 이 페이지는 AI 경로를 다룹니다. 에이전트를 gori 프로젝트에 연결하고 첫 요청을 보내기까지 안내합니다.
 
-TUI 안에는 채팅 창이 없습니다. 모델과 클라이언트는 직접 골라 가져오고, gori는 프로젝트를 도구로 노출합니다. 에이전트는 트래픽을 읽고 사용자가 쓰는 것과 같은 도구를 다룹니다. 전체 도구 목록과 더 깊은 주제(라이브 인터셉트, 설계 근거)는 [MCP 서버 가이드](/ko/guide/mcp/)를 참고하세요.
+TUI 안에는 채팅 창이 없습니다. 모델과 클라이언트는 사용자가 준비하고, gori는 프로젝트를 도구로 노출합니다. 에이전트는 트래픽을 읽고 사용자가 쓰는 것과 같은 도구를 다룹니다. 전체 도구 목록과 더 깊은 주제(라이브 인터셉트, 설계 근거)는 [MCP 서버 가이드](/ko/guide/mcp/)를 참고하세요.
 
 > **시작하기 전에.** [gori를 설치](/ko/getting-started/installation/)하고 MCP를 지원하는 클라이언트(Claude Code, Claude Desktop, OpenAI Codex, Antigravity, Grok, Hermes 등)를 준비하세요.
 
 ## 1. 클라이언트에 서버 설치하기 {#1-install-the-server-into-your-client}
 
-`gori mcp`는 stdio 위에서 JSON-RPC 2.0으로 통신합니다. AI 클라이언트가 이 프로세스를 띄워 STDIN으로 요청을 보내고 STDOUT으로 결과를 읽습니다. STDERR에는 로그가 나옵니다. 클라이언트별 설정은 gori가 작성해 줍니다.
+`gori mcp`는 stdio에서 JSON-RPC 2.0으로 통신합니다. AI 클라이언트가 이 프로세스를 띄워 STDIN으로 요청을 보내고 STDOUT으로 결과를 읽습니다. STDERR에는 로그가 나옵니다. 클라이언트별 설정은 gori가 작성해 줍니다.
 
 ```bash
 gori mcp --install-claude-code   # Claude Code
@@ -42,7 +42,7 @@ Pi는 [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter) 같은 MCP 
 
 직접 연결하려면 MCP 클라이언트가 `gori mcp` 명령을 추가 인자 없이 stdio로 실행하게 하면 됩니다.
 
-**체크포인트.** 클라이언트가 gori의 도구들(`list_history`, `send_request`, `project_info` 등)을 나열합니다. 나타나지 않으면 클라이언트를 재시작했는지, 그리고 `gori`가 클라이언트가 사용하는 `PATH`에 있는지 확인하세요.
+**체크포인트.** 클라이언트에 gori 도구(`list_history`, `send_request`, `project_info` 등)가 나타납니다. 나타나지 않으면 클라이언트를 재시작했는지, `gori`가 클라이언트가 사용하는 `PATH`에 있는지 확인하세요.
 
 ## 2. 프로젝트 바인딩 (또는 에이전트가 고르게) {#2-bind-a-project-or-let-the-agent-pick-one}
 
@@ -81,7 +81,7 @@ gori mcp --read-only --install-claude-code
 
 도구가 보이면 에이전트에게 평범한 말로 지시하세요. 에이전트가 그 의도를 읽기 도구와 액션 도구로 옮깁니다.
 
-> "`/login`에 대한 마지막 POST 20개를 나열하고, 가장 최근 것을 다른 비밀번호로 재전송한 뒤, 상태 코드가 바뀌면 이슈를 열어줘."
+> "`/login`으로 보낸 최근 POST 20개를 나열하고, 가장 최근 것을 다른 비밀번호로 재전송한 뒤, 상태 코드가 바뀌면 이슈를 열어줘."
 
 유능한 에이전트는 이를 짧은 도구 시퀀스로 바꿉니다.
 
@@ -92,10 +92,10 @@ gori mcp --read-only --install-claude-code
 → create_issue   "Auth bypass on /login" severity:high
 ```
 
-에이전트의 각 행동은 에이전트에서 온 것으로 표시되어 gori의 알림 센터에 남고 사용자 본인의 행동과 다르게 렌더링되므로, 다른 탭을 보는 동안 에이전트가 프로젝트에 무엇을 했는지 확인할 수 있습니다.
+에이전트의 행동은 모두 에이전트가 한 것으로 표시되어 gori의 알림 센터에 남고 사용자 본인의 행동과 다르게 렌더링되므로, 다른 탭을 보는 동안 에이전트가 프로젝트에 무엇을 했는지 확인할 수 있습니다.
 
 ## 다음 단계 {#next-steps}
 
-- [MCP 서버](/ko/guide/mcp/): 전체 도구 목록, 라이브 인터셉트, 그리고 gori가 MCP 이음새를 쓰는 이유
+- [MCP 서버](/ko/guide/mcp/): 전체 도구 목록, 라이브 인터셉트, gori가 MCP 이음새를 쓰는 이유
 - [CLI Reference](/ko/reference/cli/): 전체 `gori mcp` 플래그
 - [Query Language](/ko/reference/query-language/): 에이전트가 `list_history`에 사용하는 필터 문법

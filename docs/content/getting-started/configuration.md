@@ -33,7 +33,7 @@ You rarely need to edit the file by hand. Everything in it is editable in the **
 | The `⚙` chip in the top bar | Same as `Ctrl-,` |
 | `Ctrl-P` → any **Settings: …** entry | That section's fields directly |
 
-`Ctrl-,` also works in the project picker, before any project is open, so you can set your theme on first launch. Saved changes apply live, no restart. See the [Settings guide](/guide/settings/) for every section and field, and the [Configuration Reference](/reference/config/) for the underlying keys.
+`Ctrl-,` also works in the project picker, before any project is open, so you can set your theme on first launch. Saved changes apply immediately, without a restart. See the [Settings guide](/guide/settings/) for every section and field, and the [Configuration Reference](/reference/config/) for the underlying keys.
 
 ## Network
 

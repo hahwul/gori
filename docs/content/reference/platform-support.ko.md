@@ -1,17 +1,17 @@
 +++
 title = "플랫폼 지원"
-description = "gori가 지원하는 운영체제와 아키텍처, 지원 등급별로 보장하는 것, 그리고 Windows에서 알려진 한계."
+description = "gori가 지원하는 운영체제와 아키텍처, 지원 등급별 보장 내용, Windows에서 알려진 한계."
 weight = 7
 +++
 
-gori는 macOS, Linux, Windows용 단일 바이너리로 배포됩니다. 플랫폼은 보장 수준이 다른 두 등급(tier)으로 나뉩니다. 플랫폼 이름은 릴리스 자산 이름(`linux-arm64`, `osx-x86_64`)처럼 OS와 CPU 아키텍처로 부릅니다. gori는 Crystal로 빌드되므로 각 플랫폼은 컴파일러 자체의 [플랫폼 지원](https://crystal-lang.org/reference/1.21/syntax_and_semantics/platform_support.html) 수준에도 영향을 받습니다.
+gori는 macOS, Linux, Windows용 단일 바이너리로 배포됩니다. 플랫폼은 보장 수준이 다른 두 등급(tier)으로 나뉩니다. 플랫폼 이름은 릴리스 자산 이름(`linux-arm64`, `osx-x86_64`)처럼 OS와 CPU 아키텍처로 부릅니다. gori는 Crystal로 빌드되므로 각 플랫폼은 컴파일러의 [플랫폼 지원](https://crystal-lang.org/reference/1.21/syntax_and_semantics/platform_support.html) 수준에도 영향을 받습니다.
 
 ## Tier 1 {#tier-1}
 
-Tier 1은 "gori 전부가 그대로 동작하는" 플랫폼입니다. 각 플랫폼은 다음을 만족합니다.
+Tier 1은 "gori 전부가 동작하는" 플랫폼입니다. 각 플랫폼은 다음을 만족합니다.
 
 - 모든 [GitHub Release](https://github.com/hahwul/gori/releases/latest)에 사전 빌드 바이너리가 올라가고, [curl 설치 스크립트](/ko/getting-started/installation/#quick-install-curl)와 [Homebrew](/ko/getting-started/installation/#homebrew)로 설치할 수 있습니다.
-- CI나 릴리스 과정에서 소스로 빌드되고, 릴리스 바이너리는 게시 전에 실제로 실행해 봅니다.
+- CI나 릴리스 과정에서 소스로 빌드되고, 릴리스 바이너리는 게시 전에 실행해 봅니다.
 - 매일 쓰입니다. gori는 macOS에서 개발되고, 스펙 스위트는 CI의 Linux x86_64에서 돕니다(PR마다 변경에 대응하는 스펙, `main` 푸시마다 전체 스위트).
 - 플랫폼 고유의 알려진 한계가 없습니다.
 
@@ -40,7 +40,7 @@ Windows 릴리스 바이너리는 v0.8.0부터 제공됩니다.
 |------|---------------|
 | 콘솔 | TUI는 VT 시퀀스를 처리하는 콘솔(Windows 10 1809 이상)이 필요합니다. Windows Terminal을 쓰세요. `.exe`를 더블클릭하거나 `cmd.exe`에서 열리는 기본 콘솔 창에서는 글꼴에 따라 테두리 선이 빠지거나 일부 기호가 겹쳐 보일 수 있습니다. |
 | 시그널 | POSIX 시그널이 없습니다. Ctrl-C와 Ctrl-Break는 `INT`로, 콘솔 창 닫기·로그오프·종료는 `TERM`으로 처리합니다. 다만 후자는 Windows가 곧바로 프로세스를 끝내므로 정리 작업에 쓸 시간이 거의 없습니다. |
-| [`gori run shell`](/ko/reference/cli/#run-shell) | 이 명령이 만드는 CA 번들은 시스템 루트 인증서에서 출발하는데, gori는 그 위치를 Unix 경로에서만 찾습니다. 그래서 Windows에서는 `SSL_CERT_FILE`이 이미 번들을 가리키고 있지 않은 한 gori 루트만 담기고, 그 셸의 도구는 gori가 가로채지 않는 호스트(패스스루 호스트, `NO_PROXY` 대상)에서 TLS 검증에 실패합니다. 전체 번들을 `SSL_CERT_FILE`로 먼저 export해 두면 피할 수 있습니다. 이곳의 기본 `--print` 문법은 PowerShell입니다. |
+| [`gori run shell`](/ko/reference/cli/#run-shell) | 이 명령이 만드는 CA 번들은 시스템 루트 인증서에서 출발하는데, gori는 그 위치를 Unix 경로에서만 찾습니다. 그래서 Windows에서는 `SSL_CERT_FILE`이 이미 번들을 가리키고 있지 않으면 gori 루트만 담기고, 그 셸의 도구는 gori가 가로채지 않는 호스트(패스스루 호스트, `NO_PROXY` 대상)에서 TLS 검증에 실패합니다. 전체 번들을 `SSL_CERT_FILE`로 먼저 export해 두면 피할 수 있습니다. 이곳의 기본 `--print` 문법은 PowerShell입니다. |
 | 파일 권한 | 루트 CA 키의 `0600` 같은 POSIX 모드가 적용되지 않습니다. `GORI_HOME`(`%USERPROFILE%\.gori`) 아래 파일의 접근 권한은 그 폴더 설정을 따릅니다. |
 | `gori update` | Windows는 실행 중인 `.exe`를 덮어쓰지 못하므로, 기존 파일을 옆으로 옮긴 뒤 새 파일을 그 자리에 둡니다. 기존 파일이 아직 실행 중이면 남은 `.gori-update.old.*` 파일은 다음 `gori update`가 지웁니다. Chocolatey로 설치했다면 직접 교체하지 않고 `choco upgrade gori -y`만 출력합니다. gori를 닫고 관리자 셸에서 실행하세요. |
 | 설치 스크립트 | curl 설치 스크립트는 macOS와 Linux 전용입니다. [Chocolatey](/ko/getting-started/installation/#chocolatey-windows)나 [직접 다운로드](/ko/getting-started/installation/#windows)를 쓰세요. |
@@ -50,7 +50,7 @@ Windows 릴리스 바이너리는 v0.8.0부터 제공됩니다.
 
 ## 지원하지 않는 플랫폼 {#not-supported}
 
-이 플랫폼에는 릴리스 바이너리, 패키지, CI가 없습니다. 일부는 [소스에서 빌드](/ko/getting-started/installation/#build-from-source)할 수 있을지 모르지만 그렇다는 걸 확인하는 절차는 없습니다.
+이 플랫폼에는 릴리스 바이너리, 패키지, CI가 없습니다. 일부는 [소스에서 빌드](/ko/getting-started/installation/#build-from-source)할 수 있을지 모르지만 빌드되는지 확인하는 절차는 없습니다.
 
 | 플랫폼 | 비고 |
 |--------|------|

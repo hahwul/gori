@@ -1,6 +1,6 @@
 +++
 title = "MCP 서버"
-description = "Model Context Protocol을 통해 AI 에이전트나 스크립트로 gori를 구동합니다."
+description = "AI 에이전트나 스크립트에서 Model Context Protocol로 gori를 구동합니다."
 weight = 85
 
 [extra]
@@ -41,19 +41,19 @@ gori mcp --use-active-project      # explicitly serve the active TUI/MRU project
 gori mcp --no-project              # force unbound even inside a Git workspace
 ```
 
-명시적 선택자가 없으면, gori는 가장 가까운 Git 루트를 찾아 그 정규 경로를 격리된 프로젝트에 바인딩합니다. 이 바인딩은 디렉터리 이름이 같은 두 리포지토리가 하나의 데이터베이스를 공유하는 것을 막습니다.
+선택자를 지정하지 않으면 gori는 가장 가까운 Git 루트를 찾아 그 정규 경로를 격리된 프로젝트에 바인딩합니다. 이 바인딩 덕분에 디렉터리 이름이 같은 두 리포지토리가 데이터베이스를 공유하지 않습니다.
 
 **Git 워크스페이스 밖**에서 뜨면(AI 클라이언트가 홈·앱 디렉터리에서 MCP를 띄우는 흔한 경우) 서버는 **unbound**로 시작합니다. MCP 핸드셰이크와 도구 목록은 바로 성공하지만, 트래픽 도구(`list_history`, `send_request` 등)는 에이전트가 `list_projects`, `create_project`(unbound일 때 자동 바인딩), 또는 `switch_project`를 호출하기 전까지 `NO_PROJECT`를 반환합니다. unbound 상태에서는 활성 TUI/MRU 프로젝트를 저절로 열지 않습니다. 열려면 `--use-active-project`(또는 `--project` / `--db` / `GORI_MCP_PROJECT` / `GORI_MCP_DB`)를 지정하세요.
 
-프로젝트가 없어도 동작하는 도구 계열이 몇 가지 있습니다. 프로젝트 관리(`project_info`, `list_projects`, `create_project`, `switch_project`, `delete_project`, `export_project`, `import_project`, `diff_projects`), 순수 계산 헬퍼(`decode`, `jwt_*`, `cookie_*`, `sequence_analyze`), 쿼리 언어 레퍼런스(`ql_reference`, `ql_explain`), 전역 워드리스트 카탈로그(`list_wordlists`, `get_wordlist`, `save_wordlist`, `rename_wordlist`, `delete_wordlist`), 그리고 즉석 OAST 리스너(`oast_presets`, `oast_payload`, `oast_start`, `oast_stop`, `oast_poll`)입니다. 그 밖의 도구는 저장된 세션을 다루는 `oast_resume` / `oast_release`까지 포함해, 프로젝트가 바인딩되기 전까지 `NO_PROJECT`를 반환합니다.
+프로젝트가 없어도 동작하는 도구 계열이 몇 가지 있습니다. 프로젝트 관리(`project_info`, `list_projects`, `create_project`, `switch_project`, `delete_project`, `export_project`, `import_project`, `diff_projects`), 순수 계산 헬퍼(`decode`, `jwt_*`, `cookie_*`, `sequence_analyze`), 쿼리 언어 레퍼런스(`ql_reference`, `ql_explain`), 전역 워드리스트 카탈로그(`list_wordlists`, `get_wordlist`, `save_wordlist`, `rename_wordlist`, `delete_wordlist`), 즉석 OAST 리스너(`oast_presets`, `oast_payload`, `oast_start`, `oast_stop`, `oast_poll`)입니다. 그 밖의 도구는 저장된 세션을 다루는 `oast_resume` / `oast_release`까지 포함해, 프로젝트가 바인딩되기 전까지 `NO_PROJECT`를 반환합니다.
 
 **선택된 프로젝트를 열 수 없으면**(데이터베이스가 없거나 깨졌거나 읽을 수 없을 때, 프로젝트 이름이 더 이상 존재하지 않을 때) 서버는 종료하지 않고 핸드셰이크를 마친 뒤 unbound로 시작합니다. 실패 이유는 stderr에 기록되고, 핸드셰이크 `instructions`에 실리며, 모든 `NO_PROJECT` 도구 오류에 함께 반환되고, `project_info`의 `bind_error` 필드로도 보고됩니다. 에이전트는 재시작 없이 `list_projects`와 `switch_project`로 복구할 수 있습니다.
 
-`project_info`를 제공하는 프로필에서는 데이터를 사용하기 전에 이 도구를 호출하세요. `bound`, 선택된 프로젝트, 데이터베이스 경로, 워크스페이스 루트, 선택 출처, 프로젝트 `description` 전문(프로젝트를 설정하면서 저장한 작업 지침), 그리고 프로젝트 `tags`를 보고합니다. 설명이 있고 `project_info`를 제공하면 핸드셰이크 instructions가 행동 전에 읽으라고 안내합니다. 설명 본문은 instructions에 캐시하지 않고 호출할 때 읽습니다.
+`project_info`를 제공하는 프로필에서는 데이터를 사용하기 전에 이 도구를 호출하세요. `bound`, 선택된 프로젝트, 데이터베이스 경로, 워크스페이스 루트, 선택 출처, 프로젝트 `description` 전문(프로젝트를 설정하면서 저장한 작업 지침), 프로젝트 `tags`를 보고합니다. 설명이 있고 `project_info`를 제공하면 핸드셰이크 instructions가 행동 전에 읽으라고 안내합니다. 설명 본문은 instructions에 캐시하지 않고 호출할 때 읽습니다.
 
-`switch_project`와 자동 바인딩하는 `create_project`도 `description`을 돌려주며, 설명이 없으면 `null`입니다. 이 바인딩 응답에는 최대 2,000자만 담고, 잘리면 `description_truncated:true`와 `description_next_call`로 전문을 읽을 `project_info`를 안내합니다. 바인딩을 바꾸지 않는 `create_project`는 이 필드들을 생략합니다. 설명이 `null`이 아니면 `description_note`가 함께 붙습니다. 프로젝트를 설정한 사람이 이 작업을 위해 남긴 지침이며 권한을 부여하는 것은 아니라는 뜻입니다. 실제로 무엇을 보낼 수 있는지는 여전히 스코프, Sandbox, 서버 권한이 결정합니다.
+`switch_project`와 자동 바인딩하는 `create_project`도 `description`을 돌려주며, 설명이 없으면 `null`입니다. 이 바인딩 응답에는 최대 2,000자만 담고, 잘리면 `description_truncated:true`와 `description_next_call`로 전문을 읽을 `project_info`를 안내합니다. 바인딩을 바꾸지 않는 `create_project`는 이 필드를 생략합니다. 설명이 `null`이 아니면 `description_note`가 함께 붙습니다. 프로젝트를 설정한 사람이 이 작업을 위해 남긴 지침이며 권한을 부여하는 것은 아니라는 뜻입니다. 무엇을 보낼 수 있는지는 여전히 스코프, Sandbox, 서버 권한이 결정합니다.
 
-**`instructions`에 적힌 프로젝트는 핸드셰이크 시점의 바인딩입니다.** 이 텍스트는 한 번만 전달되고 갱신을 밀어주는 수단이 없어서, `switch_project` 이후에도 그때의 바인딩을 계속 설명합니다. 실제 읽기와 쓰기는 새 프로젝트로 갑니다. 현재 값은 `project_info`가 답합니다. `switch_project`(그리고 자동 바인딩하는 `create_project`)는 같은 정정을 결과에 담아, 직전 바인딩을 `previous_project`로 함께 돌려줍니다.
+**`instructions`에 적힌 프로젝트는 핸드셰이크 시점의 바인딩입니다.** 이 텍스트는 한 번만 전달되고 갱신되지 않으므로, `switch_project` 이후에도 예전 바인딩을 설명합니다. 이후 호출의 읽기와 쓰기는 새 프로젝트로 갑니다. 현재 바인딩은 `project_info`로 확인합니다. `switch_project`와 자동 바인딩하는 `create_project`는 같은 정정을 결과에 담고, 직전 바인딩도 `previous_project`로 돌려줍니다.
 
 ## 읽기 전용 모드 {#read-only-mode}
 
@@ -65,13 +65,13 @@ gori mcp --read-only
 
 읽기 전용 서버는 라이터도 두지 않습니다. 서빙 중인 프로젝트에 쓰지 않고 백그라운드 인덱싱도 돌리지 않으므로, 같은 프로젝트로 캡처 중인 TUI와 경합하지 않습니다(SQLite는 라이터를 하나만 허용합니다). 예외는 예전 gori가 쓴 데이터베이스뿐입니다. 그 데이터베이스는 마이그레이션하지 않으면 이 빌드가 읽을 수 없으므로 열 때 마이그레이션합니다.
 
-기본(액션 허용) 서버는 라이터를 둡니다. `send_request`와 `create_issue`가 필요하기 때문입니다. 다만 idle FTS 인덱서는 돌리지 않습니다. 전문 검색은 질의 때 백로그를 비웁니다. 백그라운드에서 인덱스를 최신으로 유지하는 것은 캡처 중인 TUI입니다.
+기본(액션 허용) 서버는 `send_request`와 `create_issue`에 필요하므로 라이터를 두지만, idle FTS 인덱서는 돌리지 않습니다. 전문 검색은 질의 때 백로그를 비웁니다. 인덱스는 캡처 중인 TUI가 백그라운드에서 최신으로 유지합니다.
 
-전문 검색(`body:`)이 읽는 인덱스는 캡처 커밋과 분리되어 만들어지는데, 읽기 전용 서버는 그 인덱스를 만들 수 없습니다. 아직 인덱싱되지 않은 flow가 남아 있으면 그런 질의는 부분 인덱스로 답하는 대신 `FTS_BACKLOG`로 거부됩니다. gori로 프로젝트를 열거나 `--read-only`를 빼고 실행해서 인덱스를 비우세요.
+전문 검색(`body:`)이 읽는 인덱스는 캡처 커밋과 분리되어 만들어지는데, 읽기 전용 서버는 그 인덱스를 만들 수 없습니다. 아직 인덱싱되지 않은 flow가 남아 있으면 그런 질의는 부분 인덱스로 답하는 대신 `FTS_BACKLOG`로 거부됩니다. gori로 프로젝트를 열거나 `--read-only`를 빼고 실행해서 백로그를 비우세요.
 
 ### Preferences에서 권한 정하기 {#permissions-from-preferences}
 
-`--read-only`는 에이전트에 설치할 때 정해집니다. gori 안에서 바로 바꾸는 스위치는 **Settings → AI → MCP permissions**에 있고, 도구 묶음마다 행이 하나씩 있고 각각 **on**, **ask**, **off** 중 하나이며 기본은 모두 켜져 있습니다:
+`--read-only`는 에이전트에 설치할 때 정해집니다. gori 안에서 바꾸는 스위치는 **Settings → AI → MCP permissions**에 있습니다. 도구 묶음마다 행이 하나씩 있고, 각 행은 **on**, **ask**, **off** 중 하나이며 기본은 모두 켜져 있습니다:
 
 | 묶음 | 끄면 빠지는 도구 |
 |------|------------------|
@@ -84,7 +84,7 @@ gori mcp --read-only
 
 읽기 도구와 `operator_messages` / `reply_to_operator`는 어느 묶음에도 속하지 않고 항상 제공됩니다. 꺼진 묶음의 도구는 `tools/list`에서 빠지고, 그래도 호출하면 `TOOL_DISABLED`로 거부되며, 핸드셰이크 instructions가 에이전트에게 어떤 묶음이 꺼졌는지 알려줍니다. 이 스위치는 `--read-only`, `--tools`와 함께 적용됩니다. 셋 모두가 허용한 도구만 제공됩니다. `gori mcp` 프로세스가 시작할 때 읽으므로, 이미 떠 있는 에이전트는 서버를 다시 시작할 때까지 받았던 도구를 계속 씁니다. 그 시점에 설정 파일을 읽지 못하면 모든 묶음이 꺼집니다.
 
-**Ask**로 두면 그 묶음의 도구는 목록에 남고, 호출마다 먼저 운영자에게 묻습니다. 호출은 곧바로 `approval_id`가 담긴 `APPROVAL_PENDING`을 돌려주고, gori는 `ask:` 칩에 승인 카드를 띄웁니다. 카드 내용은 gori가 아는 사실(도구, 요청이면 접속하는 호스트와 포트)로 만듭니다. 거기서 답하면 됩니다. **Allow once**는 그 호출(같은 도구, 같은 인자)의 재시도 한 번을 허용하고, **Always (this server)**는 그 `gori mcp` 프로세스가 끝날 때까지 묶음을 열어 두며, **Deny**는 재시도를 `TOOL_DISABLED`로 거부합니다. `send_request`, `send_websocket`, `ws_session_*`, `ws_inject`, `race_requests`, `timing_requests`, `fuzz_start`, `mine_start`, `sequence_start`, `minimize_repeater`, `cache_deception_check`, `grpc_reflect`의 요청은 대신 호스트 단위로 묻고 **Always this host**와 **Always host:port**를 고를 수 있습니다. 이 허용은 프로젝트에 저장되어 재시작 후에도 남고, 아카이브에서 프로젝트를 가져오면 지워집니다. 어떤 호스트의 host override를 추가·변경·삭제하면 그 호스트의 허용도 지워집니다. 허용된 호스트라도 sandbox는, sweep이라면 exclude 규칙도 여전히 막습니다. 폴러와 중지(`fuzz_status`, `stop_job`, `oast_poll` 등)는 묻지 않습니다. 답은 승인 id를 `in_reply_to`에 담은 운영자 메시지로 에이전트에게 가고, 에이전트는 같은 호출을 다시 시도합니다. 아무것도 막히지 않으므로 그동안 다른 호출은 계속 동작합니다. 답이 없는 카드는 30분 뒤 만료되고, 다음 재시도가 다시 묻습니다. **Ask**는 서버가 쓸 수 있는 프로젝트가 바인딩되어 있어야 하며, 없으면 호출은 `TOOL_DISABLED`로 거부됩니다.
+**Ask**로 두면 그 묶음의 도구는 목록에 남고, 호출마다 먼저 운영자에게 묻습니다. 호출은 곧바로 `approval_id`가 담긴 `APPROVAL_PENDING`을 돌려주고, gori는 `ask:` 칩에 승인 카드를 띄웁니다. 카드 내용은 gori가 아는 사실(도구, 요청이면 접속하는 호스트와 포트)로 만듭니다. 거기서 답하면 됩니다. **Allow once**는 그 호출(같은 도구, 같은 인자)의 재시도 한 번을 허용하고, **Always (this server)**는 그 `gori mcp` 프로세스가 끝날 때까지 묶음을 열어 두며, **Deny**는 재시도를 `TOOL_DISABLED`로 거부합니다. `send_request`, `send_websocket`, `ws_session_*`, `ws_inject`, `race_requests`, `timing_requests`, `fuzz_start`, `mine_start`, `sequence_start`, `minimize_repeater`, `cache_deception_check`, `grpc_reflect`의 요청은 대신 호스트 단위로 묻고 **Always this host**와 **Always host:port**를 고를 수 있습니다. 이 허용은 프로젝트에 저장되어 재시작 후에도 남고, 아카이브에서 프로젝트를 가져오면 지워집니다. 어떤 호스트의 host override를 추가·변경·삭제하면 그 호스트의 허용도 지워집니다. 허용된 호스트라도 sandbox는 여전히 막고, sweep이면 exclude 규칙도 막습니다. 폴러와 중지(`fuzz_status`, `stop_job`, `oast_poll` 등)는 묻지 않습니다. 답은 승인 id를 `in_reply_to`에 담은 운영자 메시지로 에이전트에게 가고, 에이전트는 같은 호출을 다시 시도합니다. 아무것도 막히지 않으므로 그동안 다른 호출은 계속 동작합니다. 답이 없는 카드는 30분 뒤 만료되고, 다음 재시도 때 다시 묻습니다. **Ask**는 서버가 쓸 수 있는 프로젝트가 바인딩되어 있어야 하며, 없으면 호출은 `TOOL_DISABLED`로 거부됩니다.
 
 묶음은 도구를 막을 뿐이고, 바이트를 대상에 보낼 수 있는 묶음은 하나가 아닙니다. **Intercept control**이 켜져 있으면 에이전트는 보류된 요청을 고쳐서 forward할 수 있고, **Send traffic**이 꺼져 있어도 그 바이트는 대상에 도달합니다. 에이전트의 바이트가 대상에 닿지 않게 하려면 둘 다 끄세요. **Change scope & sandbox**를 끄면 에이전트가 scope를 고치지 못하지만, `allow_unscoped:true`를 준 요청은 규칙이 덮지 않는 대상에도 닿습니다(sandbox는 그래도 막습니다). 그것까지 막으려면 **Send traffic**도 끄거나 **Change scope & sandbox**를 ask로 두세요. 그러면 waiver가 그 호스트에 대한 승인을 기다립니다. 요청이 닿는 곳을 바꾸는 스위치가 두 개 더 있습니다. host override(**Edit project data**)는 scope 안의 호스트 이름을 다른 주소로 돌리고, **Manage projects**는 scope와 sandbox가 다른 프로젝트로 에이전트가 옮겨 갈 수 있게 합니다.
 
@@ -103,7 +103,7 @@ gori mcp --read-only
 
 토큰은 바이트 ÷ 4로 잡은 JSON 어림값이며, 실제 값은 클라이언트의 토크나이저가 정합니다.
 
-**어디서 시작할까.** [`eval/`](https://github.com/hahwul/gori/tree/main/eval)의 에이전트 평가가 캡처 분석 과제(캡처한 플로우를 읽고, 거르고, 세고, 연결하기)로 프로필별 차이를 측정합니다. Sonnet과 Haiku 모두 프로필에 따라 과제 성공 여부가 눈에 띄게 달라지지는 않았지만, 비용은 크게 달랐습니다. 같은 답에 전체 카탈로그는 `@minimal`보다 입력 토큰을 중앙값 3.5~4배 썼습니다(과제별로는 1.7~5.5배, `--read-only`는 약 1.6배, `@recon`은 약 1.4배). 카탈로그는 턴마다 다시 전송되므로 호출할 때마다 절대 차이가 벌어지고, 작은 모델일수록 호출이 많습니다. 캡처를 읽고 파악하는 에이전트라면 `--tools=@recon --read-only`부터, History와 플로우만 읽는다면 `@minimal`부터 시작하세요. `@recon`을 그대로 쓰면 요청 재전송과 이슈·노트 기록이 더해집니다. 전체 카탈로그는 워크벤치(fuzz, discover, authorize, sequence)를 직접 돌리는 에이전트에 두세요. 이 경우는 아직 평가에서 측정하지 않습니다.
+**어디서 시작할까.** [`eval/`](https://github.com/hahwul/gori/tree/main/eval)의 에이전트 평가가 캡처 분석 과제(캡처한 플로우를 읽고, 거르고, 세고, 연결하기)로 프로필별 차이를 측정합니다. Sonnet과 Haiku 모두 프로필에 따라 과제 성공 여부가 눈에 띄게 달라지지는 않았지만, 비용은 크게 달랐습니다. 같은 답에 전체 카탈로그는 `@minimal`보다 입력 토큰을 중앙값 3.5~4배 썼습니다(과제별로는 1.7~5.5배, `--read-only`는 약 1.6배, `@recon`은 약 1.4배). 카탈로그는 턴마다 다시 전송되므로 호출할 때마다 절대 차이가 벌어지고, 작은 모델일수록 호출이 많습니다. 캡처를 읽고 파악하는 에이전트라면 `--tools=@recon --read-only`부터, History와 플로우만 읽는다면 `@minimal`부터 시작하세요. `@recon`만 쓰면 요청 재전송과 이슈·노트 기록이 더해집니다. 전체 카탈로그는 워크벤치(fuzz, discover, authorize, sequence)를 돌리는 에이전트에 두세요. 이 경우는 아직 평가에서 측정하지 않습니다.
 
 | 프로필 | 도구 |
 | --- | --- |
@@ -114,7 +114,7 @@ gori mcp --read-only
 헤드리스 캡처 분석은 `gori mcp --db capture.db --tools=@analysis`로 시작할 수 있습니다.
 시작할 때 프로젝트가 바인딩되어 있어야 하며, 프로젝트 선택·전환이나 TUI 메시지 도구는 제공하지 않습니다.
 
-여러 흐름에서 값을 추출할 때는 개별 `get_flow` 대신 `list_history`의 `columns`를 사용하세요.
+여러 플로우에서 값을 추출할 때는 개별 `get_flow` 대신 `list_history`의 `columns`를 사용하세요.
 예를 들어 `["rid=header:X-Request-Id", "body=jsonpath:$"]`로 헤더와 본문을 함께 추출할 수 있습니다.
 `fields: []`는 필수 문맥과 추출 컬럼만, `fields: ["url", "status"]`는 선택한 메타데이터도 반환합니다.
 ID·상태·출처·조작 이력·권고·오류·요청한 컬럼과 페이지 커서는 유지되며, `fields`를 생략하면 전체 행을 반환합니다.
@@ -133,19 +133,19 @@ gori mcp --tools='@recon,-send_request'                          # 프로필 - �
 gori mcp --tools='-fuzz_*,-mine_*,-discover_*,-sequence_*'       # 비동기 워크벤치만 제외
 ```
 
-도구 이름이 접두어 계열(`list_*`, `intercept_*`, `fuzz_*`, `oast_*`)로 지어져 있으므로 글롭 하나로 그룹을 고를 수 있습니다. 빼기로 시작하는 스펙은 전체에서 출발하므로 이후 버전이 도구를 추가해도 그대로 동작합니다.
+도구 이름이 접두어 계열(`list_*`, `intercept_*`, `fuzz_*`, `oast_*`)로 지어져 있으므로 글롭 하나로 그룹을 고를 수 있습니다. 빼기로 시작하는 스펙은 전체에서 출발하므로 이후 버전이 도구를 추가해도 계속 동작합니다.
 
 도구 설명에 명시된 필수 후속 도구(비동기 작업의 상태·결과·중지, flow 본문 페이지 읽기 등)는 전이적으로 자동 포함됩니다. 나중에 부모 도구는 남기고 필수 동반 도구를 제외하면 시작 시 충돌을 거부합니다. 제외 항목 뒤에 동반 도구를 다시 추가하거나 부모 도구를 빼세요. 조건부 라이브 인터셉트 읽기 도구는 제외 지정을 따릅니다. `intercept_get`은 숨겼지만 `intercept_list`는 제공한다면 `get_current_context`가 미리보기와 메타데이터를 볼 수 있다고 안내하면서 전체 상세 내용은 제공되지 않는다고 알립니다. 둘 다 숨겼다면 보류 항목을 이 서버에서 읽을 수 없다고 알리고, 어느 읽기 도구도 되살리지 않습니다.
 
 스펙을 너무 좁히면 서버가 프로젝트를 *고를* 방법조차 잃을 수 있습니다. Git 워크스페이스 밖이거나 `--no-project`로 시작했거나 지정한 데이터베이스가 열리지 않아 바인딩이 없는데 스펙이 `switch_project`와 `create_project`를 둘 다 남기지 않으면, 에이전트가 무엇을 호출해도 프로젝트를 붙일 수 없습니다. `list_projects`는 목록만 보여줄 뿐 아무것도 바인딩하지 않습니다. gori는 이를 시작 시점에 경고하고, `NO_PROJECT` 오류도 없는 도구를 가리키지 않고 같은 내용을 알립니다. 스펙에 `switch_project`를 남기거나 `--project`/`--db`를 넘기세요.
 
-반대로 서버를 한 프로젝트에 *묶어 두려면* `--pin-project`를 씁니다. 서버를 다시 바인딩하거나 다른 프로젝트를 읽는 도구(`list_projects`, `switch_project`, `create_project`, `delete_project`, `import_project`, `export_project`, `diff_projects`)를 `--tools`·`--read-only`가 좁힌 결과에서 추가로 뺍니다. `--read-only`만으로는 `switch_project`가 그대로 동작합니다. 파일시스템 울타리는 아닙니다. 경로를 받는 도구(`import_flows`, 워드리스트 파일)는 서버가 읽을 수 있는 파일이면 여전히 읽습니다. 고정한 채 프로젝트 없이 시작하게 되면(`--no-project`, 워크스페이스 밖, 열리지 않는 데이터베이스) 시작을 중단합니다.
+반대로 서버를 한 프로젝트에 *묶어 두려면* `--pin-project`를 씁니다. 서버를 다시 바인딩하거나 다른 프로젝트를 읽는 도구(`list_projects`, `switch_project`, `create_project`, `delete_project`, `import_project`, `export_project`, `diff_projects`)를 `--tools`·`--read-only`가 좁힌 결과에서 추가로 뺍니다. `--read-only`만으로는 `switch_project`가 계속 동작합니다. 고정해도 파일시스템 접근은 제한되지 않습니다. 경로를 받는 도구(`import_flows`, 워드리스트 파일)는 서버가 읽을 수 있는 파일이면 여전히 읽습니다. 고정한 채 프로젝트 없이 시작하게 되면(`--no-project`, 워크스페이스 밖, 열리지 않는 데이터베이스) 시작을 중단합니다.
 
 아무것도 매치하지 않는 패턴이나 프로필은 더 적은 도구로 서버를 띄우지 않고 시작 시 중단하며 후보를 제안합니다(`--tools: "list_hisotry" matches no tool — did you mean list_history?`). 제외된 도구는 `tools/list`에 나오지 않고, 그래도 호출하면 어떤 플래그가 감췄는지 밝히며 거절합니다. `--tools`는 `--read-only`와 함께 쓸 수 있고, 다른 플래그처럼 `--install-*`과 같이 주면 설치되는 명령에 기록됩니다.
 
 ## TUI에서 에이전트 보기 {#seeing-an-agent-from-the-tui}
 
-MCP 서버가 프로젝트에 붙어 있는 동안 gori가 이를 보여줍니다. 프로젝트 선택창에서는 해당 행에 `mcp` 표시가 붙고(둘 이상이면 `mcp×2`), 프로젝트를 열면 상단 바에 클릭 가능한 `mcp:<client>` 칩이 나타납니다. 칩을 클릭하거나 명령 팔레트에서 `app.agents`를 실행하면 붙어 있는 에이전트를 나열하는 카드가 열립니다. 이름·버전·pid·연결 시각·읽기 전용 여부가 표시됩니다. 이름은 클라이언트의 `clientInfo` 핸드셰이크에서 오고, `--read-only`로 시작한 서버는 거기서 읽기 전용으로 표시됩니다. 행은 프로세스가 종료되면 사라집니다.
+MCP 서버가 프로젝트에 붙어 있는 동안에는 gori에 표시됩니다. 프로젝트 선택창에서는 해당 행에 `mcp` 표시가 붙고(둘 이상이면 `mcp×2`), 프로젝트를 열면 상단 바에 클릭 가능한 `mcp:<client>` 칩이 나타납니다. 칩을 클릭하거나 명령 팔레트에서 `app.agents`를 실행하면 붙어 있는 에이전트를 나열하는 카드가 열립니다. 이름·버전·pid·연결 시각·읽기 전용 여부가 표시됩니다. 이름은 클라이언트의 `clientInfo` 핸드셰이크에서 오고, `--read-only`로 시작한 서버는 거기서 읽기 전용으로 표시됩니다. 행은 프로세스가 종료되면 사라집니다.
 
 ## 에이전트에 설치하기 {#installing-into-an-agent}
 
@@ -163,7 +163,7 @@ gori는 널리 쓰이는 클라이언트의 MCP 설정을 대신 작성해 줍�
 
 Pi는 [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter) 같은 MCP 어댑터가 필요합니다. `pi install npm:pi-mcp-adapter`로 어댑터를 설치한 다음 Pi를 다시 시작하세요. `--install-pi`는 MCP 서버 설정을 기록합니다.
 
-Claude Desktop과 Hermes를 뺀 나머지 클라이언트는 macOS·Linux·Windows에서 모두 같은 위치에 설정을 둡니다. Hermes는 `$HERMES_HOME`이 설정돼 있으면 그 값을, 없으면 `~/.hermes`(Windows는 `%LOCALAPPDATA%\hermes`)를 읽습니다. Claude Desktop만 Electron의 앱 데이터 디렉터리를 따릅니다. macOS는 `~/Library/Application Support/Claude/`, Windows는 `%APPDATA%\Claude\`, Linux는 `$XDG_CONFIG_HOME/Claude/`(기본값 `~/.config/Claude/`)입니다. gori는 이 변수를 읽으므로 Nix나 home-manager처럼 세션에서 값을 옮겨 둔 환경도 그대로 따라갑니다.
+Claude Desktop과 Hermes를 뺀 나머지 클라이언트는 macOS·Linux·Windows에서 모두 같은 위치에 설정을 둡니다. Hermes는 `$HERMES_HOME`이 설정돼 있으면 그 값을, 없으면 `~/.hermes`(Windows는 `%LOCALAPPDATA%\hermes`)를 읽습니다. Claude Desktop만 Electron의 앱 데이터 디렉터리를 따릅니다. macOS는 `~/Library/Application Support/Claude/`, Windows는 `%APPDATA%\Claude\`, Linux는 `$XDG_CONFIG_HOME/Claude/`(기본값 `~/.config/Claude/`)입니다. gori는 이 변수를 읽으므로 Nix나 home-manager처럼 세션에서 값을 옮겨 둔 환경도 따라갑니다.
 
 예외는 **Flatpak** Claude Desktop입니다. 이 빌드는 샌드박스 안쪽의 `XDG_CONFIG_HOME`(`~/.var/app/<app-id>/config/Claude/`)을 읽는데, 호스트 셸에서 실행되는 gori는 그 값을 볼 수 없습니다. 이 경우 gori는 `~/.config/Claude/claude_desktop_config.json`에 쓰고 그 경로를 출력하니, 파일을 샌드박스 디렉터리로 직접 복사하세요. 설치 명령은 항상 기록한 파일을 출력하므로, 그 줄을 사용 중인 빌드가 읽는 위치와 맞춰 보세요.
 
@@ -176,11 +176,11 @@ gori mcp --install-pi
 gori mcp --install-claude-code --install-codex  # 한 번에 여러 클라이언트
 ```
 
-Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mcp_servers:` 항목이 있는 YAML을 사용합니다(JSON이 아닙니다). 설치 후 클라이언트를 재시작하거나 세션을 다시 열어 MCP 서버를 다시 로드하세요. TOML 테이블에는 `tool_timeout_sec = 600`도 함께 씁니다. Codex는 기본적으로 60초가 지난 도구 호출을 취소하므로(Grok도 같은 키를 읽습니다), `minimize_repeater`나 active `probe_scan`처럼 오래 걸리는 동기 도구가 중간에 끊깁니다. 이미 값을 적어 두었다면 다시 설치해도 그 값을 유지합니다. 기존 설정 파일은 제자리에서 갱신됩니다. 다른 서버·테이블·주석은 그대로 두고, 파일 권한도 유지하며, 교체는 원자적이라 설치가 중간에 끊겨도 파일이 잘려 나가지 않습니다. gori는 TOML과 YAML 파일을 텍스트로 편집하므로 설정 주변에 적어 둔 주석이 남습니다. 주석이 없는 JSON 설정은 파싱한 뒤 다른 키를 유지한 채 다시 씁니다. 안전하게 끼워 넣을 수 없는 설정 파일은 건드리지 않고 그 사실을 알립니다.
+Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mcp_servers:` 항목이 있는 YAML을 사용합니다. 나머지 클라이언트는 JSON을 씁니다. 설치 후 클라이언트를 재시작하거나 세션을 다시 열어 MCP 서버를 다시 로드하세요. TOML 테이블에는 `tool_timeout_sec = 600`도 함께 씁니다. Codex는 기본적으로 60초가 지난 도구 호출을 취소하므로(Grok도 같은 키를 읽습니다), `minimize_repeater`나 active `probe_scan`처럼 오래 걸리는 동기 도구가 중간에 끊깁니다. 이미 값을 적어 두었다면 다시 설치해도 그 값을 유지합니다. 기존 설정 파일은 제자리에서 갱신됩니다. 다른 서버·테이블·주석은 그대로 두고, 파일 권한도 유지하며, 교체는 원자적이라 설치가 중간에 끊겨도 파일이 잘려 나가지 않습니다. gori는 TOML과 YAML 파일을 텍스트로 편집하므로 설정 주변에 적어 둔 주석이 남습니다. 주석이 없는 JSON 설정은 파싱한 뒤 다른 키를 유지한 채 다시 씁니다. 안전하게 끼워 넣을 수 없는 설정 파일은 건드리지 않고 그 사실을 알립니다.
 
 클라이언트가 리포지토리 디렉터리 밖에서 MCP를 시작해도 서버는 unbound로 연결되며, 에이전트가 도구로 프로젝트를 고르거나 만들 수 있습니다. 설치 시점에 engagement 하나로 고정해 두려면 선택자를 넘기세요. 예: `gori mcp --project my-engagement --install-codex`.
 
-`--install-*`과 함께 넘긴 플래그는 모두 설치되는 커맨드에 기록됩니다. 선택자(`--project`, `--db`, `--no-project`, `--use-active-project`), `--read-only`, `--tools`, `--pin-project`, `--insecure-upstream`, `--config`가 해당합니다. 경로는 절대 경로로 변환됩니다. 클라이언트는 사용자가 고르지 않은 작업 디렉터리에서 서버를 실행하기 때문입니다.
+`--install-*`과 함께 넘긴 플래그는 모두 설치되는 커맨드에 기록됩니다. 선택자(`--project`, `--db`, `--no-project`, `--use-active-project`), `--read-only`, `--tools`, `--pin-project`, `--insecure-upstream`, `--config`가 해당합니다. 클라이언트는 사용자가 고르지 않은 작업 디렉터리에서 서버를 실행하므로 경로는 절대 경로로 변환됩니다.
 
 ## 도구 {#tools}
 
@@ -188,7 +188,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 
 두 도구가 같은 대상을 다르게 부르는 곳에서는 두 이름을 모두 받습니다. `get_flow` / `delete_flow`의 `id` 대신 `flow_id`, repeater 도구의 `id` 대신 `repeater_id`(그리고 `minimize_repeater`의 `repeater_id` 대신 `id`), `intercept_toggle`의 `enable` 대신 `enabled`. 모든 `limit`은 기본값과 최댓값을 스키마(`default`, `minimum`, `maximum`)에 싣습니다. 목록 응답은 행 약 40 KB로도 제한됩니다. 페이지가 `limit`보다 먼저 `cut_by: "bytes"`, `has_more: true`로 끝날 수 있고, 평소의 커서(`next_before_id`, `next_since`, `next_cursor`, 또는 `next_offset`: 오프셋으로 페이징하는 목록이 다음에 넘길 `offset`으로 주는 값이며 끝에서는 null)로 멈춘 곳부터 이어집니다. 다 담지 못한 `ids` 집합은 나머지를 `remaining_ids`로 돌려주고, 바이너리 `get_response_body_chunk` 페이지는 base64가 들어가도록 48 KB에서 멈춥니다. 페이징하지 않는 목록은 담지 못한 항목을 id로 알려 주고(`authorize_results`의 `bypasses_unshown_ids`, `authorize_*`의 `skipped_unshown_ids`·`failed_unshown_ids`, `diff_projects`의 `issues_unshown_ids`), 커서가 없는 목록은 `truncated`로 알립니다(`probe_scan`, `list_sitemap`의 `unrequested`). `oast_poll`은 들어가는 만큼의 콜백을 돌려주고 나머지는 다음 폴링을 위해 남겨 둡니다(`has_more`). 문서 하나는 따로 한도를 둡니다. `export_openapi`는 기본적으로 40 KB까지 인라인하고 더 큰 문서는 `output_path`로 파일에 쓰며, `compare_flows` diff는 자체 256 KB 한도를 유지하고 `truncated`로 알립니다.
 
-빈 결과가 나올 폴링은 대신 기다릴 수 있습니다. `since`를 준 `list_history`, `list_events`, `operator_messages`, `*_status` 도구, `get_job`, `ws_session_send`는 `wait_ms`(최대 30000)를 받습니다. 빈 페이지는 새 행이 들어올 때까지, 실행 중인 작업은 끝날 때까지(`ws_*` 세션은 `after` 이후의 응답이 올 때까지, `ws_session_send`는 서버의 첫 메시지가 올 때까지) 붙잡고 있다가 그 즉시 돌아오며, 시간이 다 되면 평소처럼 빈 페이지나 실행 중 상태를 돌려줍니다. 플로우는 그것을 캡처하는 gori가, 흔히 다른 프로세스가 쓰므로 대기 중에는 100 ms마다 프로젝트를 다시 확인합니다. 서버는 한 번에 호출 하나만 처리하므로 대기는 뒤의 호출을 붙잡아 둡니다. 호출을 취소하면 대기가 끝납니다.
+빈 결과가 나올 폴링은 대신 기다릴 수 있습니다. `since`를 준 `list_history`, `list_events`, `operator_messages`, `*_status` 도구, `get_job`, `ws_session_send`는 `wait_ms`(최대 30000)를 받습니다. 빈 페이지는 새 행이 들어올 때까지, 실행 중인 작업은 끝날 때까지(`ws_*` 세션은 `after` 이후의 응답이 올 때까지, `ws_session_send`는 서버의 첫 메시지가 올 때까지) 붙잡고 있다가 그 즉시 돌아오며, 시간이 다 되면 평소처럼 빈 페이지나 실행 중 상태를 돌려줍니다. 플로우는 캡처하는 gori(흔히 다른 프로세스)가 쓰므로 대기 중에는 100 ms마다 프로젝트를 다시 확인합니다. 서버는 한 번에 호출 하나만 처리하므로 대기 중에는 뒤의 호출도 기다립니다. 호출을 취소하면 대기가 끝납니다.
 
 | 도구 | 용도 |
 |------|---------|
@@ -198,7 +198,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `reply_to_operator` | gori의 오퍼레이터에게 답합니다. `summary`는 알림 링과 Miss Ring 말풍선에 보이는 한 줄, `detail`은 링에서 ↵로 여는 긴 본문, `level`은 색, `in_reply_to`는 답하는 오퍼레이터 메시지 id입니다. 답은 gori에 있는 오퍼레이터에게 알림으로 닿습니다. 그 프로젝트에 gori TUI가 열려 있으면 바로 뜨고, 닫혀 있었다면 다음에 열 때 노트 하나로 요약됩니다 |
 | `ask_operator` | gori의 오퍼레이터에게 결정을 선택 카드로 묻습니다. `question`은 한 줄, `choices`는 2~4개의 라벨, `detail`은 선택적인 설명, `default`는 카드가 처음 가리키는 선택지, `expires_in_minutes`는 기다리는 시간(기본 30분)입니다. 질문 `id`를 담아 바로 반환하고, 답은 나중에 `in_reply_to`가 그 id이고 `outcome`이 `answered`, `dismissed`, `expired` 중 하나인 오퍼레이터 메시지로, `operator_messages`가 다루는 모든 경로를 타고 돌아옵니다. 결과에는 `reply_to_operator`처럼 `tui`가 실립니다 |
 | `list_views` | 프로젝트의 History [뷰](/ko/guide/proxy/#views). `list_history{view}`가 렌즈로 적용하는 이름 붙은 QL 쿼리로, `query`를 대체하지 않고 그 위에 AND로 얹힙니다. 기본 뷰 7종(`All`, `History`, `History + Repeater`(기본값), `WebSocket`, `gRPC`, `SSE`, `Errors`) → 글로벌 라이브러리 → 프로젝트 순이며, `active`는 TUI가 보고 있는 뷰를 표시합니다. 이 값은 `list_history`에 적용되지 **않습니다**. 그쪽은 넘긴 `view`로만 거릅니다 |
-| `get_flow` | 한 플로우의 전체 요청 + 응답. 자격 증명 헤더 값은 `include_sensitive`가 없으면 `[REDACTED]`이고, `Set-Cookie`는 이름과 속성을 남깁니다(`sid=[REDACTED]; Path=/; HttpOnly`). 본문은 기본적으로 8 KB까지 인라인되고, 더 길면 잘린 자리에 나머지를 읽을 `get_response_body_chunk` 호출을 알려 주는 `more` 필드가 붙습니다(`body_mode:"full"`은 64 KB까지). [리댁션 프로파일](/ko/reference/cli/#run-redact)이 기본 적용된 곳에서는 본문이 정제되어 `body_redaction` 객체와 함께 돌아오며, 이때는 `get_response_body_chunk`가 리댁션되지 않은 저장 바이트를 넘겨주기 때문에 기본값이 `full`로 유지됩니다. `include_sensitive:true`는 헤더 리댁션과 함께 그것도 끕니다. 소켓의 `ws_messages`는 처음 500개이며, `ws_query`(`ws:needle`, `ws~regex`, QL `ws:` 필드와 같은 매칭)는 그 한도 전에 좁히고, 이때 `count`는 매칭된 총수, `ws_total`은 소켓 전체 수입니다 |
+| `get_flow` | 한 플로우의 전체 요청 + 응답. 자격 증명 헤더 값은 `include_sensitive`가 없으면 `[REDACTED]`이고, `Set-Cookie`는 이름과 속성을 남깁니다(`sid=[REDACTED]; Path=/; HttpOnly`). 본문은 기본적으로 8 KB까지 인라인되고, 더 길면 잘린 자리에 나머지를 읽을 `get_response_body_chunk` 호출을 알려 주는 `more` 필드가 붙습니다(`body_mode:"full"`은 64 KB까지). [리댁션 프로파일](/ko/reference/cli/#run-redact)이 기본 적용된 곳에서는 본문이 정제되어 `body_redaction` 객체와 함께 돌아오며, 이때는 `get_response_body_chunk`가 리댁션되지 않은 저장 바이트를 넘겨주기 때문에 기본값이 `full`로 유지됩니다. `include_sensitive:true`는 헤더 리댁션과 함께 본문 리댁션도 끕니다. 소켓의 `ws_messages`는 처음 500개이며, `ws_query`(`ws:needle`, `ws~regex`, QL `ws:` 필드와 같은 매칭)는 그 한도 전에 좁히고, 이때 `count`는 매칭된 총수, `ws_total`은 소켓 전체 수입니다 |
 | `get_response_body_chunk` | `get_flow`, `send_request`, `get_repeater_context`가 잘렸다고 알린 본문을 한 페이지 최대 64 KiB씩 조회. 플로우나 Repeater 세션의 응답은 기본적으로 디코드해서(`raw:true`면 와이어 바이트), 요청은 `part:"request"`로 읽습니다. 캡처 상한에 잘린 본문은 `source_truncated`라고 알려 줍니다. 그 바이트는 저장된 적이 없으니 페이징하지 말고 다시 보내세요. `find`(정규식, QL `body~`와 같은 매칭)는 페이지 대신 `offset`부터의 매치를 `{offset, length, snippet}`으로 돌려줍니다. 같은 바이트를 검색하므로 각 `offset`으로 바로 그 매치를 페이징할 수 있고, `has_more`/`next_offset`으로 검색을 이어 갑니다 |
 | `list_sitemap` / `list_sitemap_tags` | 고유 엔드포인트(host, method, path와 이를 이은 `url`, 기본 한 페이지 50개. 쿼리를 접은 행의 `url`에는 쿼리 문자열이 없고, 실제 target은 `query_targets`에 있습니다)와 거기에 달린 태그. `list_sitemap`의 `query`는 TUI 트리처럼 Sitemap의 `tag:`도 받습니다. 능동 도구(Repeater, Fuzzer, Miner, Sequencer, Authorize, Probe, Retest)가 History에 기록한 플로우나 저장된 퍼즈 실행 결과가 있는 행에는 `touched_by`(도구 → 수, 쿼리를 뺀 경로 기준)가 붙고, `untested:true`는 둘 다 없는 행만 남깁니다. 기록(`record_history`)도 저장(`save_results`)도 하지 않은 스윕은 셀 흔적을 남기지 않으며, 테스트할수록 `untested` 목록이 줄어드니 페이지를 넘기지 말고 offset 0부터 다시 부르세요 |
 | `list_js_endpoints` / `scan_js_endpoints` | 캡처된 JavaScript가 참조하지만 요청이 닿지 않은 엔드포인트와, 각각을 읽어 온 플로우, 줄, 문자열. 스캔은 새 JS/HTML 응답을 읽을 뿐 요청은 보내지 않습니다. `list_sitemap`에 `include_unrequested:true`를 주면 `unrequested`로 함께 나옵니다 |
@@ -214,13 +214,13 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `list_retest_steps` / `list_retest_runs` / `get_retest_run` | Issue의 **리테스트**: 결함을 재현하는 Repeater 전송 목록(각 단계를 현재 프로젝트 기준으로 해석하므로 응답에 무엇을 보낼지와 어떤 단계가 상태를 바꾸는지가 담겨 있습니다. Repeater 세션이 삭제된 단계는 `ref_deleted: true`로 표시되고, 새 세션이 그 id를 다시 받아도 실행되지 않습니다), 보존된 실행 기록(최신순), 그리고 한 실행의 결과 표(각 행이 자기 전송의 History flow id를 보관) |
 | `get_issue`의 retest 필드 | 리테스트가 있는 이슈는 `links`, `evidence` 옆에 `retest` 객체(단계 수와 마지막 실행 판정)를 함께 싣습니다. 리테스트가 없는 이슈에는 나오지 않습니다 |
 | `compare_flows` | 두 플로우의 요청 또는 응답 줄 단위 diff. 양쪽의 status/size/time과 A→B 델타 포함. `context:N`은 동일 구간을 `{kind:fold,hidden}` 마커로 접음 |
-| `diff_projects` | 리테스트 diff. 프로젝트 두 개를 엔드포인트 단위로 비교. 지난 엔게이지먼트 이후 무엇이 새로 생겼고, 사라졌고, 다르게 응답하는지. 엔드포인트 키는 Sitemap의 폴딩된 템플릿을 그대로 쓰고, `removed`(새 캡처가 아예 요청한 적 없음)와 `gone`(요청했고 404/410을 받음)은 별개의 판정 |
+| `diff_projects` | 리테스트 diff. 프로젝트 두 개를 엔드포인트 단위로 비교. 지난 엔게이지먼트 이후 무엇이 새로 생겼고, 사라졌고, 다르게 응답하는지. 엔드포인트 키는 Sitemap의 폴딩된 템플릿을 쓰고, `removed`(새 캡처가 아예 요청한 적 없음)와 `gone`(요청했고 404/410을 받음)은 별개의 판정 |
 | `intercept_list` / `intercept_get` | 라이브 인터셉트 큐와 홀드된 항목 하나의 전체 내용 조회 |
 | `list_projects` | 이 호스트에서 프로젝트 **찾기**. 최근 활동순 **한 페이지**를 돌려줍니다. `query`는 표시 이름·디렉터리 슬러그·짧은 id·바인딩된 워크스페이스 경로·태그에 포함되는지로 걸러내고(`#TAG`는 TAG로 시작하는 태그가 붙은 것만), 각 행에 `tags`가 실리며, `limit`/`offset`으로 페이지를 넘깁니다(기본 50, 최대 500). 현재 서빙 중인 프로젝트는 페이지와 별개로 `current_project`에 실리며 목록을 좁혀도 마찬가지입니다. `total` 옆에 `total_projects`가 있으므로 매치 0건을 프로젝트가 하나도 없다는 뜻으로 오해하지 않습니다 |
 | `list_notes` / `get_note` | 프로젝트 노트 읽기 |
 | `list_wordlists` / `get_wordlist` | 전역 [wordlist 카탈로그](/ko/guide/repeater-and-fuzzer/#wordlist-catalog): `GORI_HOME/wordlists` 아래의 이름 붙은 목록을 이름·크기·수정 시각만으로 나열합니다. `get_wordlist`는 경로와 최대 32 MiB까지 읽어 센 줄 수(`lines_complete:false`면 목록이 더 깁니다)를 더하고, **값**은 `include_values:true`일 때만 돌려줍니다(`max_lines` 기본 20, 최대 200). 목록이 자격 증명 목록일 수 있기 때문입니다. 프로젝트가 바인딩되지 않아도 쓸 수 있습니다 |
 | `list_rule_presets` | 응답 수정 [프리셋](/ko/guide/proxy/#rewriter-presets). 평범한 Match & Replace 규칙을 설치하는 이름 붙은 출발점(hidden 필드 드러내기, disabled 컨트롤 활성화, `maxlength` 제거, 클라이언트 검증 제거, CSP / 보안 헤더 제거, SRI 비활성화). 각 행이 설치할 규칙을 밝힙니다 |
-| `list_extract_rules` | 프로젝트의 **extract** 규칙. [세션 바인딩](/ko/guide/proxy/#session-bindings)의 읽는 쪽 절반. 각각 응답을 관찰해 `$BIND.NAME` 하나를 메모리에 묶고, Match & Replace 규칙이 그것을 주입합니다 |
+| `list_extract_rules` | 프로젝트의 **extract** 규칙. [세션 바인딩](/ko/guide/proxy/#session-bindings)의 읽는 쪽 절반. 각각 응답을 관찰해 `$BIND.NAME` 하나를 메모리에 묶고, Match & Replace 규칙이 그 값을 주입합니다 |
 | `list_color_rules` / `list_custom_colors` | [Colormarker](/ko/guide/proxy/#colouring-rows-colormarker-tab) 규칙을 우선순위 순으로, 그리고 규칙의 `color`가 참조할 수 있는 전역 커스텀 색상. 표시 전용이며 색상 규칙은 트래픽을 건드리지 않습니다 |
 | `preview_color_rule` | 어떤 색상 조건이 최근 플로우 몇 개에 매칭되는지, 그리고 앞서 해소되는 규칙들을 셈한 뒤 몇 개를 칠하는지. 전역 후보는 모든 프로젝트 규칙보다 먼저 해석되므로 `scope`를 받습니다 |
 | `grpc_schema` | 이 프로젝트가 캡처된 gRPC를 어떤 `.proto` 스키마로 렌더하는지, 각 조각이 어디서 왔는지(디스크립터 셋 파일 또는 리플렉션 페치). 리플렉션 목록에는 프로젝트에 저장된 모든 대상과, 이 서버가 가져왔지만 저장하지 못한 대상이 함께 나옵니다. 아무것도 보내지 않습니다 |
@@ -233,18 +233,18 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `list_oast_sessions` | 프로젝트에 저장된 OAST 리스닝 세션. 페이로드 호스트, hit 수, 마지막 폴링 시각. `oast_resume`이 다시 살리는 행 |
 | `decode` | `input`에 대해 인코드/디코드/해시/압축 체인을 실행(순수 변환; 네트워크나 상태 없음). `base64`처럼 방향 없는 이름은 여기서 디코드 |
 | `jwt_decode` / `jwt_verify` / `jwt_encode` / `jwt_attacks` | JWT 디코드(JWS 또는 암호화된 JWE의 보호 헤더), 보유한 키로 서명 검증, HMAC이나 PEM 키로 재서명, 공격 페이로드 생성(순수 계산; `--read-only`에서도 사용 가능) |
-| `cookie_decode` / `cookie_verify` / `cookie_crack` / `cookie_forge` | [Cookie 워크벤치](/ko/guide/cookie/)를 순수 오프라인 연산으로: Flask / Rack / Django 서명 세션 쿠키 파싱, 후보 시크릿으로 검증, 워드리스트로 시크릿 브루트포스, 편집한 페이로드 재서명. 네트워크를 쓰지 않으므로 네 개 모두 `--read-only`에서도 살아남습니다 |
+| `cookie_decode` / `cookie_verify` / `cookie_crack` / `cookie_forge` | [Cookie 워크벤치](/ko/guide/cookie/)를 순수 오프라인 연산으로: Flask / Rack / Django 서명 세션 쿠키 파싱, 후보 시크릿으로 검증, 워드리스트로 시크릿 브루트포스, 편집한 페이로드 재서명. 네트워크를 쓰지 않으므로 네 개 모두 `--read-only`에서도 쓸 수 있습니다 |
 | `sequence_analyze` | 붙여넣은 토큰 목록의 무작위성 / 예측 가능성 평가(순수) |
 | `oast_presets` / `oast_payload` / `oast_poll` | OAST 프로바이더 나열, 세션(`session_id`)의 새 페이로드 URL 발급, 실행 중인 리스너의 콜백 폴링. 한 번의 폴링은 응답 예산에 들어가는 만큼 돌려주고 각 `raw_request`·`raw_response`는 64 KB에서 자르며(`*_truncated`), `has_more`는 이미 더 기다리고 있다는 뜻입니다. 재개한 세션은 모든 콜백을 온전히 저장합니다 |
 | `project_info` | 플로우 / 이슈 개수, 캡처 구간, 프로젝트 `description`과 `tags`, 데이터베이스, 워크스페이스 바인딩, 선택 출처 |
-| `get_current_context` | 사용자가 지금 TUI에서 보고 있는 것, **그리고 무엇을 선택했는지**. `selection.ids`는 History / Issues / Sitemap / Intercept에서 마크한 행이고, 마크가 없으면 커서 행, 디테일이 열려 있으면 거기 고정된 플로우입니다. `target_source`가 셋 중 무엇인지 알려 줍니다. Sitemap은 플로우 id가 아니라 `{host, path}` 쌍을 고르며 `kind`가 그걸 알려 줍니다. 배열이 잘렸다는 신호는 `truncated` 하나뿐입니다. `marked_count`는 마크 집합을 말하는 값이라 드릴인이 그걸 덮어쓴 경우에도 그대로 실립니다. `marks_elsewhere`는 이 selection이 싣지 못한 마크가 어느 탭에 있는지를(`tab`과 개수, 그리고 그 마크에 kind가 있을 때만 `kind`), `tui.live`는 gori TUI 창이 붙어 있는지를 말합니다(증거이지 증명은 아닙니다). History 선택은 `list_history{ids}`에 넘기면 됩니다. 그 선택이 걸러진 History 렌즈(`query`, `view`, `scope_lens`, `hide_static`)도 함께 오므로, 에이전트가 사용자가 보는 목록을 그대로 나열할 수 있습니다 |
+| `get_current_context` | 사용자가 지금 TUI에서 보고 있는 것, **그리고 무엇을 선택했는지**. `selection.ids`는 History / Issues / Sitemap / Intercept에서 마크한 행이고, 마크가 없으면 커서 행, 디테일이 열려 있으면 거기 고정된 플로우입니다. `target_source`가 셋 중 무엇인지 알려 줍니다. Sitemap은 플로우 id가 아니라 `{host, path}` 쌍을 고르며 `kind`로 알 수 있습니다. 배열이 잘렸다는 신호는 `truncated` 하나뿐입니다. `marked_count`는 마크 집합을 말하는 값이라 드릴인이 덮어쓴 경우에도 실립니다. `marks_elsewhere`는 이 selection이 싣지 못한 마크가 어느 탭에 있는지를(`tab`과 개수, 그리고 그 마크에 kind가 있을 때만 `kind`), `tui.live`는 gori TUI 창이 붙어 있는지를 말합니다(증거이지 증명은 아닙니다). History 선택은 `list_history{ids}`에 넘기면 됩니다. 그 선택이 걸러진 History 렌즈(`query`, `view`, `scope_lens`, `hide_static`)도 함께 오므로, 에이전트가 사용자가 보는 목록을 그대로 나열할 수 있습니다 |
 | `get_repeater_context` | Repeater 워크벤치 상태와 저장된 세션. 세션마다 id를 **둘 다** 싣습니다(모든 repeater 툴이 받는 `id`(`db_id`로도 실림), 그리고 TUI가 서브탭 칩에 그리는 1-based 번호 `tui_index`(`6:POST /api`)). 그래서 에이전트와 사용자가 같은 탭을 같은 이름으로 부릅니다. `create_repeater`가 돌려주고 이름 없는 탭의 칩에 그려지는 `summary`(`METHOD /path`)도 함께 싣습니다. `filter`는 TUI의 `/`와 같은 서브탭 문법(`tag:` `name:` `host:` `method:` `status:`, `-`는 부정, 맨 단어는 검색)이고 `query`와 AND로 묶입니다. `include_content`는 요청 헤드와 함께, 자격증명 헤더마다 비밀값 없이 배선만 밝히는 `env_headers` 모양(`Authorization: Bearer $ENV.AUTH`)을 줍니다. `include_response_body`는 저장된 마지막 응답 본문을 인라인합니다 |
 | `create_fuzzer` | 전송 없이 Fuzzer 서브탭을 준비합니다. `fuzz_start` 인자에 `name`을 더하며, `save_results`·`record_history`·`allow_unscoped`는 받지 않습니다. **프로젝트 데이터 편집** 권한이 필요하고 **트래픽 전송**이 꺼져 있어도 동작합니다. exec 체인은 **로컬 명령 실행**의 off/ask 권한을 동일하게 적용합니다. 공용 Plan으로 검증하고 payload 파일·프로젝트 소스를 읽은 뒤 `id`·`name`·`total`과 실행 경고를 반환합니다. 열린 TUI에 탭이 나타나며, 운영자가 검토 후 실행합니다. Advanced → **Options (JSON)**에서 processors·위치 지정·WebSocket 프레임 형태를 확인하고 수정할 수 있습니다(payload는 base64). 요청 원문은 그대로 저장하고 출력만 마스킹합니다. 프로젝트에서 읽은 payload와 파일을 합친 preset은 스냅샷으로, wordlist 경로는 절대 경로로 보존합니다. CLI에서는 `gori run fuzz create --project NAME --request request.txt --target https://example.com --payloads a,b --name review`를 사용합니다. scope 검사는 운영자가 실행할 때 적용합니다. |
-| `list_fuzz_runs` / `get_fuzz_run` | 영구 Fuzzer 결과 집합을 나열하고 들여다봅니다. 지표는 `result_index`를 포함해 스칼라 전용 투영을 쓰므로 보관된 BLOB을 읽지 않습니다. `include_content:true`는 SQLite에서 상한이 걸린 접두 바이트로 최대 25행을 돌려줍니다. `max_head_bytes`(기본 16 KiB, 최대 64 KiB)가 헤드를, `max_body_bytes`(기본 2 KiB, 최대 64 KiB)가 디코딩된 본문/원시 표본을 제한합니다. 원본 전체 크기와 헤드/원본/디코딩 절단 플래그가 무엇이 빠졌는지 말해 주며, `include_sensitive:true`는 상한이 걸린 정확한 접두 바이트를 선택하는 것이지 무제한 바이트가 아닙니다. 현재 형식 이전 스냅숏은 실행 메타데이터에 `legacy:true`로 표시되고, `condition_met` 실행은 `stop_on`이 걸린 결과를 `stop_index`로 밝힙니다. 그대로 `result_index`로 넘기면 됩니다(기록되지 않았으면 null이며, `fuzz_status`도 같은 필드를 실시간으로 보고합니다). `clusters:true`는 실행을 응답 모양으로 묶어 페이지 단위로, `cluster:"<id>"`는 그 묶음의 행을 돌려주며 `fuzz_results`와 같게 동작합니다 |
+| `list_fuzz_runs` / `get_fuzz_run` | 영구 Fuzzer 결과 집합을 나열하고 들여다봅니다. 지표는 `result_index`를 포함해 스칼라 전용 투영을 쓰므로 보관된 BLOB을 읽지 않습니다. `include_content:true`는 SQLite에서 상한이 걸린 접두 바이트로 최대 25행을 돌려줍니다. `max_head_bytes`(기본 16 KiB, 최대 64 KiB)가 헤드를, `max_body_bytes`(기본 2 KiB, 최대 64 KiB)가 디코딩된 본문/원시 표본을 제한합니다. 원본 전체 크기와 헤드/원본/디코딩 절단 플래그가 무엇이 빠졌는지 알려 주며, `include_sensitive:true`는 상한이 걸린 정확한 접두 바이트를 선택하는 것이지 무제한 바이트가 아닙니다. 현재 형식 이전 스냅숏은 실행 메타데이터에 `legacy:true`로 표시되고, `condition_met` 실행은 `stop_on`이 걸린 결과를 `stop_index`로 밝힙니다. 그대로 `result_index`로 넘기면 됩니다(기록되지 않았으면 null이며, `fuzz_status`도 같은 필드를 실시간으로 보고합니다). `clusters:true`는 실행을 응답 모양으로 묶어 페이지 단위로, `cluster:"<id>"`는 그 묶음의 행을 돌려주며 `fuzz_results`와 같게 동작합니다 |
 | `ql_reference` | 쿼리 언어 레퍼런스 |
 | `ql_explain` | 쿼리를 실행하지 않고 진단. 요청을 쓰기 전에 필터를 점검할 때 사용 |
 
-**액션 도구**(`--read-only`로 비활성화됨. 단, `switch_project`는 `--pin-project`로 빼지 않는 한 동작하고 `create_project`는 서버가 언바운드일 때 동작합니다). 소켓을 여는 도구(`send_request`, `send_websocket`, `ws_session_open`, `ws_inject`, `fuzz_*`, `mine_*`, `authorize_*`, `cache_deception_check`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, `race_requests`, `timing_requests`, `run_retest`, `refresh_session_slot`, `active:true`를 준 `probe_scan`, 그리고 `send:true`를 준 `graphql_schema`)는 모두 스코프 게이트를 지납니다. 설정된 스코프 밖의 대상, 또는 스코프가 없는 대상은 호출에 예외 선언인 `allow_unscoped:true`를 주지 않는 한 `SCOPE_BLOCKED`로 거부됩니다. 그때도 샌드박스는 적용되고, 스윕하는 도구(`fuzz_*`, `mine_*`, `discover_*`, `sequence_*`, `authorize_*`, `minimize_repeater`, `run_retest`, active `probe_scan`)에는 제외 규칙도 적용됩니다. `send_request`처럼 손으로 작성한 단일 전송은 프록시와 마찬가지로 제외 규칙에 막히지 않습니다. 프로젝트 [요청 예산](/ko/reference/config/#per-project-overrides)은 이 모두에 상한을 둡니다. 예산이 거부한 전송은 `BUDGET_EXHAUSTED`(재시도 불가)로, 프로젝트 데이터베이스가 슬롯을 내주지 못했으면 `PROJECT_BUSY`(재시도 가능)로 실패하고, 총량을 다 쓴 실행은 `budget_exhausted`로 끝납니다.
+**액션 도구**(`--read-only`로 비활성화됨. 단, `switch_project`는 `--pin-project`로 빼지 않는 한 동작하고 `create_project`는 서버가 언바운드일 때 동작합니다). 소켓을 여는 도구(`send_request`, `send_websocket`, `ws_session_open`, `ws_inject`, `fuzz_*`, `mine_*`, `authorize_*`, `cache_deception_check`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, `race_requests`, `timing_requests`, `run_retest`, `refresh_session_slot`, `active:true`를 준 `probe_scan`, `send:true`를 준 `graphql_schema`)는 모두 스코프 게이트를 지납니다. 설정된 스코프 밖의 대상, 또는 스코프가 없는 대상은 호출에 예외 선언인 `allow_unscoped:true`를 주지 않는 한 `SCOPE_BLOCKED`로 거부됩니다. 그때도 샌드박스는 적용되고, 스윕하는 도구(`fuzz_*`, `mine_*`, `discover_*`, `sequence_*`, `authorize_*`, `minimize_repeater`, `run_retest`, active `probe_scan`)에는 제외 규칙도 적용됩니다. `send_request`처럼 손으로 작성한 단일 전송은 프록시와 마찬가지로 제외 규칙에 막히지 않습니다. 프로젝트 [요청 예산](/ko/reference/config/#per-project-overrides)은 이 모두에 상한을 둡니다. 예산이 거부한 전송은 `BUDGET_EXHAUSTED`(재시도 불가)로, 프로젝트 데이터베이스가 슬롯을 내주지 못했으면 `PROJECT_BUSY`(재시도 가능)로 실패하고, 총량을 다 쓴 실행은 `budget_exhausted`로 끝납니다.
 
 캡처한 바이트는 데이터이지 지시가 아닙니다. 결과에 담긴 본문, WebSocket 메시지, SSE 이벤트, 보류된 intercept 항목, gRPC 메시지, OAST 히트, 디코딩한 JSON-RPC·LLM 텍스트에는 모두 `origin`이 붙습니다. `target`(테스트 대상 서버가 쓴 것), `client`(브라우저나 앱이 쓴 것), `remote`(OAST 콜백 같은 외부 당사자)입니다. `list_params`와 `export_openapi`의 `origin` 인자(scheme, host, port)와는 다른 것입니다.
 
@@ -270,9 +270,9 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `save_wordlist` / `rename_wordlist` / `delete_wordlist` | 전역 wordlist 카탈로그 관리. `save_wordlist`는 `values` 배열을 받은 대로 한 줄에 하나씩 저장하고(빈 줄과 `#` 줄도 payload로 남고, 줄바꿈이 든 값은 거부됩니다) 원자적으로, 소유자 전용으로 쓰며, `overwrite:true`가 아니면 기존 목록을 덮어쓰지 않습니다. `rename_wordlist`도 같습니다. `delete_wordlist`는 `confirm:true`가 필요합니다. 이름은 파일 이름이며 경로가 아닙니다. 저장한 이름은 `fuzz_start`, `mine_start`, `discover_start`의 `wordlist`로 쓸 수 있습니다. **Edit project data** 그룹이며, 프로젝트가 바인딩되지 않아도 쓸 수 있습니다 |
 | `create_rule` / `update_rule` / `set_rule_enabled` / `delete_rule` | Match & Replace 규칙 생성, 편집, 토글, 삭제(오가는 요청/응답의 헤드 또는 본문을 그 자리에서 재작성). 각각 `scope`를 받습니다: `project`(기본값) 또는 모든 프로젝트에 적용되는 `global`. `short_circuit` 규칙은 [모킹](/ko/guide/proxy/#mocking) 인자도 받습니다: `dir`/`strip_prefix`/`fallthrough`, `fault`/`hang_ms`, `delay_ms`, 그리고 캡처된 응답으로 초안을 잡는 `from_flow_id` |
 | `create_rule_from_preset` | 프리셋(`list_rule_presets` 참고)을 평범한 Match & Replace 규칙으로 설치. 규칙마다 `create_rule`을 한 번씩 부른 것과 같은 결과라, 설치 후에도 보이고 편집·비활성화됩니다. 생성된 id를 반환 |
-| `create_extract_rule` / `update_extract_rule` / `set_extract_rule_enabled` / `delete_extract_rule` | 응답에서 `$BIND.NAME`을 묶는 extract 규칙 관리. 이름을 바꾸면 옛 이름에 묶인 값은 버려집니다. 비활성화하면 이름이 선언 해제되어, 그것을 주입하던 규칙은 낡은 값도 토큰 문자열도 보내지 않고 건너뜁니다(경고 이벤트를 남김) |
+| `create_extract_rule` / `update_extract_rule` / `set_extract_rule_enabled` / `delete_extract_rule` | 응답에서 `$BIND.NAME`을 묶는 extract 규칙 관리. 이름을 바꾸면 옛 이름에 묶인 값은 버려집니다. 비활성화하면 이름이 선언 해제되어, 그 이름을 주입하던 규칙은 낡은 값도 토큰 문자열도 보내지 않고 건너뜁니다(경고 이벤트를 남김) |
 | `create_color_rule` / `update_color_rule` / `set_color_rule_enabled` / `move_color_rule` / `delete_color_rule` | Colormarker 규칙 관리. 활성화된 첫 매칭이 행을 칠하므로 `move_color_rule`은 행의 색을 바꿉니다. 각각 `scope`를 받습니다(`project` 기본값 또는 `global`) |
-| `create_custom_color` / `update_custom_color` / `delete_custom_color` | 기본 6색 위에 피커가 제공하는 전역 커스텀 색상 정의. 하나를 지워도 그것을 이름으로 쓰던 규칙은 무해하게 남으며, 그 행들은 보이는 기본값으로 떨어집니다 |
+| `create_custom_color` / `update_custom_color` / `delete_custom_color` | 기본 6색 위에 피커가 제공하는 전역 커스텀 색상 정의. 하나를 지우면 그 색을 가리키던 규칙은 동작하지 않는 채로 남고, 해당 행은 눈에 보이는 기본값으로 표시됩니다 |
 | `grpc_reflect` / `grpc_forget` | 대상의 `grpc.reflection.v1`(없으면 `v1alpha`)에 디스크립터를 요청해 프로젝트에 캐시하거나, 캐시된 대상을 버립니다. `grpc_reflect`는 아웃바운드 전송이므로 다른 전송처럼 스코프 게이트를 지납니다. `persisted: false`는 쓰기가 커밋되지 않았다는 뜻입니다(다른 gori가 라이터를 쥐고 있음). 리플렉션으로 가져온 스키마는 이 서버가 끝날 때까지 적용되고, `grpc_schema`에 나오며 `grpc_forget`으로 버릴 수 있습니다. 커밋되지 않은 forget은 이 서버가 그 대상으로 렌더하는 것만 멈추고 저장된 행은 남으므로, `grpc_schema`에는 계속 나옵니다 |
 | `create_view` / `update_view` / `delete_view` | 저장된 History [뷰](/ko/guide/proxy/#views) 생성, 편집, 스코프 이동, 삭제. 각각 `scope`를 받습니다: `project`(기본값) 또는 `global`. 쿼리는 들어올 때 검사합니다. 모든 항이 버려질 쿼리는 거절합니다 |
 | `preview_rule` | 규칙을 만들기 전에, 저장된 플로우 중 몇 개가 바뀌었을지 추정 |
@@ -283,7 +283,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `export_project` / `import_project` | 프로젝트를 이식 가능한 [`.gori` 아카이브](/ko/guide/proxy/#project-archives)로 쓰거나, 아카이브를 새 프로젝트로 가져옵니다. `gori run project export` / `import`와 같은 엔진을 씁니다. 두 경로 모두 MCP 서버의 파일시스템 기준입니다. 내보내기는 `project`로 다른 프로젝트를 지정하지 않으면 바인딩된 프로젝트를 쓰고, `overwrite:true` 없이는 기존 파일을(`overwrite:true`도 이전 `.gori` 아카이브만 덮어씁니다), gori 홈 디렉터리 안의 경로는 항상 거부하며, 결과에 아카이브가 마스킹되지 않았다고 밝힙니다. 가져오기는 `confirm:true` 전까지 아카이브의 인벤토리, 공개 문구, 이름 사용 가능 여부를 담아 `CONFIRM_REQUIRED`로 답하고, 같은 가져오기 안전 조치(실행형·파일 기반 규칙 비활성화, 프로젝트 라우팅·전역 규칙 오버라이드·Probe 모드·슬롯 자동 갱신 초기화, 2 GiB 상한)를 적용하며, 새 프로젝트로 전환하지는 않습니다 |
 | `add_scope_rule` / `update_scope_rule` / `delete_scope_rule` / `set_scope_enabled` | 프로젝트의 include / exclude 규칙 편집과 스코프 렌즈 토글 |
 | `set_sandbox` | 하드 컨테인먼트. 켜면 프록시가 스코프가 허용한 것만 전달하고 나머지는 차단 |
-| `set_env_var` / `delete_env_var` | 치환이 읽는 프로젝트 env 토큰 관리. 키는 bare로 저장됩니다. 참조는 `$ENV.KEY`로, `bare` 옵트아웃에서는 `$KEY`로 씁니다. 이 설치가 어느 쪽인지는 `list_env`의 `syntax` / `example`이 말해 줍니다 |
+| `set_env_var` / `delete_env_var` | 치환이 읽는 프로젝트 env 토큰 관리. 키는 bare로 저장됩니다. 참조는 `$ENV.KEY`로, `bare` 옵트아웃에서는 `$KEY`로 씁니다. 이 설치가 어느 쪽인지는 `list_env`의 `syntax` / `example`로 확인합니다 |
 | `create_session_slot` / `update_session_slot` / `delete_session_slot` | 세션 슬롯 관리. Authorize 탭의 identities 카드가 편집하는 목록이고, `authorize_start`가 재생하는 집합입니다. `refresh`(Repeater 세션 id, 실행 순서대로)로 슬롯에 [갱신 단계](/ko/guide/authorize/#refreshing-a-slot)를 붙입니다. `refresh_before`는 `off`만 받습니다(자동 갱신은 운영자가 켭니다) |
 | `refresh_session_slot` | 슬롯의 갱신 단계를 지금 실행해 extract 규칙이 슬롯을 다시 바인딩하게 합니다. `ok`, 실패한 단계와 상태 코드, 다시 바인딩된 바인딩 이름을 돌려주며 값은 돌려주지 않습니다. 단계는 History(source `refresh`)에 기록됩니다. `send_request`처럼 제한되고(`allow_unscoped`), 단계의 업스트림 TLS 검증도 `send_request`와 같이 합니다(`--insecure-upstream`). 값은 이 서버 프로세스에만 있습니다 |
 | `set_active_session_slot` | 모든 아웃바운드 요청이 어느 신원으로 나갈지 선택합니다. 그 슬롯의 헤더 오버레이가 최종 와이어 바이트에 적용되고 `$BIND.NAME`은 그 바인딩 테이블에서 해소됩니다. 이 서버 프로세스만 들고 있고 저장되지 않으므로, 새 연결은 캡처된 그대로 시작합니다 |
@@ -301,12 +301,12 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `discover_start` / `discover_status` / `discover_results` / `discover_stop` | 엔드포인트 스파이더링 & 브루트포스, 진행 상황 폴링, 결과 조회. 네 개 모두 액션 도구이므로 읽기 전용 서버에는 Discover 표면이 없습니다 |
 | `oast_start` / `oast_stop` | OAST 페이로드 등록 후 콜백 폴링: 기본은 공개 interactsh 서버, `provider_id`로 저장된 프로바이더, `persist:true`로 재개 가능한 세션(`oast_poll`로 히트 조회). 재개한 세션에 `oast_stop`을 쓰면 폴링만 멈추고 세션은 다시 재개할 수 있게 남습니다. Sandbox가 켜져 있으면 인라인 `server`(또는 에이전트가 저장하는 프로바이더 host)는 Sandbox가 허용하는 곳이어야 합니다. 내장 프리셋과 운영자가 저장한 프로바이더는 검사하지 않습니다 |
 | `oast_resume` / `oast_release` | 저장된 세션을 다시 살려 이전에 심어둔 페이로드가 계속 resolve되게 하고(폴링 결과는 프로젝트에 저장됩니다), 끝난 engagement는 등록 해제합니다. 콜백은 남습니다 |
-| `list_jobs` / `get_job` / `stop_job` | 작업 종류를 가로질러 처리: 이번 세션이 시작한 모든 fuzz, mine, discover, sequence, authorize, WebSocket 세션 작업 나열, 또는 id로 하나를 조회하고 중지. 이미 끝난 작업을 중지하면 아무것도 바꾸지 않고 `already_finished:true`로 답합니다. 종류별 도구에 다른 종류의 id를 주면(`fuzz_results{job_id:"mn_2"}`) 그 id를 읽는 도구를 알려 줍니다 |
+| `list_jobs` / `get_job` / `stop_job` | 작업 종류와 무관하게 처리: 이번 세션이 시작한 모든 fuzz, mine, discover, sequence, authorize, WebSocket 세션 작업 나열, 또는 id로 하나를 조회하고 중지. 이미 끝난 작업을 중지하면 아무것도 바꾸지 않고 `already_finished:true`로 답합니다. 종류별 도구에 다른 종류의 id를 주면(`fuzz_results{job_id:"mn_2"}`) 그 id를 읽는 도구를 알려 줍니다 |
 | `intercept_forward` / `intercept_forward_edit` / `intercept_drop` | 홀드된 메시지를 바이트 그대로 내보내거나, 수정한 와이어 바이트로 내보내거나, 드롭 |
 | `ws_inject` | 프록시가 아직 중계 중인 WebSocket에, 앱 자신의 소켓 위로 어느 방향이든 프레임 하나(`text`, `binary`, `ping`, `pong`, `close`)를 밀어 넣습니다. 액티브이며 플로우의 호스트에 스코프 게이트가 걸리고, 캡처 중인 TUI가 적용합니다. [라이브 인터셉트](#live-intercept) 참고 |
 | `intercept_toggle` / `intercept_set_filter` / `intercept_set_direction` | 캐치 활성화 및 해제, 조건 쿼리 설정, 홀드할 방향 선택 |
 
-> 액션 도구는 안전을 위해 상한이 있습니다: fuzz, mine, sequence, discover, authorize 작업은 총 요청 수, 동시성, 저장 결과 수가 제한됩니다. authorize의 상한은 `플로우 × 아이덴티티`를 세며, 상한을 넘는 선택은 잘라서 실행하는 대신 시작 전에 거부됩니다. `create_rule`로 생성된 규칙은 `gori run`과 새로 열린 TUI에 적용됩니다. 이미 실행 중인 해당 프로젝트의 TUI는 다음 스토어 갱신 때 규칙을 다시 로드하므로 재시작할 필요가 없습니다.
+> 액션 도구는 안전을 위해 상한이 있습니다. fuzz, mine, sequence, discover, authorize 작업은 총 요청 수, 동시성, 저장 결과 수가 제한됩니다. authorize의 상한은 `플로우 × 아이덴티티`를 세며, 상한을 넘는 선택은 잘라서 실행하는 대신 시작 전에 거부됩니다. `create_rule`로 생성된 규칙은 `gori run`과 새로 열린 TUI에 적용됩니다. 이미 실행 중인 해당 프로젝트의 TUI는 다음 스토어 갱신 때 규칙을 다시 로드하므로 재시작할 필요가 없습니다.
 
 ## 스펙에서 Repeater 탭으로 {#from-a-spec-to-repeater-tabs}
 
@@ -322,7 +322,7 @@ create_repeaters{flow_ids: [...], name_prefix: "oas: ", tags: "spec"}
 
 ## 라이브 인터셉트 {#live-intercept}
 
-에이전트는 인터셉트 루프 안에 사용자와 나란히 앉을 수 있습니다. 캡처 락을 쥔 TUI 세션이 홀드된 메시지를 에이전트 쪽으로 미러링하고 에이전트가 보낸 명령을 받아 처리하므로, `intercept_list` → `intercept_get` → `intercept_forward_edit`은 직접 손으로 도는 것과 같은 루프입니다.
+에이전트도 사용자와 함께 인터셉트 루프에 참여할 수 있습니다. 캡처 락을 쥔 TUI 세션이 홀드된 메시지를 에이전트 쪽으로 미러링하고 에이전트가 보낸 명령을 받아 처리하므로, `intercept_list` → `intercept_get` → `intercept_forward_edit`은 사용자가 직접 돌리는 것과 같은 루프입니다.
 
 변경을 일으키는 쪽(`intercept_forward`, `intercept_forward_edit`, `intercept_drop`, `intercept_toggle`, `intercept_set_filter`, `intercept_set_direction`)은 `--read-only`에서 비활성화되며, 라이브 캡처 세션이 락을 쥐고 있지 않으면 모두 거부합니다.
 
@@ -332,34 +332,34 @@ create_repeaters{flow_ids: [...], name_prefix: "oas: ", tags: "spec"}
 
 `intercept_list`가 `operator_editing: true`로 돌려주는 행은 지금 사용자가 편집 중인, 아직 저장하지 않은 내용이 들어 있는 메시지입니다. 에이전트는 포워드·편집·드롭으로 그 작업을 지워버리는 대신 사용자에게 남겨둘 수 있습니다.
 
-홀드된 메시지는 원래 사람의 결정을 무한히 기다립니다. 하지만 해당 세션에서 큐를 다룰 수 있는 에이전트(`--read-only`가 아니고 **Intercept control**이 켜진 에이전트)가 큐를 읽거나 명령을 보내고 나면, gori는 아무도 보고 있지 않은 항목에 대해 30초 자동 포워드를 켜므로, 홀드 도중 죽은 클라이언트가 연결을 막지 못합니다. 에이전트가 붙지 않은 세션은 자동 포워드를 하지 않습니다.
+홀드된 메시지는 원래 사람의 결정을 무한히 기다립니다. 하지만 해당 세션에서 큐를 다룰 수 있는 에이전트(`--read-only`가 아니고 **Intercept control**이 켜진 에이전트)가 큐를 읽거나 명령을 보내고 나면, gori는 아무도 보고 있지 않은 항목에 30초 자동 포워드를 켜므로, 홀드 도중 죽은 클라이언트가 연결을 막지 못합니다. 에이전트가 붙지 않은 세션은 자동 포워드를 하지 않습니다.
 
 ## gori가 보내는 메시지 {#messages-from-gori}
 
-팔레트 verb **"Tell the agent…"**(`app.tell-agent`)는 어느 gori 탭에서든 붙어 있는 에이전트의 세션으로 한 줄짜리 메시지를 보냅니다. 프로젝트에 붙은 MCP 클라이언트 중 하나(`mcp:` 칩과 "Attached agents" 카드가 보여주는 것과 같은 목록)를 고르거나 전체를 고르고, 한 줄을 입력하면 gori가 전달합니다. "Attached agents" 카드에서 바로 `t`를 누르면 커서가 놓인 에이전트에게 곧장 메시지를 보냅니다. History 목록에서 행을 마크한 채 보내면 그 flow들이 문맥으로 함께 실려, 에이전트가 사용자가 고른 대상에 대해 움직일 수 있습니다.
+팔레트 verb **"Tell the agent…"**(`app.tell-agent`)는 어느 gori 탭에서든 붙어 있는 에이전트의 세션으로 한 줄짜리 메시지를 보냅니다. 프로젝트에 붙은 MCP 클라이언트 중 하나(`mcp:` 칩과 "Attached agents" 카드가 보여주는 것과 같은 목록)를 고르거나 전체를 고르고, 한 줄을 입력하면 gori가 전달합니다. "Attached agents" 카드에서 `t`를 누르면 커서가 놓인 에이전트에게 바로 메시지를 보냅니다. History 목록에서 행을 마크한 채 보내면 그 flow가 문맥으로 함께 전달되므로, 에이전트가 사용자가 고른 대상을 다룰 수 있습니다.
 
-전달은 다섯 층을 시도하며, 결과를 되돌려 주는 경로가 그러지 못하는 경로보다 먼저입니다. 먼저 답한 층에서 사슬이 끝나므로 한 메시지가 두 번 실려 나가는 일은 없습니다.
+전달은 다섯 층을 차례로 시도하며, 결과를 알려 주는 경로를 그러지 못하는 경로보다 먼저 씁니다. 먼저 답한 층에서 끝나므로 메시지가 두 번 전달되지는 않습니다.
 
-1. **Inbox socket**: 대상이 Claude Code라면 `gori mcp`가 그 세션의 inbox socket(`/tmp/cc-socks/<pid>.sock`, `gori mcp`를 띄운 Claude Code 프로세스의 pid로 이름이 정해집니다)에 메시지를 씁니다. 이 경로는 GA이며 플래그가 필요 없습니다. 메시지는 다른 세션이 보낸 노트로 프레이밍되어 `[gori] The operator at the gori TUI says:` 접두어를 달고 도착합니다. idle 세션은 그 위에서 turn을 시작하고, 바쁜 세션은 tool call 사이사이에 읽습니다. 받아들일지, 나중으로 보류할지, 거절할지는 Claude Code의 `crossSessionInbound` 설정이 정합니다. gori는 어느 쪽이든 socket에 쓰며 무엇이 일어났는지는 볼 수 없습니다. 파일은 있는데 연결을 거절하는 소켓은 이미 끝난 세션이 남긴 찌꺼기입니다. `/tmp/cc-socks/<pid>.sock`은 그것을 만든 프로세스보다 오래 남고 pid는 재사용됩니다. 이때 gori는 다음 층으로 넘어갑니다.
-2. **Codex queue**: 대상이 Codex라면 `gori mcp`가 그 세션 자신의 thread에 `codex queue --thread <id> --message …`로 한 줄을 건넵니다. 세션은 그 위에서 turn을 돌립니다. idle이면 즉시, 바쁘면 지금 turn이 끝난 뒤에 돌립니다. Codex는 MCP 서버에게 자기 자신에 대해 아무것도 알려주지 않으므로, gori는 Codex 프로세스가 열어 둔 writer lock(`<CODEX_HOME>/thread-writer-locks/<thread>.lock`)에서 thread를 읽습니다. 이 경로 하나가 thread id와 queue를 넣을 `CODEX_HOME`을 동시에 알려주므로, 자기만의 `CODEX_HOME`으로 띄운 세션에도 닿습니다. GA이고 플래그가 필요 없습니다. 아직 turn을 한 번도 돌리지 않은 thread는 rollout이 없어 `codex queue`가 거절합니다. 그 이유는 delivery 행에 남고 메시지는 4·5번 층으로 계속 읽힙니다.
-3. **Channel**: Settings의 `mcp.channels`가 켜져 있고 *위의 두 문이 모두 답하지 않았을 때* `gori mcp`가 `claude/channel` capability를 선언하고 메시지를 channel event로 push합니다. Claude Code는 이를 `← gori: …`로 보여주고, 세션이 idle이 되는 즉시 그 위에서 turn을 시작합니다. 그래서 모델은 이것을 그냥 지나가는 메모가 아니라 지시로 읽습니다. 이 경로는 Claude Code를 `claude --dangerously-load-development-channels server:gori`로 띄워야 동작하는데, 이는 research-preview 플래그로 클라이언트 쪽에 한 번짜리 확인 대화상자가 뜨고, 이 플래그가 함께 갖고 오는 `--channels` 허용 목록은 Anthropic이 관리합니다. 기본은 off이고, gori는 이 경로를 마지막으로 시도합니다. channel을 등록한 적 없는 세션으로의 push는 조용히 버려지고 gori는 그것을 알 방법이 없습니다. push는 확인된 전달이 아니므로 메시지는 4·5번 층에 계속 남습니다. 실제 테스트에서 Opus 5의 세이프가드가 채널로 주입된 메시지를 내용과 무관하게 플래그해 모델 전환 대화상자에서 세션을 멈췄습니다. 소켓 경로는 걸리지 않습니다. 시험할 때가 아니면 채널은 꺼 두세요.
-4. **Tool result**: 클라이언트가 무엇이든, 위 층들이 싣지 못한 메시지가 에이전트가 다음에 부르는 gori 도구의 결과에 실려 돌아갑니다. 어떤 도구든 그 도구 자신의 답 옆에 오퍼레이터의 한 줄이 두 번째 content 블록으로 붙습니다. GA이고 플래그도 없으며, 모델이 무언가를 기억할 필요도 없습니다. 위의 세 층은 각각 특정 벤더의 문입니다(inbox socket은 Claude Code, `codex queue`는 Codex, channel은 Claude Code의 프리뷰). grok·Pi·Hermes·Antigravity·Claude Desktop에는 그런 문이 없으므로, 이 층이 메시지를 모델 앞에 가져다 놓습니다. idle 에이전트를 깨우지는 못하지만(어느 층도 못 합니다) gori가 그 에이전트에게 주는 다음 답에 그 줄이 들어 있습니다. socket과 마찬가지로 확인된 전달이므로 메시지는 5번 층에서 빠집니다. `--read-only` 서버는 이를 기록할 writer가 없으므로, 줄은 보내되 행은 계속 읽히도록 남겨 둡니다.
-5. **Poll**: 항상 쓸 수 있는, 위 모든 층의 백스톱입니다. 메시지는 프로젝트 이벤트 피드의 한 행이 되고, MCP 도구 `operator_messages`가 호출한 세션에 남아 있는 메시지를 돌려줍니다. 핸드셰이크 `instructions`가 모델에게 turn을 시작할 때 이를 확인하라고 알려주므로, 이를 따르는 에이전트는 다른 경로가 없어도 다음 호출에서 메시지를 집어갑니다. 다만 끼어들지는 못합니다. 프롬프트 앞에서 idle 상태인 에이전트는 다음 turn이 시작될 때 메시지를 봅니다.
+1. **Inbox socket**: 대상이 Claude Code라면 `gori mcp`가 그 세션의 inbox socket(`/tmp/cc-socks/<pid>.sock`, `gori mcp`를 띄운 Claude Code 프로세스의 pid로 이름이 정해집니다)에 메시지를 씁니다. 이 경로는 GA이며 플래그가 필요 없습니다. 메시지는 다른 세션이 보낸 노트 형식으로 `[gori] The operator at the gori TUI says:` 접두어를 달고 도착합니다. idle 세션은 이 메시지로 turn을 시작하고, 바쁜 세션은 tool call 사이에 읽습니다. 받아들일지, 나중으로 보류할지, 거절할지는 Claude Code의 `crossSessionInbound` 설정이 정합니다. gori는 어느 쪽이든 socket에 쓰며 무엇이 일어났는지는 볼 수 없습니다. 파일은 있는데 연결을 거절하는 소켓은 이미 끝난 세션이 남긴 파일입니다. `/tmp/cc-socks/<pid>.sock`은 만든 프로세스보다 오래 남고 pid는 재사용됩니다. 이때 gori는 다음 층으로 넘어갑니다.
+2. **Codex queue**: 대상이 Codex라면 `gori mcp`가 그 세션의 thread에 `codex queue --thread <id> --message …`로 한 줄을 건넵니다. 세션은 idle이면 즉시, 바쁘면 현재 turn이 끝난 뒤에 이 메시지로 turn을 돌립니다. Codex는 MCP 서버에 자신의 정보를 알려주지 않으므로, gori는 Codex 프로세스가 열어 둔 writer lock(`<CODEX_HOME>/thread-writer-locks/<thread>.lock`)에서 thread를 읽습니다. 이 경로에서 thread id와 queue를 넣을 `CODEX_HOME`을 알 수 있으므로, 별도의 `CODEX_HOME`으로 띄운 세션에도 닿습니다. GA이고 플래그가 필요 없습니다. 아직 turn을 한 번도 돌리지 않은 thread는 rollout이 없어 `codex queue`가 거절합니다. 그 이유는 delivery 행에 남고 메시지는 4·5번 층에서 계속 읽을 수 있습니다.
+3. **Channel**: Settings의 `mcp.channels`가 켜져 있고 *위의 두 경로가 모두 답하지 않았을 때* `gori mcp`가 `claude/channel` capability를 선언하고 메시지를 channel event로 push합니다. Claude Code는 이를 `← gori: …`로 보여주고, 세션이 idle이 되면 이 메시지로 turn을 시작하므로, 모델은 메시지를 참고용 메모가 아니라 지시로 읽습니다. 이 경로는 Claude Code를 `claude --dangerously-load-development-channels server:gori`로 띄워야 동작합니다. research-preview 플래그라서 클라이언트 쪽에 확인 대화상자가 한 번 뜨고, 플래그에 딸린 `--channels` 허용 목록은 Anthropic이 관리합니다. 기본은 off이고, gori는 이 경로를 마지막으로 시도합니다. channel을 등록한 적 없는 세션으로 보낸 push는 조용히 버려지며, gori는 이를 알 수 없습니다. push는 확인된 전달이 아니므로 메시지는 4·5번 층에 계속 남습니다. 실제 테스트에서 Opus 5의 세이프가드가 채널로 주입된 메시지를 내용과 무관하게 플래그해 모델 전환 대화상자에서 세션을 멈췄습니다. 소켓 경로는 걸리지 않습니다. 시험할 때가 아니면 채널은 꺼 두세요.
+4. **Tool result**: 클라이언트가 무엇이든, 위 층들이 싣지 못한 메시지가 에이전트가 다음에 부르는 gori 도구의 결과에 실려 돌아갑니다. 어떤 도구든 도구의 답 옆에 오퍼레이터의 한 줄이 두 번째 content 블록으로 붙습니다. GA이고 플래그도 없으며, 모델이 무언가를 기억할 필요도 없습니다. 위의 세 층은 각각 특정 벤더 전용입니다(inbox socket은 Claude Code, `codex queue`는 Codex, channel은 Claude Code의 프리뷰). grok·Pi·Hermes·Antigravity·Claude Desktop에는 그런 경로가 없으므로, 이 층이 메시지를 모델에 전달합니다. idle 에이전트를 깨우지는 못하지만(어느 층도 못 합니다) gori가 그 에이전트에게 주는 다음 답에 그 줄이 들어 있습니다. socket과 마찬가지로 확인된 전달이므로 메시지는 5번 층에서 빠집니다. `--read-only` 서버는 이를 기록할 writer가 없으므로, 줄은 보내되 행은 계속 읽히도록 남겨 둡니다.
+5. **Poll**: 항상 쓸 수 있는, 위 모든 층의 백스톱입니다. 메시지는 프로젝트 이벤트 피드의 한 행이 되고, MCP 도구 `operator_messages`가 호출한 세션에 남아 있는 메시지를 돌려줍니다. 핸드셰이크 `instructions`가 모델에게 turn을 시작할 때 이를 확인하라고 알려주므로, 이를 따르는 에이전트는 다른 경로가 없어도 다음 호출에서 메시지를 받습니다. 다만 끼어들지는 못합니다. 프롬프트에서 idle 상태인 에이전트는 다음 turn이 시작될 때 메시지를 봅니다.
 
 전달 시도마다 `agent_delivery` 행이 하나씩 기록되고, 탭을 옮기지 않아도 결과를 볼 수 있습니다. TUI의 알림 링이 `→ claude-code got it (socket)`, `→ codex-mcp-client got it (queued in codex)`, `→ grok-shell-gori got it (on its next tool result)`, `left for antigravity to pick up (operator_messages)`(에이전트가 읽으면 `→ antigravity picked it up`) 같은 문구나 전달이 실패한 이유를 보여주고, Companion(Miss Ring)을 켜 두었다면 같은 알림에 반응합니다. Activity 페인은 이 모두를 새로운 `operator` source 아래 나열하므로, 메시지와 그 전달 결과가 프로젝트 기록에 남습니다([Activity](/ko/guide/proxy/#project-tab) 참고).
 
-돌아오는 길은 `reply_to_operator`입니다. 핸드셰이크 instructions가 에이전트에게, 사용자가 그 터미널로 옮겨가지 않아도 되도록 이 도구로 답하라고 알려줍니다. 한 줄 `summary`는 클라이언트 이름과 함께 링(그리고 Miss Ring)에 뜨고, `detail`(발견 사항, diff, 엔드포인트 목록 등)은 링에서 `↵`로 열립니다. 같은 피드의 행이라 Claude가 아닌 에이전트에서도 동작하고(`--read-only`로 띄운 에이전트는 제외), `agent` 소스로 프로젝트 기록에 남습니다.
+에이전트는 `reply_to_operator`로 답합니다. 핸드셰이크 instructions가 이 도구로 gori 안에서 답하라고 알려주므로, 사용자는 에이전트의 터미널로 옮겨 갈 필요가 없습니다. 한 줄 `summary`는 클라이언트 이름과 함께 링과 Miss Ring에 뜨고, `detail`(발견 사항, diff, 엔드포인트 목록 등)은 링에서 `↵`로 열립니다. 같은 피드의 행이라 Claude가 아닌 에이전트에서도 동작하고(`--read-only`로 띄운 에이전트는 제외), `agent` 소스로 프로젝트 기록에 남습니다.
 
-에이전트가 사용자의 결정을 받아야 할 때는 `ask_operator`에 한 줄 질문과 2~4개의 선택지를 넘깁니다("add api.example.com to scope?"에 `yes` / `no`). 질문은 포커스를 뺏지 않습니다. 링에 `?` 표시와 함께 뜨고(Miss Ring이 답장처럼 들고 있습니다), 주황색 `ask:N` 칩이 기다리는 질문 수를 셉니다. 카드는 그 링 행에서 `↵`, 칩 클릭, 또는 명령 팔레트의 **Answer the agent…**로 엽니다. 선택지의 숫자를 누르거나(`↑`/`↓`로 옮기고 `↵`), `x`로 고르지 않고 무시하거나, `esc`로 나중으로 미룹니다. 답은 `in_reply_to`가 그 질문인 오퍼레이터 메시지로, 직접 입력하는 메시지와 같은 경로로 돌아가므로, 더 빠른 경로가 없어도 에이전트의 다음 tool result에 실립니다. 아무도 답하지 않은 질문은 만료되고(에이전트가 따로 정하지 않았다면 30분), 에이전트도 그 사실을 전달받습니다. 카드는 질문한 에이전트가 아직 붙어 있는 동안에만 열립니다. gori가 닫혀 있는 동안 들어온 질문은 열었을 때 기다리고 있습니다.
+에이전트가 사용자의 결정을 받아야 할 때는 `ask_operator`에 한 줄 질문과 2~4개의 선택지를 넘깁니다("add api.example.com to scope?"에 `yes` / `no`). 질문은 포커스를 뺏지 않습니다. 링에 `?` 표시와 함께 뜨고(Miss Ring이 답장처럼 들고 있습니다), 주황색 `ask:N` 칩에 대기 중인 질문 수가 표시됩니다. 카드는 그 링 행에서 `↵`, 칩 클릭, 또는 명령 팔레트의 **Answer the agent…**로 엽니다. 선택지의 숫자를 누르거나(`↑`/`↓`로 옮기고 `↵`), `x`로 고르지 않고 무시하거나, `esc`로 나중으로 미룹니다. 답은 `in_reply_to`가 그 질문인 오퍼레이터 메시지로, 직접 입력하는 메시지와 같은 경로로 돌아가므로, 더 빠른 경로가 없어도 에이전트의 다음 tool result에 실립니다. 아무도 답하지 않은 질문은 만료되고(에이전트가 따로 정하지 않았다면 30분), 에이전트도 그 사실을 전달받습니다. 카드는 질문한 에이전트가 아직 붙어 있는 동안에만 열립니다. gori가 닫혀 있는 동안 들어온 질문은 gori를 열면 볼 수 있습니다.
 
-스크립트도 [`gori run notify`](/ko/reference/cli/#run-notify)로 같은 방식으로 닿을 수 있습니다. 그 줄은 `script` 소스로, `ai` 태그 없이 링과 Miss Ring에 뜹니다.
+스크립트도 [`gori run notify`](/ko/reference/cli/#run-notify)로 같은 방식의 알림을 보낼 수 있습니다. 그 줄은 `script` 소스로, `ai` 태그 없이 링과 Miss Ring에 뜹니다.
 
 한계:
 
 - **재전송되지 않습니다.** 메시지는 보낼 때 붙어 있던 에이전트에게만 전달됩니다. 그 뒤에 붙은 에이전트는 받지 않습니다. `operator_messages`는 그 세션에 아직 남아 있는 것만 돌려주고, 이미 전달한 것을 다시 전달하지 않습니다.
-- **동의가 아니라 요청입니다.** 어느 층으로 가든, 피어가 프레이밍한 메시지는 모델에게 뭔가를 해 달라고 요청할 뿐 아무것도 승인하지 않습니다. 에이전트는 동의하지 않는 다른 지시처럼 이를 거절할 수 있습니다. `ask_operator`의 답도 마찬가지입니다. 카드에서 `yes`를 고르는 것은 에이전트에게 넘기는 결정이지 권한 부여가 아니며, 무엇을 보낼 수 있는지는 여전히 scope, 샌드박스, MCP 권한 스위치가 정합니다.
-- **답장은 우편함이 아니라 알림입니다.** 답장이 도착한 순간 그 프로젝트에 열려 있는 gori TUI에 뜹니다. 그 창에서는 Miss Ring이 다음 키 입력이나 클릭까지 답장을 들고 있지만(Settings → Companion → Agent replies), 링은 TUI를 닫으면 비워집니다. TUI가 닫혀 있는 동안 쓰인 답장은 하나씩 다시 띄우지 않습니다. 다음에 그 프로젝트를 여는 TUI가 링에 노트 하나(`claude-code sent 2 replies while you were away`)를 올리고, 그 detail에 답장들이 나열되며, 전체 본문은 Activity 패널에 남습니다. 도구도 에이전트에게 같은 말을 하고, 결과에 `get_current_context`와 같은 형태의 `tui`를 실어 주므로 `windows: 0`을 받은 에이전트는 자신의 출력으로 말해야 한다는 걸 압니다.
-- **Channel 전달은 research preview입니다.** 아직 출시되지 않은 Claude Code 플래그와 Anthropic이 정한 허용 목록에 의존하며, 둘 다 `mcp.channels`가 모르는 사이 바뀔 수 있습니다. 그 플래그가 동작하지 않게 되어도 inbox socket과 poll 도구는 계속 동작합니다.
+- **동의가 아니라 요청입니다.** 어느 층으로 가든, 피어 메시지로 전달된 내용은 모델에게 무언가를 해 달라고 요청할 뿐 아무것도 승인하지 않습니다. 에이전트는 동의하지 않는 다른 지시처럼 이를 거절할 수 있습니다. `ask_operator`의 답도 마찬가지입니다. 카드에서 `yes`를 고르는 것은 에이전트에게 넘기는 결정이지 권한 부여가 아니며, 무엇을 보낼 수 있는지는 여전히 scope, 샌드박스, MCP 권한 스위치가 정합니다.
+- **답장은 우편함이 아니라 알림입니다.** 답장이 도착한 순간 그 프로젝트에 열려 있는 gori TUI에 뜹니다. 그 창에서는 Miss Ring이 다음 키 입력이나 클릭까지 답장을 들고 있지만(Settings → Companion → Agent replies), 링은 TUI를 닫으면 비워집니다. TUI가 닫혀 있는 동안 쓰인 답장은 하나씩 다시 띄우지 않습니다. 다음에 그 프로젝트를 여는 TUI가 링에 노트 하나(`claude-code sent 2 replies while you were away`)를 올리고, 그 detail에 답장들이 나열되며, 전체 본문은 Activity 패널에 남습니다. 도구도 에이전트에게 같은 내용을 알리고, 결과에 `get_current_context`와 같은 형태의 `tui`를 실어 주므로 `windows: 0`을 받은 에이전트는 자신의 출력에 답을 적어야 한다는 것을 압니다.
+- **Channel 전달은 research preview입니다.** 아직 출시되지 않은 Claude Code 플래그와 Anthropic이 정한 허용 목록에 의존하며, 둘 다 `mcp.channels` 설정과 무관하게 바뀔 수 있습니다. 그 플래그가 동작하지 않게 되어도 inbox socket과 poll 도구는 계속 동작합니다.
 
 ## 프롬프트로 제공되는 플레이북 {#playbooks-as-prompts}
 
@@ -371,20 +371,20 @@ create_repeaters{flow_ids: [...], name_prefix: "oas: ", tags: "spec"}
 
 ## 프로토콜 리비전 {#protocol-revisions}
 
-gori는 한 프로세스에서 MCP의 두 시대를 모두 말하며, 어느 쪽으로 답할지는 요청 자체가 정합니다.
+gori는 한 프로세스에서 MCP의 두 시대를 모두 지원하며, 어느 쪽으로 답할지는 요청마다 정해집니다.
 
 - **`2026-07-28`**: stateless 리비전입니다. 요청이 `_meta`에 프로토콜 버전과 클라이언트 capability, (선택적으로) 클라이언트 이름을 싣습니다. 핸드셰이크는 없습니다. 결과에는 `resultType`, `_meta["io.modelcontextprotocol/serverInfo"]`의 서버 신원, 그리고 `tools/list`와 `prompts/list`라면 클라이언트가 캐시 기준으로 삼는 `ttlMs` / `cacheScope` 힌트가 함께 옵니다. `server/discover`는 지원 버전·capability·instructions를 한 번의 호출로 답하며, 가장 먼저 보내도 됩니다.
-- **`2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05`**: 핸드셰이크 리비전입니다. `initialize`는 예전 그대로 세션을 열고, 요청한 리비전으로 답합니다. 그 외에는(gori가 모르는 버전이든, stateless 리비전이든) 가장 최신 핸드셰이크 리비전으로 답합니다. `initialize`로 연 세션은 요청별 의미론으로 갈아탈 수 없기 때문입니다.
+- **`2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05`**: 핸드셰이크 리비전입니다. `initialize`는 예전 그대로 세션을 열고, 요청한 리비전으로 답합니다. `initialize`로 연 세션은 요청별 의미론으로 바꿀 수 없으므로, 그 외에는(gori가 모르는 버전이든, stateless 리비전이든) 가장 최신 핸드셰이크 리비전으로 답합니다.
 
-gori가 말하지 않는 버전은 `-32022`와 함께 말할 수 있는 버전 목록으로 거절되므로, 클라이언트는 추측하는 대신 다시 시도할 수 있습니다. 도구와 프롬프트는 두 시대에서 같게 동작하고, 봉투만 다릅니다. 프롬프트 목록은 바이너리에 컴파일되어 실행 중에 바뀔 수 없으므로, 두 시대 모두 `listChanged: false`로 선언합니다.
+gori가 지원하지 않는 버전은 `-32022`와 지원 버전 목록으로 거절되므로, 클라이언트는 추측하지 않고 다시 시도할 수 있습니다. 도구와 프롬프트는 두 시대에서 똑같이 동작하고, 엔벨로프만 다릅니다. 프롬프트 목록은 바이너리에 컴파일되어 실행 중에 바뀔 수 없으므로, 두 시대 모두 `listChanged: false`로 선언합니다.
 
 클라이언트를 만든다면 stateless 리비전의 두 가지를 참고하세요. `subscriptions/listen`은 gori가 푸시하는 것이 없으므로 빈 필터로 ack한 뒤 곧바로 정상 종료합니다. 대신 함께 받은 `ttlMs`를 쓰세요. `claude/channel` research preview는 핸드셰이크 시대에만 선언합니다. stateless 서버가 stdout에 쓸 수 있는 것은 응답, 진행 중인 요청에 속한 알림, ack된 구독 스트림의 알림뿐이고, channel push는 그 어느 것도 아닙니다. 운영자 메시지는 여전히 소켓, Codex 큐, 다음 tool result, `operator_messages`로 모든 클라이언트에 닿으며, 어느 것도 프로토콜 스트림을 건드리지 않습니다.
 
-없는 도구 이름은 `isError` 도구 결과가 아니라 JSON-RPC `-32602`로 돌아옵니다. 호출이 도구에 닿지 못했으므로 스펙이 그렇게 정합니다. 실행되고 실패한 도구는 `isError: true`와 구조화된 오류로 답하며, 에이전트에게 돌려줄 것은 그쪽입니다.
+없는 도구 이름은 `isError` 도구 결과가 아니라 JSON-RPC `-32602`로 돌아옵니다. 호출이 도구에 닿지 못했으므로 스펙이 그렇게 정합니다. 실행된 뒤 실패한 도구는 `isError: true`와 구조화된 오류로 답하며, 에이전트에게 돌려줄 것은 그쪽입니다.
 
 ## 도구 힌트 {#tool-hints}
 
-`tools/list`의 모든 도구는 `annotations.readOnlyHint`를 함께 싣습니다. 이 프로젝트의 캡처를 읽기만 하는 도구와, 캡처에 쓰거나 대상에 트래픽을 보내는 도구를 클라이언트가 구분할 수 있게 하려는 것입니다. 이 힌트는 [`--read-only`](#read-only-mode)가 강제하는 것과 같은 선언에서 유도되므로, 힌트와 게이트가 다른 곳은 그 선언이 그렇게 정한 곳뿐입니다. 워크벤치 폴링 도구(`*_status`, `*_results`, `list_jobs`, `get_job`)와 `preview_rule`은 보고만 하므로 `--read-only`에서는 숨겨지지만 읽기 전용으로 표시됩니다. 반대로 `switch_project`, `create_project`, `probe_scan`(`active:true`면 전송, `persist:true`면 기록), `export_openapi`(`output_path`면 파일을 씀), `operator_messages`(전달 기록을 씀)는 `--read-only`에서도 남지만 읽기 전용으로 표시되지 않습니다. 읽기 전용 도구는 `openWorldHint: false`도 함께 답합니다. 프로젝트 스토어에서 답할 뿐 바깥으로 다이얼하지 않기 때문입니다. 쓰는 도구는 답이 안전한 쪽일 때만 나머지 힌트를 적습니다. 프로젝트 자체 스토어나 gori 설정만 건드리면 `openWorldHint: false`(`create_note`, `delete_issue`, `update_view`), 행을 추가하기만 하면 `destructiveHint: false`(`create_note`, `create_issue`, `add_link`, `freeze_evidence`), 켜고 끄는 세터에는 `idempotentHint: true`입니다. 적지 않은 힌트는 MCP 기본값을 따르므로 그 도구는 외부로 나가고 파괴적일 수 있다고 읽힙니다. 전송할 수 있는 모든 도구, `intercept_*` 도구, 그리고 행을 추가하지만 gori가 보낼 수 있는 범위를 넓히는 `add_scope_rule`·`add_host_override`가 여기에 해당합니다.
+`tools/list`의 모든 도구는 `annotations.readOnlyHint`를 함께 실으므로, 클라이언트는 이 프로젝트의 캡처를 읽기만 하는 도구와 캡처에 쓰거나 대상에 트래픽을 보내는 도구를 구분할 수 있습니다. 이 힌트는 [`--read-only`](#read-only-mode)가 강제하는 것과 같은 선언에서 유도되므로, 힌트와 게이트가 다른 곳은 그 선언이 그렇게 정한 곳뿐입니다. 워크벤치 폴링 도구(`*_status`, `*_results`, `list_jobs`, `get_job`)와 `preview_rule`은 보고만 하므로 `--read-only`에서는 숨겨지지만 읽기 전용으로 표시됩니다. 반대로 `switch_project`, `create_project`, `probe_scan`(`active:true`면 전송, `persist:true`면 기록), `export_openapi`(`output_path`면 파일을 씀), `operator_messages`(전달 기록을 씀)는 `--read-only`에서도 남지만 읽기 전용으로 표시되지 않습니다. 읽기 전용 도구는 프로젝트 스토어에서 답할 뿐 바깥으로 다이얼하지 않으므로 `openWorldHint: false`도 함께 싣습니다. 쓰는 도구는 답이 안전한 쪽일 때만 나머지 힌트를 적습니다. 프로젝트 자체 스토어나 gori 설정만 건드리면 `openWorldHint: false`(`create_note`, `delete_issue`, `update_view`), 행을 추가하기만 하면 `destructiveHint: false`(`create_note`, `create_issue`, `add_link`, `freeze_evidence`), 켜고 끄는 세터에는 `idempotentHint: true`입니다. 적지 않은 힌트는 MCP 기본값을 따르므로 그 도구는 외부로 나가고 파괴적일 수 있다고 읽힙니다. 전송할 수 있는 모든 도구, `intercept_*` 도구, 그리고 행을 추가하지만 gori가 보낼 수 있는 범위를 넓히는 `add_scope_rule`·`add_host_override`가 여기에 해당합니다.
 
 ## 한 번에 한 호출 {#one-call-at-a-time}
 

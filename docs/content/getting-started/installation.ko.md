@@ -14,11 +14,11 @@ macOS와 Linux용 한 줄 명령입니다. OS/아키텍처를 감지해 알맞�
 curl -fsSL https://gori.hahwul.com/install.sh | bash
 ```
 
-`/usr/local`에 쓸 수 있으면 그 아래에, 아니면 `~/.local`에 설치합니다. `GORI_INSTALL_PREFIX`로 재정의할 수 있습니다. 설치 후에는 `gori update`가 바이너리를 스스로 업데이트합니다(설치를 담당하는 채널이 Chocolatey / Homebrew / Snap / AUR인 경우 그쪽으로 안내합니다).
+`/usr/local`에 쓸 수 있으면 그 아래에, 아니면 `~/.local`에 설치합니다. `GORI_INSTALL_PREFIX`로 재정의할 수 있습니다. 설치 후에는 `gori update`가 바이너리를 스스로 업데이트합니다(Chocolatey / Homebrew / Snap / AUR로 설치했다면 그쪽으로 안내합니다).
 
 ### GitHub rate limit에 걸린 경우 {#if-you-hit-a-github-rate-limit}
 
-설치 스크립트는 최신 릴리스가 무엇인지 GitHub API에 묻는데, 이 API는 **비인증 요청을 IP당 시간당 60회**만 허용합니다. 공용 CI나 NAT 뒤에서는 `403`이 돌아올 수 있습니다. 설치 스크립트와 `gori update` 모두 rate limit이 없는 릴리스 리다이렉트로 자동 폴백하므로 그대로 동작하며, `resolved v0.9.4 via ... (no API call)` 같은 줄이 보입니다.
+설치 스크립트는 최신 릴리스가 무엇인지 GitHub API에 묻는데, 이 API는 **비인증 요청을 IP당 시간당 60회**만 허용합니다. 공용 CI나 NAT 뒤에서는 `403`이 돌아올 수 있습니다. 설치 스크립트와 `gori update` 모두 rate limit이 없는 릴리스 리다이렉트로 자동 폴백하므로 계속 동작하며, `resolved v0.9.4 via ... (no API call)` 같은 줄이 보입니다.
 
 인증 시 한도인 5000회/시간을 쓰려면 토큰을 먼저 export하세요. `curl` 앞에 붙이면 동작하지 않습니다. 스크립트는 파이프로 연결된 `bash`에서 실행되므로 `curl`에만 걸린 변수는 상속되지 않습니다:
 
@@ -44,9 +44,9 @@ curl -fsSL -o gori.tar.gz https://github.com/hahwul/gori/releases/latest/downloa
 curl -fsSL -o gori.exe https://github.com/hahwul/gori/releases/latest/download/gori-windows-x86_64.exe
 ```
 
-버전이 붙은 이름(`gori-v0.9.4-linux-x86_64`)도 그대로 유지되니, 특정 빌드에 고정하려면 그쪽을 쓰세요.
+버전이 붙은 이름(`gori-v0.9.4-linux-x86_64`)도 계속 게시되니, 특정 빌드에 고정하려면 그쪽을 쓰세요.
 
-각 릴리스에는 두 이름 체계를 모두 담은 `SHA256SUMS`도 함께 올라갑니다. 설치 스크립트와 `gori update`는 이 파일로 자동 검증하며, 직접 받은 파일을 확인하려면:
+각 릴리스에는 두 이름 체계를 모두 담은 `SHA256SUMS`도 함께 올라갑니다. 설치 스크립트와 `gori update`는 이 파일로 자동 검증합니다. 직접 받은 파일을 확인하려면:
 
 ```bash
 curl -fsSL -O https://github.com/hahwul/gori/releases/latest/download/SHA256SUMS
@@ -130,11 +130,11 @@ NixOS / home-manager 설정에 입력(input)으로 고정할 수도 있습니다
 }
 ```
 
-다른 채널과 달리 이 채널은 소스에서 빌드합니다. nixpkgs의 Crystal이 gori가 요구하는 버전보다 한 단계 낮아, 플레이크가 컴파일러를 직접 고정하며 첫 빌드는 그것까지 함께 컴파일합니다. 몇 분이 걸리고 이후로는 캐시됩니다. Brotli와 Zstd 디코딩이 포함되며 호스트에 따로 준비할 것은 없습니다.
+다른 채널과 달리 이 채널은 소스에서 빌드합니다. nixpkgs의 Crystal이 gori가 요구하는 버전보다 한 단계 낮아, 플레이크가 컴파일러를 직접 고정하며 첫 빌드에서는 컴파일러도 함께 컴파일합니다. 몇 분이 걸리고 이후로는 캐시됩니다. Brotli와 Zstd 디코딩이 포함되며 호스트에 따로 준비할 것은 없습니다.
 
 Linux(x86_64 및 arm64)와 Apple Silicon macOS를 지원합니다. nixpkgs가 Intel macOS 지원을 중단했으므로, 그쪽에서는 [Homebrew](#homebrew)나 [사전 빌드 바이너리](#pre-built-binary)를 사용하세요.
 
-`nix develop`을 실행하면 Crystal, shards, `just`와 링크되는 라이브러리가 갖춰진 셸로 들어갑니다. [gori 자체를 개발](https://github.com/hahwul/gori/blob/main/.github/CONTRIBUTING.md)하는 데 필요한 것이 모두 들어 있습니다.
+`nix develop`을 실행하면 Crystal, shards, `just`와 링크되는 라이브러리가 갖춰진 셸로 들어갑니다. [gori를 개발](https://github.com/hahwul/gori/blob/main/.github/CONTRIBUTING.md)하는 데 필요한 것이 모두 들어 있습니다.
 
 ## Docker {#docker}
 
@@ -217,7 +217,7 @@ sudo cp -R gori lib /usr/local/opt/gori/
 sudo ln -sf /usr/local/opt/gori/gori /usr/local/bin/gori
 ```
 
-> 바이너리는 ad-hoc 서명되어 있습니다. Gatekeeper가 다운로드를 차단하면 격리 플래그를 지우세요: `xattr -dr com.apple.quarantine /usr/local/opt/gori`. [Homebrew](#homebrew)로 설치하면 이 문제를 피할 수 있습니다.
+> 바이너리는 ad-hoc 서명되어 있습니다. Gatekeeper가 다운로드를 차단하면 `xattr -dr com.apple.quarantine /usr/local/opt/gori`로 격리 플래그를 지우세요. [Homebrew](#homebrew)로 설치하면 이 문제를 피할 수 있습니다.
 
 ### Windows {#windows}
 

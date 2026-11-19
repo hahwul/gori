@@ -10,7 +10,7 @@ New to gori? Run the [Quick Start](/getting-started/quick-start/) first. When yo
 
 ## The Interface at a Glance
 
-gori is organized into tabs; move between them with `[` / `]` or jump with number keys. Two keys reach every action: `Space` opens the **space menu** (what you do most in the focused pane, one letter each), and `Ctrl-P` opens the **command palette** (any action, by typing its name). [Space Menu & Palette](/guide/space-menu-and-palette/) teaches both. Day-1 chords are in the [Quick Start](/getting-started/quick-start/).
+gori is organized into tabs. Move between them with `[` / `]` or jump with number keys. Two keys reach every action: `Space` opens the **space menu** (what you do most in the focused pane, one letter each), and `Ctrl-P` opens the **command palette** (any action, by typing its name). [Space Menu & Palette](/guide/space-menu-and-palette/) teaches both. Day-1 chords are in the [Quick Start](/getting-started/quick-start/).
 
 | Tab | Purpose |
 |-----|---------|
@@ -57,5 +57,5 @@ go. `⇧K`/`⇧J` move a row. Moving one up across the seam puts that tab on the
 last slot off. `space` sends a row straight across. For the old
 unbounded bar, turn off **Display → Tab bar slots**. `0` keeps working either way.
 
-Global lenses that are not tabs: **capture** (`c`), **intercept** (`i`), and the **scope
-lens** (`s`) toggle from anywhere.
+Outside the tabs, three global lenses toggle from anywhere: **capture** (`c`),
+**intercept** (`i`), and the **scope lens** (`s`).

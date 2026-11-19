@@ -7,9 +7,9 @@ weight = 60
 group = "Workbenches"
 +++
 
-The **Decoder** runs a value through a chain of converters (base64, URL, JWT, a hash, compression) one step at a time, showing the output of each. This playbook builds a chain, reads where it succeeds or garbles, and saves it under a name so the next value runs through it in one keystroke. It takes a few minutes and sends no traffic. The whole workbench is local transformation, so nothing here needs a target, a scope, or an authorized host.
+The **Decoder** runs a value through a chain of converters (base64, URL, JWT, a hash, compression) one step at a time, showing the output of each. This playbook builds a chain, reads where it succeeds or garbles, and saves it under a name so the next value runs through it in one keystroke. It takes a few minutes and sends no traffic. The workbench only transforms values locally, so nothing here needs a target, a scope, or an authorized host.
 
-> **Before you begin.** Have gori running (the [Quick Start](/getting-started/quick-start/) gets you there). No capture, project scope, or network target is required, and the Decoder never leaves your machine.
+> **Before you begin.** Have gori running (the [Quick Start](/getting-started/quick-start/) gets you there). No capture, project scope, or network target is required, and nothing the Decoder does leaves your machine.
 
 ## 1. Open the Decoder and paste input
 
@@ -17,7 +17,7 @@ Open the **Decoder** tab (off the bar by default: press **`0`** and type "decode
 
 Each open conversion is a **sub-tab**, and sub-tabs are saved with the project, so a scratch pad you leave open comes back the next time you open that project and does not appear in another.
 
-**Checkpoint.** Your pasted value sits in the INPUT pane.
+**Checkpoint.** Your pasted value is in the INPUT pane.
 
 ## 2. Build a chain
 
@@ -49,13 +49,13 @@ The PIPELINE is where you debug the chain. Read it top to bottom. Each row is on
 
 For binary results, `Ctrl-X` cycles OUTPUT's display mode (text → hex → base64), so bytes that look empty as text are legible as hex. Copy the final value with `y` in READ mode, or `Ctrl-Y` while editing INPUT in INS.
 
-**Checkpoint.** You can point at the exact PIPELINE row where the output first goes wrong, or confirm every row is clean and OUTPUT holds what you expected.
+**Checkpoint.** You can point at the PIPELINE row where the output first goes wrong, or confirm every row is clean and OUTPUT holds what you expected.
 
 ## 4. Save and reuse a named chain
 
-A chain you'll use again is worth a name. Save it with `Ctrl-S` (or the palette's **Save chain by name**); saving under an existing name updates it. Load one later with `Ctrl-O`, which opens a picker over everything you've saved, each name shown next to its spec, where you type to filter and `Ctrl-X` deletes the highlighted entry.
+Give a chain you'll use again a name. Save it with `Ctrl-S` (or the palette's **Save chain by name**). Saving under an existing name updates it. Load one later with `Ctrl-O`, which opens a picker over everything you've saved, with each name shown next to its spec. Type to filter, and press `Ctrl-X` to delete the highlighted entry.
 
-Named chains live under the `decoder` section of settings and are shared by every project. The chain is a recipe, and whatever you run through it stays with the project. A saved name is also a **converter**. Type it as a step and its whole spec runs in that position, whether in the Decoder, on a Repeater or Fuzzer `§…§` marker, in `gori run decoder`, or through the MCP `decode` tool, which runs the same chain over an argument.
+Named chains live under the `decoder` section of settings and are shared by every project. Only the chain is shared. The values you run through it stay with the project. A saved name is also a **converter**. Type it as a step and its whole spec runs in that position, whether in the Decoder, on a Repeater or Fuzzer `§…§` marker, in `gori run decoder`, or through the MCP `decode` tool, which runs the same chain over an argument.
 
 **Checkpoint.** A saved chain re-runs on new input from every surface: the load picker, the CLI, and a step inside another chain.
 

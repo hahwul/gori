@@ -12,13 +12,13 @@ gori ships thirty-two built-in colour themes: `goridark` (the default), `goriday
 
 ## Switching Themes
 
-Open Preferences with `Ctrl-,` (or the `⚙` chip in the top bar), go to **Appearance**, and press `↵` on the **Theme** row. The row previews the current theme inline: its name and a small swatch of its palette. `Ctrl-P` → **Settings: Theme** opens the same picker in one step.
+Open Preferences with `Ctrl-,` (or the `⚙` chip in the top bar), go to **Appearance**, and press `↵` on the **Theme** row. The row previews the current theme inline, with its name and a small swatch of its palette. `Ctrl-P` → **Settings: Theme** opens the same picker in one step.
 
-The picker is a vertical, scrollable list. Each row shows a small swatch of the theme's palette, and selecting a row previews it live. `Enter` applies and persists the choice, `Esc` reverts.
+The picker is a vertical, scrollable list. Each row shows a small swatch of the theme's palette, and selecting a row previews it live. `Enter` applies and saves the choice, and `Esc` reverts.
 
 `Ctrl-,` works in the project picker too, so you can set your theme on first launch before opening a project. Every form section is editable there, but Theme is the only opener that works. The other openers (Tabs, Env, Hotkeys, the Keyset playground, hostname overrides, and User-Agents) need a project open.
 
-The same History view across six of the built-ins:
+Here is the same History view in six of the built-ins:
 
 <div class="tui-gallery">
   <figure>
@@ -55,7 +55,7 @@ You can add your own themes as JSON files, dropped into:
 ~/.gori/themes/<name>.json
 ```
 
-(`~/.gori` is the gori home directory; override it with `$GORI_HOME`.) The file name is the theme name. `ocean.json` becomes the theme `ocean`. Custom themes appear in the picker after the built-ins, in file-name order. gori loads them at startup and again each time you open the theme picker, so you can drop a file in and reopen it without restarting.
+(`~/.gori` is the gori home directory. Override it with `$GORI_HOME`.) The file name is the theme name. `ocean.json` becomes the theme `ocean`. Custom themes appear in the picker after the built-ins, in file-name order. gori loads them at startup and again each time you open the theme picker, so you can drop a file in and reopen it without restarting.
 
 ### Format
 
@@ -73,7 +73,7 @@ Without `"base"`, the default (`goridark`) supplies any omitted colour.
 
 ### A Full Theme
 
-Every field, all inheriting from `base` when omitted:
+This lists every field. Each one inherits from `base` when omitted:
 
 ```json
 {
@@ -132,7 +132,7 @@ Every field, all inheriting from `base` when omitted:
 ### Notes
 
 - `"base"` must name a built-in theme. A custom theme can't be the base of another, and an unknown base falls back to `goridark`.
-- The file name is normalised to lower-case `a-z 0-9 - _`; other characters are dropped (`My Theme!.json` → `mytheme`).
+- The file name is normalised to lower-case `a-z 0-9 - _`, and other characters are dropped (`My Theme!.json` → `mytheme`).
 - A file whose name collides with a built-in (e.g. `goridark.json`) is ignored. The built-ins can't be redefined.
 - An unreadable file, invalid JSON, or a non-object is skipped. A malformed colour falls back to the `base` value, and the rest of the theme still loads. A broken theme file never crashes the TUI.
 - For readability, keep your functional colours (text, status, syntax) well-contrasted against `bg`. The built-ins target WCAG AA (≥ 4.5:1).

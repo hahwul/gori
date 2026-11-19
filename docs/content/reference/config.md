@@ -4,7 +4,7 @@ description = "The settings.json keys and the GORI_HOME storage layout."
 weight = 20
 +++
 
-gori stores global preferences in `settings.json` and each project as its own SQLite database. See the [Configuration guide](/getting-started/configuration/) for a walkthrough; this page is the key-by-key reference.
+gori stores global preferences in `settings.json` and each project as its own SQLite database. See the [Configuration guide](/getting-started/configuration/) for a walkthrough. This page is the key-by-key reference.
 
 ## Storage Layout
 
@@ -32,7 +32,7 @@ Everything lives under `GORI_HOME` (`$GORI_HOME` if set and non-empty, otherwise
 |----------|--------|
 | `GORI_HOME` | The home tree above. Empty or unset means `~/.gori` (`%USERPROFILE%\.gori` on Windows) |
 | `GORI_CONFIG` | The `settings.json` to use instead of `$GORI_HOME/settings.json`; `--config PATH` wins over it |
-| `GORI_SSLKEYLOGFILE`, `SSLKEYLOGFILE` | Append TLS session secrets for both legs to that file, for Wireshark. The `GORI_` name wins, and set empty it turns the log off. See [Decrypting the wire](/guide/proxy/#tls-key-log) |
+| `GORI_SSLKEYLOGFILE`, `SSLKEYLOGFILE` | Append TLS session secrets for both legs to that file, for Wireshark. The `GORI_` name wins, and setting it empty turns the log off. See [Decrypting the wire](/guide/proxy/#tls-key-log) |
 | `GORI_MCP_PROJECT`, `GORI_MCP_DB` | The project (by name) or database file `gori mcp` binds at start. See [Choosing a Project](/guide/mcp/#choosing-a-project) |
 | `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY` | The upstream route when `network.upstream_proxy` is blank (lowercase spellings too). See [upstream_rules](#upstream-rules) |
 | `SSL_CERT_FILE`, `SSL_CERT_DIR` | The CA trust `verify_upstream` checks origins against, in place of the system store's standard locations |
@@ -66,7 +66,7 @@ Its location resolves as `--config PATH` → `$GORI_CONFIG` → `$GORI_HOME/sett
 | `bind_port` | integer | `8070` | Global default listen port (used when a project has no `net.bind_port`) |
 | `upstream_proxy` | string | `""` | Global default upstream: legacy `host:port`/`http://…`, `http+tls://…` (TLS to the proxy), or `socks5://…`/`socks5h://…`; empty = environment fallback (`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`, then direct). Project `net.upstream_proxy` wins when set. `https://…` is the **legacy spelling of the plaintext form**; see [upstream_rules](#upstream-rules) |
 | `upstream_proxy_ca` | string | `""` | PEM bundle trusted for the upstream proxy's own certificate on an `http+tls` hop, in addition to the system store. Blank = system trust only. A path, never a secret, so it is safe to share in a profile |
-| `upstream_proxy_insecure` | bool | `false` | Skip verification of the **upstream proxy's** certificate. Independent of `verify_upstream` and untouched by `--insecure-upstream`, which are about the **origin**. Off by default: that hop carries every `CONNECT` authority and every `Proxy-Authorization` credential |
+| `upstream_proxy_insecure` | bool | `false` | Skip verification of the **upstream proxy's** certificate. Independent of `verify_upstream` and untouched by `--insecure-upstream`, which are about the **origin**. Off by default, because that hop carries every `CONNECT` authority and every `Proxy-Authorization` credential |
 | `verify_upstream` | bool | `true` | Verify upstream TLS certificates against the system CA trust store, resolved automatically from standard locations (honouring `SSL_CERT_FILE` / `SSL_CERT_DIR`). If none is found, HTTPS verification fails until you set `SSL_CERT_FILE` or turn this off. Toggling it re-syncs the running proxy, the active prober, and the Repeater / Fuzzer / Miner senders without a restart. `--insecure-upstream` seeds it off for one session |
 | `serve_landing` | bool | `true` | Serve the built-in info / CA-download page, both when the listen address is hit directly and at the reserved host `http://gori.proxy/` (or `http://gori/`) for a client already pointed at the proxy |
 | `connect_timeout_secs` | integer | `30` | Upstream connect timeout in seconds (minimum `1`) |
@@ -88,7 +88,7 @@ Pin the version when h1-vs-h2 differences are the subject of a test (request fra
 
 Before this setting, gori downgraded to HTTP/1.1 when Match & Replace rules were live, so forcing h1 meant enabling a no-op rule. That also turned on head rewriting, and was easy to leave behind.
 
-`off` takes effect on the next tunnelled connection, and skips the origin ALPN probe (one fewer connection per origin). No rule downgrades a connection by itself any more: Intercept, Match & Replace rules (head, body and short-circuit), session-binding extract rules and the Sandbox all run on the HTTP/2 relay. A cleartext-HTTP/2 (`h2c`) tunnel inside `CONNECT` is refused when `off`, because the client has already committed to h2 by sending the preface.
+`off` takes effect on the next tunnelled connection, and skips the origin ALPN probe (one fewer connection per origin). No rule downgrades a connection any more. Intercept, Match & Replace rules (head, body and short-circuit), session-binding extract rules and the Sandbox all run on the HTTP/2 relay. A cleartext-HTTP/2 (`h2c`) tunnel inside `CONNECT` is refused when `off`, because the client has already committed to h2 by sending the preface.
 
 Every downgrade is announced in `gori.log`, once per host, naming the host and which reason caused it. An HTTP/2-only client (every gRPC client) cannot connect to a host while a downgrade applies, and that log line is the only place the reason is written down.
 
@@ -126,7 +126,7 @@ A bypassed host produces no flow, so gori writes one line to its log the first t
 
 #### strip_alt_svc {#strip-alt-svc}
 
-gori does not intercept HTTP/3: QUIC is UDP, and every gori listener is a TCP socket. An origin answering `Alt-Svc: h3=":443"` invites the client onto a transport gori cannot read, and History stops. Turn this on and gori removes the `Alt-Svc` fields advertising `h3` (or an `h3-…` draft) from the response the *client* receives, on both HTTP/1.1 and HTTP/2.
+gori does not intercept HTTP/3, because QUIC is UDP and every gori listener is a TCP socket. An origin answering `Alt-Svc: h3=":443"` invites the client onto a transport gori cannot read, and History stops. Turn this on and gori removes the `Alt-Svc` fields advertising `h3` (or an `h3-…` draft) from the response the *client* receives, on both HTTP/1.1 and HTTP/2.
 
 It is off by default. gori edits a response unasked only where leaving it would make the capture wrong. The `Sec-WebSocket-Extensions` strip is that case, because a negotiated `permessage-deflate` leaves every stored frame a deflate stream presented as the payload. An `Alt-Svc` left in place corrupts nothing gori records. It only lets the client leave, so whether to strip it depends on your test.
 
@@ -140,7 +140,7 @@ On HTTP/2, removing a field means gori re-encodes that response's header block. 
 
 Every flow whose response was stripped carries an advisory naming what was removed and quoting the removed value, in the History detail pane, `gori run history --format json` and the MCP `get_flow` tool. The passive probe reads the *stored* response, which is the one gori delivered, so once the strip is on a captured flow stops raising the `tech_http3` fingerprint and its `Alt-Svc: <host> advertised HTTP/3` event line. The per-flow advisory records it instead. Only captured traffic is affected. A response gori elicited itself (a Repeater send, a Fuzz sweep, a Discover crawl, MCP `send_request`, an import) never goes through the proxy path, so it keeps the origin's `Alt-Svc` and still fingerprints. Resend the request from the Repeater to see the advertisement.
 
-Three things it cannot cover. A host on [`tls_passthrough`](#tls-passthrough) is never decrypted, so there is no response for gori to edit. A client can learn an h3 route from a DNS `HTTPS` record, which no response-side strip reaches. A field-name spelled with whitespace before the colon (`Alt-Svc : h3=…`) is not recognised, by this setting or by gori's own header projection. A conforming client rejects that field too (RFC 9112 §5.1). Toggle the setting from Preferences → **Network & Tabs** → **Network** → **Strip HTTP/3 Alt-Svc**.
+It cannot cover three things. A host on [`tls_passthrough`](#tls-passthrough) is never decrypted, so there is no response for gori to edit. A client can learn an h3 route from a DNS `HTTPS` record, which no response-side strip reaches. A field-name spelled with whitespace before the colon (`Alt-Svc : h3=…`) is not recognised, by this setting or by gori's own header projection. A conforming client rejects that field too (RFC 9112 §5.1). Toggle the setting from Preferences → **Network & Tabs** → **Network** → **Strip HTTP/3 Alt-Svc**.
 
 #### strip_extended_connect {#strip-extended-connect}
 
@@ -156,7 +156,7 @@ The parameter is one bit for every extended `CONNECT` protocol, so this also wit
 
 #### strip_available_dictionary {#strip-available-dictionary}
 
-Compression Dictionary Transport (RFC 9842) lets a client tell the origin which dictionary it holds, in `Available-Dictionary` (the dictionary's SHA-256) and `Dictionary-ID`. The origin may then answer `Content-Encoding: dcb` (Brotli) or `dcz` (Zstandard), a body that only that dictionary decodes, and the dictionary is an earlier response the client cached, often before gori was in the path.
+Compression Dictionary Transport (RFC 9842) lets a client tell the origin which dictionary it holds, in `Available-Dictionary` (the dictionary's SHA-256) and `Dictionary-ID`. The origin may then answer `Content-Encoding: dcb` (Brotli) or `dcz` (Zstandard), a body that only that dictionary decodes. The dictionary is an earlier response the client cached, often before gori was in the path.
 
 Without this switch the body is captured byte-exact but stays opaque: the detail view, the passive probe rules, extract rules and Match & Replace body rules all see compressed bytes, and the decode note reads *"compressed: dcb — unsupported without the client's dictionary (RFC 9842); settings network.strip_available_dictionary"*.
 
@@ -214,15 +214,15 @@ A transparent listener serves clients that believe they are talking to the origi
 **The kernel** still remembers what the client dialled before the redirect rule rewrote it, and gori asks it once per connection:
 
 - **Linux**: `getsockopt(SOL_IP, SO_ORIGINAL_DST)`, or the `SOL_IPV6` form for a v6 connection. Always available. It returns nothing when no redirect put the connection there.
-- **macOS**: a `DIOCNATLOOK` on `/dev/pf`. That device is root-only, so this works only when gori itself runs as root.
+- **macOS**: a `DIOCNATLOOK` on `/dev/pf`. That device is root-only, so this works only when gori runs as root.
 
-That answer is an address and a port. The port is the one the client connected to, so it outranks both `target_port` and any port in the client's `Host` header. The address is where gori dials, whatever the client called the destination.
+That answer is an address and a port. The port is the one the client connected to, so it outranks both `target_port` and any port in the client's `Host` header. The address is where gori dials, regardless of what the client called the destination.
 
 **The client's own bytes** supply the name: the `Host` header for cleartext, the TLS SNI for HTTPS, read out of the ClientHello *before* the handshake. gori uses the name whenever there is one. Everything downstream needs it: which leaf certificate to mint, the sandbox gate, the [passthrough list](#tls-passthrough), the origin ALPN probe, scope matching, and what History shows. The kernel's address fills in as the name only when there is no name.
 
 The name identifies the destination and travels upstream byte-exact. The address decides which machine the connection reaches. A client that lies in `Host` still gets a certificate for the name it asked for and shows up in History under it, but cannot move gori's upstream connection.
 
-A [hostname override](#hostname-overrides) still wins over the kernel address, because it is a mapping you wrote by name. It is the one way to redirect a transparent destination.
+A [hostname override](#hostname-overrides) still wins over the kernel address, because it is a mapping you wrote by name. It is the only way to redirect a transparent destination.
 
 Which source decided a destination is written to the log, once per listener and again if it changes.
 
@@ -233,7 +233,7 @@ iptables -t nat -A OUTPUT -p tcp --dport 80  -j REDIRECT --to-port 8080
 iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-port 8443
 ```
 
-On macOS, an equivalent `pf` `rdr` rule.
+On macOS, use an equivalent `pf` `rdr` rule.
 
 **These rules catch TCP only, and HTTP/3 is UDP.** A client that speaks HTTP/3 sends QUIC to UDP port 443. No rule above redirects it and no gori listener reads it, so those requests reach the origin and never appear in History. Reject UDP 443 for the same traffic and the client falls back to TCP:
 
@@ -241,13 +241,13 @@ On macOS, an equivalent `pf` `rdr` rule.
 iptables -A OUTPUT -p udp --dport 443 -j REJECT
 ```
 
-On macOS, `block return out proto udp from any to any port 443` in `pf`. [`strip_alt_svc`](#strip-alt-svc) removes the header that advertises HTTP/3. This rule covers a client that already has a route, from a cached `Alt-Svc` or a DNS `HTTPS` record.
+On macOS, use `block return out proto udp from any to any port 443` in `pf`. [`strip_alt_svc`](#strip-alt-svc) removes the header that advertises HTTP/3. This rule covers a client that already has a route, from a cached `Alt-Svc` or a DNS `HTTPS` record.
 
 **Why `target_port` is still here.** The kernel lookup does not always answer. There is no mechanism outside Linux and macOS, macOS needs root, and a connection made straight to the listener with no redirect in front of it has nothing to recover. `target_port` is the fallback for those cases. Set it to the port the redirect rule caught, so the listener taking redirected `:443` traffic sets `target_port: 443`. When the kernel does answer, `target_port` is not consulted.
 
 **When the kernel does not answer.** The name is resolved through DNS, so a client that lies in `Host` (or offers a misleading SNI) steers the upstream dial to a host of its choosing, and `target_port` decides the port. That is the case on any platform without a mechanism, on macOS without root, and for a connection that reached the listener without a redirect in front of it. The log line says which source decided. If the client must not influence the destination, use [reverse mode](#reverse-mode). It declares the destination and consults nothing the client sent, on every platform and without root.
 
-Everything else behaves as on the proxy path: flows are captured into the same project, scope and the Sandbox apply, and the passthrough list is honoured. A TLS connection with no SNI is served when the kernel supplies an address (gori mints a leaf for that IP), and dropped, logged once, only when there is no address either. A host the Sandbox rules out is dropped outright, because a TLS client cannot be answered with a 403.
+Everything else behaves as on the proxy path: flows are captured into the same project, scope and the Sandbox apply, and the passthrough list is honoured. A TLS connection with no SNI is served when the kernel supplies an address (gori mints a leaf for that IP). It is dropped, and logged once, only when there is no address either. A host the Sandbox rules out is dropped outright, because a TLS client cannot be answered with a 403.
 
 #### Reverse mode
 
@@ -293,7 +293,7 @@ Every refusal is recorded in the project as a flow carrying its reason, so a cli
 
 `network.upstream_proxy` is the catch-all route. Bare `host:port` and `http://…` use a plaintext HTTP CONNECT proxy (default port `8080`). `http+tls://…` uses the same CONNECT protocol with the hop to the proxy wrapped in TLS (default port `443`). `socks5://…` resolves destination names **locally** and sends an address literal. `socks5h://…` sends hostname targets as `ATYP DOMAIN` so the **proxy** resolves them. Both SOCKS forms default to port 1080. URI credentials are refused. Configure direct credentials in the Project tab, or use an `upstream_rules` entry with `username` and `password_env`.
 
-When this scalar is blank, gori consults the process environment at dial time. HTTP origins select `HTTP_PROXY`, then `ALL_PROXY`; HTTPS origins select `HTTPS_PROXY`, then `HTTP_PROXY`, then `ALL_PROXY`. Uppercase names are preferred and lowercase spellings are accepted. `NO_PROXY` / `no_proxy` supports `*`, hosts and domains, bracketed IPv6 literals, optional ports, and IPv4/IPv6 CIDR blocks (`10.0.0.0/8,fd00::/8`, matched against an address-literal destination). A match goes direct. `localhost` and loopback addresses are always direct, whatever `NO_PROXY` says, on every dial (TLS passthrough and CONNECT tunnels included). The exemption is about the destination, so a proxy that itself listens on `127.0.0.1` is still used for remote targets. The unspecified addresses `0.0.0.0` and `::` count as loopback here, and so does any numeric IPv4 spelling the system resolver accepts (`127.1`, `0x7f.0.0.1`, `2130706433`): the loopback check and the CIDR entries read such a destination as the dotted address it resolves to, while the dial and the `CONNECT` line keep the spelling that was sent. Inside a [gori shell](/reference/cli/#run-shell), the proxy variables that shell exported (pointing back at the gori that started it) are passed over, and the values it replaced (a corporate `HTTPS_PROXY`, its `NO_PROXY`) are read instead, so a gori started there does not chain its requests through its parent. An explicit project upstream, matching rule (including `direct`), or non-empty scalar takes precedence over the environment. In this environment-variable convention, `http://` means a plaintext HTTP CONNECT proxy (port 80 when none is given, not the scalar's 8080) and `https://` means TLS to the proxy. The persisted `network.upstream_proxy` `https://` spelling retains its legacy plaintext meaning.
+When this scalar is blank, gori consults the process environment at dial time. HTTP origins select `HTTP_PROXY`, then `ALL_PROXY`. HTTPS origins select `HTTPS_PROXY`, then `HTTP_PROXY`, then `ALL_PROXY`. Uppercase names are preferred and lowercase spellings are accepted. `NO_PROXY` / `no_proxy` supports `*`, hosts and domains, bracketed IPv6 literals, optional ports, and IPv4/IPv6 CIDR blocks (`10.0.0.0/8,fd00::/8`, matched against an address-literal destination). A match goes direct. `localhost` and loopback addresses are always direct, regardless of `NO_PROXY`, on every dial (TLS passthrough and CONNECT tunnels included). The exemption is about the destination, so a proxy that itself listens on `127.0.0.1` is still used for remote targets. The unspecified addresses `0.0.0.0` and `::` count as loopback here, and so does any numeric IPv4 spelling the system resolver accepts (`127.1`, `0x7f.0.0.1`, `2130706433`). The loopback check and the CIDR entries read such a destination as the dotted address it resolves to, while the dial and the `CONNECT` line keep the spelling that was sent. Inside a [gori shell](/reference/cli/#run-shell), the proxy variables that shell exported (pointing back at the gori that started it) are passed over, and the values it replaced (a corporate `HTTPS_PROXY`, its `NO_PROXY`) are read instead, so a gori started there does not chain its requests through its parent. An explicit project upstream, matching rule (including `direct`), or non-empty scalar takes precedence over the environment. In this environment-variable convention, `http://` means a plaintext HTTP CONNECT proxy (port 80 when none is given, not the scalar's 8080) and `https://` means TLS to the proxy. The persisted `network.upstream_proxy` `https://` spelling retains its legacy plaintext meaning.
 
 #### `https://` means the plaintext proxy, not TLS
 
@@ -313,7 +313,7 @@ An `https://` origin reached through an `http+tls` proxy is TLS inside TLS: the 
 
 All networking owned by gori uses this routing decision, including capture/replay/scan engines, the updater, and OAST provider traffic. A configured proxy that is malformed, unreachable, or refuses a tunnel fails closed. gori does not retry the destination directly. A blank project pin and a matching `direct` rule are the exceptions.
 
-Per-destination upstream routing can say "route `*.corp.internal` through the internal proxy, everything else direct", carry credentials, and choose different proxies.
+Per-destination upstream routing can express "route `*.corp.internal` through the internal proxy, everything else direct", carry credentials, and choose different proxies.
 
 Rules are **ordered** and the **first match wins**, so specific rules go above general ones. Edit them with `gori settings --edit`.
 
@@ -359,14 +359,14 @@ Precedence, highest first:
 | 5 (lowest) | Direct |
 
 For an open project, **Destination host** is evaluated before this table. `*` (the default)
-leaves the precedence above unchanged; a non-matching destination goes direct without falling
+leaves the precedence above unchanged. A non-matching destination goes direct without falling
 through to a global rule or scalar proxy.
 
 A rule is matched against the original hostname, before any [host override](#hostname-overrides) is applied. An override only changes which IP is dialled.
 
 ### outbound_tls
 
-Per-destination TLS policy for the connections gori makes: a client certificate to present, the protocol range / cipher list to negotiate with, and the shape of the ClientHello gori sends (its [TLS fingerprint](#tls-fingerprint)). Ordered, first match wins, same host-pattern dialect. Edit with `gori settings --edit`.
+Per-destination TLS policy for the connections gori makes: a client certificate to present, the protocol range / cipher list to negotiate with, and the shape of the ClientHello gori sends (its [TLS fingerprint](#tls-fingerprint)). Rules are ordered, the first match wins, and the host-pattern dialect is the same. Edit with `gori settings --edit`.
 
 It is a separate table from [`upstream_rules`](#upstream-rules). Both are keyed by destination host and apply one first-match row per host, so separate tables let "everything through the corporate proxy, plus a client certificate for one host" work without duplicating the proxy address onto that host's row.
 
@@ -421,13 +421,13 @@ The policy is looked up on the dialled host, not on an SNI override, because the
 
 #### TLS fingerprint {#tls-fingerprint}
 
-With gori in the loop, the ClientHello an origin sees is **gori's OpenSSL handshake, not the browser's**. Anti-bot stacks fingerprint that handshake as a JA3 or JA4 and serve challenges or `403`s to traffic that works in the browser. The fields above control it, and
+With gori in the loop, the ClientHello an origin sees is **gori's OpenSSL handshake, not the browser's**. Anti-bot stacks fingerprint that handshake as a JA3 or JA4 and serve challenges or `403`s to traffic that works in the browser. The fields above control it, and this command checks them:
 
 ```bash
 gori settings tls-fingerprint
 ```
 
-checks them. It prints the JA3/JA4 of the ClientHello gori sends to each destination, built from the same TLS context a dial builds. OpenSSL reports only what was *negotiated*, so this command is the way to verify these settings.
+It prints the JA3/JA4 of the ClientHello gori sends to each destination, built from the same TLS context a dial builds. OpenSSL reports only what was *negotiated*, so this command is the way to verify these settings.
 
 ```json
 {
@@ -464,7 +464,7 @@ An invalid `groups`, `sigalgs`, `ciphersuites` or `alpn` value is checked by han
 ⚠ settings: outbound TLS `groups` is not a group list this OpenSSL accepts: X25519:P-257 — the rule for api.internal; TLS dials to that destination will fail
 ```
 
-The same line appears as a notification in the TUI. A bad rule affects only its own destination; every other rule, and the rest of gori, still work.
+The same line appears as a notification in the TUI. A bad rule affects only its own destination. Every other rule and the rest of gori still work.
 
 **This table is per DESTINATION, and a fingerprint A/B is not.** "Does this endpoint answer differently as `chrome` than as `curl`?" is a question about one host, and editing a rule here between two sends changes the handshake for every other tab and background capture hitting that host at the same time. A Repeater tab (`␣Pt`) and a fuzz run (`--tls-preset`) can each name their own fingerprint, resolved at dial time without touching this table. See [per-send TLS fingerprints](/reference/cli/#per-send-tls-fingerprints). Such an override replaces the ClientHello shape only: the `client_cert`/`client_key`, `min_version`/`max_version` and `permissive` configured here still apply.
 
@@ -500,7 +500,7 @@ Per-area TUI layout prefs (command palette → **Settings: Display**, which edit
 
 ### statusline
 
-An opt-in extra row at the bottom of the TUI (Preferences → **General** → **Statusline**). When enabled, gori runs a shell command on an interval and renders its stdout as that row. It is a customizable status bar, inspired by Claude Code's status line. Disabled by default. The section is omitted from `settings.json` until you change it.
+An opt-in extra row at the bottom of the TUI (Preferences → **General** → **Statusline**). When enabled, gori runs a shell command on an interval and renders its stdout as that row. It is a customizable status bar, inspired by Claude Code's status line. It is disabled by default, and the section is omitted from `settings.json` until you change it.
 
 ```json
 {
@@ -522,7 +522,7 @@ An opt-in extra row at the bottom of the TUI (Preferences → **General** → **
 
 The command's stdout is parsed for ANSI/SGR colour escapes (16-colour, 256-colour, and truecolor, plus bold/underline/etc.), so you can produce coloured segments. Only the first line is used. Output is truncated to the terminal width. It never blocks the UI.
 
-`timeout` is separate from `interval`. Runs never overlap (gori launches the next one only after the previous has finished), so a script slower than `interval` refreshes as fast as it can. A run that does exceed `timeout` is terminated and the row reads `⋯ (timed out)`.
+`timeout` is separate from `interval`. Runs never overlap (gori launches the next one only after the previous has finished), so a script slower than `interval` refreshes as fast as it can. A run that exceeds `timeout` is terminated and the row reads `⋯ (timed out)`.
 
 Edits take effect immediately: saving a new `command`, `interval` or `timeout` re-runs the command on the next frame instead of waiting out the current interval.
 
@@ -770,7 +770,7 @@ The sweep runs on the capture path, amortized over every few thousand inserts, a
 
 Raising the cap takes effect on the next project open. Lowering it does not reclaim disk right away. Pruning frees pages for reuse inside the database file but does not shrink the file, so on-disk size drops only after a **Compress** from the project picker, which runs `VACUUM`.
 
-Surfaces that do not own capture never prune, whatever the cap says: `gori mcp`'s store, a project opened only to count its objects for a delete preview, and a freshly created project.
+Surfaces that do not own capture never prune, regardless of the cap: `gori mcp`'s store, a project opened only to count its objects for a delete preview, and a freshly created project.
 
 ### oast_providers
 
@@ -819,7 +819,7 @@ The startup update check behind the project picker's one-line "update available"
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `check_enabled` | bool | `true` | Set `false` to skip the probe entirely |
+| `check_enabled` | bool | `true` | Set `false` to skip the probe |
 | `notified_version` | string | `""` | Latest version already surfaced, so the notice shows once per release |
 | `latest_seen` | string | `""` | Last version seen from the release feed |
 | `checked_at` | integer | `0` | Unix seconds of the last successful check. Caches the result for a day |
@@ -828,7 +828,7 @@ The last three are state gori maintains. Only `check_enabled` is meant to be edi
 
 ### fuzzer
 
-Wordlists remembered by the Fuzzer's Payload overlay. Scratch state, not project data. A list in the [wordlist catalog](/guide/repeater-and-fuzzer/#wordlist-catalog) is stored by its name (`common.txt`), or by its path when a file of that name in the working directory would shadow the name. An entry an older gori stored as the absolute path into the catalog reads the same. Any other path is kept as given.
+Wordlists remembered by the Fuzzer's Payload overlay. This is scratch state, not project data. A list in the [wordlist catalog](/guide/repeater-and-fuzzer/#wordlist-catalog) is stored by its name (`common.txt`), or by its path when a file of that name in the working directory would shadow the name. An entry an older gori stored as the absolute path into the catalog reads the same. Any other path is kept as given.
 
 ```json
 {
@@ -974,7 +974,7 @@ A `colormarker` rule carries `when` (the History QL condition, `--when`), `color
 
 ## Per-Project Overrides
 
-A project can also carry its own **redaction** config under the `redaction` key: its own profiles, which one is active, and its own answer to "sanitize by default" (including an explicit `false` that turns a global default off for one engagement). Written by [`gori run redact`](/reference/cli/#run-redact). Resolution is project, then global, then built-in, first match by name.
+A project can also carry its own **redaction** config under the `redaction` key: its own profiles, which one is active, and its own answer to "sanitize by default" (including an explicit `false` that turns a global default off for one engagement). It is written by [`gori run redact`](/reference/cli/#run-redact). Resolution is project, then global, then built-in, first match by name.
 
 A project can pin its own network settings without editing the global file. These are stored in the project database (keys `net.bind_host`, `net.bind_port`, `net.upstream_proxy`, `net.upstream_destination_host`, `net.upstream_auth`, `net.connect_timeout_secs`, `net.io_timeout_secs`, `net.capture_max_mib`) and edited from the **Project** tab's **Project settings** sub-tab, or headless with [`gori run project network`](/reference/cli/#project-network) (`list`, `get`, `set`, `unset`), which also sets the request budget below. A project imported from a `.gori` archive ([`gori run project import`](/reference/cli/#project-import)) arrives with none of these keys and none of its project host overrides, so it starts on this machine's global network settings.
 
@@ -993,7 +993,7 @@ The timeout and capture-limit keys are per project because they depend on the ta
 | Surface | `bind_host` / `bind_port` | upstream / destination / auth / timeouts / capture limit |
 |---------|---------------------------|-----------------------------------------------------------------------------------|
 | TUI (`gori`) | applied; the proxy listens on the pinned address | applied |
-| `gori run capture` | applied; the one headless subcommand that listens (the pin wins over `--listen`/`--port`) | applied |
+| `gori run capture` | applied; the only headless subcommand that listens (the pin wins over `--listen`/`--port`) | applied |
 | every other `gori run` subcommand | not applied; nothing binds | applied |
 | `gori mcp` | not applied; the server never listens | applied |
 

@@ -36,9 +36,9 @@ Either selector can sit before the subcommand or anywhere after it: `gori run --
 Passing both `--db` and `--project` is a usage error, and neither wins. That includes the
 destructive verbs (`history delete`, `history clear`, `project delete`).
 
-`gori run capture` differs on one point: it **creates or reopens** its target, where reads require a project that already exists.
+`gori run capture` differs on one point. It **creates or reopens** its target, while reads require a project that already exists.
 
-Read subcommands open the store read-only and never take the capture lock, so they are safe to run against a project a live TUI is capturing into. SQLite WAL lets readers and the writer run at the same time. A `body:` query is the exception: answering it drains the search index, which is a write.
+Read subcommands open the store read-only and never take the capture lock, so they are safe to run against a project a live TUI is capturing into. SQLite WAL lets readers and the writer run at the same time. A `body:` query is the exception, because answering it drains the search index, which is a write.
 
 Write subcommands use the same WAL database as the TUI and MCP and serialize through the Store
 writer. They may run while the TUI is open, but a capture commit can briefly own SQLite's writer
@@ -49,7 +49,7 @@ project open for a whole run
 (`discover`, `fuzz`, `import`, `mine` with a `--macro`, `probe`, `retest run`, `oast listen`/`resume`, `intercept`, `sitemap js --scan`) keeps
 the standard five-second wait, the same one the TUI's capture writer uses. A
 repeater send that already reached the network keeps its completed-send result even when its
-response or History write cannot be persisted: it prints a warning to STDERR, and `--format json`
+response or History write cannot be persisted. It prints a warning to STDERR, and `--format json`
 carries `response_saved` / `history_saved` with the reason, so a script can see that the request
 went out and need not retry it because of the write failure.
 
@@ -64,7 +64,7 @@ The JSON that `gori run` emits is a stable, documented shape meant for parsing. 
 
 **STDOUT is data, STDERR is diagnostics.** Warnings, counts, notes, and export confirmations go to STDERR, so `gori run … | jq` receives only data.
 
-**`--format` picks the shape.** Most subcommands take `text` (default) or `json`; some add `jsonl`, `raw`, `har`, `paths`, or `markdown`. `--json` is the same as `--format=json` everywhere `json` is offered. `json` is always one JSON document and `jsonl` always one object per line:
+**`--format` picks the shape.** Most subcommands take `text` (default) or `json`. Some add `jsonl`, `raw`, `har`, `paths`, or `markdown`. `--json` is the same as `--format=json` everywhere `json` is offered. `json` is always one JSON document and `jsonl` always one object per line:
 
 | Subcommand | `--format json` | `--format jsonl` |
 |------------|-----------------|------------------|
@@ -160,7 +160,7 @@ gori run mine 42 --locations=query --hook './sign.sh'
 ```
 
 **The command is exec'd directly. There is no shell.** `argv` is tokenized with quote and
-backslash rules (`'a b'`, `"a b"`, `a\ b`) and handed to `execvp` as data: `$FOO`, `*`, `` ` ``,
+backslash rules (`'a b'`, `"a b"`, `a\ b`) and handed to `execvp` as data. `$FOO`, `*`, `` ` ``,
 `;`, `&&`, `|` and `>` are ordinary characters in an argument. Captured bytes that flow through
 a hook are never shell-interpreted. In a Decoder chain the three
 step separators (`>`, `|`, `,`) are consumed before the step is read, so they cannot appear
@@ -199,7 +199,7 @@ detector becomes the rule set's bottleneck under live capture, so keep its comma
 withholds the `exec:` step and marks the row held: the Rewriter's OUTPUT pane, the `^Q` chain
 editor's preview, and a Fuzzer result row rebuilt from the template (which says the value shown
 is the payload *before* that step). The Repeater's Content-Length reflection cannot say it in
-place, so it stops rewriting the header instead; `^R` computes the real length from the rendered
+place, so it stops rewriting the header instead. `^R` computes the real length from the rendered
 bytes, and `^L` recomputes it once when you take the header over. Reopening a project rebuilds every saved Repeater tab and Decoder sub-tab
 without firing their commands.
 
@@ -223,7 +223,7 @@ and a `decoder` chain named in `--sections` is too, so a hook travels in a
 [profile](/reference/cli/#profiles) like any other rule, and a team can share one re-signing
 hook. Two settings outside the hook seams run a command as
 well, and travel the same way: `statusline.command` (through `/bin/sh -c`, or `cmd.exe /d /s /c` on Windows, on a timer) and
-`editor.command`. Both ends say so. `gori settings export` counts what it wrote on stderr, and
+`editor.command`. Export and import both report it. `gori settings export` counts what it wrote on stderr, and
 `gori settings import` lists every command-carrying entry with its command and **refuses to write
 until you pass `--allow-commands`**. Importing someone's profile is the same trust decision as
 running their script, so read the commands first. There is no prompt, so a script can pass the

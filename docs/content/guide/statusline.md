@@ -8,11 +8,11 @@ group = "Customize"
 shot = "statusline"
 +++
 
-The **statusline** is an opt-in row at the very bottom of the TUI. gori runs a shell command on an interval and renders its stdout as that row: a status bar you write yourself, inspired by Claude Code's status line. It ships off, and the `statusline` section stays out of `settings.json` until you change something.
+The **statusline** is an opt-in row at the very bottom of the TUI. gori runs a shell command on an interval and renders its stdout as that row. It is a status bar you write yourself, inspired by Claude Code's status line. It ships off, and the `statusline` section stays out of `settings.json` until you change something.
 
 <figure class="tui-shot">
   <img src="/images/tui/statusline.svg" alt="gori History tab with a statusline row along the very bottom, below the status bar, reading: token 58m left, then 1 times 5xx in red, then todo 2 and the text of the first unchecked task" width="1206" height="520">
-  <figcaption>The <strong>statusline</strong> is the last row, under the status bar. This one is the <a href="#script">script below</a>: how long the token under test has, that the target has thrown a 5xx, and what is still on the list. None of it appears in the bars above.</figcaption>
+  <figcaption>The <strong>statusline</strong> is the last row, under the status bar. This one comes from the <a href="#script">script below</a>. It shows how long the token under test has left, that the target has returned a 5xx, and what is still on the list. None of it appears in the bars above.</figcaption>
 </figure>
 
 ## Turning it on
@@ -46,8 +46,8 @@ Runs happen off the draw path, so they never block the UI. gori launches the nex
 
 ## Presets {#presets}
 
-The top bar already carries what gori knows about itself: the project, capture state, the
-address it is bound to, the scan mode. A statusline is worth its row when it shows what the bar
+The top bar already shows gori's own state: the project, capture state, the
+address it is bound to, the scan mode. A statusline is useful when it shows what the bar
 does not: something from outside gori, or something gori holds but does not count for you.
 
 Each of these is one line, like the settings form's field, and goes straight into `command`.
@@ -60,7 +60,7 @@ jq -rn --argjson exp "$(gori run jwt "$(cat "${GORI_HOME:-$HOME/.gori}/token.jwt
 ```
 {% end %}
 
-{% preset(title="Whether the target has started answering 5xx", src="/images/tui/statusline-errors.svg", alt="A statusline row in red: 1 × 5xx", note="A History query on a timer. It queries the whole project, whatever History is filtered to, and prints nothing while the target is healthy, so the row appears only when something breaks.") %}
+{% preset(title="Whether the target has started answering 5xx", src="/images/tui/statusline-errors.svg", alt="A statusline row in red: 1 × 5xx", note="A History query on a timer. It queries the whole project, regardless of History's filter, and prints nothing while the target is healthy, so the row appears only when something breaks.") %}
 ```sh
 p=$(jq -r .project); gori run history --project "$p" -q 'status:>=500' -n 100000 --format json 2>/dev/null | jq -r 'length | if . == 0 then "" else "\u001b[31m\(.) × 5xx\u001b[0m" end'
 ```
@@ -115,8 +115,8 @@ printf '%s' "$token"
 printf '\n'
 ```
 
-This prints the row in the shot at the top of this page: the three presets above, joined,
-each part printed only when it is not empty. The context is read once into `$ctx`, because
+This prints the row in the shot at the top of this page. It joins the three presets above
+and prints each part only when it is not empty. The context is read once into `$ctx`, because
 stdin is a pipe (see [below](#context)). The last statement is a plain `printf`, so a quiet
 run still exits 0 and the row does not show `⋯ (exit 1)`.
 
@@ -175,13 +175,13 @@ ctx=$(cat); printf '%s · %s flows' "$(echo "$ctx" | jq -r .project)" "$(echo "$
 
 ## When the command fails {#failures}
 
-A command that fails without printing anything reports its exit status instead of leaving the row blank: `⋯ (exit 127)` for a command that was not found, `⋯ (killed)` for one a signal ended. A run that overruns `timeout` is terminated and the row reads `⋯ (timed out)`, and a command gori could not start at all reads `⋯ (statusline failed)` (or `⋯ (statusline error)` for an internal fault). A command that exits cleanly having printed nothing leaves the row empty. stderr is discarded either way.
+A command that fails without printing anything reports its exit status instead of leaving the row blank: `⋯ (exit 127)` for a command that was not found, `⋯ (killed)` for one a signal ended. A run that overruns `timeout` is terminated and the row reads `⋯ (timed out)`, and a command gori could not start reads `⋯ (statusline failed)` (or `⋯ (statusline error)` for an internal fault). A command that exits cleanly having printed nothing leaves the row empty. stderr is discarded either way.
 
 These markers are drawn in the caution colour, so a broken statusline is not mistaken for one reporting bad news.
 
 `timeout` is separate from `interval`. Runs never overlap, so a script slower than `interval` refreshes as fast as it can and is not killed for it. Only `timeout` ends a run.
 
-A command that backgrounds work (`curl … &`) must clean up after itself. gori kills the shell it started (`/bin/sh`, or `cmd.exe` on Windows) and cannot reach anything that shell forked: the shell shares gori's process group, so signalling the group would kill gori too. A timed-out run is sent `SIGTERM` before `SIGKILL`, so a `trap … TERM` around `cmd & wait` can tidy up. It is simpler to bound the command itself (`curl --max-time 2`, `timeout 2 …`).
+A command that backgrounds work (`curl … &`) must clean up after itself. gori kills the shell it started (`/bin/sh`, or `cmd.exe` on Windows) and cannot reach anything that shell forked. The shell shares gori's process group, so signalling the group would kill gori too. A timed-out run is sent `SIGTERM` before `SIGKILL`, so a `trap … TERM` around `cmd & wait` can tidy up. It is simpler to bound the command itself (`curl --max-time 2`, `timeout 2 …`).
 
 ## Where else a command can run
 

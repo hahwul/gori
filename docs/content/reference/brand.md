@@ -4,14 +4,14 @@ description = "The gori mark, the palette behind it, and the wallpapers, with di
 weight = 40
 +++
 
-These are the files this site itself uses. Right-clicking the mark in the header
+These are the files this site uses. Right-clicking the mark in the header
 opens the logo downloads as a menu. This page adds the palette and the
 wallpapers, and says which variant belongs where.
 
 ## The mark {#mark}
 
-Three variants, each shipped as SVG, PNG and WebP. The raster files are
-512 × 512. The SVGs draw on a `0 0 512 512` viewBox and scale to anything.
+There are three variants, each shipped as SVG, PNG and WebP. The raster files
+are 512 × 512. The SVGs draw on a `0 0 512 512` viewBox and scale to any size.
 
 <div class="art-gallery">
   <figure>
@@ -82,8 +82,8 @@ thirty-two built-in palettes.
 
 ## Wallpaper {#wallpaper}
 
-Ink, gold leaf and brushed cloud line-work: the painting the whole palette was
-sampled from. Two cuts, both at the 1920 × 1080 desktop size.
+The palette was sampled from this painting of ink, gold leaf and brushed cloud
+line-work. It comes in two cuts, both at the 1920 × 1080 desktop size.
 
 <div class="art-gallery">
   <figure>

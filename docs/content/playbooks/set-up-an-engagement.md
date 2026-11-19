@@ -9,13 +9,13 @@ group = "Foundations"
 
 Before you capture a single request, you set the boundaries of the test: which project holds the traffic, which hosts are in scope, and whether gori is allowed to touch anything else. This playbook walks all three and takes about five minutes. Headless and agent sends refuse a target you haven't scoped, and the sandbox stops every surface, the TUI included.
 
-> **Before you begin.** Work through the [Quick Start](/getting-started/quick-start/) first, so gori is running and you can move between tabs. Have the host you're authorized to test in mind; the examples use `api.example.com` as a stand-in.
+> **Before you begin.** Work through the [Quick Start](/getting-started/quick-start/) first, so gori is running and you can move between tabs. Have the host you're authorized to test in mind. The examples use `api.example.com` as a stand-in.
 
 ## 1. Create a project
 
 A project is one SQLite database: its own history, scope, issues, and notes, isolated from every other engagement. Keep one target per project, since scope and the sandbox are set per project.
 
-In the TUI, open the project picker from the command palette (`Ctrl-P`, then type *project*) and start a new one. Or create it from the shell before the proxy ever starts, so a script can lay down scope and env first:
+In the TUI, open the project picker from the command palette (`Ctrl-P`, then type *project*) and start a new one. Or create it from the shell before the proxy starts, so a script can lay down scope and env first:
 
 ```bash
 gori run project create "Acme API" --description="staging engagement" --tag=web --tag=acme
@@ -56,11 +56,11 @@ While it's on, the proxy forwards only the requests your scope allows and blocks
 
 Because scope is an allowlist, **a sandbox with no include rule blocks everything**. A red `sandbox` chip stays lit in the top bar while it's on.
 
-**Checkpoint.** The `sandbox` chip is lit. A request to an out-of-scope site fails; a request to `api.example.com` goes through. To try both from a terminal, `gori run shell` opens one whose curl, git, Python, Go and Node traffic goes through the running gori and trusts its CA. Toggle the sandbox off to lift the block.
+**Checkpoint.** The `sandbox` chip is lit. A request to an out-of-scope site fails, and a request to `api.example.com` goes through. To try both from a terminal, `gori run shell` opens one whose curl, git, Python, Go and Node traffic goes through the running gori and trusts its CA. Toggle the sandbox off to lift the block.
 
 ## 5. Redirect a host without touching DNS (optional)
 
-If your target's name has to resolve somewhere other than public DNS (a staging box, a local instance), add a **host override** in the **Project → Host overrides** sub-tab. It changes only the TCP dial target; the SNI, certificate name, and `Host` header stay the original name, so the server sees an ordinary request:
+If your target's name has to resolve somewhere other than public DNS (a staging box, a local instance), add a **host override** in the **Project → Host overrides** sub-tab. It changes only the TCP dial target. The SNI, certificate name, and `Host` header keep the original name, so the server sees an ordinary request:
 
 ```bash
 gori run project host-override add --host=api.example.com --ip=10.0.0.1

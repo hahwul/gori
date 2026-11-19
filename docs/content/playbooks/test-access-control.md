@@ -9,7 +9,7 @@ group = "Workbenches"
 
 Browsing the app as one user shows that the pages work. Access-control bugs show up when someone *else* asks for the same thing: a user with fewer rights, a user from another account, or someone who is not logged in. This playbook sets up those people as identities, replays your captured requests as each of them, and reads which requests came back the same when they should not have. Budget about fifteen minutes.
 
-> **Before you begin.** [Set up an engagement](/playbooks/set-up-an-engagement/) so your target is scoped, and get two test accounts from whoever authorized the test: one with more rights than the other. [Carry a session](/playbooks/carry-a-session/) explains session slots in more depth, but you do not need it first. Only test a target you are authorized to test; the examples use `api.example.com` as a stand-in.
+> **Before you begin.** [Set up an engagement](/playbooks/set-up-an-engagement/) so your target is scoped, and get two test accounts from whoever authorized the test: one with more rights than the other. [Carry a session](/playbooks/carry-a-session/) explains session slots in more depth, but you do not need it first. Only test a target you are authorized to test. The examples use `api.example.com` as a stand-in.
 
 ## 1. Browse as the stronger user
 
