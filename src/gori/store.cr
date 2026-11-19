@@ -961,9 +961,19 @@ module Gori
     def insert_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes,
                           repeater_id : Int64? = nil,
                           shape : WsShape = WsShape::DEFAULT, origin : String? = nil) : Nil
+      queue_ws_message(flow_id, direction, opcode, payload, repeater_id, shape, origin).try(&.receive)
+    end
+
+    # The same insert, queued: the returned channel answers once it commits (nil when the store
+    # is closing). The proxy relay does not wait, so a chatty socket rides the writer's batching
+    # instead of paying one commit per message; a full channel still blocks it, so nothing is
+    # dropped. Its `ts` is taken here, at capture, exactly as before.
+    def queue_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes,
+                         repeater_id : Int64? = nil,
+                         shape : WsShape = WsShape::DEFAULT, origin : String? = nil) : Channel(Nil)?
       reply = Channel(Nil).new(1) # buffered: the writer must never block sending a reply
       @writes.send(InsertWs.new(flow_id, repeater_id, now_us, direction, opcode, payload, reply, shape, origin))
-      reply.receive
+      reply
     rescue Channel::ClosedError
       nil
     end
@@ -1091,8 +1101,14 @@ module Gori
     # calls this; it is the one-shot/`spec` barrier, where correctness beats latency. A live
     # surface (the TUI) must NOT use it — it reports #fts_backlog instead of stalling.
     def flush : Nil
-      exec_task ->(_c : DB::Connection) { nil }
+      await_writes
       index_pending!
+    end
+
+    # Returns once every write queued before it has committed (or the store is closing): the
+    # barrier for a caller that queued writes without waiting and must now come after them.
+    def await_writes : Nil
+      exec_task ->(_c : DB::Connection) { nil }
     end
 
     # Indexes the whole FTS backlog, blocking until it is empty; returns the flows indexed.

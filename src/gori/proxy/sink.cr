@@ -102,7 +102,7 @@ module Gori::Proxy
     def on_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes,
                       shape : Gori::Proxy::WS::Shape = Gori::Proxy::WS::Shape::DEFAULT) : Nil
       return if flow_id <= 0
-      @store.insert_ws_message(flow_id, direction, opcode, payload, shape: shape)
+      @store.queue_ws_message(flow_id, direction, opcode, payload, shape: shape)
     end
 
     def on_ws_injected(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes,
@@ -122,7 +122,10 @@ module Gori::Proxy
       @store.append_live(flow_id, off, bytes, head, first, times)
     end
 
+    # After the transcript's queued messages commit, so the event still follows the whole
+    # captured transcript (`on_ws_message` does not wait for them).
     def on_tunnel_complete(flow_id : Int64) : Nil
+      @store.await_writes
       @store.notify_tunnel_complete(flow_id)
     end
 

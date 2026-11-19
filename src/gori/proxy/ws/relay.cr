@@ -111,10 +111,11 @@ module Gori::Proxy::WS
     # surfaces disagreed about the same protocol. A PING payload is a real covert channel
     # and a real length-check bug site, and it was invisible too.
     #
-    # But `insert_ws_message` BLOCKS until the write commits, and PING/PONG is the one frame
-    # type a peer can emit without bound and without the operator's app doing anything. An
-    # uncapped capture would throttle the relay to DB speed on a ping flood — a cost the
-    # forward path did not have before, on frames nobody asked to see. So keepalives are
+    # But every captured frame is a row the writer must commit (and a full writer queue blocks
+    # the relay), and PING/PONG is the one frame type a peer can emit without bound and without
+    # the operator's app doing anything. An uncapped capture would throttle the relay to DB
+    # speed on a ping flood — a cost the forward path did not have before, on frames nobody
+    # asked to see. So keepalives are
     # bounded and CLOSE is not: there is at most one CLOSE per direction, and it is the whole
     # reason this exists. Crossing the bound writes one marker row rather than going quiet.
     MAX_CONTROL_CAPTURE = 64
