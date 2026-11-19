@@ -65,6 +65,21 @@ describe Gori::Tui::IssuesView do
     end
   end
 
+  # Every other surface calls this status `resolved`; the cell said `done` (L#10).
+  it "abbreviates resolved as the cell's other statuses are abbreviated" do
+    with_store do |store|
+      id = store.insert_issue("Fixed thing", Gori::Store::Severity::Medium, "acme.test", nil)
+      store.update_issue(id, status: Gori::Store::Status::Resolved)
+      view = IssuesView.new
+      view.reload(store)
+      b = MemoryBackend.new(80, 10)
+      view.render(Screen.new(b), Rect.new(0, 0, 80, 10))
+      row = b.row(2)
+      row.should contain("MED  res  Fixed thing")
+      row.should_not contain("done")
+    end
+  end
+
   it "renders the severity-sorted list with badges + a status tag" do
     with_store do |store|
       store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "acme.test", nil)
