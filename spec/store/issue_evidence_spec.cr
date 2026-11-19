@@ -67,6 +67,23 @@ describe "Store#freeze_evidence (V26)" do
     end
   end
 
+  it "writes a new copy when only the error or status moved" do
+    with_store do |store|
+      fid = store.insert_flow(captured("/slow"))
+      issue = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
+      pending = flow_snapshot(store, fid)
+      first, status = store.freeze_evidence(issue, pending)
+      status.ok?.should be_true
+      # Abandoned with an error, same bytes: the copy must keep what happened.
+      errored, status = store.freeze_evidence(issue, pending.copy_with(error: "abandoned"))
+      status.ok?.should be_true
+      errored.should_not eq(first)
+      store.get_evidence(errored).not_nil!.meta.error.should eq("abandoned")
+      store.freeze_evidence(issue, pending.copy_with(error: "abandoned"))[1].duplicate?.should be_true
+      store.freeze_evidence(issue, pending.copy_with(status: 502))[1].ok?.should be_true
+    end
+  end
+
   it "copies a flow's exchange with its provenance and hashes, in one write with the live link" do
     with_store do |store|
       fid = store.insert_flow(captured("/login", "u=a&p=b"))

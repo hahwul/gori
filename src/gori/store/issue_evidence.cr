@@ -59,13 +59,16 @@ module Gori
       status.ok? || status.duplicate? ? {row_id, status} : {0_i64, status}
     end
 
-    # The id of a copy linked to `issue_id` from the same source with the same digests, or nil.
+    # The id of a copy linked to `issue_id` from the same source with the same digests, status
+    # and error, or nil: a flow frozen pending and later abandoned has the same bytes, but the
+    # error is part of what the copy says happened.
     private def identical_evidence(c : DB::Connection, issue_id : Int64, snap : Evidence::Snapshot) : Int64?
       c.query_one?(
         "SELECT e.id FROM issue_evidence e JOIN evidence_issue_links l ON l.evidence_id = e.id " \
         "WHERE l.issue_id = ? AND e.source_kind = ? AND e.source_id = ? AND e.request_sha256 = ? " \
-        "AND e.response_sha256 IS ? ORDER BY e.id LIMIT 1",
-        issue_id, snap.source_kind.label, snap.source_id, snap.request_sha256, snap.response_sha256, as: Int64)
+        "AND e.response_sha256 IS ? AND e.status IS ? AND e.error IS ? ORDER BY e.id LIMIT 1",
+        issue_id, snap.source_kind.label, snap.source_id, snap.request_sha256, snap.response_sha256,
+        snap.status, snap.error, as: Int64)
     end
 
     private def link_source(c : DB::Connection, issue_id : Int64, snap : Evidence::Snapshot, ts : Int64) : Nil
