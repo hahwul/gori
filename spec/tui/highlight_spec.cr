@@ -97,6 +97,19 @@ describe Gori::Tui::Highlight do
       (0...win.total).each { |i| win.line_at(i).map(&.text).join.should eq(full[i]) }
     end
 
+    # ^F and the drill re-read the line they are on; a multi-MB minified line was re-scrubbed
+    # on every one of those reads.
+    it "BodyLines materialises a re-read line once, and still answers every other line" do
+      bl = Highlight::BodyLines.from_bytes("one\r\n\xff two\nthree".to_slice)
+      first = bl[1]
+      bl[1].should be(first)
+      bl.dup[1].should be(first) # a copy of the struct shares the bytes, so it shares the memo
+      bl[0].should eq("one")
+      bl[2].should eq("three")
+      bl[1].should eq("� two")
+      bl[0].should eq("one")
+    end
+
     it "BodyLines matches split('\\n').map rstrip CR without eager full materialisation" do
       raw = "a\r\nb\nc\r\n".to_slice
       expected = String.new(raw).scrub.split('\n').map(&.rstrip('\r'))
