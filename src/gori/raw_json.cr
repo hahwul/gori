@@ -598,6 +598,15 @@ module Gori
     end
 
     private def one_value?(json : String) : Bool
+      bytes = json.to_slice
+      root = skip_json_space(bytes, 0)
+      # A container or string root has already been read whole by the pull parser, so its end
+      # is a byte scan away: re-lexing the document to find it cost a second full pass (and a
+      # third of `parse`'s allocation) on every body. Only JSON whitespace may follow it.
+      if close = root_end(bytes, root)
+        return skip_json_space(bytes, close) == bytes.size
+      end
+      # A scalar root (a number, `true`…): the lexer decides where it ends, and it is short.
       lexer = JSON::Lexer.new(json)
       depth = 0
       loop do
@@ -610,6 +619,49 @@ module Gori
         break if depth <= 0
       end
       depth == 0 && lexer.next_token.kind.eof?
+    end
+
+    # The offset just past the root array, object or string that opens at `i`, or nil for any
+    # other root. Only called on a root the pull parser accepted, so brackets balance and every
+    # string is closed: an escape skips the byte after it, and a bracket inside a string is text.
+    private def root_end(bytes : Bytes, i : Int32) : Int32?
+      first = bytes[i]?
+      return string_end(bytes, i) if first === '"'
+      return nil unless first === '[' || first === '{'
+      depth = 0
+      while i < bytes.size
+        b = bytes[i]
+        if b === '"'
+          i = string_end(bytes, i) || return nil
+          next
+        elsif b === '[' || b === '{'
+          depth += 1
+        elsif b === ']' || b === '}'
+          depth -= 1
+          return i + 1 if depth == 0
+        end
+        i += 1
+      end
+      nil
+    end
+
+    # The offset just past the string whose opening quote is at `i`.
+    private def string_end(bytes : Bytes, i : Int32) : Int32?
+      i += 1
+      while i < bytes.size
+        b = bytes[i]
+        return i + 1 if b === '"'
+        i += b === '\\' ? 2 : 1
+      end
+      nil
+    end
+
+    # `i` advanced past JSON whitespace (the four bytes the stdlib lexer skips).
+    private def skip_json_space(bytes : Bytes, i : Int32) : Int32
+      while (b = bytes[i]?) && (b === ' ' || b === '\n' || b === '\r' || b === '\t')
+        i += 1
+      end
+      i
     end
   end
 end

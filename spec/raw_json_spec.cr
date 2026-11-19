@@ -110,6 +110,20 @@ describe Gori::RawJson do
       expect_raises(JSON::ParseException) { Gori::RawJson.parse(%({"a":1} x)) }
       expect_raises(JSON::ParseException) { Gori::RawJson.parse("") }
     end
+
+    # The root's end is found by a byte scan, not a second lex: a bracket or quote inside a
+    # string is text, an escaped quote does not close it, and only JSON whitespace may follow.
+    it "accepts one root value with only whitespace after it, whatever its strings hold" do
+      [%({"a":"]}\\"x"} \n), %(["[",{"}":"\\\\"}]\t\r), %("a\\"b" ), %({}), %(  [] )].each do |source|
+        Gori::RawJson.parse(source).should eq(JSON.parse(source))
+      end
+    end
+
+    it "refuses anything after a root container or string" do
+      [%([1],2), %({"a":"]"} x), %("s" 1), %("s""t"), %([1]]), %({}{}), "[1]\u0000", "[1] \f"].each do |source|
+        expect_raises(JSON::ParseException) { Gori::RawJson.parse(source) }
+      end
+    end
   end
 
   describe ".claims" do
