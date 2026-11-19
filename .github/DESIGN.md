@@ -5934,3 +5934,32 @@ Notes checks the edited note's baseline inside the Store write transaction. When
 changed or deleted by a peer, save the local version under a fresh id and notify the operator.
 Links stay associated with their original note id. Closing a note that has links asks for
 confirmation even when its text is blank.
+
+### 2026-11-19: the smuggling detector reaches CL.0 and the HTTP/2 downgrade classes (#1931)
+
+Extends the active request-smuggling rule (`probe/active/request_smuggling.cr`) past CL.TE/TE.CL/TE.TE.
+The timing model — one framing tier blocks on an incomplete body the other considered complete, measured
+against a fast, reproducible baseline — is the backbone, and each new class is placed by whether it fits it.
+
+**H2.CL / H2.TE** fit it exactly, on the transport boundary. An h2 wire frames by DATA/END_STREAM and ignores
+(or, per RFC 9113 §8.1.1/§8.2.2, rejects) a `Content-Length` or `Transfer-Encoding` header, so a pure-h2
+origin answers fast; a front-end that downgrades to HTTP/1.1 forwards that header to a back-end that blocks
+on the body the frame never carried. So an h2 flow is no longer declined — it is probed with H2.CL/H2.TE over
+the sender's existing h2 path (`Fuzz::Sender`'s `http2` flag → `H2Engine.send`), which carries the smuggled
+header verbatim and never re-syncs the length (P7 — the mismatch is the payload). A flow is probed with
+exactly one variant set, chosen by its transport; the dedup key gains an `h1`/`h2` tag because ALPN can serve
+both at one host:port. There is no differential confirm over h2: a same-socket poison needs h1 keep-alive, and
+the h2 engine dials each member fresh.
+
+**CL.0 does not fit the timing model and is differential-only.** A `Content-Length` a single server honours
+blocks identically whether or not a front/back split exists, so a hang cannot tell CL.0 apart from an ordinary
+incomplete body — unlike CL.TE/TE.CL, whose header *conflict* a conformant single server rejects fast. CL.0
+therefore rides the aggressive+unsafe differential pipeline as a second same-socket `[smuggle, benign]` pair
+(a complete POST whose Content-Length body is a self-attributed smuggled GET) and surfaces only as a confirmed
+poison (Critical), never as a High timing lead. Its smuggle carries no framing conflict, so gori's codec
+passes it through verbatim rather than rejecting it — which is why the h1 self-validation guards only the
+conflict crafts, and a separate h2 self-check confirms the smuggled header survives h2 encoding.
+
+The safety posture is unchanged: off by default, `allow_unsafe` required to plan at all, the front-end
+pre-filter gates the intrusive probe, and the complete-prefix differential stays behind aggressive+unsafe. A
+variant that is not safely sendable on a flow's transport is simply not offered for it — never a false clean.

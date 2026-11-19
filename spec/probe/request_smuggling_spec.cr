@@ -92,6 +92,15 @@ private def results_for(clte : {Gori::Repeater::Result, Gori::Repeater::Result},
   out
 end
 
+# The h2 timing layout: two fast baselines then the two downgrade variants' probe pairs. No
+# differential pipeline over h2 (a same-socket smuggle needs h1 keep-alive).
+private def h2_results(h2cl : {Gori::Repeater::Result, Gori::Repeater::Result},
+                       h2te : {Gori::Repeater::Result, Gori::Repeater::Result},
+                       baseline : Gori::Repeater::Result = r_fast,
+                       baseline2 : Gori::Repeater::Result = r_fast) : Array(Gori::Repeater::Result)
+  [baseline, baseline2, h2cl[0], h2cl[1], h2te[0], h2te[1]]
+end
+
 # A recording backend: captures the wire bytes of every `send` (the injected-backend path in
 # Active.analyze routes pipeline members through the DEFAULT send_pipeline → per-member `send`).
 private class RecordingBackend < F::Backend
@@ -157,19 +166,49 @@ describe Gori::Probe::Active::RequestSmuggling do
       framing_raises?(tete).should be_true
     end
 
-    it "arms the differential pipeline (self-attributed canary) ONLY under aggressive+unsafe" do
+    it "arms the differential pipeline (CL.TE + CL.0, self-attributed canaries) ONLY under aggressive+unsafe" do
       # Plain unsafe: timing only, no pipeline, no probe_timeout.
       plan = rule.plan(frontended_detail, UNSAFE).not_nil!
       plan.pipeline.should be_empty
       plan.probe_timeout.should be_nil
 
-      # Aggressive+unsafe: a [complete-smuggle+canary, benign GET /] pipeline group.
+      # Aggressive+unsafe: [CL.TE smuggle+canary, benign GET /, CL.0 smuggle+canary, benign GET /].
       aplan = rule.plan(frontended_detail, AGGRESSIVE).not_nil!
-      aplan.pipeline.size.should eq(2)
-      String.new(aplan.pipeline[0]).should contain("gori-smuggle-") # self-attributed canary path
+      aplan.pipeline.size.should eq(4)
+      String.new(aplan.pipeline[0]).should contain("gori-smuggle-") # CL.TE smuggle canary
       String.new(aplan.pipeline[0]).should contain("Transfer-Encoding: chunked")
       String.new(aplan.pipeline[1]).should start_with("GET / HTTP/1.1")
+      # CL.0 smuggle: a plain Content-Length POST whose body IS a self-contained GET /canary —
+      # NO Transfer-Encoding (the desync is behavioural, not a framing conflict).
+      s = String.new(aplan.pipeline[2])
+      s.should contain("gori-smuggle-")
+      s.should_not contain("Transfer-Encoding")
+      s.should contain("Content-Length:")
+      String.new(aplan.pipeline[3]).should start_with("GET / HTTP/1.1")
       aplan.probe_timeout.should_not be_nil
+    end
+
+    it "sends a complete (codec-accepted) CL.0 smuggle whose OWN response can come back clean" do
+      # CL.0 carries no CL+TE conflict, so gori's codec does NOT reject it (unlike CL.TE/TE.CL) —
+      # the smuggled GET is read as the POST body by a conformant server, so the socket survives.
+      aplan = rule.plan(frontended_detail, AGGRESSIVE).not_nil!
+      framing_raises?(aplan.pipeline[2]).should be_false
+      obfuscated?(aplan.pipeline[2]).should be_false
+    end
+
+    it "offers H2.CL / H2.TE downgrade probes on an HTTP/2 flow (and NOT the h1 CL/TE set)" do
+      plan = rule.plan(frontended_detail(http_version: "HTTP/2"), UNSAFE).not_nil!
+      # baseline2 + H2.CL×2 + H2.TE×2 = 5 followups; no differential pipeline over h2.
+      plan.followups.size.should eq(5)
+      plan.pipeline.should be_empty
+      # H2.CL: a Content-Length (6) LARGER than the 1-byte body.
+      h2cl = String.new(plan.followups[1])
+      h2cl.should contain("Content-Length: 6")
+      h2cl.should end_with("\r\n\r\nZ")
+      # H2.TE: a Transfer-Encoding with an incomplete chunk body.
+      h2te = String.new(plan.followups[3])
+      h2te.should contain("Transfer-Encoding: chunked")
+      h2te.should contain("1\r\nZ\r\n")
     end
   end
 
@@ -182,8 +221,22 @@ describe Gori::Probe::Active::RequestSmuggling do
       rule.dedup_key(frontended_detail, P::Active::Options::DEFAULT).should be_nil
     end
 
-    it "declines on HTTP/2 (no CL/TE ambiguity there)" do
-      rule.plan(frontended_detail(http_version: "HTTP/2"), UNSAFE).should be_nil
+    it "probes an HTTP/2 flow with the downgrade set (no longer declined)" do
+      # The h1 CL/TE ambiguity does not exist on an h2 wire, but the h2→h1 DOWNGRADE desync does —
+      # an h2 flow is now probed with H2.CL / H2.TE instead of being skipped.
+      rule.plan(frontended_detail(http_version: "HTTP/2"), UNSAFE).should_not be_nil
+      # Still gated on allow_unsafe (synthetic POST bodies) and a front-end fingerprint.
+      rule.plan(frontended_detail(http_version: "HTTP/2"), P::Active::Options::DEFAULT).should be_nil
+      h2_plain = frontended_detail(http_version: "HTTP/2", resp_head: "HTTP/1.1 200 OK\r\n\r\n")
+      rule.plan(h2_plain, UNSAFE).should be_nil
+    end
+
+    it "keys an h2 surface distinctly from the h1 one (ALPN can serve both)" do
+      h1 = rule.dedup_key(frontended_detail, UNSAFE).not_nil!
+      h2 = rule.dedup_key(frontended_detail(http_version: "HTTP/2"), UNSAFE).not_nil!
+      h1.should contain("|h1")
+      h2.should contain("|h2")
+      h1.should_not eq(h2)
     end
 
     it "declines when no front-end fingerprint is present in the response head" do
@@ -208,7 +261,7 @@ describe Gori::Probe::Active::RequestSmuggling do
         {frontended_detail, UNSAFE},                                       # eligible
         {frontended_detail, AGGRESSIVE},                                   # eligible + armed
         {frontended_detail, P::Active::Options::DEFAULT},                  # no allow_unsafe
-        {frontended_detail(http_version: "HTTP/2"), UNSAFE},               # h2
+        {frontended_detail(http_version: "HTTP/2"), UNSAFE},               # h2 (eligible: downgrade set)
         {frontended_detail(resp_head: "HTTP/1.1 200 OK\r\n\r\n"), UNSAFE}, # no front-end hint
       ]
       cases.each do |(d, o)|
@@ -305,13 +358,74 @@ describe Gori::Probe::Active::RequestSmuggling do
       rule.detections_all(plan, res, detail).should be_empty
     end
 
-    it "emits a clte finding when the differential confirms but no timing variant pinned" do
+    it "emits a clte finding when the CL.TE differential confirms but no timing variant pinned" do
       res = results_for(clte: {r_fast, r_fast}, tecl: {r_fast, r_fast}, tete: {r_fast, r_fast},
         diff: {r_ok_complete, r_reflects_canary})
       dets = rule.detections_all(plan, res, detail)
-      dets.size.should eq(1)
-      dets[0].code.should eq("request_smuggling_clte")
+      dets.map(&.code).should eq(["request_smuggling_clte"])
       dets[0].severity.should eq(S::Severity::Critical)
+    end
+
+    # ── CL.0 (differential-only; pipeline indices [10],[11]) ──────────────────────────────
+    it "fires a CL.0 Critical when its differential confirms (benign reflects the CL.0 canary)" do
+      # [smuggle8, benign9, cl0_smuggle10, cl0_benign11]: CL.TE leg clean, CL.0 leg confirmed.
+      res = results_for(clte: {r_fast, r_fast}, tecl: {r_fast, r_fast}, tete: {r_fast, r_fast},
+        diff: {r_ok_complete, r_ok_complete}) << r_ok_complete << r_reflects_canary
+      dets = rule.detections_all(plan, res, detail)
+      dets.map(&.code).should eq(["request_smuggling_cl0"])
+      dets[0].severity.should eq(S::Severity::Critical)
+      dets[0].evidence.not_nil!.should contain("differential confirmed")
+    end
+
+    it "does NOT fire CL.0 when its smuggle itself errored (follow-up was skipped)" do
+      res = results_for(clte: {r_fast, r_fast}, tecl: {r_fast, r_fast}, tete: {r_fast, r_fast},
+        diff: {r_ok_complete, r_ok_complete}) << r_error << r_error("skipped")
+      rule.detections_all(plan, res, detail).should be_empty
+    end
+
+    it "does NOT fire CL.0 on a clean follow-up (no poison, no false positive)" do
+      res = results_for(clte: {r_fast, r_fast}, tecl: {r_fast, r_fast}, tete: {r_fast, r_fast},
+        diff: {r_ok_complete, r_ok_complete}) << r_ok_complete << r_ok_complete
+      rule.detections_all(plan, res, detail).should be_empty
+    end
+
+    it "reports CL.TE and CL.0 independently when BOTH differential legs confirm" do
+      res = results_for(clte: {r_fast, r_fast}, tecl: {r_fast, r_fast}, tete: {r_fast, r_fast},
+        diff: {r_ok_complete, r_reflects_canary}) << r_ok_complete << r_reflects_canary
+      rule.detections_all(plan, res, detail).map(&.code).sort!.should eq(
+        ["request_smuggling_cl0", "request_smuggling_clte"])
+    end
+  end
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # LAYER 3b — H2.CL / H2.TE verdict (h2 flow, timing-only, no differential).
+  # ─────────────────────────────────────────────────────────────────────────────
+  describe "h2 downgrade verdict" do
+    h2_detail = frontended_detail(http_version: "HTTP/2")
+    h2_plan = rule.plan(h2_detail, AGGRESSIVE).not_nil!
+
+    it "fires H2.CL (High) when both its probes hang against a fast baseline" do
+      dets = rule.detections_all(h2_plan, h2_results(h2cl: {r_hung, r_hung}, h2te: {r_fast, r_fast}), h2_detail)
+      dets.map(&.code).should eq(["request_smuggling_h2cl"])
+      dets[0].severity.should eq(S::Severity::High) # no differential over h2 ⇒ never Critical
+    end
+
+    it "fires H2.TE (High) on a timed_out probe pair" do
+      dets = rule.detections_all(h2_plan, h2_results(h2cl: {r_fast, r_fast}, h2te: {r_timed_out, r_timed_out}), h2_detail)
+      dets.map(&.code).should eq(["request_smuggling_h2te"])
+    end
+
+    it "fires nothing when the h2 origin answers fast (pure h2 ignores the smuggled header)" do
+      rule.detections_all(h2_plan, h2_results(h2cl: {r_fast, r_fast}, h2te: {r_fast, r_fast}), h2_detail).should be_empty
+    end
+
+    it "DECLINES an h2 variant on jitter (only one of its two probes hung)" do
+      rule.detections_all(h2_plan, h2_results(h2cl: {r_hung, r_fast}, h2te: {r_fast, r_fast}), h2_detail).should be_empty
+    end
+
+    it "never emits an h1 code on an h2 flow" do
+      dets = rule.detections_all(h2_plan, h2_results(h2cl: {r_hung, r_hung}, h2te: {r_hung, r_hung}), h2_detail)
+      dets.map(&.code).sort!.should eq(["request_smuggling_h2cl", "request_smuggling_h2te"])
     end
   end
 
