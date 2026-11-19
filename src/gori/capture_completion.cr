@@ -13,6 +13,13 @@ module Gori
       Proto.websocket?(row.status, row.connect_protocol)
     end
 
+    # Whether `ready?` can be true for this event at all, asked before the printer reads the
+    # row: an `:inserted` (one per flow) can never count, and reading its row cost the capture
+    # printer a read transaction per flow on the thread the proxy runs on.
+    def self.may_count?(event : Store::FlowEvent) : Bool
+      event.kind == :updated || event.kind == :tunnel_completed
+    end
+
     def ready?(event : Store::FlowEvent, row : Store::FlowRow) : Bool
       if awaits_tunnel?(row)
         event.kind == :tunnel_completed

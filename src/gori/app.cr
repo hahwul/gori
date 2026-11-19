@@ -434,7 +434,7 @@ module Gori
       end
       loop do
         event = session.flow_events.receive
-        next unless row = session.store.flow_row(event.id)
+        next unless row = capture_event_row(session.store, event)
         next unless completion.count?(event, row)
         # An upgraded flow emits an :updated event for its handshake and another :updated event
         # for each captured message. Count it only on the one completion event after the tunnel
@@ -468,6 +468,11 @@ module Gori
     # One completed flow on the capture stream: an array element (comma-led after the first),
     # a JSON line, or a text row.
     # A JSON row carries an errored flow's `error`, which the list read leaves out (#1680).
+    # The row an event names, unread when the event could never count (`may_count?`).
+    private def capture_event_row(store : Store, event : Store::FlowEvent) : Store::FlowRow?
+      store.flow_row(event.id) if CaptureCompletion.may_count?(event)
+    end
+
     private def print_capture_row(store : Store, row : Store::FlowRow, format : Symbol, *, first : Bool) : Nil
       case format
       when :json
