@@ -1135,8 +1135,8 @@ module Gori
       secure.nil? ? {sql, no_args} : {"(#{sql}) AND scheme = 'https'", no_args}
     end
 
-    # size: → the TOTAL bytes (request + response), so it matches the displayed/JSON
-    # `size`; reqsize:/respsize: target a single side. A NULL response_size (pending
+    # size: → the TOTAL bytes (request + response): the History SIZE column, the CLI row and
+    # the JSON `size`; reqsize:/respsize: target a single side. A NULL response_size (pending
     # flow) never matches respsize:, while size:/reqsize: fall back on the request bytes.
     private def self.size_cond(field : String, value : String) : {String, Array(DB::Any)}?
       column = case field
@@ -1415,8 +1415,8 @@ module Gori
     end
 
     # Numeric comparison on an INTEGER column/expression. `size:` uses the total
-    # (request_size + COALESCE(response_size, 0)) so it matches the displayed/JSON
-    # `size`; `reqsize:`/`respsize:` target one side. A NULL column (e.g. respsize:
+    # (request_size + COALESCE(response_size, 0)) so it matches the History SIZE column and
+    # the CLI/JSON `size`; `reqsize:`/`respsize:` target one side. A NULL column (e.g. respsize:
     # on a pending flow) never satisfies `col <op> ?`, so such rows fall out of both
     # the positive and negated form. Non-numeric values yield nil (the term is
     # dropped, like a bad status:).

@@ -96,14 +96,20 @@ class Gori::Tui::RepeaterView
     @resp_text_i = -1 # same keying, same hazard — see `resp_line_text`
   end
 
+  @resp_hint : String? = nil
+
   private def resp_view : RespView
     drop_resp_view_cache if @resp_view_rev != Theme.revision # theme switched → rebuild with new colours
     @resp_view_rev = Theme.revision
+    # The empty pane's hint carries a send's clock, so it is part of the key.
+    hint = shown_result ? nil : not_sent_hint
+    drop_resp_view_cache if hint != @resp_hint
+    @resp_hint = hint
     @resp_view_cache ||= begin
       result = shown_result
       @resp_pretty_applied = false
       if !result
-        RespView.new([[Highlight::Span.new(not_sent_hint, Theme.muted)]], Highlight::BodyLines.empty, :text)
+        RespView.new([[Highlight::Span.new(hint || not_sent_hint, Theme.muted)]], Highlight::BodyLines.empty, :text)
       elsif !result.ok? && result.head.empty?
         line = @result_stopped ? Highlight::Span.new(STOPPED_LINE, Theme.muted) : Highlight::Span.new("repeater error: #{result.error}", Theme.red)
         RespView.new([[line]], Highlight::BodyLines.empty, :text)

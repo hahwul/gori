@@ -1079,9 +1079,18 @@ module Gori::Tui
       n = @history.mark_count
       return "no marks — verbs act on the cursor row" if n == 0
       hidden = @history.marked_hidden_count
+      return "#{n} marked — only the loaded rows; more may match" if loaded_only?(n, hidden)
       msg = "#{Gori.plural(n, "flow")} marked"
       msg += " (#{hidden} not visible)" if hidden > 0
       msg
+    end
+
+    # A capped page is only a window: the marks cover the loaded rows and more may match.
+    # Said without a total. `COUNT(*)` cannot stop at the page limit the way the list's own
+    # search does, and run here it would park the UI fiber for a whole-table walk on a
+    # `path:`/`header:` filter (P6); the `1000+` chip is the same bound.
+    private def loaded_only?(n : Int32, hidden : Int32) : Bool
+      hidden == 0 && n == @history.row_count && @history.capped?
     end
 
     # Copy the selected flow's raw request (head + body, byte-exact P7) to the
@@ -1153,10 +1162,12 @@ module Gori::Tui
           "#{ids.size} flows#{hidden > 0 ? " (#{hidden} not visible)" : ""}"
         end
       label = ids.size == 1 ? "“#{name}”" : name
+      partial = ids.size > 1 && loaded_only?(ids.size, @history.marked_hidden_count)
+      warning = partial ? "Only the loaded rows are marked; more may match the filter.\n" : ""
       # return_to: :detail when launched from the open flow detail, so CANCEL restores the
       # detail (instead of dropping to the list) and the guard below still fires on accept
       # (the flow is gone, so :detail → :none).
-      @host.confirm(ids.size == 1 ? "DELETE FLOW" : "DELETE FLOWS", "Delete #{label}?\nThis can't be undone.",
+      @host.confirm(ids.size == 1 ? "DELETE FLOW" : "DELETE FLOWS", "Delete #{label}?\n#{warning}This can't be undone.",
         confirm_label: "delete", danger: true, return_to: from_detail ? :detail : :none) do
         # A rolled-back write (cross-process SQLite busy/lock) leaves the flows AND the marks in
         # place — say so instead of reporting a delete that didn't happen, so the set is still

@@ -37,8 +37,14 @@ class Gori::Tui::RepeaterView
     @menu_registry.try { |r| Hotkeys.binding_label(r, id, fallback) } || fallback
   end
 
+  # The empty RESPONSE pane. While a send is in flight it says so, with the clock, and names
+  # Stop only when Stop can end it (`RepeaterController#stoppable?`: an HTTP/gRPC send holds a
+  # live sink) and has not been pressed yet. It cannot say a dribbling head arrived: the sink sees a head only for an event
+  # stream (`Repeater::LiveBody#open`).
   private def not_sent_hint : String
-    "— not sent yet — press #{key_label("repeater.send", "^R")} to send —"
+    return "— not sent yet — press #{key_label("repeater.send", "^R")} to send —" unless @inflight
+    stop = @live.try { |l| !l.stopped? } ? Hotkeys.expand_menu_paths(@menu_registry, " · {space:repeater.stop} stops it") : ""
+    "— sending… #{Fmt.ago(@inflight_since)}#{stop} —"
   end
 
   # The pane after the operator stopped a send before any response head arrived.

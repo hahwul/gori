@@ -371,7 +371,7 @@ module Gori
           p.on("-qQL", "--query=QL", "Filter with a QL query (host: status:>=500 size:>10000 dur:>500 header: body~rx …)") { |v| query = once(query, v, "-q/--query") }
           p.on("-nN", "--limit=N", "Max rows, newest first (default 50)") { |v| limit = parse_count(v, "--limit"); limit_given = true }
           p.on("--count", "Print how many flows match (the same filters as the listing) instead of listing them") { count_only = true }
-          p.on("--sort=RANK", "List the top -n matches by slowest (duration) or largest (response size) instead of newest first") do |v|
+          p.on("--sort=RANK", "List the top -n matches by slowest (duration) or largest (request + response bytes) instead of newest first") do |v|
             rank = Store::Rank.parse?(v) || abort("gori run history: --sort is slowest or largest, got #{v.inspect}")
           end
           p.on("--view=NAME", "Apply a saved History view — ANDed with -q, like the TUI's `v` picker (see `gori run views`)") { |v| view_name = v }

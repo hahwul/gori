@@ -66,6 +66,9 @@ module Gori::CLI
     # server advertising a handful of tools, which an agent cannot tell from a gori that
     # simply does not have the feature.
     tool_filter = nil.as(MCP::ToolFilter?)
+    # An install with no `--tools` writes the default profile, so that is the spec checked here:
+    # the refusals below must judge the server the client will actually spawn.
+    tools_spec = tools_spec.try(&.presence) || MCP::Install::DEFAULT_TOOLS unless install_targets.empty?
     # The pin rides on the spec as subtractions; a pin alone is a leading subtraction, which
     # starts from the whole catalogue (`ToolFilter.parse`).
     filter_spec = tools_spec.try(&.strip).presence
@@ -252,7 +255,8 @@ module Gori::CLI
       io << "'-' subtracts (e.g. '@recon', '@minimal,send_request', '-fuzz_*,-mine_*').\n"
       io << "Required companions are included automatically; conflicting explicit exclusions are refused.\n"
       io << "The client loads every advertised tool into the model's context; the\n"
-      io << "startup log says how much. Profiles:"
+      io << "startup log says how much. A server run by hand serves every tool; an\n"
+      io << "--install-* entry defaults to #{MCP::Install::DEFAULT_TOOLS} (--tools=\"*\" installs every tool). Profiles:"
       MCP::ToolFilter::PROFILES.each do |pr|
         io << "\n  " << "@#{pr.name}".ljust(width) << pr.summary
       end
@@ -340,7 +344,10 @@ module Gori::CLI
     end
     # Once, and read back off an Outcome: the argv is identical for every target, and this
     # is the array the installs actually wrote rather than a second build of it.
-    outcomes.first?.try { |first| puts "Command: #{exe} #{first.args.join(" ")}" }
+    outcomes.first?.try do |first|
+      puts "Command: #{exe} #{first.args.join(" ")}"
+      MCP::Install.tools_note(first.args).try { |note| puts note }
+    end
     install_db_note(db_path).try { |note| STDERR.puts note }
     outcomes.all?(&.ok?)
   rescue ex

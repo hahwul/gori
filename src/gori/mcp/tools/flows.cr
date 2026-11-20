@@ -1011,7 +1011,7 @@ module Gori
           s.field "columns", strarrprop("extract a value from each flow onto the row's `columns`. Spec [LABEL=][req|res:]kind:selector, kind header|cookie (the head; header = its last value) or regex|position|jsonpath (the BODY only), e.g. \"req:header:authorization\", \"RID=jsonpath:data.id\"; side defaults to response. \"\" is a MISS, not an empty value. Sensitive header/cookie columns read \"[REDACTED]\" unless include_sensitive (a set-cookie header keeps its attributes). Each costs a read per row (body kinds up to 512 KiB)")
           s.field "include_sensitive", boolprop("unredact sensitive `columns`")
           s.field "count_only", boolprop("return only {count} of matching flows; refuses `ids`/`before_id`/`since`/`columns`/`fields`")
-          s.field "sort", enumprop("rank instead of newest-first: the top `limit` matches by duration or response size, no cursor", HISTORY_SORTS)
+          s.field "sort", enumprop("rank instead of newest-first: the top `limit` matches by duration or total bytes, no cursor", HISTORY_SORTS)
         end
 
         tool j, "list_events",

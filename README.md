@@ -155,7 +155,9 @@ gori mcp --install-pi            # Pi            (~/.pi/agent/mcp.json)
 Pi needs an MCP adapter, such as [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter)
 (`pi install npm:pi-mcp-adapter`). The installer honors `PI_CODING_AGENT_DIR` when set.
 
-Add `--read-only` for an untrusted agent: read tools only, no live requests. The
+An installed entry serves the `@recon` tool profile (read and map the capture, replay a request,
+record issues and notes); add `--tools='*'` for every tool. Add `--read-only` for an untrusted
+agent: read tools only, no live requests. The
 [AI Setup guide](https://gori.hahwul.com/getting-started/ai-setup/) covers connecting an agent and
 running a first request.
 

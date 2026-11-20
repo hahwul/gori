@@ -5995,3 +5995,27 @@ scrolled off — so on a line longer than `Wrap::FIND_PAN_MAX_CHARS` (50,000 cha
 is counted and its line reached. The ceiling goes away once both walks resume from a checkpoint the way wrap
 mode does with `ClusterMarks`.
 
+### 2026-11-20: an installed MCP entry defaults to `@recon`
+
+Refines: 2026-09-23 ("the full catalogue stays the default"). `gori mcp --install-*` with no
+`--tools` writes `--tools=@recon` (`MCP::Install::DEFAULT_TOOLS`): every agent session pays the
+whole catalogue's schemas before its first question, `@recon` is about a fifth of them, and the
+common installed agent reads, maps and replays rather than driving the workbench. A hand-run `gori mcp`
+still serves everything, so an agent never meets a narrower server it was not installed with, and
+existing entries change only on reinstall. The install prints one line naming the profile and
+`--tools='*'`, the spelling that installs every tool. `gori mcp` checks the default spec before it
+writes, like a typed one, so `--read-only`, `--pin-project` and `--no-project` with the default all
+start; `@recon` keeps both project pickers, and read tools belong to no Preferences group.
+
+### 2026-11-20: a project opened over its retention cap says so, and still opens (#1943)
+
+Opening a project holding more flows than `retention.max_flows` (a cap lowered later, a `0` capture, an archive
+import) used to be told only by the sweep's gori.log line, after the rows were gone. The opening surface now says
+how many flows are over the cap, once, at open: `Session#over_retention_on_open` (one `COUNT(*)` on the smallest
+covering index, skipped with no cap), carried like `orphaned_on_open` to the TUI's toast and notification ring and
+to `gori run capture`'s stderr. Nothing has been deleted by then, since the sweep is chunked (#1942), so the line
+names the cap and says to raise it and reopen. The cap is read only at open.
+
+Not done: a confirmation before opening, or any change to what retention keeps. The cap is the operator's own
+setting, and a dialog would put a question in front of every open of a large project.
+

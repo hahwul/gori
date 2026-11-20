@@ -58,6 +58,24 @@ describe Gori::Tui::InterceptView do
     end
   end
 
+  it "puts a held response status before the path even in a narrow queue" do
+    tmp_interceptor do |ic|
+      spawn do
+        ic.hold_response("HTTP/1.1 404 File not found\r\n\r\n".to_slice,
+          flow_id: nil, method: "GET", target: "404 File not found",
+          host: "acme.test", port: 80, scheme: "http", request_target: "/missing-long-path")
+      end
+      Fiber.yield
+      view = InterceptView.new
+      view.reload(ic)
+      backend = MemoryBackend.new(80, 12)
+      view.render(Screen.new(backend), Rect.new(0, 0, 80, 12))
+      row = (0...12).map { |y| backend.row(y) }.find { |line| line.includes?("RES ") && !line.includes?("RESPONSE") }.not_nil!
+      row.should contain("RES 404 GET")
+      row.should_not contain("->")
+    end
+  end
+
   # `scope:` is a field QL has and this gate refuses (#754): a hold gate evaluates a live
   # message, and a project's scope rules are not part of one. The refusal compiles to a
   # never-match, which un-negated holds nothing and NEGATED holds everything — so the bar has to

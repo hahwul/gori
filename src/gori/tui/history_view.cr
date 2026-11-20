@@ -1461,6 +1461,11 @@ module Gori::Tui
       @rows.size
     end
 
+    # The applied filter filled its page, so the loaded rows may not be every match.
+    def capped? : Bool
+      @inc_capped
+    end
+
     # The rail's window of list context around the open flow — see DrillIn. Maps the list row
     # onto the shared three-part shape; nothing of the list RENDERER is involved, which is
     # what keeps a 200-line column layout out of a three-row readout.
@@ -1599,7 +1604,7 @@ module Gori::Tui
       step_cursor(newest_first? ? 1 : -1)
     end
 
-    # ⇧T — mark every row in the CURRENT filtered list, unioned with what's already
+    # ⇧T — mark every LOADED row in the current filtered list, unioned with what's already
     # marked (so narrowing the filter twice accumulates rather than replaces).
     def mark_all : Nil
       @rows.each { |r| @mark_stamps[r.id] = r.created_at }
@@ -3629,7 +3634,7 @@ module Gori::Tui
           end
         end
         screen.text(type_x, y, fmt_mime_memo(row.content_type), Theme.muted, bg, width: 6) if show_type
-        screen.text(size_x, y, fmt_size(row.response_size), Theme.muted, bg, width: 6) if show_size
+        screen.text(size_x, y, fmt_size(row.size), Theme.muted, bg, width: 6) if show_size
         if show_dur
           if open_stream?(row)
             # An event stream still open (#1631): `●` and its events so far, where its
@@ -3921,19 +3926,16 @@ module Gori::Tui
       Fmt.ago(t)
     end
 
-    # Compact response size (B/KB/MB/GB), bounded to ≤6 cols. "—" until the response
-    # lands. The unit is picked from the ROUNDED magnitude so a value just under a
+    # Compact flow size (B/KB/MB/GB), bounded to ≤6 cols: request + response bytes, the
+    # `size` QL filters on and the CLI and MCP print, so a pending row reads its request
+    # bytes. The unit is picked from the ROUNDED magnitude so a value just under a
     # boundary (e.g. 1023.6 KB) rolls up to the next unit ("1.0MB") instead of the
     # misleading "1024KB".
     #
     # Through the memo, like the timestamp and the MIME label beside it: the value is a
     # frozen field of a settled flow, so this is the same String every frame it is drawn.
-    # `nil` short-circuits rather than taking a key, so the pending rows of a live capture
-    # never fill the map with one entry for "no response yet" — but it still asks `Fmt`
-    # what a missing value reads as, because `Fmt` is where that convention lives and the
-    # Repeater and Fuzzer rows that call it directly have to keep agreeing with this one.
-    private def fmt_size(bytes : Int64?) : String
-      return Fmt.size(nil) unless bytes
+    # Keyed on the value, so a pending row that settles redraws with its new total.
+    private def fmt_size(bytes : Int64) : String
       @size_memo.fetch(bytes) do
         @size_memo.clear if @size_memo.size >= @max_rows
         @size_memo[bytes] = Fmt.size(bytes)
@@ -4260,8 +4262,8 @@ module Gori::Tui
 
     # `200 · HTTP/1.1 · req 312B · res 1.4KB · 123ms · application/json · 09-05 14:02:11` —
     # the row's cells, spelled out where the list had to abbreviate. Sizes are WIRE sizes
-    # (head + true body size, not the capture-capped blob), the same numbers the SIZE column
-    # shows; latency and size read `—` until the response lands, like the list. The status
+    # (head + true body size, not the capture-capped blob), and the SIZE column is their sum;
+    # latency and `res` read `—` until the response lands, like the list's DUR. The status
     # cell is `FlowStatus.cell` so ERR/ABT here can never disagree with the list.
     private def detail_stats_line(detail : Store::FlowDetail) : Highlight::Line
       row = detail.row

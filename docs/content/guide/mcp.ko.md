@@ -90,14 +90,14 @@ gori mcp --read-only
 
 ## 노출할 도구 고르기 {#choosing-which-tools-are-exposed}
 
-기본적으로 `gori mcp`는 모든 도구를 노출하므로, 에이전트는 재시작 없이 워크벤치를 쓸 수 있습니다. 비용은 컨텍스트입니다. 클라이언트는 첫 질문 전에 카탈로그 전부를 모델 컨텍스트에 싣고 세션 내내 유지합니다. gori는 시작할 때마다 제공하는 도구 수와 `tools/list` 크기를 로그에 남깁니다. 컨텍스트가 빠듯한 클라이언트라면 프로필에서 시작하세요:
+직접 실행한 `gori mcp`는 모든 도구를 노출하므로, 에이전트는 재시작 없이 워크벤치를 쓸 수 있습니다. `--install-*`이 기록한 항목은 `--tools`를 주지 않으면 `@recon`을 제공하며, `--tools='*'`로 설치하면 모든 도구를 제공합니다. 전체 카탈로그의 비용은 컨텍스트입니다. 클라이언트는 첫 질문 전에 카탈로그 전부를 모델 컨텍스트에 싣고 세션 내내 유지합니다. gori는 시작할 때마다 제공하는 도구 수와 `tools/list` 크기를 로그에 남깁니다. 컨텍스트가 빠듯한 클라이언트라면 프로필에서 시작하세요:
 
 | 시작 방법 | 도구 | `tools/list` | 토큰 | 용도 |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 201 | ~202 KB | ~52k | 전부 (기본값) |
+| `gori mcp` | 201 | ~202 KB | ~52k | 전부 (직접 실행할 때의 기본값) |
 | `--read-only` | 65 | ~57 KB | ~15k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
 | `--tools=@analysis` | 5 | ~8 KB | ~2k | 시작할 때 바인딩한 캡처 분석; 프로젝트 전환·TUI 메시지 없음 |
-| `--tools=@recon` | 39 | ~41 KB | ~11k | 캡처를 읽고 파악, 패시브 스캔, 요청 재전송, 이슈·노트 기록 |
+| `--tools=@recon` | 39 | ~41 KB | ~11k | 캡처를 읽고 파악, 패시브 스캔, 요청 재전송, 이슈·노트 기록 (`--install-*`의 기본값) |
 | `--tools=@recon --read-only` | 29 | ~30 KB | ~8k | `--read-only`가 끄는 도구를 뺀 `@recon` |
 | `--tools=@minimal` | 18 | ~19 KB | ~5k | History와 flow, 현재 TUI 컨텍스트를 읽고 오퍼레이터와 대화 |
 
@@ -141,7 +141,7 @@ gori mcp --tools='-fuzz_*,-mine_*,-discover_*,-sequence_*'       # 비동기 워
 
 반대로 서버를 한 프로젝트에 *묶어 두려면* `--pin-project`를 씁니다. 서버를 다시 바인딩하거나 다른 프로젝트를 읽는 도구(`list_projects`, `switch_project`, `create_project`, `delete_project`, `import_project`, `export_project`, `diff_projects`)를 `--tools`·`--read-only`가 좁힌 결과에서 추가로 뺍니다. `--read-only`만으로는 `switch_project`가 계속 동작합니다. 고정해도 파일시스템 접근은 제한되지 않습니다. 경로를 받는 도구(`import_flows`, 워드리스트 파일)는 서버가 읽을 수 있는 파일이면 여전히 읽습니다. 고정한 채 프로젝트 없이 시작하게 되면(`--no-project`, 워크스페이스 밖, 열리지 않는 데이터베이스) 시작을 중단합니다.
 
-아무것도 매치하지 않는 패턴이나 프로필은 더 적은 도구로 서버를 띄우지 않고 시작 시 중단하며 후보를 제안합니다(`--tools: "list_hisotry" matches no tool — did you mean list_history?`). 제외된 도구는 `tools/list`에 나오지 않고, 그래도 호출하면 어떤 플래그가 감췄는지 밝히며 거절합니다. `--tools`는 `--read-only`와 함께 쓸 수 있고, 다른 플래그처럼 `--install-*`과 같이 주면 설치되는 명령에 기록됩니다.
+아무것도 매치하지 않는 패턴이나 프로필은 더 적은 도구로 서버를 띄우지 않고 시작 시 중단하며 후보를 제안합니다(`--tools: "list_hisotry" matches no tool — did you mean list_history?`). 제외된 도구는 `tools/list`에 나오지 않고, 그래도 호출하면 어떤 플래그가 감췄는지 밝히며 거절합니다. `--tools`는 `--read-only`와 함께 쓸 수 있고, 다른 플래그처럼 `--install-*`과 같이 주면 설치되는 명령에 기록됩니다. 주지 않으면 설치되는 명령에 `--tools=@recon`이 들어갑니다.
 
 ## TUI에서 에이전트 보기 {#seeing-an-agent-from-the-tui}
 
@@ -180,7 +180,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 
 클라이언트가 리포지토리 디렉터리 밖에서 MCP를 시작해도 서버는 unbound로 연결되며, 에이전트가 도구로 프로젝트를 고르거나 만들 수 있습니다. 설치 시점에 engagement 하나로 고정해 두려면 선택자를 넘기세요. 예: `gori mcp --project my-engagement --install-codex`.
 
-`--install-*`과 함께 넘긴 플래그는 모두 설치되는 커맨드에 기록됩니다. 선택자(`--project`, `--db`, `--no-project`, `--use-active-project`), `--read-only`, `--tools`, `--pin-project`, `--insecure-upstream`, `--config`가 해당합니다. 클라이언트는 사용자가 고르지 않은 작업 디렉터리에서 서버를 실행하므로 경로는 절대 경로로 변환됩니다.
+`--install-*`과 함께 넘긴 플래그는 모두 설치되는 커맨드에 기록됩니다. 선택자(`--project`, `--db`, `--no-project`, `--use-active-project`), `--read-only`, `--tools`, `--pin-project`, `--insecure-upstream`, `--config`가 해당합니다. `--tools`를 주지 않으면 `--tools=@recon`이 기록되고 설치 출력이 그렇다고 알려 줍니다. 모든 도구를 원하면 `--tools='*'`를 넘기세요. 클라이언트는 사용자가 고르지 않은 작업 디렉터리에서 서버를 실행하므로 경로는 절대 경로로 변환됩니다.
 
 ## 도구 {#tools}
 
@@ -192,7 +192,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 
 | 도구 | 용도 |
 |------|---------|
-| `list_history` | 최신순으로 플로우 나열, 선택적 QL과 페이지네이션 포함. 각 행에 `source`가 실립니다(클라이언트가 보낸 트래픽은 `proxy`, `send_request`(기본으로 기록됩니다)는 `repeater`, 그 밖에 `discover`·`import` …). 그래서 gori가 만든 플로우가 대상에 대한 증거로 잘못 읽히지 않습니다. `src:`로 필터링합니다. 각 행(그리고 `get_flow`)에는 scheme, host, port, target을 History와 같은 방식으로 이은 `url`도 실려 `send_request{url}`에 바로 넘길 수 있습니다. `columns`에 `gori run ls --column`과 같은 `[LABEL=][req\|res:]kind:selector` 스펙을 주면 행마다 추출한 값(헤더, JSON 필드, 정규식 캡처)을 `columns` 객체로 함께 싣습니다. QL로 거를 수 있는 값입니다([columns](/ko/guide/proxy/#columns) 참고). 행마다 읽기가 한 번 늘어나므로 지정할 때만 동작합니다. `hide_static:true`는 TUI의 정적 파일 숨기기 렌즈(`-static:true`)와 같아서 정적 자산(이미지, 폰트, 오디오/비디오)을 뺍니다. `list_sitemap`과 `list_params`도 같은 인자를 받습니다. `ids`를 주면 그 집합을 한 번에 가져옵니다. `get_current_context`가 `selection.ids`로 돌려주는, 사용자가 마크한 행들입니다. 요청한 순서 그대로 오고, `limit`과 두 커서는 적용되지 않으며, 행이 없는 id는 `missing_ids`로, `query`가 뺀 것은 `filtered_out_ids`로 돌아옵니다. `count_only:true`는 페이지를 넘기는 대신 같은 필터에 걸리는 플로우 수를 `{count}`로, 행 없이 돌려줍니다. 이때 `ids`, 두 커서, `columns`는 거절합니다. `sort:"slowest"`나 `"largest"`는 소요 시간이나 응답 크기 순으로 상위 `limit`개를 커서 없이 돌려주고(`order: "slowest_first"`), 이때 두 커서, `ids`, `count_only`는 거절합니다. gori가 읽을 수 없는 쿼리 항목(`status:abc`)은 버려져 답이 넓어지므로, 응답의 `ignored_terms`가 그 항목을 알려 주고(쿼리를 받는 도구 모두 같습니다) `strict:true`를 주면 쿼리를 거절합니다 |
+| `list_history` | 최신순으로 플로우 나열, 선택적 QL과 페이지네이션 포함. 각 행에 `source`가 실립니다(클라이언트가 보낸 트래픽은 `proxy`, `send_request`(기본으로 기록됩니다)는 `repeater`, 그 밖에 `discover`·`import` …). 그래서 gori가 만든 플로우가 대상에 대한 증거로 잘못 읽히지 않습니다. `src:`로 필터링합니다. 각 행(그리고 `get_flow`)에는 scheme, host, port, target을 History와 같은 방식으로 이은 `url`도 실려 `send_request{url}`에 바로 넘길 수 있습니다. `columns`에 `gori run ls --column`과 같은 `[LABEL=][req\|res:]kind:selector` 스펙을 주면 행마다 추출한 값(헤더, JSON 필드, 정규식 캡처)을 `columns` 객체로 함께 싣습니다. QL로 거를 수 있는 값입니다([columns](/ko/guide/proxy/#columns) 참고). 행마다 읽기가 한 번 늘어나므로 지정할 때만 동작합니다. `hide_static:true`는 TUI의 정적 파일 숨기기 렌즈(`-static:true`)와 같아서 정적 자산(이미지, 폰트, 오디오/비디오)을 뺍니다. `list_sitemap`과 `list_params`도 같은 인자를 받습니다. `ids`를 주면 그 집합을 한 번에 가져옵니다. `get_current_context`가 `selection.ids`로 돌려주는, 사용자가 마크한 행들입니다. 요청한 순서 그대로 오고, `limit`과 두 커서는 적용되지 않으며, 행이 없는 id는 `missing_ids`로, `query`가 뺀 것은 `filtered_out_ids`로 돌아옵니다. `count_only:true`는 페이지를 넘기는 대신 같은 필터에 걸리는 플로우 수를 `{count}`로, 행 없이 돌려줍니다. 이때 `ids`, 두 커서, `columns`는 거절합니다. `sort:"slowest"`나 `"largest"`는 소요 시간이나 전체 바이트(요청 + 응답, 행의 `size`) 순으로 상위 `limit`개를 커서 없이 돌려주고(`order: "slowest_first"`), 이때 두 커서, `ids`, `count_only`는 거절합니다. gori가 읽을 수 없는 쿼리 항목(`status:abc`)은 버려져 답이 넓어지므로, 응답의 `ignored_terms`가 그 항목을 알려 주고(쿼리를 받는 도구 모두 같습니다) `strict:true`를 주면 쿼리를 거절합니다 |
 | `list_events` | 작업 수명주기와 에이전트 활동을 추가 전용 피드로 전방 커서 조회. 플로우 행은 중복하지 않습니다. 모든 이벤트가 `actor`(행위 표면: `tui` / `cli` / `mcp`)를 담고 있어 에이전트가 자기 쓰기와 운영자의 쓰기를 구분할 수 있습니다. 에이전트 행동에는 클라이언트 이름과 pid인 `actor_label`도 담겨 두 에이전트를 구분합니다. 설정 변경은 누가 하든 기록됩니다. 사람은 같은 피드를 **Project → Activity** 패널에서 읽습니다 |
 | `operator_messages` | 오퍼레이터가 gori TUI에서 에이전트에게 입력한 메시지("Tell the agent…")입니다. 이 세션 또는 붙어 있는 모든 에이전트에게 보낸 것을 전방 커서로 읽습니다. gori는 가능하면 즉시 전달하고(Claude Code의 피어 메시지, Codex의 `codex queue` 전달, 채널 이벤트) 아직 남은 것은 에이전트의 다음 tool result에 실어 보냅니다. 이 도구는 모든 에이전트에 있는 폴백이므로 턴을 시작할 때 호출하세요. 반환한 메시지는 전달됨으로 표시되어 오퍼레이터의 알림 링에 "picked up"으로 보입니다 |
 | `reply_to_operator` | gori의 오퍼레이터에게 답합니다. `summary`는 알림 링과 Miss Ring 말풍선에 보이는 한 줄, `detail`은 링에서 ↵로 여는 긴 본문, `level`은 색, `in_reply_to`는 답하는 오퍼레이터 메시지 id입니다. 답은 gori에 있는 오퍼레이터에게 알림으로 닿습니다. 그 프로젝트에 gori TUI가 열려 있으면 바로 뜨고, 닫혀 있었다면 다음에 열 때 노트 하나로 요약됩니다 |

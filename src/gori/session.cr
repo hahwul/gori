@@ -87,6 +87,10 @@ module Gori
     # Flows a previous session left Pending (a crash or `kill -9`) that this open marked
     # orphaned — carried for the opening surface to say, as `env_syntax_migration` is.
     property orphaned_on_open : Int32 = 0
+    # Flows past `Settings.retention_flows` at open (a cap lowered later, a `retention 0`
+    # capture, an archive import), which the retention sweep removes as capture runs — carried
+    # for the opening surface to say, as `orphaned_on_open` is. See `Store#flows_over_retention`.
+    property over_retention_on_open : Int64 = 0
     # True when `bind_error` is the capture lock FILE failing to open (permissions, a
     # read-only volume) rather than another instance holding it: no other window exists, so
     # "take over when it closes" is the wrong advice.
@@ -247,6 +251,7 @@ module Gori
         # surface that opened the project reads it off the session and says it its own way.
         session.env_syntax_migration = syntax_migration
         session.orphaned_on_open = orphaned || 0
+        session.over_retention_on_open = store.flows_over_retention
         session.capture_lock_unavailable = lock_unavailable
         session.sync_capture_status!
         session
