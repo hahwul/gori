@@ -6108,19 +6108,31 @@ carrying `Expect: 100-continue` (and an obfuscated `Expect: y 100-continue`, whi
 through un-normalised). A conformant *single* server has every byte and answers fast, whether it sends
 an interim `100 Continue` first (skipped by `Repeater::Engine.read_response`'s 1xx loop) or ignores the
 header — so it is not flagged; only a split that withholds the body hangs past the threshold, measured
-2/2 against a fast baseline of the same POST *without* `Expect`. This clears the backbone test precisely
-because the body is complete: unlike a withheld-body probe (which a single server honouring the
-`Content-Length` would block on identically — the CL.0 problem), a hang here can only come from a tier
-that did not pass the body on. It rests on gori writing the whole request body up front and never
-waiting for a `100` itself (`Repeater::Engine.exchange`; P7 — the `Expect` bytes are the payload, not a
-client handshake), and on the reader skipping interim 1xx. Two timing variants join `H1_VARIANTS`
-(`request_smuggling_expect`, `request_smuggling_expect_obf`); the `DIFF_*`/`CL0_*` pipeline offsets are
-derived from `H1_VARIANTS.size`, so they shift with them. A self-check (`expect_sendable?`) is the
-*inverse* of the CL/TE one — the Expect craft must **not** be framing-rejected (it is sent verbatim) and
-must still carry the `Expect` header — so a codec that later stripped or rejected it makes the variants
-decline (NO-OP) rather than ship a probe that no longer triggers the handshake. Severity is High and the
-lead never borrows the CL.TE differential's confirm: an Expect hang proves a desync primitive, not an
-exploited poison, so its evidence never says "differential confirmed".
+2/2 against an **exact control**: the byte-for-byte same complete POST *without* the `Expect` header
+(`expect_control`, at `EXPECT_CONTROL_IDX`). The leads are offered only when that control answered fast,
+ok and complete, so a target merely slow on a body-bearing POST to `/` (an app, WAF or tarpit that
+treats bodies differently) cannot read as a desync — the control, not the CL:0 baseline, is what makes
+"only `Expect` can explain the hang" literally true. This clears the backbone test precisely because the
+body is complete: unlike a withheld-body probe (which a single server honouring the `Content-Length`
+would block on identically — the CL.0 problem), a hang here can only come from a tier that did not pass
+the body on. It rests on gori writing the whole request body up front and never waiting for a `100`
+itself (`Repeater::Engine.exchange`; P7 — the `Expect` bytes are the payload, not a client handshake),
+and on the reader skipping interim 1xx. Two timing variants join `H1_VARIANTS`
+(`request_smuggling_expect`, `request_smuggling_expect_obf`); the control and the `DIFF_*`/`CL0_*`
+pipeline offsets are derived from `H1_VARIANTS.size`, so they shift with them. A self-check
+(`expect_sendable?`) is the *inverse* of the CL/TE one — the Expect craft must **not** be framing-rejected
+(it is sent verbatim) and must still carry the `Expect` header — and it is ANDed into the shared
+`crafts_valid?`, so a codec that later stripped or rejected `Expect` makes the **whole h1 probe set**
+decline (NO-OP), not the Expect variants alone. Severity is High and the lead never borrows the CL.TE
+differential's confirm: an Expect hang proves a desync primitive, not an exploited poison, so its
+evidence never says "differential confirmed".
+
+One **residual false positive** survives the control and is deliberately accepted at this severity: a
+front-end that waits past the threshold for an upstream `100 Continue` and then forwards the body anyway
+is slow-*on-Expect*, not desynced, so its slowness is absent from the no-Expect control and `hung?`
+cannot tell a late-but-arriving response from a true deadlock. Such a target can raise the High lead. The
+evidence line reports a timing desync *primitive to verify*, never a confirmed or exploitable poison,
+which is why it is High (a lead) rather than Critical (a confirmed differential).
 
 **Declined, and why — so the question is not re-opened without new evidence.** A *standalone* 0.CL
 (plain visible `Content-Length`, no `Expect`) is not added: the front-end sees the header, so there is

@@ -86,11 +86,14 @@ private def results_for(clte : {Gori::Repeater::Result, Gori::Repeater::Result},
                         tete : {Gori::Repeater::Result, Gori::Repeater::Result},
                         expect : {Gori::Repeater::Result, Gori::Repeater::Result} = {r_fast, r_fast},
                         expect_obf : {Gori::Repeater::Result, Gori::Repeater::Result} = {r_fast, r_fast},
+                        expect_control : Gori::Repeater::Result = r_fast,
                         baseline : Gori::Repeater::Result = r_fast,
                         baseline2 : Gori::Repeater::Result = r_fast,
                         diff : {Gori::Repeater::Result, Gori::Repeater::Result}? = nil) : Array(Gori::Repeater::Result)
+  # The no-Expect control sits at [12], right after the five variants' probe pairs, so the
+  # differential members still land at [13],[14] and an appended CL.0 pair at [15],[16].
   out = [baseline, baseline2, clte[0], clte[1], tecl[0], tecl[1], tete[0], tete[1],
-         expect[0], expect[1], expect_obf[0], expect_obf[1]]
+         expect[0], expect[1], expect_obf[0], expect_obf[1], expect_control]
   if d = diff
     out << d[0] << d[1]
   end
@@ -135,13 +138,18 @@ describe Gori::Probe::Active::RequestSmuggling do
   # technique requires, with the exact chunk shapes the timing signal depends on.
   # ─────────────────────────────────────────────────────────────────────────────
   describe "craft" do
-    it "builds a benign, cleanly-framed baseline and 5×2 timing probes" do
+    it "builds a benign baseline, 5×2 timing probes and the Expect control" do
       plan = rule.plan(frontended_detail, UNSAFE).not_nil!
       # baseline (plan.request) is a benign CL:0 POST — framing is NOT ambiguous.
       framing_raises?(plan.request).should be_false
       String.new(plan.request).should contain("Content-Length: 0")
-      # followups = [baseline2, clte×2, tecl×2, tete×2, expect×2, expect_obf×2]
-      plan.followups.size.should eq(11)
+      # followups = [baseline2, clte×2, tecl×2, tete×2, expect×2, expect_obf×2, expect_control]
+      plan.followups.size.should eq(12)
+      # The control (last followup) is the Expect probe MINUS the Expect header: same complete POST.
+      ctl = String.new(plan.followups[11])
+      ctl.should contain("Content-Length: 1")
+      ctl.should end_with("\r\n\r\nX")
+      ctl.should_not contain("Expect")
     end
 
     it "makes the Expect probes COMPLETE (not framing-rejected) and Expect-bearing" do
@@ -353,6 +361,23 @@ describe Gori::Probe::Active::RequestSmuggling do
       res = results_for(clte: {r_fast, r_fast}, tecl: {r_fast, r_fast}, tete: {r_fast, r_fast},
         expect: {r_hung, r_fast})
       rule.detections_all(plan, res, detail).should be_empty
+    end
+
+    it "DECLINES the Expect lead when the no-Expect CONTROL also hung (slow body-bearing POST, not a desync)" do
+      # Both Expect probes hung, but so did the identical POST without Expect — so the hang is the
+      # target being slow on a body-bearing POST to `/`, not the Expect header. No finding.
+      res = results_for(clte: {r_fast, r_fast}, tecl: {r_fast, r_fast}, tete: {r_fast, r_fast},
+        expect: {r_hung, r_hung}, expect_obf: {r_hung, r_hung}, expect_control: r_hung)
+      rule.detections_all(plan, res, detail).should be_empty
+    end
+
+    it "DECLINES the Expect lead when the control errored or came back incomplete (no usable anchor)" do
+      res = results_for(clte: {r_fast, r_fast}, tecl: {r_fast, r_fast}, tete: {r_fast, r_fast},
+        expect: {r_hung, r_hung}, expect_control: r_error)
+      rule.detections_all(plan, res, detail).should be_empty
+      res2 = results_for(clte: {r_fast, r_fast}, tecl: {r_fast, r_fast}, tete: {r_fast, r_fast},
+        expect: {r_hung, r_hung}, expect_control: r_incomplete)
+      rule.detections_all(plan, res2, detail).should be_empty
     end
 
     it "keeps the Expect lead High and UNconfirmed even when the CL.TE differential confirms" do

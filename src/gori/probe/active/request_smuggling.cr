@@ -77,11 +77,19 @@ module Gori
         # first (the reader skips 1xx — `Repeater::Engine.read_response`) or ignores the header
         # outright. Only a front/back SPLIT where one tier withholds the body waiting for a 100 the
         # other already consumed deadlocks, so the final response never comes and the read times out —
-        # the "one tier blocks, the other does not" signal, against a fast baseline of the same POST
-        # WITHOUT Expect. gori writes the whole request (body included) up front and never waits for a
-        # 100 itself (P7 — `Repeater::Engine.exchange`), so the Expect bytes are the payload, not a
-        # client handshake. It is a TIMING lead only (High): a hang proves a desync primitive, not an
-        # exploited poison, and it never borrows the CL.TE differential's confirm.
+        # the "one tier blocks, the other does not" signal. It is measured against an EXACT control:
+        # the same complete POST WITHOUT the Expect header (`expect_control`, laid out at
+        # `EXPECT_CONTROL_IDX`). The leads are offered only when that control answered fast, ok and
+        # complete, so a target merely slow on a body-bearing POST to `/` (an app, WAF or tarpit that
+        # handles bodies slowly) is NOT read as an Expect desync — only the Expect header can then
+        # explain a hang the control did not show. gori writes the whole request (body included) up
+        # front and never waits for a 100 itself (P7 — `Repeater::Engine.exchange`), so the Expect
+        # bytes are the payload, not a client handshake. It is a TIMING lead only (High): a hang proves
+        # a desync primitive, not an exploited poison, and it never borrows the CL.TE differential's
+        # confirm. RESIDUAL FP: a front-end that waits past the threshold for an upstream 100 and then
+        # forwards the body anyway is slow-on-Expect, not desynced — the no-Expect control cannot
+        # exclude it and `hung?` cannot tell a late-but-arriving response from a deadlock, so the lead
+        # can still fire. The evidence says a timing desync PRIMITIVE to verify, never a confirmed poison.
         H1_VARIANTS = [
           {"request_smuggling_clte", "CL.TE", "CL + TE:chunked"},
           {"request_smuggling_tecl", "TE.CL", "TE:chunked + CL"},
@@ -109,16 +117,20 @@ module Gori
         # Result layout the analyzer produces for this rule's plan (an h1 flow):
         #   [0] baseline #1 (plan.request)   [1] baseline #2 (stability twin)
         #   [2],[3] CL.TE   [4],[5] TE.CL   [6],[7] TE.TE   [8],[9] Expect   [10],[11] Expect-obf
-        #   [12] CL.TE smuggle  [13] CL.TE benign   [14] CL.0 smuggle   [15] CL.0 benign
-        # The DIFF_* / CL0_* offsets are DERIVED from H1_VARIANTS.size, so adding a timing variant
-        # shifts the four pipeline members with it; they are present under aggressive+unsafe only. An h2 flow
-        # lays out [0],[1] baselines then [2..5] H2.CL / H2.TE probes and sends NO pipeline (a
-        # same-socket differential needs h1 keep-alive; the h2 engine sends each member fresh).
-        BASELINE_COUNT   = 2
-        DIFF_SMUGGLE_IDX = BASELINE_COUNT + H1_VARIANTS.size * 2 # 12 — CL.TE smuggle
-        DIFF_BENIGN_IDX  = DIFF_SMUGGLE_IDX + 1                  # 13 — CL.TE benign
-        CL0_SMUGGLE_IDX  = DIFF_BENIGN_IDX + 1                   # 14 — CL.0 smuggle
-        CL0_BENIGN_IDX   = CL0_SMUGGLE_IDX + 1                   # 15 — CL.0 benign
+        #   [12] Expect CONTROL (the same complete POST WITHOUT the Expect header — the Expect leads'
+        #        own control, so a target merely slow on a body-bearing POST cannot read as a desync)
+        #   [13] CL.TE smuggle  [14] CL.TE benign   [15] CL.0 smuggle   [16] CL.0 benign
+        # The EXPECT_CONTROL_IDX / DIFF_* / CL0_* offsets are DERIVED from H1_VARIANTS.size, so adding a
+        # timing variant shifts the control and the four pipeline members with it; the pipeline is present
+        # under aggressive+unsafe only, the control on every h1 plan. An h2 flow lays out [0],[1] baselines
+        # then [2..5] H2.CL / H2.TE probes and sends NO control and NO pipeline (no Expect variants there;
+        # a same-socket differential needs h1 keep-alive and the h2 engine sends each member fresh).
+        BASELINE_COUNT     = 2
+        EXPECT_CONTROL_IDX = BASELINE_COUNT + H1_VARIANTS.size * 2 # 12 — no-Expect control (h1 only)
+        DIFF_SMUGGLE_IDX   = EXPECT_CONTROL_IDX + 1                # 13 — CL.TE smuggle
+        DIFF_BENIGN_IDX    = DIFF_SMUGGLE_IDX + 1                  # 14 — CL.TE benign
+        CL0_SMUGGLE_IDX    = DIFF_BENIGN_IDX + 1                   # 15 — CL.0 smuggle
+        CL0_BENIGN_IDX     = CL0_SMUGGLE_IDX + 1                   # 16 — CL.0 benign
 
         def info : RuleInfo
           RuleInfo.new("request_smuggling", "HTTP request smuggling / desync (CL.TE/TE.CL/TE.TE, 0.CL-by-Expect, CL.0, H2.CL/H2.TE)",
@@ -130,7 +142,8 @@ module Gori
 
         # The widest per-flow send count for the Rules sub-tab + manual-run estimate: an h2 flow is
         # 2 baselines + 2×2 timing probes (6); an h1 aggressive flow is 2 baselines + 5×2 timing
-        # probes (CL.TE/TE.CL/TE.TE/Expect/Expect-obf) + a 4-member differential pipeline (16).
+        # probes (CL.TE/TE.CL/TE.TE/Expect/Expect-obf) + 1 Expect control + a 4-member differential
+        # pipeline (17).
         def requests_per_flow : Range(Int32, Int32)
           (BASELINE_COUNT + H2_VARIANTS.size * 2)..(CL0_BENIGN_IDX + 1)
         end
@@ -168,6 +181,7 @@ module Gori
             followups << tete_probe(hdr) << tete_probe(hdr)
             followups << expect_probe(hdr) << expect_probe(hdr)
             followups << expect_obf_probe(hdr) << expect_obf_probe(hdr)
+            followups << expect_control(hdr) # the Expect leads' no-Expect control (one request)
           end
 
           pipeline = [] of Bytes
@@ -194,16 +208,20 @@ module Gori
           # Per-family differential confirms (h1 only; absent/empty pipeline ⇒ false everywhere).
           clte_confirmed = differential_confirmed?(results, DIFF_SMUGGLE_IDX, DIFF_BENIGN_IDX)
           cl0_confirmed = differential_confirmed?(results, CL0_SMUGGLE_IDX, CL0_BENIGN_IDX)
+          # The Expect leads' EXACT control answered fast — so a hang is attributable to the Expect
+          # header, not to a target slow on a body-bearing POST. False ⇒ both Expect variants decline.
+          control_ok = expect_control_fast?(results, t_base)
           out = [] of Detection
           variants_for(detail).each_with_index do |(code, label, combo), i|
             a = results[BASELINE_COUNT + i * 2]?
             b = results[BASELINE_COUNT + i * 2 + 1]?
             next unless a && b
             next unless hung?(a, t_base) && hung?(b, t_base) # BOTH repeats — one alone is jitter
+            next if suppress_expect_lead?(code, control_ok)  # Expect hang only counts with a fast control
             # The Expect (0.CL-by-Expect) leads are a DIFFERENT class from the CL.TE differential, so
             # they never borrow its confirm: an Expect hang stays an honest High timing lead, never
             # relabelled "differential confirmed" by a poison it did not itself observe.
-            confirmed = code.starts_with?("request_smuggling_expect") ? false : clte_confirmed
+            confirmed = expect_variant?(code) ? false : clte_confirmed
             out << detection(detail, code, label, combo, t_base, confirmed)
           end
           # CL.0 has no timing primitive — it surfaces ONLY as a confirmed poison (Critical).
@@ -329,6 +347,25 @@ module Gori
           p.duration_us - t_base > DELAY_THRESHOLD
         end
 
+        private def expect_variant?(code : String) : Bool
+          code.starts_with?("request_smuggling_expect")
+        end
+
+        # Suppress an Expect lead whose no-Expect control did NOT answer fast: the hang is then a slow
+        # body-bearing POST, not the Expect header. Non-Expect variants are never suppressed here.
+        private def suppress_expect_lead?(code : String, control_ok : Bool) : Bool
+          expect_variant?(code) && !control_ok
+        end
+
+        # The Expect leads' control (`expect_control`, at EXPECT_CONTROL_IDX) answered fast, ok and
+        # complete — the anchor that makes "only Expect can explain the hang" true. False (both Expect
+        # variants decline) when it is absent, hung, errored or incomplete.
+        private def expect_control_fast?(results : Array(Repeater::Result), t_base : Int64) : Bool
+          ctl = results[EXPECT_CONTROL_IDX]?
+          return false unless ctl
+          ctl.ok? && !ctl.incomplete? && !hung?(ctl, t_base)
+        end
+
         # The differential leg confirmed a poison: the COMPLETE smuggle got its own complete
         # response (so the socket was NOT retired and the benign follow-up really rode behind it),
         # AND that benign follow-up came back ANOMALOUS — errored/incomplete after a live smuggle,
@@ -442,6 +479,15 @@ module Gori
           "POST / HTTP/1.1\r\nHost: #{hdr}\r\nContent-Length: 1\r\nExpect: y 100-continue\r\n\r\nX".to_slice
         end
 
+        # The EXACT control for the two Expect leads: byte-for-byte the Expect probe MINUS the `Expect`
+        # header — the same complete `POST /` with `Content-Length: 1` and a one-byte body. A lead is
+        # offered only when this answered fast (ok, complete, not hung), so a target that is simply slow
+        # on a body-bearing POST to `/` cannot be read as a desync: only the Expect header can then
+        # explain a hang this control did not show.
+        private def expect_control(hdr : String) : Bytes
+          "POST / HTTP/1.1\r\nHost: #{hdr}\r\nContent-Length: 1\r\n\r\nX".to_slice
+        end
+
         # The COMPLETE differential smuggle (aggressive+unsafe only): a CL.TE prefix whose
         # Content-Length spans the ENTIRE buffer (so a CL front-end forwards all of it and the outer
         # request gets a normal, complete response), while a TE back-end ends the outer request at
@@ -526,9 +572,9 @@ module Gori
 
         # The Expect timing probes are the INVERSE self-check: unlike the CL/TE crafts they must NOT be
         # framing-rejected — they are clean, complete POSTs gori sends VERBATIM — and they must still
-        # carry the `Expect` header the technique rests on. If a future codec started rejecting or
-        # dropping Expect, the Expect variants decline (NO-OP) rather than ship a probe that no longer
-        # triggers the 100-continue handshake.
+        # carry the `Expect` header the technique rests on. This is ANDed into the SHARED `crafts_valid?`,
+        # so if a future codec started rejecting or dropping Expect the WHOLE h1 probe set declines
+        # (NO-OP) — not the Expect variants alone — rather than ship a probe whose evidence is stale.
         private def expect_sendable?(req : Bytes) : Bool
           return false if framing_rejected?(req)
           head = head_of(req)

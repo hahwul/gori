@@ -95,7 +95,7 @@ gori run probe rules disable sri            # 시끄러운 패시브 체크 하�
 | `url_rewrite_bypass` | Access-control bypass (URL-rewrite headers) | `active` | 3 |  | 401/403/404로 응답한 경로를 X-Original-URL/X-Rewrite-URL에 담아 /를 요청하고, 2xx로 제공되면 표시합니다. |
 | `ssti` | Server-side template injection | `active` | 2 |  | 템플릿 산술 폴리글롯을 주입하고, 값이 평가되는 파라미터를 표시합니다. |
 | `nextjs_action_no_auth` | Next.js server action missing authorization | `active` | 1 | unsafe 필요 | Next.js 서버 액션(Next-Action)을 세션 쿠키/Authorization을 뺀 채 재전송하고, 여전히 2xx로 성공하면 표시합니다. |
-| `request_smuggling` | HTTP request smuggling / desync (CL.TE/TE.CL/TE.TE, 0.CL-by-Expect, CL.0, H2.CL/H2.TE) | `active` | 6-16 | 기본 비활성 · unsafe 필요 | 불완전한 CL.TE/TE.CL/TE.TE 또는 완전한 Expect: 100-continue 프레이밍 프로브(h1), 혹은 H2.CL/H2.TE 다운그레이드 프로브(h2)를 보내고, 타이밍 hang으로 프런트엔드/백엔드 디싱크를 표시합니다. CL.0과 차분 확인은 aggressive+unsafe에서 실행됩니다. 기본 비활성이며 POST 본문을 보냅니다. |
+| `request_smuggling` | HTTP request smuggling / desync (CL.TE/TE.CL/TE.TE, 0.CL-by-Expect, CL.0, H2.CL/H2.TE) | `active` | 6-17 | 기본 비활성 · unsafe 필요 | 불완전한 CL.TE/TE.CL/TE.TE 또는 완전한 Expect: 100-continue 프레이밍 프로브(h1), 혹은 H2.CL/H2.TE 다운그레이드 프로브(h2)를 보내고, 타이밍 hang으로 프런트엔드/백엔드 디싱크를 표시합니다. CL.0과 차분 확인은 aggressive+unsafe에서 실행됩니다. 기본 비활성이며 POST 본문을 보냅니다. |
 | `ssrf_oast` | Blind SSRF (out-of-band) | `active` | 1 | OAST 필요 | 쿼리, 폼, JSON의 URL 파라미터 하나를 OAST 페이로드로 향하게 하고, 서버에서 콜백이 오면 발견으로 올립니다. |
 | `cmd_injection_oast` | Blind OS command injection (out-of-band) | `active` | 1 | OAST 필요 | 명령/진단 파라미터에 셸 브레이크아웃 OAST 페이로드를 덧붙이고, 서버의 셸에서 콜백이 오면 발견으로 올립니다. |
 | `xxe_oast` | XML external entity (out-of-band) | `active` | 1 | OAST 필요 · unsafe 필요 | XML 본문에 외부 파라미터 엔티티 하나를 추가합니다. OAST 콜백이 오면 해석된 것으로 확인합니다. unsafe 옵트인이 필요합니다. |
