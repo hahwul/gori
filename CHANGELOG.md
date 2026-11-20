@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- MCP: `list_issues` exports Markdown and SARIF reports, and `get_flow` exports curl, Python, fetch, Go, httpie and CSRF PoCs, with credential and body redaction, read-only access and explicit size cuts (#1947).
+
 - MCP: `race_requests`, `timing_requests` and `minimize_repeater` take `background:true`, which returns a `job_id` at once so other calls are answered while the run goes on; `get_job` returns the call's usual result and `stop_job` cancels it (#1944).
 
 - TUI: an upstream proxy that does not answer is named once on the status row and in Notifications, with the setting that chose it, instead of only inside each failed flow's detail (#1944).

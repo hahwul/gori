@@ -18,12 +18,15 @@ module Gori
       # `matcher` is the project's redaction profile (`Redact::Policy.ambient`): the report embeds
       # each linked flow's request and response, and a shared report is the export that profile
       # exists for — `show`, History and MCP already sanitize the same bodies through it.
+      # `flow_loader` lets a caller bound and project evidence before rendering; absent it,
+      # the existing CLI/TUI report reads the captured flow in full.
       def self.markdown(issues : Array(Store::Issue), store : Store, project_name : String,
-                        matcher : Redact::Matcher? = nil) : String
+                        matcher : Redact::Matcher? = nil,
+                        flow_loader : Proc(Int64, Store::FlowDetail?)? = nil) : String
         String.build do |io|
           io << "# Issues — " << project_name << "\n\n"
           io << "_" << issues.size << " issues · exported " << Time.local.to_s("%Y-%m-%d %H:%M") << "_\n"
-          issues.each { |f| append_stored_issue(io, f, store, matcher) }
+          issues.each { |f| append_stored_issue(io, f, store, matcher, flow_loader) }
         end
       end
 
@@ -33,8 +36,8 @@ module Gori
       end
 
       private def self.append_stored_issue(io : String::Builder, f : Store::Issue, store : Store,
-                                           matcher : Redact::Matcher?) : Nil
-        flow = f.flow_id.try { |fid| store.get_flow(fid) }
+                                           matcher : Redact::Matcher?, flow_loader : Proc(Int64, Store::FlowDetail?)? = nil) : Nil
+        flow = f.flow_id.try { |fid| flow_loader ? flow_loader.call(fid) : store.get_flow(fid) }
         flow = Redact::Wire.flow(flow, matcher)[0] if flow && matcher
         append_issue(io, f, flow, resolve_issue_links(f, store), frozen: store.issue_evidence(f.id))
       end

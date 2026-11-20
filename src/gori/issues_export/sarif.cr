@@ -133,7 +133,8 @@ module Gori
       # webRequest/webResponse bodies of the one export most likely to leave the machine. A
       # caller that honours `--include-sensitive` passes nil.
       def self.sarif(issues : Array(Store::Issue), store : Store, project_name : String,
-                     include_sensitive : Bool = false, matcher : Redact::Matcher? = nil) : String
+                     include_sensitive : Bool = false, matcher : Redact::Matcher? = nil,
+                     flow_loader : Proc(Int64, Store::FlowDetail?)? = nil) : String
         # One rule per DISTINCT title, in first-seen order, so `find_rule_index` links each
         # result to its rule and a repeated finding collapses to one entry in a rules list.
         rules = {} of String => String # rule id => the title that first claimed it
@@ -157,7 +158,7 @@ module Gori
         # and its body inflated twice; the links were resolved twice. That ran synchronously on
         # the TUI's UI fiber, so a large issue list stalled the interface.
         flows = issues.map do |f|
-          flow = f.flow_id.try { |fid| store.get_flow(fid) }
+          flow = f.flow_id.try { |fid| flow_loader ? flow_loader.call(fid) : store.get_flow(fid) }
           flow && matcher ? Redact::Wire.flow(flow, matcher)[0] : flow
         end
         links = issues.map { |f| Export.resolve_issue_links(f, store) }
