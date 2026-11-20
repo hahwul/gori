@@ -6,7 +6,10 @@ require "../../env"
 module Gori
   module MCP
     class Tools
-      ISSUES_LIMIT = PageLimit.new(100, 500)
+      ISSUES_LIMIT  = PageLimit.new(100, 500)
+      ISSUE_FORMATS = %w[json markdown sarif]
+      # 500 issues × two (2 KiB + 1) reads stays below the 2 MiB body-read budget.
+      REPORT_EVIDENCE_CAP = 2 * 1024
 
       # Characters of an issue's `notes` a list_issues row carries; get_issue has the rest.
       ISSUE_NOTES_PREVIEW = 200
@@ -18,6 +21,13 @@ module Gori
 
       @[Tool("list_issues")]
       private def list_issues(h) : Result
+        format = str(h, "format") || "json"
+        unless ISSUE_FORMATS.includes?(format)
+          return err("format must be #{ISSUE_FORMATS.join("|")}", "INVALID_ARGUMENT", field: "format")
+        end
+        if format == "json" && present?(h, "include_sensitive")
+          return err("'include_sensitive' only applies to report formats", "INVALID_ARGUMENT", field: "include_sensitive")
+        end
         pg = page_args(h, ISSUES_LIMIT)
         all = store.issues
         # The TUI `/` bar's own filter, refused where the bar only notes it: an agent reading
@@ -29,6 +39,7 @@ module Gori
           all = Issues::Filter.parse(q).apply(all)
         end
         page = all[pg.offset, pg.limit]? || [] of Store::Issue
+        return issues_report_export(h, page, all.size, pg, format) unless format == "json"
         parts = fit_rows(page) { |rj, f, _| Serialize.issue(rj, f, store, notes_preview: ISSUE_NOTES_PREVIEW, items_cap: ISSUE_ITEMS_PREVIEW) }
         cut = parts.size < page.size
         page = page.first(parts.size)
@@ -38,6 +49,98 @@ module Gori
             emit_page(j, pg, page.size, all.size, cut: cut)
           end
         end)
+      end
+
+      private def issues_report_export(h, page : Array(Store::Issue), total : Int32, pg : Page,
+                                       format : String) : Result
+        include_sensitive = bool_arg(h, "include_sensitive", false)
+        matcher = include_sensitive ? nil : Redact::Policy.ambient(store)
+        name = @project_name || "project"
+        # Cache projections across the bounded binary search; never re-read/inflate a flow.
+        flows = {} of Int64 => Store::FlowDetail?
+        loader = ->(id : Int64) do
+          flows.fetch(id) do
+            flows[id] = report_flow(id, REPORT_EVIDENCE_CAP, include_sensitive, matcher)
+          end
+        end
+        render = ->(count : Int32) do
+          selected = page.first(count)
+          if format == "sarif"
+            Issues::Export.sarif(selected, store, name, include_sensitive, flow_loader: loader)
+          else
+            Issues::Export.markdown(selected, store, name, flow_loader: loader)
+          end
+        end
+        returned = page.size
+        document = render.call(returned)
+        if document.bytesize > Serialize::MAX_TEXT
+          return err("report header exceeds the 64 KiB report cap", "QUOTA_EXCEEDED") if page.empty?
+          low, high = 0, page.size
+          while low < high
+            candidate = (low + high + 1) // 2
+            trial = render.call(candidate)
+            if trial.bytesize <= Serialize::MAX_TEXT
+              low = candidate
+              document = trial
+            else
+              high = candidate - 1
+            end
+          end
+          # Unbounded notes, heads or related metadata can exceed the cap even without bodies.
+          return err("issue #{page.first.id} alone exceeds the 64 KiB report cap; read it with get_issue", "QUOTA_EXCEEDED") if low == 0
+          returned = low
+        end
+        included = page.first(returned)
+        evidence_cut = included.any? do |issue|
+          flow = issue.flow_id.try { |id| flows[id]? }
+          flow.try { |f| f.request_body_truncated? || f.response_body_truncated? }
+        end
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "format", format
+            j.field "document", document
+            j.field "evidence_truncated", evidence_cut
+            emit_page(j, pg, returned, total, cut: returned < page.size)
+            j.field "sensitive_headers_redacted", true unless include_sensitive
+            j.field "redaction_profile", matcher.profile.name if matcher
+          end
+        end)
+      end
+
+      private def report_flow(id : Int64, cap : Int32, include_sensitive : Bool, matcher : Redact::Matcher?)
+        flow = store.get_flow(id, body_max: cap + 1)
+        return nil unless flow
+        req_head, req, req_cut = report_message(flow.request_head, flow.request_body, cap, flow.request_body_truncated?, matcher)
+        res_head, res, res_cut = report_message(flow.response_head, flow.response_body, cap, flow.response_body_truncated?, matcher)
+        # Project heads BEFORE parsing: a malformed credential line must not reappear as
+        # a folded public value or a response reason phrase.
+        Store::FlowDetail.new(flow.row, flow.http_version,
+          Serialize.redact_head(String.new(req_head || Bytes.empty), include_sensitive).to_slice, req,
+          Serialize.redact_head_bytes(res_head, include_sensitive), res,
+          flow.h2_conn_id, flow.h2_stream_id, req_cut, res_cut, flow.error, flow.sni)
+      end
+
+      private def report_message(head : Bytes?, body : Bytes?, cap : Int32, capture_cut : Bool,
+                                 matcher : Redact::Matcher?) : {Bytes?, Bytes?, Bool}
+        return {head, body, capture_cut} unless body
+        decoded, note, complete = Proxy::Codec::ContentDecode.decode_full(head, body, cap + 1)
+        entity = decoded || body
+        cut = capture_cut || entity.size > cap || !complete
+        # A partial JSON document cannot honor JSON Pointers. Withhold it under a profile,
+        # and never feed compressed prefixes back to an exporter for unbounded inflation.
+        return {head, nil, true} if (cut && matcher) || Proxy::Codec::ContentDecode.decode_failed?(note)
+        entity = Issues::Export.trim_to_codepoint_boundary(entity[0, cap]) if entity.size > cap
+        head, entity = redact_report_message(head, entity, matcher, !decoded.nil?)
+        return {head, nil, true} if entity.size > cap
+        {head, entity, cut}
+      end
+
+      private def redact_report_message(head : Bytes?, entity : Bytes, matcher : Redact::Matcher?, decoded : Bool)
+        entity = matcher.body(entity, MediaType.of(head)).bytes if matcher
+        if decoded || matcher
+          head = Redact::Wire.reframe(head || Bytes.empty, entity.size, drop_transfer: decoded)
+        end
+        {head, entity}
       end
 
       @[Tool("get_issue")]
@@ -216,6 +319,8 @@ module Gori
           s.field "lenient", boolprop("free-text an unknown `field:` instead of refusing")
           s.field "limit", limitprop("max rows", ISSUES_LIMIT)
           s.field "offset", intprop("start row (default 0)")
+          s.field "format", enumprop("default json; reports fit whole issues in 64 KiB; follow next_offset; evidence_truncated marks body cuts", ISSUE_FORMATS)
+          s.field "include_sensitive", boolprop("report formats: unredact credential headers and bodies")
         end
 
         tool j, "get_issue",

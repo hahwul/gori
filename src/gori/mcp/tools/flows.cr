@@ -4,6 +4,11 @@ require "../../store"
 require "../serialize"
 require "../../redact/policy"
 require "../../plural"
+require "../../export/python_requests"
+require "../../export/js_fetch"
+require "../../export/go_http"
+require "../../export/httpie"
+require "../../export/csrf_poc"
 
 module Gori
   module MCP
@@ -24,6 +29,7 @@ module Gori
       HISTORY_CONTEXT_FIELDS = %w[id state short_circuited intercept_edited rewritten rewritten_by
         source source_surface source_ref advisory error columns]
       HISTORY_FIELDS = HISTORY_METADATA_FIELDS + HISTORY_CONTEXT_FIELDS
+      FLOW_FORMATS   = %w[json curl python fetch go httpie csrf]
 
       @[Tool("list_history", requires: ["get_flow", "ql_reference"])]
       private def list_history(h) : Result
@@ -566,9 +572,19 @@ module Gori
 
       @[Tool("get_flow", requires: ["get_response_body_chunk"])]
       private def get_flow(h) : Result
+        format = str(h, "format") || "json"
+        unless FLOW_FORMATS.includes?(format)
+          return err("format must be #{FLOW_FORMATS.join("|")}", "INVALID_ARGUMENT", field: "format")
+        end
         id = required_id(h, "id")
         detail = store.get_flow(id)
         return not_found("no flow with id #{id}") unless detail
+        return flow_code_export(h, detail, format) unless format == "json"
+        flow_detail_result(h, detail)
+      end
+
+      private def flow_detail_result(h, detail : Store::FlowDetail) : Result
+        id = detail.row.id
         # A WebSocket flow carries a separate message log; fetch it so get_flow surfaces the
         # frames (parity with `gori run show`).
         #
@@ -608,6 +624,46 @@ module Gori
         Result.new(Serialize.flow_detail_json(detail, ws_msgs, include_sensitive, cap, omit, redaction, more,
           interims: store.interims(id), ws_total: ws_total, ws_socket_total: ws_socket_total,
           originals: rewrite_originals(detail, include_sensitive)))
+      end
+
+      private def flow_code_export(h, detail : Store::FlowDetail, format : String) : Result
+        if field = %w[body_mode max_body_bytes ws_query].find { |key| present?(h, key) }
+          return err("'#{field}' only applies to format json", "INVALID_ARGUMENT", field: field)
+        end
+        include_sensitive = bool_arg(h, "include_sensitive", false)
+        detail, _, redaction = redact_flow(detail, [] of Store::WsMessage, include_sensitive)
+        wire = Serialize.redact_head(String.new(Repeater::FlowRequest.export_head(detail)), include_sensitive) +
+               String.new(detail.request_body || Bytes.empty)
+        row = detail.row
+        target = Repeater::FlowRequest.build_target(row.scheme, row.host, row.port)
+        document = case format
+                   when "curl"   then Export::Curl.text(wire, target)
+                   when "python" then Export::PythonRequests.text(wire, target)
+                   when "fetch"  then Export::JsFetch.text(wire, target)
+                   when "go"     then Export::GoHttp.text(wire, target)
+                   when "httpie" then Export::Httpie.text(wire, target)
+                   when "csrf"   then Export::CsrfPoc.text(wire, target)
+                   end
+        return err("flow #{row.id} has no runnable #{format} snippet", "INVALID_ARGUMENT", field: "id") unless document
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "id", row.id
+            j.field "format", format
+            emit_export_document(j, document, detail.request_body_truncated?)
+            j.field "sensitive_headers_redacted", true unless include_sensitive
+            Serialize.emit_redaction_note(j, redaction)
+            j.field "note", "WebSocket upgrade handshake only; no message transcript" if detail.websocket?
+          end
+        end)
+      end
+
+      # A single-document reply keeps its own cap, on whole UTF-8 sequences. A cut SARIF
+      # document or snippet is only a prefix; callers must check `truncated` before using it.
+      private def emit_export_document(j : JSON::Builder, document : String, source_cut : Bool = false) : Nil
+        document = document.scrub
+        cut = document.bytesize > Serialize::MAX_TEXT
+        j.field "document", cut ? String.new(Serialize.max_text_prefix(document.to_slice)) : document
+        j.field "truncated", cut || source_cut
       end
 
       # What Match&Replace or an Intercept edit replaced on each side (#1589), under the flow's own
@@ -1073,6 +1129,7 @@ module Gori
           "values share a [REDACTED:tag]) and `body_redaction` says what ran; absent field = " \
           "captured bytes. Continue a cut body with get_response_body_chunk." do |s|
           s.field "id", intprop("flow id from list_history"), required: true
+          s.field "format", enumprop("default json; code formats return {document, truncated} (64 KiB prefix; socket handshake only)", FLOW_FORMATS)
           s.field "include_sensitive", boolprop("unredact credential headers, and return captured bodies instead of the redaction profile's copy")
           s.field "body_mode", enumprop("body inlining. Default: up to #{AUTO_BODY_BYTES} bytes, longer cut with a `more` pointer (full under a redaction profile); full: up to #{Serialize::MAX_TEXT}; preview: a small head; none: shape only", BODY_MODES)
           s.field "max_body_bytes", intprop("cap inlined body bytes (clamped to 65536)")
