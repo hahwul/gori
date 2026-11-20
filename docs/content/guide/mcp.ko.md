@@ -90,14 +90,14 @@ gori mcp --read-only
 
 ## 노출할 도구 고르기 {#choosing-which-tools-are-exposed}
 
-기본적으로 `gori mcp`는 모든 도구를 노출하므로, 에이전트는 재시작 없이 워크벤치를 쓸 수 있습니다. 비용은 컨텍스트입니다. 클라이언트는 첫 질문 전에 카탈로그 전부를 모델 컨텍스트에 싣고 세션 내내 유지합니다. gori는 시작할 때마다 제공하는 도구 수와 `tools/list` 크기를 로그에 남깁니다. 컨텍스트가 빠듯한 클라이언트라면 프로필에서 시작하세요:
+직접 실행한 `gori mcp`는 모든 도구를 노출하므로, 에이전트는 재시작 없이 워크벤치를 쓸 수 있습니다. `--install-*`이 기록한 항목은 `--tools`를 주지 않으면 `@recon`을 제공하며, `--tools='*'`로 설치하면 모든 도구를 제공합니다. 전체 카탈로그의 비용은 컨텍스트입니다. 클라이언트는 첫 질문 전에 카탈로그 전부를 모델 컨텍스트에 싣고 세션 내내 유지합니다. gori는 시작할 때마다 제공하는 도구 수와 `tools/list` 크기를 로그에 남깁니다. 컨텍스트가 빠듯한 클라이언트라면 프로필에서 시작하세요:
 
 | 시작 방법 | 도구 | `tools/list` | 토큰 | 용도 |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 201 | ~202 KB | ~52k | 전부 (기본값) |
+| `gori mcp` | 201 | ~202 KB | ~52k | 전부 (직접 실행할 때의 기본값) |
 | `--read-only` | 65 | ~57 KB | ~15k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
 | `--tools=@analysis` | 5 | ~8 KB | ~2k | 시작할 때 바인딩한 캡처 분석; 프로젝트 전환·TUI 메시지 없음 |
-| `--tools=@recon` | 39 | ~41 KB | ~11k | 캡처를 읽고 파악, 패시브 스캔, 요청 재전송, 이슈·노트 기록 |
+| `--tools=@recon` | 39 | ~41 KB | ~11k | 캡처를 읽고 파악, 패시브 스캔, 요청 재전송, 이슈·노트 기록 (`--install-*`의 기본값) |
 | `--tools=@recon --read-only` | 29 | ~30 KB | ~8k | `--read-only`가 끄는 도구를 뺀 `@recon` |
 | `--tools=@minimal` | 18 | ~19 KB | ~5k | History와 flow, 현재 TUI 컨텍스트를 읽고 오퍼레이터와 대화 |
 
@@ -141,7 +141,7 @@ gori mcp --tools='-fuzz_*,-mine_*,-discover_*,-sequence_*'       # 비동기 워
 
 반대로 서버를 한 프로젝트에 *묶어 두려면* `--pin-project`를 씁니다. 서버를 다시 바인딩하거나 다른 프로젝트를 읽는 도구(`list_projects`, `switch_project`, `create_project`, `delete_project`, `import_project`, `export_project`, `diff_projects`)를 `--tools`·`--read-only`가 좁힌 결과에서 추가로 뺍니다. `--read-only`만으로는 `switch_project`가 계속 동작합니다. 고정해도 파일시스템 접근은 제한되지 않습니다. 경로를 받는 도구(`import_flows`, 워드리스트 파일)는 서버가 읽을 수 있는 파일이면 여전히 읽습니다. 고정한 채 프로젝트 없이 시작하게 되면(`--no-project`, 워크스페이스 밖, 열리지 않는 데이터베이스) 시작을 중단합니다.
 
-아무것도 매치하지 않는 패턴이나 프로필은 더 적은 도구로 서버를 띄우지 않고 시작 시 중단하며 후보를 제안합니다(`--tools: "list_hisotry" matches no tool — did you mean list_history?`). 제외된 도구는 `tools/list`에 나오지 않고, 그래도 호출하면 어떤 플래그가 감췄는지 밝히며 거절합니다. `--tools`는 `--read-only`와 함께 쓸 수 있고, 다른 플래그처럼 `--install-*`과 같이 주면 설치되는 명령에 기록됩니다.
+아무것도 매치하지 않는 패턴이나 프로필은 더 적은 도구로 서버를 띄우지 않고 시작 시 중단하며 후보를 제안합니다(`--tools: "list_hisotry" matches no tool — did you mean list_history?`). 제외된 도구는 `tools/list`에 나오지 않고, 그래도 호출하면 어떤 플래그가 감췄는지 밝히며 거절합니다. `--tools`는 `--read-only`와 함께 쓸 수 있고, 다른 플래그처럼 `--install-*`과 같이 주면 설치되는 명령에 기록됩니다. 주지 않으면 설치되는 명령에 `--tools=@recon`이 들어갑니다.
 
 ## TUI에서 에이전트 보기 {#seeing-an-agent-from-the-tui}
 
@@ -180,7 +180,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 
 클라이언트가 리포지토리 디렉터리 밖에서 MCP를 시작해도 서버는 unbound로 연결되며, 에이전트가 도구로 프로젝트를 고르거나 만들 수 있습니다. 설치 시점에 engagement 하나로 고정해 두려면 선택자를 넘기세요. 예: `gori mcp --project my-engagement --install-codex`.
 
-`--install-*`과 함께 넘긴 플래그는 모두 설치되는 커맨드에 기록됩니다. 선택자(`--project`, `--db`, `--no-project`, `--use-active-project`), `--read-only`, `--tools`, `--pin-project`, `--insecure-upstream`, `--config`가 해당합니다. 클라이언트는 사용자가 고르지 않은 작업 디렉터리에서 서버를 실행하므로 경로는 절대 경로로 변환됩니다.
+`--install-*`과 함께 넘긴 플래그는 모두 설치되는 커맨드에 기록됩니다. 선택자(`--project`, `--db`, `--no-project`, `--use-active-project`), `--read-only`, `--tools`, `--pin-project`, `--insecure-upstream`, `--config`가 해당합니다. `--tools`를 주지 않으면 `--tools=@recon`이 기록되고 설치 출력이 그렇다고 알려 줍니다. 모든 도구를 원하면 `--tools='*'`를 넘기세요. 클라이언트는 사용자가 고르지 않은 작업 디렉터리에서 서버를 실행하므로 경로는 절대 경로로 변환됩니다.
 
 ## 도구 {#tools}
 

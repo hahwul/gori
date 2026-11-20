@@ -90,14 +90,14 @@ A group gates tools, and more than one group can put bytes on the wire. With **I
 
 ## Choosing Which Tools Are Exposed
 
-By default `gori mcp` advertises every tool, so an agent can reach the workbench without a restart. The cost is context. A client loads the full catalogue into the model's context before the first question and keeps it for the session. Every start logs how many tools it serves and how large `tools/list` is. For a client with a tight context budget, start from a profile:
+A `gori mcp` you start by hand advertises every tool, so an agent can reach the workbench without a restart. An entry written by `--install-*` serves `@recon` unless you pass `--tools`, and `--tools='*'` installs every tool. The cost of the full catalogue is context. A client loads the full catalogue into the model's context before the first question and keeps it for the session. Every start logs how many tools it serves and how large `tools/list` is. For a client with a tight context budget, start from a profile:
 
 | Start with | Tools | `tools/list` | Tokens | For |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 201 | ~202 KB | ~52k | Everything (the default) |
+| `gori mcp` | 201 | ~202 KB | ~52k | Everything (the default when run by hand) |
 | `--read-only` | 65 | ~57 KB | ~15k | Read tools and pure compute; no live requests |
 | `--tools=@analysis` | 5 | ~8 KB | ~2k | Analyze one bound capture; no project switching or TUI mailbox |
-| `--tools=@recon` | 39 | ~41 KB | ~11k | Read and map the capture, scan it passively, replay a request, record issues and notes |
+| `--tools=@recon` | 39 | ~41 KB | ~11k | Read and map the capture, scan it passively, replay a request, record issues and notes (the `--install-*` default) |
 | `--tools=@recon --read-only` | 29 | ~30 KB | ~8k | `@recon` minus what `--read-only` disables |
 | `--tools=@minimal` | 18 | ~19 KB | ~5k | Read History, flows and the current TUI context; talk to the operator |
 
@@ -142,7 +142,7 @@ A narrow spec can also leave the server with no way to *pick* a project. If it s
 
 The opposite need, a server that must *stay* on one project, is `--pin-project`. It withholds every tool that rebinds the server or reads another project (`list_projects`, `switch_project`, `create_project`, `delete_project`, `import_project`, `export_project`, `diff_projects`), in addition to what `--tools` and `--read-only` narrow. `--read-only` alone leaves `switch_project` working. Pinning does not restrict the filesystem. A tool that reads a path you give it (`import_flows`, a wordlist file) can still read any file the server can. A pinned start that ends up with no project (`--no-project`, outside a workspace, or a database that will not open) aborts.
 
-A pattern or profile that matches nothing aborts at startup with a suggestion (`--tools: "list_hisotry" matches no tool — did you mean list_history?`) instead of serving a smaller set. Tools left out are absent from `tools/list` and refused if called anyway, naming the flag that hid them. `--tools` composes with `--read-only`, and like every other flag it is written into the command when you pass it alongside `--install-*`.
+A pattern or profile that matches nothing aborts at startup with a suggestion (`--tools: "list_hisotry" matches no tool — did you mean list_history?`) instead of serving a smaller set. Tools left out are absent from `tools/list` and refused if called anyway, naming the flag that hid them. `--tools` composes with `--read-only`, and like every other flag it is written into the command when you pass it alongside `--install-*`. Without it the installed command gets `--tools=@recon`.
 
 ## Seeing an Agent From the TUI
 
@@ -181,7 +181,7 @@ Codex and Grok use TOML with an `[mcp_servers.gori]` table, and Hermes uses YAML
 
 If a client starts MCP outside your repository directory, the server starts unbound and the agent can pick or create a project over tools. To pin a fixed engagement at install time instead, pass a selector, for example `gori mcp --project my-engagement --install-codex`.
 
-Every flag you pass alongside `--install-*` is written into the installed command: selectors (`--project`, `--db`, `--no-project`, `--use-active-project`), `--read-only`, `--tools`, `--pin-project`, `--insecure-upstream`, and `--config`. Paths are made absolute, because the client spawns the server from a working directory you did not choose.
+Every flag you pass alongside `--install-*` is written into the installed command: selectors (`--project`, `--db`, `--no-project`, `--use-active-project`), `--read-only`, `--tools`, `--pin-project`, `--insecure-upstream`, and `--config`. With no `--tools`, the command gets `--tools=@recon` and the install says so; pass `--tools='*'` for every tool. Paths are made absolute, because the client spawns the server from a working directory you did not choose.
 
 ## Tools
 

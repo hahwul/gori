@@ -208,10 +208,21 @@ module Gori
         # A tuple, not five `if`s: one more flag would put this method over ameba's complexity cap.
         { {"--no-project", no_project}, {"--read-only", read_only}, {"--insecure-upstream", insecure_upstream},
          {"--use-active-project", use_active_project}, {"--pin-project", pin_project} }.each { |flag, on| args << flag if on }
-        if spec = tools_spec.try(&.presence)
-          args << "--tools=#{spec}"
-        end
-        args
+        args << "--tools=#{tools_spec.try(&.presence) || DEFAULT_TOOLS}"
+      end
+
+      # The `--tools` an installed entry gets when none was passed (2026-11-20, DESIGN.md §7):
+      # the full catalogue is several times the schemas `@recon` is, paid every agent session.
+      # Only the installers default it; a bare `gori mcp` still serves everything, and
+      # `--tools='*'` installs that.
+      DEFAULT_TOOLS = "@recon"
+
+      # The one install line that says which tools the entry serves when it is the default,
+      # and how to widen it. Read off the argv the install wrote, so it cannot disagree.
+      def self.tools_note(args : Array(String)) : String?
+        return nil unless args.includes?("--tools=#{DEFAULT_TOOLS}")
+        "Tools: the #{DEFAULT_TOOLS} profile (gori mcp --help lists it); " \
+        "reinstall with --tools='*' to serve every tool"
       end
 
       # Resolve the absolute path of the running gori binary, as it was invoked.

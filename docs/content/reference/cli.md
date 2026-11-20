@@ -1989,7 +1989,7 @@ MCP stdio server. See the [MCP guide](/guide/mcp/) for tool details.
 | `--no-project` | Start unbound even inside a Git workspace (agent picks via list/create/switch) |
 | `--insecure-upstream` | Skip upstream TLS verification for every tool that sends to a target (`send_request`, fuzz, `grpc_reflect`, session refresh, …). OAST servers are always verified; see [Custom CA Bundles](/guide/oast/#custom-ca-bundles) |
 | `--read-only` | Disable action tools (`send_request`, create/update issues, fuzz/mine). `switch_project` (and `create_project` when unbound) stay available unless `--pin-project` |
-| `--tools=SPEC` | Advertise only these tools: comma-separated names, globs or profiles (`@minimal`, `@recon`), a leading `-` subtracts (`@recon`, `@minimal,send_request` or `-fuzz_*,-mine_*`). The startup log reports the size of what is served. See [Choosing which tools are exposed](/guide/mcp/#choosing-which-tools-are-exposed) |
+| `--tools=SPEC` | Advertise only these tools: comma-separated names, globs or profiles (`@minimal`, `@recon`), a leading `-` subtracts (`@recon`, `@minimal,send_request` or `-fuzz_*,-mine_*`). The startup log reports the size of what is served. Unset, a hand-run server serves every tool and an `--install-*` entry gets `@recon`; `'*'` selects every tool. See [Choosing which tools are exposed](/guide/mcp/#choosing-which-tools-are-exposed) |
 | `--pin-project` | Keep the server on the project it starts with: withhold `list_projects`, `switch_project`, `create_project`, `delete_project`, `import_project`, `export_project` and `diff_projects`. Refused with `--no-project`. A start that ends up unbound aborts |
 | `--install-claude` | Write Claude Desktop `mcpServers` config |
 | `--install-claude-code` | Write Claude Code `~/.claude.json` `mcpServers` entry (or `$CLAUDE_CONFIG_DIR`) |
@@ -1999,7 +1999,7 @@ MCP stdio server. See the [MCP guide](/guide/mcp/) for tool details.
 | `--install-hermes` | Write Hermes `~/.hermes/config.yaml` `mcp_servers.gori` (or `$HERMES_HOME`) |
 | `--install-pi` | Write Pi `~/.pi/agent/mcp.json` `mcpServers.gori` (or `$PI_CODING_AGENT_DIR`). Requires an MCP adapter |
 
-Several `--install-*` flags may be given in one run. Each named client is configured and reported separately, and one unwritable config does not stop the others. Every other flag on the command line (`--db`, `--project`, `--no-project`, `--use-active-project`, `--read-only`, `--tools`, `--pin-project`, `--insecure-upstream`, and the global `--config`) is written into the installed command, with paths made absolute (`--project` is recorded as the name). Existing config files are updated in place: other entries, tables and comments survive, permissions are preserved, and the replacement is atomic.
+Several `--install-*` flags may be given in one run. Each named client is configured and reported separately, and one unwritable config does not stop the others. Every other flag on the command line (`--db`, `--project`, `--no-project`, `--use-active-project`, `--read-only`, `--tools`, `--pin-project`, `--insecure-upstream`, and the global `--config`) is written into the installed command, with paths made absolute (`--project` is recorded as the name). With no `--tools`, the command gets `--tools=@recon` and the install prints a line saying so; `--tools='*'` installs every tool. Existing config files are updated in place: other entries, tables and comments survive, permissions are preserved, and the replacement is atomic.
 
 ## gori ca
 

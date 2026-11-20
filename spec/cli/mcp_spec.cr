@@ -39,6 +39,11 @@ describe "gori mcp catalogue wording" do
       help.should_not match(/\d\s*(KB|tokens|k\b)/)
     end
 
+    it "states the install default and how to install every tool" do
+      help.should contain("--install-* entry defaults to @recon")
+      help.should contain("--tools='*' installs every tool")
+    end
+
     it "explains required companions and conflicting exclusions" do
       help.should contain("Required companions are included automatically")
       help.should contain("conflicting explicit exclusions are refused")
@@ -78,5 +83,30 @@ end
 describe "gori mcp --pin-project" do
   it "withholds only real tools, so the pin never aborts as a misspelled --tools term (#1508)" do
     Gori::CLI::MCP_PIN_EXCLUDES.each { |t| Gori::MCP::Tools::TOOL_NAMES.should contain(t) }
+  end
+end
+
+# The installers write `--tools=@recon` when none is passed (2026-11-20), so no flag an install
+# accepts may turn that default into a refusal the operator never asked for.
+describe "gori mcp install default (@recon)" do
+  spec = Gori::MCP::Install::DEFAULT_TOOLS
+
+  it "serves read tools under --read-only, so the empty-catalogue refusal never fires" do
+    filter = Gori::MCP::ToolFilter.parse(spec, Gori::MCP::Tools::TOOL_NAMES,
+      Gori::MCP::Tools::TOOL_DEPENDENCIES).as(Gori::MCP::ToolFilter)
+    Gori::MCP::Tools.served_names(filter, allow_actions: false).should_not be_empty
+    # Every Preferences group off still leaves the read tools, which belong to none.
+    all_groups = Gori::Settings::MCP_PERMISSIONS.map(&.key).to_set
+    Gori::MCP::Tools.served_names(filter, false, all_groups).should_not be_empty
+  end
+
+  it "keeps a project picker, so a --no-project start can still bind" do
+    Gori::MCP::Tools::PROJECT_PICKERS.all? { |t| Gori::MCP::ToolFilter::RECON.includes?(t) }.should be_true
+  end
+
+  it "composes with --pin-project's subtractions without a companion conflict" do
+    pinned = "#{spec},#{Gori::CLI::MCP_PIN_EXCLUDES.join(',') { |t| "-#{t}" }}"
+    Gori::MCP::ToolFilter.parse(pinned, Gori::MCP::Tools::TOOL_NAMES,
+      Gori::MCP::Tools::TOOL_DEPENDENCIES).should be_a(Gori::MCP::ToolFilter)
   end
 end

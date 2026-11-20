@@ -5995,3 +5995,15 @@ scrolled off — so on a line longer than `Wrap::FIND_PAN_MAX_CHARS` (50,000 cha
 is counted and its line reached. The ceiling goes away once both walks resume from a checkpoint the way wrap
 mode does with `ClusterMarks`.
 
+### 2026-11-20: an installed MCP entry defaults to `@recon`
+
+Refines: 2026-09-23 ("the full catalogue stays the default"). `gori mcp --install-*` with no
+`--tools` writes `--tools=@recon` (`MCP::Install::DEFAULT_TOOLS`): every agent session pays the
+whole catalogue's schemas before its first question, `@recon` is about a fifth of them, and the
+common installed agent reads, maps and replays rather than driving the workbench. A hand-run `gori mcp`
+still serves everything, so an agent never meets a narrower server it was not installed with, and
+existing entries change only on reinstall. The install prints one line naming the profile and
+`--tools='*'`, the spelling that installs every tool. `gori mcp` checks the default spec before it
+writes, like a typed one, so `--read-only`, `--pin-project` and `--no-project` with the default all
+start; every profile already keeps both project pickers, and read tools belong to no Preferences group.
+

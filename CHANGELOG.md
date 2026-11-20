@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- MCP: `gori mcp --install-*` writes `--tools=@recon` when no `--tools` is given, so a fresh install loads about a fifth of the full catalogue's tool schemas; `--tools='*'` installs every tool, and a hand-run `gori mcp` and existing entries are unchanged (#1943).
+
 - Large projects: a `body:` search returns its first page in milliseconds instead of reading every match first, `path:` and `proto:grpc` scans run up to 40% faster, and the retention sweep removes the oldest flows a bounded chunk at a time, so capture and the TUI no longer freeze while a project over its `retention.max_flows` cap is trimmed (#1942).
 
 - TUI: pasting a large wordlist into a Fuzzer payload set, or a large body into an Intercept held request, no longer freezes the app, and a filtered History re-runs its whole query less often under capture (#1942).

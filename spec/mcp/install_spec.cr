@@ -477,20 +477,22 @@ describe Gori::MCP::Install do
   end
 
   describe ".build_args" do
+    recon = "--tools=@recon"
+
     it "starts with mcp and appends optional flags" do
-      Gori::MCP::Install.build_args.should eq(["mcp"])
+      Gori::MCP::Install.build_args.should eq(["mcp", recon])
       Gori::MCP::Install.build_args(project: "eng", read_only: true).should eq(
-        ["mcp", "--project=eng", "--read-only"])
+        ["mcp", "--project=eng", "--read-only", recon])
       Gori::MCP::Install.build_args(use_active_project: true).should eq(
-        ["mcp", "--use-active-project"])
+        ["mcp", "--use-active-project", recon])
     end
 
     it "carries --no-project into the installed argv" do
       # Dropped here, the installed server path-binds to whatever workspace the client
       # spawns it in — the opposite of the flag the user typed and gori validated.
-      Gori::MCP::Install.build_args(no_project: true).should eq(["mcp", "--no-project"])
+      Gori::MCP::Install.build_args(no_project: true).should eq(["mcp", "--no-project", recon])
       Gori::MCP::Install.build_args(no_project: true, read_only: true).should eq(
-        ["mcp", "--no-project", "--read-only"])
+        ["mcp", "--no-project", "--read-only", recon])
     end
 
     it "carries --tools into the installed argv" do
@@ -500,25 +502,33 @@ describe Gori::MCP::Install do
       Gori::MCP::Install.build_args(tools_spec: "list_*,get_*").should eq(
         ["mcp", "--tools=list_*,get_*"])
       # A profile is a spec like any other: written as typed, resolved by the spawned server.
-      Gori::MCP::Install.build_args(tools_spec: "@recon").should eq(["mcp", "--tools=@recon"])
+      Gori::MCP::Install.build_args(tools_spec: "@minimal").should eq(["mcp", "--tools=@minimal"])
       Gori::MCP::Install.build_args(project: "eng", read_only: true, tools_spec: "-fuzz_*").should eq(
         ["mcp", "--project=eng", "--read-only", "--tools=-fuzz_*"])
-      Gori::MCP::Install.build_args(tools_spec: "").should eq(["mcp"])
+      # `*` is how the full catalogue is installed, and it is written as typed.
+      Gori::MCP::Install.build_args(tools_spec: "*").should eq(["mcp", "--tools=*"])
+    end
+
+    it "defaults an install with no --tools to @recon (2026-11-20)" do
+      # The full catalogue is paid in schemas every agent session; a blank spec
+      # is no spec.
+      Gori::MCP::Install::DEFAULT_TOOLS.should eq("@recon")
+      Gori::MCP::Install.build_args(tools_spec: nil).should eq(["mcp", recon])
+      Gori::MCP::Install.build_args(tools_spec: "").should eq(["mcp", recon])
+      Gori::MCP::Install.build_args(tools_spec: "  ").should eq(["mcp", recon])
     end
 
     it "carries --pin-project into the installed argv" do
       # Dropped here, the spawned server could switch projects the operator meant to lock (#1508).
       Gori::MCP::Install.build_args(project: "eng", read_only: true, pin_project: true).should eq(
-        ["mcp", "--project=eng", "--read-only", "--pin-project"])
+        ["mcp", "--project=eng", "--read-only", "--pin-project", recon])
     end
 
     it "carries --config into the installed argv, absolute" do
       # The client spawns this command from a directory the user never chose, so a
       # relative --config would resolve against the wrong tree (or not at all).
       args = Gori::MCP::Install.build_args(config_path: "./ci-settings.json")
-      args.size.should eq(2)
-      args[0].should eq("mcp")
-      args[1].should eq("--config=#{File.expand_path("./ci-settings.json")}")
+      args.should eq(["mcp", "--config=#{File.expand_path("./ci-settings.json")}", recon])
     end
 
     it "expands a quoted tilde instead of writing it as a literal directory" do
@@ -527,12 +537,26 @@ describe Gori::MCP::Install do
       home = ENV["HOME"]? || Path.home.to_s
       args = Gori::MCP::Install.build_args("~/e.db", config_path: "~/gori.json")
       args.should eq(["mcp", "--config=#{File.join(home, "gori.json")}",
-                      "--db=#{File.join(home, "e.db")}"])
+                      "--db=#{File.join(home, "e.db")}", recon])
     end
 
     it "emits no selector flags when none were asked for" do
-      Gori::MCP::Install.build_args(no_project: false, config_path: nil).should eq(["mcp"])
-      Gori::MCP::Install.build_args(config_path: "").should eq(["mcp"])
+      Gori::MCP::Install.build_args(no_project: false, config_path: nil).should eq(["mcp", recon])
+      Gori::MCP::Install.build_args(config_path: "").should eq(["mcp", recon])
+    end
+  end
+
+  describe ".tools_note" do
+    it "says the default profile was installed and how to widen it, in one line" do
+      note = Gori::MCP::Install.tools_note(Gori::MCP::Install.build_args).not_nil!
+      note.should contain("@recon")
+      note.should contain("--tools='*'")
+      note.should_not contain('\n')
+    end
+
+    it "says nothing for any other spec, which the Command line already shows" do
+      Gori::MCP::Install.tools_note(Gori::MCP::Install.build_args(tools_spec: "*")).should be_nil
+      Gori::MCP::Install.tools_note(Gori::MCP::Install.build_args(tools_spec: "@recon,probe_scan")).should be_nil
     end
   end
 
@@ -816,7 +840,7 @@ describe Gori::MCP::Install do
       begin
         path = install_one("pi", exe_path: "/opt/gori")
         path.should eq(File.join(dir, "mcp.json"))
-        JSON.parse(File.read(path))["mcpServers"]["gori"]["args"].as_a.map(&.as_s).should eq(["mcp"])
+        JSON.parse(File.read(path))["mcpServers"]["gori"]["args"].as_a.map(&.as_s).should eq(["mcp", "--tools=@recon"])
 
         File.write(path, %({"settings":{"toolPrefix":"custom"},"mcpServers":{"other":{"command":"other"},"gori":{"command":"old"}}}))
         2.times do
@@ -859,7 +883,7 @@ describe Gori::MCP::Install do
           parsed = JSON.parse(File.read(path))
           entry = parsed["mcpServers"]["gori"]
           entry["command"].as_s.should eq("/opt/gori/bin/gori")
-          entry["args"].as_a.map(&.as_s).should eq(["mcp", "--project=demo", "--read-only"])
+          entry["args"].as_a.map(&.as_s).should eq(["mcp", "--project=demo", "--read-only", "--tools=@recon"])
         ensure
           old_home ? (ENV["HOME"] = old_home) : ENV.delete("HOME")
         end
@@ -995,6 +1019,37 @@ describe Gori::MCP::Install do
       end
     end
 
+    # `--tools='*'` is how the full catalogue is installed now that @recon is the default, so a
+    # `*` (a YAML alias sigil, a glob everywhere) must reach every format's argv as typed.
+    it "writes --tools=* verbatim into JSON, TOML and YAML configs" do
+      Dir.tempdir.try do |base|
+        home = File.join(base, "home-star-#{Random::Secure.hex(4)}")
+        Dir.mkdir_p(home)
+        saved = {"HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "HERMES_HOME"}.map { |k| {k, ENV[k]?} }
+        ENV["HOME"] = home
+        {"CODEX_HOME", "CLAUDE_CONFIG_DIR"}.each { |k| ENV.delete(k) }
+        ENV["HERMES_HOME"] = File.join(home, ".hermes")
+        begin
+          outcomes = Gori::MCP::Install.install_all(["claude-code", "codex", "hermes"],
+            exe_path: "/opt/gori", tools_spec: "*")
+          outcomes.all?(&.ok?).should be_true
+          want = ["mcp", "--tools=*"]
+          JSON.parse(File.read(File.join(home, ".claude.json")))["mcpServers"]["gori"]["args"]
+            .as_a.map(&.as_s).should eq(want)
+          Gori::MCP::Install::TomlDoc.parse(File.read(File.join(home, ".codex", "config.toml")))
+            .dig("mcp_servers", "gori").not_nil!.string_array?("args").should eq(want)
+          YAML.parse(File.read(File.join(home, ".hermes", "config.yaml")))["mcp_servers"]["gori"]["args"]
+            .as_a.map(&.as_s).should eq(want)
+          # …and `*` is a spec the server accepts: it serves every tool.
+          filter = Gori::MCP::ToolFilter.parse("*", Gori::MCP::Tools::TOOL_NAMES,
+            Gori::MCP::Tools::TOOL_DEPENDENCIES).as(Gori::MCP::ToolFilter)
+          Gori::MCP::Tools.served_names(filter, true).size.should eq(Gori::MCP::Tools::TOOL_NAMES.size)
+        ensure
+          saved.each { |k, v| v ? (ENV[k] = v) : ENV.delete(k) }
+        end
+      end
+    end
+
     it "writes a TOML mcp_servers.gori table for codex" do
       Dir.tempdir.try do |base|
         home = File.join(base, "home-toml-#{Random::Secure.hex(4)}")
@@ -1015,7 +1070,7 @@ describe Gori::MCP::Install do
           text.should contain("js_repl = false")
           text.should contain("[mcp_servers.gori]")
           text.should contain(%(command = "/opt/gori/bin/gori"))
-          text.should contain(%(args = ["mcp", "--insecure-upstream"]))
+          text.should contain(%(args = ["mcp", "--insecure-upstream", "--tools=@recon"]))
         ensure
           old_home ? (ENV["HOME"] = old_home) : ENV.delete("HOME")
           old_codex ? (ENV["CODEX_HOME"] = old_codex) : ENV.delete("CODEX_HOME")
@@ -1041,7 +1096,7 @@ describe Gori::MCP::Install do
           text.should contain("yolo = true")
           text.scan("[mcp_servers.gori]").size.should eq(1)
           text.should contain(%(command = "/opt/gori2"))
-          text.should contain(%(args = ["mcp", "--read-only"]))
+          text.should contain(%(args = ["mcp", "--read-only", "--tools=@recon"]))
           text.should_not contain(%(command = "/opt/gori"\n))
         ensure
           old_home ? (ENV["HOME"] = old_home) : ENV.delete("HOME")
@@ -1085,7 +1140,7 @@ describe Gori::MCP::Install do
           parsed["mcp_servers"]["github"]["env"]["GITHUB_PERSONAL_ACCESS_TOKEN"].as_s
             .should eq("ghp_secret")
           parsed["mcp_servers"]["gori"]["command"].as_s.should eq("/opt/gori2")
-          parsed["mcp_servers"]["gori"]["args"].as_a.map(&.as_s).should eq(["mcp", "--read-only"])
+          parsed["mcp_servers"]["gori"]["args"].as_a.map(&.as_s).should eq(["mcp", "--read-only", "--tools=@recon"])
         ensure
           old_home ? (ENV["HOME"] = old_home) : ENV.delete("HOME")
           old_hermes ? (ENV["HERMES_HOME"] = old_hermes) : ENV.delete("HERMES_HOME")
