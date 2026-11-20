@@ -1980,6 +1980,14 @@ module Gori::Tui
         status(Runner.enter_first_hint(chord, below.title, strip: subtabs_shown?, pane: Runner.gated_pane(below, lands)))
         return
       end
+      # `/` on the bar of a tab with no filter below: the operator meant to search, and the
+      # letters typed next reach Global (`s` lens, `c` stops capture). Say there is nothing to
+      # filter, before those letters land. Help is not asked: its `/` search is the page's own
+      # key handler, not a filter verb this line could see.
+      if @focus == :menu && !@menu_more && chord == Keybind::FILTER_CHORD && @active_tab != :help
+        status(Hotkeys.expand(@session.registry, Runner.no_filter_hint(Runner.filing_origin_label(@active_tab))))
+        return
+      end
       if hint = Runner.unbound_key_hint(chord, read_mode: editor_read_mode?)
         status(Hotkeys.expand(@session.registry, hint))
         return
@@ -3142,6 +3150,12 @@ module Gori::Tui
       key = "‹#{Hotkeys.display_label(chord)}›"
       return "#{key} — READ mode: #{EditorPane::INSERT_KEYS} to type · space menu" if read_mode
       "#{key} — nothing bound here · space menu · {help.hotkeys} help"
+    end
+
+    # The tab-bar `/` on a tab whose pane below has no filter. `here`: a sibling sub-tab may
+    # have one (Project's ACTIVITY does), so the line speaks for the sub-tab on screen.
+    def self.no_filter_hint(tab : String) : String
+      "‹/› — #{tab} has no filter here · {app.palette} searches actions"
     end
 
     # …and the same line for a key that IS bound — one level down. On the tab bar `/` answered
