@@ -5,6 +5,7 @@ require "digest/sha1"
 require "digest/sha256"
 require "compress/zlib"
 require "./raw_json"
+require "./secret_crack"
 require "./cookie/flask"
 require "./cookie/rack"
 require "./cookie/django"
@@ -127,11 +128,11 @@ module Gori
     # cookie is parsed once; each candidate is a cheap HMAC + constant-time compare.
     # `salt` / `algorithm` follow `verify` — the crack must sign under the SAME knobs.
     def crack(cookie : String, secrets, format : String? = nil, *,
-              salt : String? = nil, algorithm : String = Django::DEFAULT_ALGO) : String?
+              salt : String? = nil, algorithm : String = Django::DEFAULT_ALGO, stop : Proc(Bool)? = nil) : String?
       case resolve(cookie, format)
-      when "flask" then Flask.crack(cookie, secrets, salt: salt || Flask::SALT)
-      when "rack"  then Rack.crack(cookie, secrets)
-      else              Django.crack(cookie, secrets, salt: salt || Django::DEFAULT_SALT, algorithm: algorithm)
+      when "flask" then Flask.crack(cookie, secrets, salt: salt || Flask::SALT, stop: stop)
+      when "rack"  then Rack.crack(cookie, secrets, stop: stop)
+      else              Django.crack(cookie, secrets, salt: salt || Django::DEFAULT_SALT, algorithm: algorithm, stop: stop)
       end
     end
 
@@ -242,15 +243,10 @@ module Gori
     end
 
     # First of `secrets` whose signature (the block) matches `signature`, compared in
-    # constant time; nil when none does. Yields every 4Ki candidates: the TUI cracks on its render
-    # fiber, and a rockyou-sized list otherwise froze every proxied request for tens of seconds.
-    def first_signing(secrets, signature : String, & : String -> String) : String?
-      n = 0
-      secrets.each do |s|
-        Fiber.yield if (n += 1) % 4096 == 0
-        return s if Crypto::Subtle.constant_time_compare(yield(s), signature)
-      end
-      nil
+    # constant time; nil when none does. The shared loop yields every 4Ki candidates or 10 ms
+    # so long lists and large signing inputs cannot hold up the proxy or the UI.
+    def first_signing(secrets, signature : String, stop : Proc(Bool)? = nil, & : String -> String) : String?
+      SecretCrack.search(secrets, signature, stop) { |secret| yield secret }.secret
     end
 
     BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"

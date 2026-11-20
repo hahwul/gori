@@ -48,7 +48,7 @@ module Gori
         if why = wordlist.try { |w| wordlist_stream_refusal(w) }
           return Result.new(why, is_error: true)
         end
-        found = cookie_crack_search(c, inline, wordlist, h)
+        found = cookie_crack(c, SecretCrack::Candidates.new(inline, wordlist), h)
         Result.new(JSON.build do |j|
           j.object do
             j.field "found", !found.nil?
@@ -60,13 +60,6 @@ module Gori
         Result.new(ex.message || "not a decodable cookie", is_error: true)
       rescue ex : Gori::Error # a missing/unreadable wordlist from Fuzz::WordlistFile
         Result.new(ex.message || "wordlist error", is_error: true)
-      end
-
-      # Try the inline candidates first (cheap, ordered), then stream the wordlist file.
-      private def cookie_crack_search(c : String, inline : Array(String), wordlist : String?, h) : String?
-        found = inline.empty? ? nil : cookie_crack(c, Fuzz::InlineList.new(inline), h)
-        found ||= cookie_crack(c, Fuzz::WordlistFile.new(wordlist), h) if found.nil? && wordlist
-        found
       end
 
       @[Tool("cookie_forge", unbound: true)]
@@ -170,11 +163,11 @@ module Gori
 
       private def cookie_crack(cookie : String, secrets, h) : String?
         case cookie_resolved_format(cookie, h)
-        when "flask" then Cookie::Flask.crack(cookie, secrets, salt: str(h, "salt") || Cookie::Flask::SALT)
-        when "rack"  then Cookie::Rack.crack(cookie, secrets)
+        when "flask" then Cookie::Flask.crack(cookie, secrets, salt: str(h, "salt") || Cookie::Flask::SALT, stop: cancel_signal)
+        when "rack"  then Cookie::Rack.crack(cookie, secrets, stop: cancel_signal)
         when "django" then Cookie::Django.crack(cookie, secrets,
           salt: str(h, "salt") || Cookie::Django::DEFAULT_SALT,
-          algorithm: django_algorithm_for(cookie, h))
+          algorithm: django_algorithm_for(cookie, h), stop: cancel_signal)
         else raise Cookie::CookieError.new("unrecognized cookie format")
         end
       end

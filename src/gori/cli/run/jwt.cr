@@ -7,13 +7,15 @@ module Gori
       # MCP jwt_* tools (all three drive the pure Gori::Jwt engine).
 
       @[Subcommand("jwt", help: [
-        {"jwt [<token>]", "Decode, verify, re-sign, or generate testing payloads for a JWT"},
+        {"jwt [<token>]", "Decode, verify, crack, re-sign, or generate testing payloads for a JWT"},
       ])]
       private def self.cmd_jwt(args : Array(String)) : Nil
         action = :decode
         alg = "HS256"
         alg_given = false
         secret = nil.as(String?) # nil = not passed; "" = the empty HMAC secret, deliberately
+        secrets = [] of String
+        wordlist = nil.as(String?)
         key = ""
         format = :text
         payload_override = nil.as(String?)
@@ -22,7 +24,7 @@ module Gori
         header_sets = [] of String
         positional = parse_args(args, "gori run jwt") do |p|
           p.banner = "Usage: gori run jwt [<token>] [options]\n\n" \
-                     "Decode, verify, re-sign, or generate testing payloads for a JWT (JWS) —\n" \
+                     "Decode, verify, crack, re-sign, or generate testing payloads for a JWT (JWS) —\n" \
                      "or read the protected header of an encrypted one (JWE). The token is read\n" \
                      "from the <token> argument, or from STDIN when none is given."
           p.on("--decode", "Decode header / payload / signature (default)") { action = :decode }
@@ -30,6 +32,9 @@ module Gori
                            "(no token needed with --header AND --payload; with only one, the other half " \
                            "is read from the <token> arg or STDIN — pass \"\" or </dev/null for {})") { action = :encode }
           p.on("--verify", "Check the token's own signature against --secret / --key; exits 1 unless it verifies") { action = :verify }
+          p.on("--crack", "Find an HMAC secret over --secrets / --wordlist (HS256/384/512)") { action = :crack }
+          p.on("--secrets=LIST", "Comma-separated candidate secrets (for --crack)") { |v| secrets = v.split(',') }
+          p.on("--wordlist=PATH", "Wordlist file or saved list NAME (for --crack)") { |v| wordlist = v }
           p.on("--attacks", "Generate testing payloads (alg:none, weak-secret, header injection)") { action = :attacks }
           p.on("--alg=ALG", "Signing alg for --encode: HS256 (default) | HS384 | HS512 | " \
                             "RS/PS/ES with 256/384/512 | EdDSA | none") { |v| alg = v; alg_given = true }
@@ -44,6 +49,9 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
 
+        if refusal = jwt_crack_refusal(action, secrets, wordlist, secret, key)
+          abort "gori run jwt: #{refusal}"
+        end
         jwt_refuse_conflicts(action, payload_override, sets, secret, key)
         jwt_refuse_header_conflicts(action, header_override, header_sets)
         # `--verify` checks the token's OWN alg, so a pinned `--alg RS256` read as an
@@ -55,6 +63,10 @@ module Gori
         end
         token, minting = jwt_token_and_minting(action, positional, header_override, payload_override)
         abort "gori run jwt: no token — pass it as an argument or pipe it on STDIN" if token.empty? && !minting
+        if action == :crack
+          emit_jwt_crack(token, secrets, wordlist, format)
+          return
+        end
         jwt_dispatch(action, token, alg, secret, key, payload_override, sets, header_override, header_sets, format)
       end
 
@@ -247,6 +259,39 @@ module Gori
         end
       rescue ex : Jwt::ForgeError
         abort "gori run jwt: #{ex.message}"
+      end
+
+      # Validate before reading the token so a refused call cannot consume STDIN.
+      def self.jwt_crack_refusal(action : Symbol, secrets : Array(String), wordlist : String?,
+                                 secret : String?, key : String) : String?
+        if action != :crack
+          return "--secrets / --wordlist apply to --crack only" if !secrets.empty? || wordlist
+          return nil
+        end
+        return "--crack needs --secrets and/or --wordlist" if secrets.empty? && wordlist.nil?
+        return "--crack takes --secrets / --wordlist, not --secret / --key" if secret || !key.empty?
+        nil
+      end
+
+      private def self.emit_jwt_crack(token : String, secrets : Array(String), wordlist : String?, format : Symbol) : Nil
+        result = Jwt.crack(token, SecretCrack::Candidates.new(secrets, wordlist))
+        if format == :json
+          puts result.to_json
+        else
+          puts jwt_crack_line(result)
+        end
+        exit jwt_crack_status(result)
+      rescue ex : Gori::Error
+        abort "gori run jwt: #{CLI::Output.term_safe(ex.message || "crack failed")}"
+      end
+
+      def self.jwt_crack_status(result : SecretCrack::Result) : Int32
+        result.secret.nil? ? 1 : 0
+      end
+
+      def self.jwt_crack_line(result : SecretCrack::Result) : String
+        verdict = (secret = result.secret) ? "found: #{secret.inspect}" : "not found"
+        "#{CLI::Output.term_safe(verdict)} (#{result.tried} tried)"
       end
 
       private def self.emit_jwt_attacks(token : String, public_key : String?, format : Symbol) : Nil

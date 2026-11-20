@@ -228,3 +228,35 @@ describe "gori run jwt" do
     lines[1].strip.should eq(a.token)
   end
 end
+
+describe "gori run jwt --crack output" do
+  it "serializes only found, the matching secret, and tried" do
+    JSON.parse(Gori::SecretCrack::Result.new("", 2).to_json).as_h.should eq(
+      JSON.parse(%({"found":true,"secret":"","tried":2})).as_h)
+    JSON.parse(Gori::SecretCrack::Result.new(nil, 7).to_json).as_h.should eq(
+      JSON.parse(%({"found":false,"tried":7})).as_h)
+  end
+
+  it "names empty hits, counts misses, and keeps control bytes out of the terminal" do
+    Gori::CLI::Run.jwt_crack_line(Gori::SecretCrack::Result.new("", 2)).should eq(%(found: "" (2 tried)))
+    Gori::CLI::Run.jwt_crack_line(Gori::SecretCrack::Result.new(nil, 7)).should eq("not found (7 tried)")
+    Gori::CLI::Run.jwt_crack_line(Gori::SecretCrack::Result.new("\e[2J", 1)).should_not contain('\e')
+  end
+end
+
+describe "gori run jwt --crack options" do
+  it "requires candidates and refuses ignored key or candidate flags before reading stdin" do
+    Gori::CLI::Run.jwt_crack_refusal(:crack, [] of String, nil, nil, "").not_nil!.should contain("needs --secrets")
+    Gori::CLI::Run.jwt_crack_refusal(:decode, ["x"], nil, nil, "").not_nil!.should contain("--crack only")
+    Gori::CLI::Run.jwt_crack_refusal(:verify, [] of String, "file", nil, "").not_nil!.should contain("--crack only")
+    Gori::CLI::Run.jwt_crack_refusal(:crack, ["x"], nil, "", "").not_nil!.should contain("not --secret")
+    Gori::CLI::Run.jwt_crack_refusal(:crack, ["x"], nil, nil, "key.pem").not_nil!.should contain("not --secret")
+    Gori::CLI::Run.jwt_crack_refusal(:crack, [""], nil, nil, "").should be_nil
+    Gori::CLI::Run.jwt_crack_refusal(:crack, [] of String, "saved-list", nil, "").should be_nil
+  end
+
+  it "exits 0 only on a hit, including the empty secret" do
+    Gori::CLI::Run.jwt_crack_status(Gori::SecretCrack::Result.new("", 2)).should eq(0)
+    Gori::CLI::Run.jwt_crack_status(Gori::SecretCrack::Result.new(nil, 2)).should eq(1)
+  end
+end

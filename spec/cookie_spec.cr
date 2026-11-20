@@ -291,6 +291,13 @@ describe Gori::Cookie do
       Gori::Cookie.crack(RACK, list).should eq(SECRET)
     end
 
+    it "passes cancellation through every format before trying a matching secret" do
+      [FLASK, DJANGO, RACK].each do |cookie|
+        Gori::Cookie.crack(cookie, [SECRET], stop: -> { true }).should be_nil
+        Gori::Cookie.crack(cookie, [SECRET]).should eq(SECRET)
+      end
+    end
+
     it "returns nil when no candidate matches" do
       Gori::Cookie.crack(FLASK, ["a", "b", "c"]).should be_nil
     end

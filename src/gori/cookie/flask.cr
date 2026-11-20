@@ -68,10 +68,10 @@ module Gori
         Crypto::Subtle.constant_time_compare(compute_sig(signing_input(p), secret, salt), p.signature)
       end
 
-      def crack(cookie : String, secrets, salt : String = SALT) : String?
+      def crack(cookie : String, secrets, salt : String = SALT, *, stop : Proc(Bool)? = nil) : String?
         p = parse(cookie)
         input = signing_input(p)
-        Cookie.first_signing(secrets, p.signature) { |s| compute_sig(input, s, salt) }
+        Cookie.first_signing(secrets, p.signature, stop) { |s| compute_sig(input, s, salt) }
       end
 
       # Mint a fresh cookie from a JSON payload + secret. The payload is emitted UNcompressed

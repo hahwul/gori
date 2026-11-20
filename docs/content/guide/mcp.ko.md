@@ -94,8 +94,8 @@ gori mcp --read-only
 
 | 시작 방법 | 도구 | `tools/list` | 토큰 | 용도 |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 201 | ~202 KB | ~52k | 전부 (직접 실행할 때의 기본값) |
-| `--read-only` | 65 | ~57 KB | ~15k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
+| `gori mcp` | 202 | ~202 KB | ~52k | 전부 (직접 실행할 때의 기본값) |
+| `--read-only` | 66 | ~57 KB | ~15k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
 | `--tools=@analysis` | 5 | ~8 KB | ~2k | 시작할 때 바인딩한 캡처 분석; 프로젝트 전환·TUI 메시지 없음 |
 | `--tools=@recon` | 39 | ~41 KB | ~11k | 캡처를 읽고 파악, 패시브 스캔, 요청 재전송, 이슈·노트 기록 (`--install-*`의 기본값) |
 | `--tools=@recon --read-only` | 29 | ~34 KB | ~9k | `--read-only`가 끄는 도구를 뺀 `@recon` |
@@ -233,6 +233,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `list_oast_sessions` | 프로젝트에 저장된 OAST 리스닝 세션. 페이로드 호스트, hit 수, 마지막 폴링 시각. `oast_resume`이 다시 살리는 행 |
 | `decode` | `input`에 대해 인코드/디코드/해시/압축 체인을 실행(순수 변환; 네트워크나 상태 없음). `base64`처럼 방향 없는 이름은 여기서 디코드 |
 | `jwt_decode` / `jwt_verify` / `jwt_encode` / `jwt_attacks` | JWT 디코드(JWS 또는 암호화된 JWE의 보호 헤더), 보유한 키로 서명 검증, HMAC이나 PEM 키로 재서명, 공격 페이로드 생성(순수 계산; `--read-only`에서도 사용 가능) |
+| `jwt_crack` | HS256/HS384/HS512 비밀키를 오프라인으로 검색. `token`, `secrets` 배열과/또는 `wordlist` 파일 경로나 저장된 이름을 받으며 인라인 후보부터 시도합니다. `{found, secret?, tried}` 반환. 취소 시 후보 사이에서 멈추고 다음 호출을 처리하며, 취소된 요청에는 응답하지 않습니다. unsigned/비대칭/JWE 토큰 거절. `--read-only`에서 사용 가능하며 `@recon`에는 미포함 |
 | `cookie_decode` / `cookie_verify` / `cookie_crack` / `cookie_forge` | [Cookie 워크벤치](/ko/guide/cookie/)를 순수 오프라인 연산으로: Flask / Rack / Django 서명 세션 쿠키 파싱, 후보 시크릿으로 검증, 워드리스트로 시크릿 브루트포스, 편집한 페이로드 재서명. 네트워크를 쓰지 않으므로 네 개 모두 `--read-only`에서도 쓸 수 있습니다 |
 | `sequence_analyze` | 붙여넣은 토큰 목록의 무작위성 / 예측 가능성 평가(순수) |
 | `oast_presets` / `oast_payload` / `oast_poll` | OAST 프로바이더 나열, 세션(`session_id`)의 새 페이로드 URL 발급, 실행 중인 리스너의 콜백 폴링. 한 번의 폴링은 응답 예산에 들어가는 만큼 돌려주고 각 `raw_request`·`raw_response`는 64 KB에서 자르며(`*_truncated`), `has_more`는 이미 더 기다리고 있다는 뜻입니다. 재개한 세션은 모든 콜백을 온전히 저장합니다 |
