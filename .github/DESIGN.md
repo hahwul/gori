@@ -6019,7 +6019,6 @@ names the cap and says to raise it and reopen. The cap is read only at open.
 Not done: a confirmation before opening, or any change to what retention keeps. The cap is the operator's own
 setting, and a dialog would put a question in front of every open of a large project.
 
-
 ### 2026-11-20: race, timing and minimize take `background:true` (#1944)
 
 Refines: "Tools run one at a time". `race_requests`, `timing_requests` and `minimize_repeater` are one call
@@ -6060,6 +6059,7 @@ at all, so matching a callback to the send that caused it took timezone arithmet
 and is served only from what the widest DESTINATION does not need: it is the first cell to go on a narrow pane,
 and an 80-column pane keeps the destination width it had. Evidence keeps RFC 3339 (the issue notes'
 `received:` line), and History's relative-time preference does not apply here.
+
 ### 2026-11-20: under `--json`, a bare `notes <n>` that is also another note's id is refused (#1944)
 
 `gori run notes <n>` and `notes update|append|delete <n>` read `<n>` as a 1-based list position, the number the listing and
@@ -6083,6 +6083,7 @@ sentence `gori run capture` prints, with "as flows are added" for "as capture ru
 (one flow, even `--record-history`, even in a loop of processes), `notes create`, or a read that opens writable
 (`history --view`, a `body:` query) says nothing: it would warn of a deletion that never comes in that process.
 A read-only open passes no cap and says nothing.
+
 ### 2026-11-20: cache-deception refuses missing flow ids before replay
 
 Refines 2026-11-14 ("`NOT_FOUND` under `--json`"). A missing id is a bad selection, not an empty
