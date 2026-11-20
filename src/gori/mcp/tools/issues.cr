@@ -8,6 +8,8 @@ module Gori
     class Tools
       ISSUES_LIMIT  = PageLimit.new(100, 500)
       ISSUE_FORMATS = %w[json markdown sarif]
+      # 500 issues × two (2 KiB + 1) reads stays below the 2 MiB body-read budget.
+      REPORT_EVIDENCE_CAP = 2 * 1024
 
       # Characters of an issue's `notes` a list_issues row carries; get_issue has the rest.
       ISSUE_NOTES_PREVIEW = 200
@@ -54,26 +56,51 @@ module Gori
         include_sensitive = bool_arg(h, "include_sensitive", false)
         matcher = include_sensitive ? nil : Redact::Policy.ambient(store)
         name = @project_name || "project"
-        # A report must not hydrate hundreds of multi-MiB captures just to emit 64 KiB.
-        remaining = 2 * 1024 * 1024
-        source_cut = false
+        # Cache projections across the bounded binary search; never re-read/inflate a flow.
+        flows = {} of Int64 => Store::FlowDetail?
         loader = ->(id : Int64) do
-          cap = {Serialize::MAX_TEXT, remaining // 2}.min
-          flow, used, cut = report_flow(id, cap, include_sensitive, matcher)
-          remaining -= used
-          source_cut ||= cut
-          flow
+          flows.fetch(id) do
+            flows[id] = report_flow(id, REPORT_EVIDENCE_CAP, include_sensitive, matcher)
+          end
         end
-        document = if format == "sarif"
-                     Issues::Export.sarif(page, store, name, include_sensitive, flow_loader: loader)
-                   else
-                     Issues::Export.markdown(page, store, name, flow_loader: loader)
-                   end
+        render = ->(count : Int32) do
+          selected = page.first(count)
+          if format == "sarif"
+            Issues::Export.sarif(selected, store, name, include_sensitive, flow_loader: loader)
+          else
+            Issues::Export.markdown(selected, store, name, flow_loader: loader)
+          end
+        end
+        returned = page.size
+        document = render.call(returned)
+        if document.bytesize > Serialize::MAX_TEXT
+          return err("report header exceeds the 64 KiB report cap", "QUOTA_EXCEEDED") if page.empty?
+          low, high = 0, page.size
+          while low < high
+            candidate = (low + high + 1) // 2
+            trial = render.call(candidate)
+            if trial.bytesize <= Serialize::MAX_TEXT
+              low = candidate
+              document = trial
+            else
+              high = candidate - 1
+            end
+          end
+          # Unbounded notes, heads or related metadata can exceed the cap even without bodies.
+          return err("issue #{page.first.id} alone exceeds the 64 KiB report cap; read it with get_issue", "QUOTA_EXCEEDED") if low == 0
+          returned = low
+        end
+        included = page.first(returned)
+        evidence_cut = included.any? do |issue|
+          flow = issue.flow_id.try { |id| flows[id]? }
+          flow.try { |f| f.request_body_truncated? || f.response_body_truncated? }
+        end
         Result.new(JSON.build do |j|
           j.object do
             j.field "format", format
-            emit_export_document(j, document, source_cut || page.size < total)
-            emit_page(j, pg, page.size, total)
+            j.field "document", document
+            j.field "evidence_truncated", evidence_cut
+            emit_page(j, pg, returned, total, cut: returned < page.size)
             j.field "sensitive_headers_redacted", true unless include_sensitive
             j.field "redaction_profile", matcher.profile.name if matcher
           end
@@ -82,16 +109,15 @@ module Gori
 
       private def report_flow(id : Int64, cap : Int32, include_sensitive : Bool, matcher : Redact::Matcher?)
         flow = store.get_flow(id, body_max: cap + 1)
-        return {nil, 0, false} unless flow
+        return nil unless flow
         req_head, req, req_cut = report_message(flow.request_head, flow.request_body, cap, flow.request_body_truncated?, matcher)
         res_head, res, res_cut = report_message(flow.response_head, flow.response_body, cap, flow.response_body_truncated?, matcher)
         # Project heads BEFORE parsing: a malformed credential line must not reappear as
         # a folded public value or a response reason phrase.
-        clean = Store::FlowDetail.new(flow.row, flow.http_version,
+        Store::FlowDetail.new(flow.row, flow.http_version,
           Serialize.redact_head(String.new(req_head || Bytes.empty), include_sensitive).to_slice, req,
           Serialize.redact_head_bytes(res_head, include_sensitive), res,
           flow.h2_conn_id, flow.h2_stream_id, req_cut, res_cut, flow.error, flow.sni)
-        {clean, (req.try(&.size) || 0) + (res.try(&.size) || 0), req_cut || res_cut}
       end
 
       private def report_message(head : Bytes?, body : Bytes?, cap : Int32, capture_cut : Bool,
@@ -103,7 +129,7 @@ module Gori
         # A partial JSON document cannot honor JSON Pointers. Withhold it under a profile,
         # and never feed compressed prefixes back to an exporter for unbounded inflation.
         return {head, nil, true} if (cut && matcher) || Proxy::Codec::ContentDecode.decode_failed?(note)
-        entity = entity[0, cap] if entity.size > cap
+        entity = Issues::Export.trim_to_codepoint_boundary(entity[0, cap]) if entity.size > cap
         head, entity = redact_report_message(head, entity, matcher, !decoded.nil?)
         return {head, nil, true} if entity.size > cap
         {head, entity, cut}
@@ -293,7 +319,7 @@ module Gori
           s.field "lenient", boolprop("free-text an unknown `field:` instead of refusing")
           s.field "limit", limitprop("max rows", ISSUES_LIMIT)
           s.field "offset", intprop("start row (default 0)")
-          s.field "format", enumprop("default json; reports return this page as {document, truncated} (64 KiB prefix)", ISSUE_FORMATS)
+          s.field "format", enumprop("default json; reports fit whole issues in 64 KiB; follow next_offset; evidence_truncated marks body cuts", ISSUE_FORMATS)
           s.field "include_sensitive", boolprop("report formats: unredact credential headers and bodies")
         end
 

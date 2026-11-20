@@ -2,7 +2,8 @@ require "../../spec_helper"
 require "compress/gzip"
 
 private def export_flow(store, *, body = "name=hello", content_type = "application/x-www-form-urlencoded",
-                        truncated = false, socket = false, extra_headers = "", response_head : String? = nil) : Int64
+                        truncated = false, socket = false, extra_headers = "", response_head : String? = nil,
+                        response_body = %({"token":"response-body-secret"})) : Int64
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "https", host: "export.test", port: 443,
     method: "POST", target: "/submit", http_version: "HTTP/1.1",
@@ -11,7 +12,7 @@ private def export_flow(store, *, body = "name=hello", content_type = "applicati
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: socket ? 101 : 200,
     head: (response_head || "HTTP/1.1 200 OK\r\nSet-Cookie: sid=response-secret; HttpOnly\r\nContent-Type: application/json\r\n\r\n").to_slice,
-    body: %({"token":"response-body-secret"}).to_slice))
+    body: response_body.to_slice))
   id
 end
 
@@ -81,21 +82,22 @@ describe "MCP report and request-code formats" do
         payload = exported(tools, "list_issues", %({"format":"#{format}"}))
         payload["document"].as_s.bytesize.should be < Gori::MCP::Serialize::MAX_TEXT
         payload["document"].as_s.should contain("Binary evidence")
-        payload["truncated"].should be_true
+        payload["evidence_truncated"].should be_true
       end
     end
   end
 
-  it "also bounds the total body prefixes retained across a report page" do
+  it "bounds body reads across a maximum-sized candidate report page" do
     with_store do |store|
-      40.times do |n|
+      500.times do |n|
         id = export_flow(store, body: "\xff" * 60_000)
         store.insert_issue("Finding #{n}", Gori::Store::Severity::High, "export.test", id)
       end
-      payload = exported(tools_for(store, allow_actions: false), "list_issues", %({"format":"markdown"}))
-      payload["returned"].should eq(40)
+      payload = exported(tools_for(store, allow_actions: false), "list_issues", %({"format":"markdown","limit":500}))
+      payload["returned"].as_i.should be > 0
+      payload["returned"].as_i.should be < 500
       payload["document"].as_s.bytesize.should be < Gori::MCP::Serialize::MAX_TEXT
-      payload["truncated"].should be_true
+      payload["evidence_truncated"].should be_true
     end
   end
 
@@ -116,11 +118,11 @@ describe "MCP report and request-code formats" do
       %w[markdown sarif].each do |format|
         payload = exported(tools, "list_issues", %({"format":"#{format}"}))
         payload.to_json.should_not contain("pointer-secret")
-        payload["truncated"].should be_true
+        payload["evidence_truncated"].should be_true
         payload["document"].as_s.bytesize.should be < Gori::MCP::Serialize::MAX_TEXT
         # Opting out of the profile still leaves decoding bounded.
         raw = exported(tools, "list_issues", %({"format":"#{format}","include_sensitive":true}))
-        raw["truncated"].should be_true
+        raw["evidence_truncated"].should be_true
       end
     end
   end
@@ -135,7 +137,7 @@ describe "MCP report and request-code formats" do
       %w[markdown sarif].each do |format|
         payload = exported(tools, "list_issues", %({"format":"#{format}","query":"sev:high"}))
         {payload["total"].as_i, payload["returned"].as_i}.should eq({1, 1})
-        payload["truncated"].should be_false
+        payload["truncated"]?.should be_nil
         payload["document"].as_s.should contain("Selected finding")
         payload["document"].as_s.should_not contain("Excluded finding")
         %w[header-secret folded-secret cookie-secret api-secret response-secret].each do |secret|
@@ -152,7 +154,7 @@ describe "MCP report and request-code formats" do
         empty = exported(tools, "list_issues", %({"format":"#{format}","query":"host:absent.test"}))
         empty["total"].should eq(0)
         empty["document"].as_s.should_not be_empty
-        empty["truncated"].should be_false
+        empty["truncated"]?.should be_nil
       end
       exported(tools, "list_issues", "{}")["issues"].as_a.size.should eq(2)
     end
@@ -178,27 +180,109 @@ describe "MCP report and request-code formats" do
     end
   end
 
-  it "cuts oversized documents on UTF-8 boundaries, and flags report pages and captured prefixes" do
+  it "cuts oversized code on UTF-8 boundaries and flags captured prefixes" do
     with_store do |store|
       id = export_flow(store, body: "값" * 40_000)
-      store.insert_issue("Large finding", Gori::Store::Severity::High, "export.test", id, notes: "값" * 40_000)
-      store.insert_issue("Next finding", Gori::Store::Severity::Info, "export.test", nil)
       tools = tools_for(store, allow_actions: false)
-      %w[curl python fetch go httpie csrf markdown sarif].each do |format|
-        args = format.in?("markdown", "sarif") ? %({"format":"#{format}"}) : %({"id":#{id},"format":"#{format}"})
-        payload = exported(tools, format.in?("markdown", "sarif") ? "list_issues" : "get_flow", args)
+      %w[curl python fetch go httpie csrf].each do |format|
+        payload = exported(tools, "get_flow", %({"id":#{id},"format":"#{format}"}))
         payload["truncated"].should be_true
         doc = payload["document"].as_s
         doc.bytesize.should be <= Gori::MCP::Serialize::MAX_TEXT
         doc.valid_encoding?.should be_true
         doc.should_not be_empty
       end
-      page = exported(tools, "list_issues", %({"format":"markdown","limit":1}))
-      page["has_more"].should be_true
-      page["next_offset"].should eq(1)
-      page["truncated"].should be_true
       cut_id = export_flow(store, truncated: true)
       exported(tools, "get_flow", %({"id":#{cut_id},"format":"curl"}))["truncated"].should be_true
+    end
+  end
+
+  it "fits whole report issues and walks byte-limited pages exactly once" do
+    with_store do |store|
+      ids = Array.new(40) do |n|
+        flow = export_flow(store, body: "값" * 40_000)
+        store.insert_issue("Large finding #{n}", Gori::Store::Severity::High, "export.test", flow)
+      end
+      tools = tools_for(store, allow_actions: false)
+      %w[markdown sarif].each do |format|
+        offset = 0
+        visited = [] of Int64
+        loop do
+          payload = exported(tools, "list_issues", %({"format":"#{format}","offset":#{offset}}))
+          doc = payload["document"].as_s
+          doc.bytesize.should be <= Gori::MCP::Serialize::MAX_TEXT
+          doc.valid_encoding?.should be_true
+          payload["truncated"]?.should be_nil
+          payload["evidence_truncated"].should be_true
+          doc.should contain("body truncated")
+          returned = payload["returned"].as_i
+          returned.should be > 0
+          actual = if format == "sarif"
+                     JSON.parse(doc)["runs"][0]["results"].as_a.map(&.["properties"].["gori/issueId"].as_i64)
+                   else
+                     doc.scan(/## \[high\] Large finding (\d+)/).map { |m| ids[m[1].to_i] }
+                   end
+          actual.size.should eq(returned)
+          visited.concat(actual)
+          break unless payload["has_more"].as_bool
+          payload["cut_by"].should eq("bytes")
+          payload["next_offset"].should eq(offset + returned)
+          offset = payload["next_offset"].as_i
+        end
+        visited.should eq(store.issues.map(&.id))
+        visited.uniq.size.should eq(ids.size)
+      end
+    end
+  end
+
+  it "keeps a single large exchange well-formed and distinguishes evidence cuts from more pages" do
+    with_store do |store|
+      id = export_flow(store, body: "x" * 200_000, response_body: "\"\\\n" * 100_000)
+      issue = store.insert_issue("Large body", Gori::Store::Severity::High, "export.test", id)
+      store.insert_issue("Next finding", Gori::Store::Severity::Info, "export.test", nil)
+      tools = tools_for(store, allow_actions: false)
+      %w[markdown sarif].each do |format|
+        page = exported(tools, "list_issues", %({"format":"#{format}","limit":1}))
+        page["returned"].should eq(1)
+        page["has_more"].should be_true
+        page["next_offset"].should eq(1)
+        page["truncated"]?.should be_nil
+        page["evidence_truncated"].should be_true
+        page["document"].as_s.should contain("body truncated")
+        if format == "sarif"
+          results = JSON.parse(page["document"].as_s)["runs"][0]["results"].as_a
+          results.size.should eq(1)
+          results[0]["properties"]["gori/issueId"].should eq(issue)
+        end
+        next_page = exported(tools, "list_issues", %({"format":"#{format}","offset":1}))
+        next_page["evidence_truncated"].should be_false
+        next_page["truncated"]?.should be_nil
+      end
+    end
+  end
+
+  it "does not flag cuts belonging only to issues beyond the fitted page" do
+    with_store do |store|
+      id = export_flow(store, body: "x" * 100_000)
+      store.insert_issue("First", Gori::Store::Severity::High, nil, nil, notes: "a" * 20_000)
+      store.insert_issue("Second", Gori::Store::Severity::Info, nil, id, notes: "b" * 40_000)
+      payload = exported(tools_for(store), "list_issues", %({"format":"sarif"}))
+      payload["returned"].should eq(1)
+      payload["has_more"].should be_true
+      payload["evidence_truncated"].should be_false
+      payload["truncated"]?.should be_nil
+      JSON.parse(payload["document"].as_s)["runs"][0]["results"].as_a.size.should eq(1)
+    end
+  end
+
+  it "refuses a single issue whose metadata alone exceeds the report cap" do
+    with_store do |store|
+      store.insert_issue("Huge notes", Gori::Store::Severity::High, nil, nil, notes: "값" * 40_000)
+      %w[markdown sarif].each do |format|
+        result = tools_for(store).call("list_issues", JSON.parse(%({"format":"#{format}"})))
+        result.is_error.should be_true
+        result.text.should contain("64 KiB")
+      end
     end
   end
 
