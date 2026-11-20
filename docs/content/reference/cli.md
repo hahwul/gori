@@ -974,7 +974,7 @@ Connections are reused per origin by default, so a brute-force pass pays one TCP
 
 ### run wordlist
 
-The global wordlist catalog: named lists under `$GORI_HOME/wordlists` (`~/.gori/wordlists`), each a plain file. A name is accepted anywhere a wordlist path is (`fuzz -w`, `mine --wordlist`, `discover --wordlist`, `cookie --crack --wordlist`) from any working directory. A value with a `/` is a path and is read as given. A bare name is looked up in the current directory first, then in the catalog. Nothing here needs a project, and nothing sends a request. See the [guide](/guide/repeater-and-fuzzer/#wordlist-catalog) for the model.
+The global wordlist catalog: named lists under `$GORI_HOME/wordlists` (`~/.gori/wordlists`), each a plain file. A name is accepted anywhere a wordlist path is (`fuzz -w`, `mine --wordlist`, `discover --wordlist`, `cookie --crack --wordlist`, `jwt --crack --wordlist`) from any working directory. A value with a `/` is a path and is read as given. A bare name is looked up in the current directory first, then in the catalog. Nothing here needs a project, and nothing sends a request. See the [guide](/guide/repeater-and-fuzzer/#wordlist-catalog) for the model.
 
 ```bash
 gori run sitemap params --host api.example.com --format names | gori run wordlist save api-params.txt
@@ -1194,6 +1194,9 @@ gori run jwt eyJhbGci... --attacks --key ./public.pem
 | `--decode` | Decode header / payload / signature (default) |
 | `--encode` | Re-sign the token's claims with `--alg` and `--secret` / `--key`. With both `--header` and `--payload` no token is read, and with only one the other half is still taken from the `<token>` argument or STDIN (pass `""` or `</dev/null` to start it from `{}`) |
 | `--verify` | Check the token's signature against `--secret` / `--key` (one is required; `--secret ''` checks the empty secret). Prints `verified: yes\|no` and a `reason`, and exits 1 unless it verifies. `--format json` adds a `code` (`signature_mismatch`, `unsigned`, `alg_unsupported`, …) |
+| `--crack` | Search an HS256/HS384/HS512 token's secret offline; exits 0 on a hit, 1 on a miss or refusal. JSON: `{found, secret?, tried}`; unsigned/asymmetric/JWE tokens are refused |
+| `--secrets=LIST` | `--crack`: comma-separated candidate secrets, tried first |
+| `--wordlist=PATH` | `--crack`: newline-delimited file or saved list name; empty lines and spaces are preserved |
 | `--attacks` | Generate testing payloads (alg:none, weak-secret, header injection) |
 | `--alg=ALG` | Signing alg for `--encode`: `HS256` (default) \| `HS384` \| `HS512` \| `RS256/384/512` \| `PS256/384/512` \| `ES256/384/512` \| `EdDSA` \| `none` |
 | `--secret=SECRET` | HMAC secret, for an HS algorithm |

@@ -46,6 +46,15 @@ gori run jwt eyJhbGci... --verify --key ./public.pem                # verified: 
 
 **체크포인트.** OUTPUT에, 편집한 클레임을 담아 고른 알고리즘과 비밀키로 다시 서명한 토큰이 있습니다.
 
+캡처한 토큰이 HMAC을 쓰고 비밀키를 모른다면 재서명 전에 워드리스트를 시도하세요:
+
+```bash
+gori run jwt "$TOKEN" --crack --wordlist secrets.txt --json
+# 또는: --crack --secrets 'first,second' --wordlist saved-list-name
+```
+
+찾으면 `secret`과 `tried`를 반환하고, 없으면 `found:false`와 시도 횟수를 반환합니다(종료 코드 1). 찾은 비밀키를 2단계에 사용하세요. MCP에서는 `jwt_crack`에 `token`, `wordlist`와/또는 `secrets` 배열을 넘깁니다. 오프라인으로 HS256/HS384/HS512만 지원합니다. 찾은 키가 캡처 토큰을 서명한다는 뜻이며, 서버가 변조 토큰을 받아들이는지는 재전송으로 확인합니다.
+
 ## 3. 공격 프리셋 실행 {#3-run-the-attack-presets}
 
 비밀키를 아는 경우는 드무니, gori가 우회 시도를 생성하게 하세요. Decode 렌즈의 디코드된 부분 아래에 토큰으로 만든 **공격 페이로드** 목록이 있으며, 항목을 선택할 수 있습니다:

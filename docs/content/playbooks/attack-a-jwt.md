@@ -46,6 +46,15 @@ gori run jwt eyJhbGci... --verify --key ./public.pem                # verified: 
 
 **Checkpoint.** OUTPUT holds a token carrying your edited claim, re-signed with the algorithm and secret you chose.
 
+If the captured token uses HMAC and you do not know its secret, try a wordlist before re-signing:
+
+```bash
+gori run jwt "$TOKEN" --crack --wordlist secrets.txt --json
+# Or: --crack --secrets 'first,second' --wordlist saved-list-name
+```
+
+A hit returns `secret` and `tried`; a miss returns `found:false` with the count (exit 1). Use the recovered secret in step 2. Over MCP, call `jwt_crack` with `token` and `wordlist` and/or a `secrets` array. This is offline and supports only HS256/HS384/HS512; a hit proves the key signs the captured token, and replay still checks what the server accepts.
+
 ## 3. Run the attack presets
 
 You rarely know the secret, so let gori generate the bypass attempts. On the Decode lens, below the decoded parts, is a selectable list of **attack payloads** built from the token:
