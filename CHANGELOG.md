@@ -21,7 +21,7 @@
 
 - TUI: an import that duplicates an earlier one, or did not commit every flow, says so on the status row ahead of the path and keeps the warning in Notifications (#1942).
 
-- Repeater: stopping a send reads as stopped instead of a red `Closed stream` error, and a response gori cut short names the cause (its read budget, its 8 MiB capture cap, an idle origin) instead of a bare `(stopped)` or `(incomplete)` (#1942).
+- Repeater: stopping a send reads as stopped instead of a red `Closed stream` error, and a response gori cut short names the cause (its read budget, its 8 MiB capture cap, an idle origin) instead of a bare `(stopped)` or `(incomplete)`. A send still waiting for its response says it is sending, for how long and how to stop it, instead of "not sent yet" (#1942, #1943).
 
 - TUI: the Intercept queue hint calls `/` the catch condition it sets, not a filter; coming back to Decoder lands on INPUT instead of typing into the chain, and the footer under a sub-tab filter being typed shows the filter's keys instead of strip letters that now type. The Issues list marks a resolved issue `res`, not `done` (#1942).
 

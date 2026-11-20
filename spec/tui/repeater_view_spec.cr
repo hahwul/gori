@@ -129,6 +129,50 @@ describe Gori::Tui::RepeaterView do
     end
   end
 
+  # A send in flight with nothing yet to show must not tell the operator to press ^R — the key
+  # they just pressed. It says it is sending, for how long, and (when Stop can end it) how.
+  it "says a send in flight is sending, with elapsed time and the route to Stop" do
+    registry = Gori::Verbs.registry
+    view = RepeaterView.new
+    view.menu_registry = registry
+    view.load_blank
+    view.inflight = true
+    view.live_begin(Gori::Repeater::LiveBody.new)
+    stop = Gori::Hotkeys.route(registry, "repeater.stop").not_nil!
+    backend = MemoryBackend.new(120, 20)
+    view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
+    backend.contains?("not sent yet").should be_false
+    backend.contains?("sending… 0s · #{stop} stops it").should be_true
+
+    # The clock moves on the next frame: the cached pane view must not pin the first second.
+    view.inflight_since = Time.instant - 3.seconds
+    later = MemoryBackend.new(120, 20)
+    view.render(Screen.new(later), Rect.new(0, 0, 120, 20))
+    later.contains?("sending… 3s").should be_true
+
+    # A previous response stays on screen while the next send is in flight.
+    view.inflight = false
+    view.apply(Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, "PONG".to_slice, nil, 1000_i64))
+    view.inflight = true
+    resent = MemoryBackend.new(120, 20)
+    view.render(Screen.new(resent), Rect.new(0, 0, 120, 20))
+    resent.contains?("PONG").should be_true
+    resent.contains?("sending…").should be_false
+  end
+
+  # A send Stop cannot end (no live sink: a group, a race, a WebSocket connect) says it is
+  # sending but names no Stop it does not have.
+  it "names no Stop for an in-flight send that Stop cannot end" do
+    view = RepeaterView.new
+    view.menu_registry = Gori::Verbs.registry
+    view.load_blank
+    view.inflight = true
+    backend = MemoryBackend.new(120, 20)
+    view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
+    backend.contains?("— sending… 0s —").should be_true
+    backend.contains?("stops it").should be_false
+  end
+
   it "mirrors the target host into the Host header on the first edit of a blank tab" do
     view = RepeaterView.new
     view.load_blank

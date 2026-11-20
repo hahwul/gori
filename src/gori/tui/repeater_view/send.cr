@@ -269,8 +269,14 @@ class Gori::Tui::RepeaterView
   end
 
   def inflight=(value : Bool) : Nil
+    @inflight_since = Time.instant if value && !@inflight
     @inflight = value
   end
+
+  # When the send in flight started: the empty RESPONSE pane's clock (`not_sent_hint`), redrawn
+  # by the spinner tick that runs while any send is in flight (P6: no timer of its own). Every
+  # send path goes through `inflight=`, so a group, a race and a WebSocket connect have one too.
+  property inflight_since = Time.instant
 
   # Did the LAST send's wire go out with an unterminated head (#1075)?
   #
