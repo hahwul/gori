@@ -75,6 +75,28 @@ describe "MCP background calls" do
     end
   end
 
+  # The operator's feed says how a background run ended, as it does a synchronous call's
+  # outcome, not only that it started.
+  it "logs a background run's outcome to the event feed when it ends" do
+    origin = start_bg_origin
+    port = origin.local_address.port
+    begin
+      with_store do |store|
+        id = bg_repeater(store, port, "/m?a=1")
+        tools = tools_for(store)
+        job_id = JSON.parse(bg_call(tools, "minimize_repeater",
+          %({"repeater_id":#{id},"allow_unscoped":true,"background":true})).text)["job_id"].as_s
+        bg_finished(tools, job_id)
+        store.flush
+        lines = store.events_after(0_i64, 50).select(&.kind.==("agent_action")).map(&.message)
+        lines.should eq(["minimize_repeater ok: #{job_id} started in the background",
+                         "minimize_repeater ok: #{job_id} done"])
+      end
+    ensure
+      origin.close
+    end
+  end
+
   # The run read the repeater once, at the call. An edit landing while it runs is the stored
   # request now, and apply:true must not put the old target and a request minimized from text
   # that is no longer stored back over it.

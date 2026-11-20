@@ -348,7 +348,8 @@ module Gori
         evict_finished_jobs(@bg_jobs)
         @bg_jobs[id] = job
         spawn(name: "mcp-bg-#{id}") { run_background(job, work) }
-        Result.new({job_id: id, kind: "background", tool: tool, status: "running"}.to_json)
+        Result.new({job_id: id, kind: "background", tool: tool, status: "running"}.to_json,
+          event_note: "#{id} started in the background")
       end
 
       # The run, answered as `call` answers a handler: an exception becomes the same
@@ -364,9 +365,11 @@ module Gori
           Log.warn(exception: ex) { "tool #{job.tool} failed (#{job.id})" }
           err("tool error: #{ex.message}", "INTERNAL")
         end
-        job.result = result
         job.status = result.is_error ? :error : (job.stop_requested? ? :stopped : :done)
+        job.result = result
         job.ended_at_ms = Time.utc.to_unix_ms
+        # `call` logged the start; the outcome is logged here, as `call` logs a synchronous one.
+        log_agent_action(job.tool, result.copy_with(event_note: "#{job.id} #{job.status}#{result.event_note.try { |n| ": #{n}" }}"))
       ensure
         finalize_job(job)
       end
