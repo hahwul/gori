@@ -26,6 +26,25 @@ private def with_flows(n : Int32, &)
   end
 end
 
+# STDERR pointed at a file for the block, as `stdout_captured` does STDOUT.
+private def stderr_captured(&) : String
+  {% if flag?(:win32) %}
+    pending!("STDERR is a handle on Windows, not an fd to dup")
+  {% else %}
+    path = File.tempname("gori-stderr", ".out")
+    STDERR.flush
+    saved = LibC.dup(STDERR.fd)
+    File.open(path, "w") { |f| STDERR.reopen(f) }
+    begin
+      yield
+    ensure
+      STDERR.flush
+      STDERR.reopen(IO::FileDescriptor.new(saved))
+    end
+    File.read(path).tap { File.delete?(path) }
+  {% end %}
+end
+
 private def ids(json : String) : Array(Int64)
   JSON.parse(json).as_a.map(&.["id"].as_i64)
 end
@@ -60,6 +79,24 @@ describe "gori run history --since / --before-id" do
     Gori::CLI::Run.history_cursor_clash(1_i64, nil, Gori::Store::Rank::Slowest, false).not_nil!.should contain("--sort")
     Gori::CLI::Run.history_cursor_clash(nil, 1_i64, nil, true).not_nil!.should contain("--count")
     Gori::CLI::Run.history_cursor_clash(nil, nil, Gori::Store::Rank::Slowest, true).should be_nil
+  end
+
+  it "says how to continue a cut --since HAR, as the other formats do" do
+    with_flows(3) do |db|
+      har = %w[history --since 0 -n 2 --format har --db] << db
+      # Pending flows: nothing is written to the HAR, and the cut is still said.
+      stderr_captured { stdout_silenced { Gori::CLI::Run.dispatch(har) } }
+        .should contain("Pass the last row's id back as --since for the next page.")
+      store = Gori::Store.open(db)
+      (1_i64..3_i64).each do |id|
+        store.update_response(Gori::Store::CapturedResponse.new(flow_id: id, status: 200,
+          head: "HTTP/1.1 200 OK\r\n\r\n".to_slice, body: "ok".to_slice))
+      end
+      store.close
+      err = stderr_captured { stdout_silenced { Gori::CLI::Run.dispatch(har) } }
+      err.should contain("Pass the last row's id back as --since for the next page.")
+      err.downcase.should_not contain("raise -n")
+    end
   end
 
   it "names the cursor in the truncation and empty-listing notes" do

@@ -626,7 +626,7 @@ module Gori
             STDERR.puts "gori run history: --column is not carried by --format har (the values are in each entry's headers/content)" unless column_specs.empty?
             # `emit_har` writes the page oldest first by reversing a newest-first one; a
             # `--since` page already is oldest first.
-            emit_har(store, since_id ? rows.reverse : rows, query, view_label, limit, truncated, redaction, hide_static)
+            emit_har(store, since_id ? rows.reverse : rows, query, view_label, limit, truncated, redaction, hide_static, cursor_flag)
           elsif format.in?(:json, :jsonl)
             # Said on STDERR in the streaming formats too, for the reason the empty note below
             # gives: STDOUT is a pipe, and the consumer reading it cannot see the flags the
@@ -900,7 +900,7 @@ module Gori
       private def self.emit_har(store : Store, rows : Array(Store::FlowRow), query : String?,
                                 view : String?, limit : Int32, truncated : Bool,
                                 redaction : RedactFlags = RedactFlags.new,
-                                hide_static : Bool = false) : Nil
+                                hide_static : Bool = false, cursor : String? = nil) : Nil
         # Resolved (and refused) while the store is still open, exactly as `cmd_show` does: the
         # project's own profiles live on a settings row in this database.
         choice = redact_choice(store, redaction)
@@ -963,7 +963,7 @@ module Gori
           # one: `--format har -n 50` then said only "no flows written to the HAR" and sent its
           # operator away from 150 flows that `-n 200` would have exported. The cut is a fact
           # here (`limit_probe`), so say it rather than let the empty note stand for it.
-          if note = history_truncation_note(truncated, limit)
+          if note = history_truncation_note(truncated, limit, nil, cursor)
             STDERR.puts "gori run history: #{note}"
           end
         elsif truncated
@@ -974,7 +974,9 @@ module Gori
           # `--format har -n 123` against a project holding exactly 123 flows told its
           # operator to raise `-n` for flows that do not exist. The listing over-reads by one
           # row (`limit_probe`), which answers it outright.
-          STDERR.puts "gori run history: stopped at the --limit of #{Gori.plural(limit, "flow")}; raise -n to export more"
+          #
+          # A cursor page continues from its own last entry (`_goriFlowId`), not from a bigger -n.
+          STDERR.puts "gori run history: #{cursor ? history_truncation_note(truncated, limit, nil, cursor) : "stopped at the --limit of #{Gori.plural(limit, "flow")}; raise -n to export more"}"
         end
       end
 
