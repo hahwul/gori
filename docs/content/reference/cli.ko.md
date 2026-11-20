@@ -962,7 +962,7 @@ gori run discover --target https://target.example --max-depth 3 --extensions php
 
 ### run wordlist {#run-wordlist}
 
-전역 wordlist 카탈로그입니다. `$GORI_HOME/wordlists`(`~/.gori/wordlists`) 아래의 이름 붙은 목록이며 하나하나가 일반 파일입니다. wordlist 경로를 받는 곳(`fuzz -w`, `mine --wordlist`, `discover --wordlist`, `cookie --crack --wordlist`)이면 어느 작업 디렉터리에서든 이름을 쓸 수 있습니다. `/`가 있는 값은 경로이므로 주어진 그대로 읽고, 이름만 있으면 현재 디렉터리를 먼저, 그다음 카탈로그를 찾습니다. 여기서는 프로젝트가 필요 없고 요청도 보내지 않습니다. 개념은 [가이드](/ko/guide/repeater-and-fuzzer/#wordlist-catalog)를 보세요.
+전역 wordlist 카탈로그입니다. `$GORI_HOME/wordlists`(`~/.gori/wordlists`) 아래의 이름 붙은 목록이며 하나하나가 일반 파일입니다. wordlist 경로를 받는 곳(`fuzz -w`, `mine --wordlist`, `discover --wordlist`, `cookie --crack --wordlist`, `jwt --crack --wordlist`)이면 어느 작업 디렉터리에서든 이름을 쓸 수 있습니다. `/`가 있는 값은 경로이므로 주어진 그대로 읽고, 이름만 있으면 현재 디렉터리를 먼저, 그다음 카탈로그를 찾습니다. 여기서는 프로젝트가 필요 없고 요청도 보내지 않습니다. 개념은 [가이드](/ko/guide/repeater-and-fuzzer/#wordlist-catalog)를 보세요.
 
 ```bash
 gori run sitemap params --host api.example.com --format names | gori run wordlist save api-params.txt
@@ -1182,6 +1182,9 @@ gori run jwt eyJhbGci... --attacks --key ./public.pem
 | `--decode` | header / payload / signature 디코드(기본) |
 | `--encode` | `--alg`와 `--secret` / `--key`로 토큰 클레임 재서명. `--header`와 `--payload`를 둘 다 주면 토큰을 읽지 않고, 하나만 주면 나머지 쪽은 `<token>` 인자나 STDIN에서 읽습니다(`""`나 `</dev/null`을 주면 `{}`에서 시작) |
 | `--verify` | 토큰의 서명을 `--secret` / `--key`로 검증(둘 중 하나 필수, `--secret ''`은 빈 secret 확인). `verified: yes\|no`와 `reason`을 출력하고 검증되지 않으면 1로 종료합니다. `--format json`은 `code`(`signature_mismatch`, `unsigned`, `alg_unsupported`, …)를 더합니다 |
+| `--crack` | HS256/HS384/HS512 비밀키를 오프라인으로 검색. 찾으면 0, 없거나 거절하면 1. JSON: `{found, secret?, tried, stopped}`. unsigned/비대칭/JWE 토큰은 거절 |
+| `--secrets=LIST` | `--crack`: 먼저 시도할 쉼표 구분 후보 비밀키 |
+| `--wordlist=PATH` | `--crack`: 줄 단위 파일이나 저장된 목록 이름. 빈 줄과 공백 유지 |
 | `--attacks` | 테스트 페이로드 생성(alg:none, weak-secret, header injection) |
 | `--alg=ALG` | `--encode`용 서명 alg: `HS256`(기본) \| `HS384` \| `HS512` \| `RS256/384/512` \| `PS256/384/512` \| `ES256/384/512` \| `EdDSA` \| `none` |
 | `--secret=SECRET` | HS 알고리즘용 HMAC 시크릿 |

@@ -48,7 +48,7 @@ module Gori
         if why = wordlist.try { |w| wordlist_stream_refusal(w) }
           return Result.new(why, is_error: true)
         end
-        found = cookie_crack_search(c, inline, wordlist, h)
+        found = cookie_crack(c, SecretCrack::Candidates.new(inline, wordlist), h)
         Result.new(JSON.build do |j|
           j.object do
             j.field "found", !found.nil?
@@ -60,13 +60,6 @@ module Gori
         Result.new(ex.message || "not a decodable cookie", is_error: true)
       rescue ex : Gori::Error # a missing/unreadable wordlist from Fuzz::WordlistFile
         Result.new(ex.message || "wordlist error", is_error: true)
-      end
-
-      # Try the inline candidates first (cheap, ordered), then stream the wordlist file.
-      private def cookie_crack_search(c : String, inline : Array(String), wordlist : String?, h) : String?
-        found = inline.empty? ? nil : cookie_crack(c, Fuzz::InlineList.new(inline), h)
-        found ||= cookie_crack(c, Fuzz::WordlistFile.new(wordlist), h) if found.nil? && wordlist
-        found
       end
 
       @[Tool("cookie_forge", unbound: true)]
