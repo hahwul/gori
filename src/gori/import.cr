@@ -7,6 +7,7 @@ require "./import/insomnia"
 require "./import/burp"
 require "./import/xml_mini"
 require "./import/wsdl"
+require "./import/graphql"
 require "./import/raw"
 require "./import/curl"
 
@@ -48,6 +49,7 @@ module Gori
       :insomnia => "Insomnia",
       :burp     => "Burp",
       :wsdl     => "WSDL",
+      :graphql  => "GraphQL",
       :curl     => "cURL",
     }
 
@@ -299,20 +301,21 @@ module Gori
     def self.import_file(store : Store, kind : Symbol, path : String,
                          surface : FlowSource::Surface? = nil, *,
                          cancelled : (-> Bool)? = nil, progress : (Int32, Int32? ->)? = nil,
-                         ref : String? = nil) : Result
+                         ref : String? = nil, endpoint : String? = nil) : Result
+      raise Gori::Error.new("endpoint applies only to GraphQL imports") if endpoint && kind != :graphql
       expanded = Path[path].expand(home: true).to_s
       raise Gori::Error.new("file not found: #{expanded}") unless File.exists?(expanded)
       raise Gori::Error.new("not a file: #{expanded}") unless File.file?(expanded)
       prov = Provenance.new(surface, ref || File.basename(expanded))
       dup = ref ? nil : duplicate_note(store, File.basename(expanded))
-      with_note(import_parsed(store, kind, expanded, surface, prov, cancelled, progress), dup)
+      with_note(import_parsed(store, kind, expanded, surface, prov, cancelled, progress, endpoint), dup)
     end
 
     # The body of `import_file` once the source is resolved: stream a HAR, hand curl to the
     # text path, parse-then-insert everything else.
     private def self.import_parsed(store : Store, kind : Symbol, expanded : String,
                                    surface : FlowSource::Surface?, prov : Provenance,
-                                   cancelled : (-> Bool)?, progress : (Int32, Int32? ->)?) : Result
+                                   cancelled : (-> Bool)?, progress : (Int32, Int32? ->)?, endpoint : String?) : Result
       if kind == :har
         begin
           return import_har_stream(store, expanded, prov, cancelled, progress)
@@ -330,6 +333,7 @@ module Gori
         when :insomnia then Insomnia.parse_file(expanded, prov)
         when :burp     then Burp.parse_file(expanded, prov)
         when :wsdl     then Wsdl.parse_file(expanded, prov)
+        when :graphql  then Graphql.parse_file(expanded, endpoint, prov)
         else                raise Gori::Error.new("unknown import kind: #{kind}")
         end
       rescue ex : File::Error
@@ -364,15 +368,16 @@ module Gori
     # format (the OpenAPI and Insomnia readers pick YAML by extension) and is imported from
     # there with `ref` standing in for the file name, then removed.
     def self.import_text(store : Store, kind : Symbol, text : String,
-                         surface : FlowSource::Surface? = nil) : Result
+                         surface : FlowSource::Surface? = nil, *, endpoint : String? = nil) : Result
       # The file readers skip a leading BOM; `text_suffix`'s sniff and the curl tokenizer do not.
+      raise Gori::Error.new("endpoint applies only to GraphQL imports") if endpoint && kind != :graphql
       text = text.lchop('\u{FEFF}')
       return import_curl_text(store, text, surface) if kind == :curl
       raise Gori::Error.new("unknown import kind: #{kind}") unless LABELS.has_key?(kind)
       raise Gori::Error.new("the #{label(kind)} text is empty") if text.strip.empty?
       file = File.tempfile("gori-import", text_suffix(kind, text)) { |f| f.print(text) }
       begin
-        import_file(store, kind, file.path, surface, ref: "#{kind} text")
+        import_file(store, kind, file.path, surface, ref: "#{kind} text", endpoint: endpoint)
       rescue ex : Gori::Error
         # The parsers name the file they read, which here is a temp path the caller never saw,
         # or call it a file ("HAR file is not valid JSON") when the caller passed none.

@@ -776,6 +776,7 @@ Short circuit 규칙의 `source:` 행에서 답을 어디서 가져올지 고릅
 | **Import: Insomnia** | Insomnia v4 JSON 익스포트 → 저장된 요청마다 요청 템플릿 하나 |
 | **Import: Burp** | Burp Suite 저장 항목(XML) → 전체 요청/응답 플로우, 바이트 단위 그대로 |
 | **Import: WSDL** | WSDL 1.1 서비스 설명서(XML) → 오퍼레이션마다 SOAP 요청 템플릿 하나 |
+| **Import: GraphQL** | 인트로스펙션 JSON과 입력한 엔드포인트 URL → 쿼리·뮤테이션 필드마다 POST 요청 템플릿 하나 |
 | **Import: cURL** | 붙여넣은 curl 명령("Copy all as cURL"처럼 여러 개도 가능) → URL마다 요청 하나 |
 
 형식이 잘못된 항목은 임포트를 중단시키지 않고 건너뛰며, 어떤 항목을 왜 건너뛰었는지는 결과의 notes에 나옵니다. OpenAPI 3.x와 Swagger 2.0 스펙은 로컬 JSON Pointer `$ref`를 해석하고, 원격 참조는 보고만 할 뿐 가져오지 않습니다. 임포트된 플로우는 캡처된 트래픽처럼 History에 들어오므로, 똑같이 필터링하고 Repeater로 재전송하거나 퍼징·스캔할 수 있습니다.
@@ -788,11 +789,19 @@ Short circuit 규칙의 `source:` 행에서 답을 어디서 가져올지 고릅
 
 **Burp** 항목은 저장된 wire 바이트를 유지합니다. 이상한 공백, 중복 헤더, 일부러 틀린 `Content-Length`, 요청 타깃 안의 CRLF까지 남습니다. 직접 조작한 요청도 Repeater에서 바이트 단위로 똑같이 재전송됩니다.
 
+**GraphQL**은 `data.__schema`(표준 인트로스펙션 응답) 또는 최상위 `__schema`(결과 값만 저장한 문서)가 있는 JSON을 읽습니다. **Import: GraphQL**에서 파일 경로 다음에 엔드포인트 URL을 입력합니다. 인수는 타입을 선언한 변수와 플레이스홀더 값으로 채우고, 선택 집합은 너비 8·깊이 3까지 만듭니다. 재귀와 깊이 제한에서는 `__typename`으로 멈추고, 필수 인수가 있는 중첩 필드는 생략합니다. 구독은 생략한 개수를 `notes`에 적습니다. 문서는 8 MiB, 타입은 4,096개, 쿼리·뮤테이션 합계는 1,000개까지 읽습니다. SDL 파싱이나 인트로스펙션 요청은 하지 않으며, 생성한 플로우는 전송하기 전까지 `Pending`입니다. 사용자 정의 스칼라는 문자열 플레이스홀더이므로 API에 맞게 값을 편집해야 할 수 있습니다.
+
+History에 인트로스펙션 응답이 있다면 `123`을 해당 플로우 ID로 바꾸고, `run show`의 디코딩된 JSON 본문을 `jq`로 추출합니다. 내보내기 마스킹 없이 캡처된 본문을 읽어 같은 데이터베이스에 템플릿을 임포트합니다.
+
+```bash
+gori run show 123 --response-only --format json --no-redact --db ./assessment.db | jq -er '.response.body.text' | gori run import --graphql - --endpoint https://api.example.com/graphql --db ./assessment.db
+```
+
 **WSDL**은 서비스가 게시한 SOAP 포트마다 오퍼레이션당 SOAP 요청 템플릿 하나를 만듭니다. SOAP 1.1(`SOAPAction`, `text/xml`)과 SOAP 1.2(`action` 미디어 타입 파라미터, `application/soap+xml`)를 모두 다루므로, 두 버전을 함께 게시하는 엔드포인트는 요청 두 개로 들어옵니다. 본문은 `<wsdl:types>` 안의 XSD에서 뽑아낸 스켈레톤이며, 내장 타입마다 유효한 플레이스홀더를 채워 스키마를 검증하는 게이트웨이도 시드 요청을 통과시킵니다. 재귀 타입은 첫 반복에서 멈추고 직접 중첩하라는 주석을 남깁니다. WSDL 1.1만 읽고, `http:binding`(GET/POST) 포트와 HTTP가 아닌 트랜스포트는 이유와 함께 건너뛸 뿐 손상으로 세지 않으며, 외부 `xsd:import` 파일은 가져오지 않고, `<!DOCTYPE>`는 거부합니다.
 
 **cURL**은 경로 입력 대신 붙여넣기 상자를 엽니다. 각 명령은 [Repeater의 Paste cURL](/ko/guide/repeater-and-fuzzer/#repeater)과 같은 방식으로 읽히고, 요청은 만들어진 대로 저장되므로 더 긴 `-d` 옆의 `-H 'Content-Length: 1'`은 입력한 desync 그대로 남습니다.
 
-같은 소스를 헤드리스에서도 다룰 수 있습니다. `gori run import --postman PATH`(또는 `--har` / `--urls` / `--oas` / `--insomnia` / `--burp` / `--wsdl` / `--curl`, `--curl -`는 stdin을 읽음)와 MCP의 `import_flows` 도구입니다.
+같은 소스를 헤드리스에서도 다룰 수 있습니다. `gori run import --postman PATH`(또는 `--har` / `--urls` / `--oas` / `--insomnia` / `--burp` / `--wsdl` / `--graphql` / `--curl`, `--curl -`는 stdin을 읽음)와 MCP의 `import_flows` 도구입니다. GraphQL은 CLI에서 `--endpoint URL`, MCP에서 `kind:"graphql", endpoint:"https://api.example.com/graphql"`을 함께 지정합니다.
 
 ## 프로젝트 아카이브 {#project-archives}
 

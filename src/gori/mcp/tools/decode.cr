@@ -277,6 +277,23 @@ module Gori
         end
       end
 
+      @[Tool("jwt_crack", unbound: true)]
+      private def jwt_crack_tool(h) : Result
+        token = jwt_input(h)
+        return Result.new("missing required 'token'", is_error: true) if token.nil? || token.strip.empty?
+        inline = str_list(h, "secrets")
+        wordlist = str(h, "wordlist").try(&.presence)
+        if inline.empty? && wordlist.nil?
+          return Result.new("provide 'secrets' and/or 'wordlist'", is_error: true)
+        end
+        if why = wordlist.try { |w| wordlist_stream_refusal(w) }
+          return Result.new(why, is_error: true)
+        end
+        Result.new(Jwt.crack(token, SecretCrack::Candidates.new(inline, wordlist), stop: cancel_signal).to_json)
+      rescue ex : Gori::Error
+        Result.new(ex.message || "crack failed", is_error: true)
+      end
+
       # The tools/list schemas for the decoder / JWT tools, kept beside the handlers that
       # implement them. `Tools#list` composes every one of these; the action gate is applied
       # here rather than around one long block, so a new write tool cannot be added on the
@@ -315,6 +332,15 @@ module Gori
           s.field "secret", strprop("HMAC secret for HS256/384/512; \"\" checks the empty secret")
           s.field "key", strprop("PEM for RS/PS/ES/EdDSA (public key, certificate or private key), inline or a .pem path. Exclusive with 'secret'")
           s.requires_one_of "secret", "key"
+        end
+
+        tool j, "jwt_crack",
+          "Find an HS256/HS384/HS512 JWT secret offline. Inline candidates first, then the " \
+          "wordlist. Refuses unsigned/asymmetric tokens. Returns {found, secret?, tried}." do |s|
+          s.field "token", strprop("signed HMAC JWT"), required: true
+          s.field "secrets", strarrprop("inline candidate secrets, in order")
+          s.field "wordlist", strprop("file path or saved wordlist name")
+          s.requires_one_of "secrets", "wordlist"
         end
 
         tool j, "jwt_encode",

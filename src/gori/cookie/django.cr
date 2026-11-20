@@ -67,10 +67,10 @@ module Gori
       end
 
       def crack(cookie : String, secrets,
-                salt : String = DEFAULT_SALT, algorithm : String = DEFAULT_ALGO) : String?
+                salt : String = DEFAULT_SALT, algorithm : String = DEFAULT_ALGO, *, stop : Proc(Bool)? = nil) : String?
         p = parse(cookie)
         input = signing_input(p)
-        Cookie.first_signing(secrets, p.signature) { |s| compute_sig(input, s, salt, algorithm) }
+        Cookie.first_signing(secrets, p.signature, stop) { |s| compute_sig(input, s, salt, algorithm) }
       end
 
       # Mint a fresh cookie from JSON payload + secret (uncompressed; always verifies).

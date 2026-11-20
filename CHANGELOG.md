@@ -4,6 +4,12 @@
 
 - Probe: the request-smuggling rule adds the 0.CL-by-`Expect: 100-continue` desync (plain and obfuscated) as a High timing lead, sent as a complete POST so a conformant server answers fast and only a front-end/back-end split hangs; still off by default and behind unsafe (#1945).
 
+- Import GraphQL introspection JSON (`data.__schema` or top-level `__schema`) into unsent POST templates, one per query or mutation, with typed variables and bounded selections from the TUI, CLI and MCP; subscriptions are omitted with a count (#1948).
+
+- MCP: `list_issues` exports Markdown and SARIF reports, and `get_flow` exports curl, Python, fetch, Go, httpie and CSRF PoCs, with credential and body redaction and read-only access. Reports page whole issues within 64 KiB and mark shortened evidence separately (#1947).
+
+- JWT: find HS256/HS384/HS512 signing secrets offline with `gori run jwt --crack` or MCP `jwt_crack`, using inline candidates, files or saved wordlists and reporting the candidates tried. MCP `jwt_crack` and `cookie_crack` stop between candidates when cancelled (#1946).
+
 - MCP: `race_requests`, `timing_requests` and `minimize_repeater` take `background:true`, which returns a `job_id` at once so other calls are answered while the run goes on; `get_job` returns the call's usual result and `stop_job` cancels it (#1944).
 
 - TUI: an upstream proxy that does not answer is named once on the status row and in Notifications, with the setting that chose it, instead of only inside each failed flow's detail (#1944).

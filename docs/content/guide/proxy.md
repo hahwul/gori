@@ -777,6 +777,7 @@ You don't have to capture everything live. From the command palette (`Ctrl-P`):
 | **Import: Insomnia** | Insomnia v4 JSON export → one request template per saved request |
 | **Import: Burp** | Burp Suite saved items (XML) → full request/response flows, byte-exact |
 | **Import: WSDL** | WSDL 1.1 service description (XML) → one SOAP request template per operation |
+| **Import: GraphQL** | Introspection JSON and an endpoint URL you supply → one POST template per query/mutation field |
 | **Import: cURL** | A pasted curl command (or several, as "Copy all as cURL" writes them) → one request per URL |
 
 Malformed entries are skipped without aborting the import, and the result's notes say which ones and why. OpenAPI 3.x and Swagger 2.0 specs resolve local JSON Pointer `$ref` values. Remote refs are reported and never fetched. Imported flows land in History like captured traffic, so you can filter, Repeater, Fuzz, and scan them the same way.
@@ -789,11 +790,19 @@ Malformed entries are skipped without aborting the import, and the result's note
 
 **Burp** items keep their wire bytes as saved: odd spacing, duplicate headers, a deliberately wrong `Content-Length`, a CRLF in the request target. A hand-forged request replays from the Repeater byte-for-byte.
 
+**GraphQL** reads JSON containing `data.__schema` (a standard introspection response) or a top-level `__schema` (the result value alone). Choose **Import: GraphQL**, enter the file path, then the endpoint URL. Arguments become typed variables with placeholder values. Selections expand to width eight and depth three, stop at cycles/depth limits with `__typename`, and omit nested fields with required arguments. Subscriptions are omitted with their count in `notes`. Documents are capped at 8 MiB, 4,096 types and 1,000 query/mutation fields combined. It does not parse SDL or run introspection, and generated flows stay `Pending` until sent. Custom scalars use string placeholders; edit values to suit the API before replaying.
+
+If the introspection response is already in History, replace `123` with its flow ID and use `jq` to extract the decoded JSON body from `run show`. This reads the captured body without export redaction and imports templates into the same database:
+
+```bash
+gori run show 123 --response-only --format json --no-redact --db ./assessment.db | jq -er '.response.body.text' | gori run import --graphql - --endpoint https://api.example.com/graphql --db ./assessment.db
+```
+
 **WSDL** builds one SOAP request template per operation, for every SOAP port a service publishes. That covers SOAP 1.1 (`SOAPAction`, `text/xml`) and SOAP 1.2 (the `action` media-type parameter, `application/soap+xml`), so a dual-stack endpoint arrives as two requests. The body is a skeleton derived from the XSD inline in `<wsdl:types>`, with a valid placeholder for each built-in type so a schema-validating gateway lets the seed request through. A recursive type stops at its first repetition with a comment where you nest it by hand. Only WSDL 1.1 is read. `http:binding` (GET/POST) ports and non-HTTP transports are skipped with a reason and not counted as damage, external `xsd:import` files are never fetched, and a `<!DOCTYPE>` is refused.
 
 **cURL** opens a paste box rather than a path prompt. Each command is read the way [Repeater's Paste cURL](/guide/repeater-and-fuzzer/#repeater) reads it, and each request is stored as built, so a `-H 'Content-Length: 1'` beside a longer `-d` stays the desync you typed.
 
-The same sources are scriptable headless: `gori run import --postman PATH` (and `--har` / `--urls` / `--oas` / `--insomnia` / `--burp` / `--wsdl` / `--curl`, where `--curl -` reads stdin), and the MCP `import_flows` tool.
+The same sources are scriptable headless: `gori run import --postman PATH` (and `--har` / `--urls` / `--oas` / `--insomnia` / `--burp` / `--wsdl` / `--graphql` / `--curl`, where `--curl -` reads stdin), and the MCP `import_flows` tool. GraphQL also requires `--endpoint URL` on the CLI or `kind:"graphql", endpoint:"https://api.example.com/graphql"` on MCP.
 
 ## Project archives {#project-archives}
 

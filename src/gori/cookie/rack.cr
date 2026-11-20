@@ -81,9 +81,9 @@ module Gori
         Crypto::Subtle.constant_time_compare(compute_sig(p.data, secret), p.signature)
       end
 
-      def crack(cookie : String, secrets) : String?
+      def crack(cookie : String, secrets, *, stop : Proc(Bool)? = nil) : String?
         p = parse(cookie)
-        Cookie.first_signing(secrets, p.signature) { |s| compute_sig(p.data, s) }
+        Cookie.first_signing(secrets, p.signature, stop) { |s| compute_sig(p.data, s) }
       end
 
       # Mint a cookie from an opaque base64 `data` value + secret. `data` is the marshalled

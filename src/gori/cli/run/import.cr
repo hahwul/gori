@@ -8,12 +8,13 @@ module Gori
   module CLI
     module Run
       @[Subcommand("import", help: [
-        {"import", "Import flows into History from a HAR, URL list, OpenAPI, Postman, Insomnia, Burp or WSDL file, or curl commands"},
+        {"import", "Import flows into History from a HAR, URL list, OpenAPI, Postman, Insomnia, Burp, WSDL or GraphQL introspection file, or curl commands"},
       ])]
       private def self.cmd_import(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
         format = :text
+        endpoint : String? = nil
         # One entry per source flag, in the order they appear in --help. Adding a format
         # means a row here, a bullet in the banner ABOVE the flags, and a `p.on` below —
         # the banner spells every flag out by hand, so three edits, not two.
@@ -25,11 +26,12 @@ module Gori
           :insomnia => nil.as(String?),
           :burp     => nil.as(String?),
           :wsdl     => nil.as(String?),
+          :graphql  => nil.as(String?),
           :curl     => nil.as(String?),
         }
 
         parser = option_parser("gori run import") do |p|
-          p.banner = "Usage: gori run import (--har PATH | --urls PATH | --oas PATH | --postman PATH | --insomnia PATH | --burp PATH | --wsdl PATH | --curl PATH) [options]\n\n" \
+          p.banner = "Usage: gori run import (--har PATH | --urls PATH | --oas PATH | --postman PATH | --insomnia PATH | --burp PATH | --wsdl PATH | --graphql PATH | --curl PATH) [options]\n\n" \
                      "Bulk-import flows into the project's History. Exactly one source is required:\n" \
                      "  --har       a browser/proxy HAR (HTTP Archive) export\n" \
                      "  --urls      a text file of URLs, one per line (# comments and blanks ignored); each becomes a\n" \
@@ -39,6 +41,7 @@ module Gori
                      "  --insomnia  request templates from an Insomnia v4 export (JSON)\n" \
                      "  --burp      saved Burp items (XML) — request AND response, byte-exact\n" \
                      "  --wsdl      SOAP request templates from a WSDL 1.1 service description (XML)\n" \
+                     "  --graphql   query/mutation templates from introspection JSON (requires --endpoint URL)\n" \
                      "  --curl      curl commands — one flow per request\n\n" \
                      "Every source reads stdin when its PATH is `-` (`pbpaste | gori run import --curl -`,\n" \
                      "`generator | gori run import --urls -`); stdin must be a pipe or a redirect."
@@ -49,6 +52,8 @@ module Gori
           p.on("--insomnia=PATH", "Import an Insomnia v4 JSON export (- reads stdin)") { |v| sources[:insomnia] = v }
           p.on("--burp=PATH", "Import a Burp Suite item export (XML) (- reads stdin)") { |v| sources[:burp] = v }
           p.on("--wsdl=PATH", "Import a WSDL 1.1 service description (SOAP 1.1/1.2) (- reads stdin)") { |v| sources[:wsdl] = v }
+          p.on("--graphql=PATH", "Import GraphQL introspection JSON (- reads stdin)") { |v| sources[:graphql] = v }
+          p.on("--endpoint=URL", "Endpoint URL for --graphql request templates") { |v| endpoint = v }
           p.on("--curl=PATH", "Import curl commands from PATH, or from stdin when PATH is -") { |v| sources[:curl] = v }
           p.on("--project=NAME", "Project to import into (#{DEFAULT_PROJECT_HELP})") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to import into (created if absent)") { |v| db_path = v }
@@ -61,6 +66,7 @@ module Gori
         parser.parse(args)
 
         kind, path = import_source(sources)
+        validate_import_endpoint(kind, endpoint)
         # Read BEFORE `open_store`, like `repeater create --request-stdin`: a pipe that never
         # ends must not hold the project's open-lock while it waits.
         curl_text = if kind == :curl
@@ -85,9 +91,9 @@ module Gori
             Import.import_curl_text(store, text, Gori::FlowSource::Surface::Cli,
               path == "-" ? "curl (stdin)" : File.basename(path))
           elsif tmp = spool
-            import_spooled(store, kind, tmp)
+            import_spooled(store, kind, tmp, endpoint)
           else
-            Import.import_file(store, kind, path, Gori::FlowSource::Surface::Cli)
+            Import.import_file(store, kind, path, Gori::FlowSource::Surface::Cli, endpoint: endpoint)
           end
         rescue ex : Gori::Error
           abort "gori run import: #{CLI::Output.term_line(ex.message.to_s)}"
@@ -100,11 +106,16 @@ module Gori
         exit 1 if result.short?
       end
 
+      private def self.validate_import_endpoint(kind : Symbol, endpoint : String?) : Nil
+        abort "gori run import: --graphql requires --endpoint URL" if kind == :graphql && endpoint.to_s.empty?
+        abort "gori run import: --endpoint applies only to --graphql" if endpoint && kind != :graphql
+      end
+
       # A spooled stdin, imported under `ref: "stdin"` — the way `Import.import_text` names its
       # own temp file — so the flows' provenance says where they came from, and a refusal says
       # `stdin` rather than the spool's path.
-      private def self.import_spooled(store : Store, kind : Symbol, spooled : String) : Import::Result
-        Import.import_file(store, kind, spooled, Gori::FlowSource::Surface::Cli, ref: "stdin")
+      private def self.import_spooled(store : Store, kind : Symbol, spooled : String, endpoint : String? = nil) : Import::Result
+        Import.import_file(store, kind, spooled, Gori::FlowSource::Surface::Cli, ref: "stdin", endpoint: endpoint)
       rescue ex : Gori::Error
         raise Gori::Error.new((ex.message || "import failed").gsub(spooled, "stdin"))
       end

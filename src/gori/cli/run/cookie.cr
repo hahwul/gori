@@ -151,9 +151,8 @@ module Gori
       private def self.emit_cookie_crack(cookie : String, type : String?, secrets : Array(String),
                                          wordlist : String?, salt : String?, algorithm : String, format : Symbol) : Nil
         abort "gori run cookie: --crack needs --secrets and/or --wordlist" if secrets.empty? && wordlist.nil?
-        found = nil.as(String?)
-        found = cookie_dispatch_crack(cookie, type, Fuzz::InlineList.new(secrets), salt, algorithm) unless secrets.empty?
-        found ||= cookie_dispatch_crack(cookie, type, Fuzz::WordlistFile.new(wordlist), salt, algorithm) if wordlist && found.nil?
+        source = SecretCrack::Candidates.new(secrets, wordlist)
+        found = cookie_dispatch_crack(cookie, type, source, salt, algorithm)
         fmt = type || Cookie.detect(cookie)
         if format == :json
           puts JSON.build { |j| j.object { j.field "found", !found.nil?; j.field("secret", found) if found; j.field "format", fmt } }

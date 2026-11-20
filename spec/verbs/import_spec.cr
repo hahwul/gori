@@ -15,6 +15,7 @@ describe "Gori::Verbs.register_import" do
     "import.insomnia" => {:open_import, ["insomnia"]},
     "import.burp"     => {:open_import, ["burp"]},
     "import.wsdl"     => {:open_import, ["wsdl"]},
+    "import.graphql"  => {:open_import, ["graphql"]},
     "import.curl"     => {:import_curl, [] of String},
   }
 

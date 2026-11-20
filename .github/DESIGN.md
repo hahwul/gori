@@ -6091,6 +6091,21 @@ cache result. `gori run cache-deception` validates every named flow before the f
 missing id refuses the whole run with `NOT_FOUND` in JSON mode. A present flow that cannot be
 replayed still remains a per-flow skip or failure, so one bad backend does not hide later results.
 
+### 2026-11-20: JWT wordlist cracking shares Cookie's cooperative search (#1946)
+
+`Jwt.crack` parses a signed HS256/HS384/HS512 token once and searches literal inline or lazy
+wordlist candidates offline. `SecretCrack` owns the first-match loop shared with Cookie: it
+yields every 4,096 candidates or after 10 ms, checked between candidates, because a large JWT
+makes even a short candidate stride expensive. Results count only signatures actually tried.
+Both MCP crack tools poll cancellation between candidates and free the server for the next
+call; like every cancelled request, they get no response. `stopped` stays internal to the
+engine, outside CLI/MCP JSON. File and saved-name resolution remains in `Fuzz::WordlistFile`.
+
+CLI `--crack` and MCP `jwt_crack` expose this separately from verification and attack payload
+generation. It is pure read-only compute outside `@recon`. The TUI is intentionally deferred:
+JWT's SECRET belongs to ENCODE, while Cookie's crack gesture operates on DECODE's visible
+input and SECRET; adding that gesture honestly would need a layout decision.
+
 ### 2026-11-20: the smuggling detector reaches 0.CL via the Expect timing probe (#1945)
 
 Extends the smuggling rule (`probe/active/request_smuggling.cr`) past the #1931 set with the
@@ -6154,4 +6169,3 @@ pre-filter still gates the probe, the complete-prefix differential stays behind 
 a variant not safely sendable on a flow's transport is not offered. The Expect probe is a self-damaging
 timing probe on gori's own fresh socket (it rides `followups`), so it smuggles nothing into a
 neighbour's request.
-

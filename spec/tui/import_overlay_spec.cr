@@ -16,7 +16,7 @@ describe Gori::Tui::ImportOverlay do
   it "titles and describes the card by import kind" do
     {:har => "HAR", :project_archive => "project archive", :urls => "URLs", :oas => "OpenAPI",
      :postman => "Postman", :insomnia => "Insomnia", :burp => "Burp",
-     :wsdl => "WSDL"}.each do |kind, want|
+     :wsdl => "WSDL", :graphql => "GraphQL"}.each do |kind, want|
       ov = ImportOverlay.new(kind)
       ov.label.should eq(want)
       backend = MemoryBackend.new(100, 30)
@@ -37,6 +37,7 @@ describe Gori::Tui::ImportOverlay do
      :insomnia        => "Build request templates from an Insomnia v4 JSON export.",
      :burp            => "Load saved Burp items into History — request and response, byte-exact.",
      :wsdl            => "Build request templates from a WSDL 1.1 service — one per operation.",
+     :graphql         => "Build query/mutation templates from introspection JSON; sends nothing.",
     }.each do |kind, fragment|
       backend = MemoryBackend.new(100, 30)
       ImportOverlay.new(kind).render(Screen.new(backend), Rect.new(0, 0, 100, 30))
@@ -46,7 +47,7 @@ describe Gori::Tui::ImportOverlay do
     # Every registered kind is described — no source can be added without a blurb. `:curl` is
     # the one kind this card never opens for: a curl command is pasted, not saved, so
     # Import: cURL opens `CurlPasteOverlay` instead (#1244).
-    (Gori::Import::LABELS.keys - [:curl]).size.should eq(7)
+    (Gori::Import::LABELS.keys - [:curl]).size.should eq(8)
     archive_backend = MemoryBackend.new(100, 30)
     ImportOverlay.new(:project_archive).render(Screen.new(archive_backend), Rect.new(0, 0, 100, 30))
     archive_backend.contains?("add it to this machine's project list.").should be_true
@@ -77,9 +78,122 @@ describe Gori::Tui::ImportOverlay do
     ov.handle_key(key(Termisu::Input::Key::Enter)).should eq(:commit)
   end
 
+  it "collects a GraphQL path and endpoint before committing through the shell" do
+    ov = ImportOverlay.new(:graphql)
+    h = OverlayHarness.new(ov)
+    submitted = [] of {String, String?}
+    h.on_commit do
+      submitted << {ov.path, ov.endpoint}
+      true
+    end
+    h.type("/no/such/gori-graphql-schema.json")
+    h.press(Termisu::Input::Key::Enter).should eq(:open)
+    h.rendered?("endpoint URL").should be_true
+    h.type("https://api.test/graphql")
+    h.press(Termisu::Input::Key::Enter).should eq(:closed)
+    submitted.should eq([{"/no/such/gori-graphql-schema.json", "https://api.test/graphql"}])
+  end
+
   it "cancels on esc" do
     ov = ImportOverlay.new(:har)
     ov.handle_key(key(Termisu::Input::Key::Escape)).should eq(:cancel)
+  end
+
+  it "backs out of the endpoint step with the path intact before cancelling" do
+    ov = ImportOverlay.new(:graphql)
+    h = OverlayHarness.new(ov)
+    h.type("/no/such/schema.json")
+    ov.hint.should contain("esc cancel")
+    h.press(Termisu::Input::Key::Enter)
+    ov.hint.should contain("esc back")
+    h.type("https://api.test/graphql")
+    h.press(Termisu::Input::Key::Escape).should eq(:open)
+    h.rendered?("source path").should be_true
+    ov.path.should eq("/no/such/schema.json")
+    h.press(Termisu::Input::Key::Enter).should eq(:open)
+    ov.endpoint.should eq("https://api.test/graphql")
+    h.press(Termisu::Input::Key::Escape).should eq(:open)
+    h.press(Termisu::Input::Key::Escape).should eq(:closed)
+    h.commits.should eq(0)
+  end
+
+  it "keeps an empty or whitespace-only endpoint open without committing" do
+    ov = ImportOverlay.new(:graphql)
+    h = OverlayHarness.new(ov)
+    h.type("/no/such/schema.json")
+    h.press(Termisu::Input::Key::Enter)
+    h.press(Termisu::Input::Key::Enter).should eq(:open)
+    h.type("  ")
+    h.press(Termisu::Input::Key::Enter).should eq(:open)
+    h.rendered?("endpoint URL").should be_true
+    ov.path.should eq("/no/such/schema.json")
+    h.commits.should eq(0)
+  end
+
+  it "routes a bracketed paste and IME preedit to the endpoint field" do
+    ov = ImportOverlay.new(:graphql)
+    h = OverlayHarness.new(ov)
+    h.type("/no/such/schema.json")
+    h.press(Termisu::Input::Key::Enter)
+    paste = PasteNewline.new
+    paste.swallow?(key(Termisu::Input::Key::PasteStart)).should be_true
+    "https://api.test/graphql".each_char do |c|
+      ev = key(Termisu::Input::Key::Unknown, c)
+      paste.swallow?(ev).should be_false
+      ov.takes_pasted?(ev).should be_true
+      ov.handle_key(ev).should eq(:stay)
+    end
+    ov.takes_pasted?(key(Termisu::Input::Key::Enter)).should be_false
+    paste.swallow?(key(Termisu::Input::Key::PasteEnd)).should be_true
+    ov.endpoint.should eq("https://api.test/graphql")
+    h.preedit("preedithere")
+    h.rendered?("preedithere").should be_true
+    h.press(Termisu::Input::Key::Escape)
+    h.rendered?("preedithere").should be_false
+    ov.path.should eq("/no/such/schema.json")
+    h.commits.should eq(0)
+  end
+
+  it "keeps path completion closed while editing the endpoint" do
+    file = File.tempfile("gori-import", ".json")
+    file.close
+    begin
+      ov = ImportOverlay.new(:graphql)
+      h = OverlayHarness.new(ov)
+      h.type(file.path)
+      h.press(Termisu::Input::Key::Enter)
+      h.type("https://api.test/graphql")
+      {Termisu::Input::Key::Up, Termisu::Input::Key::Down,
+       Termisu::Input::Key::Tab, Termisu::Input::Key::BackTab}.each do |k|
+        h.press(k).should eq(:open)
+      end
+      h.wheel(3)
+      h.rendered?(File.basename(file.path)).should be_false
+      ov.endpoint.should eq("https://api.test/graphql")
+      ov.path.should eq(file.path)
+      h.press(Termisu::Input::Key::Escape).should eq(:open)
+      h.rendered?("source path").should be_true
+      ov.path.should eq(file.path)
+    ensure
+      file.delete
+    end
+  end
+
+  it "places the caret in the field shown on each step" do
+    ov = ImportOverlay.new(:graphql)
+    h = OverlayHarness.new(ov)
+    h.type("/no/such/schema.json")
+    h.render
+    h.click_in_box(10, 3).should eq(:open)
+    h.type("X")
+    ov.path.should eq("X/no/such/schema.json")
+    h.press(Termisu::Input::Key::Enter)
+    h.type("https://api.test/graphql")
+    h.render
+    h.click_in_box(18, 3).should eq(:open)
+    h.type("X")
+    ov.endpoint.should eq("https://Xapi.test/graphql")
+    ov.path.should eq("X/no/such/schema.json")
   end
 
   it "renders the typed path inside the card" do

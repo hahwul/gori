@@ -80,7 +80,7 @@ gori run <subcommand> [verb] [options]
 | `probe rules` · `mode` | List / arm scan rules; get or set the scan mode |
 | `discover` | Spider and brute-force endpoints into the Sitemap |
 | `wordlist` (`list`) · `show` · `save` · `rename` · `delete` | The global wordlist catalog: named lists any `--wordlist` / `-w` takes by name (`delete` needs `--yes`) |
-| `import` | Bulk-import flows into History from a HAR / URL list / OpenAPI / Postman / Insomnia / Burp / WSDL file, or a curl command |
+| `import` | Bulk-import flows into History from a HAR / URL list / OpenAPI / Postman / Insomnia / Burp / WSDL / GraphQL introspection file, or a curl command |
 | `sitemap [QL]` | Host → path endpoint tree |
 | `sitemap tag` | Pin, clear, or list a free-text memo on a sitemap path |
 | `sitemap params [QL]` | Per-endpoint parameter inventory: names by location, counts, sample values, reflected values |
@@ -974,7 +974,7 @@ Connections are reused per origin by default, so a brute-force pass pays one TCP
 
 ### run wordlist
 
-The global wordlist catalog: named lists under `$GORI_HOME/wordlists` (`~/.gori/wordlists`), each a plain file. A name is accepted anywhere a wordlist path is (`fuzz -w`, `mine --wordlist`, `discover --wordlist`, `cookie --crack --wordlist`) from any working directory. A value with a `/` is a path and is read as given. A bare name is looked up in the current directory first, then in the catalog. Nothing here needs a project, and nothing sends a request. See the [guide](/guide/repeater-and-fuzzer/#wordlist-catalog) for the model.
+The global wordlist catalog: named lists under `$GORI_HOME/wordlists` (`~/.gori/wordlists`), each a plain file. A name is accepted anywhere a wordlist path is (`fuzz -w`, `mine --wordlist`, `discover --wordlist`, `cookie --crack --wordlist`, `jwt --crack --wordlist`) from any working directory. A value with a `/` is a path and is read as given. A bare name is looked up in the current directory first, then in the catalog. Nothing here needs a project, and nothing sends a request. See the [guide](/guide/repeater-and-fuzzer/#wordlist-catalog) for the model.
 
 ```bash
 gori run sitemap params --host api.example.com --format names | gori run wordlist save api-params.txt
@@ -1027,6 +1027,8 @@ gori run import --postman api.postman_collection.json --db ./assessment.db --for
 | `--insomnia=PATH` | An Insomnia v4 export (JSON) |
 | `--burp=PATH` | A Burp Suite item export (XML). Request and response, byte-exact |
 | `--wsdl=PATH` | A WSDL 1.1 service description (XML). One SOAP request template per operation |
+| `--graphql=PATH` | GraphQL introspection JSON (`data.__schema`). One POST template per query/mutation; subscriptions are omitted with a count |
+| `--endpoint=URL` | Required endpoint URL for `--graphql`; refused with other sources |
 | `--curl=PATH` | curl commands, one flow per request; `-` reads stdin (`pbpaste \| gori run import --curl -`). Ignored transport flags are named on stderr (`notes` in JSON) |
 | `--project=NAME` | Project to import into (default: the `GORI_PROJECT` or `project switch` project, else the most recently active one) |
 | `--db=PATH` | Explicit SQLite db file to import into (created if absent) |
@@ -1035,6 +1037,8 @@ gori run import --postman api.postman_collection.json --db ./assessment.db --for
 Import writes flows, so it resolves its target like `discover`: an explicit `--db` is created or reopened, and without one it writes into an existing project and does not create a default.
 
 A malformed entry is skipped and the rest of the file still imports. The result reports both counts (`{"count": 12, "attempted": 12, "skipped": 3}`), and `notes` says which line or entry each skip was and why (the first 20). When the project cannot commit every parsed flow (a busy or unwritable store), `count` is smaller than `attempted`, the text line says how many did not commit, and the command exits `1`. Re-run the import to retry them. Only `--har` and `--burp` carry responses. The rest import request templates that show as `Pending` in History until you send them.
+
+GraphQL example: `gori run import --graphql schema.json --endpoint https://api.example.com/graphql --db ./assessment.db`. Use `--graphql -` to read stdin instead. See the [GraphQL import limits](/guide/proxy/#import) and edit placeholders before replaying.
 
 ### run sitemap
 
@@ -1194,6 +1198,9 @@ gori run jwt eyJhbGci... --attacks --key ./public.pem
 | `--decode` | Decode header / payload / signature (default) |
 | `--encode` | Re-sign the token's claims with `--alg` and `--secret` / `--key`. With both `--header` and `--payload` no token is read, and with only one the other half is still taken from the `<token>` argument or STDIN (pass `""` or `</dev/null` to start it from `{}`) |
 | `--verify` | Check the token's signature against `--secret` / `--key` (one is required; `--secret ''` checks the empty secret). Prints `verified: yes\|no` and a `reason`, and exits 1 unless it verifies. `--format json` adds a `code` (`signature_mismatch`, `unsigned`, `alg_unsupported`, …) |
+| `--crack` | Search an HS256/HS384/HS512 token's secret offline; exits 0 on a hit, 1 on a miss or refusal. JSON: `{found, secret?, tried}`; unsigned/asymmetric/JWE tokens are refused |
+| `--secrets=LIST` | `--crack`: comma-separated candidate secrets, tried first |
+| `--wordlist=PATH` | `--crack`: newline-delimited file or saved list name; empty lines and spaces are preserved |
 | `--attacks` | Generate testing payloads (alg:none, weak-secret, header injection) |
 | `--alg=ALG` | Signing alg for `--encode`: `HS256` (default) \| `HS384` \| `HS512` \| `RS256/384/512` \| `PS256/384/512` \| `ES256/384/512` \| `EdDSA` \| `none` |
 | `--secret=SECRET` | HMAC secret, for an HS algorithm |
