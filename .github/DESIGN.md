@@ -6027,7 +6027,9 @@ per run, so a 250-send minimize or a long timing run held every other call (a re
 nothing could cancel it but the client's own `notifications/cancelled`. With `background:true` the call runs
 every refusal and gate as before, then answers a `bg_*` `job_id` and runs the rest on its own fiber. `get_job`
 returns the synchronous call's own Result once the run ends, and `stop_job` is the cancel: the run polls it
-where the synchronous call polls the cancel predicate (a race already on the wire finishes). No
+where the synchronous call polls the cancel predicate (a race already on the wire finishes). A stopped run's
+Result adds `incomplete_reason:"stopped"`, the field the other job kinds use, so a cut-short timing sample is
+not read as a full verdict; a finished run's is unchanged. No
 `*_start/_status/_stop` tools were added; the three declare `requires: get_job, stop_job` instead. The
 synchronous default is unchanged, and a running background call blocks a project switch like any job.
 

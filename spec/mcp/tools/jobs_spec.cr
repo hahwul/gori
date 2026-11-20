@@ -147,7 +147,9 @@ describe "MCP background calls" do
         stop = JSON.parse(bg_call(tools, "stop_job", %({"job_id":"#{job_id}","wait":true,"wait_timeout_ms":30000})).text)
         stop["status"].as_s.should eq("stopped")
         report = JSON.parse(bg_finished(tools, job_id).text)
-        report.as_h.keys.should eq(sync.as_h.keys)
+        # The synchronous document plus one field saying the sample was cut short.
+        report.as_h.keys.should eq(sync.as_h.keys + ["incomplete_reason"])
+        report["incomplete_reason"].as_s.should eq("stopped")
         report["iterations"].as_i.should be < 2000 if report["iterations"]?
       end
     ensure

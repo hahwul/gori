@@ -391,7 +391,7 @@ Every tool in `tools/list` carries `annotations.readOnlyHint`, so a client can t
 
 Tools run one at a time, in the order they arrive. A fuzz or a slow `send_request` does not overlap with the next call, and responses come back in order. Two messages are handled immediately regardless: `ping`, so a client's liveness probe never stalls behind a long call, and `notifications/cancelled`, which suppresses the response to a request you stopped waiting for. Cancelling `send_request` or `send_websocket` closes its active socket so a silent origin cannot hold the worker until the timeout. Tools with cooperative cancellation stop at their next check. Other in-progress calls finish before the worker takes the next queued call.
 
-`race_requests`, `timing_requests` and `minimize_repeater` also take `background:true`. The call is refused or gated exactly as without it, then returns a `bg_*` `job_id` at once, and the run goes on while the next calls are served. `get_job` returns the same result the synchronous call would have (`wait_ms` holds the read until the run ends), and `stop_job` cancels it at its next check. A race already on the wire finishes.
+`race_requests`, `timing_requests` and `minimize_repeater` also take `background:true`. The call is refused or gated exactly as without it, then returns a `bg_*` `job_id` at once, and the run goes on while the next calls are served. `get_job` returns the same result the synchronous call would have (`wait_ms` holds the read until the run ends), and `stop_job` cancels it at its next check. A stopped run's result also carries `incomplete_reason:"stopped"`. A race already on the wire finishes.
 
 ## Why an MCP Seam
 

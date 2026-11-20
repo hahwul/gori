@@ -366,12 +366,20 @@ module Gori
           err("tool error: #{ex.message}", "INTERNAL")
         end
         job.status = result.is_error ? :error : (job.stop_requested? ? :stopped : :done)
-        job.result = result
+        job.result = job.status == :stopped ? with_stop_reason(result) : result
         job.ended_at_ms = Time.utc.to_unix_ms
         # `call` logged the start; the outcome is logged here, as `call` logs a synchronous one.
         log_agent_action(job.tool, result.copy_with(event_note: "#{job.id} #{job.status}#{result.event_note.try { |n| ": #{n}" }}"))
       ensure
         finalize_job(job)
+      end
+
+      # A stopped run's document: the synchronous one plus `incomplete_reason:"stopped"`, the
+      # field every other job kind says it with, so a shortened timing sample is not read as a
+      # full verdict. A finished run's document is left byte for byte the synchronous one.
+      private def with_stop_reason(r : Result) : Result
+        return r unless r.text.starts_with?('{') && r.text.ends_with?('}') && r.text.size > 2
+        r.copy_with(text: r.text.rchop + %(,"incomplete_reason":"stopped"}))
       end
 
       # `get_job` on a `bg_*` id: the running status, or — once it ends — the tool's result.

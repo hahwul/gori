@@ -390,7 +390,7 @@ gori가 지원하지 않는 버전은 `-32022`와 지원 버전 목록으로 거
 
 도구는 도착한 순서대로 하나씩 실행됩니다. 퍼즈나 느린 `send_request`가 다음 호출과 겹치지 않고, 응답도 순서대로 돌아옵니다. 다만 `ping`은 긴 호출 뒤에 밀려 서버가 죽었다는 판정을 받지 않도록, `notifications/cancelled`는 취소한 요청의 응답을 보내지 않도록 즉시 처리합니다. `send_request`나 `send_websocket`을 취소하면 진행 중인 소켓을 닫으므로 응답하지 않는 대상이 타임아웃까지 워커를 붙잡지 않습니다. 협력적 취소를 지원하는 도구는 다음 취소 확인 지점에서 멈춥니다. 그 밖의 진행 중인 호출은 끝난 뒤 다음 대기 호출을 처리합니다.
 
-`race_requests`, `timing_requests`, `minimize_repeater`는 `background:true`도 받습니다. 호출은 이 인자가 없을 때와 똑같이 거부되거나 게이트를 거친 뒤 곧바로 `bg_*` `job_id`를 돌려주고, 실행은 다음 호출을 처리하는 동안 계속됩니다. `get_job`은 동기 호출이 돌려줬을 것과 같은 결과를 돌려주고(`wait_ms`를 주면 실행이 끝날 때까지 기다립니다), `stop_job`은 다음 확인 지점에서 실행을 취소합니다. 이미 전송된 race는 끝까지 갑니다.
+`race_requests`, `timing_requests`, `minimize_repeater`는 `background:true`도 받습니다. 호출은 이 인자가 없을 때와 똑같이 거부되거나 게이트를 거친 뒤 곧바로 `bg_*` `job_id`를 돌려주고, 실행은 다음 호출을 처리하는 동안 계속됩니다. `get_job`은 동기 호출이 돌려줬을 것과 같은 결과를 돌려주고(`wait_ms`를 주면 실행이 끝날 때까지 기다립니다), `stop_job`은 다음 확인 지점에서 실행을 취소합니다. 중지된 실행의 결과에는 `incomplete_reason:"stopped"`가 더 붙습니다. 이미 전송된 race는 끝까지 갑니다.
 
 ## MCP 이음새인 이유 {#why-an-mcp-seam}
 
