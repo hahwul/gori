@@ -61,19 +61,21 @@ module Gori
     # What `ranked` orders by, highest first.
     enum Rank
       Slowest # duration_us
-      Largest # response_size
+      Largest # request + response bytes, the `size` a row prints and `size:` filters on
 
       def column : String
-        slowest? ? "duration_us" : "response_size"
+        slowest? ? "duration_us" : "(request_size + COALESCE(response_size, 0))"
       end
     end
 
     # The flows matching `filter` (every flow when nil) ranked by `by`, highest first and ties
     # newest first: "the slowest request", "the largest response". An agent without it hunted
     # the slowest flow with `dur:>N` guesses, five calls for one row. A top-N, not a pager: a
-    # rank is not stable while capture appends, so it takes no cursor. Both columns sit in
+    # rank is not stable while capture appends, so it takes no cursor. Every column sits in
     # `idx_flows_list` (V37), so the sort reads that covering index, never a row's BLOB
-    # overflow chain. A flow with no response yet (NULL) ranks last. Raises on a failed query.
+    # overflow chain (the total costs ~1 ms more than `response_size` alone at 100k flows: the
+    # same scan and temp sort either way). A flow with no response yet ranks last by duration,
+    # and by its request bytes by size, as `size:` counts it. Raises on a failed query.
     def ranked(filter : QL::Filter?, by : Rank, limit : Int32, control : QueryControl? = nil) : Array(FlowRow)
       args = filter ? filter.args.dup : [] of DB::Any
       args << limit

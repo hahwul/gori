@@ -408,12 +408,13 @@ describe Gori::Tui::HistoryView do
           (0...12).map { |y| backend.row(y) }.join("\n")
         end
 
-        # Pending: no response, so both cells read whatever `Fmt` spells a missing value as —
-        # asked rather than written out, so this cannot pin a second spelling of that
-        # convention next to the one `Fmt` owns.
+        # Pending: DUR reads whatever `Fmt` spells a missing value as — asked rather than
+        # written out, so this cannot pin a second spelling of that convention next to the one
+        # `Fmt` owns — and SIZE reads the request bytes, the total `size:` counts so far.
         pending = draw.call
-        pending.should contain(Fmt.size(nil))
-        pending.should_not contain("3.5KB")
+        pending.should contain(Fmt.dur(nil))
+        pending.should contain(Fmt.size(store.recent_flows(1).first.size))
+        pending.should_not contain("3.6KB")
 
         store.update_response(Gori::Store::CapturedResponse.new(
           flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
@@ -422,8 +423,38 @@ describe Gori::Tui::HistoryView do
         view.reload(store)
 
         settled = draw.call
-        settled.should contain("3.5KB")
+        settled.should contain("3.6KB") # 41B request + 19B head + 3,600B body
         settled.should contain("42ms")
+      end
+    ensure
+      Gori::Settings.history_preview = prev
+    end
+  end
+
+  # SIZE is the number `size:` filters on and the CLI and MCP print as `size`: request +
+  # response bytes. It used to draw the response alone, so `size:<300` hid a row reading 240B.
+  it "draws SIZE as the request + response total that size: filters on" do
+    prev = Gori::Settings.history_preview
+    begin
+      Gori::Settings.history_preview = false
+      with_store do |store|
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "POST", target: "/total", http_version: "HTTP/1.1",
+          head: "POST /total HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice,
+          body: Bytes.new(2_000), body_size: 2_000_i64, source: Gori::FlowSource::Kind::Proxy))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
+          body: Bytes.new(100), body_size: 100_i64, duration_us: 1_000_i64))
+        view = HistoryView.new
+        view.reload(store)
+        row = store.recent_flows(1).first
+        backend = MemoryBackend.new(120, 12)
+        view.render_list(Screen.new(backend), Rect.new(0, 0, 120, 12))
+        list = (0...12).map { |y| backend.row(y) }.join("\n")
+        list.should contain(Fmt.size(row.size))
+        list.should_not contain(Fmt.size(row.response_size))
+        store.count_matching(Gori::QL.parse("size:=#{row.size}")).should eq(1)
       end
     ensure
       Gori::Settings.history_preview = prev

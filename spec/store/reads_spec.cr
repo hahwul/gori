@@ -82,7 +82,7 @@ describe Gori::Store do
   end
 
   describe "#ranked" do
-    it "returns the top flows by duration or response size, ties newest first, unanswered last" do
+    it "returns the top flows by duration or total size, ties newest first, unanswered last by duration" do
       with_store do |store|
         fast = seed_ranked_flow(store, "a.test", 5_000_i64, 900)
         slow = seed_ranked_flow(store, "a.test", 90_000_i64, 10)
@@ -93,6 +93,31 @@ describe Gori::Store do
         store.ranked(nil, Gori::Store::Rank::Largest, 1).map(&.id).should eq([fast])
         filter = Gori::QL.parse("host:a.test")
         store.ranked(filter, Gori::Store::Rank::Slowest, 2).map(&.id).should eq([slow, fast])
+      end
+    end
+
+    # "largest" means what `size:` and the printed `size` mean: request + response bytes. An
+    # upload with a tiny answer outranks a bigger answer to a GET, and a pending flow ranks
+    # by the request bytes it has.
+    it "ranks largest by the total size it prints, not the response alone" do
+      with_store do |store|
+        get = seed_ranked_flow(store, "a.test", 1_000_i64, 900)
+        upload = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "https", host: "a.test", port: 443,
+          method: "POST", target: "/up", http_version: "HTTP/1.1",
+          head: "POST /up HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice, body: Bytes.new(5_000),
+          body_size: 5_000_i64, source: Gori::FlowSource::Kind::Proxy))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: upload, status: 201, head: "HTTP/1.1 201 Created\r\n\r\n".to_slice,
+          body: Bytes.new(0), body_size: 0_i64, duration_us: 1_000_i64))
+        pending = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "https", host: "a.test", port: 443,
+          method: "POST", target: "/slow", http_version: "HTTP/1.1",
+          head: "POST /slow HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice, body: Bytes.new(2_000),
+          body_size: 2_000_i64, source: Gori::FlowSource::Kind::Proxy))
+        rows = store.ranked(nil, Gori::Store::Rank::Largest, 10)
+        rows.map(&.id).should eq([upload, pending, get])
+        rows.map(&.size).should eq(rows.map(&.size).sort!.reverse!)
       end
     end
   end

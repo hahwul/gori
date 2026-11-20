@@ -288,7 +288,7 @@ gori run history -q 'status:5xx' --limit 100 --format json
 | `-q`, `--query=QL` | Query-language filter (also accepted positionally) |
 | `-n`, `--limit=N` | Max rows (default 50) |
 | `--count` | Print how many flows match instead of listing them: a bare number, or `{"count": N}` under `--format json`/`jsonl`. Same filters as the listing (`-q`, `--view`, `--in-scope`, `--hide-static`), so the number and the rows agree. `--column`, `--no-columns`, `--format har` and `--redact` are refused beside it, and `-n` does not apply |
-| `--sort=RANK` | List the top `-n` matches by `slowest` (duration) or `largest` (response size) instead of newest first, ties newest first. A ranking, not a page. Refused beside `--count` and `--format har` |
+| `--sort=RANK` | List the top `-n` matches by `slowest` (duration) or `largest` (request + response bytes, the size the row prints) instead of newest first, ties newest first. A ranking, not a page. Refused beside `--count` and `--format har` |
 | `--view=NAME` | Apply a saved [view](#run-views). Its query is ANDed with `-q`, as the TUI's `v` picker layers over the filter bar. An unknown name is refused, and the error names the ones that exist. Listing and `--count` only |
 | `--in-scope` | Only flows in the project's configured scope: the TUI's `s` lens, opt-in and independent of whether that lens is enabled. Capture still records everything; empty when no scope rules exist |
 | `--hide-static` | Leave out images, fonts and audio/video: the TUI's [hide-static lens](/guide/proxy/#hide-static), the same as `-q -static:true`, and independent of whether that lens is on |
