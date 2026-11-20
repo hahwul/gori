@@ -6091,7 +6091,6 @@ cache result. `gori run cache-deception` validates every named flow before the f
 missing id refuses the whole run with `NOT_FOUND` in JSON mode. A present flow that cannot be
 replayed still remains a per-flow skip or failure, so one bad backend does not hide later results.
 
-
 ### 2026-11-20: JWT wordlist cracking shares Cookie's cooperative search (#1946)
 
 `Jwt.crack` parses a signed HS256/HS384/HS512 token once and searches literal inline or lazy
@@ -6106,3 +6105,67 @@ CLI `--crack` and MCP `jwt_crack` expose this separately from verification and a
 generation. It is pure read-only compute outside `@recon`. The TUI is intentionally deferred:
 JWT's SECRET belongs to ENCODE, while Cookie's crack gesture operates on DECODE's visible
 input and SECRET; adding that gesture honestly would need a layout decision.
+
+### 2026-11-20: the smuggling detector reaches 0.CL via the Expect timing probe (#1945)
+
+Extends the smuggling rule (`probe/active/request_smuggling.cr`) past the #1931 set with the
+`Expect: 100-continue` desync from the 2025 research (PortSwigger, *HTTP/1.1 Must Die*; HTTP Request
+Smuggler v3). The #1931 backbone decides it: the timing model is the spine, and a class is admitted
+only if a *conformant single server produces a different observation than a front/back split* — the
+test that made CL.0 differential-only.
+
+**0.CL-by-Expect fits the timing backbone, so it ships as a High timing lead.** The research's
+headline finding is that "simply sending a valid `Expect` header causes a 0.CL desync on numerous
+servers": a front-end that forwards the request but withholds the body (waiting for a `100 Continue`
+the back-end already consumed, or vice versa) deadlocks, while the back-end reads the body as the next
+request. gori crafts a **complete, cleanly-framed** POST — `Content-Length: 1`, a one-byte body —
+carrying `Expect: 100-continue` (and an obfuscated `Expect: y 100-continue`, which a front-end may pass
+through un-normalised). A conformant *single* server has every byte and answers fast, whether it sends
+an interim `100 Continue` first (skipped by `Repeater::Engine.read_response`'s 1xx loop) or ignores the
+header — so it is not flagged; only a split that withholds the body hangs past the threshold, measured
+2/2 against an **exact control**: the byte-for-byte same complete POST *without* the `Expect` header
+(`expect_control`, at `EXPECT_CONTROL_IDX`). The leads are offered only when that control answered fast,
+ok and complete, so a target merely slow on a body-bearing POST to `/` (an app, WAF or tarpit that
+treats bodies differently) cannot read as a desync — the control, not the CL:0 baseline, is what makes
+"only `Expect` can explain the hang" literally true. This clears the backbone test precisely because the
+body is complete: unlike a withheld-body probe (which a single server honouring the `Content-Length`
+would block on identically — the CL.0 problem), a hang here can only come from a tier that did not pass
+the body on. It rests on gori writing the whole request body up front and never waiting for a `100`
+itself (`Repeater::Engine.exchange`; P7 — the `Expect` bytes are the payload, not a client handshake),
+and on the reader skipping interim 1xx. Two timing variants join `H1_VARIANTS`
+(`request_smuggling_expect`, `request_smuggling_expect_obf`); the control and the `DIFF_*`/`CL0_*`
+pipeline offsets are derived from `H1_VARIANTS.size`, so they shift with them. A self-check
+(`expect_sendable?`) is the *inverse* of the CL/TE one — the Expect craft must **not** be framing-rejected
+(it is sent verbatim) and must still carry the `Expect` header — and it is ANDed into the shared
+`crafts_valid?`, so a codec that later stripped or rejected `Expect` makes the **whole h1 probe set**
+decline (NO-OP), not the Expect variants alone. Severity is High and the lead never borrows the CL.TE
+differential's confirm: an Expect hang proves a desync primitive, not an exploited poison, so its
+evidence never says "differential confirmed".
+
+One **residual false positive** survives the control and is deliberately accepted at this severity: a
+front-end that waits past the threshold for an upstream `100 Continue` and then forwards the body anyway
+is slow-*on-Expect*, not desynced, so its slowness is absent from the no-Expect control and `hung?`
+cannot tell a late-but-arriving response from a true deadlock. Such a target can raise the High lead. The
+evidence line reports a timing desync *primitive to verify*, never a confirmed or exploitable poison,
+which is why it is High (a lead) rather than Critical (a confirmed differential).
+
+**Declined, and why — so the question is not re-opened without new evidence.** A *standalone* 0.CL
+(plain visible `Content-Length`, no `Expect`) is not added: the front-end sees the header, so there is
+no 0.CL to detect; reaching it needs something that hides the length from the front-end — the
+visible/hidden (V-H / H-V) parser-discrepancy scan, a different detection shape (header-spelling fuzz +
+response diff) that is out of scope and belongs in its own issue — and the research's *reliable* 0.CL
+confirmation then needs a target-specific early-response gadget plus a double desync, which gori's
+synthetic `POST /` probe does not do and whose doubled connection state is a worse neighbour risk than a
+single prefix. An `Expect`-prefixed **differential** (the existing `CL.0`/`CL.TE` smuggle with an
+`Expect` prefix, for the Netlify-style CL.0-by-Expect case) is sound by construction (it fires only on a
+confirmed poison) but is also deferred: its added coverage over the plain differential is entirely
+target-dependent (only where `Expect` flips a framing the plain smuggle does not), nothing here can
+demonstrate it without live targets, and on an Expect-induced *deadlock* the smuggle POST itself hangs so
+its own confirm never arrives. It is a future issue, to be built against real evidence inside the
+unchanged aggressive+unsafe differential gate.
+
+The safety posture is unchanged: off by default, `allow_unsafe` required to plan at all, the front-end
+pre-filter still gates the probe, the complete-prefix differential stays behind aggressive+unsafe, and
+a variant not safely sendable on a flow's transport is not offered. The Expect probe is a self-damaging
+timing probe on gori's own fresh socket (it rides `followups`), so it smuggles nothing into a
+neighbour's request.

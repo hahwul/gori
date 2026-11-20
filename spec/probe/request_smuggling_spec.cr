@@ -77,15 +77,23 @@ private def r_reflects_canary : Gori::Repeater::Result
   Gori::Repeater::Result.new(head.to_slice, body.to_slice, nil, 100_000_i64)
 end
 
-# A full timing-layer result list: two fast baselines followed by the three variants' probe
-# pairs (each `pair` is a {a, b} tuple), then an optional differential {smuggle, benign}.
+# A full timing-layer result list: two fast baselines followed by the FIVE h1 variants' probe
+# pairs (each `pair` is a {a, b} tuple), then an optional differential {smuggle, benign}. The two
+# Expect pairs default to fast (a conformant server answers the complete POST promptly), so the
+# existing CL/TE tests read unchanged and the differential members still land at [12],[13].
 private def results_for(clte : {Gori::Repeater::Result, Gori::Repeater::Result},
                         tecl : {Gori::Repeater::Result, Gori::Repeater::Result},
                         tete : {Gori::Repeater::Result, Gori::Repeater::Result},
+                        expect : {Gori::Repeater::Result, Gori::Repeater::Result} = {r_fast, r_fast},
+                        expect_obf : {Gori::Repeater::Result, Gori::Repeater::Result} = {r_fast, r_fast},
+                        expect_control : Gori::Repeater::Result = r_fast,
                         baseline : Gori::Repeater::Result = r_fast,
                         baseline2 : Gori::Repeater::Result = r_fast,
                         diff : {Gori::Repeater::Result, Gori::Repeater::Result}? = nil) : Array(Gori::Repeater::Result)
-  out = [baseline, baseline2, clte[0], clte[1], tecl[0], tecl[1], tete[0], tete[1]]
+  # The no-Expect control sits at [12], right after the five variants' probe pairs, so the
+  # differential members still land at [13],[14] and an appended CL.0 pair at [15],[16].
+  out = [baseline, baseline2, clte[0], clte[1], tecl[0], tecl[1], tete[0], tete[1],
+         expect[0], expect[1], expect_obf[0], expect_obf[1], expect_control]
   if d = diff
     out << d[0] << d[1]
   end
@@ -130,13 +138,36 @@ describe Gori::Probe::Active::RequestSmuggling do
   # technique requires, with the exact chunk shapes the timing signal depends on.
   # ─────────────────────────────────────────────────────────────────────────────
   describe "craft" do
-    it "builds a benign, cleanly-framed baseline and 3×2 timing probes" do
+    it "builds a benign baseline, 5×2 timing probes and the Expect control" do
       plan = rule.plan(frontended_detail, UNSAFE).not_nil!
       # baseline (plan.request) is a benign CL:0 POST — framing is NOT ambiguous.
       framing_raises?(plan.request).should be_false
       String.new(plan.request).should contain("Content-Length: 0")
-      # followups = [baseline2, clte, clte, tecl, tecl, tete, tete]
-      plan.followups.size.should eq(7)
+      # followups = [baseline2, clte×2, tecl×2, tete×2, expect×2, expect_obf×2, expect_control]
+      plan.followups.size.should eq(12)
+      # The control (last followup) is the Expect probe MINUS the Expect header: same complete POST.
+      ctl = String.new(plan.followups[11])
+      ctl.should contain("Content-Length: 1")
+      ctl.should end_with("\r\n\r\nX")
+      ctl.should_not contain("Expect")
+    end
+
+    it "makes the Expect probes COMPLETE (not framing-rejected) and Expect-bearing" do
+      plan = rule.plan(frontended_detail, UNSAFE).not_nil!
+      expect = plan.followups[7]
+      s = String.new(expect)
+      s.should contain("Content-Length: 1")
+      s.should contain("Expect: 100-continue")
+      s.should end_with("\r\n\r\nX") # the full one-byte body is present
+      # A clean, complete POST — gori sends it VERBATIM, it is NOT a framing reject like CL.TE.
+      framing_raises?(expect).should be_false
+      obfuscated?(expect).should be_false
+
+      expect_obf = plan.followups[9]
+      obf = String.new(expect_obf)
+      obf.should contain("Expect: y 100-continue") # unrecognised expectation, un-normalised
+      obf.should contain("Content-Length: 1")
+      framing_raises?(expect_obf).should be_false
     end
 
     it "makes the CL.TE probe raise the CL+TE rejection with a lone incomplete chunk" do
@@ -300,6 +331,66 @@ describe Gori::Probe::Active::RequestSmuggling do
     it "DECLINES a variant on jitter (only one of its two probes hung)" do
       res = results_for(clte: {r_hung, r_fast}, tecl: {r_fast, r_fast}, tete: {r_fast, r_fast})
       rule.detections_all(plan, res, detail).should be_empty
+    end
+
+    # ── 0.CL-by-Expect (timing lead; complete body, so a conformant single server is fast) ────────
+    it "fires the Expect lead High when BOTH its probes hung against a fast baseline" do
+      res = results_for(clte: {r_fast, r_fast}, tecl: {r_fast, r_fast}, tete: {r_fast, r_fast},
+        expect: {r_hung, r_hung})
+      dets = rule.detections_all(plan, res, detail)
+      dets.map(&.code).should eq(["request_smuggling_expect"])
+      dets[0].severity.should eq(S::Severity::High)
+      dets[0].evidence.not_nil!.should contain("2/2")
+    end
+
+    it "fires the obfuscated-Expect lead on a timed_out probe pair" do
+      res = results_for(clte: {r_fast, r_fast}, tecl: {r_fast, r_fast}, tete: {r_fast, r_fast},
+        expect_obf: {r_timed_out, r_timed_out})
+      rule.detections_all(plan, res, detail).map(&.code).should eq(["request_smuggling_expect_obf"])
+    end
+
+    it "does NOT fire Expect when the complete POST answers fast (conformant server, or a 100-continue it skipped)" do
+      # A conformant single server has every byte: it answers fast whether it sent an interim
+      # 100 Continue (skipped by the reader) or ignored the Expect header. Fast ⇒ no desync lead.
+      res = results_for(clte: {r_fast, r_fast}, tecl: {r_fast, r_fast}, tete: {r_fast, r_fast},
+        expect: {r_fast, r_fast}, expect_obf: {r_fast, r_fast})
+      rule.detections_all(plan, res, detail).should be_empty
+    end
+
+    it "DECLINES the Expect lead on jitter (only one of its two probes hung)" do
+      res = results_for(clte: {r_fast, r_fast}, tecl: {r_fast, r_fast}, tete: {r_fast, r_fast},
+        expect: {r_hung, r_fast})
+      rule.detections_all(plan, res, detail).should be_empty
+    end
+
+    it "DECLINES the Expect lead when the no-Expect CONTROL also hung (slow body-bearing POST, not a desync)" do
+      # Both Expect probes hung, but so did the identical POST without Expect — so the hang is the
+      # target being slow on a body-bearing POST to `/`, not the Expect header. No finding.
+      res = results_for(clte: {r_fast, r_fast}, tecl: {r_fast, r_fast}, tete: {r_fast, r_fast},
+        expect: {r_hung, r_hung}, expect_obf: {r_hung, r_hung}, expect_control: r_hung)
+      rule.detections_all(plan, res, detail).should be_empty
+    end
+
+    it "DECLINES the Expect lead when the control errored or came back incomplete (no usable anchor)" do
+      res = results_for(clte: {r_fast, r_fast}, tecl: {r_fast, r_fast}, tete: {r_fast, r_fast},
+        expect: {r_hung, r_hung}, expect_control: r_error)
+      rule.detections_all(plan, res, detail).should be_empty
+      res2 = results_for(clte: {r_fast, r_fast}, tecl: {r_fast, r_fast}, tete: {r_fast, r_fast},
+        expect: {r_hung, r_hung}, expect_control: r_incomplete)
+      rule.detections_all(plan, res2, detail).should be_empty
+    end
+
+    it "keeps the Expect lead High and UNconfirmed even when the CL.TE differential confirms" do
+      # A confirmed CL.TE poison escalates the CL.TE finding to Critical, but the Expect lead is a
+      # different class: it must stay High and its evidence must NOT claim a differential it never ran.
+      res = results_for(clte: {r_fast, r_fast}, tecl: {r_fast, r_fast}, tete: {r_fast, r_fast},
+        expect: {r_hung, r_hung}, diff: {r_ok_complete, r_reflects_canary})
+      dets = rule.detections_all(plan, res, detail)
+      expect_det = dets.find { |d| d.code == "request_smuggling_expect" }.not_nil!
+      expect_det.severity.should eq(S::Severity::High)
+      expect_det.evidence.not_nil!.should_not contain("differential confirmed")
+      # The CL.TE leg still confirms independently (Critical), proving the two did not merge.
+      dets.find { |d| d.code == "request_smuggling_clte" }.not_nil!.severity.should eq(S::Severity::Critical)
     end
 
     it "DECLINES the whole flow on a slow/unstable baseline (a hang is not attributable)" do

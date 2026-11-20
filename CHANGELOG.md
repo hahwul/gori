@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Probe: the request-smuggling rule adds the 0.CL-by-`Expect: 100-continue` desync (plain and obfuscated) as a High timing lead, sent as a complete POST so a conformant server answers fast and only a front-end/back-end split hangs; still off by default and behind unsafe (#1945).
+
 - Import GraphQL introspection JSON (`data.__schema` or top-level `__schema`) into unsent POST templates, one per query or mutation, with typed variables and bounded selections from the TUI, CLI and MCP; subscriptions are omitted with a count (#1948).
 
 - MCP: `list_issues` exports Markdown and SARIF reports, and `get_flow` exports curl, Python, fetch, Go, httpie and CSRF PoCs, with credential and body redaction and read-only access. Reports page whole issues within 64 KiB and mark shortened evidence separately (#1947).

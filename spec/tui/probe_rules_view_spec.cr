@@ -61,7 +61,7 @@ describe Gori::Tui::ProbeRulesView do
     rules_store do |store|
       view = Gori::Tui::ProbeRulesView.new
       view.reload(store)
-      row = find_row(view, "HTTP request smuggling / desync (CL.TE/TE.CL/TE.TE, CL.0, H2.CL/H2.TE)").not_nil!
+      row = find_row(view, "HTTP request smuggling / desync (CL.TE/TE.CL/TE.TE, 0.CL-by-Expect, CL.0, H2.CL/H2.TE)").not_nil!
       row.enabled?.should be_false
       row.note.should eq("opt-in")
     end

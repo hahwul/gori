@@ -37,7 +37,7 @@ gori에는 수동 테스트와 나란히 돌아가는 자동 분석 기능이 �
 
 일부 액티브 룰은 나머지와 다르게 동작하며, Rules 서브탭의 해당 행에 표시됩니다.
 
-- **HTTP 요청 스머글링**(CL.TE / TE.CL / TE.TE 디싱크)은 기본값이 **비활성**입니다. POST 본문과 함께 불완전한 프레이밍 프로브를 보내고 프런트엔드/백엔드 디싱크를 응답 지연(hang)으로 확인하는데, 여기 있는 어떤 룰보다 대상에 부담이 큽니다. 행에는 `opt-in` 배지가 붙습니다. `gori run probe rules enable request_smuggling`으로 켜고, 차분 확인은 `--aggressive --unsafe` 단계로 읽으세요. 프로브가 모두 POST이므로, 활성화해도 unsafe 메서드(팝업의 옵트인, `--unsafe`, AGGRESSIVE) 없이는 프로브를 만들지 않습니다.
+- **HTTP 요청 스머글링**(CL.TE / TE.CL / TE.TE, 0.CL-by-Expect, CL.0, H2.CL / H2.TE 다운그레이드 디싱크)은 기본값이 **비활성**입니다. POST 본문과 함께 불완전한 프레이밍 프로브(또는 완전한 `Expect: 100-continue` POST)를 보내고 프런트엔드/백엔드 디싱크를 응답 지연(hang)으로 표시하는데, 여기 있는 어떤 룰보다 대상에 부담이 큽니다. 행에는 `opt-in` 배지가 붙습니다. `gori run probe rules enable request_smuggling`으로 켜고, 차분 확인은 `--aggressive --unsafe` 단계로 읽으세요. 프로브가 모두 POST이므로, 활성화해도 unsafe 메서드(팝업의 옵트인, `--unsafe`, AGGRESSIVE) 없이는 프로브를 만들지 않습니다.
 - **시간 기반 블라인드 SQL 인젝션**(`sqli_time_based`)도 확인 단계마다 몇 초씩 기다리므로 기본값이 **비활성**입니다. Rules 서브탭이나 `gori run probe rules enable sqli_time_based`로 켜세요. 깨끗한 baseline 두 번에 이어 2초와 4초 지연을 주입하고(기본은 MySQL `SLEEP`, AGGRESSIVE에서는 `pg_sleep`과 `WAITFOR DELAY`도), 응답 시간이 요청한 지연에 비례해 늘어날 때만 보고하므로 그저 느린 엔드포인트에는 걸리지 않습니다. 두 baseline부터 신호만큼 벌어지는 엔드포인트는 건너뜁니다.
 - **대역 외 룰**(블라인드 SSRF, 블라인드 OS 커맨드 인젝션, XML 외부 엔티티, 원격 파일 포함)은 기본값이 **활성이지만 작동하지 않는** 상태입니다. 프로젝트에 등록된 OAST 리스너가 있어야 페이로드를 만들어 보냅니다. 그전까지는 행에 `needs OAST` 배지가 붙고 그 요청 비용이 추정치에서 빠집니다.
 
