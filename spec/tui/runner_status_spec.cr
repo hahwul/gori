@@ -162,10 +162,12 @@ end
 # A dead upstream proxy is said once (`Runner#drain_unreachable_upstreams`): the status row
 # keeps the address, the notification names the setting that chose it.
 describe "Runner.upstream_down_toast" do
-  it "names the proxy and fits 80×24's 59 columns with its ✗" do
-    toast = Runner.upstream_down_toast("upstream SOCKS5 proxy 255.255.255.255:65535")
-    toast.should eq("upstream SOCKS5 proxy 255.255.255.255:65535 unreachable")
-    ("✗ " + toast).size.should be <= 59
+  it "puts the verdict inside 80×24's 59 columns with its ✗, so a clip cuts the host" do
+    toast = Runner.upstream_down_toast("upstream HTTPS proxy proxy.corp.example.com:8080")
+    toast.should eq("unreachable: upstream HTTPS proxy proxy.corp.example.com:8080")
+    # A long host overflows the row; Screen#text clips the end to 58 columns plus `…`.
+    Screen.display_width("✗ " + toast).should be > 59
+    ("✗ " + toast)[0, 58].should contain("unreachable")
     Runner.upstream_down_note("upstream HTTP proxy 127.0.0.1:3128 (network.upstream_proxy)")
       .should start_with("upstream HTTP proxy 127.0.0.1:3128 (network.upstream_proxy) is unreachable")
   end

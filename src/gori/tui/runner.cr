@@ -4739,9 +4739,10 @@ module Gori::Tui
       fresh
     end
 
-    # The status row keeps the proxy's address; the setting that chose it is in the note.
+    # Verdict first: a clip at the status row's 59 columns cuts the host, never "unreachable".
+    # The setting that chose the proxy is in the note.
     def self.upstream_down_toast(label : String) : String
-      "#{label} unreachable"
+      "unreachable: #{label}"
     end
 
     # `via`: `Upstream.via`'s line, `upstream HTTP proxy h:p (network.upstream_proxy)`.
