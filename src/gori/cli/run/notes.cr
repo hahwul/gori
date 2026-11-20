@@ -138,6 +138,9 @@ module Gori
         # With --id there is no <n>, so a word left over would be read as the text: `update 3
         # --id 7` would overwrite note 7 with "3". Refused, as `notes delete` refuses the pair.
         abort "gori run notes update: pass <n> or --id ID, not both (with --id, give the text as --text or on STDIN)" if note_id && !positional.empty?
+        # `--position N` takes <n>'s place, so a leading number is a second <n>, not text:
+        # `update 2 --position 3 hello` wrote "2 hello" into note 3.
+        abort "gori run notes update: pass <n> or --position N, not both (with --position, give text that starts with a number as --text)" if position && positional.first?.try(&.to_i?)
         # `--position N` takes the place of <n>, so the words after it are all text.
         n = note_id ? nil : (position || parse_note_index(positional.first?) || abort "gori run notes update: missing <n> (or --id ID)")
         body = note_update_text(text, n && !position ? positional[1..] : positional)
