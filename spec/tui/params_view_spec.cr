@@ -65,6 +65,12 @@ describe ParamsView do
     v.rows.map(&.name).should eq(["q"])
     pv_type(v, "zz")
     pv_render_framed(v)[4].should contain("no parameters match")
+    # At rest `esc` is params.to-menu, not a clear: the line names the key that edits it.
+    v.handle_filter_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter, Termisu::Input::Modifier::None, nil))
+    v.set_registry(Gori::Verbs.registry)
+    line = pv_render_framed(v)[3]
+    line.should contain("no parameters match “/searzz” — / edits the filter")
+    line.should_not contain("esc")
   end
 
   it "lists the inventory under a summary and column headings" do

@@ -26,6 +26,7 @@ module Gori::Tui
     def initialize(host : Host, @sitemap : SitemapView = SitemapView.new)
       super(host)
       @params = ParamsView.new
+      @params.set_registry(@host.session.registry)
       @results = Channel({Int64, ParamInventory::Report?, String?}).new(1)
     end
 

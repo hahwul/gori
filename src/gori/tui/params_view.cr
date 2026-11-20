@@ -53,6 +53,11 @@ module Gori::Tui
     getter filter : RowFilter
     property? scanning : Bool = false
     property? all_headers : Bool = false
+    @registry : Verb::Registry? = nil
+
+    def set_registry(registry : Verb::Registry) : Nil
+      @registry = registry
+    end
 
     def initialize
       @report = nil
@@ -259,7 +264,11 @@ module Gori::Tui
     private def empty_note : String
       return "scanning captured requests…" if scanning? && @report.nil?
       return "press ^R to scan the captured requests for parameters" unless r = @report
-      return @filter.no_match_line("parameters") if @filter.active? && !@scoped.empty?
+      # Not "esc to clear": `esc` at rest is `params.to-menu` here, and the query stays.
+      if @filter.active? && !@scoped.empty?
+        remedy = "{params.filter} edits the filter"
+        return @filter.no_match_line("parameters", @registry.try { |reg| Hotkeys.expand(reg, remedy) } || remedy)
+      end
       return "no parameters on #{@target.try(&.label)} — esc clears the filter to show every endpoint" if @target && !r.rows.empty?
       "no parameters in #{Fmt.count(r.flows_scanned)} flows read (the Sitemap query and scope lens apply)"
     end

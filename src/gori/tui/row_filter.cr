@@ -117,9 +117,10 @@ module Gori::Tui
       "type to filter · ↵ keep · esc clear"
     end
 
-    # The empty-state line for a pane whose source has rows but none match.
-    def no_match_line(noun : String) : String
-      "no #{noun} match “#{text.strip}” — esc to clear"
+    # The empty-state line for a pane whose source has rows but none match. `remedy` is for a
+    # pane whose `esc` at rest does something else.
+    def no_match_line(noun : String, remedy : String = "esc to clear") : String
+      "no #{noun} match “#{text.strip}” — #{remedy}"
     end
   end
 end
