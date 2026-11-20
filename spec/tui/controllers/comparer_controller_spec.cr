@@ -48,3 +48,23 @@ describe "temporary comparisons on project exit" do
     end
   end
 end
+
+# The arrows point at the chips they pick: `←` REQ, `→` RES. Both used to toggle, so `→` on
+# RES jumped left.
+describe "ComparerController ←/→" do
+  it "selects REQ on ← and RES on →, staying put when already there" do
+    with_comparer_controller do |ctl|
+      left = Termisu::Event::Key.new(Termisu::Input::Key::Left)
+      right = Termisu::Event::Key.new(Termisu::Input::Key::Right)
+      ctl.view.pane.should eq(:response)
+      ctl.handle_body_key(right).should be_true
+      ctl.view.pane.should eq(:response)
+      ctl.handle_body_key(left).should be_true
+      ctl.view.pane.should eq(:request)
+      ctl.handle_body_key(left).should be_true
+      ctl.view.pane.should eq(:request)
+      ctl.handle_body_key(right).should be_true
+      ctl.view.pane.should eq(:response)
+    end
+  end
+end
