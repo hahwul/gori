@@ -6030,6 +6030,7 @@ returns the synchronous call's own Result once the run ends, and `stop_job` is t
 where the synchronous call polls the cancel predicate (a race already on the wire finishes). No
 `*_start/_status/_stop` tools were added; the three declare `requires: get_job, stop_job` instead. The
 synchronous default is unchanged, and a running background call blocks a project switch like any job.
+
 ### 2026-11-20: the regex budget is thread CPU time, not wall time (#1944)
 
 Refines: 2026-10-11 ("operator- and agent-authored regexes are budgeted by time"). The budget,
@@ -6048,6 +6049,7 @@ The ReDoS bound is the same in CPU time, so an uncontended trip is unchanged. On
 the wall time until a trip grows with the thread's lost share. CPU another fiber spends inside
 an armed block still counts, as before, so blocks stay free of yields. A slower core (macOS
 background QoS on efficiency cores) is real CPU and still trips a long legitimate Replace.
+
 ### 2026-11-20: OAST callbacks show the local time History shows (#1944)
 
 The callbacks list has a `TIME` cell and the detail's meta line reads the same local `MM-DD HH:MM:SS`
