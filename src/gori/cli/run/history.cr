@@ -360,6 +360,8 @@ module Gori
         count_only = false
         limit_given = false
         rank = nil.as(Store::Rank?)
+        since_id = nil.as(Int64?)
+        before_id = nil.as(Int64?)
         redaction = RedactFlags.new
 
         args = normalize_query_flag(args)
@@ -374,6 +376,8 @@ module Gori
           p.on("--sort=RANK", "List the top -n matches by slowest (duration) or largest (request + response bytes) instead of newest first") do |v|
             rank = Store::Rank.parse?(v) || abort("gori run history: --sort is slowest or largest, got #{v.inspect}")
           end
+          p.on("--since=ID", "Tail newer: only flows with id > ID, OLDEST first (0 = from the start). Pass the last row's id back for the next page") { |v| since_id = history_cursor(v, "--since") }
+          p.on("--before-id=ID", "Page older: only flows with id < ID, newest first. Pass the last row's id back for the next page") { |v| before_id = history_cursor(v, "--before-id") }
           p.on("--view=NAME", "Apply a saved History view — ANDed with -q, like the TUI's `v` picker (see `gori run views`)") { |v| view_name = v }
           p.on("--in-scope", "Only flows in the project's configured scope (the TUI's `s` lens; capture still records everything)") { in_scope = true }
           p.on("--hide-static", "Leave out static assets — images, fonts, media (the TUI's hide-static lens; same as -q -static:true)") { hide_static = true }
@@ -408,6 +412,9 @@ module Gori
         # `--count` prints a number (#1648); the flags that shape ROWS contradict it. Before the
         # `--redact` refusal below, which would otherwise send `--count --redact` to `--format har`.
         abort "gori run history: --sort ranks a listing, and a HAR log is written oldest first — drop one" if rank && format == :har
+        if err = history_cursor_clash(since_id, before_id, rank, count_only)
+          Run.usage_abort(err)
+        end
         if count_only
           abort "gori run history: --sort ranks rows and --count prints none — pass one" if rank
           if err = history_count_clash(column_specs, no_columns, format, !redaction.mode.nil?, include_sensitive)
@@ -449,6 +456,12 @@ module Gori
         # exactly what `fts_backlog_error` refuses to let a one-shot answer do.
         with_store(resolve_read_project(proj.name, proj.db),
           read_only: !query_uses_fts?(query) && view_name.nil?) do |store|
+          # Judged against the highest id this project has EVER issued, as MCP `list_history`
+          # judges `since`: a cursor at a deleted flow still tails, one past the mark was not
+          # issued here and would answer `[]` until capture climbed past it.
+          if (cur = since_id) && cur > 0 && (issued = store.flow_id_high_water) && cur > issued
+            Run.usage_abort("gori run history: --since #{cur} is ahead of every flow id this project has issued (#{issued}) — restart from --since 0", store: store)
+          end
           # The scope lens, opt-in and independent of the persisted `s` flag — the same per-flow
           # include/exclude filter the TUI History lens applies, so `--in-scope` here shows the
           # same set. Capture is untouched; this narrows only the VIEW. Empty (nothing in scope)
@@ -566,17 +579,19 @@ module Gori
               end
             elsif c = combined
               begin
-                store.search(c, limit_probe(limit), raise_on_error: true)
+                store.search(c, limit_probe(limit), before_id, since_id, raise_on_error: true)
               rescue ex
                 abort_closing(store, "gori run history: #{failed} failed: #{ex.message}")
               end
             else
-              store.recent_flows(limit_probe(limit))
+              store.recent_flows(limit_probe(limit), before_id, since_id)
             end
           # The over-read row is the CUT, not a row to print — drop it before anything reads
           # `rows` (the HAR writer, the per-row `--column` reads and the counts all take the
           # page).
           rows, truncated = limit_page(rows, limit)
+          cursor_flag = since_id ? "--since" : before_id ? "--before-id" : nil
+          cursor_note = since_id.try { |sid| "after id #{sid}" } || before_id.try { |bid| "before id #{bid}" }
           # Ad-hoc `--column` specs REPLACE the project's set rather than adding to it: the flag
           # is the operator saying "this listing, these values", and a set half-configured in
           # the TUI and half on the command line is a row whose meaning depends on a file the
@@ -609,18 +624,20 @@ module Gori
             # `--format har` run in any project that has a column, which is stderr noise in a
             # script rather than a warning about anything they did.
             STDERR.puts "gori run history: --column is not carried by --format har (the values are in each entry's headers/content)" unless column_specs.empty?
-            emit_har(store, rows, query, view_label, limit, truncated, redaction, hide_static)
+            # `emit_har` writes the page oldest first by reversing a newest-first one; a
+            # `--since` page already is oldest first.
+            emit_har(store, since_id ? rows.reverse : rows, query, view_label, limit, truncated, redaction, hide_static)
           elsif format.in?(:json, :jsonl)
             # Said on STDERR in the streaming formats too, for the reason the empty note below
             # gives: STDOUT is a pipe, and the consumer reading it cannot see the flags the
             # command was invoked with.
-            (note = history_truncation_note(truncated, limit, rank)) && STDERR.puts("gori run history: #{note}")
+            (note = history_truncation_note(truncated, limit, rank, cursor_flag)) && STDERR.puts("gori run history: #{note}")
             # The same sentence the text and HAR branches print, on the same channel. JSON-Lines
             # answered an empty listing with ZERO bytes and a silent STDERR — so "I saw no
             # traffic" and "a standing --view/--in-scope lens excluded all of it" read identically
             # to the one consumer that cannot see the flags it was invoked with. STDOUT stays a
             # pure stream either way (this is STDERR), so a pipe is unaffected.
-            STDERR.puts empty_listing_note(query, view_label, in_scope, hide_static) if rows.empty?
+            STDERR.puts empty_listing_note(query, view_label, in_scope, hide_static, cursor_note) if rows.empty?
             # One extra read per row for the head the projection does not carry — that is what
             # buys `headers` on the row (`Output.flow_row_fields`). Heads are small and
             # this streams row by row, so a large `-n` costs queries, not memory.
@@ -652,9 +669,9 @@ module Gori
               end
             end
           elsif rows.empty?
-            STDERR.puts empty_listing_note(query, view_label, in_scope, hide_static)
+            STDERR.puts empty_listing_note(query, view_label, in_scope, hide_static, cursor_note)
           else
-            (note = history_truncation_note(truncated, limit, rank)) && STDERR.puts("gori run history: #{note}")
+            (note = history_truncation_note(truncated, limit, rank, cursor_flag)) && STDERR.puts("gori run history: #{note}")
             # `include_sensitive: true` on purpose — the text listing is out of #1002's scope
             # (it is the interactive read, not the feed a script or an agent captures) and the
             # note above promises the flag changes `--format json` alone. Stated at the call
@@ -689,6 +706,29 @@ module Gori
         choice = redact_choice(store, redaction)
         choice.error.try { |e| return "gori run history: #{e}" }
         choice.matcher
+      end
+
+      # A non-negative flow id: `--since 0` tails from the first flow.
+      private def self.history_cursor(v : String, flag : String) : Int64
+        n = v.to_i64?
+        usage_abort "gori run history: invalid #{flag} #{v.inspect} (expected a flow id, 0 or more)" unless n && n >= 0
+        n
+      end
+
+      # Why the cursor flags cannot run as given, or nil. Split out because `abort` is not
+      # spec-able. The clashes MCP `list_history` refuses: one direction at a time, and neither
+      # beside a ranking or a count, which have no page to continue.
+      def self.history_cursor_clash(since_id : Int64?, before_id : Int64?, rank : Store::Rank?,
+                                    count_only : Bool) : String?
+        return unless since_id || before_id
+        flag = since_id ? "--since" : "--before-id"
+        if since_id && before_id
+          "gori run history: pass only one of --since (tail newer, oldest first) or --before-id (page older, newest first)"
+        elsif rank
+          "gori run history: --sort returns a ranking with no page to continue, so #{flag} does not apply — drop one"
+        elsif count_only
+          "gori run history: --count counts every match, so #{flag} does not apply — drop one"
+        end
       end
 
       # Why `--count` cannot run beside these flags, or nil (#1648). Split out of
@@ -779,8 +819,8 @@ module Gori
       # Public for the reason `view_row` is: the command ends in `exit`, so the printed shape is
       # the only part of it a spec can pin.
       def self.empty_listing_note(query : String?, view : String?, in_scope : Bool,
-                                  hide_static : Bool = false) : String
-        scoped = in_scope ? " in scope" : ""
+                                  hide_static : Bool = false, cursor : String? = nil) : String
+        scoped = "#{cursor.try { |c| " #{c}" }}#{in_scope ? " in scope" : ""}"
         viewed = view ? " in the #{view.inspect} view" : ""
         static = hide_static ? " (static assets hidden)" : ""
         hint = query.try { |q| QL.missing_colon_hint(q) }.try { |h| " (#{h})" }
@@ -800,8 +840,16 @@ module Gori
       # there IS more and which flag moves it, which the over-read below establishes exactly.
       #
       # Pure and public for the reason `empty_listing_note` is: the command ends in `exit`.
-      def self.history_truncation_note(truncated : Bool, limit : Int32, rank : Store::Rank? = nil) : String?
+      #
+      # `cursor` is the cursor flag the page was read with: that page continues from its own
+      # last row, so that is the move to name, and a `--since` page holds the OLDEST rows.
+      def self.history_truncation_note(truncated : Bool, limit : Int32, rank : Store::Rank? = nil,
+                                       cursor : String? = nil) : String?
         return nil unless truncated
+        if cursor
+          return "showing the #{cursor == "--since" ? "oldest" : "newest"} #{limit} — more rows match. " \
+                 "Pass the last row's id back as #{cursor} for the next page."
+        end
         "showing the #{rank.try(&.to_s.downcase) || "newest"} #{limit} — more rows match. Raise -n/--limit, or narrow with -q."
       end
 

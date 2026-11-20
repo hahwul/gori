@@ -175,7 +175,7 @@ module Gori
       # `--record-history` and `--regex`, which take a value in one subcommand and none in another.
       private VALUE_FLAGS = Set.new(%w[
         -b -d -f -H -l -n -o -p -q -r -s -t -v -w -X
-        --alg --algorithm --assert --auto-reply --bind-from --body --body-file --browser
+        --alg --algorithm --assert --auto-reply --before-id --bind-from --body --body-file --browser
         --brute --bucket --burp --ca-dir --case --category --cluster --code --color --column
         --concurrency --containment --context --cookie --copy-header --curl --cvss --data
         --db --delay --description --detail --detail-file --device-port --direction --export
@@ -197,7 +197,7 @@ module Gori
         --region --remote-debugging-port --remove --repeater --request --request-file
         --request-raw --respond --response-file --retries --rm-header --role --rule --salt
         --samples --scope --secret --secrets --selector --serial --server --session --set
-        --set-header --severity --shell --side --slot --sni --sort --sse-events --sse-time
+        --set-header --severity --shell --side --since --slot --sni --sort --sse-events --sse-time
         --status --stop-after-matches --stop-on --strip-prefix --style --suffix --tag --tags
         --target --text --throttle --timeout --timestamp --title --tls-preset --to --to-db
         --token --token-cookie --token-header --tokens --type --unpack --url --urls --value
