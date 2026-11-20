@@ -188,7 +188,8 @@ module Gori
           "issue, with a SHA-256 per message. Do it the moment a response proves a finding: a " \
           "tab's next send and flow retention replace live copies; a frozen one never changes. " \
           "Refused: a never-sent tab, or one whose request was edited after its response — " \
-          "re-send, or set allow_drift. `link` (default true) also files the add_link link." do |s|
+          "re-send, or set allow_drift. A duplicate returns already_frozen:true. " \
+          "`link` (default true) also files the add_link link." do |s|
           s.field "issue_id", intprop("the issue that owns the copy"), required: true
           s.field "ref_kind", enumprop("what to copy from", FREEZE_SOURCES), required: true
           s.field "ref_id", intprop("the flow or repeater id"), required: true

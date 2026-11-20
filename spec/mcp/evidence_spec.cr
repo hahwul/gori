@@ -74,6 +74,12 @@ describe "MCP frozen evidence" do
     end
   end
 
+  it "describes the already_frozen result in the tool catalogue" do
+    catalogue = JSON.parse(Gori::MCP::Tools.catalogue_json(nil, true))
+    description = catalogue.as_a.find { |tool| tool["name"].as_s == "freeze_evidence" }.not_nil!["description"].as_s
+    description.should contain("already_frozen")
+  end
+
   it "marks a frozen flow source detached after History reuses its id" do
     with_store do |store|
       fid = mcp_seed_flow(store, "acme.test", "GET", "/original", 200)
