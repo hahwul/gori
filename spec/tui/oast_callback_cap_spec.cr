@@ -251,6 +251,30 @@ describe "Gori::Tui::OastController — the CALLBACKS table on a narrow pane" do
       row.should contain(".oast.test") # the destination survives beside the provider
     end
   end
+
+  # A callback is matched to the send that caused it by time, so the list carries History's
+  # local stamp before PROVIDER, and the detail says the same local time (not UTC RFC 3339).
+  # TIME takes only what DESTINATION does not need, so at 80 columns the destination keeps
+  # its width and TIME is what goes.
+  it "shows the local receive time before PROVIDER, yielding it first on a narrow pane" do
+    with_oast_controller do |controller, _host, _session, sid|
+      flood(controller, sid, 2)
+      stamp = Gori::LocalTime.of(Time.unix(1_700_000_001_i64)).to_s(Gori::LocalTime::LIST)
+      wide = callbacks_pane_at(controller, 140, 20)
+      head = wide.find(&.includes?("PROTO")).not_nil!
+      %w[DESTINATION TIME PROVIDER].each_cons(2) do |(a, b)|
+        head.index(a).not_nil!.should be < head.index(b).not_nil!
+      end
+      wide.find(&.includes?("000001.oast.test")).not_nil!.should contain(stamp)
+      narrow = callbacks_pane_at(controller, 80, 20)
+      narrow.find(&.includes?("PROTO")).not_nil!.should_not contain("TIME")
+      narrow.find(&.includes?("203.0.113.1 ")).not_nil!.should contain("000001.oast.test")
+      controller.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter, Termisu::Input::Modifier::None, nil))
+      meta = callbacks_pane_at(controller, 140, 20).find(&.includes?("from 203.0.113.1 ")).not_nil!
+      meta.should contain(stamp)
+      meta.should_not match(/\d{4}-\d\d-\d\dT/)
+    end
+  end
 end
 
 # --- a listener that stopped REACHING its provider must say so ---------------------------

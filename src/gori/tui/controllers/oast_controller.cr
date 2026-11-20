@@ -1055,18 +1055,8 @@ module Gori::Tui
         end
         return
       end
-      header_y = inner.y
-      pw = provider_col_w(inner, ordered)
-      # The header labels are clamped by the SAME geometry the rows use. Unclamped they had
-      # `Screen#text`'s default limit — the whole screen — so on a narrow pane DESTINATION ran
-      # over the PROVIDER label (`PROVIDERTINATION` at 70 columns) and straight through the
-      # card's right border (at 52 and under).
-      screen.text(inner.x + 2, header_y, "PROTO", Theme.muted, Theme.bg, width: cell_w(inner, inner.x + 2, 6))
-      screen.text(inner.x + 9, header_y, "METHOD", Theme.muted, Theme.bg, width: cell_w(inner, inner.x + 9, 8))
-      screen.text(inner.x + 18, header_y, "SOURCE", Theme.muted, Theme.bg, width: cell_w(inner, inner.x + 18, 17))
-      dest_x, dest_w, prov_w = dest_provider_layout(inner, pw)
-      screen.text(dest_x, header_y, "DESTINATION", Theme.muted, Theme.bg, width: dest_w) if dest_w > 0
-      screen.text(inner.right - prov_w, header_y, "PROVIDER", Theme.muted, Theme.bg, width: prov_w) if prov_w > 0
+      cols = callback_cols(inner, ordered)
+      draw_callback_header(screen, inner, cols)
       rows_rect = Rect.new(inner.x, inner.y + 1, inner.w, inner.h - 1)
       visible = rows_rect.h
       return if visible <= 0 # a collapsed pane (tiny terminal) has no rows to draw; a negative slice count would raise
@@ -1078,8 +1068,23 @@ module Gori::Tui
       ordered[@cb_scroll, visible]?.try &.each_with_index do |row, i|
         py = rows_rect.y + i
         abs = @cb_scroll + i
-        draw_callback_row(screen, rows_rect, py, row, abs == @cb_sel, focused, pw)
+        draw_callback_row(screen, rows_rect, py, row, abs == @cb_sel, focused, cols)
       end
+    end
+
+    # The header labels are clamped by the SAME geometry the rows use. Unclamped they had
+    # `Screen#text`'s default limit — the whole screen — so on a narrow pane DESTINATION ran
+    # over the PROVIDER label (`PROVIDERTINATION` at 70 columns) and straight through the
+    # card's right border (at 52 and under).
+    private def draw_callback_header(screen : Screen, inner : Rect, cols : {Int32, Int32, Int32, Int32}) : Nil
+      y = inner.y
+      screen.text(inner.x + 2, y, "PROTO", Theme.muted, Theme.bg, width: cell_w(inner, inner.x + 2, 6))
+      screen.text(inner.x + 9, y, "METHOD", Theme.muted, Theme.bg, width: cell_w(inner, inner.x + 9, 8))
+      screen.text(inner.x + 18, y, "SOURCE", Theme.muted, Theme.bg, width: cell_w(inner, inner.x + 18, 17))
+      dest_x, dest_w, time_w, prov_w = cols
+      screen.text(dest_x, y, "DESTINATION", Theme.muted, Theme.bg, width: dest_w) if dest_w > 0
+      screen.text(dest_x + dest_w + 1, y, "TIME", Theme.muted, Theme.bg, width: time_w) if time_w > 0
+      screen.text(inner.right - prov_w, y, "PROVIDER", Theme.muted, Theme.bg, width: prov_w) if prov_w > 0
     end
 
     # The PROVIDER column's width. It was pinned at 17 columns hard against the right edge, so a
@@ -1131,22 +1136,44 @@ module Gori::Tui
 
     private def provider_col_w(inner : Rect, rows : Array(CbRow)) : Int32
       widest = rows.max_of? { |r| Screen.draw_width(r.provider) } || 0
-      dest_need = rows.max_of? { |r| Screen.draw_width(r.destination) } || 0
       # -1 for the blank column `draw_callback_row` keeps between the two runs.
-      slack = inner.w - DEST_COL_X - 1 - dest_need
+      slack = inner.w - DEST_COL_X - 1 - dest_need(rows)
+      # TIME is served from the slack before PROVIDER grows into it (see #callback_cols).
+      slack -= TIME_COL_W + 1 if slack - TIME_COL_W - 1 >= PROVIDER_COL_MIN
       widest.clamp(PROVIDER_COL_MIN, {slack, PROVIDER_COL_MIN}.max)
     end
 
+    private def dest_need(rows : Array(CbRow)) : Int32
+      rows.max_of? { |r| Screen.draw_width(r.destination) } || 0
+    end
+
+    # `MM-DD HH:MM:SS`, local: History's TIME, so a callback can be matched to a send by eye.
+    TIME_COL_W = 14
+
+    # {dest_x, dest_w, time_w, prov_w}. TIME sits left of PROVIDER and takes only what the
+    # widest DESTINATION does not need, so at a narrow width it is the first column to go
+    # (an 80-column pane keeps the destination it had); PROVIDER goes next, as before.
+    private def callback_cols(rect : Rect, rows : Array(CbRow)) : {Int32, Int32, Int32, Int32}
+      dest_x, dest_w, prov_w = dest_provider_layout(rect, provider_col_w(rect, rows))
+      return {dest_x, dest_w, 0, prov_w} if prov_w == 0 || dest_w - TIME_COL_W - 1 < {dest_need(rows), DEST_COL_MIN}.max
+      {dest_x, dest_w - TIME_COL_W - 1, TIME_COL_W, prov_w}
+    end
+
+    private def cb_time(row : CbRow) : String
+      LocalTime.of(row.at).to_s(LocalTime::LIST)
+    end
+
     private def draw_callback_row(screen : Screen, rect : Rect, py : Int32, row : CbRow, sel : Bool,
-                                  focused : Bool, pw : Int32) : Nil
+                                  focused : Bool, cols : {Int32, Int32, Int32, Int32}) : Nil
       bg = sel ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
       screen.fill(Rect.new(rect.x, py, rect.w, 1), bg)
       screen.cell(rect.x, py, sel ? '▎' : ' ', Theme.accent, bg)
       screen.text(rect.x + 2, py, row.protocol, protocol_hue(row.protocol), bg, width: cell_w(rect, rect.x + 2, 6))
       screen.text(rect.x + 9, py, row.method || "—", Theme.text, bg, width: cell_w(rect, rect.x + 9, 8))
       screen.text(rect.x + 18, py, row.source || "—", Theme.accent, bg, width: cell_w(rect, rect.x + 18, 17))
-      dest_x, dest_w, prov_w = dest_provider_layout(rect, pw)
+      dest_x, dest_w, time_w, prov_w = cols
       screen.text(dest_x, py, row.destination, sel ? Theme.text_bright : Theme.text, bg, width: dest_w) if dest_w > 0
+      screen.text(dest_x + dest_w + 1, py, cb_time(row), Theme.muted, bg, width: time_w) if time_w > 0
       screen.text(rect.right - prov_w, py, row.provider, Theme.muted, bg, width: prov_w) if prov_w > 0
     end
 
@@ -1162,7 +1189,7 @@ module Gori::Tui
     private def render_callback_detail(screen : Screen, rect : Rect, row : CbRow, focused : Bool) : Nil
       Frame.card(screen, rect, "#{row.protocol.upcase} · #{row.destination}", border: focused ? Theme.focus_gold : Theme.border, bg: Theme.bg)
       inner = rect.inset(1, 1)
-      meta = "from #{row.source || "?"} · provider #{row.provider} · #{row.at.to_rfc3339}"
+      meta = "from #{row.source || "?"} · provider #{row.provider} · #{cb_time(row)}"
       screen.text(inner.x + 1, inner.y, meta, Theme.muted, Theme.bg, width: inner.w - 2)
       body = Rect.new(inner.x, inner.y + 2, inner.w, inner.h - 2)
       return if body.h <= 0 # collapsed pane (tiny terminal): a negative slice count would raise

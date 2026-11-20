@@ -6048,3 +6048,11 @@ The ReDoS bound is the same in CPU time, so an uncontended trip is unchanged. On
 the wall time until a trip grows with the thread's lost share. CPU another fiber spends inside
 an armed block still counts, as before, so blocks stay free of yields. A slower core (macOS
 background QoS on efficiency cores) is real CPU and still trips a long legitimate Replace.
+### 2026-11-20: OAST callbacks show the local time History shows (#1944)
+
+The callbacks list has a `TIME` cell and the detail's meta line reads the same local `MM-DD HH:MM:SS`
+(`LocalTime::LIST`, History's TIME column), where the detail printed UTC RFC 3339 and the list printed no time
+at all, so matching a callback to the send that caused it took timezone arithmetic. TIME sits left of PROVIDER
+and is served only from what the widest DESTINATION does not need: it is the first cell to go on a narrow pane,
+and an 80-column pane keeps the destination width it had. Evidence keeps RFC 3339 (the issue notes'
+`received:` line), and History's relative-time preference does not apply here.
