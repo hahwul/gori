@@ -136,6 +136,7 @@ The scan reads the flows the Sitemap shows, so the `/` query and the `s` scope l
 | Action | Key | Result |
 | --- | --- | --- |
 | Open flow | `↵` | The newest request that carried the name, in the History detail |
+| Filter | `/` | Narrows the list to rows whose location, name or endpoint contains the text; `⇧Y` and `w` take what is listed |
 | Copy | `y` / `⇧Y` | The name, or every listed name one per line |
 | Export wordlist | `w` | The listed names (JSON leaf names, no headers) as a list in the [wordlist catalog](/guide/repeater-and-fuzzer/#wordlist-catalog) (`~/.gori/wordlists/`), owner-only, named `params-HOST-TIMESTAMP.txt` |
 | Mine | `m` | Opens the Miner on this endpoint with the names seen on its origin's (scheme, host and port) other endpoints tested first |

@@ -66,6 +66,29 @@ module Gori::Tui
       !f.nil? && @scanned_under == {f.sql, f.args}
     end
 
+    # --- the list's `/` filter (a `RowFilter` lens; the shell's generic arm routes its keys) ---
+    def list_filter_editing? : Bool
+      @params.filter.editing?
+    end
+
+    def handle_list_filter_key(ev : Termisu::Event::Key) : Bool
+      @params.handle_filter_key(ev)
+    end
+
+    def set_preedit(text : String) : Bool
+      @params.filter.set_preedit(text)
+    end
+
+    def body_takes_text? : Bool
+      list_filter_editing?
+    end
+
+    # `/`. Refused with nothing to narrow, unless a held query is what emptied the list.
+    def start_filter : Nil
+      return @host.status("no parameters to filter — #{keys("{params.run}")} scans") if @params.scoped_size == 0 && !@params.filter.active?
+      @params.filter.start
+    end
+
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       BodyChrome.framed(screen, rect, focus == :body) { |inner| render_content(screen, inner, focus) }
     end
@@ -133,6 +156,8 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       return "" unless focus == :body
+      return @params.filter.hint if list_filter_editing?
+      # No `/ filter` segment: the resting label on the border above the list names that key.
       base = keys("{params.run} scan · {params.all-headers} headers")
       base = "#{base} · esc all endpoints" if @params.target
       # `space cmds` before the way out: it is the tail `Chrome.fit_hints` keeps, and without

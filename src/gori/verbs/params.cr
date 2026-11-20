@@ -25,6 +25,10 @@ module Gori
         "Include or leave out the headers every browser sends (User-Agent, Accept*, Sec-*, …)",
         Verb::Scope::Params, [Verb::Chord.new("a")], group: :view, intent: :show_all) { |ctx| ctx.params_toggle_headers; nil }
 
+      r.register Verb::Definition.new(
+        "params.filter", "Filter parameters", "Filter the list by name, location or endpoint",
+        Verb::Scope::Params, [Verb::Chord.new("/")], intent: :filter) { |ctx| ctx.params_filter; nil }
+
       # No chord of its own: bare `x` is select-line app-wide (Keyset), and `esc` already does
       # this while a filter is set (`params.to-menu`) — the menu entry is for discovery.
       targeted = ->(ctx : Verb::ExecContext) { ctx.params_targeted? }

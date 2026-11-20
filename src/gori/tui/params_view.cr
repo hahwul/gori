@@ -3,6 +3,7 @@ require "./theme"
 require "./frame"
 require "./fmt"
 require "./viewport"
+require "./row_filter"
 require "../param_inventory"
 
 module Gori::Tui
@@ -14,6 +15,8 @@ module Gori::Tui
   # the event loop and hands it over; this is a renderer with a cursor and a node filter.
   # The filter is a SET of endpoint paths rather than a prefix because a Sitemap row can be a
   # `{uuid}` fold, whose descendants share a parent but not a path the fold itself names.
+  # Over the node filter sits the `/` text lens (`RowFilter`), matched against what a row
+  # shows: location, name and endpoint.
   class ParamsView
     alias Row = ParamInventory::Row
 
@@ -47,6 +50,7 @@ module Gori::Tui
     getter error : String?
     getter target : Target?
     getter selected : Int32
+    getter filter : RowFilter
     property? scanning : Bool = false
     property? all_headers : Bool = false
 
@@ -57,6 +61,8 @@ module Gori::Tui
       @selected = 0
       @scroll = 0
       @rows = [] of Row
+      @scoped = [] of Row # the node-filtered rows the `/` lens narrows
+      @filter = RowFilter.new
     end
 
     def report=(r : ParamInventory::Report) : Nil
@@ -69,6 +75,7 @@ module Gori::Tui
       @error = message
       @report = nil
       @rows = [] of Row
+      @scoped = [] of Row
       @selected = 0
       @scroll = 0
     end
@@ -76,6 +83,18 @@ module Gori::Tui
     def target=(t : Target?) : Nil
       @target = t
       reproject
+    end
+
+    # The `/` bar's keys; the rows re-narrow on every edit, the cursor kept on its parameter.
+    def handle_filter_key(ev : Termisu::Event::Key) : Bool
+      @filter.handle_key(ev)
+      reproject
+      true
+    end
+
+    # Rows the node filter leaves, before the `/` lens: what there is to filter.
+    def scoped_size : Int32
+      @scoped.size
     end
 
     def ready? : Bool
@@ -119,15 +138,20 @@ module Gori::Tui
     private def reproject : Nil
       anchor = @rows[@selected]?.try { |r| key_of(r) }
       all = @report.try(&.rows) || [] of Row
-      @rows = if t = @target
-                paths = t.paths
-                all.select { |r| t.covers?(r) && (paths.nil? || paths.includes?(r.path)) }
-              else
-                all
-              end
+      @scoped = if t = @target
+                  paths = t.paths
+                  all.select { |r| t.covers?(r) && (paths.nil? || paths.includes?(r.path)) }
+                else
+                  all
+                end
+      @rows = @filter.active? ? @scoped.select { |r| @filter.matches?(haystack(r)) } : @scoped
       @selected = (anchor ? @rows.index { |r| key_of(r) == anchor } : nil) || 0
       @selected = @selected.clamp(0, {@rows.size - 1, 0}.max)
       @scroll = 0 if anchor.nil?
+    end
+
+    private def haystack(r : Row) : String
+      "#{r.location.label} #{r.name} #{r.method} #{r.path}"
     end
 
     private def key_of(r : Row) : ParamInventory::Key
@@ -146,12 +170,20 @@ module Gori::Tui
         end
         return
       end
-      list = Rect.new(rect.x, rect.y + HEADER_H, rect.w, {rect.h - HEADER_H, 0}.max)
+      # At rest the filter rides the border above the pane (the strip's hairline under Target).
+      @filter.render_label(screen, rect.x + 1, rect.y - 1, RowFilter.label_limit(rect), @scoped.size)
+      @filter.render_bar(screen, Rect.new(rect.x, rect.y + 1, rect.w, 1)) if @filter.shown? && rect.h > 1
+      list = Rect.new(rect.x, rect.y + header_h, rect.w, {rect.h - header_h, 0}.max)
       render_list(screen, list, focused)
     end
 
     # `Screen#text` clips to the SCREEN, not the rect, so every row is checked against the
     # pane height (the 40x8 minimum leaves this body one or two rows).
+    # Summary · (the `/` bar while it is typed in) · column headings.
+    private def header_h : Int32
+      @filter.shown? ? HEADER_H + 1 : HEADER_H
+    end
+
     private def row(rect : Rect, offset : Int32) : Int32?
       offset < rect.h ? rect.y + offset : nil
     end
@@ -171,7 +203,7 @@ module Gori::Tui
           screen.text(lx, y, label, Theme.accent, Theme.bg, width: {rect.right - lx, 0}.max)
         end
       end
-      if (y = row(rect, 1)) && !@rows.empty?
+      if (y = row(rect, header_h - 1)) && !@rows.empty?
         name_w, ep_w = widths(rect.w)
         head = String.build do |io|
           io << " " << "LOCATION".ljust(LOC_W) << "NAME".ljust(name_w) << "FLOWS".rjust(COUNT_W - 1) << " "
@@ -187,13 +219,15 @@ module Gori::Tui
       where = @target.try(&.label) || "all endpoints"
       r = @report
       return "PARAMS · #{where}" unless r
-      "PARAMS · #{where} · #{@rows.size} params · #{Fmt.count(r.flows_scanned)} flows read"
+      count = @filter.active? ? "#{@rows.size}/#{@scoped.size}" : @rows.size.to_s
+      "PARAMS · #{where} · #{count} params · #{Fmt.count(r.flows_scanned)} flows read"
     end
 
     # {name column, endpoint column} widths. The endpoint column is dropped when the view is
     # one endpoint (it would repeat on every row) or when the pane is too narrow to spare it.
     private def widths(w : Int32) : {Int32, Int32}
-      name_w = ((@rows.max_of? { |r| Screen.display_width(r.name) } || 4) + 2).clamp(6, NAME_MAX)
+      # Over the node-filtered rows, not the `/`-narrowed ones: the columns hold still while typing.
+      name_w = ((@scoped.max_of? { |r| Screen.display_width(r.name) } || 4) + 2).clamp(6, NAME_MAX)
       single = (t = @target) && (paths = t.paths) && paths.size <= 1
       ep_w = single || w < 80 ? 0 : ENDPOINT_MAX
       {name_w, ep_w}
@@ -225,12 +259,13 @@ module Gori::Tui
     private def empty_note : String
       return "scanning captured requests…" if scanning? && @report.nil?
       return "press ^R to scan the captured requests for parameters" unless r = @report
+      return @filter.no_match_line("parameters") if @filter.active? && !@scoped.empty?
       return "no parameters on #{@target.try(&.label)} — esc clears the filter to show every endpoint" if @target && !r.rows.empty?
       "no parameters in #{Fmt.count(r.flows_scanned)} flows read (the Sitemap query and scope lens apply)"
     end
 
     def row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
-      top = rect.y + HEADER_H
+      top = rect.y + header_h
       return nil unless mx >= rect.x && mx < rect.right && my >= top && my < rect.bottom
       idx = @scroll + (my - top)
       idx < @rows.size ? idx : nil

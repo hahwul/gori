@@ -171,6 +171,15 @@ module Gori::Tui
       active_child.handle_body_key(ev)
     end
 
+    # The Params list's `/` bar, through the Runner's generic `RowFilter` arm.
+    def list_filter_editing? : Bool
+      active_child.list_filter_editing?
+    end
+
+    def handle_list_filter_key(ev : Termisu::Event::Key) : Bool
+      active_child.handle_list_filter_key(ev)
+    end
+
     def handle_wheel(step : Int32) : Bool
       active_child.handle_wheel(step)
     end

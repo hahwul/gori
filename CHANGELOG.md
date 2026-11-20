@@ -8,6 +8,7 @@
 - TUI: an upstream proxy that does not answer is named once on the status row and in Notifications, with the setting that chose it, instead of only inside each failed flow's detail (#1944).
 
 - TUI: `/` on the tab bar of a tab with no filter says so and points at `^P` before the next letters reach the global keys, a function key says gori binds none instead of doing nothing, and Comparer `←` diffs the requests and `→` the responses instead of both toggling (#1944).
+- TUI: the Target → Params list has a `/` filter over parameter name, location and endpoint (#1944).
 
 - MCP: `gori mcp --install-*` writes `--tools=@recon` when no `--tools` is given, so a fresh install loads about a fifth of the full catalogue's tool schemas; `--tools='*'` installs every tool, and a hand-run `gori mcp` is unchanged, as is an existing entry until it is reinstalled (#1943).
 
