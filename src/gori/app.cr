@@ -56,6 +56,15 @@ module Gori
     # poller's interval scale.
     RELOAD_POLL_INTERVAL = 2.seconds
 
+    # What a headless open of a project over its retention cap says, once: `gori run capture`
+    # here and every writable `gori run` open (`CLI::Run.open_store`). One home, so the two
+    # cannot drift. `capture: false` is a command that adds flows of its own (a send, an import,
+    # `--record-history`) or none at all, so it names neither a running capture nor a stop.
+    def self.over_retention_line(count : Int64, cap : Int32, *, capture : Bool = true) : String
+      "#{Gori.plural(count, "old flow")} will be deleted as #{capture ? "capture runs" : "flows are added"}: " \
+      "retention keeps the newest #{cap}. To keep them, #{capture ? "stop and " : ""}raise retention.max_flows in settings.json."
+    end
+
     # Signals headless `gori run capture` winds down on, rather than dying from.
     CAPTURE_SIGNALS = [Signal::INT, Signal::TERM]
 
@@ -295,9 +304,7 @@ module Gori
       session.env_syntax_migration.try(&.notices.each { |line| Log.info { line } })
       Settings.take_env_syntax_global_migration.try { |g| Log.info { g.line } }
       if (n = session.over_retention_on_open) > 0
-        line = "#{Gori.plural(n, "old flow")} will be deleted as capture runs: retention keeps the newest " \
-               "#{Settings.retention_flows}. To keep them, stop and raise retention.max_flows in settings.json."
-        Log.warn { line }
+        Log.warn { App.over_retention_line(n, Settings.retention_flows) }
       end
       if err = session.bind_error
         STDERR.puts "gori: not capturing — #{err}"

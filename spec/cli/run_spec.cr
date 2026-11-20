@@ -1519,3 +1519,51 @@ describe "gori run — a parent's --help names its subcommands" do
     end
   end
 end
+
+# A writable `gori run` open of a project over `retention.max_flows` says so once on stderr,
+# in `gori run capture`'s words (`App.over_retention_line`); a read-only open says nothing.
+module Gori::CLI::Run
+  def self.reset_over_retention_for_spec : Nil
+    @@said_over_retention = false
+  end
+end
+
+describe "gori run — a project opened over its retention cap" do
+  it "is said once per process by a writable open, and never by a read-only one" do
+    db = File.tempname("gori-over-cap", ".db")
+    seed = Gori::Store.open(db, retention_flows: Gori::Store::RETENTION_UNLIMITED)
+    5.times do |i|
+      seed.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: i.to_i64 + 1, scheme: "http", host: "cap.test", port: 80, method: "GET",
+        target: "/#{i}", http_version: "HTTP/1.1", head: "GET /#{i} HTTP/1.1\r\nHost: cap.test\r\n\r\n".to_slice,
+        source: Gori::FlowSource::Kind::Proxy))
+    end
+    seed.close
+    prev_cap = Gori::Settings.retention_max_flows
+    prev_io = Gori::CLI::Run.over_retention_io
+    io = IO::Memory.new
+    begin
+      Gori::Settings.retention_max_flows = 2
+      Gori::CLI::Run.over_retention_io = io
+      Gori::CLI::Run.reset_over_retention_for_spec
+      stdout_silenced { Gori::CLI::Run.dispatch(["history", "--db", db]) }
+      io.to_s.should be_empty
+      2.times { stdout_silenced { Gori::CLI::Run.dispatch(["notes", "create", "--text", "x", "--json", "--db", db]) } }
+      io.to_s.should eq("gori run: #{Gori::App.over_retention_line(3_i64, 2, capture: false)}\n")
+    ensure
+      Gori::Settings.retention_max_flows = prev_cap
+      Gori::CLI::Run.over_retention_io = prev_io
+      Gori::CLI::Run.reset_over_retention_for_spec
+      delete_db_files(db)
+    end
+  end
+
+  it "keeps capture's wording, and drops its stop for a command that is not one" do
+    Gori::App.over_retention_line(3_i64, 2).should eq(
+      "3 old flows will be deleted as capture runs: retention keeps the newest 2. " \
+      "To keep them, stop and raise retention.max_flows in settings.json.")
+    Gori::App.over_retention_line(1_i64, 2, capture: false).should eq(
+      "1 old flow will be deleted as flows are added: retention keeps the newest 2. " \
+      "To keep them, raise retention.max_flows in settings.json.")
+  end
+end

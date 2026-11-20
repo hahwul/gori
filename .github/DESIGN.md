@@ -6067,3 +6067,13 @@ A script passing that id changed whichever note sat at the position. `resolve_no
 spellings, `--position N` and `--id N`; past the end it adds "id N is note #k" to the not-found. Where the
 position and the id agree, or `<n>` is no note's id, `<n>` is a position as before, so a person typing the
 number they see is not asked to choose.
+
+### 2026-11-20: every writable `gori run` open says it is over the retention cap (#1944)
+
+Refines the #1943 entry above. `CLI::Run.open_store` passes `Settings.retention_flows` on every writable open,
+so `send` loops, imports and `--record-history` sweep an over-cap project as they add flows, which only gori.log
+recorded. That open now says it once per process on stderr, never on a `--json` stdout, through
+`App.over_retention_line`, the sentence `gori run capture` prints, with "as flows are added" for "as capture
+runs" and no "stop". It is said on every writable open, including commands that add no flow (`notes create`):
+the project is over its cap whichever command noticed, and the count is one `COUNT(*)`. A read-only open
+passes no cap and says nothing.

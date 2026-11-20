@@ -1000,6 +1000,7 @@ module Gori
           store.close
           raise ex
         end
+        say_over_retention(store) unless read_only
         store
       rescue ex : DB::Error | SQLite3::Exception
         raise ex unless abort_on_failure
@@ -1010,6 +1011,25 @@ module Gori
         # Not a database, or one a newer gori wrote: `CLI.run` prints the line, as it always did.
         puts failure_json(ex.message.to_s, "open_failed", "NO_PROJECT") if abort_on_failure && json_stdout?
         raise ex
+      end
+
+      # Whether this process has already said its project is over the retention cap.
+      @@said_over_retention = false
+
+      # Where that notice goes: STDERR, never a `--json` stdout; a spec swaps in an `IO::Memory`,
+      # as it does for `default_project_io`.
+      class_property over_retention_io : IO? = STDERR
+
+      # A writable open of a project over `retention.max_flows` sweeps the oldest flows once
+      # this process has added a sweep's worth (a send loop, an import, `--record-history`),
+      # which only gori.log recorded. Said once per process, in `gori run capture`'s words
+      # (`App.over_retention_line`), since one command can open its project more than once.
+      # A read-only open sweeps nothing and passes no cap, so it says nothing.
+      private def self.say_over_retention(store : Store) : Nil
+        return if @@said_over_retention
+        return unless (n = store.flows_over_retention) > 0
+        @@said_over_retention = true
+        @@over_retention_io.try &.puts("gori run: #{App.over_retention_line(n, Settings.retention_flows, capture: false)}")
       end
 
       # `open_store`, yield, close — the shape nearly every command wants. Returns the block's
