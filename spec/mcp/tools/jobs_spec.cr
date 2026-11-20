@@ -75,6 +75,33 @@ describe "MCP background calls" do
     end
   end
 
+  # The run read the repeater once, at the call. An edit landing while it runs is the stored
+  # request now, and apply:true must not put the old target and a request minimized from text
+  # that is no longer stored back over it.
+  it "does not apply a background minimize over an edit that landed during the run" do
+    origin = start_bg_origin(20.milliseconds)
+    port = origin.local_address.port
+    begin
+      with_store do |store|
+        id = bg_repeater(store, port, "/m?a=1")
+        tools = tools_for(store)
+        started = JSON.parse(bg_call(tools, "minimize_repeater",
+          %({"repeater_id":#{id},"allow_unscoped":true,"apply":true,"background":true})).text)
+        edited = "GET /edited HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n"
+        store.update_repeater(id: id, target: "http://127.0.0.1:#{port}", request: edited.to_slice,
+          http2: false, auto_cl: true).should be_true
+
+        report = JSON.parse(bg_finished(tools, started["job_id"].as_s).text)
+        report["removed_count"].as_i.should be > 0
+        report["applied"].as_bool.should be_false
+        report["apply_skipped"].as_s.should contain("changed during the run")
+        String.new(store.get_repeater(id).not_nil!.request).should eq(edited)
+      end
+    ensure
+      origin.close
+    end
+  end
+
   it "cancels a background timing run with stop_job, and answers other calls while it runs" do
     origin = start_bg_origin(50.milliseconds)
     port = origin.local_address.port

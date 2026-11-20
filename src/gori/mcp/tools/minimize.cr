@@ -147,15 +147,24 @@ module Gori
         # computes `apply && !interrupted_run && !report.aborted && …`, on the reasoning that a
         # destructive write is where a cancelled sweep parts company with a capped one. There
         # the operator is told `--apply` was skipped; here there is no one left to tell.
+        changed = false
         if apply && !report.aborted && !report.removed.empty? && !cancel.try(&.call)
-          # ws_keep_key/ws_http_only/tls_preset for the reason the CLI twin gives:
-          # update_repeater's SQL sets every one of those columns unconditionally and its
-          # signature defaults them, so omitting one CLEARS a session that carried it.
-          applied = store.update_repeater(id: id, target: rec.target,
-            request: report.minimized_text.to_slice, http2: rec.http2?,
-            auto_cl: rec.auto_content_length?, sni: rec.sni,
-            ws_keep_key: rec.ws_keep_key?, ws_http_only: rec.ws_http_only?,
-            tls_preset: rec.tls_preset)
+          # The run read `rec` once, at the call, and the write below puts every column back.
+          # An edit (or a second minimize) that landed meanwhile — likely under
+          # `background:true`, possible on any run — would be silently undone, and the stored
+          # request replaced by one minimized from text that is no longer there. So the write
+          # happens only if the row still holds what the run started from.
+          changed = !repeater_unchanged?(rec, store.get_repeater(id))
+          unless changed
+            # ws_keep_key/ws_http_only/tls_preset for the reason the CLI twin gives:
+            # update_repeater's SQL sets every one of those columns unconditionally and its
+            # signature defaults them, so omitting one CLEARS a session that carried it.
+            applied = store.update_repeater(id: id, target: rec.target,
+              request: report.minimized_text.to_slice, http2: rec.http2?,
+              auto_cl: rec.auto_content_length?, sni: rec.sni,
+              ws_keep_key: rec.ws_keep_key?, ws_http_only: rec.ws_http_only?,
+              tls_preset: rec.tls_preset)
+          end
         end
         # The rewritten request is what a slot's refresh step sends, as with `update_repeater`.
         disarmed = applied ? disarm_slots_refreshing(id) : [] of String
@@ -178,6 +187,7 @@ module Gori
             end
             j.field "removed_count", report.removed.size
             j.field "applied", applied
+            j.field "apply_skipped", "repeater #{id} changed during the run (or was deleted); the minimized request was not saved" if changed
             # As `update_repeater` reports it: the minimized bytes are no longer the seed's.
             if applied && (fid = rec.flow_id)
               j.field "flow_id", fid
@@ -187,6 +197,15 @@ module Gori
             j.field "minimized_request", report.minimized_text
           end
         end)
+      end
+
+      # Does `now` still hold every column the apply-back writes, as `rec` read them?
+      private def repeater_unchanged?(rec : Store::RepeaterRecord, now : Store::RepeaterRecord?) : Bool
+        return false unless now
+        now.target == rec.target && now.request == rec.request && now.http2? == rec.http2? &&
+          now.auto_content_length? == rec.auto_content_length? && now.sni == rec.sni &&
+          now.ws_keep_key? == rec.ws_keep_key? && now.ws_http_only? == rec.ws_http_only? &&
+          now.tls_preset == rec.tls_preset
       end
 
       # The validated {scheme, host, port} to minimize against, or a refusal Result. Split out
