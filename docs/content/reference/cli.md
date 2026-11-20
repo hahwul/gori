@@ -2006,6 +2006,8 @@ MCP stdio server. See the [MCP guide](/guide/mcp/) for tool details.
 
 Several `--install-*` flags may be given in one run. Each named client is configured and reported separately, and one unwritable config does not stop the others. Every other flag on the command line (`--db`, `--project`, `--no-project`, `--use-active-project`, `--read-only`, `--tools`, `--pin-project`, `--insecure-upstream`, and the global `--config`) is written into the installed command, with paths made absolute (`--project` is recorded as the name). With no `--tools`, the command gets `--tools=@recon` and the install prints a line saying so; `--tools='*'` installs every tool. Existing config files are updated in place: other entries, tables and comments survive, permissions are preserved, and the replacement is atomic.
 
+The printed `Command:` quotes globs and arguments with spaces for copying into a shell; the installed argv is unchanged.
+
 ## gori ca
 
 ```bash
