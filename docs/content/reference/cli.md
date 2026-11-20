@@ -1194,7 +1194,7 @@ gori run jwt eyJhbGci... --attacks --key ./public.pem
 | `--decode` | Decode header / payload / signature (default) |
 | `--encode` | Re-sign the token's claims with `--alg` and `--secret` / `--key`. With both `--header` and `--payload` no token is read, and with only one the other half is still taken from the `<token>` argument or STDIN (pass `""` or `</dev/null` to start it from `{}`) |
 | `--verify` | Check the token's signature against `--secret` / `--key` (one is required; `--secret ''` checks the empty secret). Prints `verified: yes\|no` and a `reason`, and exits 1 unless it verifies. `--format json` adds a `code` (`signature_mismatch`, `unsigned`, `alg_unsupported`, …) |
-| `--crack` | Search an HS256/HS384/HS512 token's secret offline; exits 0 on a hit, 1 on a miss or refusal. JSON: `{found, secret?, tried, stopped}`; unsigned/asymmetric/JWE tokens are refused |
+| `--crack` | Search an HS256/HS384/HS512 token's secret offline; exits 0 on a hit, 1 on a miss or refusal. JSON: `{found, secret?, tried}`; unsigned/asymmetric/JWE tokens are refused |
 | `--secrets=LIST` | `--crack`: comma-separated candidate secrets, tried first |
 | `--wordlist=PATH` | `--crack`: newline-delimited file or saved list name; empty lines and spaces are preserved |
 | `--attacks` | Generate testing payloads (alg:none, weak-secret, header injection) |

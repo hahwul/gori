@@ -163,11 +163,11 @@ module Gori
 
       private def cookie_crack(cookie : String, secrets, h) : String?
         case cookie_resolved_format(cookie, h)
-        when "flask" then Cookie::Flask.crack(cookie, secrets, salt: str(h, "salt") || Cookie::Flask::SALT)
-        when "rack"  then Cookie::Rack.crack(cookie, secrets)
+        when "flask" then Cookie::Flask.crack(cookie, secrets, salt: str(h, "salt") || Cookie::Flask::SALT, stop: cancel_signal)
+        when "rack"  then Cookie::Rack.crack(cookie, secrets, stop: cancel_signal)
         when "django" then Cookie::Django.crack(cookie, secrets,
           salt: str(h, "salt") || Cookie::Django::DEFAULT_SALT,
-          algorithm: django_algorithm_for(cookie, h))
+          algorithm: django_algorithm_for(cookie, h), stop: cancel_signal)
         else raise Cookie::CookieError.new("unrecognized cookie format")
         end
       end

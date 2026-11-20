@@ -128,11 +128,11 @@ module Gori
     # cookie is parsed once; each candidate is a cheap HMAC + constant-time compare.
     # `salt` / `algorithm` follow `verify` — the crack must sign under the SAME knobs.
     def crack(cookie : String, secrets, format : String? = nil, *,
-              salt : String? = nil, algorithm : String = Django::DEFAULT_ALGO) : String?
+              salt : String? = nil, algorithm : String = Django::DEFAULT_ALGO, stop : Proc(Bool)? = nil) : String?
       case resolve(cookie, format)
-      when "flask" then Flask.crack(cookie, secrets, salt: salt || Flask::SALT)
-      when "rack"  then Rack.crack(cookie, secrets)
-      else              Django.crack(cookie, secrets, salt: salt || Django::DEFAULT_SALT, algorithm: algorithm)
+      when "flask" then Flask.crack(cookie, secrets, salt: salt || Flask::SALT, stop: stop)
+      when "rack"  then Rack.crack(cookie, secrets, stop: stop)
+      else              Django.crack(cookie, secrets, salt: salt || Django::DEFAULT_SALT, algorithm: algorithm, stop: stop)
       end
     end
 
@@ -245,8 +245,8 @@ module Gori
     # First of `secrets` whose signature (the block) matches `signature`, compared in
     # constant time; nil when none does. The shared loop yields every 4Ki candidates or 10 ms
     # so long lists and large signing inputs cannot hold up the proxy or the UI.
-    def first_signing(secrets, signature : String, & : String -> String) : String?
-      SecretCrack.search(secrets, signature) { |secret| yield secret }.secret
+    def first_signing(secrets, signature : String, stop : Proc(Bool)? = nil, & : String -> String) : String?
+      SecretCrack.search(secrets, signature, stop) { |secret| yield secret }.secret
     end
 
     BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"

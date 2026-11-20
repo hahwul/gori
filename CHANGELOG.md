@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- JWT: find HS256/HS384/HS512 signing secrets offline with `gori run jwt --crack` or MCP `jwt_crack`, using inline candidates, files or saved wordlists and reporting the candidates tried (#1946).
+- JWT: find HS256/HS384/HS512 signing secrets offline with `gori run jwt --crack` or MCP `jwt_crack`, using inline candidates, files or saved wordlists and reporting the candidates tried. MCP `jwt_crack` and `cookie_crack` stop between candidates when cancelled (#1946).
 
 - MCP: `race_requests`, `timing_requests` and `minimize_repeater` take `background:true`, which returns a `job_id` at once so other calls are answered while the run goes on; `get_job` returns the call's usual result and `stop_job` cancels it (#1944).
 

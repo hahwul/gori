@@ -336,7 +336,7 @@ module Gori
 
         tool j, "jwt_crack",
           "Find an HS256/HS384/HS512 JWT secret offline. Inline candidates first, then the " \
-          "wordlist. Refuses unsigned/asymmetric tokens. Returns {found, secret?, tried, stopped}." do |s|
+          "wordlist. Refuses unsigned/asymmetric tokens. Returns {found, secret?, tried}." do |s|
           s.field "token", strprop("signed HMAC JWT"), required: true
           s.field "secrets", strarrprop("inline candidate secrets, in order")
           s.field "wordlist", strprop("file path or saved wordlist name")

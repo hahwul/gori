@@ -19,7 +19,6 @@ module Gori::SecretCrack
         json.field "found", !secret.nil?
         json.field "secret", secret if secret
         json.field "tried", tried
-        json.field "stopped", stopped
       end
     end
   end

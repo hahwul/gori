@@ -1698,10 +1698,9 @@ module Gori
       #                     did run keep their History rows (P7: record the wire).
       #   timing_requests   yes — `Repeater::Timing.run` polls it between pairs; up to
       #                     MAX_ITERATIONS pairs of real requests to the target.
-      #   cookie_crack      NO. It is pure CPU over a wordlist with no outbound and no yield
-      #                     point, so the reader fiber never runs during it and the
-      #                     notification is not even PARSED until it finishes — a check there
-      #                     would be code that cannot fire. The cost is local.
+      #   jwt_crack         yes — `SecretCrack.search` polls it between candidates, after
+      #                     yielding every 4,096 candidates or 10 ms. The cost is local.
+      #   cookie_crack      yes — each format passes it to the same `SecretCrack.search` loop.
       #   send_request /    yes — the one-shot send engines close their owned socket when the
       #   send_websocket    predicate fires, so a silent origin cannot pin the serial worker.
       #   fuzz/mine/        NO, by design. They return a `job_id` immediately and are stopped

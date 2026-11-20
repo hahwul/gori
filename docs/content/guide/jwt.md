@@ -70,9 +70,9 @@ For an `HS256`, `HS384` or `HS512` token, search your own candidates offline fro
 gori run jwt "$TOKEN" --crack --secrets 'first,second' --wordlist secrets.txt --json
 ```
 
-Inline candidates run first, followed by the newline-delimited file. `--wordlist` also accepts a saved wordlist name: the current directory wins, then the global catalog is searched. Empty lines are empty-secret candidates; spaces are preserved. The result carries `found`, `secret` on a hit, `tried`, and `stopped`. The CLI exits 0 on a hit and 1 on a miss or refusal. `none`, asymmetric tokens, malformed signatures and encrypted JWEs are refused before searching. Nothing is sent to the target.
+Inline candidates run first, followed by the newline-delimited file. `--wordlist` also accepts a saved wordlist name: the current directory wins, then the global catalog is searched. Empty lines are empty-secret candidates; spaces are preserved. The result carries `found`, `secret` on a hit, and `tried`. The CLI exits 0 on a hit and 1 on a miss or refusal. `none`, asymmetric tokens, malformed signatures and encrypted JWEs are refused before searching. Nothing is sent to the target.
 
-MCP `jwt_crack` takes `token`, `secrets` (an array) and/or `wordlist` (a file path or saved name). Client cancellation stops the search and returns `stopped:true` with the partial count. It is available with the full catalogue and under `--read-only`, outside `@recon`. The JWT tab keeps its current layout; wordlist cracking is available through these headless surfaces.
+MCP `jwt_crack` takes `token`, `secrets` (an array) and/or `wordlist` (a file path or saved name). Client cancellation stops the search between candidates and frees the server for the next call; like every cancelled request, it gets no response. It is available with the full catalogue and under `--read-only`, outside `@recon`. The JWT tab keeps its current layout; wordlist cracking is available through these headless surfaces.
 
 ## Headless
 

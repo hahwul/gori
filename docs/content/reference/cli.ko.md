@@ -1182,7 +1182,7 @@ gori run jwt eyJhbGci... --attacks --key ./public.pem
 | `--decode` | header / payload / signature 디코드(기본) |
 | `--encode` | `--alg`와 `--secret` / `--key`로 토큰 클레임 재서명. `--header`와 `--payload`를 둘 다 주면 토큰을 읽지 않고, 하나만 주면 나머지 쪽은 `<token>` 인자나 STDIN에서 읽습니다(`""`나 `</dev/null`을 주면 `{}`에서 시작) |
 | `--verify` | 토큰의 서명을 `--secret` / `--key`로 검증(둘 중 하나 필수, `--secret ''`은 빈 secret 확인). `verified: yes\|no`와 `reason`을 출력하고 검증되지 않으면 1로 종료합니다. `--format json`은 `code`(`signature_mismatch`, `unsigned`, `alg_unsupported`, …)를 더합니다 |
-| `--crack` | HS256/HS384/HS512 비밀키를 오프라인으로 검색. 찾으면 0, 없거나 거절하면 1. JSON: `{found, secret?, tried, stopped}`. unsigned/비대칭/JWE 토큰은 거절 |
+| `--crack` | HS256/HS384/HS512 비밀키를 오프라인으로 검색. 찾으면 0, 없거나 거절하면 1. JSON: `{found, secret?, tried}`. unsigned/비대칭/JWE 토큰은 거절 |
 | `--secrets=LIST` | `--crack`: 먼저 시도할 쉼표 구분 후보 비밀키 |
 | `--wordlist=PATH` | `--crack`: 줄 단위 파일이나 저장된 목록 이름. 빈 줄과 공백 유지 |
 | `--attacks` | 테스트 페이로드 생성(alg:none, weak-secret, header injection) |

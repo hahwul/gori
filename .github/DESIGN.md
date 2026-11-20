@@ -6097,9 +6097,10 @@ replayed still remains a per-flow skip or failure, so one bad backend does not h
 `Jwt.crack` parses a signed HS256/HS384/HS512 token once and searches literal inline or lazy
 wordlist candidates offline. `SecretCrack` owns the first-match loop shared with Cookie: it
 yields every 4,096 candidates or after 10 ms, checked between candidates, because a large JWT
-makes even a short candidate stride expensive. Results count only signatures actually tried;
-a cancelled MCP call reports `stopped:true`, never a complete miss. File and saved-name
-resolution remains in `Fuzz::WordlistFile`.
+makes even a short candidate stride expensive. Results count only signatures actually tried.
+Both MCP crack tools poll cancellation between candidates and free the server for the next
+call; like every cancelled request, they get no response. `stopped` stays internal to the
+engine, outside CLI/MCP JSON. File and saved-name resolution remains in `Fuzz::WordlistFile`.
 
 CLI `--crack` and MCP `jwt_crack` expose this separately from verification and attack payload
 generation. It is pure read-only compute outside `@recon`. The TUI is intentionally deferred:

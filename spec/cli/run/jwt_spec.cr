@@ -230,6 +230,13 @@ describe "gori run jwt" do
 end
 
 describe "gori run jwt --crack output" do
+  it "serializes only found, the matching secret, and tried" do
+    JSON.parse(Gori::SecretCrack::Result.new("", 2).to_json).as_h.should eq(
+      JSON.parse(%({"found":true,"secret":"","tried":2})).as_h)
+    JSON.parse(Gori::SecretCrack::Result.new(nil, 7).to_json).as_h.should eq(
+      JSON.parse(%({"found":false,"tried":7})).as_h)
+  end
+
   it "names empty hits, counts misses, and keeps control bytes out of the terminal" do
     Gori::CLI::Run.jwt_crack_line(Gori::SecretCrack::Result.new("", 2)).should eq(%(found: "" (2 tried)))
     Gori::CLI::Run.jwt_crack_line(Gori::SecretCrack::Result.new(nil, 7)).should eq("not found (7 tried)")

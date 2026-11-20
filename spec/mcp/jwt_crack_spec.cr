@@ -15,7 +15,7 @@ describe "MCP jwt_crack" do
         j["secret"].as_s.should eq("custom-key")
         j["tried"].as_i.should eq(3)
         miss = tools.call("jwt_crack", JSON.parse({token: Gori::Jwt.encode("{}", "{}", "HS384", "absent"), wordlist: "jwt-secrets.txt"}.to_json))
-        JSON.parse(miss.text).as_h.should eq(JSON.parse(%({"found":false,"tried":3,"stopped":false})).as_h)
+        JSON.parse(miss.text).as_h.should eq(JSON.parse(%({"found":false,"tried":3})).as_h)
       end
     end
   end
@@ -39,7 +39,7 @@ describe "MCP jwt_crack" do
     token = Gori::Jwt.encode("{}", "{}", "HS256", "hit")
     r = tools.call("jwt_crack", JSON.parse({token: token, secrets: ["hit"]}.to_json), cancelled: -> { true })
     j = JSON.parse(r.text)
-    j["stopped"].as_bool.should be_true
+    j.as_h.has_key?("stopped").should be_false
     j["tried"].as_i.should eq(0)
     catalogue = JSON.parse(Gori::MCP::Tools.catalogue_json(nil, false)).as_a
     t = catalogue.find! { |entry| entry["name"].as_s == "jwt_crack" }
