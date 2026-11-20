@@ -355,6 +355,35 @@ describe "Gori::SafeRegexp.budgeted" do
     budgeted_run("z", text) { later.matches?(text) }.should be_false
   end
 
+  # A thread the OS took off the CPU spends no budget: under load a trivial pattern on a
+  # sub-KB subject was "treated as not matching" because the clock was the wall. Sleeping inside
+  # the armed block is that descheduling, made deterministic.
+  it "does not charge the budget for time the thread spent off the CPU" do
+    text = "{" + "\"a\": 1, " * 60 + "\"model\": \"x\"}"
+    rx = Gori::SafeRegexp.budgeted("\"model\"\\s*:\\s*\"")
+    budgeted_run(rx.source, text) do
+      sleep Gori::SafeRegexp::BUDGET + 20.milliseconds
+      rx.matches?(text)
+    end.should be_true
+  end
+
+  # ...while CPU the thread did spend still counts, wherever in the armed block it went.
+  it "charges the budget for CPU spent before the match" do
+    text = "{" + "\"a\": 1, " * 60 + "\"model\": \"x\"}"
+    rx = Gori::SafeRegexp.budgeted("\"model\"\\s*:\\s*\"")
+    expect_raises(Regex::Error) do
+      budgeted_run(rx.source, text) do
+        # Spin on the process's own CPU clock (no allocation, so no GC thread adds to it), so
+        # a loaded host only makes this slower, never makes it pass.
+        cpu = -> { t = Process.times; t.utime + t.stime }
+        start = cpu.call
+        while cpu.call - start < (Gori::SafeRegexp::BUDGET * 2).total_seconds
+        end
+        rx.matches?(text)
+      end
+    end
+  end
+
   # The other half of that repro: a gsub whose block yields (a Pipe hook) between matches.
   it "never cuts a match that runs with nothing armed, however long the block takes" do
     rx = Gori::SafeRegexp.budgeted("tok=\\w+")

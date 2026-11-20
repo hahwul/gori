@@ -17,6 +17,8 @@
 
 - `gori run`: an invalid `~` regex in a query is an error, as its help and MCP say, and `--strict` refuses a term QL would drop (#1942).
 
+- Regex searches and rules (`body~`, `llm:`, Rewriter, Probe and Fuzzer patterns) no longer drop real matches on a busy machine: their 50 ms budget counts the CPU gori spends, not time spent waiting for a core (#1944).
+
 - `gori run`: a mistyped `probe`, `history` or `sitemap` verb is refused instead of searched, `fuzz -w -` reads stdin, every delete accepts `--yes`, and under `--json` a not-found, pre-send, usage or `intercept` refusal prints the error object (an `intercept` refusal also goes to stderr in text mode) and `project delete`/`repeater delete` say `ok` (#1942).
 
 - TUI: startup warnings show at once instead of behind the greeting and stay in Notifications: a fallback port, capture off, a project dir gori cannot write (no longer blamed on another window), a corrupt settings.json under `--db`, and flows a crash left incomplete. Other action messages no longer wait behind a companion bubble either (#1942).

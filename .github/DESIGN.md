@@ -6030,3 +6030,21 @@ returns the synchronous call's own Result once the run ends, and `stop_job` is t
 where the synchronous call polls the cancel predicate (a race already on the wire finishes). No
 `*_start/_status/_stop` tools were added; the three declare `requires: get_job, stop_job` instead. The
 synchronous default is unchanged, and a running background call blocks a project switch like any job.
+### 2026-11-20: the regex budget is thread CPU time, not wall time (#1944)
+
+Refines: 2026-10-11 ("operator- and agent-authored regexes are budgeted by time"). The budget,
+50 ms plus 50 ms per MiB, now counts the CPU the thread spends. On a loaded host the OS kept
+the thread off the CPU long enough to use up a wall-clock budget, so a trivial pattern on a
+sub-KB subject was "treated as not matching" and `llm:` / `body~` listings dropped real
+matches with only a gori.log line to show for it. The callout still reads the cheap wall clock
+on its stride. A thread cannot spend CPU faster than the wall moves, so the thread CPU clock
+is read only after the wall deadline passes. If the budget is not spent yet, the wall deadline
+moves to the soonest instant it could be. Arming reuses a CPU reading under 1 ms old, which can
+overcharge by less than that. It cannot undercharge. The clock is `CLOCK_THREAD_CPUTIME_ID` on
+Linux and macOS and `GetThreadTimes` on Windows, which advances at the scheduler tick, so a trip
+there can come one tick (~15.6 ms) late. Elsewhere the wall decides alone, as before.
+
+The ReDoS bound is the same in CPU time, so an uncontended trip is unchanged. On a contended host
+the wall time until a trip grows with the thread's lost share. CPU another fiber spends inside
+an armed block still counts, as before, so blocks stay free of yields. A slower core (macOS
+background QoS on efficiency cores) is real CPU and still trips a long legitimate Replace.

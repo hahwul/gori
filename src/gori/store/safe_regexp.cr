@@ -19,6 +19,17 @@ lib LibPCRE2
   fun set_callout = pcre2_set_callout_8(mcontext : MatchContext*, callout : (Void*, Void*) -> Int32, data : Void*) : Int32
 end
 
+# The thread CPU clock `SafeRegexp.thread_cpu` reads: the stdlib binds Linux's clock id and
+# Windows' `GetCurrentThread`, but not Darwin's id or `GetThreadTimes`.
+lib LibC
+  {% if flag?(:darwin) %}
+    CLOCK_THREAD_CPUTIME_ID = 16
+  {% elsif flag?(:win32) %}
+    fun GetThreadTimes(hThread : HANDLE, lpCreationTime : FILETIME*, lpExitTime : FILETIME*,
+                       lpKernelTime : FILETIME*, lpUserTime : FILETIME*) : BOOL
+  {% end %}
+end
+
 module Gori
   # Byte-safe override of SQLite's `REGEXP(pattern, text)` function.
   #
@@ -85,8 +96,9 @@ module Gori
     # pattern over peer-shaped bytes can hold the single scheduler thread for seconds per call
     # (P6). Every pattern `budgeted` compiles carries one callout that PCRE2 (JIT included) calls
     # at each start attempt. A caller runs the match inside `within_budget`, which arms a
-    # deadline for the CURRENT fiber; the callout aborts the match once that deadline has passed,
-    # as a `Regex::Error` every caller already reads as no match. The callout only reads the
+    # deadline for the CURRENT fiber, charged in thread CPU time (`spent?`); the callout aborts
+    # the match once that deadline has passed, as a `Regex::Error` every caller already reads as
+    # no match. The callout only reads the
     # deadline, never sets it (a pattern's own `(?C)` reaches the same callback), and with
     # nothing armed it continues. Why time and not `match_limit`, and the measurements: DESIGN.md
     # §7 "2026-10-11: operator- and agent-authored regexes are budgeted by time".
@@ -101,9 +113,12 @@ module Gori
     # on up to 16 MiB) is not cut short while a pathological 64 KiB one still stops near BUDGET.
     BUDGET_PER_MIB = 50.milliseconds
 
-    # The armed deadline per fiber. A match never yields, so the callout always runs on the fiber
+    # The armed budget per fiber. A match never yields, so the callout always runs on the fiber
     # that armed it; keyed by fiber because a `within_budget` block is not obliged not to yield.
-    @@deadlines = {} of Fiber => Time::Instant
+    # `wall` is when the callout next consults `cpu`, the thread CPU time at which the budget is
+    # spent (zero where `thread_cpu` has no clock: the wall alone decides, as it always did).
+    record Armed, wall : Time::Instant, cpu : Time::Span
+    @@deadlines = {} of Fiber => Armed
     @@warned = Set(String).new
 
     def self.budget_for(subject_bytesize : Int) : Time::Span
@@ -113,20 +128,70 @@ module Gori
     # Runs the block — the match of a `budgeted` regex over a `subject_bytesize`-byte subject —
     # under a deadline for this fiber, and returns its value. A nested call keeps the outer
     # deadline. A budget trip propagates as the `Regex::Error` it is, after one log warning per
-    # `pattern`. Keep anything that may yield (a hook, a log line) OUT of the block: its time
-    # would count against the regex.
+    # `pattern`. Keep anything that may yield (a hook, a log line) OUT of the block: the CPU
+    # another fiber spends meanwhile is this thread's, so it would count against the regex.
     def self.within_budget(pattern : String, subject_bytesize : Int, &)
       fiber = Fiber.current
       outer = @@deadlines[fiber]?
-      deadline = outer || (@@deadlines[fiber] = Time.instant + budget_for(subject_bytesize))
+      unless outer
+        budget = budget_for(subject_bytesize)
+        now = Time.instant
+        @@deadlines[fiber] = Armed.new(now + budget, cpu_baseline(now).try(&.+(budget)) || Time::Span.zero)
+      end
       begin
         yield
       rescue ex : Regex::Error
-        warn_tripped(pattern, subject_bytesize) if Time.instant > deadline
+        warn_tripped(pattern, subject_bytesize) if (armed = @@deadlines[fiber]?) && spent?(fiber, armed, Time.instant)
         raise ex
       ensure
         @@deadlines.delete(fiber) unless outer
       end
+    end
+
+    # Has `fiber`'s `armed` budget run out at `now`? The budget is CPU time: a wall-clock one ran
+    # out while the OS had the thread off the CPU, so on a loaded host a trivial pattern on a
+    # sub-KB subject was "treated as not matching" (DESIGN.md §7, 2026-11-20). The wall still
+    # answers first, because it is the cheap read the callout makes anyway: a thread cannot
+    # spend CPU faster than the wall moves, so before `wall` the budget cannot be spent, and past
+    # it the CPU clock is read once and `wall` moves to the soonest instant the rest could be.
+    # Never raises, never yields, never allocates: it runs inside pcre2_match.
+    def self.spent?(fiber : Fiber, armed : Armed, now : Time::Instant) : Bool
+      return false if now <= armed.wall
+      cpu = thread_cpu || return true
+      return true if cpu >= armed.cpu
+      @@deadlines[fiber] = Armed.new(now + (armed.cpu - cpu), armed.cpu)
+      false
+    end
+
+    # The CPU clock at arming, from a reading under CPU_SAMPLE_AGE old: a SQL `body~` scan arms
+    # once per row, and a fresh read each time cost ~85 ns a row on macOS (a syscall on Linux).
+    # An older reading only charges the CPU spent since it — under CPU_SAMPLE_AGE — to the regex.
+    CPU_SAMPLE_AGE = 1.millisecond
+    @@cpu_sample : Time::Span? = nil
+    @@cpu_sample_at = Time.instant
+
+    private def self.cpu_baseline(now : Time::Instant) : Time::Span?
+      if @@cpu_sample.nil? || now - @@cpu_sample_at >= CPU_SAMPLE_AGE
+        @@cpu_sample = thread_cpu
+        @@cpu_sample_at = now
+      end
+      @@cpu_sample
+    end
+
+    # This thread's CPU time, or nil where it cannot be read (the wall then decides alone).
+    def self.thread_cpu : Time::Span?
+      {% if flag?(:win32) %}
+        # 100 ns units, but advanced at the scheduler tick (~15.6 ms): a trip can run a tick late.
+        return nil if LibC.GetThreadTimes(LibC.GetCurrentThread, out created, out exited, out kernel, out user) == 0
+        ticks = ((kernel.dwHighDateTime.to_u64 << 32) | kernel.dwLowDateTime) +
+                ((user.dwHighDateTime.to_u64 << 32) | user.dwLowDateTime)
+        Time::Span.new(nanoseconds: ticks.to_i64 * 100)
+      {% elsif LibC.has_constant?(:CLOCK_THREAD_CPUTIME_ID) %}
+        return nil unless LibC.clock_gettime(LibC::CLOCK_THREAD_CPUTIME_ID, out ts) == 0
+        Time::Span.new(seconds: ts.tv_sec, nanoseconds: ts.tv_nsec)
+      {% else %}
+        nil
+      {% end %}
     end
 
     # Start-of-pattern option settings — `(*UTF)`, `(*CRLF)`, `(*LIMIT_MATCH=…)` and the rest —
@@ -162,12 +227,13 @@ module Gori
     # :nodoc: — the PCRE2 callout. Never raises and never yields: it runs inside pcre2_match.
     def self.on_callout : Int32
       return 0 if @@deadlines.empty? || (@@countdown -= 1) > 0
-      deadline = @@deadlines[Fiber.current]? || return 0
+      fiber = Fiber.current
+      armed = @@deadlines[fiber]? || return 0
       now = Time.instant
       @@stride = now - @@last_read < STRIDE_FAST ? Math.min(@@stride * 2, STRIDE_MAX) : 1
       @@countdown = @@stride
       @@last_read = now
-      now > deadline ? LibPCRE2::Error::CALLOUT.value : 0
+      now > armed.wall && spent?(fiber, armed, now) ? LibPCRE2::Error::CALLOUT.value : 0
     end
 
     private def self.warn_tripped(pattern : String, subject_size : Int) : Nil
@@ -178,7 +244,7 @@ module Gori
       spawn do
         ::Log.warn do
           "regex #{pattern.inspect} ran past its #{budget_for(subject_size).total_milliseconds.to_i} " \
-          "ms budget on a #{subject_size}-byte subject and was treated as not matching"
+          "ms CPU budget on a #{subject_size}-byte subject and was treated as not matching"
         end
       rescue Channel::ClosedError
         # The process is exiting and the log backend has shut; the line has nowhere to go.
