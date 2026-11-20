@@ -24,7 +24,7 @@
 
 - Repeater: stopping a send reads as stopped instead of a red `Closed stream` error, and a response gori cut short names the cause (its read budget, its 8 MiB capture cap, an idle origin) instead of a bare `(stopped)` or `(incomplete)`. A send still waiting for its response says it is sending, for how long and how to stop it, instead of "not sent yet" (#1942, #1943).
 
-- TUI: the Intercept queue hint calls `/` the catch condition it sets, not a filter; coming back to Decoder lands on INPUT instead of typing into the chain, and the footer under a sub-tab filter being typed shows the filter's keys instead of strip letters that now type. The Issues list marks a resolved issue `res`, not `done` (#1942).
+- TUI: the Intercept queue hint calls `/` the catch condition it sets, not a filter, and held response rows show status before the path so it remains visible on narrow screens. Coming back to Decoder lands on INPUT instead of typing into the chain, and the footer under a sub-tab filter being typed shows the filter's keys instead of strip letters that now type. The Issues list marks a resolved issue `res`, not `done` (#1942, #1943).
 
 - Evidence: freezing an exchange an issue already holds with the same bytes writes no second copy; the TUI and `gori run evidence freeze` name the existing copy and MCP `freeze_evidence` returns it with `already_frozen: true`. A source whose bytes changed still freezes a new copy (#1942).
 

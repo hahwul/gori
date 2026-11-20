@@ -1258,17 +1258,17 @@ module Gori::Tui
     # item); a WebSocket message shows the socket it rides on plus a preview of the payload,
     # because the handshake identity is shared by every message on that socket and the
     # payload is the only thing that tells two rows apart.
-    # `Item#label` composes the HTTP kinds — the ONE definition of "host + an overloaded
-    # target", which as three separate copies produced `POST 127.0.0.1200 OK` (reads as HTTP
-    # status 1200) on the ack path. It takes the EDITED method/target so a row still tracks
-    # what is about to be sent. A WebSocket row keeps its own tail: `Item#label` ends a WS
+    # Request rows use `Item#label` so the row tracks edited method/target values. Response
+    # rows put the status first: the narrow queue cuts the path but keeps the triage field.
+    # A WebSocket row keeps its own tail: `Item#label` ends a WS
     # message with its byte count, and here the PAYLOAD PREVIEW is the only thing that tells
     # two messages on one socket apart.
     private def row_label(it : Interceptor::Item) : String
       method, raw_target = effective_method_target(it) # edited values for the loaded item
       case it.kind
-      in .request?, .response? then it.label(method, raw_target)
-      in .ws_out?, .ws_in?     then "#{it.authority}#{Url.origin_path(raw_target)}  #{ws_preview(it)}"
+      in .request?         then it.label(method, raw_target)
+      in .response?        then "#{raw_target.split.first? || raw_target} #{method} #{it.authority}#{it.request_target.try { |t| Url.origin_path(t) }}"
+      in .ws_out?, .ws_in? then "#{it.authority}#{Url.origin_path(raw_target)}  #{ws_preview(it)}"
       end
     end
 
