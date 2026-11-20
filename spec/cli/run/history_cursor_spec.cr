@@ -99,6 +99,11 @@ describe "gori run history --since / --before-id" do
     end
   end
 
+  it "says in -n's help that --since reads oldest first" do
+    src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "history.cr"))
+    src.should contain(%("Max rows, newest first (oldest first with --since) (default 50)"))
+  end
+
   it "names the cursor in the truncation and empty-listing notes" do
     Gori::CLI::Run.history_truncation_note(true, 2, nil, "--since").not_nil!
       .should eq("showing the oldest 2 — more rows match. Pass the last row's id back as --since for the next page.")
