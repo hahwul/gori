@@ -34,7 +34,8 @@ module Gori
         end
       end
 
-      @[Tool("minimize_repeater", gated: true, agent_action: true, env_refresh: true, permission: "send")]
+      @[Tool("minimize_repeater", gated: true, agent_action: true, env_refresh: true,
+        requires: ["get_job", "stop_job"], permission: "send")]
       private def minimize_repeater(h) : Result
         # `id` — the spelling `delete_repeater` / `update_repeater` use — arrives here folded
         # into `repeater_id` by `ARG_ALIASES`.
@@ -110,21 +111,32 @@ module Gori
             keep_alive: true, idle_conns: 1),
           Repeater::Minimize::SEND_CAP)
 
+        run_or_background(h, "minimize_repeater", "#{scheme}://#{host}:#{port}") do |cancel|
+          minimize_run(id, rec, text, ob, backend, resolve, auto_cl, apply, cancel)
+        end
+      end
+
+      # The search and the apply-back, past every refusal: inline with the call's cancel
+      # predicate, or on a `background:true` job's fiber with its stop.
+      private def minimize_run(id : Int64, rec : Store::RepeaterRecord, text : String, ob : Outbound,
+                               backend : Fuzz::CappedBackend, resolve : Proc(String, Bytes), auto_cl : Bool,
+                               apply : Bool, cancel : Proc(Bool)?) : Result
         # `Stop` polls the cancellation predicate immediately before every send, so a
         # cancelled call stops at the next candidate instead of riding SEND_CAP out at the
         # origin (#1103). This is the same token the TUI arms on pane close and `gori run
         # repeater minimize` arms on SIGINT — MCP was the third surface and the only one that
         # had no way to reach it.
-        ob.halt = cancel_signal # …and a budget wait (#1601)
+        ob.halt = cancel # …and a budget wait (#1601)
         report = begin
           Repeater::Minimize.run(text, auto_cl: auto_cl, resolve: resolve, backend: backend,
-            stop: Repeater::Minimize::Stop.new(cancel_signal)) { }
+            stop: Repeater::Minimize::Stop.new(cancel)) { }
         ensure
           backend.close # release the parked socket even if the run raises
         end
 
         applied = false
-        # `!cancelled?` is the extra condition, and it is NOT covered by `aborted`: a stop
+        # `!cancel` (the call's cancel, or a background job's stop_job) is the extra
+        # condition, and it is NOT covered by `aborted`: a stop
         # during CALIBRATION aborts (nothing was verified), but a stop mid-search returns
         # `aborted: false` with the removals proven so far — and applying those would rewrite
         # the stored request under a caller who is owed no response and will never learn the
@@ -135,7 +147,7 @@ module Gori
         # computes `apply && !interrupted_run && !report.aborted && …`, on the reasoning that a
         # destructive write is where a cancelled sweep parts company with a capped one. There
         # the operator is told `--apply` was skipped; here there is no one left to tell.
-        if apply && !report.aborted && !report.removed.empty? && !cancelled?
+        if apply && !report.aborted && !report.removed.empty? && !cancel.try(&.call)
           # ws_keep_key/ws_http_only/tls_preset for the reason the CLI twin gives:
           # update_repeater's SQL sets every one of those columns unconditionally and its
           # signature defaults them, so omitting one CLEARS a session that carried it.
@@ -269,6 +281,7 @@ module Gori
           s.field "apply", boolprop("write the minimized request back into the session (default false)")
           s.field "verbatim", boolprop("search with the stored bytes EXACTLY: no token expansion, bare-LF->CRLF promotion or Content-Length resync (body params stop being removal candidates). For a capture-seeded session whose stored $filter/$top is evidence, not a reference. Default false")
           s.field "allow_unscoped", boolprop("minimize outside (or without) a configured scope (default false)")
+          s.field "background", background_prop
         end
       end
     end

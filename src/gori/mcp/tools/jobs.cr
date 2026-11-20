@@ -9,7 +9,7 @@ module Gori
       private def list_jobs : Result
         Result.new(JSON.build do |j|
           j.object do
-            j.field "count", @jobs.size + @mine_jobs.size + @discover_jobs.size + @sequence_jobs.size + @authorize_jobs.size + @ws_jobs.size
+            j.field "count", @jobs.size + @mine_jobs.size + @discover_jobs.size + @sequence_jobs.size + @authorize_jobs.size + @ws_jobs.size + @bg_jobs.size
             j.field("jobs") do
               j.array do
                 @jobs.each_value do |f|
@@ -85,6 +85,16 @@ module Gori
                     emit_job_project(j, w)
                   end
                 end
+                @bg_jobs.each_value do |b|
+                  j.object do
+                    j.field "job_id", b.id
+                    j.field "kind", "background"
+                    j.field "tool", b.tool
+                    j.field "status", b.status.to_s
+                    j.field "target", Serialize.text(b.audit.target)
+                    emit_job_project(j, b)
+                  end
+                end
               end
             end
           end
@@ -94,7 +104,8 @@ module Gori
       # Each async kind's id prefix (`fuzz_start` mints `fz_1`, `mine_start` `mn_2`, …) — the
       # same dispatch `get_job` does on the maps, spelled for an id no map holds any more.
       JOB_ID_PREFIXES = {"fz_" => "fuzz", "mn_" => "mine", "ds_" => "discover",
-                         "sq_" => "sequence", "az_" => "authorize", "ws_" => "ws_session"}
+                         "sq_" => "sequence", "az_" => "authorize", "ws_" => "ws_session",
+                         "bg_" => "background"}
 
       # The kind of job `id` names: the map that holds it, else its prefix, else nil.
       private def job_kind_of(id : String) : String?
@@ -104,6 +115,7 @@ module Gori
         return "sequence" if @sequence_jobs.has_key?(id)
         return "authorize" if @authorize_jobs.has_key?(id)
         return "ws_session" if @ws_jobs.has_key?(id)
+        return "background" if @bg_jobs.has_key?(id)
         JOB_ID_PREFIXES.find { |prefix, _| id.starts_with?(prefix) }.try(&.[1])
       end
 
@@ -141,6 +153,8 @@ module Gori
       # `fuzz_send`); this maps to one that does (#1630).
       private def suggest_job_tool(kind : String, verb : String) : String
         return verb == "send" ? "ws_session_send" : "get_job" if kind == "ws_session"
+        # A background call is read and stopped only through the any-kind tools.
+        return verb == "stop" ? "stop_job" : "get_job" if kind == "background"
         {"status", "results", "stop"}.includes?(verb) ? "#{kind}_#{verb}" : "get_job"
       end
 
@@ -186,6 +200,8 @@ module Gori
           authorize_status(h)
         elsif @ws_jobs.has_key?(id)
           ws_session_status(h)
+        elsif bjob = @bg_jobs[id]?
+          background_status(bjob, h)
         else
           not_found("no job #{id}#{held_any_hint}")
         end
@@ -193,7 +209,7 @@ module Gori
 
       # `held_jobs_hint` across every kind, for the two tools that take any id.
       private def held_any_hint : String
-        held = {@jobs, @mine_jobs, @discover_jobs, @sequence_jobs, @authorize_jobs, @ws_jobs}.flat_map do |jobs|
+        held = {@jobs, @mine_jobs, @discover_jobs, @sequence_jobs, @authorize_jobs, @ws_jobs, @bg_jobs}.flat_map do |jobs|
           jobs.compact_map { |k, j| k if j.db_path == @db_path }
         end
         held.empty? ? "" : " — this server holds job#{held.size == 1 ? "" : "s"} #{held_ids(held)}"
@@ -206,7 +222,8 @@ module Gori
       private def stop_job(h) : Result
         id = str(h, "job_id")
         return err("missing required 'job_id'#{held_any_hint}", "INVALID_ARGUMENT", field: "job_id") if id.nil? || id.empty?
-        job = @jobs[id]? || @mine_jobs[id]? || @discover_jobs[id]? || @sequence_jobs[id]? || @authorize_jobs[id]? || @ws_jobs[id]?
+        job = @jobs[id]? || @mine_jobs[id]? || @discover_jobs[id]? || @sequence_jobs[id]? || @authorize_jobs[id]? ||
+              @ws_jobs[id]? || @bg_jobs[id]?
         return not_found("no job #{id}#{held_any_hint}") unless job
         if mismatch = job_project_mismatch(job)
           return mismatch
@@ -228,7 +245,7 @@ module Gori
       # stopped, and each fuzz save is closed now as `stopped` with the counters so far, since
       # its in-flight requests cannot outlive the process to report.
       def stop_jobs_for_shutdown : Nil
-        {@jobs, @mine_jobs, @discover_jobs, @sequence_jobs, @authorize_jobs}.each do |jobs|
+        {@jobs, @mine_jobs, @discover_jobs, @sequence_jobs, @authorize_jobs, @bg_jobs}.each do |jobs|
           jobs.each_value { |job| request_stop(job) }
         end
         # A live crawl's findings not yet batched into the store: its DoneEvent flush would
@@ -304,6 +321,77 @@ module Gori
         end)
       end
 
+      # --- background calls (`background:true`) ---------------------------------
+      #
+      # race_requests, timing_requests and minimize_repeater are synchronous: one call is
+      # the whole run, and the server serves one call at a time, so a 250-send minimize held
+      # every other call — a read, a stop — behind it with nothing to cancel it by. With
+      # `background:true` the call refuses or gates exactly as before, then answers a `bg_N`
+      # id and runs the rest on its own fiber. `get_job` hands back the Result the synchronous
+      # call would have returned once the run ends, and `stop_job` is its cancel: the run
+      # polls the stop where the synchronous call polls `notifications/cancelled`. The job
+      # class is `BackgroundJob`, beside the other kinds in tools.cr.
+      @bg_jobs = {} of String => BackgroundJob
+
+      private def background_prop : JSON::Any
+        boolprop("return a job_id at once and run on: get_job returns this call's result, stop_job cancels (default false)")
+      end
+
+      # Run `work` now with the call's cancel predicate (the default), or under
+      # `background:true` on a `bg_N` job's fiber with its stop. Called after every refusal
+      # and gate, so a background call is refused exactly as a synchronous one is.
+      private def run_or_background(h, tool : String, target : String, &work : Proc(Bool)? -> Result) : Result
+        return work.call(cancel_signal) unless bool_arg(h, "background", false)
+        @job_seq += 1
+        id = "bg_#{@job_seq}"
+        job = BackgroundJob.new(id, tool, JobAudit.new(target, nil, 1, nil, Time.utc.to_unix_ms), @db_path)
+        evict_finished_jobs(@bg_jobs)
+        @bg_jobs[id] = job
+        spawn(name: "mcp-bg-#{id}") { run_background(job, work) }
+        Result.new({job_id: id, kind: "background", tool: tool, status: "running"}.to_json)
+      end
+
+      # The run, answered as `call` answers a handler: an exception becomes the same
+      # INVALID_ARGUMENT / INTERNAL Result, so the document is the synchronous call's.
+      private def run_background(job : BackgroundJob, work : Proc(Proc(Bool)?, Result)) : Nil
+        result = begin
+          classify(work.call(-> { job.stop_requested? }))
+        rescue ex : ArgError
+          err(ex.message || "invalid arguments for '#{job.tool}'", "INVALID_ARGUMENT", field: ex.field)
+        rescue ex : Gori::Error
+          err(ex.message || "invalid arguments for '#{job.tool}'", "INVALID_ARGUMENT")
+        rescue ex
+          Log.warn(exception: ex) { "tool #{job.tool} failed (#{job.id})" }
+          err("tool error: #{ex.message}", "INTERNAL")
+        end
+        job.result = result
+        job.status = result.is_error ? :error : (job.stop_requested? ? :stopped : :done)
+        job.ended_at_ms = Time.utc.to_unix_ms
+      ensure
+        finalize_job(job)
+      end
+
+      # `get_job` on a `bg_*` id: the running status, or — once it ends — the tool's result.
+      private def background_status(job : BackgroundJob, h) : Result
+        if mismatch = job_project_mismatch(job)
+          return mismatch
+        end
+        wait_for_job(job, h)
+        if (r = job.result) && !job.live?
+          return r
+        end
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "job_id", job.id
+            j.field "kind", "background"
+            j.field "tool", job.tool
+            j.field "status", job.status.to_s
+            j.field "error", Serialize.text(job.error_msg)
+            emit_audit(j, job.audit, job.ended_at_ms)
+          end
+        end)
+      end
+
       # The tools/list schemas for the job-control tools, kept beside the handlers that
       # implement them. `Tools#list` composes every one of these; the action gate is applied
       # here rather than around one long block, so a new write tool cannot be added on the
@@ -312,23 +400,24 @@ module Gori
         return unless @allow_actions
 
         tool j, "list_jobs",
-          "List all fuzz, mine, discover, sequence, authorize and WebSocket-session (ws_*) jobs " \
-          "this session started (job_id, kind, status, counts, target). An authorize row carries " \
-          "bypass_count, so an access-control finding is visible here." { }
+          "List all fuzz, mine, discover, sequence, authorize, WebSocket-session (ws_*) and " \
+          "background-call (bg_*) jobs this session started (job_id, kind, status, counts, " \
+          "target). An authorize row carries bypass_count, so an access-control finding is visible here." { }
 
         tool j, "get_job",
           "Full status of any job by id (dispatches by id prefix). For a ws_* session this " \
-          "returns the live transcript; pass 'after' to read only rows past a cursor." do |s|
-          s.field "job_id", strprop("a job id: fz_* fuzz, mn_* mine, ds_* discover, sq_* sequence, az_* authorize, ws_* WebSocket-session"), required: true
+          "returns the live transcript; pass 'after' to read only rows past a cursor. A finished " \
+          "bg_* job returns its tool's own result." do |s|
+          s.field "job_id", strprop("a job id: fz_* fuzz, mn_* mine, ds_* discover, sq_* sequence, az_* authorize, ws_* WebSocket-session, bg_* background call"), required: true
           s.field "after", intprop("ws_* only: return only transcript rows with seq greater than this cursor (from a previous read's 'cursor'); default 0")
           s.field "wait_ms", intprop("wait up to this many ms while the job runs (ws_*: for a reply past 'after'); max #{LONG_POLL_MAX_WAIT_MS}")
         end
 
         tool j, "stop_job",
-          "Stop any fuzz/mine/discover/sequence/authorize job, or close a WebSocket session " \
-          "(ws_*). With wait:true, block until it reaches a terminal state (or wait_timeout_ms) " \
+          "Stop any fuzz/mine/discover/sequence/authorize job or background call (bg_*), or close " \
+          "a WebSocket session (ws_*). With wait:true, block until it reaches a terminal state (or wait_timeout_ms) " \
           "and report final status + stopped_at; without wait, returns immediately (async)." do |s|
-          s.field "job_id", strprop("a job id: fz_* fuzz, mn_* mine, ds_* discover, sq_* sequence, az_* authorize, ws_* WebSocket-session"), required: true
+          s.field "job_id", strprop("a job id: fz_* fuzz, mn_* mine, ds_* discover, sq_* sequence, az_* authorize, ws_* WebSocket-session, bg_* background call"), required: true
           s.field "wait", boolprop("block until the job actually stops (default false)")
           s.field "wait_timeout_ms", intprop("max ms to wait when wait:true (default 10000, max 60000)")
         end

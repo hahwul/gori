@@ -301,7 +301,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `discover_start` / `discover_status` / `discover_results` / `discover_stop` | 엔드포인트 스파이더링 & 브루트포스, 진행 상황 폴링, 결과 조회. 네 개 모두 액션 도구이므로 읽기 전용 서버에는 Discover 표면이 없습니다 |
 | `oast_start` / `oast_stop` | OAST 페이로드 등록 후 콜백 폴링: 기본은 공개 interactsh 서버, `provider_id`로 저장된 프로바이더, `persist:true`로 재개 가능한 세션(`oast_poll`로 히트 조회). 재개한 세션에 `oast_stop`을 쓰면 폴링만 멈추고 세션은 다시 재개할 수 있게 남습니다. Sandbox가 켜져 있으면 인라인 `server`(또는 에이전트가 저장하는 프로바이더 host)는 Sandbox가 허용하는 곳이어야 합니다. 내장 프리셋과 운영자가 저장한 프로바이더는 검사하지 않습니다 |
 | `oast_resume` / `oast_release` | 저장된 세션을 다시 살려 이전에 심어둔 페이로드가 계속 resolve되게 하고(폴링 결과는 프로젝트에 저장됩니다), 끝난 engagement는 등록 해제합니다. 콜백은 남습니다 |
-| `list_jobs` / `get_job` / `stop_job` | 작업 종류와 무관하게 처리: 이번 세션이 시작한 모든 fuzz, mine, discover, sequence, authorize, WebSocket 세션 작업 나열, 또는 id로 하나를 조회하고 중지. 이미 끝난 작업을 중지하면 아무것도 바꾸지 않고 `already_finished:true`로 답합니다. 종류별 도구에 다른 종류의 id를 주면(`fuzz_results{job_id:"mn_2"}`) 그 id를 읽는 도구를 알려 줍니다 |
+| `list_jobs` / `get_job` / `stop_job` | 작업 종류와 무관하게 처리: 이번 세션이 시작한 모든 fuzz, mine, discover, sequence, authorize, WebSocket 세션, 백그라운드 호출(`background:true`) 작업 나열, 또는 id로 하나를 조회하고 중지. 이미 끝난 작업을 중지하면 아무것도 바꾸지 않고 `already_finished:true`로 답합니다. 종류별 도구에 다른 종류의 id를 주면(`fuzz_results{job_id:"mn_2"}`) 그 id를 읽는 도구를 알려 줍니다 |
 | `intercept_forward` / `intercept_forward_edit` / `intercept_drop` | 홀드된 메시지를 바이트 그대로 내보내거나, 수정한 와이어 바이트로 내보내거나, 드롭 |
 | `ws_inject` | 프록시가 아직 중계 중인 WebSocket에, 앱 자신의 소켓 위로 어느 방향이든 프레임 하나(`text`, `binary`, `ping`, `pong`, `close`)를 밀어 넣습니다. 액티브이며 플로우의 호스트에 스코프 게이트가 걸리고, 캡처 중인 TUI가 적용합니다. [라이브 인터셉트](#live-intercept) 참고 |
 | `intercept_toggle` / `intercept_set_filter` / `intercept_set_direction` | 캐치 활성화 및 해제, 조건 쿼리 설정, 홀드할 방향 선택 |
@@ -389,6 +389,8 @@ gori가 지원하지 않는 버전은 `-32022`와 지원 버전 목록으로 거
 ## 한 번에 한 호출 {#one-call-at-a-time}
 
 도구는 도착한 순서대로 하나씩 실행됩니다. 퍼즈나 느린 `send_request`가 다음 호출과 겹치지 않고, 응답도 순서대로 돌아옵니다. 다만 `ping`은 긴 호출 뒤에 밀려 서버가 죽었다는 판정을 받지 않도록, `notifications/cancelled`는 취소한 요청의 응답을 보내지 않도록 즉시 처리합니다. `send_request`나 `send_websocket`을 취소하면 진행 중인 소켓을 닫으므로 응답하지 않는 대상이 타임아웃까지 워커를 붙잡지 않습니다. 협력적 취소를 지원하는 도구는 다음 취소 확인 지점에서 멈춥니다. 그 밖의 진행 중인 호출은 끝난 뒤 다음 대기 호출을 처리합니다.
+
+`race_requests`, `timing_requests`, `minimize_repeater`는 `background:true`도 받습니다. 호출은 이 인자가 없을 때와 똑같이 거부되거나 게이트를 거친 뒤 곧바로 `bg_*` `job_id`를 돌려주고, 실행은 다음 호출을 처리하는 동안 계속됩니다. `get_job`은 동기 호출이 돌려줬을 것과 같은 결과를 돌려주고(`wait_ms`를 주면 실행이 끝날 때까지 기다립니다), `stop_job`은 다음 확인 지점에서 실행을 취소합니다. 이미 전송된 race는 끝까지 갑니다.
 
 ## MCP 이음새인 이유 {#why-an-mcp-seam}
 

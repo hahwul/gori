@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- MCP: `race_requests`, `timing_requests` and `minimize_repeater` take `background:true`, which returns a `job_id` at once so other calls are answered while the run goes on; `get_job` returns the call's usual result and `stop_job` cancels it (#1944).
 - MCP: `gori mcp --install-*` writes `--tools=@recon` when no `--tools` is given, so a fresh install loads about a fifth of the full catalogue's tool schemas; `--tools='*'` installs every tool, and a hand-run `gori mcp` is unchanged, as is an existing entry until it is reinstalled (#1943).
 
 - History: "size" means request + response bytes everywhere. The TUI SIZE column shows the total that `size:` filters on and the CLI and MCP print, and `--sort=largest` (MCP `sort:"largest"`) ranks by it; `respsize:` still filters on the response alone (#1943).

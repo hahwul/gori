@@ -1428,6 +1428,25 @@ module Gori
         end
       end
 
+      # A synchronous tool's run under `background:true` (`run_or_background`, tools/jobs.cr).
+      class BackgroundJob < Job
+        getter tool : String
+        # The synchronous call's own Result, set when the run ends.
+        property result : Result? = nil
+
+        def initialize(id : String, @tool : String, audit : JobAudit, db_path : String?)
+          super(id, audit, db_path)
+        end
+
+        def stop_requested? : Bool
+          !stop_requested_at_ms.nil?
+        end
+
+        # Nothing to signal: the run polls `stop_requested?`.
+        private def halt : Nil
+        end
+      end
+
       # Second spellings of one argument, per tool: alias → the name the handler reads (#1393).
       #
       # The same object is `flow_id` on nine tools and `id` on get_flow/delete_flow; a repeater
@@ -1688,7 +1707,9 @@ module Gori
       #   fuzz/mine/        NO, by design. They return a `job_id` immediately and are stopped
       #   discover/         with `stop_job` — cancelling the *call* that started one would
       #   sequence/         suppress the id and leave the job running, which is the opposite
-      #   authorize _start  of what the client asked for.
+      #   authorize _start  of what the client asked for. The same holds for race_requests,
+      #                     timing_requests and minimize_repeater under `background:true`:
+      #                     their run polls the job's `stop_job` in place of this predicate.
       def call(name : String, args : JSON::Any, cancelled : Proc(Bool)? = nil) : Result
         @cancelled = cancelled
         @calling = name

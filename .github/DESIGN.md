@@ -6019,3 +6019,14 @@ names the cap and says to raise it and reopen. The cap is read only at open.
 Not done: a confirmation before opening, or any change to what retention keeps. The cap is the operator's own
 setting, and a dialog would put a question in front of every open of a large project.
 
+
+### 2026-11-20: race, timing and minimize take `background:true` (#1944)
+
+Refines: "Tools run one at a time". `race_requests`, `timing_requests` and `minimize_repeater` are one call
+per run, so a 250-send minimize or a long timing run held every other call (a read, a stop) behind it, and
+nothing could cancel it but the client's own `notifications/cancelled`. With `background:true` the call runs
+every refusal and gate as before, then answers a `bg_*` `job_id` and runs the rest on its own fiber. `get_job`
+returns the synchronous call's own Result once the run ends, and `stop_job` is the cancel: the run polls it
+where the synchronous call polls the cancel predicate (a race already on the wire finishes). No
+`*_start/_status/_stop` tools were added; the three declare `requires: get_job, stop_job` instead. The
+synchronous default is unchanged, and a running background call blocks a project switch like any job.
