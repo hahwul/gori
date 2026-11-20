@@ -222,7 +222,7 @@ module Gori
       def self.tools_note(args : Array(String)) : String?
         return nil unless args.includes?("--tools=#{DEFAULT_TOOLS}")
         "Tools: the #{DEFAULT_TOOLS} profile (gori mcp --help lists it); " \
-        "reinstall with --tools='*' to serve every tool"
+        "reinstall with --tools=\"*\" to serve every tool"
       end
 
       # Resolve the absolute path of the running gori binary, as it was invoked.

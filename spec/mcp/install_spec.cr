@@ -550,7 +550,7 @@ describe Gori::MCP::Install do
     it "says the default profile was installed and how to widen it, in one line" do
       note = Gori::MCP::Install.tools_note(Gori::MCP::Install.build_args).not_nil!
       note.should contain("@recon")
-      note.should contain("--tools='*'")
+      note.should contain(%(--tools="*"))
       note.should_not contain('\n')
     end
 

@@ -41,7 +41,7 @@ describe "gori mcp catalogue wording" do
 
     it "states the install default and how to install every tool" do
       help.should contain("--install-* entry defaults to @recon")
-      help.should contain("--tools='*' installs every tool")
+      help.should contain(%(--tools="*" installs every tool))
     end
 
     it "explains required companions and conflicting exclusions" do

@@ -6005,7 +6005,7 @@ still serves everything, so an agent never meets a narrower server it was not in
 existing entries change only on reinstall. The install prints one line naming the profile and
 `--tools='*'`, the spelling that installs every tool. `gori mcp` checks the default spec before it
 writes, like a typed one, so `--read-only`, `--pin-project` and `--no-project` with the default all
-start; every profile already keeps both project pickers, and read tools belong to no Preferences group.
+start; `@recon` keeps both project pickers, and read tools belong to no Preferences group.
 
 ### 2026-11-20: a project opened over its retention cap says so, and still opens (#1943)
 

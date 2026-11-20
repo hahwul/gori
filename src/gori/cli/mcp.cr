@@ -256,7 +256,7 @@ module Gori::CLI
       io << "Required companions are included automatically; conflicting explicit exclusions are refused.\n"
       io << "The client loads every advertised tool into the model's context; the\n"
       io << "startup log says how much. A server run by hand serves every tool; an\n"
-      io << "--install-* entry defaults to #{MCP::Install::DEFAULT_TOOLS} (--tools='*' installs every tool). Profiles:"
+      io << "--install-* entry defaults to #{MCP::Install::DEFAULT_TOOLS} (--tools=\"*\" installs every tool). Profiles:"
       MCP::ToolFilter::PROFILES.each do |pr|
         io << "\n  " << "@#{pr.name}".ljust(width) << pr.summary
       end
