@@ -1309,7 +1309,7 @@ gori run notes delete 2 --yes
 | `update <n>` (`edit`) · `append <n>` | Replace the note's text, or add to it on a new line (`append`, or `update --append`). The text is `--text`, the words after `<n>`, or STDIN. An empty text is refused. Applied by the note's stable id inside the write, so a peer's edit a moment earlier is appended to rather than overwritten |
 | `delete <n>` (`rm`) | Delete the note at index `n`. `-y`/`--yes` is required |
 
-The index is a list position, so `notes delete 2` names a different note once an earlier one is gone. `--json` prints each note's stable `id`, which `update`, `append` and `delete` take as `--id ID`; `--position N` names the list position. A bare `<n>` that is also the id of a note at another position is refused, naming both, so a script that passes an id never changes the note at that position. `delete` refuses without `-y`/`--yes` (there is no interactive prompt), and the refusal quotes the note's first line, when it has one.
+The index is a list position, so `notes delete 2` names a different note once an earlier one is gone. `--json` prints each note's stable `id`, which `update`, `append` and `delete` take as `--id ID`; `--position N` names the list position. Under `--json`, a bare `<n>` that is also the id of a note at another position is refused, naming both, so a script that passes an id never changes the note at that position. Without `--json` a bare `<n>` is always the list position, and the reply names the note it changed. `delete` refuses without `-y`/`--yes` (there is no interactive prompt), and the refusal quotes the note's first line, when it has one.
 
 ### run notify
 

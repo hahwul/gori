@@ -1,8 +1,8 @@
 # `gori run notes` — read the project's notes (list, show one, or --all),
 # or write them (create, delete). Notes are addressed by their 1-based list
 # position <n> (the same number `notes <n>` and the listing show); `update` and `delete`
-# also take `--id ID`, the stable id the listing prints as "(id N)", and `--position N`; a bare
-# <n> that is also another note's id is refused as ambiguous (`resolve_note_index`).
+# also take `--id ID`, the stable id the listing prints as "(id N)", and `--position N`; under
+# `--json` a bare <n> that is also another note's id is refused as ambiguous (`resolve_note_index`).
 module Gori
   module CLI
     module Run
@@ -125,7 +125,7 @@ module Gori
                      "       gori run notes append <n>|--id ID [--text TEXT | TEXT…] [options]\n\n" \
                      "Replace the text of the note at 1-based list position <n> (or stable --id ID), or\n" \
                      "add to it with --append. The text comes from --text, else the words after <n>, else STDIN.\n" \
-                     "A bare <n> that is also the id of a note at another position is refused: pass --position N or --id N."
+                     "Under --json, a bare <n> that is also the id of a note at another position is refused: pass --position N or --id N."
           p.on("--append", "Add the text on a new line after the note's current text instead of replacing it") { append = true }
           p.on("--id=ID", "Address the note by its stable id (the listing's \"id N\") instead of <n>") { |v| note_id = parse_id(v, "gori run notes update", "--id") }
           p.on("--position=N", "Address the note by its 1-based list position, even where N is also another note's id") { |v| position = parse_note_index(v) }
@@ -213,7 +213,7 @@ module Gori
           doc.notes.index { |e| e.id == id } || not_found_abort(cmd, "no note with id #{id}", format, store)
         else
           n = n.not_nil!
-          if err = note_position_error(doc, n, explicit)
+          if err = note_position_error(doc, n, explicit, format == :json)
             n > doc.size ? not_found_abort(cmd, err, format, store) : usage_abort("#{cmd}: #{err}", store: store)
           end
           n - 1
@@ -222,15 +222,17 @@ module Gori
 
       # Why `<n>` names no one note, or nil. A bare `<n>` is a list position, while `--json`
       # prints each note's `id` first, so a script passing an id deleted whichever note sat at
-      # that position. A bare `<n>` that is ALSO the id of a note at another position is
-      # therefore refused, naming both readings; one that agrees, or is no note's id, is a
-      # position as before. `--position N` (`explicit`) says which reading is meant.
-      def self.note_position_error(doc : Notes::Doc, n : Int32, explicit : Bool = false) : String?
+      # that position. Under `--json` (the script contract) a bare `<n>` that is ALSO the id of
+      # a note at another position is therefore refused, naming both readings. Without it, `<n>`
+      # is the position a person reads off the listing, as always: notes made here get
+      # sequential ids, so after one delete nearly every position is some other note's id, and
+      # the reply names the note it touched. `--position N` (`explicit`) says which is meant.
+      def self.note_position_error(doc : Notes::Doc, n : Int32, explicit : Bool = false, json : Bool = false) : String?
         at = explicit ? nil : doc.notes.index { |e| e.id == n }
         if n > doc.size
           "no note ##{n} (this project has #{Gori.plural(doc.size, "note")})" \
           "#{at.try { |i| "; id #{n} is note ##{i + 1} — pass --id #{n}" }}"
-        elsif at && at != n - 1
+        elsif json && at && at != n - 1
           "#{n} is ambiguous: note ##{n} is id #{doc.notes[n - 1].id}, and id #{n} is note ##{at + 1} — " \
           "pass --position #{n} or --id #{n}"
         end
@@ -258,7 +260,7 @@ module Gori
         positional = parse_args(args, "gori run notes delete") do |p|
           p.banner = "Usage: gori run notes delete <n>|--id ID --yes [options]\n\n" \
                      "Delete the note at 1-based list position <n> (as shown by `notes`), or by its stable --id ID.\n" \
-                     "A bare <n> that is also the id of a note at another position is refused: pass --position N or --id N."
+                     "Under --json, a bare <n> that is also the id of a note at another position is refused: pass --position N or --id N."
           p.on("-y", "--yes", "Confirm the deletion (required — there is no interactive prompt here)") { yes = true }
           p.on("--id=ID", "Address the note by its stable id (the listing's \"id N\") instead of <n>") { |v| note_id = parse_id(v, "gori run notes delete", "--id") }
           p.on("--position=N", "Address the note by its 1-based list position, even where N is also another note's id") { |v| position = parse_note_index(v) }

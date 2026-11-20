@@ -13,7 +13,7 @@
 - TUI: OAST callbacks show when they arrived in the local time History uses, as a TIME column on a wide enough pane and in the detail, which printed UTC (#1944).
 - `gori run history`: `--since ID` tails newer flows oldest first and `--before-id ID` pages older ones, as MCP `list_history` does, so a script continues from the last row's id (#1944).
 
-- `gori run notes update|append|delete <n>` refuses an `<n>` that is also the id of a note at another position, so a script passing the id `--json` prints no longer changes a different note; `--id N` and `--position N` name one or the other (#1944).
+- `gori run notes update|append|delete <n> --json` refuses an `<n>` that is also the id of a note at another position, so a script passing the id `--json` prints no longer changes a different note; without `--json` `<n>` is the list position as before, and `--id N` and `--position N` name one or the other (#1944).
 
 - MCP: `gori mcp --install-*` writes `--tools=@recon` when no `--tools` is given, so a fresh install loads about a fifth of the full catalogue's tool schemas; `--tools='*'` installs every tool, and a hand-run `gori mcp` is unchanged, as is an existing entry until it is reinstalled (#1943).
 
