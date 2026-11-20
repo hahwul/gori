@@ -97,6 +97,31 @@ describe Gori::Session, ".open notices" do
     end
   end
 
+  it "counts the flows past the configured retention cap, and nothing with no cap" do
+    root = File.tempname("gori-session-retention")
+    Dir.mkdir_p(root)
+    prev_cap = Gori::Settings.retention_max_flows
+    begin
+      project = Gori::ProjectRegistry.new(File.join(root, "projects")).create("big")
+      ca = Gori::Proxy::Tls::CertAuthority.load_or_create(File.join(root, "ca"))
+      store = Gori::Store.open(project.db_path, retention_flows: Gori::Store::RETENTION_UNLIMITED)
+      5.times { |i| store.insert_flow(pending_request("/f-#{i}")) }
+      store.close
+      {2 => 3_i64, 0 => 0_i64, 5 => 0_i64}.each do |cap, over|
+        Gori::Settings.retention_max_flows = cap
+        session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0), ca, Gori::Verbs.registry, project)
+        begin
+          session.over_retention_on_open.should eq(over)
+        ensure
+          session.close
+        end
+      end
+    ensure
+      Gori::Settings.retention_max_flows = prev_cap
+      FileUtils.rm_rf(root)
+    end
+  end
+
   it "tells a lock file that cannot be created from a lock another instance holds" do
     root = File.tempname("gori-session-lockfile")
     Dir.mkdir_p(root)

@@ -6,6 +6,8 @@
 
 - Large projects: a `body:` search returns its first page in milliseconds instead of reading every match first, `path:` and `proto:grpc` scans run up to 40% faster, and the retention sweep removes the oldest flows a bounded chunk at a time, so capture and the TUI no longer freeze while a project over its `retention.max_flows` cap is trimmed (#1942).
 
+- Opening a project that holds more flows than `retention.max_flows` now says how many the sweep will delete as capture runs and how to keep them, in the TUI and on `gori run capture`'s stderr (#1943).
+
 - TUI: pasting a large wordlist into a Fuzzer payload set, or a large body into an Intercept held request, no longer freezes the app, and a filtered History re-runs its whole query less often under capture (#1942).
 
 - `gori run`: an invalid `~` regex in a query is an error, as its help and MCP say, and `--strict` refuses a term QL would drop (#1942).

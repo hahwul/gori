@@ -506,6 +506,13 @@ module Gori::Tui
       "#{Gori.plural(count, "flow")} left incomplete by the last session · marked orphaned (gori did not exit cleanly)"
     end
 
+    # A project opened over its retention cap. Nothing is gone yet: the sweep removes the excess
+    # a chunk at a time as capture adds flows. The cap is read only at open, hence "reopen".
+    def self.over_retention_line(count : Int64, cap : Int32) : String
+      "#{Gori.plural(count, "old flow")} will be deleted as capture runs · retention keeps the newest #{cap} · " \
+      "to keep them, raise History retention in settings (^P) and reopen the project"
+    end
+
     def run : Symbol
       # The fiber that runs the event loop: a session slot's before-send refresh asked from it
       # runs in the background instead of blocking the loop on a login (#1233).
@@ -543,6 +550,11 @@ module Gori::Tui
       if (n = @session.orphaned_on_open) > 0
         line = Runner.orphaned_line(n)
         @notifications.push(:warn, line, Jobs::Goto.new(:history), source: "app")
+        @toast ||= line
+      end
+      if (n = @session.over_retention_on_open) > 0
+        line = Runner.over_retention_line(n, Settings.retention_flows)
+        @notifications.push(:warn, line, source: "app")
         @toast ||= line
       end
       # The Project SETTINGS pane is an editor for the PINNED config, so its snapshot (and the

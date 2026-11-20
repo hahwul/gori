@@ -103,6 +103,19 @@ describe "Runner.orphaned_line" do
   end
 end
 
+describe "Runner.over_retention_line" do
+  it "says how many flows the sweep will take, outcome first, and how to keep them" do
+    line = Runner.over_retention_line(402_000_i64, 100_000)
+    line.should start_with("402000 old flows will be deleted as capture runs")
+    line.should contain("newest 100000")
+    line.should contain("reopen") # the cap is read at open only
+    Runner.over_retention_line(1_i64, 3).should start_with("1 old flow will be deleted")
+    # 80×24's 59 toast columns keep the outcome even at seven digits.
+    Chrome.fit_hints(Runner.over_retention_line(9_999_999_i64, 100_000), 59)
+      .should eq("9999999 old flows will be deleted as capture runs …")
+  end
+end
+
 # The import's warning rode AFTER ` · path`, so `fit_hints` dropped it with the path and a
 # duplicate import read exactly like the first (W#1).
 describe "Runner.import_done_line" do

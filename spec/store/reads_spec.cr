@@ -157,3 +157,24 @@ describe "Store#search driven from flows_fts" do
     end
   end
 end
+
+# What an open over the retention cap says (the sweep removes the excess later, a chunk at a time).
+describe Gori::Store, "#flows_over_retention" do
+  it "counts the flows past the cap this store was opened with, 0 under it or with no cap" do
+    path = File.tempname("gori-spec", ".db")
+    begin
+      seed = Gori::Store.open(path, retention_flows: Gori::Store::RETENTION_UNLIMITED)
+      5.times { |i| seed_count_flow(seed, "h#{i}.test", 200) }
+      seed.flows_over_retention.should eq(0) # unlimited: nothing to say
+      seed.close
+      {3 => 2_i64, 5 => 0_i64, 10 => 0_i64}.each do |cap, over|
+        store = Gori::Store.open(path, retention_flows: cap)
+        store.flows_over_retention.should eq(over)
+        store.count.should eq(5) # opening deletes nothing
+        store.close
+      end
+    ensure
+      delete_db_files(path)
+    end
+  end
+end

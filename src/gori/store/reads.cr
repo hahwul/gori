@@ -759,6 +759,15 @@ module Gori
       nil
     end
 
+    # How many flows this project holds past the retention cap this store was opened with, for
+    # the surface that opened it to say at open: the sweep removes them a chunk at a time as
+    # capture adds new flows (`prune`), and otherwise says so only in gori.log. 0 with no cap
+    # (no count is run then) and on a read error — the answer only adds a notice.
+    def flows_over_retention : Int64
+      return 0_i64 if @retention_flows <= 0
+      Math.max(count - @retention_flows, 0_i64)
+    end
+
     # Hard-delete one History flow and its captured dependents (WS messages, FTS row,
     # entity_links that pointed at it, detached references, and its h2 frame log when no sibling
     # flow still shares the connection). Writer-fiber only so it races cleanly with live capture.

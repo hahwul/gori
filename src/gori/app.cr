@@ -294,6 +294,11 @@ module Gori
       # never in the `:json` flow stream on STDOUT, which is somebody's input.
       session.env_syntax_migration.try(&.notices.each { |line| Log.info { line } })
       Settings.take_env_syntax_global_migration.try { |g| Log.info { g.line } }
+      if (n = session.over_retention_on_open) > 0
+        line = "#{Gori.plural(n, "old flow")} will be deleted as capture runs: retention keeps the newest " \
+               "#{Settings.retention_flows}. To keep them, stop and raise retention.max_flows in settings.json."
+        Log.warn { line }
+      end
       if err = session.bind_error
         STDERR.puts "gori: not capturing — #{err}"
         # The lock is the project's, so --port cannot help that one.
