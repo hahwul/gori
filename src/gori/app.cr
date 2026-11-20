@@ -57,9 +57,9 @@ module Gori
     RELOAD_POLL_INTERVAL = 2.seconds
 
     # What a headless open of a project over its retention cap says, once: `gori run capture`
-    # here and every writable `gori run` open (`CLI::Run.open_store`). One home, so the two
-    # cannot drift. `capture: false` is a command that adds flows of its own (a send, an import,
-    # `--record-history`) or none at all, so it names neither a running capture nor a stop.
+    # here and the `gori run` commands that add enough flows to sweep (`CLI::Run.say_over_retention`).
+    # One home, so the two cannot drift. `capture: false` is such a command (an import, a crawl,
+    # `fuzz --record-history`), so it names neither a running capture nor a stop.
     def self.over_retention_line(count : Int64, cap : Int32, *, capture : Bool = true) : String
       "#{Gori.plural(count, "old flow")} will be deleted as #{capture ? "capture runs" : "flows are added"}: " \
       "retention keeps the newest #{cap}. To keep them, #{capture ? "stop and " : ""}raise retention.max_flows in settings.json."

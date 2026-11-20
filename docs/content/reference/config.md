@@ -768,7 +768,7 @@ gori has always swept old flows so a project database stops growing. This sectio
 
 The sweep runs on the capture path, amortized over every few thousand inserts, and cascades to a pruned flow's WebSocket messages and orphaned HTTP/2 frames. It writes one line to the log whenever it drops rows.
 
-A project opened over its cap (the cap lowered later, a project captured with `0`, an imported archive) says so on open, with how many flows the sweep will remove: the TUI in a toast and the notification centre, `gori run capture` and every other `gori run` command that opens the project for writing (`send`, `import`, `--record-history`, …) once on stderr. Nothing is gone yet at that point. The excess goes a chunk at a time as capture adds new flows, so to keep it, raise the cap and reopen the project before capturing.
+A project opened over its cap (the cap lowered later, a project captured with `0`, an imported archive) says so on open, with how many flows the sweep will remove: the TUI in a toast and the notification centre, `gori run capture` and the `gori run` commands that can add enough flows in one run for the sweep to start (`import`, `discover`, `fuzz --record-history`) once on stderr. Nothing is gone yet at that point. The excess goes a chunk at a time as capture adds new flows, so to keep it, raise the cap and reopen the project before capturing.
 
 Raising the cap takes effect on the next project open. Lowering it does not reclaim disk right away. Pruning frees pages for reuse inside the database file but does not shrink the file, so on-disk size drops only after a **Compress** from the project picker, which runs `VACUUM`.
 

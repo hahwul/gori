@@ -1000,7 +1000,6 @@ module Gori
           store.close
           raise ex
         end
-        say_over_retention(store) unless read_only
         store
       rescue ex : DB::Error | SQLite3::Exception
         raise ex unless abort_on_failure
@@ -1013,7 +1012,7 @@ module Gori
         raise ex
       end
 
-      # Whether this process has already said its project is over the retention cap.
+      # Whether this process has already checked (and, if over, said) its project's retention cap.
       @@said_over_retention = false
 
       # Where that notice goes: STDERR, never a `--json` stdout; a spec swaps in an `IO::Memory`,
@@ -1021,14 +1020,17 @@ module Gori
       class_property over_retention_io : IO? = STDERR
 
       # A writable open of a project over `retention.max_flows` sweeps the oldest flows once
-      # this process has added a sweep's worth (a send loop, an import, `--record-history`),
-      # which only gori.log recorded. Said once per process, in `gori run capture`'s words
+      # THIS process has added `Store::PRUNE_INTERVAL` of them, which only gori.log recorded.
+      # So it is said by the commands that can add that many in one run: `import`, `discover`
+      # (at its first stored batch) and `fuzz --record-history`, not by every writable open — a
+      # `send` loop, `notes create` or a read that opens writable would warn of a deletion that
+      # never comes. Said once per process, in `gori run capture`'s words
       # (`App.over_retention_line`), since one command can open its project more than once.
-      # A read-only open sweeps nothing and passes no cap, so it says nothing.
       private def self.say_over_retention(store : Store) : Nil
         return if @@said_over_retention
-        return unless (n = store.flows_over_retention) > 0
+        # Set before the count, so a caller per batch (`flush_discover`) pays one `COUNT(*)`.
         @@said_over_retention = true
+        return unless (n = store.flows_over_retention) > 0
         @@over_retention_io.try &.puts("gori run: #{App.over_retention_line(n, Settings.retention_flows, capture: false)}")
       end
 

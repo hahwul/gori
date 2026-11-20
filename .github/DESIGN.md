@@ -6070,12 +6070,14 @@ position is another note's id, and refusing there punished the person typing the
 positions exist for. Their reply already names the note it touched. Past the end, either way, the not-found adds
 "id N is note #k".
 
-### 2026-11-20: every writable `gori run` open says it is over the retention cap (#1944)
+### 2026-11-20: the `gori run` commands that can sweep say a project is over the retention cap (#1944)
 
 Refines the #1943 entry above. `CLI::Run.open_store` passes `Settings.retention_flows` on every writable open,
-so `send` loops, imports and `--record-history` sweep an over-cap project as they add flows, which only gori.log
-recorded. That open now says it once per process on stderr, never on a `--json` stdout, through
-`App.over_retention_line`, the sentence `gori run capture` prints, with "as flows are added" for "as capture
-runs" and no "stop". It is said on every writable open, including commands that add no flow (`notes create`):
-the project is over its cap whichever command noticed, and the count is one `COUNT(*)`. A read-only open
-passes no cap and says nothing.
+but the Store sweeps only after `Store::PRUNE_INTERVAL` (500) inserts within one process, so the commands that
+can trim an over-cap project are the ones that add that many flows in one run: `import`, `discover` (unless
+`--no-store`) and `fuzz --record-history`. Only gori.log recorded it. Those now say it once per process on
+stderr, never on a `--json` stdout, through `CLI::Run.say_over_retention` and `App.over_retention_line`, the
+sentence `gori run capture` prints, with "as flows are added" for "as capture runs" and no "stop". A `send`
+(one flow, even `--record-history`, even in a loop of processes), `notes create`, or a read that opens writable
+(`history --view`, a `body:` query) says nothing: it would warn of a deletion that never comes in that process.
+A read-only open passes no cap and says nothing.

@@ -531,6 +531,7 @@ module Gori
         # failures are logged as events — traffic nobody typed at that moment, so it is on the record.
         write_store = (record_policy == :none && !save_results && plan.request_macro.nil?) ? nil : open_store(resolve_read_project(proj.name, proj.db), long_running: true)
         attach_request_macro_store(plan.request_macro, write_store)
+        write_store.try { |s| say_over_retention(s) } unless record_policy == :none
         saved = nil.as(Fuzz::Persistence?)
         # Calibration SENDS, so it belongs inside the block that releases the read
         # connection — a raise in there would otherwise leak it. The permanent row is created
