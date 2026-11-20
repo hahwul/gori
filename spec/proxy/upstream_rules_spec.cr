@@ -1118,6 +1118,30 @@ describe "upstream rules" do
     ensure
       reset_upstream
     end
+
+    # Every flow through a dead proxy is an ERR row with the reason only in its detail; the TUI
+    # says it once from this table (`Runner#drain_unreachable_upstreams`).
+    it "lists a proxy that cannot be dialled with the setting that chose it, until it answers" do
+      srv = TCPServer.new("127.0.0.1", 0)
+      pport = srv.local_address.port
+      srv.close
+      Gori::Settings.upstream_rules = [rule("*", "http", "127.0.0.1:#{pport}")]
+      Gori::Proxy::Upstream.dial_result("example.test", 443)
+      Gori::Proxy::Upstream.unreachable_proxies["upstream HTTP proxy 127.0.0.1:#{pport}"]?
+        .should eq("upstream HTTP proxy 127.0.0.1:#{pport} (upstream rule *)")
+
+      # A proxy that answers, even with a refusal, is reachable: its entry goes.
+      with_refusing_http_proxy(403, "Forbidden") do |live|
+        label = "upstream HTTP proxy 127.0.0.1:#{live}"
+        Gori::Proxy::Upstream.unreachable_proxies[label] = "stale"
+        Gori::Settings.upstream_rules = [rule("*", "http", "127.0.0.1:#{live}")]
+        Gori::Proxy::Upstream.dial_result("example.test", 443)
+        Gori::Proxy::Upstream.unreachable_proxies.has_key?(label).should be_false
+      end
+    ensure
+      Gori::Proxy::Upstream.unreachable_proxies.clear
+      reset_upstream
+    end
   end
 
   # A rule that NAMES a password variable is a statement that a password is required. gori

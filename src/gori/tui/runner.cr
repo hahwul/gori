@@ -311,6 +311,9 @@ module Gori::Tui
       # Whether an untrusted-CA handshake has already raised its one toast (see
       # drain_untrusted_handshakes).
       @untrusted_toasted = false
+      # Upstream proxies already said to be unreachable (see drain_unreachable_upstreams), seeded
+      # like the passthrough mark: a proxy that died under the previous project is not news here.
+      @upstream_said = Proxy::Upstream.unreachable_proxies.keys
       # A hold was announced and the Intercept tab has not been opened since (see
       # announce_first_hold).
       @hold_announced = false
@@ -843,6 +846,8 @@ module Gori::Tui
             dirty = true if drain_ws_inject_outcomes
             # …and a client that refused gori's certificate. Same placement, same reason.
             dirty = true if drain_untrusted_handshakes
+            # …and an upstream proxy that stopped answering. Same placement, same reason.
+            dirty = true if drain_unreachable_upstreams
             # …and what intercept just started holding, while another tab is up. After the
             # notices above: it is said once, so none of them may take the toast from it.
             dirty = true if announce_first_hold
@@ -4697,6 +4702,38 @@ module Gori::Tui
         status("HTTPS failed: trust gori's CA from http://gori.proxy/ (#{hp})")
       end
       true
+    end
+
+    # Say once that the configured upstream proxy does not answer: every flow through it is an
+    # `ERR` row whose reason is only in its detail. `Upstream.unreachable_proxies` is written on
+    # the dial path and read here, the passthrough shape. Silent again until the proxy answers
+    # (its entry leaves the table) or a different one is configured (a new label).
+    private def drain_unreachable_upstreams : Bool
+      down = Proxy::Upstream.unreachable_proxies
+      return false if down.empty? && @upstream_said.empty?
+      @upstream_said.select! { |label| down.has_key?(label) }
+      fresh = down.reject { |label, _| @upstream_said.includes?(label) }
+      return false if fresh.empty?
+      fresh.each do |label, via|
+        @upstream_said << label
+        @notifications.push(:error, Runner.upstream_down_note(via), source: "app")
+      end
+      return true unless Settings.notify_toast?
+      # `status(_, :error)` without its own notification: the note above is the long form.
+      toast = Runner.upstream_down_toast(fresh.first_key)
+      @toast_kinded = {toast, :error}
+      status(toast)
+      true
+    end
+
+    # The status row keeps the proxy's address; the setting that chose it is in the note.
+    def self.upstream_down_toast(label : String) : String
+      "#{label} unreachable"
+    end
+
+    # `via`: `Upstream.via`'s line, `upstream HTTP proxy h:p (network.upstream_proxy)`.
+    def self.upstream_down_note(via : String) : String
+      "#{via} is unreachable — flows routed through it fail before reaching the origin"
     end
 
     GOTO_TARGET_UNAVAILABLE = "Result is no longer available"

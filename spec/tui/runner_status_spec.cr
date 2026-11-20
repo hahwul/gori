@@ -158,3 +158,15 @@ describe "the sub-tab strip footer while its filter is being typed" do
     Screen.display_width(Runner::SUBTAB_FILTER_HINT).should be <= 59
   end
 end
+
+# A dead upstream proxy is said once (`Runner#drain_unreachable_upstreams`): the status row
+# keeps the address, the notification names the setting that chose it.
+describe "Runner.upstream_down_toast" do
+  it "names the proxy and fits 80×24's 59 columns with its ✗" do
+    toast = Runner.upstream_down_toast("upstream SOCKS5 proxy 255.255.255.255:65535")
+    toast.should eq("upstream SOCKS5 proxy 255.255.255.255:65535 unreachable")
+    ("✗ " + toast).size.should be <= 59
+    Runner.upstream_down_note("upstream HTTP proxy 127.0.0.1:3128 (network.upstream_proxy)")
+      .should start_with("upstream HTTP proxy 127.0.0.1:3128 (network.upstream_proxy) is unreachable")
+  end
+end

@@ -144,10 +144,38 @@ module Gori::Proxy
           err = DialError.new(DialErrorKind::Connect, override_target: Gori::BindAddress.authority(target, target_port))
         end
         {sock, err}
-      elsif route.socks5?
-        dial_via_socks5(route, target, target_port, connect_timeout, io_timeout, refuse_self)
       else
-        dial_via_proxy(route, target, target_port, connect_timeout, io_timeout, refuse_self)
+        result = if route.socks5?
+                   dial_via_socks5(route, target, target_port, connect_timeout, io_timeout, refuse_self)
+                 else
+                   dial_via_proxy(route, target, target_port, connect_timeout, io_timeout, refuse_self)
+                 end
+        note_proxy_leg(route, result[1], host, origin_scheme, port)
+        result
+      end
+    end
+
+    # Upstream proxies whose last TCP leg failed: `proxy_label` => the `via` line naming the
+    # setting that chose it. Every flow through a dead proxy is an `ERR` row whose reason is
+    # only in its detail; a surface that wants to say so once reads this (the TUI does, on its
+    # tick). Written on the dial path as one hash store, never waited on (P6). A dial that
+    # reached the proxy, whatever it answered, takes its entry back out.
+    @@unreachable_proxies = {} of String => String
+
+    def self.unreachable_proxies : Hash(String, String)
+      @@unreachable_proxies
+    end
+
+    private def self.note_proxy_leg(route : Settings::UpstreamRoute, err : DialError?,
+                                    host : String, origin_scheme : String, port : Int32) : Nil
+      return if err.nil? && @@unreachable_proxies.empty? # the common case allocates nothing
+      label = proxy_label(route)
+      # `Connect` on a proxy route is `dial_proxy_leg`'s, the one kind that means the proxy
+      # itself did not answer.
+      if err.try(&.kind.connect?)
+        @@unreachable_proxies[label] ||= via(host, origin_scheme, port)
+      else
+        @@unreachable_proxies.delete(label)
       end
     end
 
