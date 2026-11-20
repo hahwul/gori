@@ -239,7 +239,7 @@ describe "gori run --json — the refusals that printed nothing" do
     reader = run[run.index("private def self.read_input_file(").not_nil!..run.index("# The bytes an operator piped", run.index("private def self.read_input_file(").not_nil!).not_nil!]
     reader.should contain("usage_abort(")
     JsonRefusals.method("history.cr", "cmd_history_list").should contain("usage_abort(\"gori run history: --sort")
-    JsonRefusals.method("notes.cr", "cmd_notes_delete").should contain("usage_abort(\"gori run notes delete: missing")
+    JsonRefusals.method("notes.cr", "note_delete_position").should contain("usage_abort(\"gori run notes delete: missing")
     JsonRefusals.method("notes.cr", "parse_note_index").should contain("usage_abort(\"gori run notes: invalid note number")
     JsonRefusals.method("repeater.cr", "cmd_repeater_send").should contain("usage_abort(\"gori run repeater send: missing")
   end

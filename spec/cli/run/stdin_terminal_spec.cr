@@ -190,7 +190,7 @@ describe "gori run — stdin doors refuse a terminal" do
     # the read, and abort the same way.
     it "checks the opened file too, before reading it" do
       body = method_body(cli_source("run.cr"), "read_input_file")
-      body.should match(/if err = stdin_terminal_error\([\s\S]*?\n\s*abort err\n\s*end/)
+      body.should match(/if err = stdin_terminal_error\([\s\S]*?\n\s*usage_abort\(err\)\n\s*end/)
       body.index!("stdin_terminal_error(").should be < body.index!("gets_to_end")
       # `File.read` cannot be checked, and its `File::Error` rescue could not catch the bare
       # `IO::Error` that `read(2)` on a directory raises.

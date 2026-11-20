@@ -15,7 +15,6 @@
 
 - `gori run notes <n>`, `update`, `append` and `delete` refuse, under `--json`, an `<n>` that is also the id of a note at another position, so a script passing the id `--json` prints no longer reads or changes a different note; without `--json` `<n>` is the list position as before, and `--id N` and `--position N` name one or the other on all four (#1944).
 
-- MCP: `gori mcp --install-*` writes `--tools=@recon` when no `--tools` is given, so a fresh install loads about a fifth of the full catalogue's tool schemas; `--tools='*'` installs every tool, and a hand-run `gori mcp` is unchanged, as is an existing entry until it is reinstalled (#1943).
 - MCP: `gori mcp --install-*` writes `--tools=@recon` when no `--tools` is given, so a fresh install loads about a fifth of the full catalogue's tool schemas; `--tools='*'` installs every tool, and a hand-run `gori mcp` is unchanged, as is an existing entry until it is reinstalled. The printed `Command:` quotes glob and spaced arguments for copying into a shell (#1943, #1944).
 
 - History: "size" means request + response bytes everywhere. The TUI SIZE column shows the total that `size:` filters on and the CLI and MCP print, and `--sort=largest` (MCP `sort:"largest"`) ranks by it; `respsize:` still filters on the response alone (#1943).
