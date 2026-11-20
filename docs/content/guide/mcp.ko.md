@@ -285,7 +285,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `grpc_reflect` / `grpc_forget` | 대상의 `grpc.reflection.v1`(없으면 `v1alpha`)에 디스크립터를 요청해 프로젝트에 캐시하거나, 캐시된 대상을 버립니다. `grpc_reflect`는 아웃바운드 전송이므로 다른 전송처럼 스코프 게이트를 지납니다. `persisted: false`는 쓰기가 커밋되지 않았다는 뜻입니다(다른 gori가 라이터를 쥐고 있음). 리플렉션으로 가져온 스키마는 이 서버가 끝날 때까지 적용되고, `grpc_schema`에 나오며 `grpc_forget`으로 버릴 수 있습니다. 커밋되지 않은 forget은 이 서버가 그 대상으로 렌더하는 것만 멈추고 저장된 행은 남으므로, `grpc_schema`에는 계속 나옵니다 |
 | `create_view` / `update_view` / `delete_view` | 저장된 History [뷰](/ko/guide/proxy/#views) 생성, 편집, 스코프 이동, 삭제. 각각 `scope`를 받습니다: `project`(기본값) 또는 `global`. 쿼리는 들어올 때 검사합니다. 모든 항이 버려질 쿼리는 거절합니다 |
 | `preview_rule` | 규칙을 만들기 전에, 저장된 플로우 중 몇 개가 바뀌었을지 추정 |
-| `import_flows` | HAR / URL 목록 / OpenAPI / Postman / Insomnia / Burp / WSDL 문서나 curl 명령을 파일(`path`) 또는 `text`로 받아 History로 일괄 임포트. 임포트는 중복을 제거하지 않습니다. 같은 이름의 파일에서 온 플로우가 이미 있으면 `notes`가 알려 줍니다 |
+| `import_flows` | HAR / URL 목록 / OpenAPI / Postman / Insomnia / Burp / WSDL / GraphQL 인트로스펙션 문서나 curl 명령을 파일(`path`) 또는 `text`로 받아 History로 일괄 임포트. 임포트는 중복을 제거하지 않습니다. 같은 이름의 파일에서 온 플로우가 이미 있으면 `notes`가 알려 줍니다. GraphQL은 `kind:"graphql"`과 `endpoint` URL이 필수이며, 쿼리·뮤테이션마다 전송하지 않은 POST 템플릿을 만듭니다. 구독은 생략한 개수를 `notes`에 적습니다 |
 | `delete_flow` / `clear_history` | 플로우 하나 삭제, 또는 캡처된 History 전체 삭제. 이슈나 노트가 링크한 플로우를 지우면 그 링크도 함께 사라지고, `delete_flow`의 응답은 `unlinked`로 그 소유자를 밝힙니다(`delete_repeater`/`delete_repeaters`도 세션에 대해 마찬가지). `clear_history`는 플로우 링크를 모두 지우되 목록은 내지 않습니다 |
 | `set_sitemap_tag` | Sitemap 경로에 자유 형식 메모 고정 |
 | `create_project` / `switch_project` / `delete_project` | 프로젝트 생성 또는 다시 열기(선택 `tags`는 다시 연 프로젝트의 태그를 교체, `[]`는 비움), 이 서버를 다른 프로젝트로 전환(`unbind:true`면 현재 프로젝트에서 빠져나옴), 프로젝트 삭제. 서비스 중인 프로젝트는 빠져나온 뒤 삭제합니다. 삭제는 2단계로, `dry_run` 후 확인 토큰 필요 |

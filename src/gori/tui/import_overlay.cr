@@ -31,11 +31,21 @@ module Gori::Tui
 
     def initialize(@kind : Symbol)
       @field = TextField.new("")
+      @endpoint_field = TextField.new("")
+      @entering_endpoint = false
       @path_complete = PathComplete.new
     end
 
     def path : String
       @field.value.strip
+    end
+
+    def endpoint : String?
+      @kind == :graphql ? @endpoint_field.value.strip : nil
+    end
+
+    private def active_field : TextField
+      @entering_endpoint ? @endpoint_field : @field
     end
 
     # The source format, for the card title and the Runner's result toast — one source
@@ -53,6 +63,7 @@ module Gori::Tui
       when :postman         then "Build request templates from a Postman Collection v2 export."
       when :insomnia        then "Build request templates from an Insomnia v4 JSON export."
       when :burp            then "Load saved Burp items into History — request and response, byte-exact."
+      when :graphql         then "Build query/mutation templates from introspection JSON; sends nothing."
       when :wsdl            then "Build request templates from a WSDL 1.1 service — one per operation."
       else                       "Load flows into History."
       end
@@ -73,11 +84,11 @@ module Gori::Tui
     # is the whole opt-in: caret placement on a press, drag to extend, double-click for a
     # word, all inverted by the field against the geometry `render` last drew it at.
     def text_fields : Array(TextField)
-      [@field]
+      [active_field]
     end
 
     def hint : String
-      "type to complete · ↹ pick · ↑↓ browse · ↵ import · esc cancel"
+      @entering_endpoint ? "endpoint URL · ↵ import · esc back" : "type to complete · ↹ pick · ↑↓ browse · ↵ #{@kind == :graphql ? "continue" : "import"} · esc cancel"
     end
 
     # --- input ---------------------------------------------------------------
@@ -85,15 +96,15 @@ module Gori::Tui
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
 
-      # esc peels one layer at a time: the dropdown first, the popup only once it's
-      # down — so a stray esc can't discard a long path the user just typed.
-      if key.escape?
-        return :cancel unless @path_complete.open?
-        @path_complete.close
+      return escape_key if key.escape?
+
+      if @entering_endpoint
+        return @endpoint_field.value.strip.empty? ? :stay : :commit if key.enter?
+        @endpoint_field.handle_edit_key(ev)
         return :stay
       end
 
-      return commit_or_complete(key) if key.tab? || key.enter?
+      return path_key(key) if key.tab? || key.enter?
 
       if key.back_tab? || key.up?
         @path_complete.move(-1) if @path_complete.open?
@@ -106,6 +117,26 @@ module Gori::Tui
 
       @field.handle_edit_key(ev)
       @path_complete.refresh(@field.value) # keep the dropdown in lockstep
+      :stay
+    end
+
+    # Escape undoes one step: endpoint → path, then dropdown → card → dismiss.
+    private def escape_key : Symbol
+      if @entering_endpoint
+        @entering_endpoint = false
+      elsif @path_complete.open?
+        @path_complete.close
+      else
+        return :cancel
+      end
+      :stay
+    end
+
+    private def path_key(key : Termisu::Input::Key) : Symbol
+      result = commit_or_complete(key)
+      return result unless result == :commit && @kind == :graphql && !path.empty?
+      @path_complete.close
+      @entering_endpoint = true
       :stay
     end
 
@@ -129,13 +160,13 @@ module Gori::Tui
     end
 
     def set_preedit(text : String) : Nil
-      @field.set_preedit(text)
+      active_field.set_preedit(text)
     end
 
     # Wheel support — the Runner routes a scroll here, and the only scrollable thing is
     # the completion list.
     def move(d : Int32) : Nil
-      @path_complete.move(d) if @path_complete.open?
+      @path_complete.move(d) if !@entering_endpoint && @path_complete.open?
     end
 
     # --- rendering -----------------------------------------------------------
@@ -156,12 +187,12 @@ module Gori::Tui
         end
         return
       end
-      Frame.card(screen, box, "IMPORT #{label.upcase} · source path", bg: Theme.bg,
+      Frame.card(screen, box, "IMPORT #{label.upcase} · #{@entering_endpoint ? "endpoint URL" : "source path"}", bg: Theme.bg,
         border: Theme.border_focus)
       screen.text(box.x + 2, box.y + 1, blurb, Theme.muted, Theme.bg, width: box.w - 4)
       render_field(screen, box)
       screen.text(box.x + 2, box.bottom - 2,
-        "type to complete · ↹ pick · ↑↓ browse · ↵ import · esc cancel",
+        hint,
         Theme.muted, Theme.bg, width: box.w - 4)
       render_dropdown(screen, box)
     end
@@ -171,14 +202,14 @@ module Gori::Tui
     private def render_field(screen : Screen, box : Rect) : Nil
       y = field_y(box)
       screen.fill(Rect.new(box.x + 1, y, box.w - 2, 1), Theme.accent_bg)
-      screen.text(box.x + 2, y, "Path", Theme.text_bright, Theme.accent_bg)
+      screen.text(box.x + 2, y, @entering_endpoint ? "URL" : "Path", Theme.text_bright, Theme.accent_bg)
       vx = value_x(box)
       vw = {box.right - 2 - vx, 1}.max
-      @field.render(screen, vx, y, vw, true, Theme.text_bright, Theme.accent_bg)
+      active_field.render(screen, vx, y, vw, true, Theme.text_bright, Theme.accent_bg)
     end
 
     private def render_dropdown(screen : Screen, box : Rect) : Nil
-      return unless @path_complete.open?
+      return unless !@entering_endpoint && @path_complete.open?
       @path_complete.render(screen, value_x(box), field_y(box) + 1, box.inset(1, 1))
     end
 

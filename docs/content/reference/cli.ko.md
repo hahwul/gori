@@ -80,7 +80,7 @@ gori run <subcommand> [verb] [options]
 | `probe rules` · `mode` | 스캔 규칙 목록 / 무장, 스캔 모드 조회 및 설정 |
 | `discover` | 엔드포인트를 스파이더링 & 브루트포스하여 Sitemap으로 반영 |
 | `wordlist` (`list`) · `show` · `save` · `rename` · `delete` | 전역 wordlist 카탈로그: 모든 `--wordlist` / `-w`가 이름으로 받는 이름 붙은 목록(`delete`는 `--yes` 필요) |
-| `import` | HAR / URL 목록 / OpenAPI / Postman / Insomnia / Burp / WSDL 파일 또는 curl 명령에서 History로 플로우 일괄 임포트 |
+| `import` | HAR / URL 목록 / OpenAPI / Postman / Insomnia / Burp / WSDL / GraphQL 인트로스펙션 파일 또는 curl 명령에서 History로 플로우 일괄 임포트 |
 | `sitemap [QL]` | 호스트 → 경로 엔드포인트 트리 |
 | `sitemap tag` | Sitemap 경로에 자유 텍스트 메모를 고정 / 해제 / 목록 |
 | `sitemap params [QL]` | 엔드포인트별 파라미터 목록: 위치별 이름, 등장 횟수, 샘플 값, 반사된 값 |
@@ -1015,6 +1015,8 @@ gori run import --postman api.postman_collection.json --db ./assessment.db --for
 | `--insomnia=PATH` | Insomnia v4 익스포트(JSON) |
 | `--burp=PATH` | Burp Suite 항목 익스포트(XML). 요청과 응답, 바이트 단위 그대로 |
 | `--wsdl=PATH` | WSDL 1.1 서비스 설명서(XML). 오퍼레이션마다 SOAP 요청 템플릿 하나 |
+| `--graphql=PATH` | GraphQL 인트로스펙션 JSON(`data.__schema`). 쿼리·뮤테이션마다 POST 템플릿 하나를 만들고, 구독은 개수와 함께 생략합니다 |
+| `--endpoint=URL` | `--graphql`에 필수인 엔드포인트 URL. 다른 소스에는 사용할 수 없습니다 |
 | `--curl=PATH` | curl 명령. 요청마다 플로우 하나이며 `-`는 stdin을 읽음(`pbpaste \| gori run import --curl -`). 무시한 전송 플래그는 stderr에 밝힘(JSON에서는 `notes`) |
 | `--project=NAME` | 임포트할 프로젝트(기본값: `GORI_PROJECT`나 `project switch`로 정한 프로젝트, 없으면 가장 최근에 활성화한 프로젝트) |
 | `--db=PATH` | 임포트할 SQLite db 파일을 직접 지정(없으면 생성) |
@@ -1023,6 +1025,8 @@ gori run import --postman api.postman_collection.json --db ./assessment.db --for
 임포트는 플로우를 기록하므로 `discover`와 같은 방식으로 대상을 정합니다. `--db`를 주면 생성하거나 다시 열고, 주지 않으면 기본 프로젝트를 만들지 않고 기존 프로젝트에 씁니다.
 
 형식이 잘못된 항목은 건너뛰고 나머지는 계속 임포트합니다. 결과에 양쪽 개수가 모두 담기고(`{"count": 12, "attempted": 12, "skipped": 3}`), `notes`가 건너뛴 줄이나 항목과 그 이유를 알려줍니다(처음 20개). 프로젝트가 파싱한 플로우를 모두 커밋하지 못하면(저장소가 바쁘거나 쓸 수 없는 경우) `count`가 `attempted`보다 작아지고, text 줄에 커밋되지 않은 개수가 나오며, 명령은 `1`로 끝납니다. 임포트를 다시 실행하면 그 플로우를 재시도합니다. 응답까지 가져오는 것은 `--har`와 `--burp`뿐입니다. 나머지는 요청 템플릿이라 보내기 전까지 History에서 `Pending`으로 보입니다.
+
+GraphQL 예: `gori run import --graphql schema.json --endpoint https://api.example.com/graphql --db ./assessment.db`. 파일 대신 `--graphql -`로 stdin을 읽을 수도 있습니다. [GraphQL 임포트 제한](/ko/guide/proxy/#import)을 참고하고, 재전송 전에 플레이스홀더를 편집하세요.
 
 ### run sitemap {#run-sitemap}
 
