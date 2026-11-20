@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Probe: the request-smuggling rule adds the 0.CL-by-`Expect: 100-continue` desync (plain and obfuscated) as a High timing lead, sent as a complete POST so a conformant server answers fast and only a front-end/back-end split hangs; still off by default and behind unsafe (#1945).
+
 - MCP: `race_requests`, `timing_requests` and `minimize_repeater` take `background:true`, which returns a `job_id` at once so other calls are answered while the run goes on; `get_job` returns the call's usual result and `stop_job` cancels it (#1944).
 
 - TUI: an upstream proxy that does not answer is named once on the status row and in Notifications, with the setting that chose it, instead of only inside each failed flow's detail (#1944).

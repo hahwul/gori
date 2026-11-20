@@ -590,10 +590,10 @@ describe "Gori::Probe::Active (manual run estimate)" do
       r.end.should be >= r.begin
       # Nothing floods a single flow with probes. The exceptions are the OFF-BY-DEFAULT, opt-in
       # rules, which run only when the operator explicitly enables them: request_smuggling (an h1
-      # aggressive flow: 2 baselines + 3 variants × 2 timing probes + a 4-member CL.TE/CL.0
-      # differential group = 12) and sqli_time_based (2 baselines + 2 families × 2 delays × 2
-      # params) — see Probe::DEFAULT_DISABLED_RULES.
-      cap = rule.info.id == "request_smuggling" ? 12 : (rule.info.id == "sqli_time_based" ? 10 : 8)
+      # aggressive flow: 2 baselines + 5 variants × 2 timing probes [CL.TE/TE.CL/TE.TE/Expect/
+      # Expect-obf] + a 4-member CL.TE/CL.0 differential group = 16) and sqli_time_based (2
+      # baselines + 2 families × 2 delays × 2 params) — see Probe::DEFAULT_DISABLED_RULES.
+      cap = rule.info.id == "request_smuggling" ? 16 : (rule.info.id == "sqli_time_based" ? 10 : 8)
       r.end.should be <= cap
     end
     by_id = Gori::Probe::Active::RULES.to_h { |rule| {rule.info.id, rule.requests_per_flow} }
@@ -613,8 +613,8 @@ describe "Gori::Probe::Active (manual run estimate)" do
     by_id["path_normalization_bypass"].should eq(6..7)
     # The off-by-default request-smuggling detector. The widest-span estimate: an h2 flow is the
     # floor (2 baselines + 2 downgrade variants × 2 timing probes = 6); an h1 aggressive flow is the
-    # ceiling (2 baselines + 3 variants × 2 timing probes + a 4-member CL.TE/CL.0 differential = 12).
-    by_id["request_smuggling"].should eq(6..12)
+    # ceiling (2 baselines + 5 variants × 2 timing probes + a 4-member CL.TE/CL.0 differential = 16).
+    by_id["request_smuggling"].should eq(6..16)
     ["reflected_param", "cors_reflection"].each { |id| by_id[id].should eq(1..1) }
   end
 

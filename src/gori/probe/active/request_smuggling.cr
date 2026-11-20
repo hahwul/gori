@@ -6,7 +6,8 @@ require "../../repeater/h2_engine"
 module Gori
   module Probe
     module Active
-      # Active HTTP request-smuggling / desync detector (CL.TE / TE.CL / TE.TE, CL.0, H2.CL / H2.TE).
+      # Active HTTP request-smuggling / desync detector (CL.TE / TE.CL / TE.TE, 0.CL-by-Expect,
+      # CL.0, H2.CL / H2.TE).
       #
       # A smuggling vulnerability exists when a front-end and a back-end DISAGREE on where one
       # request's body ends — because they read the Content-Length / Transfer-Encoding framing
@@ -68,10 +69,25 @@ module Gori
         # layout below). A flow is probed with EXACTLY ONE of these sets, picked by its transport
         # (`variants_for`): the h1 CL/TE framing ambiguity does not exist on an h2 wire, and the
         # h2-downgrade smuggle has no meaning on an h1 one.
+        # 0.CL-by-Expect (PortSwigger, "HTTP/1.1 Must Die", 2025) fits the SAME timing backbone, from
+        # the opposite side of the CL.TE family. The probe is a COMPLETE, cleanly-framed POST
+        # (`Content-Length: 1`, a one-byte body) carrying `Expect: 100-continue` — plain, and an
+        # obfuscated spelling (`Expect: y 100-continue`) a front-end may not recognise. A conformant
+        # SINGLE server has every byte: it answers fast, whether it sends an interim `100 Continue`
+        # first (the reader skips 1xx — `Repeater::Engine.read_response`) or ignores the header
+        # outright. Only a front/back SPLIT where one tier withholds the body waiting for a 100 the
+        # other already consumed deadlocks, so the final response never comes and the read times out —
+        # the "one tier blocks, the other does not" signal, against a fast baseline of the same POST
+        # WITHOUT Expect. gori writes the whole request (body included) up front and never waits for a
+        # 100 itself (P7 — `Repeater::Engine.exchange`), so the Expect bytes are the payload, not a
+        # client handshake. It is a TIMING lead only (High): a hang proves a desync primitive, not an
+        # exploited poison, and it never borrows the CL.TE differential's confirm.
         H1_VARIANTS = [
           {"request_smuggling_clte", "CL.TE", "CL + TE:chunked"},
           {"request_smuggling_tecl", "TE.CL", "TE:chunked + CL"},
           {"request_smuggling_tete", "TE.TE", "TE:chunked + obfuscated TE"},
+          {"request_smuggling_expect", "0.CL/Expect", "complete body + Expect: 100-continue"},
+          {"request_smuggling_expect_obf", "0.CL/Expect-obf", "complete body + obfuscated Expect"},
         ]
         # H2→H1 DOWNGRADE desync. An h2 frontend frames by DATA/END_STREAM and ignores (or rejects)
         # a Content-Length / Transfer-Encoding header, so a pure-h2 origin answers these fast; a
@@ -92,28 +108,29 @@ module Gori
 
         # Result layout the analyzer produces for this rule's plan (an h1 flow):
         #   [0] baseline #1 (plan.request)   [1] baseline #2 (stability twin)
-        #   [2],[3] CL.TE probes             [4],[5] TE.CL probes    [6],[7] TE.TE probes
-        #   [8] CL.TE smuggle   [9] CL.TE benign      [10] CL.0 smuggle   [11] CL.0 benign
-        # The four pipeline members ([8..11]) are present under aggressive+unsafe only. An h2 flow
+        #   [2],[3] CL.TE   [4],[5] TE.CL   [6],[7] TE.TE   [8],[9] Expect   [10],[11] Expect-obf
+        #   [12] CL.TE smuggle  [13] CL.TE benign   [14] CL.0 smuggle   [15] CL.0 benign
+        # The DIFF_* / CL0_* offsets are DERIVED from H1_VARIANTS.size, so adding a timing variant
+        # shifts the four pipeline members with it; they are present under aggressive+unsafe only. An h2 flow
         # lays out [0],[1] baselines then [2..5] H2.CL / H2.TE probes and sends NO pipeline (a
         # same-socket differential needs h1 keep-alive; the h2 engine sends each member fresh).
         BASELINE_COUNT   = 2
-        DIFF_SMUGGLE_IDX = BASELINE_COUNT + H1_VARIANTS.size * 2 # 8  — CL.TE smuggle
-        DIFF_BENIGN_IDX  = DIFF_SMUGGLE_IDX + 1                  # 9  — CL.TE benign
-        CL0_SMUGGLE_IDX  = DIFF_BENIGN_IDX + 1                   # 10 — CL.0 smuggle
-        CL0_BENIGN_IDX   = CL0_SMUGGLE_IDX + 1                   # 11 — CL.0 benign
+        DIFF_SMUGGLE_IDX = BASELINE_COUNT + H1_VARIANTS.size * 2 # 12 — CL.TE smuggle
+        DIFF_BENIGN_IDX  = DIFF_SMUGGLE_IDX + 1                  # 13 — CL.TE benign
+        CL0_SMUGGLE_IDX  = DIFF_BENIGN_IDX + 1                   # 14 — CL.0 smuggle
+        CL0_BENIGN_IDX   = CL0_SMUGGLE_IDX + 1                   # 15 — CL.0 benign
 
         def info : RuleInfo
-          RuleInfo.new("request_smuggling", "HTTP request smuggling / desync (CL.TE/TE.CL/TE.TE, CL.0, H2.CL/H2.TE)",
-            "Sends incomplete CL.TE/TE.CL/TE.TE (h1) or H2.CL/H2.TE downgrade (h2) framing probes and " \
-            "flags a front-end/back-end desync by a timing hang; CL.0 and the differential confirm run " \
-            "under aggressive+unsafe. Off by default; sends POST bodies.",
+          RuleInfo.new("request_smuggling", "HTTP request smuggling / desync (CL.TE/TE.CL/TE.TE, 0.CL-by-Expect, CL.0, H2.CL/H2.TE)",
+            "Sends incomplete CL.TE/TE.CL/TE.TE or complete Expect: 100-continue (h1), or H2.CL/H2.TE " \
+            "downgrade (h2) framing probes, and flags a front-end/back-end desync by a timing hang; CL.0 " \
+            "and the differential confirm run under aggressive+unsafe. Off by default; sends POST bodies.",
             Category::ACTIVE)
         end
 
         # The widest per-flow send count for the Rules sub-tab + manual-run estimate: an h2 flow is
-        # 2 baselines + 2×2 timing probes (6); an h1 aggressive flow is 2 baselines + 3×2 timing
-        # probes + a 4-member differential pipeline (12).
+        # 2 baselines + 2×2 timing probes (6); an h1 aggressive flow is 2 baselines + 5×2 timing
+        # probes (CL.TE/TE.CL/TE.TE/Expect/Expect-obf) + a 4-member differential pipeline (16).
         def requests_per_flow : Range(Int32, Int32)
           (BASELINE_COUNT + H2_VARIANTS.size * 2)..(CL0_BENIGN_IDX + 1)
         end
@@ -149,6 +166,8 @@ module Gori
             followups << clte_probe(hdr) << clte_probe(hdr)
             followups << tecl_probe(hdr) << tecl_probe(hdr)
             followups << tete_probe(hdr) << tete_probe(hdr)
+            followups << expect_probe(hdr) << expect_probe(hdr)
+            followups << expect_obf_probe(hdr) << expect_obf_probe(hdr)
           end
 
           pipeline = [] of Bytes
@@ -181,7 +200,11 @@ module Gori
             b = results[BASELINE_COUNT + i * 2 + 1]?
             next unless a && b
             next unless hung?(a, t_base) && hung?(b, t_base) # BOTH repeats — one alone is jitter
-            out << detection(detail, code, label, combo, t_base, clte_confirmed)
+            # The Expect (0.CL-by-Expect) leads are a DIFFERENT class from the CL.TE differential, so
+            # they never borrow its confirm: an Expect hang stays an honest High timing lead, never
+            # relabelled "differential confirmed" by a poison it did not itself observe.
+            confirmed = code.starts_with?("request_smuggling_expect") ? false : clte_confirmed
+            out << detection(detail, code, label, combo, t_base, confirmed)
           end
           # CL.0 has no timing primitive — it surfaces ONLY as a confirmed poison (Critical).
           out << detection(detail, CL0[0], CL0[1], CL0[2], t_base, true, timing: false) if cl0_confirmed
@@ -403,6 +426,22 @@ module Gori
           "POST / HTTP/1.1\r\nHost: #{hdr}\r\nTransfer-Encoding : chunked\r\nContent-Length: #{body.bytesize}\r\n\r\n#{body}".to_slice
         end
 
+        # 0.CL-by-Expect timing probe (plain): a COMPLETE, cleanly-framed POST — `Content-Length: 1`
+        # and a one-byte body — carrying `Expect: 100-continue`. Every conformant tier has the whole
+        # body, so it answers fast (an interim `100 Continue` is skipped by the reader). A desync where
+        # one tier withholds the body for a 100 the other consumed deadlocks and the read times out.
+        private def expect_probe(hdr : String) : Bytes
+          "POST / HTTP/1.1\r\nHost: #{hdr}\r\nContent-Length: 1\r\nExpect: 100-continue\r\n\r\nX".to_slice
+        end
+
+        # 0.CL-by-Expect timing probe (obfuscated): the same complete POST with an UNRECOGNISED
+        # expectation (`Expect: y 100-continue`) a front-end may pass through un-normalised while the
+        # back-end still acts on the `100-continue` token — reaching desyncs the plain spelling, which a
+        # front-end strips or honours, does not. A conformant single server 417s or ignores it, fast.
+        private def expect_obf_probe(hdr : String) : Bytes
+          "POST / HTTP/1.1\r\nHost: #{hdr}\r\nContent-Length: 1\r\nExpect: y 100-continue\r\n\r\nX".to_slice
+        end
+
         # The COMPLETE differential smuggle (aggressive+unsafe only): a CL.TE prefix whose
         # Content-Length spans the ENTIRE buffer (so a CL front-end forwards all of it and the outer
         # request gets a normal, complete response), while a TE back-end ends the outer request at
@@ -480,7 +519,22 @@ module Gori
           framing_rejected?(clte_probe(hdr)) &&
             framing_rejected?(tecl_probe(hdr)) &&
             framing_rejected?(diff_smuggle(hdr, "/gori-smuggle-selfcheck")) &&
-            obfuscation_rejected?(tete_probe(hdr))
+            obfuscation_rejected?(tete_probe(hdr)) &&
+            expect_sendable?(expect_probe(hdr)) &&
+            expect_sendable?(expect_obf_probe(hdr))
+        end
+
+        # The Expect timing probes are the INVERSE self-check: unlike the CL/TE crafts they must NOT be
+        # framing-rejected — they are clean, complete POSTs gori sends VERBATIM — and they must still
+        # carry the `Expect` header the technique rests on. If a future codec started rejecting or
+        # dropping Expect, the Expect variants decline (NO-OP) rather than ship a probe that no longer
+        # triggers the 100-continue handshake.
+        private def expect_sendable?(req : Bytes) : Bool
+          return false if framing_rejected?(req)
+          head = head_of(req)
+          !Proxy::Codec::Http1.parse_request_head(head).headers.get?("Expect").nil?
+        rescue
+          false
         end
 
         # `Body.request_framing` RAISES on this craft (the CL+TE / obfuscation rejection). We pass
