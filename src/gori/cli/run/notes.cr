@@ -1,7 +1,8 @@
 # `gori run notes` — read the project's notes (list, show one, or --all),
 # or write them (create, delete). Notes are addressed by their 1-based list
 # position <n> (the same number `notes <n>` and the listing show); `update` and `delete`
-# also take `--id ID`, the stable id the listing prints as "(id N)".
+# also take `--id ID`, the stable id the listing prints as "(id N)", and `--position N`; a bare
+# <n> that is also another note's id is refused as ambiguous (`resolve_note_index`).
 module Gori
   module CLI
     module Run
@@ -116,27 +117,32 @@ module Gori
         proj = ProjectFlags.new
         text : String? = nil
         note_id : Int64? = nil
+        position : Int32? = nil
         format = :text
 
         positional = parse_args(args, "gori run notes update") do |p|
           p.banner = "Usage: gori run notes update <n>|--id ID [--append] [--text TEXT | TEXT… ] [options]\n" \
                      "       gori run notes append <n>|--id ID [--text TEXT | TEXT…] [options]\n\n" \
                      "Replace the text of the note at 1-based list position <n> (or stable --id ID), or\n" \
-                     "add to it with --append. The text comes from --text, else the words after <n>, else STDIN."
+                     "add to it with --append. The text comes from --text, else the words after <n>, else STDIN.\n" \
+                     "A bare <n> that is also the id of a note at another position is refused: pass --position N or --id N."
           p.on("--append", "Add the text on a new line after the note's current text instead of replacing it") { append = true }
           p.on("--id=ID", "Address the note by its stable id (the listing's \"id N\") instead of <n>") { |v| note_id = parse_id(v, "gori run notes update", "--id") }
+          p.on("--position=N", "Address the note by its 1-based list position, even where N is also another note's id") { |v| position = parse_note_index(v) }
           project_options(p, proj, "update")
           p.on("--text=TEXT", "The text (else the words after <n>, else STDIN)") { |v| text = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
 
+        abort "gori run notes update: pass --position N or --id ID, not both" if note_id && position
         # With --id there is no <n>, so a word left over would be read as the text: `update 3
         # --id 7` would overwrite note 7 with "3". Refused, as `notes delete` refuses the pair.
         abort "gori run notes update: pass <n> or --id ID, not both (with --id, give the text as --text or on STDIN)" if note_id && !positional.empty?
-        n = note_id ? nil : (parse_note_index(positional.first?) || abort "gori run notes update: missing <n> (or --id ID)")
-        body = note_update_text(text, n ? positional[1..] : positional)
+        # `--position N` takes the place of <n>, so the words after it are all text.
+        n = note_id ? nil : (position || parse_note_index(positional.first?) || abort "gori run notes update: missing <n> (or --id ID)")
+        body = note_update_text(text, n && !position ? positional[1..] : positional)
         store = open_store(resolve_read_project(proj.name, proj.db))
-        apply_note_update(store, n, note_id, body, append, format)
+        apply_note_update(store, n, note_id, body, append, format, explicit: !position.nil?)
       end
 
       # The text for `notes update`: --text, else the words after <n>, else a pipe. An empty
@@ -151,10 +157,10 @@ module Gori
       end
 
       private def self.apply_note_update(store : Store, n : Int32?, note_id : Int64?, body : String,
-                                         append : Bool, format : Symbol) : Nil
+                                         append : Bool, format : Symbol, *, explicit : Bool = false) : Nil
         doc = Notes.load(store)
         # By the note's STABLE id, inside the write transaction — see `Notes.update`.
-        id = doc.notes[resolve_note_index(store, doc, n, note_id, "gori run notes update", format)].id
+        id = doc.notes[resolve_note_index(store, doc, n, note_id, "gori run notes update", format, explicit)].id
         case Notes.update(store, id, body, append: append)
         when .busy?
           busy_abort("gori run notes update", "project is busy (write did not commit) — try again", store)
@@ -199,15 +205,34 @@ module Gori
         idx ? "Note #{idx + 1} (id #{id})" : "Note (id #{id})"
       end
 
-      # The 0-based index of the note `<n>` or `--id ID` names, or abort naming what is missing.
+      # The 0-based index of the note `<n>`, `--position N` (`explicit`) or `--id ID` names, or
+      # abort naming what is missing or ambiguous.
       private def self.resolve_note_index(store : Store, doc : Notes::Doc, n : Int32?, id : Int64?, cmd : String,
-                                          format : Symbol = :text) : Int32
+                                          format : Symbol = :text, explicit : Bool = false) : Int32
         if id
           doc.notes.index { |e| e.id == id } || not_found_abort(cmd, "no note with id #{id}", format, store)
         else
           n = n.not_nil!
-          n <= doc.size || not_found_abort(cmd, "no note ##{n} (this project has #{Gori.plural(doc.size, "note")})", format, store)
+          if err = note_position_error(doc, n, explicit)
+            n > doc.size ? not_found_abort(cmd, err, format, store) : usage_abort("#{cmd}: #{err}", store: store)
+          end
           n - 1
+        end
+      end
+
+      # Why `<n>` names no one note, or nil. A bare `<n>` is a list position, while `--json`
+      # prints each note's `id` first, so a script passing an id deleted whichever note sat at
+      # that position. A bare `<n>` that is ALSO the id of a note at another position is
+      # therefore refused, naming both readings; one that agrees, or is no note's id, is a
+      # position as before. `--position N` (`explicit`) says which reading is meant.
+      def self.note_position_error(doc : Notes::Doc, n : Int32, explicit : Bool = false) : String?
+        at = explicit ? nil : doc.notes.index { |e| e.id == n }
+        if n > doc.size
+          "no note ##{n} (this project has #{Gori.plural(doc.size, "note")})" \
+          "#{at.try { |i| "; id #{n} is note ##{i + 1} — pass --id #{n}" }}"
+        elsif at && at != n - 1
+          "#{n} is ambiguous: note ##{n} is id #{doc.notes[n - 1].id}, and id #{n} is note ##{at + 1} — " \
+          "pass --position #{n} or --id #{n}"
         end
       end
 
@@ -227,25 +252,25 @@ module Gori
         proj = ProjectFlags.new
         yes = false
         note_id : Int64? = nil
+        position : Int32? = nil
         format = :text
 
         positional = parse_args(args, "gori run notes delete") do |p|
           p.banner = "Usage: gori run notes delete <n>|--id ID --yes [options]\n\n" \
-                     "Delete the note at 1-based list position <n> (as shown by `notes`), or by its stable --id ID."
+                     "Delete the note at 1-based list position <n> (as shown by `notes`), or by its stable --id ID.\n" \
+                     "A bare <n> that is also the id of a note at another position is refused: pass --position N or --id N."
           p.on("-y", "--yes", "Confirm the deletion (required — there is no interactive prompt here)") { yes = true }
           p.on("--id=ID", "Address the note by its stable id (the listing's \"id N\") instead of <n>") { |v| note_id = parse_id(v, "gori run notes delete", "--id") }
+          p.on("--position=N", "Address the note by its 1-based list position, even where N is also another note's id") { |v| position = parse_note_index(v) }
           project_options(p, proj, "update")
           format_flag(p, [:text, :json], delete_format_help) { |f| format = f }
         end
 
-        abort "gori run notes delete: pass <n> or --id ID, not both" if note_id && !positional.empty?
-        abort "gori run notes delete: missing <n> (or --id ID)" if positional.empty? && !note_id
-        abort "gori run notes delete: too many arguments (expected one note number)" if positional.size > 1
-        n_arg = parse_note_index(positional.first?)
+        n_arg = note_delete_position(positional, note_id, position)
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
           persisted = Notes.load(store)
-          idx = resolve_note_index(store, persisted, n_arg, note_id, "gori run notes delete", format)
+          idx = resolve_note_index(store, persisted, n_arg, note_id, "gori run notes delete", format, !position.nil?)
           n = idx + 1
           target = persisted.notes[idx]
           # Gated AFTER the note is resolved, so the refusal can name the text that would go —
@@ -279,6 +304,15 @@ module Gori
           merged || busy_abort("gori run notes delete", "project is busy (write did not commit) — try again", store)
           puts format == :json ? deleted_json("id", target_id) : "#{note_ref(idx, target_id)} deleted."
         end
+      end
+
+      # The position `notes delete` was given (`<n>` or `--position N`), nil under `--id`, or
+      # abort when the three are combined or none is given.
+      private def self.note_delete_position(positional : Array(String), note_id : Int64?, position : Int32?) : Int32?
+        abort "gori run notes delete: pass one of <n>, --position N or --id ID" if (note_id || position) && !positional.empty? || note_id && position
+        abort "gori run notes delete: missing <n> (or --id ID)" if positional.empty? && !note_id && !position
+        abort "gori run notes delete: too many arguments (expected one note number)" if positional.size > 1
+        position || parse_note_index(positional.first?)
       end
 
       # The refusal `notes delete` owes an operator who did not pass --yes, or nil when they

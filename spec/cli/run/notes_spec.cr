@@ -259,3 +259,64 @@ describe "gori run notes update/delete --id" do
     src.should contain(%(pass <n> or --id ID, not both (with --id, give the text as --text or on STDIN)" if note_id && !positional.empty?))
   end
 end
+
+# A bare `<n>` is a list position while `--json` prints each note's `id`, so a script passing an
+# id deleted whichever note sat at that position (ux-cli finding 1). `<n>` that is ALSO another
+# note's id is refused, naming both; `--position N` and `--id N` say which is meant.
+private def with_shifted_notes(&)
+  db = File.tempname("gori-notes-addr", ".db")
+  store = Gori::Store.open(db)
+  # ids 1..4, then note id 1 deleted: positions 1-3 hold ids 2, 3, 4.
+  ids = %w[alpha beta gamma delta].map { |t| Gori::Notes.create(store, t).not_nil! }
+  Gori::Notes.delete(store, ids.first)
+  store.close
+  begin
+    yield db
+  ensure
+    delete_db_files(db)
+  end
+end
+
+private def note_texts(db : String) : Array(String)
+  store = Gori::Store.open(db)
+  Gori::Notes.load(store).notes.map(&.text)
+ensure
+  store.try &.close
+end
+
+describe "gori run notes — a bare <n> that is also another note's id" do
+  doc = Gori::Notes::Doc.new(0, [2_i64, 3_i64, 4_i64].map { |i| Gori::Notes::NoteEntry.new(i, "n#{i}") }, 5_i64)
+
+  it "refuses it, naming both readings and the two explicit spellings" do
+    Gori::CLI::Run.note_position_error(doc, 2).should eq(
+      "2 is ambiguous: note #2 is id 3, and id 2 is note #1 — pass --position 2 or --id 2")
+    Gori::CLI::Run.note_position_error(doc, 4).should eq(
+      "no note #4 (this project has 3 notes); id 4 is note #3 — pass --id 4")
+  end
+
+  it "reads it as a position when that agrees or is no note's id, and under --position" do
+    agreeing = Gori::Notes::Doc.new(0, [1_i64, 2_i64].map { |i| Gori::Notes::NoteEntry.new(i, "n#{i}") }, 3_i64)
+    Gori::CLI::Run.note_position_error(agreeing, 2).should be_nil
+    Gori::CLI::Run.note_position_error(doc, 1).should be_nil # id 1 is gone
+    Gori::CLI::Run.note_position_error(doc, 2, explicit: true).should be_nil
+    Gori::CLI::Run.note_position_error(doc, 5).should eq("no note #5 (this project has 3 notes)")
+  end
+
+  it "routes update, append and delete through it" do
+    src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "notes.cr"))
+    src.scan(/p\.on\("--position=N"/).size.should eq(2)
+    src.should contain("if err = note_position_error(doc, n, explicit)")
+    notes_delete_body.should contain(%(resolve_note_index(store, persisted, n_arg, note_id, "gori run notes delete", format, !position.nil?)))
+  end
+
+  it "deletes and updates by --position and --id, end to end" do
+    with_shifted_notes do |db|
+      printed = stdout_captured { Gori::CLI::Run.dispatch(%w[notes delete --position 2 --yes --json --db] << db) }
+      JSON.parse(printed)["id"].as_i64.should eq(3_i64)
+      note_texts(db).should eq(%w[beta delta])
+      stdout_captured { Gori::CLI::Run.dispatch(%w[notes update --id 4 --text DELTA --db] << db) }
+      stdout_captured { Gori::CLI::Run.dispatch(%w[notes append --position 1 more --db] << db) }
+      note_texts(db).should eq(["beta\nmore", "DELTA"])
+    end
+  end
+end
