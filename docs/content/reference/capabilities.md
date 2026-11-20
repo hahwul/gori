@@ -43,6 +43,8 @@ byte-exact after the cap, and the flow reports both captured and wire sizes.
 | Read History, Sitemap, Probe findings, Issues, and Notes | Yes | Yes | Yes |
 | Replay and active-send requests | Yes | Yes | Yes |
 | Run Fuzzer, Miner, Discover, Sequencer, and Authorize engines | Yes | Yes | Yes |
+| Export issue reports | Markdown / SARIF | `issues --format markdown\|sarif` | `list_issues{format:"markdown"\|"sarif"}` (paged, capped) |
+| Export request code and CSRF PoCs | Copy as menu | `show --format curl\|python\|fetch\|go\|httpie\|csrf` | `get_flow{format:…}` (capped; socket handshake only) |
 | UI navigation, pane focus, themes, and hotkey editing | Yes | Not applicable | Not applicable |
 
 The command and tool inventories live in the [CLI reference](/reference/cli/) and

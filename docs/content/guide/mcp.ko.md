@@ -98,8 +98,8 @@ gori mcp --read-only
 | `--read-only` | 66 | ~57 KB | ~15k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
 | `--tools=@analysis` | 5 | ~8 KB | ~2k | 시작할 때 바인딩한 캡처 분석; 프로젝트 전환·TUI 메시지 없음 |
 | `--tools=@recon` | 39 | ~41 KB | ~11k | 캡처를 읽고 파악, 패시브 스캔, 요청 재전송, 이슈·노트 기록 (`--install-*`의 기본값) |
-| `--tools=@recon --read-only` | 29 | ~30 KB | ~8k | `--read-only`가 끄는 도구를 뺀 `@recon` |
-| `--tools=@minimal` | 18 | ~19 KB | ~5k | History와 flow, 현재 TUI 컨텍스트를 읽고 오퍼레이터와 대화 |
+| `--tools=@recon --read-only` | 29 | ~34 KB | ~9k | `--read-only`가 끄는 도구를 뺀 `@recon` |
+| `--tools=@minimal` | 18 | ~22 KB | ~6k | History와 flow, 현재 TUI 컨텍스트를 읽고 오퍼레이터와 대화 |
 
 토큰은 바이트 ÷ 4로 잡은 JSON 어림값이며, 실제 값은 클라이언트의 토크나이저가 정합니다.
 
@@ -204,7 +204,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `list_js_endpoints` / `scan_js_endpoints` | 캡처된 JavaScript가 참조하지만 요청이 닿지 않은 엔드포인트와, 각각을 읽어 온 플로우, 줄, 문자열. 스캔은 새 JS/HTML 응답을 읽을 뿐 요청은 보내지 않습니다. `list_sitemap`에 `include_unrequested:true`를 주면 `unrequested`로 함께 나옵니다 |
 | `list_params` | 엔드포인트별 파라미터 목록: 위치별 입력 이름, 등장 횟수, 샘플 값(자격 증명은 가림), 응답에 값이 반사되는지 여부. 행마다 `scheme`, `host`, `port`가 실리고, `origin`(`http://127.0.0.1:19021`)으로 한 호스트의 서비스 하나만 고를 수 있습니다 |
 | `export_openapi` | 캡처된 API를 OpenAPI 3.0.3 문서로 인라인 반환합니다(JSON 객체, `format:"yaml"`이면 YAML). 템플릿 경로, 파라미터, 추론한 요청·응답 스키마, servers, 보안 스킴이 들어갑니다. `host`로 호스트를 좁히듯 `origin`으로 스킴·호스트·포트 하나로 좁힙니다. 자격 증명 값은 넣지 않고, 예시 값은 `examples:true`일 때만 가려서 넣습니다. `max_endpoints`와 `max_bytes`(인라인 기본값 40 KB)로 크기를 제한하고, 잘리면 `truncated`로 알립니다. `output_path`를 주면 응답 대신 파일로 씁니다(`--read-only`에서는 거절, gori 홈 안은 불가, 기존 파일은 `overwrite:true`일 때만, 그것도 OpenAPI 문서일 때만 덮어씁니다). `@recon` 크기 예산을 넘기므로 전체 카탈로그에만 있습니다 |
-| `list_issues` / `get_issue` | 트리아지된 이슈 읽기 |
+| `list_issues` / `get_issue` | 분류한 이슈를 읽습니다. `list_issues{format:"markdown"\|"sarif"}`는 조회한 페이지를 CLI와 같은 보고서 내보내기로 렌더링합니다. 기본값은 JSON입니다 |
 | `probe_scan` | 캡처된 플로우와 Repeater 탭 재스캔. `active:true`가 아니면 패시브(요청 0건)이고, 액티브는 쓰기 권한이 필요하며 스코프 게이트를 거침. `persist:true`면 찾은 결과를 라이브 스캐너와 같은 방식으로 합쳐 `probe_issues`가 읽는 판정 목록에도 기록(`--read-only`에서는 거절) |
 | `probe_issues` | Probe 탭에 저장된 발견 항목을 트리아지 상태로 조회(기본은 open만) |
 | `list_probe_rules` | 모든 스캔 규칙(패시브, 액티브, 커스텀)과 활성화 여부, 프로젝트의 스캔 모드 |
@@ -244,6 +244,14 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `list_fuzz_runs` / `get_fuzz_run` | 영구 Fuzzer 결과 집합을 나열하고 들여다봅니다. 지표는 `result_index`를 포함해 스칼라 전용 투영을 쓰므로 보관된 BLOB을 읽지 않습니다. `include_content:true`는 SQLite에서 상한이 걸린 접두 바이트로 최대 25행을 돌려줍니다. `max_head_bytes`(기본 16 KiB, 최대 64 KiB)가 헤드를, `max_body_bytes`(기본 2 KiB, 최대 64 KiB)가 디코딩된 본문/원시 표본을 제한합니다. 원본 전체 크기와 헤드/원본/디코딩 절단 플래그가 무엇이 빠졌는지 알려 주며, `include_sensitive:true`는 상한이 걸린 정확한 접두 바이트를 선택하는 것이지 무제한 바이트가 아닙니다. 현재 형식 이전 스냅숏은 실행 메타데이터에 `legacy:true`로 표시되고, `condition_met` 실행은 `stop_on`이 걸린 결과를 `stop_index`로 밝힙니다. 그대로 `result_index`로 넘기면 됩니다(기록되지 않았으면 null이며, `fuzz_status`도 같은 필드를 실시간으로 보고합니다). `clusters:true`는 실행을 응답 모양으로 묶어 페이지 단위로, `cluster:"<id>"`는 그 묶음의 행을 돌려주며 `fuzz_results`와 같게 동작합니다 |
 | `ql_reference` | 쿼리 언어 레퍼런스 |
 | `ql_explain` | 쿼리를 실행하지 않고 진단. 요청을 쓰기 전에 필터를 점검할 때 사용 |
+
+요청 코드: `get_flow{format:"curl"|"python"|"fetch"|"go"|"httpie"|"csrf"}`는 기존 CLI/TUI 내보내기의 출력을 `document`로 반환하며, 기본 `json` 상세 응답은 그대로입니다. 코드 내보내기는 `include_sensitive`를 받지만 JSON 전용 `body_mode`, `max_body_bytes`, `ws_query`는 거부합니다. WebSocket은 업그레이드 핸드셰이크만 내보내며 메시지 기록이 포함되지 않았다는 안내를 덧붙입니다.
+
+두 내보내기는 `--read-only`에서도 사용할 수 있으며 요청을 보내지 않습니다. 기본적으로 접힌 연속 행을 포함한 인증 헤더를 가리고, `get_flow`와 같이 기본 본문 가림 프로필을 적용합니다. `include_sensitive:true`는 두 가림을 해제하며, `list_issues`에서는 보고서 형식에만 적용됩니다.
+
+요청 코드는 최대 64 KiB의 UTF-8 접두부입니다. 크기 한도로 잘렸거나 캡처 시 요청이 잘렸다면 `truncated:true`를 반환하므로 코드를 사용하기 전에 확인하세요.
+
+이슈 보고서는 최대 64 KiB의 완전한 문서에 이슈 단위로 담습니다. `query`, `lenient`, `limit`(기본 100, 최대 500), `offset`을 유지합니다. 크기 한도로 페이지가 짧아지면 `cut_by:"bytes"`로 알리며, `returned`는 실제 포함된 이슈 수입니다. `has_more` / `next_offset`으로 마지막 포함 이슈 바로 다음부터 이어서 읽습니다. 보고서는 `truncated`를 생략하며, 다음 페이지가 있다는 이유로 문서가 불완전해지지 않습니다. 증거 본문은 요청·응답 각각 2 KiB로 제한합니다(저장된 본문 읽기와 디코딩은 최대 2 KiB + 1). 호출당 본문 읽기는 2 MiB 미만이며, 페이지 크기를 맞추는 동안 가공한 플로우를 캐시해 다시 읽지 않습니다. 크기·캡처 상한으로 잘린 본문과 디코딩·가림 규칙을 안전하게 적용할 수 없어 숨긴 본문은 문서 안과 `evidence_truncated`로 알립니다. 가림 프로필이 적용되면 불완전한 본문은 전체를 숨겨 잘림으로 구조 기반 규칙이 우회되지 않도록 합니다. 이슈 하나의 노트·헤더·관련 메타데이터만으로 문서 상한을 넘으면 해당 이슈를 명시한 `QUOTA_EXCEEDED` 오류를 반환합니다. 이때는 `get_issue`로 읽으세요.
 
 **액션 도구**(`--read-only`로 비활성화됨. 단, `switch_project`는 `--pin-project`로 빼지 않는 한 동작하고 `create_project`는 서버가 언바운드일 때 동작합니다). 소켓을 여는 도구(`send_request`, `send_websocket`, `ws_session_open`, `ws_inject`, `fuzz_*`, `mine_*`, `authorize_*`, `cache_deception_check`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, `race_requests`, `timing_requests`, `run_retest`, `refresh_session_slot`, `active:true`를 준 `probe_scan`, `send:true`를 준 `graphql_schema`)는 모두 스코프 게이트를 지납니다. 설정된 스코프 밖의 대상, 또는 스코프가 없는 대상은 호출에 예외 선언인 `allow_unscoped:true`를 주지 않는 한 `SCOPE_BLOCKED`로 거부됩니다. 그때도 샌드박스는 적용되고, 스윕하는 도구(`fuzz_*`, `mine_*`, `discover_*`, `sequence_*`, `authorize_*`, `minimize_repeater`, `run_retest`, active `probe_scan`)에는 제외 규칙도 적용됩니다. `send_request`처럼 손으로 작성한 단일 전송은 프록시와 마찬가지로 제외 규칙에 막히지 않습니다. 프로젝트 [요청 예산](/ko/reference/config/#per-project-overrides)은 이 모두에 상한을 둡니다. 예산이 거부한 전송은 `BUDGET_EXHAUSTED`(재시도 불가)로, 프로젝트 데이터베이스가 슬롯을 내주지 못했으면 `PROJECT_BUSY`(재시도 가능)로 실패하고, 총량을 다 쓴 실행은 `budget_exhausted`로 끝납니다.
 

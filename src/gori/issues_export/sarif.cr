@@ -133,7 +133,8 @@ module Gori
       # webRequest/webResponse bodies of the one export most likely to leave the machine. A
       # caller that honours `--include-sensitive` passes nil.
       def self.sarif(issues : Array(Store::Issue), store : Store, project_name : String,
-                     include_sensitive : Bool = false, matcher : Redact::Matcher? = nil) : String
+                     include_sensitive : Bool = false, matcher : Redact::Matcher? = nil,
+                     flow_loader : Proc(Int64, Store::FlowDetail?)? = nil) : String
         # One rule per DISTINCT title, in first-seen order, so `find_rule_index` links each
         # result to its rule and a repeated finding collapses to one entry in a rules list.
         rules = {} of String => String # rule id => the title that first claimed it
@@ -157,7 +158,7 @@ module Gori
         # and its body inflated twice; the links were resolved twice. That ran synchronously on
         # the TUI's UI fiber, so a large issue list stalled the interface.
         flows = issues.map do |f|
-          flow = f.flow_id.try { |fid| store.get_flow(fid) }
+          flow = f.flow_id.try { |fid| flow_loader ? flow_loader.call(fid) : store.get_flow(fid) }
           flow && matcher ? Redact::Wire.flow(flow, matcher)[0] : flow
         end
         links = issues.map { |f| Export.resolve_issue_links(f, store) }
@@ -176,7 +177,7 @@ module Gori
         run.results ||= [] of ::Sarif::Result
         # Results FIRST: a rule's `security-severity` is the worst severity among the results
         # that cite it, and it reads those off the property bags this pass writes.
-        annotate_results(run, issues, flows, links, project_name, rule_index, include_sensitive)
+        annotate_results(run, issues, flows, links, project_name, rule_index, include_sensitive, !flow_loader.nil?)
         annotate_rules(run)
         log.to_pretty_json
       end
@@ -191,7 +192,7 @@ module Gori
                                         links : Array(Array(Links::Resolved)),
                                         project_name : String,
                                         rule_index : Hash(String, Int32),
-                                        include_sensitive : Bool) : Nil
+                                        include_sensitive : Bool, source_cuts : Bool) : Nil
         results = run.results
         return unless results
         results.each_with_index do |res, i|
@@ -219,8 +220,8 @@ module Gori
           res.properties = bag
 
           if flow = flows[i]
-            res.web_request = sarif_web_request(flow, include_sensitive)
-            res.web_response = sarif_web_response(flow, include_sensitive)
+            res.web_request = sarif_web_request(flow, include_sensitive, source_cuts)
+            res.web_response = sarif_web_response(flow, include_sensitive, source_cuts)
           end
         end
       end
@@ -371,7 +372,7 @@ module Gori
           status: ::Sarif::SuppressionStatus::Accepted)
       end
 
-      private def self.sarif_web_request(flow : Store::FlowDetail, include_sensitive : Bool) : ::Sarif::WebRequest
+      private def self.sarif_web_request(flow : Store::FlowDetail, include_sensitive : Bool, source_cuts : Bool) : ::Sarif::WebRequest
         req = Proxy::Codec::Http1.parse_request_head(flow.request_head)
         row = flow.row
         headers, bag = sarif_headers(req.headers, include_sensitive)
@@ -384,12 +385,12 @@ module Gori
           # writer follows.
           method: one_line(req.method.presence || row.method),
           headers: headers,
-          body: sarif_body(flow.request_head, flow.request_body),
+          body: sarif_body(flow.request_head, flow.request_body, source_cuts && flow.request_body_truncated?),
           properties: bag,
         )
       end
 
-      private def self.sarif_web_response(flow : Store::FlowDetail, include_sensitive : Bool) : ::Sarif::WebResponse?
+      private def self.sarif_web_response(flow : Store::FlowDetail, include_sensitive : Bool, source_cuts : Bool) : ::Sarif::WebResponse?
         head = flow.response_head
         # An Error/Aborted flow never got one. SARIF says so explicitly rather than emitting
         # a webResponse full of nils.
@@ -408,7 +409,7 @@ module Gori
           # every other optional field in this record omits itself the same way.
           reason_phrase: one_line(resp.reason).presence,
           headers: headers,
-          body: sarif_body(head, flow.response_body),
+          body: sarif_body(head, flow.response_body, source_cuts && flow.response_body_truncated?),
           properties: bag,
         )
       end
@@ -527,11 +528,13 @@ module Gori
       # report uses (`Export.body_evidence`): decoded, capped at EVIDENCE_CAP, cut on a
       # codepoint boundary, binary dropped. A truncated body says so inline — a consumer
       # reading 64 KiB of a 5 MiB response must not think it has the whole thing.
-      private def self.sarif_body(head : Bytes, body : Bytes?) : ::Sarif::ArtifactContent?
+      private def self.sarif_body(head : Bytes, body : Bytes?, source_cut : Bool = false) : ::Sarif::ArtifactContent?
         ev = body_evidence(head, body)
         text = ev.text
-        return nil unless text
+        return nil unless text || source_cut
+        text ||= ""
         text += "\n\n[… body truncated, #{ev.size} bytes total …]" if ev.truncated?
+        text += "\n\n[… body truncated or omitted before export …]" if source_cut
         ::Sarif::ArtifactContent.new(text: text)
       end
 

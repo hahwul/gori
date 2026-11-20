@@ -43,6 +43,8 @@ gori에는 같은 프로젝트 데이터와 엔진 모듈을 쓰는 세 진입�
 | History, Sitemap, Probe 발견, Issues, Notes 읽기 | 지원 | 지원 | 지원 |
 | 요청 재전송과 액티브 send | 지원 | 지원 | 지원 |
 | Fuzzer, Miner, Discover, Sequencer, Authorize 엔진 실행 | 지원 | 지원 | 지원 |
+| 이슈 보고서 내보내기 | Markdown / SARIF | `issues --format markdown\|sarif` | `list_issues{format:"markdown"\|"sarif"}` (페이지 및 크기 제한) |
+| 요청 코드 및 CSRF PoC 내보내기 | Copy as 메뉴 | `show --format curl\|python\|fetch\|go\|httpie\|csrf` | `get_flow{format:…}` (크기 제한, 소켓은 핸드셰이크만) |
 | UI 탐색, 패널 포커스, 테마, 단축키 편집 | 지원 | 해당 없음 | 해당 없음 |
 
 명령·도구 목록은 [CLI 레퍼런스](/ko/reference/cli/)와
