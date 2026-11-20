@@ -1461,10 +1461,9 @@ module Gori::Tui
       @rows.size
     end
 
-    # The applied question, not text currently being typed into the filter bar.
-    def capped_match_filter : QL::Filter?
-      return nil unless @inc_capped
-      @inc_base.try(&.[0].filter)
+    # The applied filter filled its page, so the loaded rows may not be every match.
+    def capped? : Bool
+      @inc_capped
     end
 
     # The rail's window of list context around the open flow — see DrillIn. Maps the list row

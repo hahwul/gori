@@ -22,9 +22,9 @@ describe Gori::Tui::HistoryController do
       ctl.view.row_count.should eq(1000)
 
       ctl.history_mark_all
-      host.statuses.last.should eq("1000 of 1,001 marked — only loaded rows")
+      host.statuses.last.should eq("1000 marked — only the loaded rows; more may match")
       ctl.history_delete
-      host.confirms.last[1].should contain("Delete 1000 of 1,001 marked — only loaded rows?")
+      host.confirms.last[1].should eq("Delete 1000 flows?\nOnly the loaded rows are marked; more may match the filter.\nThis can't be undone.")
     end
   end
 
