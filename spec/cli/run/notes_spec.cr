@@ -256,9 +256,9 @@ describe "gori run notes update/delete --id" do
     src.scan(/p\.on\("--id=ID"/).size.should eq(3)
     notes_delete_body.should contain("resolve_note_index(store, persisted, n_arg, note_id")
     # `update 3 --id 7` must not read the stray "3" as note 7's new text.
-    src.should contain(%[pass <n> or --id ID, not both (with --id, give the text as --text or on STDIN)") if note_id && !positional.empty?])
+    src.should contain(%(pass <n> or --id ID, not both (with --id, give the text as --text or on STDIN)"\) if note_id && !positional.empty?))
     # …nor `update 2 --position 3 hello` the stray "2" as part of note 3's new text.
-    src.should contain(%[pass <n> or --position N, not both (with --position, give text that starts with a number as --text)") if position && positional.first?.try(&.to_i?)])
+    src.should contain(%(pass <n> or --position N, not both (with --position, give text that starts with a number as --text)"\) if position && positional.first?.try(&.to_i?)))
   end
 end
 
