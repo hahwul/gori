@@ -205,7 +205,8 @@ module Gori
       # to hit a TOCTOU across DISTINCT endpoints. The headless counterpart of the TUI's
       # `repeater.send-race`; the first multi-request send tool on MCP (`send_request` is one
       # request). All members must resolve to ONE origin and share the transport.
-      @[Tool("race_requests", gated: true, agent_action: true, env_refresh: true, permission: "send")]
+      @[Tool("race_requests", gated: true, agent_action: true, env_refresh: true,
+        requires: ["get_job", "stop_job"], permission: "send")]
       private def race_requests(h) : Result
         members = race_member_ids(h)
         return members if members.is_a?(Result)
@@ -223,6 +224,16 @@ module Gori
         gate = send_gate(ob, plan, members)
         return gate if gate.is_a?(Result)
 
+        run_or_background(h, "race_requests", "#{plan.scheme}://#{plan.host}:#{plan.port}") do |cancel|
+          race_run(ob, plan, members, labels, cancel)
+        end
+      end
+
+      # The race itself, past every refusal: inline, or on a `background:true` job's fiber.
+      # `send_race` polls nothing, so a stop only ends a wait for the project budget.
+      private def race_run(ob : Outbound, plan : Repeater::Plan, members : Array(Int64), labels : Array(String),
+                           cancel : Proc(Bool)?) : Result
+        ob.halt = cancel
         results = plan.send_race
         Log.info { "race_requests #{plan.scheme}://#{plan.host}:#{plan.port} x#{results.size} (#{plan.http2? ? "h2" : "h1"}) -> #{results.count(&.ok?)} ok" }
         Result.new(race_result_json(members, labels, results, plan))
@@ -421,7 +432,8 @@ module Gori
         Serialize.emit_body(j, "body", "target", r.head, r.body, false, body_cap)
       end
 
-      @[Tool("timing_requests", gated: true, agent_action: true, env_refresh: true, permission: "send")]
+      @[Tool("timing_requests", gated: true, agent_action: true, env_refresh: true,
+        requires: ["get_job", "stop_job"], permission: "send")]
       private def timing_requests(h) : Result
         members = timing_member_ids(h)
         return members if members.is_a?(Result)
@@ -447,9 +459,17 @@ module Gori
         gate = send_gate(ob, plan, members)
         return gate if gate.is_a?(Result)
 
+        run_or_background(h, "timing_requests", "#{plan.scheme}://#{plan.host}:#{plan.port}") do |cancel|
+          timing_run(plan, labels, iterations, warmup, interleaved, cancel)
+        end
+      end
+
+      # The pairs themselves, past every refusal: inline, or on a `background:true` job's fiber.
+      private def timing_run(plan : Repeater::Plan, labels : Array(String), iterations : Int32, warmup : Int32,
+                             interleaved : Bool, cancel : Proc(Bool)?) : Result
         mode = interleaved ? Repeater::Timing::Mode::Interleaved : Repeater::Timing::Mode::Auto
         rep = Repeater::Timing.run(plan, iterations: iterations, mode: mode, warmup: warmup,
-          cancel: -> { cancelled? })
+          cancel: -> { !!cancel.try(&.call) })
         transport = interleaved ? "interleaved" : (plan.http2? ? "single-packet h2" : "last-byte-sync h1")
         Log.info { "timing_requests #{plan.scheme}://#{plan.host}:#{plan.port} x#{rep.iterations} (#{transport}) -> #{rep.verdict}" }
         subject = Repeater::Timing::Present::Subject.new(
@@ -1911,6 +1931,7 @@ module Gori
           s.field "timeout_ms", intprop("per-operation connect + idle timeout, ms (1-600000)")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")
           s.field "allow_unscoped", boolprop("send even when the origin is outside (or without) a configured scope; the Sandbox still applies (default false)")
+          s.field "background", background_prop
         end
 
         tool j, "timing_requests",
@@ -1927,6 +1948,7 @@ module Gori
           s.field "timeout_ms", intprop("per-operation connect + idle timeout, ms (1-600000)")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")
           s.field "allow_unscoped", boolprop("send even when the origin is outside (or without) a configured scope; the Sandbox still applies (default false)")
+          s.field "background", background_prop
         end
 
         tool j, "send_websocket",

@@ -544,6 +544,27 @@ def stdout_silenced(&)
   {% end %}
 end
 
+# Run the block with STDOUT pointed at a file and return what it wrote — for driving a
+# `gori run` entry point in-process and reading its answer. Pending on Windows, where
+# `stdout_silenced` cannot redirect either.
+def stdout_captured(&) : String
+  {% if flag?(:win32) %}
+    pending!("STDOUT is a handle on Windows, not an fd to dup")
+  {% else %}
+    path = File.tempname("gori-stdout", ".out")
+    STDOUT.flush
+    saved = LibC.dup(STDOUT.fd)
+    File.open(path, "w") { |f| STDOUT.reopen(f) }
+    begin
+      yield
+    ensure
+      STDOUT.flush
+      STDOUT.reopen(IO::FileDescriptor.new(saved))
+    end
+    File.read(path).tap { File.delete?(path) }
+  {% end %}
+end
+
 # `Dir.glob` over path parts joined like `File.join`. A glob pattern takes `/` on every
 # platform (`\` escapes), so on Windows the joined parts are turned POSIX first.
 def glob_files(*parts : String) : Array(String)

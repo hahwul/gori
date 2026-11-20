@@ -9,6 +9,7 @@ describe "Gori::Verbs.register_params" do
     {"params.run"          => :params_run,
      "params.all-headers"  => :params_toggle_headers,
      "params.clear-target" => :params_clear_target,
+     "params.filter"       => :params_filter,
      "params.open-flow"    => :params_open_flow,
      "params.copy-names"   => :params_copy_names,
      "params.export"       => :params_export,
@@ -39,5 +40,6 @@ describe "Gori::Verbs.register_params" do
     r["sitemap.params"].chords.should eq([typed_chord("p")])
     r["params.copy-names"].chords.should eq([typed_chord("y", shift: true)])
     r["params.run"].chords.should eq([typed_chord("r", ctrl: true)])
+    r["params.filter"].chords.should eq([typed_chord("/")])
   end
 end

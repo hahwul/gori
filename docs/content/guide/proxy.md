@@ -136,6 +136,7 @@ The scan reads the flows the Sitemap shows, so the `/` query and the `s` scope l
 | Action | Key | Result |
 | --- | --- | --- |
 | Open flow | `↵` | The newest request that carried the name, in the History detail |
+| Filter | `/` | Narrows the list to rows whose location, name or endpoint contains the text; `⇧Y` and `w` take what is listed |
 | Copy | `y` / `⇧Y` | The name, or every listed name one per line |
 | Export wordlist | `w` | The listed names (JSON leaf names, no headers) as a list in the [wordlist catalog](/guide/repeater-and-fuzzer/#wordlist-catalog) (`~/.gori/wordlists/`), owner-only, named `params-HOST-TIMESTAMP.txt` |
 | Mine | `m` | Opens the Miner on this endpoint with the names seen on its origin's (scheme, host and port) other endpoints tested first |
@@ -822,7 +823,7 @@ Only the TCP connect target moves. SNI, the certificate hostname and the `Host` 
 
 ## Upstream Proxy {#upstream-proxy}
 
-gori can dial through another proxy instead of going direct, for a corporate egress, a SOCKS tunnel, or a second tool chained behind it. Set it in Preferences (`Ctrl-,`) → **Network & Tabs** → **Network**: **Upstream proxy** (`None`, `HTTP`, `HTTP+TLS`, `SOCKS5` which resolves names locally, or `SOCKS5H` which resolves them at the proxy), **Proxy host** and **Proxy port**, plus **Proxy TLS CA** and **Verify proxy TLS** for an `HTTP+TLS` hop. A project can pin its own with `gori run project network set upstream_proxy=socks5h://127.0.0.1:1080` (with `upstream_destination_host` and `upstream_auth` beside it), which wins over the global value for that project only. `upstream_rules` routes individual hosts differently. While the protocol is `None` and nothing else claims a host, gori follows `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` from its environment (honouring `NO_PROXY`, and keeping localhost direct). The **Environment proxy** row shows what is in effect. The keys are in the [configuration reference](/reference/config/#network).
+gori can dial through another proxy instead of going direct, for a corporate egress, a SOCKS tunnel, or a second tool chained behind it. Set it in Preferences (`Ctrl-,`) → **Network & Tabs** → **Network**: **Upstream proxy** (`None`, `HTTP`, `HTTP+TLS`, `SOCKS5` which resolves names locally, or `SOCKS5H` which resolves them at the proxy), **Proxy host** and **Proxy port**, plus **Proxy TLS CA** and **Verify proxy TLS** for an `HTTP+TLS` hop. A project can pin its own with `gori run project network set upstream_proxy=socks5h://127.0.0.1:1080` (with `upstream_destination_host` and `upstream_auth` beside it), which wins over the global value for that project only. `upstream_rules` routes individual hosts differently. While the protocol is `None` and nothing else claims a host, gori follows `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` from its environment (honouring `NO_PROXY`, and keeping localhost direct). The **Environment proxy** row shows what is in effect. When the upstream proxy does not answer, the TUI says so once on the status row and in Notifications, naming the setting that chose it, and stays quiet while it stays down; one that answers and fails again is named at most once every five minutes. The keys are in the [configuration reference](/reference/config/#network).
 
 ## Clients That Cannot Use a Proxy {#clients-without-proxy}
 

@@ -111,3 +111,27 @@ describe "Runner.undo_key_note" do
     toast.size.should be <= 59
   end
 end
+
+# The tab-bar `/` on a tab with no filter below used to read "nothing bound here", and the
+# rest of the typed word ran Global keys (`s` lens, `c` stops capture).
+describe "Runner.no_filter_hint" do
+  it "names the tab, says it has no filter and points at the palette, inside 59 columns" do
+    registry = Gori::Verbs.registry
+    Gori::Hotkeys.expand(registry, Runner.no_filter_hint("Project"))
+      .should eq("‹/› — Project has no filter here · ^P searches actions")
+    Gori::Tui::Chrome::TABS.each do |(sym, _)|
+      line = Gori::Hotkeys.expand(registry, Runner.no_filter_hint(Runner.filing_origin_label(sym)))
+      Screen.display_width(line).should be <= 59
+    end
+  end
+end
+
+# Function keys are no chord, so F1…F24 used to vanish without a word.
+describe "Runner.function_key_hint" do
+  it "says gori binds no function keys and names help and the palette, inside 59 columns" do
+    registry = Gori::Verbs.registry
+    Gori::Hotkeys.expand(registry, Runner.function_key_hint(Termisu::Input::Key::F5.to_s))
+      .should eq("‹F5› — gori binds no function keys · ? help · ^P palette")
+    Screen.display_width(Gori::Hotkeys.expand(registry, Runner.function_key_hint("F24"))).should be <= 59
+  end
+end

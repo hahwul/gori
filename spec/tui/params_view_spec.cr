@@ -8,8 +8,9 @@ include Gori::Tui
 private alias PVRow = Gori::ParamInventory::Row
 
 private def pv_row(name : String, path = "/a", *, host = "acme.test", reflected = false,
-                   samples = ["v"], sensitive = false, scheme = "https", port = 443) : PVRow
-  PVRow.new(scheme, host, port, "GET", path, Gori::Miner::Location::Query, name, 1, samples, false,
+                   samples = ["v"], sensitive = false, scheme = "https", port = 443,
+                   location = Gori::Miner::Location::Query) : PVRow
+  PVRow.new(scheme, host, port, "GET", path, location, name, 1, samples, false,
     1_i64, 7_i64, reflected, reflected ? 7_i64 : nil, sensitive)
 end
 
@@ -23,7 +24,55 @@ private def pv_render(v : ParamsView, w = 110, h = 12) : Array(String)
   (0...h).map { |y| backend.row(y) }
 end
 
+private def pv_type(v : ParamsView, text : String) : Nil
+  text.each_char { |c| v.handle_filter_key(Termisu::Event::Key.new(Termisu::Input::Key.from_char(c), Termisu::Input::Modifier::None, c)) }
+end
+
+# Inset one cell so row 0 is the border the resting filter label rides.
+private def pv_render_framed(v : ParamsView, w = 110, h = 12) : Array(String)
+  backend = MemoryBackend.new(w, h)
+  v.render(Screen.new(backend), Rect.new(1, 1, w - 2, h - 2), focused: true)
+  (0...h).map { |y| backend.row(y) }
+end
+
 describe ParamsView do
+  # The `/` lens over the node filter: what a row shows (location, name, endpoint), the
+  # cursor kept on its parameter, and no row of its own unless it is being typed in.
+  it "filters by name, location or endpoint, the bar shown only while typing" do
+    v = ParamsView.new
+    v.report = pv_report([pv_row("q", "/search"), pv_row("Authorization", "/me", location: Gori::Miner::Location::Headers),
+                          pv_row("user.email", "/profile", location: Gori::Miner::Location::Json)])
+    pv_render_framed(v)[0].should contain("/ filter")
+    v.filter.start
+    pv_type(v, "auth")
+    v.rows.map(&.name).should eq(["Authorization"])
+    rows = pv_render_framed(v)
+    rows[1].should contain("1/3 params")
+    rows[2].should contain("filter › auth")
+    rows[3].should contain("NAME")
+    rows[4].should contain("Authorization")
+    v.handle_filter_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter, Termisu::Input::Modifier::None, nil))
+    rows = pv_render_framed(v)
+    rows[0].should contain(": auth")
+    rows[2].should contain("NAME") # the bar's row is gone at rest
+    v.filter.clear
+    v.filter.start
+    pv_type(v, "json")
+    v.rows.map(&.name).should eq(["user.email"])
+    v.filter.clear
+    v.filter.start
+    pv_type(v, "/sear")
+    v.rows.map(&.name).should eq(["q"])
+    pv_type(v, "zz")
+    pv_render_framed(v)[4].should contain("no parameters match")
+    # At rest `esc` is params.to-menu, not a clear: the line names the key that edits it.
+    v.handle_filter_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter, Termisu::Input::Modifier::None, nil))
+    v.set_registry(Gori::Verbs.registry)
+    line = pv_render_framed(v)[3]
+    line.should contain("no parameters match “/searzz” — / edits the filter")
+    line.should_not contain("esc")
+  end
+
   it "lists the inventory under a summary and column headings" do
     v = ParamsView.new
     v.report = pv_report([pv_row("q", reflected: true, samples: ["shoes"]), pv_row("page")])
@@ -122,6 +171,32 @@ private def drain_until_landed(ctl : ParamsController) : Nil
 end
 
 describe ParamsController do
+  # The bar's keys reach it through the Target shell's generic `RowFilter` arm, which asks the
+  # shell, not the child; an empty inventory refuses `/` with the way to fill it.
+  it "routes the `/` bar through the Target shell, refusing it with nothing to filter" do
+    with_params_controller do |_, _, session, host|
+      target = TargetController.new(host)
+      target.jump_subtab(TargetController::SUBS.index("Params").not_nil!)
+      ctl = target.params
+      drain_until_landed(ctl)
+      ctl.start_filter
+      host.statuses.last.should contain("no parameters to filter")
+      target.list_filter_editing?.should be_false
+      seed_params_flow(session.store, "https://acme.test/search?q=shoes&page=2")
+      ctl.run
+      drain_until_landed(ctl)
+      ctl.start_filter
+      target.list_filter_editing?.should be_true
+      target.body_takes_text?.should be_true
+      target.body_hint(:body).should contain("esc clear")
+      "pag".each_char { |c| target.handle_list_filter_key(Termisu::Event::Key.new(Termisu::Input::Key.from_char(c), Termisu::Input::Modifier::None, c)) }
+      ctl.view.rows.map(&.name).should eq(["page"])
+      target.handle_list_filter_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape, Termisu::Input::Modifier::None, nil))
+      target.list_filter_editing?.should be_false
+      ctl.view.rows.size.should eq(2)
+    end
+  end
+
   it "scans off the event loop and lands the report" do
     with_params_controller do |ctl, _, session|
       seed_params_flow(session.store, "https://acme.test/search?q=shoes")

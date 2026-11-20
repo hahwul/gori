@@ -35,6 +35,9 @@ module Gori
   module LocalTime
     extend self
 
+    # The list-row stamp: History's TIME column, and the OAST callbacks' beside it.
+    LIST = "%m-%d %H:%M:%S"
+
     # A stored `created_at` (unix MICROseconds) as local time, or nil when the instant is too
     # far out for `Time` to hold at all.
     def at(micros : Int64) : Time?

@@ -26,6 +26,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     params_controller.set_target(nil)
   end
 
+  def params_filter : Nil
+    params_controller.start_filter
+  end
+
   def params_copy_names : Nil
     params_controller.copy_names
   end

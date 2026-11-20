@@ -3862,7 +3862,7 @@ module Gori::Tui
       t = LocalTime.at(created_at)
       return "—" unless t
       return fmt_time_relative(t) if Settings.history_time_format == "relative"
-      t.to_s(short ? "%H:%M:%S" : "%m-%d %H:%M:%S")
+      t.to_s(short ? "%H:%M:%S" : LocalTime::LIST)
     end
 
     # `fmt_time` through the memo — for the ABSOLUTE format only. A relative age is a

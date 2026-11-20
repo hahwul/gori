@@ -141,8 +141,11 @@ module Gori::Tui
       when nav_down?(ev)
         view.move_rows(1, ev.shift?)
         true
-      when nav_left?(ev), nav_right?(ev)
-        view.toggle_pane
+      when nav_left?(ev)
+        view.set_pane(:request) # the arrows point at the chips: ← REQ, → RES
+        true
+      when nav_right?(ev)
+        view.set_pane(:response)
         true
       when key.escape?
         @host.request_focus(:subtabs)
@@ -152,8 +155,8 @@ module Gori::Tui
       end
     end
 
-    # ⇧←/→ scrolls both diff columns sideways. Checked BEFORE the plain ←/→ pane toggle:
-    # the bare arrows keep switching REQ ⇄ RES, the shifted ones never reach that branch.
+    # ⇧←/→ scrolls both diff columns sideways. Checked BEFORE the plain ←/→ pane pick:
+    # the bare arrows keep selecting REQ / RES, the shifted ones never reach that branch.
     private def handle_body_hscroll(ev : Termisu::Event::Key) : Bool
       return false unless ev.shift?
       key = ev.key

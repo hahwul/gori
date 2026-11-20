@@ -125,6 +125,8 @@ gori run <subcommand> [verb] [options]
 
 Common flags across read subcommands: `--project=NAME`, `--db=PATH`, `--format=FMT` (usually `text` or `json`), and `--json`, which is `--format=json` on every command whose `--format` offers it. An unknown option or subcommand prints one line naming the nearest real one (`did you mean --format?`) and where `--help` is, on stderr. A subcommand typed as an MCP tool name is answered with the command it means (`gori run list_history` names `gori run history`). Under `--json`, a reader given an id that does not exist (or a parent id, as `links --issue N`), a resend of a flow or session that does not exist (`repeater`, `repeater send`, `fuzz`, `mine`, `sequence`, `authorize`), and a single-row `delete`/`rm` that takes `--json` (or `project scope update` / `project host-override update`) of a row that does not exist, prints `{"ok":false,"error":…,"error_kind":"not_found","error_code":"NOT_FOUND","retryable":false}` on stdout, the object `send` prints for a refused send, and still exits 1 with the plain line on stderr. A write refused as a duplicate (`project scope add`/`update`, `project host-override add`/`update`) prints the same shape with `"error_kind":"duplicate"`, MCP's `"error_code":"INVALID_ARGUMENT"` and the row already there as `existing_id`. A write that did not commit, because another gori holds the project or the file is not writable, prints it with `"error_kind":"busy"`, MCP's `"error_code":"PROJECT_BUSY"` and `"retryable":true`. A project that will not open is `PROJECT_BUSY` when a peer holds it and `NO_PROJECT` otherwise, and a `--project` or `--db` that names nothing is `NOT_FOUND`. A single-row delete that takes `--json` answers `{"ok":true,"deleted":true,"id":…}` (`name`, `key` or `target` for a row addressed by one), and one that empties a table (`probe delete --all`, `grpc forget --all`) answers `{"ok":true,"deleted":true,"count":N}`. A delete's `--help` says whether it takes `--json`. Global flags go **after** the verb: `gori run rewriter rm 1 --project=x`. `gori run rewriter --project=x rm 1` is a usage error.
 
+`cache-deception` checks all named flow ids before sending; a missing id ends the run with the `NOT_FOUND` object under `--json`. An unreadable `send --request-file` and command usage refusals return `INVALID_ARGUMENT` objects under `--json`.
+
 Read subcommands open the store read-only and never take the capture lock, so they are safe to run against a project a live TUI is capturing into. A `body:` query drains the search index and is therefore a write. A `--db` file that is not a gori project (another tool's SQLite database, or an empty file) is refused before anything touches it. Commands that create their database (`import --db`, `capture --db`) still initialise an empty file, but refuse one that holds another tool's tables.
 
 Write subcommands share that project's WAL database with the TUI and MCP. They serialize through
@@ -289,6 +291,8 @@ gori run history -q 'status:5xx' --limit 100 --format json
 | `-n`, `--limit=N` | Max rows (default 50) |
 | `--count` | Print how many flows match instead of listing them: a bare number, or `{"count": N}` under `--format json`/`jsonl`. Same filters as the listing (`-q`, `--view`, `--in-scope`, `--hide-static`), so the number and the rows agree. `--column`, `--no-columns`, `--format har` and `--redact` are refused beside it, and `-n` does not apply |
 | `--sort=RANK` | List the top `-n` matches by `slowest` (duration) or `largest` (request + response bytes, the size the row prints) instead of newest first, ties newest first. A ranking, not a page. Refused beside `--count` and `--format har` |
+| `--since=ID` | Only flows with an id above `ID`, **oldest first** (`--since 0` starts at the first flow), as MCP `list_history` `since` reads them. Pass the last row's id back for the next page, starting from `last=0` (an empty page keeps the previous id): `last=$(gori run history --since "$last" --json \| jq ".[-1].id // $last")`. An id this project never issued is refused. Not with `--before-id`, `--sort` or `--count` |
+| `--before-id=ID` | Only flows with an id below `ID`, newest first: page older by passing the last row's id back. Not with `--since`, `--sort` or `--count` |
 | `--view=NAME` | Apply a saved [view](#run-views). Its query is ANDed with `-q`, as the TUI's `v` picker layers over the filter bar. An unknown name is refused, and the error names the ones that exist. Listing and `--count` only |
 | `--in-scope` | Only flows in the project's configured scope: the TUI's `s` lens, opt-in and independent of whether that lens is enabled. Capture still records everything; empty when no scope rules exist |
 | `--hide-static` | Leave out images, fonts and audio/video: the TUI's [hide-static lens](/guide/proxy/#hide-static), the same as `-q -static:true`, and independent of whether that lens is on |
@@ -1303,11 +1307,12 @@ gori run notes delete 2 --yes
 | Option | Description |
 | -------- | ------------- |
 | `list` | `--all` prints every note in full instead of a summary line |
+| `<n>` · `--id ID` · `--position N` | Print one note in full: by list position, by stable id, or by list position even where `N` is also another note's id |
 | `create` | `--text=TEXT`, or a positional argument, or STDIN |
 | `update <n>` (`edit`) · `append <n>` | Replace the note's text, or add to it on a new line (`append`, or `update --append`). The text is `--text`, the words after `<n>`, or STDIN. An empty text is refused. Applied by the note's stable id inside the write, so a peer's edit a moment earlier is appended to rather than overwritten |
 | `delete <n>` (`rm`) | Delete the note at index `n`. `-y`/`--yes` is required |
 
-The index is a list position, so `notes delete 2` names a different note once an earlier one is gone. `delete` refuses without `-y`/`--yes` (there is no interactive prompt), and the refusal quotes the note's first line, when it has one.
+The index is a list position, so `notes delete 2` names a different note once an earlier one is gone. `--json` prints each note's stable `id`, which `notes <n>`, `update`, `append` and `delete` take as `--id ID`; `--position N` names the list position. Under `--json`, a bare `<n>` that is also the id of a note at another position is refused, naming both, so a script that passes an id never reads or changes the note at that position. Without `--json` a bare `<n>` is always the list position, and the reply names the note it changed. `delete` refuses without `-y`/`--yes` (there is no interactive prompt), and the refusal quotes the note's first line, when it has one.
 
 ### run notify
 
@@ -2000,6 +2005,8 @@ MCP stdio server. See the [MCP guide](/guide/mcp/) for tool details.
 | `--install-pi` | Write Pi `~/.pi/agent/mcp.json` `mcpServers.gori` (or `$PI_CODING_AGENT_DIR`). Requires an MCP adapter |
 
 Several `--install-*` flags may be given in one run. Each named client is configured and reported separately, and one unwritable config does not stop the others. Every other flag on the command line (`--db`, `--project`, `--no-project`, `--use-active-project`, `--read-only`, `--tools`, `--pin-project`, `--insecure-upstream`, and the global `--config`) is written into the installed command, with paths made absolute (`--project` is recorded as the name). With no `--tools`, the command gets `--tools=@recon` and the install prints a line saying so; `--tools='*'` installs every tool. Existing config files are updated in place: other entries, tables and comments survive, permissions are preserved, and the replacement is atomic.
+
+The printed `Command:` quotes globs and arguments with spaces for copying into a shell; the installed argv is unchanged.
 
 ## gori ca
 

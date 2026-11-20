@@ -175,7 +175,7 @@ module Gori
       # `--record-history` and `--regex`, which take a value in one subcommand and none in another.
       private VALUE_FLAGS = Set.new(%w[
         -b -d -f -H -l -n -o -p -q -r -s -t -v -w -X
-        --alg --algorithm --assert --auto-reply --bind-from --body --body-file --browser
+        --alg --algorithm --assert --auto-reply --before-id --bind-from --body --body-file --browser
         --brute --bucket --burp --ca-dir --case --category --cluster --code --color --column
         --concurrency --containment --context --cookie --copy-header --curl --cvss --data
         --db --delay --description --detail --detail-file --device-port --direction --export
@@ -197,7 +197,7 @@ module Gori
         --region --remote-debugging-port --remove --repeater --request --request-file
         --request-raw --respond --response-file --retries --rm-header --role --rule --salt
         --samples --scope --secret --secrets --selector --serial --server --session --set
-        --set-header --severity --shell --side --slot --sni --sort --sse-events --sse-time
+        --set-header --severity --shell --side --since --slot --sni --sort --sse-events --sse-time
         --status --stop-after-matches --stop-on --strip-prefix --style --suffix --tag --tags
         --target --text --throttle --timeout --timestamp --title --tls-preset --to --to-db
         --token --token-cookie --token-header --tokens --type --unpack --url --urls --value
@@ -845,16 +845,16 @@ module Gori
         if stdin && path == "-"
           return read_stdin_text(STDIN, what, noun, stdin_pipe_hint(what, flag: flag || "-"))
         end
-        abort "#{what}: not a readable file: #{path}" if File.directory?(path)
+        usage_abort("#{what}: not a readable file: #{path}") if File.directory?(path)
         File.open(path) do |f|
           if err = stdin_terminal_error(f, what: what, noun: noun,
                hint: "#{path} names this terminal. Pass the path of a real file, or pipe the #{noun} in.")
-            abort err
+            usage_abort(err)
           end
           f.gets_to_end
         end
       rescue ex : IO::Error
-        abort "#{what}: cannot read '#{path}': #{ex.message}"
+        usage_abort("#{what}: cannot read '#{path}': #{ex.message}")
       end
 
       # The bytes an operator piped in for an EXPLICIT `--…-stdin` flag, verbatim. Byte-for-byte
@@ -1010,6 +1010,28 @@ module Gori
         # Not a database, or one a newer gori wrote: `CLI.run` prints the line, as it always did.
         puts failure_json(ex.message.to_s, "open_failed", "NO_PROJECT") if abort_on_failure && json_stdout?
         raise ex
+      end
+
+      # Whether this process has already checked (and, if over, said) its project's retention cap.
+      @@said_over_retention = false
+
+      # Where that notice goes: STDERR, never a `--json` stdout; a spec swaps in an `IO::Memory`,
+      # as it does for `default_project_io`.
+      class_property over_retention_io : IO? = STDERR
+
+      # A writable open of a project over `retention.max_flows` sweeps the oldest flows once
+      # THIS process has added `Store::PRUNE_INTERVAL` of them, which only gori.log recorded.
+      # So it is said by the commands that can add that many in one run: `import`, `discover`
+      # (at its first stored batch) and `fuzz --record-history`, not by every writable open — a
+      # `send` loop, `notes create` or a read that opens writable would warn of a deletion that
+      # never comes. Said once per process, in `gori run capture`'s words
+      # (`App.over_retention_line`), since one command can open its project more than once.
+      private def self.say_over_retention(store : Store) : Nil
+        return if @@said_over_retention
+        # Set before the count, so a caller per batch (`flush_discover`) pays one `COUNT(*)`.
+        @@said_over_retention = true
+        return unless (n = store.flows_over_retention) > 0
+        @@over_retention_io.try &.puts("gori run: #{App.over_retention_line(n, Settings.retention_flows, capture: false)}")
       end
 
       # `open_store`, yield, close — the shape nearly every command wants. Returns the block's

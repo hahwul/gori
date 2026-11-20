@@ -125,6 +125,8 @@ gori run <subcommand> [verb] [options]
 
 읽기 서브커맨드의 공통 플래그는 `--project=NAME`, `--db=PATH`, `--format=FMT`(보통 `text` 또는 `json`)와, `--format`이 `json`을 제공하는 모든 명령에서 `--format=json`과 같은 `--json`입니다. 모르는 옵션이나 서브커맨드를 주면 가장 가까운 실제 이름(`did you mean --format?`)과 `--help` 위치를 한 줄로 stderr에 출력합니다. 서브커맨드를 MCP 도구 이름으로 치면 그에 해당하는 명령을 알려 줍니다(`gori run list_history`에는 `gori run history`). `--json`에서 없는 id(또는 `links --issue N`처럼 부모 id)를 조회한 명령과, 없는 플로우나 세션을 다시 보내려 한 명령(`repeater`, `repeater send`, `fuzz`, `mine`, `sequence`, `authorize`), `--json`을 받는 단건 `delete`/`rm`(그리고 `project scope update` / `project host-override update`)으로 없는 행을 가리킨 명령은 `send`가 거부된 전송에 찍는 것과 같은 객체 `{"ok":false,"error":…,"error_kind":"not_found","error_code":"NOT_FOUND","retryable":false}`를 stdout에 출력하고, stderr의 평문 한 줄과 종료 코드 1은 그대로입니다. 중복이라 거부된 쓰기(`project scope add`/`update`, `project host-override add`/`update`)는 같은 모양에 `"error_kind":"duplicate"`, MCP와 같은 `"error_code":"INVALID_ARGUMENT"`, 이미 있는 행의 id인 `existing_id`를 담습니다. 다른 gori가 프로젝트를 잡고 있거나 파일에 쓸 수 없어 커밋되지 않은 쓰기는 같은 모양에 `"error_kind":"busy"`, MCP와 같은 `"error_code":"PROJECT_BUSY"`, `"retryable":true`를 담습니다. 열리지 않는 프로젝트는 다른 gori가 잡고 있으면 `PROJECT_BUSY`, 그 밖에는 `NO_PROJECT`이고, 아무것도 가리키지 않는 `--project`나 `--db`는 `NOT_FOUND`입니다. `--json`을 받는 단건 삭제는 `{"ok":true,"deleted":true,"id":…}`로 답합니다(이름이나 키로 가리키는 행은 `name`, `key`, `target`). 테이블을 비우는 삭제(`probe delete --all`, `grpc forget --all`)는 `{"ok":true,"deleted":true,"count":N}`로 답합니다. `--json`을 받는지는 각 삭제의 `--help`에 나옵니다. 전역 플래그는 **동사 뒤에** 옵니다. `gori run rewriter rm 1 --project=x`는 되고, `gori run rewriter --project=x rm 1`은 사용법 오류입니다.
 
+`cache-deception`은 전송 전에 지정한 모든 flow id를 확인합니다. 없는 id가 있으면 `--json`에서 `NOT_FOUND` 객체를 반환하며 실행을 중단합니다. 읽을 수 없는 `send --request-file`과 명령 사용법 오류는 `--json`에서 `INVALID_ARGUMENT` 객체를 반환합니다.
+
 읽기 서브커맨드는 스토어를 읽기 전용으로 열고 캡처 락을 잡지 않으므로, 라이브 TUI가 캡처 중인 프로젝트를 대상으로 실행해도 안전합니다. `body:` 질의는 검색 인덱스를 비우므로 쓰기입니다. gori 프로젝트가 아닌 `--db` 파일(다른 도구의 SQLite 데이터베이스나 빈 파일)은 파일에 손대기 전에 거부합니다. 데이터베이스를 만드는 명령(`import --db`, `capture --db`)은 빈 파일은 계속 초기화하지만, 다른 도구의 테이블이 든 파일은 거부합니다.
 
 쓰기 서브커맨드는 그 프로젝트의 WAL 데이터베이스를 TUI, MCP와 공유합니다. Store 라이터를 통해 직렬화되므로 TUI가 열려 있어도 실행할 수 있지만, 캡처 커밋이 SQLite 라이터 슬롯을 잠시 차지할 수 있습니다. 짧게 끝나는 서브커맨드는 SQLite 열기/라이터 대기에 1초 예산을 둡니다. 그때까지 슬롯이 바쁘면 필요한 쓰기는 0이 아닌 코드로 종료하며, 다른 gori가 프로젝트를 잠그고 있다고 알리고 해결책(다시 시도하거나 읽기 전용 서브커맨드로 읽기)을 함께 보여 줍니다. 실행 내내 프로젝트를 열어 두는 서브커맨드(`discover`, `fuzz`, `import`, `--macro`를 준 `mine`, `probe`, `retest run`, `oast listen`/`resume`, `intercept`, `sitemap js --scan`)는 표준 5초 대기를 그대로 씁니다. repeater 전송도 네트워크 응답을 저장하지 못하면 실패하므로, 스크립트가 완료된 쓰기와 확인이 필요한 응답을 구분할 수 있습니다.
@@ -282,6 +284,8 @@ gori run history -q 'status:5xx' --limit 100 --format json
 | `-n`, `--limit=N` | 최대 행 수 (기본값 50) |
 | `--count` | 목록 대신 걸리는 플로우 수를 출력합니다. 숫자 하나, `--format json`/`jsonl`이면 `{"count": N}`. 목록과 같은 필터(`-q`, `--view`, `--in-scope`, `--hide-static`)를 쓰므로 개수와 행이 어긋나지 않습니다. `--column`, `--no-columns`, `--format har`, `--redact`는 함께 쓰면 거절하고 `-n`은 적용되지 않습니다 |
 | `--sort=RANK` | 최신순 대신 `slowest`(소요 시간)나 `largest`(요청 + 응답 바이트, 행에 찍히는 크기) 순으로 상위 `-n`개를 나열합니다. 같으면 최신순입니다. 페이지가 아니라 순위이므로 `--count`, `--format har`와는 함께 쓸 수 없습니다 |
+| `--since=ID` | id가 `ID`보다 큰 플로우만 **오래된 순**으로 나열합니다(`--since 0`은 첫 플로우부터). MCP `list_history`의 `since`와 같습니다. 다음 페이지는 마지막 행의 id를 다시 넘기면 됩니다(`last=0`에서 시작). 빈 페이지면 이전 값이 유지됩니다: `last=$(gori run history --since "$last" --json \| jq ".[-1].id // $last")`. 이 프로젝트가 발급한 적 없는 id는 거절합니다. `--before-id`, `--sort`, `--count`와는 함께 쓸 수 없습니다 |
+| `--before-id=ID` | id가 `ID`보다 작은 플로우만 최신순으로 나열합니다. 마지막 행의 id를 다시 넘기면 더 오래된 페이지로 넘어갑니다. `--since`, `--sort`, `--count`와는 함께 쓸 수 없습니다 |
 | `--view=NAME` | 저장된 [뷰](#run-views)를 적용합니다. 그 쿼리는 `-q`에 AND로 얹힙니다. TUI의 `v` 피커가 필터 바 위에 얹히는 것과 같습니다. 없는 이름은 거절하고 있는 이름들을 알려 줍니다. 목록과 `--count`에서만 씁니다 |
 | `--in-scope` | 프로젝트에 설정된 스코프 안의 플로우만 출력합니다. TUI의 `s` 렌즈로, 옵트인이며 그 렌즈의 활성화 여부와 무관합니다. 캡처는 여전히 전부 기록하며, 스코프 규칙이 없으면 빈 결과 |
 | `--hide-static` | 이미지, 폰트, 오디오·비디오를 뺍니다. TUI의 [정적 에셋 숨기기 렌즈](/ko/guide/proxy/#hide-static)로, `-q -static:true`와 같고 그 렌즈가 켜져 있는지와는 무관합니다 |
@@ -1291,11 +1295,12 @@ gori run notes delete 2 --yes
 | Option | Description |
 |--------|-------------|
 | `list` | `--all`은 요약 한 줄 대신 모든 노트를 전문으로 출력 |
+| `<n>` · `--id ID` · `--position N` | 노트 하나를 전문으로 출력. 목록 위치, 고정 id, 또는 `N`이 다른 노트의 id이기도 할 때에도 목록 위치로 지정 |
 | `create` | `--text=TEXT`, 위치 인자, 또는 STDIN |
 | `update <n>` (`edit`) · `append <n>` | 노트 텍스트를 교체하거나, 새 줄에 덧붙임(`append`, 또는 `update --append`). 텍스트는 `--text`, `<n>` 뒤의 단어들, 또는 STDIN입니다. 빈 텍스트는 거부됩니다. 쓰기 안에서 노트의 고정 id로 적용되므로, 바로 앞서 다른 쪽이 한 편집은 덮어쓰지 않고 그 뒤에 덧붙습니다 |
 | `delete <n>` (`rm`) | 인덱스 `n`의 노트 삭제. `-y`/`--yes` 필요 |
 
-인덱스는 목록 위치라서, 앞의 노트가 하나 사라지면 `notes delete 2`가 가리키는 노트도 달라집니다. `delete`는 `-y`/`--yes` 없이는 거부하고(대화형 확인 절차는 없습니다), 거부 메시지에 노트의 첫 줄(빈 노트라면 생략)을 인용합니다.
+인덱스는 목록 위치라서, 앞의 노트가 하나 사라지면 `notes delete 2`가 가리키는 노트도 달라집니다. `--json`은 노트마다 바뀌지 않는 `id`를 출력하고, `notes <n>`, `update`, `append`, `delete`는 이것을 `--id ID`로 받습니다. 목록 위치는 `--position N`으로 지정합니다. `--json`과 함께 그냥 쓴 `<n>`이 다른 위치에 있는 노트의 id이기도 하면 둘을 함께 알려 주며 거부하므로, id를 넘긴 스크립트가 그 위치의 노트를 읽거나 바꾸는 일은 없습니다. `--json`이 없으면 그냥 쓴 `<n>`은 언제나 목록 위치이고, 응답에 바뀐 노트가 나옵니다. `delete`는 `-y`/`--yes` 없이는 거부하고(대화형 확인 절차는 없습니다), 거부 메시지에 노트의 첫 줄(빈 노트라면 생략)을 인용합니다.
 
 ### run notify {#run-notify}
 
@@ -1988,6 +1993,8 @@ MCP stdio 서버입니다. 도구 세부사항은 [MCP 가이드](/ko/guide/mcp/
 | `--install-pi` | Pi `~/.pi/agent/mcp.json` `mcpServers.gori` 기록 (또는 `$PI_CODING_AGENT_DIR`). MCP 어댑터 필요 |
 
 `--install-*`은 한 번에 여러 개 지정할 수 있습니다. 클라이언트마다 따로 설정하고 따로 보고하며, 하나가 실패해도 나머지는 계속 진행됩니다. 커맨드라인의 다른 플래그(`--db`, `--project`, `--no-project`, `--use-active-project`, `--read-only`, `--tools`, `--pin-project`, `--insecure-upstream`, 전역 `--config`)는 모두 설치되는 커맨드에 기록되고, 경로는 절대 경로로 바뀝니다(`--project`는 이름 그대로 기록). `--tools`를 주지 않으면 `--tools=@recon`이 기록되고 설치 출력이 그 사실을 한 줄로 알려 줍니다. 모든 도구는 `--tools='*'`로 설치합니다. 기존 설정 파일은 제자리에서 갱신됩니다. 다른 항목·테이블·주석은 유지되고, 권한도 보존되며, 교체는 원자적입니다.
+
+출력되는 `Command:`는 셸에 복사할 수 있도록 글롭과 공백이 있는 인수를 따옴표로 묶습니다. 설치된 argv는 바뀌지 않습니다.
 
 ## gori ca {#gori-ca}
 

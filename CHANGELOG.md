@@ -2,7 +2,20 @@
 
 ## Unreleased
 
-- MCP: `gori mcp --install-*` writes `--tools=@recon` when no `--tools` is given, so a fresh install loads about a fifth of the full catalogue's tool schemas; `--tools='*'` installs every tool, and a hand-run `gori mcp` is unchanged, as is an existing entry until it is reinstalled (#1943).
+- MCP: `race_requests`, `timing_requests` and `minimize_repeater` take `background:true`, which returns a `job_id` at once so other calls are answered while the run goes on; `get_job` returns the call's usual result and `stop_job` cancels it (#1944).
+
+- TUI: an upstream proxy that does not answer is named once on the status row and in Notifications, with the setting that chose it, instead of only inside each failed flow's detail (#1944).
+
+- TUI: `/` on the tab bar of a tab with no filter says so and points at `^P` before the next letters reach the global keys, a function key says gori binds none instead of doing nothing, and Comparer `←` diffs the requests and `→` the responses instead of both toggling (#1944).
+
+- TUI: the Target → Params list has a `/` filter over parameter name, location and endpoint (#1944).
+
+- TUI: OAST callbacks show when they arrived in the local time History uses, as a TIME column on a wide enough pane and in the detail, which printed UTC (#1944).
+- `gori run history`: `--since ID` tails newer flows oldest first and `--before-id ID` pages older ones, as MCP `list_history` does, so a script continues from the last row's id (#1944).
+
+- `gori run notes <n>`, `update`, `append` and `delete` refuse, under `--json`, an `<n>` that is also the id of a note at another position, so a script passing the id `--json` prints no longer reads or changes a different note; without `--json` `<n>` is the list position as before, and `--id N` and `--position N` name one or the other on all four (#1944).
+
+- MCP: `gori mcp --install-*` writes `--tools=@recon` when no `--tools` is given, so a fresh install loads about a fifth of the full catalogue's tool schemas; `--tools='*'` installs every tool, and a hand-run `gori mcp` is unchanged, as is an existing entry until it is reinstalled. The printed `Command:` quotes glob and spaced arguments for copying into a shell (#1943, #1944).
 
 - History: "size" means request + response bytes everywhere. The TUI SIZE column shows the total that `size:` filters on and the CLI and MCP print, and `--sort=largest` (MCP `sort:"largest"`) ranks by it; `respsize:` still filters on the response alone (#1943).
 
@@ -10,13 +23,17 @@
 
 - Large projects: a `body:` search returns its first page in milliseconds instead of reading every match first, `path:` and `proto:grpc` scans run up to 40% faster, and the retention sweep removes the oldest flows a bounded chunk at a time, so capture and the TUI no longer freeze while a project over its `retention.max_flows` cap is trimmed (#1942).
 
-- Opening a project that holds more flows than `retention.max_flows` now says how many the sweep will delete as capture runs and how to keep them, in the TUI and on `gori run capture`'s stderr (#1943).
+- Opening a project that holds more flows than `retention.max_flows` now says how many the sweep will delete as capture runs and how to keep them, in the TUI and on the stderr of `gori run capture`, `import`, `discover` and `fuzz --record-history` (#1943, #1944).
 
 - TUI: pasting a large wordlist into a Fuzzer payload set, or a large body into an Intercept held request, no longer freezes the app, and a filtered History re-runs its whole query less often under capture (#1942).
 
 - `gori run`: an invalid `~` regex in a query is an error, as its help and MCP say, and `--strict` refuses a term QL would drop (#1942).
 
-- `gori run`: a mistyped `probe`, `history` or `sitemap` verb is refused instead of searched, `fuzz -w -` reads stdin, every delete accepts `--yes`, and under `--json` a not-found, pre-send, usage or `intercept` refusal prints the error object (an `intercept` refusal also goes to stderr in text mode) and `project delete`/`repeater delete` say `ok` (#1942).
+- Regex searches and rules (`body~`, `llm:`, Rewriter, Probe and Fuzzer patterns) no longer drop real matches on a busy machine: their 50 ms budget counts the CPU gori spends, not time spent waiting for a core (#1944).
+
+- `gori run`: a mistyped `probe`, `history` or `sitemap` verb is refused instead of searched, `fuzz -w -` reads stdin, every delete accepts `--yes`, and under `--json` a not-found, pre-send, usage, unreadable request file or `intercept` refusal prints the error object (an `intercept` refusal also goes to stderr in text mode) and `project delete`/`repeater delete` say `ok` (#1942, #1944).
+
+- `gori run cache-deception` refuses a missing flow id with `NOT_FOUND` under `--json` before sending any request (#1944).
 
 - TUI: startup warnings show at once instead of behind the greeting and stay in Notifications: a fallback port, capture off, a project dir gori cannot write (no longer blamed on another window), a corrupt settings.json under `--db`, and flows a crash left incomplete. Other action messages no longer wait behind a companion bubble either (#1942).
 
@@ -28,7 +45,7 @@
 
 - TUI: the Intercept queue hint calls `/` the catch condition it sets, not a filter, and held response rows show status before the path so it remains visible on narrow screens. Coming back to Decoder lands on INPUT instead of typing into the chain, and the footer under a sub-tab filter being typed shows the filter's keys instead of strip letters that now type. The Issues list marks a resolved issue `res`, not `done` (#1942, #1943).
 
-- Evidence: freezing an exchange an issue already holds with the same bytes writes no second copy; the TUI and `gori run evidence freeze` name the existing copy and MCP `freeze_evidence` returns it with `already_frozen: true`. A source whose bytes changed still freezes a new copy (#1942).
+- Evidence: freezing an exchange an issue already holds with the same bytes writes no second copy; the TUI and `gori run evidence freeze` name the existing copy and MCP `freeze_evidence` returns it with `already_frozen: true`, now named in the tool description. A source whose bytes changed still freezes a new copy (#1942, #1944).
 
 - Extract rules: a rule that re-binds the same value on every response no longer makes another rule's `extract_miss` warning repeat on most captured flows (#1942).
 
@@ -73,10 +90,15 @@
 - Fuzzer: agents can prepare a sub-tab with `create_fuzzer` while Send traffic is off, and scripts can use `gori run fuzz create`; the operator reviews and runs the saved request, payloads, processors and WebSocket script in the TUI (#1910).
 
 - LLM targets: QL `llm:true` finds LLM API calls and `llm:claude` narrows by model name, and the Fuzzer's body regex also matches a streamed reply as reassembled text, so a word split across SSE deltas is found. **Copy as… › LLM transcript** and `gori run show --format transcript` write a call as Markdown for a report (#1912)
+
 - Probe: `llm_prompt_injection` also flags an MCP `tools/list` result whose tool description hides itself from the user (#1912)
+
 - Probe: passive OAuth checks flag successful password grants and token responses without `Cache-Control: no-store` (#1936).
+
 - Fuzzer: a run whose only payload sets are null payloads needs no `§…§` position and sends the request as it stands N times (`--null=20`), to read a hit rate off a target whose answer varies (#1912)
+
 - Session bindings: an extract rule whose condition reads `header:` or `body:` fires on a Repeater send, a slot's refresh step and a macro step, not only on proxied traffic (#1912)
+
 - Docs: the **Test an AI target** playbook covers LLM and MCP targets end to end, including an MCP session carried by a slot's refresh steps; it is also an MCP prompt (#1912)
 
 - MCP: project binding replies include engagement guidance, capped at 2,000 characters with the full text in `project_info`; handshake instructions point agents to it before acting (#1911).
@@ -88,11 +110,17 @@
 - Repeater/Fuzzer: scripted WebSocket sends can opt into permessage-deflate with independent messages; transcripts and Fuzzer matching use bounded decoded replies, while explicitly shaped frames, including saved Repeater seeds, stay verbatim. CLI text transcripts retain received frames on decode errors (#1897)
 
 - History: a DNS-over-HTTPS body (`application/dns-message`) renders as JSON in the detail pane, `gori run show --format json` and MCP `get_flow` (#1899)
+
 - Proxy: with a Match & Replace body rule, a body extract rule or the response intercept on its host, a chunked `multipart/x-mixed-replace` stream reaches the client at once, and a chunked NDJSON, Connect or gRPC-Web stream that has not ended after 5 seconds is released instead of stalling. On HTTP/2 an NDJSON body that declares its length is rewritten, and a stream a rule skipped says so on the flow (#1899, #1901, #1902)
+
 - Proxy: `network.strip_extended_connect` keeps a browser's WebSockets off HTTP/2, so per-message intercept and Match & Replace apply to them (#1896, #1903)
+
 - Proxy: `network.strip_available_dictionary` removes a request's `Available-Dictionary` so the origin answers in a coding gori decodes, and a `dcb`/`dcz` body's decode note names the dictionary and the setting (#1898, #1904)
+
 - Proxy: an HTTP/2 body still gets its Match & Replace rule when its empty final DATA frame arrives while another stream's spill waits for the client to read it (#1906)
+
 - Proxy: an HTTP/1.1 flow keeps its request advisory, such as a Match & Replace body rule skipped on a compressed request, when the response adds one of its own (#1905, #1907)
+
 - Docs: transparent mode says to block UDP 443 so an HTTP/3 client falls back to TCP (#1899)
 
 ## v0.9.4

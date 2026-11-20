@@ -31,7 +31,8 @@ module Gori
       # names the running kinds, so an agent stops the job that is actually running (#1556).
       private def jobs_busy(action : String) : Result?
         kinds = [] of String
-        {fuzz: @jobs, mine: @mine_jobs, discover: @discover_jobs, sequence: @sequence_jobs, authorize: @authorize_jobs}.each do |kind, jobs|
+        {fuzz: @jobs, mine: @mine_jobs, discover: @discover_jobs, sequence: @sequence_jobs, authorize: @authorize_jobs,
+         background: @bg_jobs}.each do |kind, jobs|
           kinds << kind.to_s if jobs.each_value.any?(&.live?)
         end
         return if kinds.empty?

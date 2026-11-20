@@ -6019,3 +6019,75 @@ names the cap and says to raise it and reopen. The cap is read only at open.
 Not done: a confirmation before opening, or any change to what retention keeps. The cap is the operator's own
 setting, and a dialog would put a question in front of every open of a large project.
 
+### 2026-11-20: race, timing and minimize take `background:true` (#1944)
+
+Refines: "Tools run one at a time". `race_requests`, `timing_requests` and `minimize_repeater` are one call
+per run, so a 250-send minimize or a long timing run held every other call (a read, a stop) behind it, and
+nothing could cancel it but the client's own `notifications/cancelled`. With `background:true` the call runs
+every refusal and gate as before, then answers a `bg_*` `job_id` and runs the rest on its own fiber. `get_job`
+returns the synchronous call's own Result once the run ends, and `stop_job` is the cancel: the run polls it
+where the synchronous call polls the cancel predicate (a race already on the wire finishes). A stopped run's
+Result adds `incomplete_reason:"stopped"`, the field the other job kinds use, so a cut-short timing sample is
+not read as a full verdict; a finished run's is unchanged. No
+`*_start/_status/_stop` tools were added; the three declare `requires: get_job, stop_job` instead. The
+synchronous default is unchanged, and a running background call blocks a project switch like any job.
+
+### 2026-11-20: the regex budget is thread CPU time, not wall time (#1944)
+
+Refines: 2026-10-11 ("operator- and agent-authored regexes are budgeted by time"). The budget,
+50 ms plus 50 ms per MiB, now counts the CPU the thread spends. On a loaded host the OS kept
+the thread off the CPU long enough to use up a wall-clock budget, so a trivial pattern on a
+sub-KB subject was "treated as not matching" and `llm:` / `body~` listings dropped real
+matches with only a gori.log line to show for it. The callout still reads the cheap wall clock
+on its stride. A thread cannot spend CPU faster than the wall moves, so the thread CPU clock
+is read only after the wall deadline passes. If the budget is not spent yet, the wall deadline
+moves to the soonest instant it could be. Arming reuses a CPU reading under 1 ms old, which can
+overcharge by less than that. It cannot undercharge. The clock is `CLOCK_THREAD_CPUTIME_ID` on
+Linux and macOS and `GetThreadTimes` on Windows, which advances at the scheduler tick, so a trip
+there can come one tick (~15.6 ms) late. Elsewhere the wall decides alone, as before.
+
+The ReDoS bound is the same in CPU time, so an uncontended trip is unchanged. On a contended host
+the wall time until a trip grows with the thread's lost share. CPU another fiber spends inside
+an armed block still counts, as before, so blocks stay free of yields. A slower core (macOS
+background QoS on efficiency cores) is real CPU and still trips a long legitimate Replace.
+
+### 2026-11-20: OAST callbacks show the local time History shows (#1944)
+
+The callbacks list has a `TIME` cell and the detail's meta line reads the same local `MM-DD HH:MM:SS`
+(`LocalTime::LIST`, History's TIME column), where the detail printed UTC RFC 3339 and the list printed no time
+at all, so matching a callback to the send that caused it took timezone arithmetic. TIME sits left of PROVIDER
+and is served only from what the widest DESTINATION does not need: it is the first cell to go on a narrow pane,
+and an 80-column pane keeps the destination width it had. Evidence keeps RFC 3339 (the issue notes'
+`received:` line), and History's relative-time preference does not apply here.
+
+### 2026-11-20: under `--json`, a bare `notes <n>` that is also another note's id is refused (#1944)
+
+`gori run notes <n>` and `notes update|append|delete <n>` read `<n>` as a 1-based list position, the number the listing and
+the TUI show, while `--json` prints each note's stable `id` first and every other `gori run` delete takes an id.
+A script passing that id read or changed whichever note sat at the position. Under `--json`, the script contract,
+`resolve_note_index` now refuses a bare `<n>` that is ALSO the id of a note at a different position, naming both
+readings and the two explicit spellings, `--position N` and `--id N`. Without `--json` a bare `<n>` stays the
+position, ambiguous or not: notes made from the CLI or MCP get sequential ids, so after one delete nearly every
+position is another note's id, and refusing there punished the person typing the number they see, who is who
+positions exist for. Their reply already names the note it touched. Past the end, either way, the not-found adds
+"id N is note #k".
+
+### 2026-11-20: the `gori run` commands that can sweep say a project is over the retention cap (#1944)
+
+Refines the #1943 entry above. `CLI::Run.open_store` passes `Settings.retention_flows` on every writable open,
+but the Store sweeps only after `Store::PRUNE_INTERVAL` (500) inserts within one process, so the commands that
+can trim an over-cap project are the ones that add that many flows in one run: `import`, `discover` (unless
+`--no-store`) and `fuzz --record-history`. Only gori.log recorded it. Those now say it once per process on
+stderr, never on a `--json` stdout, through `CLI::Run.say_over_retention` and `App.over_retention_line`, the
+sentence `gori run capture` prints, with "as flows are added" for "as capture runs" and no "stop". A `send`
+(one flow, even `--record-history`, even in a loop of processes), `notes create`, or a read that opens writable
+(`history --view`, a `body:` query) says nothing: it would warn of a deletion that never comes in that process.
+A read-only open passes no cap and says nothing.
+
+### 2026-11-20: cache-deception refuses missing flow ids before replay
+
+Refines 2026-11-14 ("`NOT_FOUND` under `--json`"). A missing id is a bad selection, not an empty
+cache result. `gori run cache-deception` validates every named flow before the first send; one
+missing id refuses the whole run with `NOT_FOUND` in JSON mode. A present flow that cannot be
+replayed still remains a per-flow skip or failure, so one bad backend does not hide later results.
+

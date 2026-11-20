@@ -158,3 +158,57 @@ describe "the sub-tab strip footer while its filter is being typed" do
     Screen.display_width(Runner::SUBTAB_FILTER_HINT).should be <= 59
   end
 end
+
+# A dead upstream proxy is said once (`Runner#drain_unreachable_upstreams`): the status row
+# keeps the address, the notification names the setting that chose it.
+describe "Runner.upstream_down_toast" do
+  it "puts the verdict inside 80×24's 59 columns with its ✗, so a clip cuts the host" do
+    toast = Runner.upstream_down_toast("upstream HTTPS proxy proxy.corp.example.com:8080")
+    toast.should eq("unreachable: upstream HTTPS proxy proxy.corp.example.com:8080")
+    # A long host overflows the row; Screen#text clips the end to 58 columns plus `…`.
+    Screen.display_width("✗ " + toast).should be > 59
+    ("✗ " + toast)[0, 58].should contain("unreachable")
+    Runner.upstream_down_note("upstream HTTP proxy 127.0.0.1:3128 (network.upstream_proxy)")
+      .should start_with("upstream HTTP proxy 127.0.0.1:3128 (network.upstream_proxy) is unreachable")
+  end
+end
+
+# A proxy that alternates answering and failing is named at most once per
+# UPSTREAM_RESAY_AFTER, and one that stays down is named once.
+describe "Runner.upstream_news" do
+  label = "upstream HTTP proxy 127.0.0.1:3128"
+  down_at = ->(t : Time::Instant) { Gori::Proxy::Upstream::Unreachable.new("via", t) }
+
+  it "names a flaky proxy again only after the interval" do
+    t0 = Time.instant
+    down = {label => down_at.call(t0)}
+    said = {} of String => Time::Instant
+    Runner.upstream_news(down, said, t0).keys.should eq([label])
+    # It answers, then fails again a second later: not news.
+    down.clear
+    Runner.upstream_news(down, said, t0 + 1.second).should be_empty
+    down[label] = down_at.call(t0 + 2.seconds)
+    Runner.upstream_news(down, said, t0 + 2.seconds).should be_empty
+    # Still failing past the interval: still quiet.
+    down[label] = down_at.call(t0 + 6.minutes)
+    Runner.upstream_news(down, said, t0 + 6.minutes).should be_empty
+    # It answers, and fails again after the interval: news.
+    down.clear
+    Runner.upstream_news(down, said, t0 + 7.minutes).should be_empty
+    down[label] = down_at.call(t0 + 8.minutes)
+    Runner.upstream_news(down, said, t0 + 8.minutes).keys.should eq([label])
+  end
+
+  # A proxy since removed from the settings is never dialled again, so nothing takes its entry
+  # out; left there it keeps the dial path's empty short-circuit off for good.
+  it "drops a said entry nothing has failed on for the interval" do
+    t0 = Time.instant
+    down = {label => down_at.call(t0)}
+    said = {} of String => Time::Instant
+    Runner.upstream_news(down, said, t0)
+    Runner.upstream_news(down, said, t0 + 1.minute)
+    down.has_key?(label).should be_true
+    Runner.upstream_news(down, said, t0 + Runner::UPSTREAM_RESAY_AFTER)
+    down.should be_empty
+  end
+end

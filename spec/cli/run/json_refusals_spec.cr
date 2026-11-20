@@ -96,7 +96,7 @@ describe "gori run <delete> --json — the deletes that took none" do
       {"history.cr", "not_found_abort(\"gori run history delete\""},
       {"history.cr", "deleted_json(ids)"},
       {"history.cr", "deleted_count_json(n)"},
-      {"notes.cr", %(resolve_note_index(store, persisted, n_arg, note_id, "gori run notes delete", format))},
+      {"notes.cr", %(resolve_note_index(store, persisted, n_arg, note_id, "gori run notes delete", format, !position.nil?))},
       {"notes.cr", "not_found_abort(cmd, \"no note"},
       {"notes.cr", %(deleted_json("id", target_id))},
       {"oast.cr", %(oast_provider_row_id(store, id, "delete", format))},
@@ -211,7 +211,7 @@ describe "gori run --json — the refusals that printed nothing" do
       {"repeater.cr", "get_repeater(id) || not_found_abort(cmd, \"no repeater session"},
       {"repeater.cr", "not_found_abort(cmd, \"no repeater session #\#{id}\") unless rec"},
       {"repeater.cr", "err == ws_not_found_line(id)"},
-      {"notes.cr", "resolve_note_index(store, doc, n, note_id, \"gori run notes update\", format)"},
+      {"notes.cr", "resolve_note_index(store, doc, n, note_id, \"gori run notes update\", format, explicit)"},
       {"session.cr", "not_found_abort(\"gori run session refresh\""},
       {"session.cr", "not_found_abort(\"gori run session edit\""},
       {"session.cr", "not_found_abort(\"gori run session baseline\""},
@@ -232,6 +232,16 @@ describe "gori run --json — the refusals that printed nothing" do
     body.should contain(%(failure_json(reason, "invalid_argument", "INVALID_ARGUMENT", delivered: false)))
     # The helper's own line is the only bare one left.
     File.read(File.join(JsonRefusals::ROOT, "send.cr")).scan(%(abort "gori run send: )).size.should eq(1)
+  end
+
+  it "routes unreadable request files and command usage through the JSON refusal helpers" do
+    run = File.read(File.join(JsonRefusals::ROOT, "..", "run.cr"))
+    reader = run[run.index("private def self.read_input_file(").not_nil!..run.index("# The bytes an operator piped", run.index("private def self.read_input_file(").not_nil!).not_nil!]
+    reader.should contain("usage_abort(")
+    JsonRefusals.method("history.cr", "cmd_history_list").should contain("usage_abort(\"gori run history: --sort")
+    JsonRefusals.method("notes.cr", "note_delete_position").should contain("usage_abort(\"gori run notes delete: missing")
+    JsonRefusals.method("notes.cr", "parse_note_index").should contain("usage_abort(\"gori run notes: invalid note number")
+    JsonRefusals.method("repeater.cr", "cmd_repeater_send").should contain("usage_abort(\"gori run repeater send: missing")
   end
 
   it "says ok in the project and repeater delete replies" do

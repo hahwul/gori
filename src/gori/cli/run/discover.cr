@@ -296,6 +296,7 @@ module Gori
       private def self.flush_discover(store : Store,
                                       pending : Array({Store::CapturedRequest, Store::CapturedResponse?})) : Int32
         return 0 if pending.empty?
+        say_over_retention(store) # the crawl's first batch is about to land; once per process
         landed = store.insert_import_batch(pending)
         lost = pending.size - landed
         pending.clear

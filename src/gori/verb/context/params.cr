@@ -6,6 +6,7 @@ abstract class Gori::Verb::ExecContext
   abstract def params_run : Nil                 # (re-)scan the captured requests
   abstract def params_toggle_headers : Nil      # include / leave out the standard browser headers
   abstract def params_clear_target : Nil        # drop the Sitemap-node narrowing (every endpoint)
+  abstract def params_filter : Nil              # open the list's `/` bar (name / location / endpoint)
   abstract def params_open_flow : Nil           # open the row's newest flow in the History detail
   abstract def params_copy_names : Nil          # every visible name, one per line, to the clipboard
   abstract def params_export : Nil              # the visible names as a wordlist file

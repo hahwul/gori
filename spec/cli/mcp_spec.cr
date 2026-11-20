@@ -110,3 +110,11 @@ describe "gori mcp install default (@recon)" do
       Gori::MCP::Tools::TOOL_DEPENDENCIES).should be_a(Gori::MCP::ToolFilter)
   end
 end
+
+describe "gori mcp installed command display" do
+  it "quotes shell globs and paths with spaces without changing argv" do
+    Gori::CLI.mcp_install_display_arg("--tools=*").should eq(%("--tools=*"))
+    Gori::CLI.mcp_install_display_arg("--db=/tmp/my project.db").should eq(%("--db=/tmp/my project.db"))
+    Gori::CLI.mcp_install_display_arg("--read-only").should eq("--read-only")
+  end
+end

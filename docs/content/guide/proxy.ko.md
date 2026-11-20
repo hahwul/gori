@@ -136,6 +136,7 @@ Sitemap 행에서 `p`를 누르면 그 호스트나 하위 트리로 좁힌 **Pa
 | 동작 | 키 | 결과 |
 | --- | --- | --- |
 | 플로우 열기 | `↵` | 그 이름이 들어 있던 가장 최근 요청을 History 상세로 엽니다 |
+| 필터 | `/` | 위치, 이름, 엔드포인트에 그 글자가 들어 있는 줄만 남깁니다. `⇧Y`와 `w`는 보이는 목록을 씁니다 |
 | 복사 | `y` / `⇧Y` | 이름 하나, 또는 목록의 모든 이름을 한 줄에 하나씩 |
 | 워드리스트 내보내기 | `w` | 목록의 이름(JSON은 마지막 키 이름, 헤더 제외)을 [wordlist 카탈로그](/ko/guide/repeater-and-fuzzer/#wordlist-catalog)(`~/.gori/wordlists/`)의 목록으로, 소유자 전용, `params-HOST-TIMESTAMP.txt`라는 이름으로 저장합니다 |
 | 마이닝 | `m` | 이 엔드포인트로 Miner를 열고, 같은 오리진(스킴, 호스트, 포트)의 다른 엔드포인트에서 본 이름을 먼저 시험합니다 |
@@ -821,7 +822,7 @@ gori run project import acme-api.gori
 
 ## 업스트림 프록시 {#upstream-proxy}
 
-gori는 직접 접속하는 대신 다른 프록시를 거쳐 나갈 수 있습니다. 회사 이그레스, SOCKS 터널, 뒤에 이어 붙인 다른 도구 같은 경우입니다. Preferences(`Ctrl-,`) → **Network & Tabs** → **Network**에서 설정합니다. **Upstream proxy**(`None`, `HTTP`, `HTTP+TLS`, 이름을 로컬에서 해석하는 `SOCKS5`, 프록시에서 해석하는 `SOCKS5H`), **Proxy host**와 **Proxy port**, 그리고 `HTTP+TLS` 홉에 쓰는 **Proxy TLS CA**와 **Verify proxy TLS**입니다. 프로젝트는 `gori run project network set upstream_proxy=socks5h://127.0.0.1:1080`(옆에 `upstream_destination_host`, `upstream_auth`)으로 자기 값을 고정할 수 있고, 그 값은 해당 프로젝트에서만 전역 값보다 우선합니다. `upstream_rules`는 호스트별로 경로를 따로 정합니다. 프로토콜이 `None`이고 다른 설정이 호스트를 가져가지 않으면 gori는 환경의 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`를 따르며(`NO_PROXY`를 존중하고 localhost는 직접 접속), 지금 무엇이 적용되는지는 **Environment proxy** 행이 보여 줍니다. 키는 [설정 레퍼런스](/ko/reference/config/#network)에 있습니다.
+gori는 직접 접속하는 대신 다른 프록시를 거쳐 나갈 수 있습니다. 회사 이그레스, SOCKS 터널, 뒤에 이어 붙인 다른 도구 같은 경우입니다. Preferences(`Ctrl-,`) → **Network & Tabs** → **Network**에서 설정합니다. **Upstream proxy**(`None`, `HTTP`, `HTTP+TLS`, 이름을 로컬에서 해석하는 `SOCKS5`, 프록시에서 해석하는 `SOCKS5H`), **Proxy host**와 **Proxy port**, 그리고 `HTTP+TLS` 홉에 쓰는 **Proxy TLS CA**와 **Verify proxy TLS**입니다. 프로젝트는 `gori run project network set upstream_proxy=socks5h://127.0.0.1:1080`(옆에 `upstream_destination_host`, `upstream_auth`)으로 자기 값을 고정할 수 있고, 그 값은 해당 프로젝트에서만 전역 값보다 우선합니다. `upstream_rules`는 호스트별로 경로를 따로 정합니다. 프로토콜이 `None`이고 다른 설정이 호스트를 가져가지 않으면 gori는 환경의 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`를 따르며(`NO_PROXY`를 존중하고 localhost는 직접 접속), 지금 무엇이 적용되는지는 **Environment proxy** 행이 보여 줍니다. 업스트림 프록시가 응답하지 않으면 TUI가 그 프록시를 고른 설정을 밝혀 상태 줄과 Notifications에 한 번 알리고, 계속 응답하지 않는 동안은 조용합니다. 응답했다가 다시 끊기는 프록시는 5분에 한 번까지만 알립니다. 키는 [설정 레퍼런스](/ko/reference/config/#network)에 있습니다.
 
 ## 프록시를 설정할 수 없는 클라이언트 {#clients-without-proxy}
 

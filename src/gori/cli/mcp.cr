@@ -345,7 +345,7 @@ module Gori::CLI
     # Once, and read back off an Outcome: the argv is identical for every target, and this
     # is the array the installs actually wrote rather than a second build of it.
     outcomes.first?.try do |first|
-      puts "Command: #{exe} #{first.args.join(" ")}"
+      puts "Command: #{mcp_install_display_arg(exe)} #{first.args.map { |arg| mcp_install_display_arg(arg) }.join(" ")}"
       MCP::Install.tools_note(first.args).try { |note| puts note }
     end
     install_db_note(db_path).try { |note| STDERR.puts note }
@@ -357,6 +357,11 @@ module Gori::CLI
     # they were covered by this method's own rescue before it grew a loop, and a setup
     # failure affecting every target still belongs here rather than in an Outcome.
     abort "Failed to install MCP config: #{ex.message.presence || ex.class}"
+  end
+
+  # This is display-only; the installed configuration keeps its original argv array.
+  def self.mcp_install_display_arg(arg : String) : String
+    arg.matches?(/[\s*?\[\]]/) ? %("#{arg}") : arg
   end
 
   # Said at install when `--db` names a file that does not exist yet: a served `--db` is never

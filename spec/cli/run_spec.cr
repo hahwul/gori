@@ -1383,7 +1383,7 @@ describe "gori run <reader> --format json — a not-found id" do
     {
       {"history.cr", "gori run show"}, {"issues.cr", "gori run issues show"},
       {"repeater.cr", "gori run repeater show"}, {"evidence.cr", "gori run evidence show"},
-      {"notes.cr", "gori run notes"}, {"fuzz_saved.cr", "gori run fuzz show"},
+      {"fuzz_saved.cr", "gori run fuzz show"},
       {"retest.cr", "gori run retest show"}, {"session.cr", "gori run session show"},
       {"wordlist.cr", "gori run wordlist show"}, {"intercept.cr", "gori run intercept get"},
       {"compare.cr", "gori run compare"},
@@ -1395,6 +1395,8 @@ describe "gori run <reader> --format json — a not-found id" do
     }.each do |file, prefix|
       File.read(File.join(root, file)).should contain("not_found_abort(\"#{prefix}\""), failure_message: file
     end
+    # `notes <n>` resolves through the resolver `update`/`delete` share, which ends in `not_found_abort(cmd`.
+    File.read(File.join(root, "notes.cr")).should contain(%(resolve_note_index(store, doc, index, note_id, "gori run notes", format, !position.nil?)))
   end
 
   # `project scope delete 999 --json` was "unknown option: --json" while its siblings took it.
@@ -1517,5 +1519,58 @@ describe "gori run — a parent's --help names its subcommands" do
       banner = src[at, 900].split(/\n\s*(?:project_options|p\.on|format_flag)/).first
       banner.should contain("Or run with a subcommand: #{verbs}"), failure_message: file
     end
+  end
+end
+
+# A `gori run` command that can add a sweep's worth of flows (an import) says a project over
+# `retention.max_flows` once on stderr, in `gori run capture`'s words (`App.over_retention_line`);
+# a read, or a writable open that adds no flow (`notes create`), says nothing.
+module Gori::CLI::Run
+  def self.reset_over_retention_for_spec : Nil
+    @@said_over_retention = false
+  end
+end
+
+describe "gori run — a project opened over its retention cap" do
+  it "is said once per process by an import, and never by a read or a non-inserting write" do
+    db = File.tempname("gori-over-cap", ".db")
+    urls = File.tempname("gori-over-cap", ".txt")
+    seed = Gori::Store.open(db, retention_flows: Gori::Store::RETENTION_UNLIMITED)
+    5.times do |i|
+      seed.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: i.to_i64 + 1, scheme: "http", host: "cap.test", port: 80, method: "GET",
+        target: "/#{i}", http_version: "HTTP/1.1", head: "GET /#{i} HTTP/1.1\r\nHost: cap.test\r\n\r\n".to_slice,
+        source: Gori::FlowSource::Kind::Proxy))
+    end
+    seed.close
+    prev_cap = Gori::Settings.retention_max_flows
+    prev_io = Gori::CLI::Run.over_retention_io
+    io = IO::Memory.new
+    begin
+      Gori::Settings.retention_max_flows = 2
+      Gori::CLI::Run.over_retention_io = io
+      Gori::CLI::Run.reset_over_retention_for_spec
+      stdout_silenced { Gori::CLI::Run.dispatch(["history", "--db", db]) }
+      stdout_silenced { Gori::CLI::Run.dispatch(["notes", "create", "--text", "x", "--json", "--db", db]) }
+      io.to_s.should be_empty
+      File.write(urls, "http://cap.test/a\n")
+      2.times { stdout_silenced { Gori::CLI::Run.dispatch(["import", "--urls", urls, "--db", db]) } }
+      io.to_s.should eq("gori run: #{Gori::App.over_retention_line(3_i64, 2, capture: false)}\n")
+    ensure
+      Gori::Settings.retention_max_flows = prev_cap
+      Gori::CLI::Run.over_retention_io = prev_io
+      Gori::CLI::Run.reset_over_retention_for_spec
+      delete_db_files(db)
+      File.delete?(urls)
+    end
+  end
+
+  it "keeps capture's wording, and drops its stop for a command that is not one" do
+    Gori::App.over_retention_line(3_i64, 2).should eq(
+      "3 old flows will be deleted as capture runs: retention keeps the newest 2. " \
+      "To keep them, stop and raise retention.max_flows in settings.json.")
+    Gori::App.over_retention_line(1_i64, 2, capture: false).should eq(
+      "1 old flow will be deleted as flows are added: retention keeps the newest 2. " \
+      "To keep them, raise retention.max_flows in settings.json.")
   end
 end

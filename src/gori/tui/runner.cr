@@ -311,6 +311,10 @@ module Gori::Tui
       # Whether an untrusted-CA handshake has already raised its one toast (see
       # drain_untrusted_handshakes).
       @untrusted_toasted = false
+      # Upstream proxies already said to be unreachable (see drain_unreachable_upstreams), seeded
+      # like the passthrough mark: a proxy that died under the previous project is not news here.
+      @upstream_said = {} of String => Time::Instant
+      Proxy::Upstream.unreachable_proxies.each_key { |label| @upstream_said[label] = Time.instant }
       # A hold was announced and the Intercept tab has not been opened since (see
       # announce_first_hold).
       @hold_announced = false
@@ -843,6 +847,8 @@ module Gori::Tui
             dirty = true if drain_ws_inject_outcomes
             # …and a client that refused gori's certificate. Same placement, same reason.
             dirty = true if drain_untrusted_handshakes
+            # …and an upstream proxy that stopped answering. Same placement, same reason.
+            dirty = true if drain_unreachable_upstreams
             # …and what intercept just started holding, while another tab is up. After the
             # notices above: it is said once, so none of them may take the toast from it.
             dirty = true if announce_first_hold
@@ -1719,6 +1725,12 @@ module Gori::Tui
         dispatch_overlay_key(ov, ev)
         return
       end
+      # A function key is no chord (`Chord::NAMED_KEYS` has none) and every pane dropped it
+      # silently, editors included. Asked ahead of the panes, after the modals, which keep theirs.
+      if ev.key.function_key?
+        status(Hotkeys.expand(@session.registry, Runner.function_key_hint(ev.key.to_s)))
+        return
+      end
       # The second press of vim's `dd` / `yy` (see `editor_delete_line`). Ahead of the digit
       # family and every pane's own keys: between the two presses the operator owns the next
       # key, as vim's operator-pending state does, so a `d2` cannot jump to tab 2.
@@ -1978,6 +1990,14 @@ module Gori::Tui
       if @focus == :menu && (below = Runner.body_scope_verb(chord, @tabs[@active_tab]?.try(&.command_scope) || Verb::Scope::Body, @keymap, @session.registry))
         lands = @tabs[@active_tab]?.try(&.command_section) || :common
         status(Runner.enter_first_hint(chord, below.title, strip: subtabs_shown?, pane: Runner.gated_pane(below, lands)))
+        return
+      end
+      # `/` on the bar of a tab with no filter below: the operator meant to search, and the
+      # letters typed next reach Global (`s` lens, `c` stops capture). Say there is nothing to
+      # filter, before those letters land. Help is not asked: its `/` search is the page's own
+      # key handler, not a filter verb this line could see.
+      if @focus == :menu && !@menu_more && chord == Keybind::FILTER_CHORD && @active_tab != :help
+        status(Hotkeys.expand(@session.registry, Runner.no_filter_hint(Runner.filing_origin_label(@active_tab))))
         return
       end
       if hint = Runner.unbound_key_hint(chord, read_mode: editor_read_mode?)
@@ -3142,6 +3162,17 @@ module Gori::Tui
       key = "‹#{Hotkeys.display_label(chord)}›"
       return "#{key} — READ mode: #{EditorPane::INSERT_KEYS} to type · space menu" if read_mode
       "#{key} — nothing bound here · space menu · {help.hotkeys} help"
+    end
+
+    # Any F-key: gori binds none (F1 is not Help, by decision), and silence read as a dead key.
+    def self.function_key_hint(key : String) : String
+      "‹#{key}› — gori binds no function keys · {help.hotkeys} help · {app.palette} palette"
+    end
+
+    # The tab-bar `/` on a tab whose pane below has no filter. `here`: a sibling sub-tab may
+    # have one (Project's ACTIVITY does), so the line speaks for the sub-tab on screen.
+    def self.no_filter_hint(tab : String) : String
+      "‹/› — #{tab} has no filter here · {app.palette} searches actions"
     end
 
     # …and the same line for a key that IS bound — one level down. On the tab bar `/` answered
@@ -4672,6 +4703,52 @@ module Gori::Tui
         status("HTTPS failed: trust gori's CA from http://gori.proxy/ (#{hp})")
       end
       true
+    end
+
+    # Say once that the configured upstream proxy does not answer: every flow through it is an
+    # `ERR` row whose reason is only in its detail. `Upstream.unreachable_proxies` is written on
+    # the dial path and read here, the passthrough shape. `Runner.upstream_news` decides.
+    private def drain_unreachable_upstreams : Bool
+      down = Proxy::Upstream.unreachable_proxies
+      return false if down.empty? && @upstream_said.empty?
+      fresh = Runner.upstream_news(down, @upstream_said, Time.instant)
+      return false if fresh.empty?
+      fresh.each { |_, gone| @notifications.push(:error, Runner.upstream_down_note(gone.via), source: "app") }
+      return true unless Settings.notify_toast?
+      # `status(_, :error)` without its own notification: the note above is the long form.
+      toast = Runner.upstream_down_toast(fresh.first_key)
+      @toast_kinded = {toast, :error}
+      status(toast)
+      true
+    end
+
+    # How long a proxy said to be unreachable stays unsaid again. One that alternates answering
+    # and failing is named at most this often, and one that stays down is named once.
+    UPSTREAM_RESAY_AFTER = 5.minutes
+
+    # The proxies in `down` that are news at `now`; records them in `said` (label => when said).
+    # A said label is forgotten only once it is no longer down AND was said at least
+    # UPSTREAM_RESAY_AFTER ago. A said entry nothing has failed on for that long is dropped from
+    # `down`: it may be a proxy no longer configured, and an entry left there forever keeps the
+    # dial path's `empty?` short-circuit off. Should it fail again, that is news after the quiet.
+    def self.upstream_news(down : Hash(String, Proxy::Upstream::Unreachable), said : Hash(String, Time::Instant),
+                           now : Time::Instant) : Hash(String, Proxy::Upstream::Unreachable)
+      said.reject! { |label, at| !down.has_key?(label) && now - at >= UPSTREAM_RESAY_AFTER }
+      down.reject! { |label, gone| said.has_key?(label) && now - gone.failed_at >= UPSTREAM_RESAY_AFTER }
+      fresh = down.reject { |label, _| said.has_key?(label) }
+      fresh.each_key { |label| said[label] = now }
+      fresh
+    end
+
+    # Verdict first: a clip at the status row's 59 columns cuts the host, never "unreachable".
+    # The setting that chose the proxy is in the note.
+    def self.upstream_down_toast(label : String) : String
+      "unreachable: #{label}"
+    end
+
+    # `via`: `Upstream.via`'s line, `upstream HTTP proxy h:p (network.upstream_proxy)`.
+    def self.upstream_down_note(via : String) : String
+      "#{via} is unreachable — flows routed through it fail before reaching the origin"
     end
 
     GOTO_TARGET_UNAVAILABLE = "Result is no longer available"

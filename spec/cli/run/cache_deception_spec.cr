@@ -9,6 +9,10 @@ private alias AZ = Gori::Authorize
 # The output shapes are `private def self.`, so a spec reaches them through a module reopen —
 # the pattern the other CLI specs use.
 module Gori::CLI::Run
+  def self.cache_deception_missing_flow_for_spec(store : Store, ids : Array(Int64)) : Int64?
+    cache_deception_missing_flow(store, ids)
+  end
+
   def self.cache_deception_text_for_spec(report : CacheDeception::Report) : String
     cache_deception_report_text(report)
   end
@@ -20,6 +24,15 @@ module Gori::CLI::Run
   def self.check_cache_deception_flows_for_spec(store : Store, engine : Authorize::Engine,
                                                 outbound : Outbound, flow_ids : Array(Int64))
     check_cache_deception_flows(store, engine, outbound, flow_ids, false, :json)
+  end
+end
+
+describe "gori run cache-deception — missing selection" do
+  it "finds a missing id before replay or JSON array output" do
+    with_store do |store|
+      present = cli_cd_flow(store, "ok.test", "GET /account HTTP/1.1\r\nHost: ok.test\r\n\r\n")
+      Gori::CLI::Run.cache_deception_missing_flow_for_spec(store, [present, 999_i64]).should eq(999_i64)
+    end
   end
 end
 

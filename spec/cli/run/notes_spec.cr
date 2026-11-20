@@ -251,11 +251,100 @@ describe "gori run notes create --format json" do
 end
 
 describe "gori run notes update/delete --id" do
-  it "registers --id on both parsers, beside the positional <n>" do
+  it "registers --id on the show, update and delete parsers, beside the positional <n>" do
     src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "notes.cr"))
-    src.scan(/p\.on\("--id=ID"/).size.should eq(2)
+    src.scan(/p\.on\("--id=ID"/).size.should eq(3)
     notes_delete_body.should contain("resolve_note_index(store, persisted, n_arg, note_id")
     # `update 3 --id 7` must not read the stray "3" as note 7's new text.
-    src.should contain(%(pass <n> or --id ID, not both (with --id, give the text as --text or on STDIN)" if note_id && !positional.empty?))
+    src.should contain(%(pass <n> or --id ID, not both (with --id, give the text as --text or on STDIN)"\) if note_id && !positional.empty?))
+    # …nor `update 2 --position 3 hello` the stray "2" as part of note 3's new text.
+    src.should contain(%(pass <n> or --position N, not both (with --position, give text that starts with a number as --text)"\) if position && positional.first?.try(&.to_i?)))
+  end
+end
+
+# A bare `<n>` is a list position while `--json` prints each note's `id`, so a script passing an
+# id deleted whichever note sat at that position (ux-cli finding 1). Under `--json`, `<n>` that is
+# ALSO another note's id is refused, naming both; `--position N` and `--id N` say which is meant.
+# Without `--json` a bare `<n>` stays the position a person reads off the listing.
+private def with_shifted_notes(&)
+  db = File.tempname("gori-notes-addr", ".db")
+  store = Gori::Store.open(db)
+  # ids 1..4, then note id 1 deleted: positions 1-3 hold ids 2, 3, 4.
+  ids = %w[alpha beta gamma delta].map { |t| Gori::Notes.create(store, t).not_nil! }
+  Gori::Notes.delete(store, ids.first)
+  store.close
+  begin
+    yield db
+  ensure
+    delete_db_files(db)
+  end
+end
+
+private def note_texts(db : String) : Array(String)
+  store = Gori::Store.open(db)
+  Gori::Notes.load(store).notes.map(&.text)
+ensure
+  store.try &.close
+end
+
+describe "gori run notes — a bare <n> that is also another note's id" do
+  doc = Gori::Notes::Doc.new(0, [2_i64, 3_i64, 4_i64].map { |i| Gori::Notes::NoteEntry.new(i, "n#{i}") }, 5_i64)
+
+  it "refuses it under --json, naming both readings and the two explicit spellings" do
+    Gori::CLI::Run.note_position_error(doc, 2, json: true).should eq(
+      "2 is ambiguous: note #2 is id 3, and id 2 is note #1 — pass --position 2 or --id 2")
+    Gori::CLI::Run.note_position_error(doc, 2).should be_nil # a person typing a position
+    Gori::CLI::Run.note_position_error(doc, 4).should eq(
+      "no note #4 (this project has 3 notes); id 4 is note #3 — pass --id 4")
+  end
+
+  it "reads it as a position when that agrees or is no note's id, and under --position" do
+    agreeing = Gori::Notes::Doc.new(0, [1_i64, 2_i64].map { |i| Gori::Notes::NoteEntry.new(i, "n#{i}") }, 3_i64)
+    Gori::CLI::Run.note_position_error(agreeing, 2).should be_nil
+    Gori::CLI::Run.note_position_error(doc, 1).should be_nil # id 1 is gone
+    Gori::CLI::Run.note_position_error(doc, 2, explicit: true, json: true).should be_nil
+    Gori::CLI::Run.note_position_error(doc, 5).should eq("no note #5 (this project has 3 notes)")
+  end
+
+  it "routes show, update, append and delete through it" do
+    src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "notes.cr"))
+    src.scan(/p\.on\("--position=N"/).size.should eq(3)
+    src.should contain(%(resolve_note_index(store, doc, index, note_id, "gori run notes", format, !position.nil?)))
+    src.should contain("if err = note_position_error(doc, n, explicit, format == :json)")
+    notes_delete_body.should contain(%(resolve_note_index(store, persisted, n_arg, note_id, "gori run notes delete", format, !position.nil?)))
+  end
+
+  it "keeps a bare <n> a position for a person after a delete shifts the ids" do
+    db = File.tempname("gori-notes-human", ".db")
+    store = Gori::Store.open(db)
+    %w[a b c d e].each { |t| Gori::Notes.create(store, t) }
+    store.close
+    begin
+      %w[1 2 3].each { |n| stdout_captured { Gori::CLI::Run.dispatch(["notes", "delete", n, "--yes", "--db", db]) } }
+      note_texts(db).should eq(%w[b d])
+      stdout_captured { Gori::CLI::Run.dispatch(["notes", "update", "2", "D", "--db", db]) }
+      note_texts(db).should eq(%w[b D])
+    ensure
+      delete_db_files(db)
+    end
+  end
+
+  it "shows by <n>, --position and --id, end to end" do
+    with_shifted_notes do |db|
+      stdout_captured { Gori::CLI::Run.dispatch(%w[notes 2 --db] << db) }.should eq("gamma\n")
+      JSON.parse(stdout_captured { Gori::CLI::Run.dispatch(%w[notes --id 2 --json --db] << db) })["text"].should eq("beta")
+      JSON.parse(stdout_captured { Gori::CLI::Run.dispatch(%w[notes --position 2 --json --db] << db) })["text"].should eq("gamma")
+    end
+  end
+
+  it "deletes and updates by --position and --id, end to end" do
+    with_shifted_notes do |db|
+      printed = stdout_captured { Gori::CLI::Run.dispatch(%w[notes delete --position 2 --yes --json --db] << db) }
+      JSON.parse(printed)["id"].as_i64.should eq(3_i64)
+      note_texts(db).should eq(%w[beta delta])
+      stdout_captured { Gori::CLI::Run.dispatch(%w[notes update --id 4 --text DELTA --db] << db) }
+      stdout_captured { Gori::CLI::Run.dispatch(%w[notes append --position 1 more --db] << db) }
+      note_texts(db).should eq(["beta\nmore", "DELTA"])
+    end
   end
 end
