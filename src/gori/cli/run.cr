@@ -845,16 +845,16 @@ module Gori
         if stdin && path == "-"
           return read_stdin_text(STDIN, what, noun, stdin_pipe_hint(what, flag: flag || "-"))
         end
-        abort "#{what}: not a readable file: #{path}" if File.directory?(path)
+        usage_abort("#{what}: not a readable file: #{path}") if File.directory?(path)
         File.open(path) do |f|
           if err = stdin_terminal_error(f, what: what, noun: noun,
                hint: "#{path} names this terminal. Pass the path of a real file, or pipe the #{noun} in.")
-            abort err
+            usage_abort(err)
           end
           f.gets_to_end
         end
       rescue ex : IO::Error
-        abort "#{what}: cannot read '#{path}': #{ex.message}"
+        usage_abort("#{what}: cannot read '#{path}': #{ex.message}")
       end
 
       # The bytes an operator piped in for an EXPLICIT `--…-stdin` flag, verbatim. Byte-for-byte

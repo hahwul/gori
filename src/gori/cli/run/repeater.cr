@@ -1856,15 +1856,15 @@ module Gori
         end
         parser.parse(args)
         refresh_verify_upstream(!insecure)
-        abort "gori run repeater send: missing <repeater-id>\n#{parser}" if positional.empty?
-        abort "gori run repeater send: too many arguments (expected one <repeater-id>, got: #{positional.join(" ")})" if positional.size > 1
-        id = positional[0].to_i64? || abort "gori run repeater send: invalid repeater id '#{positional[0]}'"
+        usage_abort("gori run repeater send: missing <repeater-id>\n#{parser}") if positional.empty?
+        usage_abort("gori run repeater send: too many arguments (expected one <repeater-id>, got: #{positional.join(" ")})") if positional.size > 1
+        id = positional[0].to_i64? || usage_abort("gori run repeater send: invalid repeater id '#{positional[0]}'")
         cap = body_cap(headers_only, max_body, "gori run repeater send")
         if err = output_diff_error(cap, do_diff)
-          abort "gori run repeater send: #{err}"
+          usage_abort("gori run repeater send: #{err}")
         end
         if err = path_override_error(path_override)
-          abort "gori run repeater send: #{err}"
+          usage_abort("gori run repeater send: #{err}")
         end
         # The flags that make THIS send differ from the stored session, so its answer is not
         # written back over the row's (see the persist below).
@@ -2224,9 +2224,9 @@ module Gori
         end
         parser.parse(args)
         refresh_verify_upstream(!insecure)
-        abort "gori run repeater ws: missing <repeater-id>\n#{parser}" if positional.empty?
-        abort "gori run repeater ws: too many arguments (expected one <repeater-id>, got: #{positional.join(" ")})" if positional.size > 1
-        id = positional[0].to_i64? || abort "gori run repeater ws: invalid repeater id '#{positional[0]}'"
+        usage_abort("gori run repeater ws: missing <repeater-id>\n#{parser}") if positional.empty?
+        usage_abort("gori run repeater ws: too many arguments (expected one <repeater-id>, got: #{positional.join(" ")})") if positional.size > 1
+        id = positional[0].to_i64? || usage_abort("gori run repeater ws: invalid repeater id '#{positional[0]}'")
         auto_replies << Repeater::WsSession::ENGINE_IO_HEARTBEAT if engine_io
 
         project = resolve_read_project(proj.name, proj.db)

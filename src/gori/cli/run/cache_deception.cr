@@ -44,10 +44,13 @@ module Gori
         end
         refresh_verify_upstream(!insecure)
         positional.each { |s| flow_ids << parse_flow_id(s, "gori run cache-deception") }
-        abort "gori run cache-deception: name at least one flow id (or --flow ID)" if flow_ids.empty?
+        usage_abort("gori run cache-deception: name at least one flow id (or --flow ID)") if flow_ids.empty?
 
         project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
+        if missing = cache_deception_missing_flow(store, flow_ids)
+          not_found_abort("gori run cache-deception", "no flow with id #{missing}", format, store)
+        end
         outbound = project_outbound(project, allow_unscoped)
         overrides = Gori::HostOverrides.load(store)
         engine = Authorize::Engine.live(outbound, !insecure, timeout, overrides: overrides)
@@ -74,6 +77,10 @@ module Gori
         exit_if_no_cache_deception_evidence(reports, sent, checked, failed)
       end
 
+      private def self.cache_deception_missing_flow(store : Store, ids : Array(Int64)) : Int64?
+        ids.find { |id| !store.get_flow(id) }
+      end
+
       # The per-flow loop, returning `{reports, checked, sent, failed}`. One flow that cannot be
       # replayed is not the end of the selection — the same rule as `gori run authorize`'s
       # `on_error`: a raise before any send (a backend that cannot be built, or a head
@@ -91,10 +98,7 @@ module Gori
         flow_ids.each do |id|
           break if stop.try(&.call)
           detail = store.get_flow(id)
-          unless detail
-            STDERR.puts "gori run cache-deception: no flow with id #{id}"
-            next
-          end
+          next unless detail # the command checked all ids before the first send
           next if report_skip_reason?(id, detail, unsafe_methods)
           next if report_outbound_skip?(id, detail.row, outbound)
           report = begin

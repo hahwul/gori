@@ -6081,3 +6081,10 @@ sentence `gori run capture` prints, with "as flows are added" for "as capture ru
 (one flow, even `--record-history`, even in a loop of processes), `notes create`, or a read that opens writable
 (`history --view`, a `body:` query) says nothing: it would warn of a deletion that never comes in that process.
 A read-only open passes no cap and says nothing.
+### 2026-11-20: cache-deception refuses missing flow ids before replay
+
+Refines 2026-11-14 ("`NOT_FOUND` under `--json`"). A missing id is a bad selection, not an empty
+cache result. `gori run cache-deception` validates every named flow before the first send; one
+missing id refuses the whole run with `NOT_FOUND` in JSON mode. A present flow that cannot be
+replayed still remains a per-flow skip or failure, so one bad backend does not hide later results.
+

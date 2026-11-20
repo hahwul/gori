@@ -374,7 +374,7 @@ module Gori
           p.on("-nN", "--limit=N", "Max rows, newest first (oldest first with --since) (default 50)") { |v| limit = parse_count(v, "--limit"); limit_given = true }
           p.on("--count", "Print how many flows match (the same filters as the listing) instead of listing them") { count_only = true }
           p.on("--sort=RANK", "List the top -n matches by slowest (duration) or largest (request + response bytes) instead of newest first") do |v|
-            rank = Store::Rank.parse?(v) || abort("gori run history: --sort is slowest or largest, got #{v.inspect}")
+            rank = Store::Rank.parse?(v) || usage_abort("gori run history: --sort is slowest or largest, got #{v.inspect}")
           end
           p.on("--since=ID", "Tail newer: only flows with id > ID, OLDEST first (0 = from the start). Pass the last row's id back for the next page") { |v| since_id = history_cursor(v, "--since") }
           p.on("--before-id=ID", "Page older: only flows with id < ID, newest first. Pass the last row's id back for the next page") { |v| before_id = history_cursor(v, "--before-id") }
@@ -390,7 +390,7 @@ module Gori
           redact_options(p, redaction)
         end
         if err = history_verb_error(positional)
-          abort err
+          usage_abort(err)
         end
         # Accept a positional QL too ("gori run history status:404" / "-status:404"),
         # mirroring the TUI's `/` bar — otherwise a positional query was silently dropped
@@ -407,23 +407,23 @@ module Gori
         # and this command aborts on an unknown query field and on a malformed `--column` spec
         # one line down rather than picking one reading of a contradictory command line.
         if !column_specs.empty? && no_columns
-          abort "gori run history: --column and --no-columns contradict each other — pass one"
+          usage_abort("gori run history: --column and --no-columns contradict each other — pass one")
         end
         # `--count` prints a number (#1648); the flags that shape ROWS contradict it. Before the
         # `--redact` refusal below, which would otherwise send `--count --redact` to `--format har`.
-        abort "gori run history: --sort ranks a listing, and a HAR log is written oldest first — drop one" if rank && format == :har
+        usage_abort("gori run history: --sort ranks a listing, and a HAR log is written oldest first — drop one") if rank && format == :har
         if err = history_cursor_clash(since_id, before_id, rank, count_only)
           Run.usage_abort(err)
         end
         if count_only
-          abort "gori run history: --sort ranks rows and --count prints none — pass one" if rank
+          usage_abort("gori run history: --sort ranks rows and --count prints none — pass one") if rank
           if err = history_count_clash(column_specs, no_columns, format, !redaction.mode.nil?, include_sensitive)
-            abort err
+            usage_abort(err)
           end
           STDERR.puts "gori run history: --limit does not apply to --count" if limit_given
         end
         ad_hoc = DisplayColumns.parse_specs(column_specs)
-        abort "gori run history: #{ad_hoc}" if ad_hoc.is_a?(String)
+        usage_abort("gori run history: #{ad_hoc}") if ad_hoc.is_a?(String)
         # A flag that does nothing says so, keyed off the FLAG and not off derived state — the
         # same discipline as the `--column is not carried by --format har` note below. Below the
         # `--column` abort, though, and not beside the refusals above it: the note describes a

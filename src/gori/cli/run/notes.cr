@@ -55,10 +55,10 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
 
-        abort "gori run notes: too many arguments (expected at most one note number)" if positional.size > 1
-        abort "gori run notes: pass one of <n>, --position N or --id ID" if [!positional.empty?, note_id, position].count(&.itself) > 1
+        usage_abort("gori run notes: too many arguments (expected at most one note number)") if positional.size > 1
+        usage_abort("gori run notes: pass one of <n>, --position N or --id ID") if [!positional.empty?, note_id, position].count(&.itself) > 1
         index = position || parse_note_index(positional.first?)
-        abort "gori run notes: <n> and --all are mutually exclusive" if (index || note_id) && all
+        usage_abort("gori run notes: <n> and --all are mutually exclusive") if (index || note_id) && all
 
         with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           doc = Notes.load(store)
@@ -143,12 +143,12 @@ module Gori
         abort "gori run notes update: pass --position N or --id ID, not both" if note_id && position
         # With --id there is no <n>, so a word left over would be read as the text: `update 3
         # --id 7` would overwrite note 7 with "3". Refused, as `notes delete` refuses the pair.
-        abort "gori run notes update: pass <n> or --id ID, not both (with --id, give the text as --text or on STDIN)" if note_id && !positional.empty?
+        usage_abort("gori run notes update: pass <n> or --id ID, not both (with --id, give the text as --text or on STDIN)") if note_id && !positional.empty?
         # `--position N` takes <n>'s place, so a leading number is a second <n>, not text:
         # `update 2 --position 3 hello` wrote "2 hello" into note 3.
-        abort "gori run notes update: pass <n> or --position N, not both (with --position, give text that starts with a number as --text)" if position && positional.first?.try(&.to_i?)
+        usage_abort("gori run notes update: pass <n> or --position N, not both (with --position, give text that starts with a number as --text)") if position && positional.first?.try(&.to_i?)
         # `--position N` takes the place of <n>, so the words after it are all text.
-        n = note_id ? nil : (position || parse_note_index(positional.first?) || abort "gori run notes update: missing <n> (or --id ID)")
+        n = note_id ? nil : (position || parse_note_index(positional.first?) || usage_abort("gori run notes update: missing <n> (or --id ID)"))
         body = note_update_text(text, n && !position ? positional[1..] : positional)
         store = open_store(resolve_read_project(proj.name, proj.db))
         apply_note_update(store, n, note_id, body, append, format, explicit: !position.nil?)
@@ -158,10 +158,10 @@ module Gori
       # replacement would blank the note and an empty append would do nothing — neither is what
       # a script that lost its input meant, so both are refused.
       private def self.note_update_text(text : String?, words : Array(String)) : String
-        abort "gori run notes update: pass the text as --text or as words after <n>, not both" if text && !words.empty?
+        usage_abort("gori run notes update: pass the text as --text or as words after <n>, not both") if text && !words.empty?
         body = text || (words.empty? ? nil : words.join(' '))
         body ||= read_stdin_fallback(STDIN, "gori run notes", "note text") unless STDIN.tty?
-        abort "gori run notes update: no note text (use --text, words after <n>, or pipe via STDIN)" if body.nil? || body.empty?
+        usage_abort("gori run notes update: no note text (use --text, words after <n>, or pipe via STDIN)") if body.nil? || body.empty?
         body
       end
 
@@ -320,9 +320,9 @@ module Gori
       # The position `notes delete` was given (`<n>` or `--position N`), nil under `--id`, or
       # abort when the three are combined or none is given.
       private def self.note_delete_position(positional : Array(String), note_id : Int64?, position : Int32?) : Int32?
-        abort "gori run notes delete: pass one of <n>, --position N or --id ID" if (note_id || position) && !positional.empty? || note_id && position
-        abort "gori run notes delete: missing <n> (or --id ID)" if positional.empty? && !note_id && !position
-        abort "gori run notes delete: too many arguments (expected one note number)" if positional.size > 1
+        usage_abort("gori run notes delete: pass one of <n>, --position N or --id ID") if (note_id || position) && !positional.empty? || note_id && position
+        usage_abort("gori run notes delete: missing <n> (or --id ID)") if positional.empty? && !note_id && !position
+        usage_abort("gori run notes delete: too many arguments (expected one note number)") if positional.size > 1
         position || parse_note_index(positional.first?)
       end
 
@@ -379,7 +379,7 @@ module Gori
       private def self.parse_note_index(arg : String?) : Int32?
         return nil unless arg
         n = arg.to_i?
-        abort "gori run notes: invalid note number '#{arg}' (expected a positive integer)" unless n && n > 0
+        usage_abort("gori run notes: invalid note number '#{arg}' (expected a positive integer)") unless n && n > 0
         n
       end
 
