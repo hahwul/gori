@@ -1383,7 +1383,7 @@ describe "gori run <reader> --format json — a not-found id" do
     {
       {"history.cr", "gori run show"}, {"issues.cr", "gori run issues show"},
       {"repeater.cr", "gori run repeater show"}, {"evidence.cr", "gori run evidence show"},
-      {"notes.cr", "gori run notes"}, {"fuzz_saved.cr", "gori run fuzz show"},
+      {"fuzz_saved.cr", "gori run fuzz show"},
       {"retest.cr", "gori run retest show"}, {"session.cr", "gori run session show"},
       {"wordlist.cr", "gori run wordlist show"}, {"intercept.cr", "gori run intercept get"},
       {"compare.cr", "gori run compare"},
@@ -1395,6 +1395,8 @@ describe "gori run <reader> --format json — a not-found id" do
     }.each do |file, prefix|
       File.read(File.join(root, file)).should contain("not_found_abort(\"#{prefix}\""), failure_message: file
     end
+    # `notes <n>` resolves through the resolver `update`/`delete` share, which ends in `not_found_abort(cmd`.
+    File.read(File.join(root, "notes.cr")).should contain(%(resolve_note_index(store, doc, index, note_id, "gori run notes", format, !position.nil?)))
   end
 
   # `project scope delete 999 --json` was "unknown option: --json" while its siblings took it.

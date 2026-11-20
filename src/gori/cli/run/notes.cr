@@ -1,13 +1,13 @@
 # `gori run notes` — read the project's notes (list, show one, or --all),
 # or write them (create, delete). Notes are addressed by their 1-based list
-# position <n> (the same number `notes <n>` and the listing show); `update` and `delete`
+# position <n> (the same number `notes <n>` and the listing show); show, `update` and `delete`
 # also take `--id ID`, the stable id the listing prints as "(id N)", and `--position N`; under
 # `--json` a bare <n> that is also another note's id is refused as ambiguous (`resolve_note_index`).
 module Gori
   module CLI
     module Run
       @[Subcommand("notes", help: [
-        {"notes [<n>]", "Read or write the project's notes (list, <n>, --all, create)"},
+        {"notes [<n>|--id ID]", "Read or write the project's notes (list, <n>, --all, create)"},
         {"notes update <n>|--id ID", "Replace (or --append to) the text of the note at list position <n>"},
         {"notes delete <n>|--id ID", "Delete the note at 1-based list position <n> (needs --yes)"},
       ])]
@@ -36,35 +36,41 @@ module Gori
         proj = ProjectFlags.new
         format = :text
         all = false
+        note_id : Int64? = nil
+        position : Int32? = nil
 
         positional = parse_args(args, "gori run notes") do |p|
-          p.banner = "Usage: gori run notes [<n>] [options]\n\n" \
+          p.banner = "Usage: gori run notes [<n>|--id ID|--position N] [options]\n\n" \
                      "List the project's notes; with <n> (1-based) print that note in full, " \
-                     "or --all to print them all.\n\n" \
+                     "or --all to print them all.\n" \
+                     "Under --json, a bare <n> that is also the id of a note at another position is refused: pass --position N or --id N.\n\n" \
                      "Or run with a subcommand:\n" \
                      "  gori run notes create [--text TEXT] [options]\n" \
                      "  gori run notes update <n>|--id ID [--text TEXT] [options]   (append <n>: add to it)\n" \
                      "  gori run notes delete <n>|--id ID --yes [options]"
           project_options(p, proj, "read")
           p.on("--all", "Print every note in full instead of the one-line list") { all = true }
+          p.on("--id=ID", "Print the note with this stable id (the listing's \"id N\") instead of <n>") { |v| note_id = parse_id(v, "gori run notes", "--id") }
+          p.on("--position=N", "Print the note at this 1-based list position, even where N is also another note's id") { |v| position = parse_note_index(v) }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
 
         abort "gori run notes: too many arguments (expected at most one note number)" if positional.size > 1
-        index = parse_note_index(positional.first?)
-        abort "gori run notes: <n> and --all are mutually exclusive" if index && all
+        abort "gori run notes: pass one of <n>, --position N or --id ID" if [!positional.empty?, note_id, position].count(&.itself) > 1
+        index = position || parse_note_index(positional.first?)
+        abort "gori run notes: <n> and --all are mutually exclusive" if (index || note_id) && all
 
-        doc = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
-          Notes.load(store)
-        end
-
-        if n = index
-          not_found_abort("gori run notes", "no note ##{n} (this project has #{Gori.plural(doc.size, "note")})", format) unless n <= doc.size
-          show_note(doc, n - 1, format)
-        elsif all
-          show_all_notes(doc, format)
-        else
-          list_notes(doc, format)
+        with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
+          doc = Notes.load(store)
+          if index || note_id
+            # The resolver `update` and `delete` use, so a script passing the id `--json` printed
+            # is refused rather than shown another note.
+            show_note(doc, resolve_note_index(store, doc, index, note_id, "gori run notes", format, !position.nil?), format)
+          elsif all
+            show_all_notes(doc, format)
+          else
+            list_notes(doc, format)
+          end
         end
       end
 

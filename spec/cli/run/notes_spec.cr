@@ -251,9 +251,9 @@ describe "gori run notes create --format json" do
 end
 
 describe "gori run notes update/delete --id" do
-  it "registers --id on both parsers, beside the positional <n>" do
+  it "registers --id on the show, update and delete parsers, beside the positional <n>" do
     src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "notes.cr"))
-    src.scan(/p\.on\("--id=ID"/).size.should eq(2)
+    src.scan(/p\.on\("--id=ID"/).size.should eq(3)
     notes_delete_body.should contain("resolve_note_index(store, persisted, n_arg, note_id")
     # `update 3 --id 7` must not read the stray "3" as note 7's new text.
     src.should contain(%(pass <n> or --id ID, not both (with --id, give the text as --text or on STDIN)" if note_id && !positional.empty?))
@@ -306,9 +306,10 @@ describe "gori run notes — a bare <n> that is also another note's id" do
     Gori::CLI::Run.note_position_error(doc, 5).should eq("no note #5 (this project has 3 notes)")
   end
 
-  it "routes update, append and delete through it" do
+  it "routes show, update, append and delete through it" do
     src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "notes.cr"))
-    src.scan(/p\.on\("--position=N"/).size.should eq(2)
+    src.scan(/p\.on\("--position=N"/).size.should eq(3)
+    src.should contain(%(resolve_note_index(store, doc, index, note_id, "gori run notes", format, !position.nil?)))
     src.should contain("if err = note_position_error(doc, n, explicit, format == :json)")
     notes_delete_body.should contain(%(resolve_note_index(store, persisted, n_arg, note_id, "gori run notes delete", format, !position.nil?)))
   end
@@ -325,6 +326,14 @@ describe "gori run notes — a bare <n> that is also another note's id" do
       note_texts(db).should eq(%w[b D])
     ensure
       delete_db_files(db)
+    end
+  end
+
+  it "shows by <n>, --position and --id, end to end" do
+    with_shifted_notes do |db|
+      stdout_captured { Gori::CLI::Run.dispatch(%w[notes 2 --db] << db) }.should eq("gamma\n")
+      JSON.parse(stdout_captured { Gori::CLI::Run.dispatch(%w[notes --id 2 --json --db] << db) })["text"].should eq("beta")
+      JSON.parse(stdout_captured { Gori::CLI::Run.dispatch(%w[notes --position 2 --json --db] << db) })["text"].should eq("gamma")
     end
   end
 

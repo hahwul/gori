@@ -6060,9 +6060,9 @@ and an 80-column pane keeps the destination width it had. Evidence keeps RFC 333
 `received:` line), and History's relative-time preference does not apply here.
 ### 2026-11-20: under `--json`, a bare `notes <n>` that is also another note's id is refused (#1944)
 
-`gori run notes update|append|delete <n>` reads `<n>` as a 1-based list position, the number the listing and
+`gori run notes <n>` and `notes update|append|delete <n>` read `<n>` as a 1-based list position, the number the listing and
 the TUI show, while `--json` prints each note's stable `id` first and every other `gori run` delete takes an id.
-A script passing that id changed whichever note sat at the position. Under `--json`, the script contract,
+A script passing that id read or changed whichever note sat at the position. Under `--json`, the script contract,
 `resolve_note_index` now refuses a bare `<n>` that is ALSO the id of a note at a different position, naming both
 readings and the two explicit spellings, `--position N` and `--id N`. Without `--json` a bare `<n>` stays the
 position, ambiguous or not: notes made from the CLI or MCP get sequential ids, so after one delete nearly every
