@@ -6006,6 +6006,7 @@ existing entries change only on reinstall. The install prints one line naming th
 `--tools='*'`, the spelling that installs every tool. `gori mcp` checks the default spec before it
 writes, like a typed one, so `--read-only`, `--pin-project` and `--no-project` with the default all
 start; every profile already keeps both project pickers, and read tools belong to no Preferences group.
+
 ### 2026-11-20: a project opened over its retention cap says so, and still opens (#1943)
 
 Opening a project holding more flows than `retention.max_flows` (a cap lowered later, a `0` capture, an archive

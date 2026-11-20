@@ -3,6 +3,7 @@
 ## Unreleased
 
 - MCP: `gori mcp --install-*` writes `--tools=@recon` when no `--tools` is given, so a fresh install loads about a fifth of the full catalogue's tool schemas; `--tools='*'` installs every tool, and a hand-run `gori mcp` and existing entries are unchanged (#1943).
+
 - History: "size" means request + response bytes everywhere. The TUI SIZE column shows the total that `size:` filters on and the CLI and MCP print, and `--sort=largest` (MCP `sort:"largest"`) ranks by it; `respsize:` still filters on the response alone (#1943).
 
 - Large projects: a `body:` search returns its first page in milliseconds instead of reading every match first, `path:` and `proto:grpc` scans run up to 40% faster, and the retention sweep removes the oldest flows a bounded chunk at a time, so capture and the TUI no longer freeze while a project over its `retention.max_flows` cap is trimmed (#1942).
