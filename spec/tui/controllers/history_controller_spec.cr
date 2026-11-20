@@ -4,6 +4,30 @@ require "../../support/history_search"
 include Gori::Tui
 
 describe Gori::Tui::HistoryController do
+  it "names the loaded subset in a capped mark toast and delete confirmation" do
+    TuiContract.with_session("history-mark-cap") do |session|
+      1001.times do |i|
+        session.store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: i.to_i64, scheme: "http", host: "bulk.test", port: 80,
+          method: "GET", target: "/#{i}", http_version: "HTTP/1.1",
+          head: "GET /#{i} HTTP/1.1\r\nHost: bulk.test\r\n\r\n".to_slice, body: nil,
+          source: Gori::FlowSource::Kind::Proxy))
+      end
+      session.store.flush
+      host = TuiContract::Host.new(session)
+      ctl = HistoryController.new(host)
+      "host:bulk.test".each_char { |c| ctl.view.query_insert(c) }
+      ctl.view.reload(session.store)
+      settle_history(ctl, session.store)
+      ctl.view.row_count.should eq(1000)
+
+      ctl.history_mark_all
+      host.statuses.last.should eq("1000 of 1,001 marked — only loaded rows")
+      ctl.history_delete
+      host.confirms.last[1].should contain("Delete 1000 of 1,001 marked — only loaded rows?")
+    end
+  end
+
   # The toast, the tab and the tour all say "intercept"; the footer said "hold-mode".
   it "names the intercept key `intercept` in the list footer" do
     TuiContract.with_session("history-footer") do |session|

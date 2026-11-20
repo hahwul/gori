@@ -6,6 +6,8 @@
 
 - History: "size" means request + response bytes everywhere. The TUI SIZE column shows the total that `size:` filters on and the CLI and MCP print, and `--sort=largest` (MCP `sort:"largest"`) ranks by it; `respsize:` still filters on the response alone (#1943).
 
+- TUI: when a filtered History list has more matches than its loaded rows, marking the page and confirming a delete show how many matches remain outside that page (#1943).
+
 - Large projects: a `body:` search returns its first page in milliseconds instead of reading every match first, `path:` and `proto:grpc` scans run up to 40% faster, and the retention sweep removes the oldest flows a bounded chunk at a time, so capture and the TUI no longer freeze while a project over its `retention.max_flows` cap is trimmed (#1942).
 
 - Opening a project that holds more flows than `retention.max_flows` now says how many the sweep will delete as capture runs and how to keep them, in the TUI and on `gori run capture`'s stderr (#1943).

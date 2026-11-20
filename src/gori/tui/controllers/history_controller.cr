@@ -1079,9 +1079,27 @@ module Gori::Tui
       n = @history.mark_count
       return "no marks — verbs act on the cursor row" if n == 0
       hidden = @history.marked_hidden_count
+      note = loaded_only_note(n, hidden)
+      return note if note
       msg = "#{Gori.plural(n, "flow")} marked"
       msg += " (#{hidden} not visible)" if hidden > 0
       msg
+    end
+
+    # A capped page is only a window. Count once on the keypress, using the same filter
+    # that loaded that window; SQLite's progress hook yields during a larger scan (P6).
+    private def loaded_only_note(n : Int32, hidden : Int32) : String?
+      return nil unless hidden == 0 && n == @history.row_count
+      filter = @history.capped_match_filter || return nil
+      total = @host.session.store.count_matching(filter, Store::QueryControl.new)
+      return nil if total <= n
+      grouped = total.to_s.reverse.gsub(/(\d{3})(?=\d)/, "\\1,").reverse
+      line = "#{n} of #{grouped} marked — only loaded rows"
+      # The 80-column status slot is 59 cells including its stamp tail.
+      line.size <= 52 ? line : "#{n}/#{grouped} marked — loaded only"
+    rescue ex
+      ::Log.warn { "history mark count failed: #{ex.message}" }
+      "#{n} marked — loaded page; total unavailable"
     end
 
     # Copy the selected flow's raw request (head + body, byte-exact P7) to the
@@ -1152,7 +1170,7 @@ module Gori::Tui
           hidden = @history.marked_hidden_count
           "#{ids.size} flows#{hidden > 0 ? " (#{hidden} not visible)" : ""}"
         end
-      label = ids.size == 1 ? "“#{name}”" : name
+      label = ids.size == 1 ? "“#{name}”" : (loaded_only_note(ids.size, @history.marked_hidden_count) || name)
       # return_to: :detail when launched from the open flow detail, so CANCEL restores the
       # detail (instead of dropping to the list) and the guard below still fires on accept
       # (the flow is gone, so :detail → :none).

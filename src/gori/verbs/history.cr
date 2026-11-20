@@ -136,12 +136,12 @@ module Gori
         Verb::Scope::Body, [Verb::Chord.new("t")],
         available: history_selected, intent: :mark, group: :triage) { |ctx| ctx.history_mark_toggle; nil }
 
-      # ⇧T, the list's Ctrl+A: mark everything the CURRENT filter shows, so `/ status:>=500`
-      # then ⇧T marks exactly the errors. The chord is Chord.new("t", shift: true), NOT
+      # ⇧T, the list's Ctrl+A: mark the LOADED rows the current filter shows. A capped
+      # result has more matches than the marks can cover. The chord is Chord.new("t", shift: true), NOT
       # Chord.new("T") — Keybind.from_event normalises a typed capital to shift+lowercase, so
       # a "T" chord would never fire; menu_key skips shift chords, hence the intent's lexicon letter.
       r.register Verb::Definition.new(
-        "history.mark-all", "Mark all (filtered)", "Mark every flow the current filter shows",
+        "history.mark-all", "Mark all (filtered)", "Mark the loaded flows matching the current filter",
         Verb::Scope::Body, [Verb::Chord.new("t", shift: true)],
         available: history_has_flows, intent: :mark_all, group: :triage) { |ctx| ctx.history_mark_all; nil }
 

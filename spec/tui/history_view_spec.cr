@@ -2972,6 +2972,21 @@ end
 # that the list reloads, re-sorts and re-filters under the user constantly, so most of these
 # assert that a mark survives exactly that.
 describe "Gori::Tui::HistoryView marks" do
+  it "exposes the applied filter behind a capped mark window" do
+    with_store do |store|
+      1001.times { |i| add_flow(store, "GET", "/#{i}", 200, nil, "bulk.test") }
+      view = HistoryView.new
+      "host:bulk.test".each_char { |c| view.query_insert(c) }
+      view.reload(store)
+      view.row_count.should eq(1000)
+      store.count_matching(view.capped_match_filter.not_nil!).should eq(1001)
+
+      view.set_query("host:none.test")
+      view.reload(store)
+      view.capped_match_filter.should be_nil
+    end
+  end
+
   it "starts with no marks, so verbs target the cursor row" do
     with_store do |store|
       id = add_flow(store, "GET", "/a", 200)

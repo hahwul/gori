@@ -1461,6 +1461,12 @@ module Gori::Tui
       @rows.size
     end
 
+    # The applied question, not text currently being typed into the filter bar.
+    def capped_match_filter : QL::Filter?
+      return nil unless @inc_capped
+      @inc_base.try(&.[0].filter)
+    end
+
     # The rail's window of list context around the open flow — see DrillIn. Maps the list row
     # onto the shared three-part shape; nothing of the list RENDERER is involved, which is
     # what keeps a 200-line column layout out of a three-row readout.
@@ -1599,7 +1605,7 @@ module Gori::Tui
       step_cursor(newest_first? ? 1 : -1)
     end
 
-    # ⇧T — mark every row in the CURRENT filtered list, unioned with what's already
+    # ⇧T — mark every LOADED row in the current filtered list, unioned with what's already
     # marked (so narrowing the filter twice accumulates rather than replaces).
     def mark_all : Nil
       @rows.each { |r| @mark_stamps[r.id] = r.created_at }
