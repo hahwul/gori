@@ -22,6 +22,30 @@ private def envelope(pair : Gori::Import::Builder::FlowPair) : JSON::Any
 end
 
 describe Gori::Import::Graphql do
+  it "accepts the introspection response envelope or the result value alone" do
+    wrapped = schema_doc
+    expected = parse_graphql(wrapped).flows.map { |pair| envelope(pair) }
+    expected.size.should eq(5)
+    parse_graphql(wrapped["data"]).flows.map { |pair| envelope(pair) }.should eq(expected)
+  end
+
+  it "prefers data.__schema and falls back to a top-level schema object" do
+    doc = schema_doc
+    doc.as_h["__schema"] = JSON.parse("{}")
+    parse_graphql(doc).flows.size.should eq(5)
+    doc.as_h["__schema"] = doc["data"]["__schema"]
+    doc.as_h["data"] = JSON.parse(%({"__schema":null}))
+    parse_graphql(doc).flows.size.should eq(5)
+  end
+
+  it "names both supported shapes when neither has a schema object" do
+    [%({}), %({"__schema":42}), %({"data":{"__schema":[]}})].each do |raw|
+      expect_raises(Gori::Error, "GraphQL document has no data.__schema or top-level __schema object") do
+        parse_graphql(raw: raw)
+      end
+    end
+  end
+
   it "builds one inert, framed JSON POST for each query/mutation and reports subscriptions" do
     parsed = parse_graphql
     parsed.skipped.should eq(0)

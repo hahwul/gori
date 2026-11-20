@@ -790,7 +790,13 @@ Malformed entries are skipped without aborting the import, and the result's note
 
 **Burp** items keep their wire bytes as saved: odd spacing, duplicate headers, a deliberately wrong `Content-Length`, a CRLF in the request target. A hand-forged request replays from the Repeater byte-for-byte.
 
-**GraphQL** reads a standard introspection response (`data.__schema`) as JSON. Choose **Import: GraphQL**, enter the file path, then the endpoint URL. Arguments become typed variables with placeholder values. Selections expand to width eight and depth three, stop at cycles/depth limits with `__typename`, and omit nested fields with required arguments. Subscriptions are omitted with their count in `notes`. Documents are capped at 8 MiB, 4,096 types and 1,000 query/mutation fields combined. It does not parse SDL or run introspection, and generated flows stay `Pending` until sent. Custom scalars use string placeholders; edit values to suit the API before replaying.
+**GraphQL** reads JSON containing `data.__schema` (a standard introspection response) or a top-level `__schema` (the result value alone). Choose **Import: GraphQL**, enter the file path, then the endpoint URL. Arguments become typed variables with placeholder values. Selections expand to width eight and depth three, stop at cycles/depth limits with `__typename`, and omit nested fields with required arguments. Subscriptions are omitted with their count in `notes`. Documents are capped at 8 MiB, 4,096 types and 1,000 query/mutation fields combined. It does not parse SDL or run introspection, and generated flows stay `Pending` until sent. Custom scalars use string placeholders; edit values to suit the API before replaying.
+
+If the introspection response is already in History, replace `123` with its flow ID and use `jq` to extract the decoded JSON body from `run show`. This reads the captured body without export redaction and imports templates into the same database:
+
+```bash
+gori run show 123 --response-only --format json --no-redact --db ./assessment.db | jq -er '.response.body.text' | gori run import --graphql - --endpoint https://api.example.com/graphql --db ./assessment.db
+```
 
 **WSDL** builds one SOAP request template per operation, for every SOAP port a service publishes. That covers SOAP 1.1 (`SOAPAction`, `text/xml`) and SOAP 1.2 (the `action` media-type parameter, `application/soap+xml`), so a dual-stack endpoint arrives as two requests. The body is a skeleton derived from the XSD inline in `<wsdl:types>`, with a valid placeholder for each built-in type so a schema-validating gateway lets the seed request through. A recursive type stops at its first repetition with a comment where you nest it by hand. Only WSDL 1.1 is read. `http:binding` (GET/POST) ports and non-HTTP transports are skipped with a reason and not counted as damage, external `xsd:import` files are never fetched, and a `<!DOCTYPE>` is refused.
 

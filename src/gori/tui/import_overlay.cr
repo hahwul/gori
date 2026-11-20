@@ -88,7 +88,7 @@ module Gori::Tui
     end
 
     def hint : String
-      @entering_endpoint ? "endpoint URL · ↵ import · esc cancel" : "type to complete · ↹ pick · ↑↓ browse · ↵ #{@kind == :graphql ? "continue" : "import"} · esc cancel"
+      @entering_endpoint ? "endpoint URL · ↵ import · esc back" : "type to complete · ↹ pick · ↑↓ browse · ↵ #{@kind == :graphql ? "continue" : "import"} · esc cancel"
     end
 
     # --- input ---------------------------------------------------------------
@@ -96,16 +96,10 @@ module Gori::Tui
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
 
-      # esc peels one layer at a time: the dropdown first, the popup only once it's
-      # down — so a stray esc can't discard a long path the user just typed.
-      if key.escape?
-        return :cancel unless @path_complete.open?
-        @path_complete.close
-        return :stay
-      end
+      return escape_key if key.escape?
 
       if @entering_endpoint
-        return :commit if key.enter?
+        return @endpoint_field.value.strip.empty? ? :stay : :commit if key.enter?
         @endpoint_field.handle_edit_key(ev)
         return :stay
       end
@@ -126,9 +120,22 @@ module Gori::Tui
       :stay
     end
 
+    # Escape undoes one step: endpoint → path, then dropdown → card → dismiss.
+    private def escape_key : Symbol
+      if @entering_endpoint
+        @entering_endpoint = false
+      elsif @path_complete.open?
+        @path_complete.close
+      else
+        return :cancel
+      end
+      :stay
+    end
+
     private def path_key(key : Termisu::Input::Key) : Symbol
       result = commit_or_complete(key)
       return result unless result == :commit && @kind == :graphql && !path.empty?
+      @path_complete.close
       @entering_endpoint = true
       :stay
     end
@@ -159,7 +166,7 @@ module Gori::Tui
     # Wheel support — the Runner routes a scroll here, and the only scrollable thing is
     # the completion list.
     def move(d : Int32) : Nil
-      @path_complete.move(d) if @path_complete.open?
+      @path_complete.move(d) if !@entering_endpoint && @path_complete.open?
     end
 
     # --- rendering -----------------------------------------------------------

@@ -34,6 +34,12 @@ If you have GraphQL introspection JSON, use **Import: GraphQL** with the file an
 gori run import --graphql schema.json --endpoint https://api.example.com/graphql --db ./assessment.db
 ```
 
+If the introspection response is already in History, replace `123` with its flow ID. Use `jq` to extract the decoded body without export redaction and pipe it into the same importer:
+
+```bash
+gori run show 123 --response-only --format json --no-redact --db ./assessment.db | jq -er '.response.body.text' | gori run import --graphql - --endpoint https://api.example.com/graphql --db ./assessment.db
+```
+
 ## 2. Fold noisy ids
 
 In a REST API, `/user/1`, `/user/2` and `/order/9f3c…` differ only by identifier. The Sitemap folds path-param ids, so `/user/1` and `/user/2` share one node and a long id collapses into a single `{uuid}`. Query-string variants fold the same way (`/search?q=1` and `/search?q=2` onto `/search`). Both folds are on by default. When you need every literal value, `g` toggles the id fold and `Shift-G` the query fold.

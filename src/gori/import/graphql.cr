@@ -27,7 +27,8 @@ module Gori::Import
       parser.max_nesting = 64
       doc = parser.parse
       schema = at(at(doc, "data"), "__schema")
-      raise Gori::Error.new("GraphQL document has no data.__schema object") unless schema && schema.as_h?
+      schema = at(doc, "__schema") unless schema.try(&.as_h?)
+      raise Gori::Error.new("GraphQL document has no data.__schema or top-level __schema object") unless schema && schema.as_h?
       Generator.new(schema).build(endpoint, prov)
     rescue ex : JSON::ParseException
       raise Gori::Error.new("GraphQL document is not valid JSON: #{ex.message}")

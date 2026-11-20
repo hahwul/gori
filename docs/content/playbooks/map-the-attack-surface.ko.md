@@ -34,6 +34,12 @@ GraphQL 인트로스펙션 JSON이 있다면 **Import: GraphQL**에서 파일과
 gori run import --graphql schema.json --endpoint https://api.example.com/graphql --db ./assessment.db
 ```
 
+History에 인트로스펙션 응답이 있다면 `123`을 해당 플로우 ID로 바꿉니다. 내보내기 마스킹 없이 디코딩된 본문을 `jq`로 추출해 같은 임포터로 전달합니다.
+
+```bash
+gori run show 123 --response-only --format json --no-redact --db ./assessment.db | jq -er '.response.body.text' | gori run import --graphql - --endpoint https://api.example.com/graphql --db ./assessment.db
+```
+
 ## 2. 시끄러운 id 접기 {#2-fold-noisy-ids}
 
 REST API에서 `/user/1`, `/user/2`, `/order/9f3c…`는 식별자만 다릅니다. Sitemap은 path-param id를 접으므로, `/user/1`과 `/user/2`가 한 노드를 공유하고 긴 id는 `{uuid}` 하나로 접힙니다. 쿼리 문자열 변형도 같은 방식으로 접힙니다(`/search?q=1`과 `/search?q=2`는 `/search`로). 두 접기는 기본으로 켜져 있습니다. 값을 하나하나 봐야 할 때는 `g`로 id 접기를, `Shift-G`로 쿼리 접기를 토글합니다.
