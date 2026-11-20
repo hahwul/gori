@@ -313,7 +313,8 @@ module Gori::Tui
       @untrusted_toasted = false
       # Upstream proxies already said to be unreachable (see drain_unreachable_upstreams), seeded
       # like the passthrough mark: a proxy that died under the previous project is not news here.
-      @upstream_said = Proxy::Upstream.unreachable_proxies.transform_values { Time.instant }
+      @upstream_said = {} of String => Time::Instant
+      Proxy::Upstream.unreachable_proxies.each_key { |label| @upstream_said[label] = Time.instant }
       # A hold was announced and the Intercept tab has not been opened since (see
       # announce_first_hold).
       @hold_announced = false
