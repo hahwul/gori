@@ -178,6 +178,8 @@ module Gori
       # `POST 127.0.0.1200 OK` for a held response — which reads as HTTP status 1200. Composing
       # per kind is what `Tui::InterceptView#row_label` and `InterceptController` render, so
       # they call THIS with the values they display and the composition lives once.
+      # (One exception: the TUI queue row for a held RESPONSE leads with the status so a narrow
+      # pane cuts the path, not the triage field. It composes that order itself.)
       #
       # `m`/`t` default to the Item's own immutable metadata. A surface settling an EDIT
       # passes the edited values instead (`#edited_method_target`, or `#edited_label` for the
