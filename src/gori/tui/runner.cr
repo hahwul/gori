@@ -313,7 +313,7 @@ module Gori::Tui
       @untrusted_toasted = false
       # Upstream proxies already said to be unreachable (see drain_unreachable_upstreams), seeded
       # like the passthrough mark: a proxy that died under the previous project is not news here.
-      @upstream_said = Proxy::Upstream.unreachable_proxies.keys
+      @upstream_said = Proxy::Upstream.unreachable_proxies.transform_values { Time.instant }
       # A hold was announced and the Intercept tab has not been opened since (see
       # announce_first_hold).
       @hold_announced = false
@@ -4706,24 +4706,37 @@ module Gori::Tui
 
     # Say once that the configured upstream proxy does not answer: every flow through it is an
     # `ERR` row whose reason is only in its detail. `Upstream.unreachable_proxies` is written on
-    # the dial path and read here, the passthrough shape. Silent again until the proxy answers
-    # (its entry leaves the table) or a different one is configured (a new label).
+    # the dial path and read here, the passthrough shape. `Runner.upstream_news` decides.
     private def drain_unreachable_upstreams : Bool
       down = Proxy::Upstream.unreachable_proxies
       return false if down.empty? && @upstream_said.empty?
-      @upstream_said.select! { |label| down.has_key?(label) }
-      fresh = down.reject { |label, _| @upstream_said.includes?(label) }
+      fresh = Runner.upstream_news(down, @upstream_said, Time.instant)
       return false if fresh.empty?
-      fresh.each do |label, via|
-        @upstream_said << label
-        @notifications.push(:error, Runner.upstream_down_note(via), source: "app")
-      end
+      fresh.each { |_, gone| @notifications.push(:error, Runner.upstream_down_note(gone.via), source: "app") }
       return true unless Settings.notify_toast?
       # `status(_, :error)` without its own notification: the note above is the long form.
       toast = Runner.upstream_down_toast(fresh.first_key)
       @toast_kinded = {toast, :error}
       status(toast)
       true
+    end
+
+    # How long a proxy said to be unreachable stays unsaid again. One that alternates answering
+    # and failing is named at most this often, and one that stays down is named once.
+    UPSTREAM_RESAY_AFTER = 5.minutes
+
+    # The proxies in `down` that are news at `now`; records them in `said` (label => when said).
+    # A said label is forgotten only once it is no longer down AND was said at least
+    # UPSTREAM_RESAY_AFTER ago. A said entry nothing has failed on for that long is dropped from
+    # `down`: it may be a proxy no longer configured, and an entry left there forever keeps the
+    # dial path's `empty?` short-circuit off. Should it fail again, that is news after the quiet.
+    def self.upstream_news(down : Hash(String, Proxy::Upstream::Unreachable), said : Hash(String, Time::Instant),
+                           now : Time::Instant) : Hash(String, Proxy::Upstream::Unreachable)
+      said.reject! { |label, at| !down.has_key?(label) && now - at >= UPSTREAM_RESAY_AFTER }
+      down.reject! { |label, gone| said.has_key?(label) && now - gone.failed_at >= UPSTREAM_RESAY_AFTER }
+      fresh = down.reject { |label, _| said.has_key?(label) }
+      fresh.each_key { |label| said[label] = now }
+      fresh
     end
 
     # The status row keeps the proxy's address; the setting that chose it is in the note.
