@@ -125,3 +125,13 @@ describe "Runner.no_filter_hint" do
     end
   end
 end
+
+# Function keys are no chord, so F1…F24 used to vanish without a word.
+describe "Runner.function_key_hint" do
+  it "says gori binds no function keys and names help and the palette, inside 59 columns" do
+    registry = Gori::Verbs.registry
+    Gori::Hotkeys.expand(registry, Runner.function_key_hint(Termisu::Input::Key::F5.to_s))
+      .should eq("‹F5› — gori binds no function keys · ? help · ^P palette")
+    Screen.display_width(Gori::Hotkeys.expand(registry, Runner.function_key_hint("F24"))).should be <= 59
+  end
+end

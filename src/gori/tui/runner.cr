@@ -1719,6 +1719,12 @@ module Gori::Tui
         dispatch_overlay_key(ov, ev)
         return
       end
+      # A function key is no chord (`Chord::NAMED_KEYS` has none) and every pane dropped it
+      # silently, editors included. Asked ahead of the panes, after the modals, which keep theirs.
+      if ev.key.function_key?
+        status(Hotkeys.expand(@session.registry, Runner.function_key_hint(ev.key.to_s)))
+        return
+      end
       # The second press of vim's `dd` / `yy` (see `editor_delete_line`). Ahead of the digit
       # family and every pane's own keys: between the two presses the operator owns the next
       # key, as vim's operator-pending state does, so a `d2` cannot jump to tab 2.
@@ -3150,6 +3156,11 @@ module Gori::Tui
       key = "‹#{Hotkeys.display_label(chord)}›"
       return "#{key} — READ mode: #{EditorPane::INSERT_KEYS} to type · space menu" if read_mode
       "#{key} — nothing bound here · space menu · {help.hotkeys} help"
+    end
+
+    # Any F-key: gori binds none (F1 is not Help, by decision), and silence read as a dead key.
+    def self.function_key_hint(key : String) : String
+      "‹#{key}› — gori binds no function keys · {help.hotkeys} help · {app.palette} palette"
     end
 
     # The tab-bar `/` on a tab whose pane below has no filter. `here`: a sibling sub-tab may

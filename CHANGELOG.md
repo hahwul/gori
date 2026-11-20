@@ -5,6 +5,7 @@
 - MCP: `race_requests`, `timing_requests` and `minimize_repeater` take `background:true`, which returns a `job_id` at once so other calls are answered while the run goes on; `get_job` returns the call's usual result and `stop_job` cancels it (#1944).
 - TUI: Comparer `←` diffs the requests and `→` the responses, instead of both toggling (#1944).
 - TUI: `/` on the tab bar of a tab with no filter says so and points at `^P` before the next letters reach the global keys, and Comparer `←` diffs the requests and `→` the responses instead of both toggling (#1944).
+- TUI: `/` on the tab bar of a tab with no filter says so and points at `^P` before the next letters reach the global keys, a function key says gori binds none instead of doing nothing, and Comparer `←` diffs the requests and `→` the responses instead of both toggling (#1944).
 
 - MCP: `gori mcp --install-*` writes `--tools=@recon` when no `--tools` is given, so a fresh install loads about a fifth of the full catalogue's tool schemas; `--tools='*'` installs every tool, and a hand-run `gori mcp` is unchanged, as is an existing entry until it is reinstalled (#1943).
 
