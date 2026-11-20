@@ -11,6 +11,10 @@ module Gori::CLI::Run
     import_source(sources)
   end
 
+  def self.import_spooled_for_spec(store : Store, path : String, endpoint : String?) : Import::Result
+    import_spooled(store, :graphql, path, endpoint)
+  end
+
   def self.import_result_json_for_spec(kind : Symbol, path : String, result : Import::Result) : String
     import_result_json(kind, path, result)
   end
@@ -31,7 +35,7 @@ describe "gori run import" do
   it "maps each source flag to its {kind, path}" do
     {har: "a.har", urls: "urls.txt", oas: "api.yaml",
      postman: "c.postman_collection.json", insomnia: "i.json", burp: "items.xml",
-     wsdl: "service.wsdl", curl: "-"}.each do |kind, path|
+     wsdl: "service.wsdl", graphql: "schema.json", curl: "-"}.each do |kind, path|
       Gori::CLI::Run.import_source_for_spec(only(kind, path)).should eq({kind, path})
     end
   end
@@ -41,6 +45,24 @@ describe "gori run import" do
     # flag table and the label table are edited in different files.
     Gori::Import::LABELS.each_key do |kind|
       Gori::CLI::Run.import_source_for_spec(only(kind, "f")).should eq({kind, "f"})
+    end
+  end
+
+  it "forwards a GraphQL endpoint through the stdin adapter and preserves CLI provenance" do
+    path = File.join(__DIR__, "..", "..", "fixtures", "graphql", "introspection.json")
+    with_store do |store|
+      result = Gori::CLI::Run.import_spooled_for_spec(store, path, "https://gql.test/query")
+      result.count.should eq(5)
+      result.notes.join.should contain("skipped 1 subscription")
+      store.recent_flows(10).each do |row|
+        row.host.should eq("gql.test")
+        row.target.should eq("/query")
+        row.source_ref.should eq("stdin")
+        row.source_surface.should eq(Gori::FlowSource::Surface::Cli)
+      end
+      expect_raises(Gori::Error, "requires an endpoint") do
+        Gori::CLI::Run.import_spooled_for_spec(store, path, nil)
+      end
     end
   end
 
@@ -88,7 +110,7 @@ describe "gori run import" do
     # One table (Import::LABELS) feeds the CLI line, the overlay title and the TUI toast, so
     # they cannot drift apart as sources are added.
     {har: "HAR", urls: "URLs", oas: "OpenAPI",
-     postman: "Postman", insomnia: "Insomnia", burp: "Burp", wsdl: "WSDL"}.each do |kind, label|
+     postman: "Postman", insomnia: "Insomnia", burp: "Burp", wsdl: "WSDL", graphql: "GraphQL"}.each do |kind, label|
       Gori::CLI::Run.import_result_text_for_spec(kind, "f", Gori::Import::Result.new(count: 1))
         .should eq("imported 1 flow from #{label} · f")
       Gori::Tui::ImportOverlay.new(kind).label.should eq(label)

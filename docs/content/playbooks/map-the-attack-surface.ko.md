@@ -28,6 +28,12 @@ gori run sitemap
 
 **체크포인트.** 대상 호스트가 경로 트리로 펼쳐지고, 각 경로에 method 칩이 붙습니다.
 
+GraphQL 인트로스펙션 JSON이 있다면 **Import: GraphQL**에서 파일과 엔드포인트 URL을 입력하거나 아래 명령으로 쿼리·뮤테이션마다 요청을 준비합니다. 구독은 개수와 함께 생략하며, 임포트는 트래픽을 보내지 않습니다. [생성 제한](/ko/guide/proxy/#import)을 확인하고, History의 `Pending` 플로우를 Repeater로 보내 플레이스홀더와 인증 헤더를 편집한 뒤 전송하세요.
+
+```bash
+gori run import --graphql schema.json --endpoint https://api.example.com/graphql --db ./assessment.db
+```
+
 ## 2. 시끄러운 id 접기 {#2-fold-noisy-ids}
 
 REST API에서 `/user/1`, `/user/2`, `/order/9f3c…`는 식별자만 다릅니다. Sitemap은 path-param id를 접으므로, `/user/1`과 `/user/2`가 한 노드를 공유하고 긴 id는 `{uuid}` 하나로 접힙니다. 쿼리 문자열 변형도 같은 방식으로 접힙니다(`/search?q=1`과 `/search?q=2`는 `/search`로). 두 접기는 기본으로 켜져 있습니다. 값을 하나하나 봐야 할 때는 `g`로 id 접기를, `Shift-G`로 쿼리 접기를 토글합니다.

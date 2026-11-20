@@ -1253,6 +1253,35 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "imports GraphQL file/text templates at the supplied endpoint and requires that endpoint" do
+      path = File.join(__DIR__, "..", "fixtures", "graphql", "introspection.json")
+      with_store do |store|
+        tools = tools_for(store)
+        {"path" => path, "text" => File.read(path)}.each do |source, value|
+          args = {"kind" => "graphql", source => value, "endpoint" => "https://gql.test/api"}
+          reply = tools.call("import_flows", JSON.parse(args.to_json))
+          reply.is_error.should be_false
+          result = JSON.parse(reply.text)
+          result["count"].as_i.should eq(5)
+          result["notes"].as_a.map(&.as_s).join.should contain("skipped 1 subscription")
+        end
+        store.count.should eq(10)
+        store.recent_flows(20).each do |row|
+          row.host.should eq("gql.test")
+          row.target.should eq("/api")
+          row.source.should eq(Gori::FlowSource::Kind::Import)
+          row.source_surface.should eq(Gori::FlowSource::Surface::Mcp)
+        end
+        missing = tools.call("import_flows", JSON.parse({kind: "graphql", path: path}.to_json))
+        missing.is_error.should be_true
+        missing.text.should contain("requires an endpoint")
+        orphan = tools.call("import_flows", JSON.parse({kind: "urls", text: "https://a.test", endpoint: "https://gql.test"}.to_json))
+        orphan.is_error.should be_true
+        orphan.text.should contain("only to GraphQL")
+        store.count.should eq(10)
+      end
+    end
+
     it "accepts every kind Import.import_file dispatches on" do
       # The MCP whitelist (mcp/tools/import.cr) and the parser table are edited in different
       # files — a format added to one and not the other is invisible to agents.

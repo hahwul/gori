@@ -16,7 +16,7 @@ describe Gori::Tui::ImportOverlay do
   it "titles and describes the card by import kind" do
     {:har => "HAR", :project_archive => "project archive", :urls => "URLs", :oas => "OpenAPI",
      :postman => "Postman", :insomnia => "Insomnia", :burp => "Burp",
-     :wsdl => "WSDL"}.each do |kind, want|
+     :wsdl => "WSDL", :graphql => "GraphQL"}.each do |kind, want|
       ov = ImportOverlay.new(kind)
       ov.label.should eq(want)
       backend = MemoryBackend.new(100, 30)
@@ -37,6 +37,7 @@ describe Gori::Tui::ImportOverlay do
      :insomnia        => "Build request templates from an Insomnia v4 JSON export.",
      :burp            => "Load saved Burp items into History — request and response, byte-exact.",
      :wsdl            => "Build request templates from a WSDL 1.1 service — one per operation.",
+     :graphql         => "Build query/mutation templates from introspection JSON; sends nothing.",
     }.each do |kind, fragment|
       backend = MemoryBackend.new(100, 30)
       ImportOverlay.new(kind).render(Screen.new(backend), Rect.new(0, 0, 100, 30))
@@ -46,7 +47,7 @@ describe Gori::Tui::ImportOverlay do
     # Every registered kind is described — no source can be added without a blurb. `:curl` is
     # the one kind this card never opens for: a curl command is pasted, not saved, so
     # Import: cURL opens `CurlPasteOverlay` instead (#1244).
-    (Gori::Import::LABELS.keys - [:curl]).size.should eq(7)
+    (Gori::Import::LABELS.keys - [:curl]).size.should eq(8)
     archive_backend = MemoryBackend.new(100, 30)
     ImportOverlay.new(:project_archive).render(Screen.new(archive_backend), Rect.new(0, 0, 100, 30))
     archive_backend.contains?("add it to this machine's project list.").should be_true
@@ -75,6 +76,22 @@ describe Gori::Tui::ImportOverlay do
     type(ov, "/tmp/x.har")
     ov.path.should eq("/tmp/x.har")
     ov.handle_key(key(Termisu::Input::Key::Enter)).should eq(:commit)
+  end
+
+  it "collects a GraphQL path and endpoint before committing through the shell" do
+    ov = ImportOverlay.new(:graphql)
+    h = OverlayHarness.new(ov)
+    submitted = [] of {String, String?}
+    h.on_commit do
+      submitted << {ov.path, ov.endpoint}
+      true
+    end
+    h.type("/no/such/gori-graphql-schema.json")
+    h.press(Termisu::Input::Key::Enter).should eq(:open)
+    h.rendered?("endpoint URL").should be_true
+    h.type("https://api.test/graphql")
+    h.press(Termisu::Input::Key::Enter).should eq(:closed)
+    submitted.should eq([{"/no/such/gori-graphql-schema.json", "https://api.test/graphql"}])
   end
 
   it "cancels on esc" do

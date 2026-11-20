@@ -5068,7 +5068,7 @@ module Gori::Tui
       if ov.path.empty?
         @toast = "import cancelled — path is empty"
       else
-        apply_import(ov.kind, ov.label, ov.path)
+        apply_import(ov.kind, ov.label, ov.path, ov.endpoint)
       end
       true
     end
@@ -5087,7 +5087,7 @@ module Gori::Tui
     # paces itself, and `Import.import_har_stream` writes a chunk at a time), so the frame keeps
     # drawing for the whole of it and the count on the chip is live. The other formats are
     # small by nature and still parse in one call before their chunks go in.
-    private def apply_import(kind : Symbol, label : String, path : String) : Nil
+    private def apply_import(kind : Symbol, label : String, path : String, endpoint : String? = nil) : Nil
       if @import_job
         @toast = "an import is already running — cancel it from the palette (Import: cancel) or wait"
         return
@@ -5101,7 +5101,7 @@ module Gori::Tui
       spawn(name: "gori-import") do
         begin
           result = Import.import_file(store, kind, path, Gori::FlowSource::Surface::Tui,
-            cancelled: -> { @import_cancel },
+            endpoint: endpoint, cancelled: -> { @import_cancel },
             progress: ->(done : Int32, total : Int32?) { events.send(ImportProgress.new(job, done, total)) })
           events.send(ImportDone.new(job, label, path, result, nil))
         rescue ex

@@ -24,6 +24,9 @@ module Gori
       r.register Verb::Definition.new(
         "import.wsdl", "Import: WSDL", "Import SOAP request templates from a WSDL 1.1 service description",
         Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.open_import(:wsdl); nil }
+      r.register Verb::Definition.new(
+        "import.graphql", "Import: GraphQL", "Import query/mutation templates from introspection JSON",
+        Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.open_import(:graphql); nil }
       # A paste box, not a path prompt: a curl command is copied, rarely saved (#1244).
       r.register Verb::Definition.new(
         "import.curl", "Import: cURL", "Paste curl command(s) and import each request into History",

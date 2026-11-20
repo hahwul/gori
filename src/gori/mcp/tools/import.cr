@@ -18,6 +18,7 @@ module Gori
         "insomnia" => :insomnia,
         "burp"     => :burp,
         "wsdl"     => :wsdl,
+        "graphql"  => :graphql,
         "curl"     => :curl,
       }
 
@@ -72,9 +73,11 @@ module Gori
         path = path_str(h, "path").try(&.strip).presence
         # Blank is absent, as `path` above: a client filling every property sends `text: ""`.
         text = str(h, "text").presence
+        endpoint = str(h, "endpoint")
+        return err("endpoint applies only to GraphQL imports", "INVALID_ARGUMENT", field: "endpoint") if endpoint && kind != :graphql
         return err("pass 'path' or 'text', not both", "INVALID_ARGUMENT", field: "text") if text && path
-        return Import.import_text(store, kind, text, Gori::FlowSource::Surface::Mcp) if text
-        return Import.import_file(store, kind, path, Gori::FlowSource::Surface::Mcp) if path
+        return Import.import_text(store, kind, text, Gori::FlowSource::Surface::Mcp, endpoint: endpoint) if text
+        return Import.import_file(store, kind, path, Gori::FlowSource::Surface::Mcp, endpoint: endpoint) if path
         err("missing required 'path' or 'text'", "INVALID_ARGUMENT", field: "path")
       end
 
@@ -87,7 +90,7 @@ module Gori
 
         tool j, "import_flows",
           "Bulk-import flows into History (format in `kind`; OpenAPI/Swagger use local refs " \
-          "only). Source as `path` (read from the MCP SERVER's filesystem, same trust boundary " \
+          "only; graphql reads introspection JSON and requires endpoint; subscriptions are skipped). Source as `path` (read from the MCP SERVER's filesystem, same trust boundary " \
           "as send_request) or `text`. For curl, one flow per request; transport flags like " \
           "-k/-x/-L are ignored and listed in `notes`. Only `har` and `burp` carry responses; " \
           "the rest import request templates only. NOT deduplicated: re-importing adds the flows " \
@@ -95,6 +98,7 @@ module Gori
           "same name." do |s|
           s.field "kind", enumprop("the source format to read", KINDS.keys), required: true
           s.field "path", strprop("filesystem path to the source file (this or 'text')")
+          s.field "endpoint", strprop("GraphQL only: URL for the generated POST request templates (required for graphql)")
           s.field "text", strprop("the source document itself instead of a file")
           s.requires_one_of "path", "text"
         end

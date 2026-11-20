@@ -178,10 +178,10 @@ module Gori
         --alg --algorithm --assert --auto-reply --before-id --bind-from --body --body-file --browser
         --brute --bucket --burp --ca-dir --case --category --cluster --code --color --column
         --concurrency --containment --context --cookie --copy-header --curl --cvss --data
-        --db --delay --description --detail --detail-file --device-port --direction --export
+        --db --delay --description --detail --detail-file --device-port --direction --endpoint --export
         --extensions --extract --extractor --fail-on --fault --fc --fg --fh --field --fields
         --file --filter --find-context --find-from --find-max --fl --flow --for --form-key
-        --fr --from --from-db --from-flow --fs --ft --fw --grpc-field --hang --har --hash
+        --fr --from --from-db --from-flow --fs --ft --fw --graphql --grpc-field --hang --har --hash
         --head --header --hex --hook --host --id --identities --idle-ms --input --insomnia
         --interval --ip --issue --json-field --json-pointer --jsonpath --keep --key --kind
         --level --limit --listen --location --locations --macro --macro-every --macro-expect

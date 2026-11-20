@@ -80,7 +80,7 @@ gori run <subcommand> [verb] [options]
 | `probe rules` · `mode` | List / arm scan rules; get or set the scan mode |
 | `discover` | Spider and brute-force endpoints into the Sitemap |
 | `wordlist` (`list`) · `show` · `save` · `rename` · `delete` | The global wordlist catalog: named lists any `--wordlist` / `-w` takes by name (`delete` needs `--yes`) |
-| `import` | Bulk-import flows into History from a HAR / URL list / OpenAPI / Postman / Insomnia / Burp / WSDL file, or a curl command |
+| `import` | Bulk-import flows into History from a HAR / URL list / OpenAPI / Postman / Insomnia / Burp / WSDL / GraphQL introspection file, or a curl command |
 | `sitemap [QL]` | Host → path endpoint tree |
 | `sitemap tag` | Pin, clear, or list a free-text memo on a sitemap path |
 | `sitemap params [QL]` | Per-endpoint parameter inventory: names by location, counts, sample values, reflected values |
@@ -1027,6 +1027,8 @@ gori run import --postman api.postman_collection.json --db ./assessment.db --for
 | `--insomnia=PATH` | An Insomnia v4 export (JSON) |
 | `--burp=PATH` | A Burp Suite item export (XML). Request and response, byte-exact |
 | `--wsdl=PATH` | A WSDL 1.1 service description (XML). One SOAP request template per operation |
+| `--graphql=PATH` | GraphQL introspection JSON (`data.__schema`). One POST template per query/mutation; subscriptions are omitted with a count |
+| `--endpoint=URL` | Required endpoint URL for `--graphql`; refused with other sources |
 | `--curl=PATH` | curl commands, one flow per request; `-` reads stdin (`pbpaste \| gori run import --curl -`). Ignored transport flags are named on stderr (`notes` in JSON) |
 | `--project=NAME` | Project to import into (default: the `GORI_PROJECT` or `project switch` project, else the most recently active one) |
 | `--db=PATH` | Explicit SQLite db file to import into (created if absent) |
@@ -1035,6 +1037,8 @@ gori run import --postman api.postman_collection.json --db ./assessment.db --for
 Import writes flows, so it resolves its target like `discover`: an explicit `--db` is created or reopened, and without one it writes into an existing project and does not create a default.
 
 A malformed entry is skipped and the rest of the file still imports. The result reports both counts (`{"count": 12, "attempted": 12, "skipped": 3}`), and `notes` says which line or entry each skip was and why (the first 20). When the project cannot commit every parsed flow (a busy or unwritable store), `count` is smaller than `attempted`, the text line says how many did not commit, and the command exits `1`. Re-run the import to retry them. Only `--har` and `--burp` carry responses. The rest import request templates that show as `Pending` in History until you send them.
+
+GraphQL example: `gori run import --graphql schema.json --endpoint https://api.example.com/graphql --db ./assessment.db`. Use `--graphql -` to read stdin instead. See the [GraphQL import limits](/guide/proxy/#import) and edit placeholders before replaying.
 
 ### run sitemap
 
