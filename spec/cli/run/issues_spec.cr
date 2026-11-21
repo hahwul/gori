@@ -37,8 +37,12 @@ module Gori::CLI::Run
     issue_delete_confirmation_error(ids, yes)
   end
 
+  def self.write_issues_file_for_spec(path : String, project : Project) : Nil
+    write_issues_file(path, project, "report\n")
+  end
+
   def self.write_issues_report_for_spec(content : String, path : String?, stdout : IO, stderr : IO) : Nil
-    write_issues_report(content, 2, path, stdout, stderr)
+    write_issues_report(content, 2, path, Project.new("spec", "gori.db"), stdout, stderr)
   end
 end
 
@@ -447,6 +451,65 @@ describe "gori run issues --export -" do
       end
     ensure
       FileUtils.rm_rf(dir)
+    end
+  end
+end
+
+describe "gori run issues --export PATH" do
+  it "protects the source database and its sidecars, including ones not created yet" do
+    root = File.tempname("issues-export")
+    Dir.mkdir(root)
+    begin
+      Dir.cd(root) do
+        project = Gori::Project.new("example", "project.db")
+        File.write(project.db_path, "original")
+        {"", "-wal", "-shm", "-journal", Gori::OpenLock::SUFFIX}.each do |suffix|
+          path = "./project.db#{suffix}"
+          expect_raises(IO::Error, /source project database/) do
+            Gori::CLI::Run.write_issues_file_for_spec(path, project)
+          end
+          File.exists?(path).should eq(suffix.empty?)
+        end
+        if File.exists?("PROJECT.DB") # case-insensitive volume
+          expect_raises(IO::Error, /source project database/) do
+            Gori::CLI::Run.write_issues_file_for_spec("PROJECT.DB-WAL", project)
+          end
+          File.exists?("project.db-wal").should be_false
+        else
+          File.write("PROJECT.DB-WAL", "an unrelated existing report")
+          Gori::CLI::Run.write_issues_file_for_spec("PROJECT.DB-WAL", project)
+          File.read("PROJECT.DB-WAL").should eq("report\n")
+        end
+        File.read(project.db_path).should eq("original")
+        File.write("project.db.json", "longer old document")
+        Gori::CLI::Run.write_issues_file_for_spec("project.db.json", project)
+        File.read("project.db.json").should eq("report\n")
+      end
+    ensure
+      FileUtils.rm_rf(root)
+    end
+  end
+
+  it "recognizes linked destinations before truncating them" do
+    posix_only!("File.symlink needs Developer Mode")
+    root = File.tempname("issues-export")
+    Dir.mkdir(root)
+    begin
+      db = File.join(root, "project.db")
+      project = Gori::Project.new("example", db)
+      File.write(db, "original")
+      alias_path = File.join(root, "report")
+      File.link(db, alias_path)
+      expect_raises(IO::Error, /source project database/) { Gori::CLI::Run.write_issues_file_for_spec(alias_path, project) }
+      File.read(db).should eq("original")
+      {"project.db-journal", db + "-journal"}.each do |journal|
+        File.delete(alias_path)
+        File.symlink(journal, alias_path)
+        expect_raises(IO::Error, /source project database/) { Gori::CLI::Run.write_issues_file_for_spec(alias_path, project) }
+        File.exists?(db + "-journal").should be_false
+      end
+    ensure
+      FileUtils.rm_rf(root)
     end
   end
 end
