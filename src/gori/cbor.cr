@@ -698,8 +698,9 @@ module Gori
       # too, which is the wanted answer. Sub-second precision is dropped from the
       # display string only — `value` still carries the exact number.
       private def rfc3339(seconds : Float64) : String?
-        return nil unless -62_135_596_800.0 <= seconds <= 253_402_300_799.0
-        Time.unix(seconds.to_i64).to_rfc3339
+        whole_second = seconds.floor
+        return nil unless -62_135_596_800.0 <= whole_second <= 253_402_300_799.0
+        Time.unix(whole_second.to_i64).to_rfc3339
       end
 
       # --- bytes --------------------------------------------------------------
