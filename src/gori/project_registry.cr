@@ -373,8 +373,8 @@ module Gori
       slug
     end
 
-    # Create (or reopen) a named project. The display name is slugified for the
-    # directory; the original name is kept for display.
+    # Create (or reopen) a named project. A new project's directory starts from
+    # its slugified name, and the original name is kept for display.
     # `description` is optional and persisted immediately into the project's
     # settings (so it is available on first open in the Project tab).
     def create(name : String, description : String = "", tags : Array(String)? = nil) : Project
@@ -463,10 +463,7 @@ module Gori
                          tags : Array(String)? = nil) : {Project, Bool}
       tags = tags.try { |t| ProjectRegistry.normalize_tags(t) }
       display = validated_display_name(name)
-      slug = slugify(display)
-      raise Gori::Error.new(UNSLUGGABLE_NAME) if slug.empty?
-      slug = unique_slug(slug, display) # don't merge into a DIFFERENT project that slugifies alike
-      dir = File.join(@root, slug)
+      dir = directory_for_create(display)
       db_path = File.join(dir, Project::DB_FILE)
       # A DB at the resolved path is the same thing #list calls an existing project.
       reopened = File.exists?(db_path)
@@ -583,6 +580,22 @@ module Gori
         slug = "#{base_slug}-#{n}"
         n += 1
       end
+    end
+
+    private def directory_for_create(display : String) : String
+      slug = slugify(display)
+      dir = File.join(@root, unique_slug(slug, display)) unless slug.empty?
+      # Preserve the same-name project's claim in the slug sequence, even if an
+      # auto-bound workspace has yet to open its database.
+      return dir if dir && (File.exists?(File.join(dir, Project::DB_FILE)) || workspace_in(dir))
+
+      # A rename keeps the directory fixed. Reopen such a project by its exact
+      # display name when the slug sequence would allocate a new directory.
+      if (existing = find(display)) && existing.name.downcase == display.downcase
+        return existing.dir
+      end
+
+      dir || raise Gori::Error.new(UNSLUGGABLE_NAME)
     end
 
     # Keep `slug` when the directory is free OR already belongs to a project with the SAME

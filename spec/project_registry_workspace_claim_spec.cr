@@ -88,6 +88,17 @@ describe Gori::ProjectRegistry do
       end
     end
 
+    it "keeps the primary workspace claim when another checkout with the same name has a database" do
+      with_root do |registry, root|
+        primary = registry.create_for_workspace("api", File.join(root, "checkout-one"))
+        peer = registry.create_for_workspace("api", File.join(root, "checkout-two"))
+        Gori::Store.open(peer.db_path).close
+
+        registry.create("API").dir.should eq(primary.dir)
+        registry.find("api").try(&.dir).should eq(primary.dir)
+      end
+    end
+
     it "does not treat a leftover empty directory as a collision" do
       with_root do |registry, root|
         # No db and no binding: a half-created or hand-made dir must still be reusable,

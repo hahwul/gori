@@ -411,6 +411,43 @@ describe Gori::ProjectRegistry do
     end
   end
 
+  it "reopens a renamed project by its current display name" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      original = reg.create("Old label", tags: ["original"])
+      id = reg.id_of(original).not_nil!
+      renamed = reg.rename(original, "New label")
+
+      reopened, created = reg.create_or_reopen("new LABEL")
+      created.should be_false
+      reopened.should eq(renamed)
+      reg.id_of(reopened).should eq(id)
+      reg.tags_of(reopened).should eq(["original"])
+      reg.list.map(&.dir).should eq([original.dir])
+    end
+  end
+
+  it "reopens an existing name that does not need a new directory slug" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      renamed = reg.rename(reg.create("Symbolic"), "!!!")
+      reg.create_or_reopen("!!!").should eq({renamed, false})
+    end
+  end
+
+  it "refuses to reopen an ambiguous display name away from its slug" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      first = reg.rename(reg.create("One"), "Shared label")
+      second = reg.rename(reg.create("Two"), "Shared label")
+      expected_dirs = [first.dir, second.dir].sort!
+
+      ex = expect_raises(Gori::ProjectRegistry::Ambiguous) { reg.create_or_reopen("Shared label") }
+      ex.candidates.map(&.dir).sort!.should eq(expected_dirs)
+      reg.list.map(&.dir).sort!.should eq(expected_dirs)
+    end
+  end
+
   # A 300-character name made a 300-byte directory name, which every filesystem refuses:
   # create failed on every surface with the OS's raw "File name too long".
   it "caps a long name's slug and keeps two long names that share a head apart" do

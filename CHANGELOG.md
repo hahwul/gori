@@ -113,6 +113,8 @@
 
 - Project workspace bindings preserve trailing spaces in directory names (#1961)
 
+- Creating a project by its renamed display name reopens the existing project (#1973)
+
 - TUI: the command palette keeps the selected result visible in short terminals. If the palette or Space menu no longer fits, resize to resume or press Esc to close it (#1928).
 
 - TUI: History Copy uses URLs for marked flows, and selecting more than two flows leaves the current comparison intact. Notifications and Activity report when a linked result is gone (#1927).
