@@ -38,9 +38,7 @@ module Gori
         "to search titles and hosts, pass -q '#{sub}'"
       end
 
-      # SARIF is the one format that carries header VALUES structurally: text and json have
-      # none, and markdown's evidence blocks are the captured head as a whole. Inert elsewhere,
-      # and said so rather than silently ignored (the `history --include-sensitive` rule).
+      # The CLI opt-in applies to SARIF. Markdown always masks evidence header credentials.
       private def self.warn_inert_include_sensitive(format : Symbol) : Nil
         return if format == :sarif
         STDERR.puts "gori run issues: --include-sensitive only changes --format sarif"

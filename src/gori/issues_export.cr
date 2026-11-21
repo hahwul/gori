@@ -4,6 +4,7 @@ require "./links"
 require "./utf8"
 require "./proxy/codec/content_decode"
 require "./redact/wire"
+require "./redact/headers"
 require "./issues_export/sarif" # Export.sarif — the SARIF 2.1.0 sibling of .markdown/.json
 
 module Gori
@@ -25,11 +26,11 @@ module Gori
       # additional truncation. Without it, the flags describe the original stored capture.
       def self.markdown(issues : Array(Store::Issue), store : Store, project_name : String,
                         matcher : Redact::Matcher? = nil,
-                        flow_loader : Proc(Int64, Store::FlowDetail?)? = nil) : String
+                        flow_loader : Proc(Int64, Store::FlowDetail?)? = nil, *, include_sensitive : Bool = false) : String
         String.build do |io|
           io << "# Issues — " << project_name << "\n\n"
           io << "_" << issues.size << " issues · exported " << Time.local.to_s("%Y-%m-%d %H:%M") << "_\n"
-          issues.each { |f| append_stored_issue(io, f, store, matcher, flow_loader) }
+          issues.each { |f| append_stored_issue(io, f, store, matcher, flow_loader, include_sensitive) }
         end
       end
 
@@ -39,10 +40,15 @@ module Gori
       end
 
       private def self.append_stored_issue(io : String::Builder, f : Store::Issue, store : Store,
-                                           matcher : Redact::Matcher?, flow_loader : Proc(Int64, Store::FlowDetail?)? = nil) : Nil
+                                           matcher : Redact::Matcher?, flow_loader : Proc(Int64, Store::FlowDetail?)? = nil,
+                                           include_sensitive : Bool = false) : Nil
         flow = f.flow_id.try { |fid| flow_loader ? flow_loader.call(fid) : store.get_flow(fid) }
         flow = Redact::Wire.flow(flow, matcher)[0] if flow && matcher
-        append_issue(io, f, flow, resolve_issue_links(f, store), frozen: store.issue_evidence(f.id))
+        append_issue(io, f, resolve_issue_links(f, store), store.issue_evidence(f.id))
+        if flow
+          append_evidence(io, "Request", flow.request_head, flow.request_body, flow.request_body_truncated?, include_sensitive)
+          append_evidence(io, "Response", flow.response_head, flow.response_body, flow.response_body_truncated?, include_sensitive)
+        end
       end
 
       # The Markdown for ONE issue, heading included — the body of `markdown`'s loop, split out
@@ -50,22 +56,15 @@ module Gori
       # dashboard renders exactly what the operator already reads in the TUI's report. The leading
       # "\n" separates the blocks, exactly as it did inside the loop.
       #
-      # `flow` and `resolved_links` arrive PRE-FETCHED rather than being read here, so a caller
-      # that needs them for something else too (the SARIF exporter needs the flow for
-      # webRequest/webResponse and the links for a property bag) pays for one store read per
-      # issue instead of three.
-      #
-      # `evidence: false` omits the fenced request/response blocks. The SARIF exporter passes it
-      # because those same bytes already ride structurally in `webRequest`/`webResponse`, and
-      # embedding them twice roughly DOUBLED the document — enough to push an engagement past
-      # the size limit on a `gh api .../code-scanning/sarifs` upload.
+      # The caller supplies resolved links so SARIF can reuse them for its property bag.
+      # Only the Markdown report appends evidence fences; SARIF emits the exchange in
+      # webRequest/webResponse.
       #
       # `frozen` (#1038) arrives pre-fetched for the same reason — one store read per issue,
       # paid by the caller that has the store. The SARIF writer leaves it empty: its result
       # already carries the exchange as webRequest/webResponse, and a provenance block about
       # copies it does not include would be a list of hashes with nothing to check them against.
-      private def self.append_issue(io : String::Builder, f : Store::Issue, flow : Store::FlowDetail?,
-                                    resolved_links : Array(Links::Resolved), evidence : Bool = true,
+      private def self.append_issue(io : String::Builder, f : Store::Issue, resolved_links : Array(Links::Resolved),
                                     frozen : Array(Store::IssueEvidenceMeta) = [] of Store::IssueEvidenceMeta) : Nil
         io << "\n## [" << f.severity.label << "] " << one_line(f.title) << "\n\n"
         io << "- **Severity:** " << f.severity.label << "\n"
@@ -90,10 +89,6 @@ module Gori
         # an OSC "set window title" can't drive a TTY when the report is printed/`cat`d,
         # yet keeps its newlines (unlike one_line, which would flatten title/host to a line).
         io << "\n" << demote_note_headings(scrub_controls(f.notes)) << "\n" unless f.notes.strip.empty?
-        if flow && evidence
-          append_evidence(io, "Request", flow.request_head, flow.request_body, flow.request_body_truncated?)
-          append_evidence(io, "Response", flow.response_head, flow.response_body, flow.response_body_truncated?)
-        end
       end
 
       # An issue's related workbench entities, resolved for display, PRIMARY FLOW FIRST. One
@@ -374,7 +369,7 @@ module Gori
         BodyEvidence.new(text.valid_encoding? ? text : nil, display_body.size, truncated)
       end
 
-      private def self.append_evidence(io : String::Builder, label : String, head : Bytes?, body : Bytes?, source_cut : Bool = false) : Nil
+      private def self.append_evidence(io : String::Builder, label : String, head : Bytes?, body : Bytes?, source_cut : Bool, include_sensitive : Bool) : Nil
         return if head.nil? || head.empty?
         cap = EVIDENCE_CAP
         # Build the embedded request/response text first, THEN pick a fence longer
@@ -387,8 +382,10 @@ module Gori
           # the header block's trailing CRLF CRLF so a single blank line (added
           # below) sits between headers and body instead of a stack of empty lines.
           hslice = head.size > cap ? head[0, cap] : head
-          c << String.new(hslice).scrub.rstrip
-          c << "\n\n[… headers truncated, #{head.size} bytes total …]" if head.size > cap
+          projected = Redact.redact_head(String.new(hslice), include_sensitive, truncated: head.size > cap)
+          c << projected.byte_slice(0, cap).scrub.rstrip
+          size = {head.size, projected.bytesize}.max # placeholders can expand a short cookie field
+          c << "\n\n[… headers truncated, #{size} bytes total …]" if size > cap
           ev = body_evidence(head, body)
           if text = ev.text
             c << "\n\n" << text

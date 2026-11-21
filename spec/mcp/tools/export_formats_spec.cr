@@ -144,7 +144,7 @@ describe "MCP report and request-code formats" do
           payload.to_json.should_not contain(secret)
         end
         sensitive = exported(tools, "list_issues", %({"format":"#{format}","query":"sev:high","include_sensitive":true}))
-        expected = format == "sarif" ? Gori::Issues::Export.sarif(selected, store, "test-project", true) : Gori::Issues::Export.markdown(selected, store, "test-project")
+        expected = format == "sarif" ? Gori::Issues::Export.sarif(selected, store, "test-project", true) : Gori::Issues::Export.markdown(selected, store, "test-project", include_sensitive: true)
         sensitive["document"].as_s.should eq(expected)
         sensitive["document"].as_s.should contain("header-secret")
         sensitive["document"].as_s.should contain("response-secret")

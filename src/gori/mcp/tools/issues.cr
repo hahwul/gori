@@ -69,7 +69,7 @@ module Gori
           if format == "sarif"
             Issues::Export.sarif(selected, store, name, include_sensitive, flow_loader: loader)
           else
-            Issues::Export.markdown(selected, store, name, flow_loader: loader)
+            Issues::Export.markdown(selected, store, name, flow_loader: loader, include_sensitive: include_sensitive)
           end
         end
         returned = page.size

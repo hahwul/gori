@@ -312,7 +312,7 @@ module Gori
           # already on this result as webRequest/webResponse, and carrying them twice doubled
           # the document for no reader's benefit.
           rb.message(sarif_message_text(f, title),
-            markdown: String.build { |io| append_issue(io, f, flow, links, evidence: false) })
+            markdown: String.build { |io| append_issue(io, f, links) })
           # NOT `rb.rule_id` — that is what makes `ResultBuilder#build` scan the rules array for
           # this result's index. `annotate_results` writes the id and the index together from the
           # map that already knows both.
