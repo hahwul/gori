@@ -514,13 +514,9 @@ module Gori
     # 63 ms at 500. The tick runs ~1.3×/sec for as long as capture is committing flows, and 63 ms
     # of it is a visible stutter in a UI that is also drawing frames and taking keys.
     #
-    # Which is why the file's own bytes gate the work. The overwhelmingly common tick is one
-    # where nobody touched settings.json at all, and for that one there is nothing to fold: the
-    # class properties already hold what the file says. So a repeat of the same bytes costs the
-    # read and stops — and a read is what stays, deliberately, rather than an mtime or size
-    # check. Both of those miss a same-second rewrite of the same length, which is exactly the
-    # shape of a peer toggling a rule's `enabled` flag, and being fast is worth nothing if the
-    # answer is stale.
+    # A repeat of the same bytes skips the fold. The file metadata cache below also skips the
+    # read on ordinary ticks. A recently changed file still gets read, since a filesystem with
+    # a coarse clock can give two same-length writes the same timestamp.
     #
     # Keyed by PATH as well as content: `$GORI_HOME` moves between spec examples (and between a
     # `--db` open and the picker), and two different homes whose settings.json happen to agree
@@ -536,24 +532,19 @@ module Gori
     # store and never touches this file.
     @@reloaded_from : Hash(String, {String, String}) = {} of String => {String, String}
 
-    # The file's identity on disk — path, mtime, size — as of the last time `reload_section`
-    # settled `key`. A `stat` a tick instead of a `read` a tick: the three sections the TUI
-    # re-reads on every data_version poll (colormarker, saved views, rewriter) cost three
-    # blocking `File.read`s of settings.json on the render fiber, up to four times a second
-    # under capture, and `@@reloaded_from` only ever skipped the PARSE. A file whose mtime and
-    # size have not moved has not been written; a same-size rewrite still moves its mtime.
-    @@reloaded_stat : Hash(String, {String, Time, Int64}) = {} of String => {String, Time, Int64}
+    private record ReloadSignature, path : String, info : File::Info do
+      def same_version?(other : self) : Bool
+        path == other.path && info.same_file?(other.info) && info.size == other.info.size &&
+          info.modification_time == other.info.modification_time
+      end
+    end
+
+    # A stat on the render fiber instead of a blocking read for each of the three sections
+    # polled under capture. File identity distinguishes replacements that preserve size and
+    # mtime, such as restoring a saved copy of settings.json.
+    @@reloaded_stat = {} of String => ReloadSignature
 
     private RACY_WINDOW = 2.seconds
-
-    # `File.info?`, not a rescued `File.info`: with no settings.json (an MCP-only install never
-    # writes one) every tool call reloads eight sections, and a raise apiece cost ~1 ms a call.
-    private def self.file_signature : {String, Time, Int64}?
-      info = File.info?(path)
-      info && {path, info.modification_time, info.size.to_i64}
-    rescue
-      nil
-    end
 
     #
     # `absent` is what a PARSED file that lacks `key` means, for a section `serialize` omits when
@@ -563,12 +554,18 @@ module Gori
     # `object: false` admits a section that is not a JSON object (`user_agents` is an array).
     protected def self.reload_section(key : String, absent : JSON::Any? = nil, object : Bool = true,
                                       & : JSON::Any -> Nil) : Nil
-      sig = file_signature
-      return if sig && @@reloaded_stat[key]? == sig # not written since this section was settled
-      return unless sig                             # no file to read: `load_raw` would answer nil, by raising
-      raw = load_raw
-      return unless raw
-      here = {path, raw}
+      settings_path = path
+      # An MCP-only install may have no settings.json. File.info? handles that without raising.
+      return unless info = File.info?(settings_path)
+      return if @@reloaded_stat[key]?.try(&.same_version?(ReloadSignature.new(settings_path, info)))
+
+      raw, sig = File.open(settings_path, "r") do |file|
+        # Read the identity from the same handle as the bytes. A peer may have replaced
+        # the file between the path stat and this open.
+        opened = ReloadSignature.new(settings_path, file.info)
+        {file.gets_to_end, opened}
+      end
+      here = {settings_path, raw}
       # Same bytes under a new stat (our own save): settle it.
       return settle_section(key, here, sig) if @@reloaded_from[key]? == here
       root = JSON.parse(raw).as_h?
@@ -586,13 +583,17 @@ module Gori
     end
 
     private def self.settle_section(key : String, here : {String, String},
-                                    sig : {String, Time, Int64}?) : Nil
+                                    sig : ReloadSignature) : Nil
       @@reloaded_from[key] = here
       # A stamp too fresh to trust is not kept (git's "racily clean"): a filesystem with a coarse
       # clock, Windows' for one, stamps two same-length writes a few milliseconds apart alike,
       # so a peer's write right after this read would match it. Until the stamp ages, the
       # content check above decides.
-      @@reloaded_stat[key] = sig if sig && sig[1] < Time.utc - RACY_WINDOW
+      if sig.info.modification_time < Time.utc - RACY_WINDOW
+        @@reloaded_stat[key] = sig
+      else
+        @@reloaded_stat.delete(key)
+      end
     end
 
     # Forget what `reload_section` last folded, so the next call re-reads whatever the file says.

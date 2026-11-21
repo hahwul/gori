@@ -73,6 +73,51 @@ describe "Settings.reload_section on an unchanged file" do
     end
   end
 
+  it "reloads a replacement with the same size and modification time" do
+    with_settings_home do |dir|
+      path = File.join(dir, "settings.json")
+      write_rewriter(dir, rule_json(1, "AAA"), 2)
+      File.touch(path, Time.utc - 1.minute)
+      original = File.info(path)
+      Gori::Settings.reload_rewriter_from_disk
+      Gori::Settings.rewriter_rules.map(&.pattern).should eq(["AAA"])
+
+      staged = File.join(dir, "restored.json")
+      File.write(staged, File.read(path).sub("AAA", "BBB"))
+      File.touch(staged, original.modification_time)
+      File.rename(staged, path)
+      replacement = File.info(path)
+      replacement.size.should eq(original.size)
+      replacement.modification_time.should eq(original.modification_time)
+      replacement.same_file?(original).should be_false
+
+      Gori::Settings.reload_rewriter_from_disk
+      Gori::Settings.rewriter_rules.map(&.pattern).should eq(["BBB"])
+    end
+  end
+
+  it "reloads an older file restored after a recent write" do
+    with_settings_home do |dir|
+      path = File.join(dir, "settings.json")
+      backup = File.join(dir, "previous.json")
+      write_rewriter(dir, rule_json(1, "AAA"), 2)
+      File.touch(path, Time.utc - 1.minute)
+      Gori::Settings.reload_rewriter_from_disk
+      Gori::Settings.rewriter_rules.map(&.pattern).should eq(["AAA"])
+
+      File.rename(path, backup)
+      write_rewriter(dir, rule_json(1, "BBB"), 2)
+      # Keep the timestamp in the uncached window even if the test is paused.
+      File.touch(path, Time.utc + 1.minute)
+      Gori::Settings.reload_rewriter_from_disk
+      Gori::Settings.rewriter_rules.map(&.pattern).should eq(["BBB"])
+
+      File.rename(backup, path)
+      Gori::Settings.reload_rewriter_from_disk
+      Gori::Settings.rewriter_rules.map(&.pattern).should eq(["AAA"])
+    end
+  end
+
   it "keeps each section's answer to itself" do
     # Both sections read the SAME file, so a cache keyed on the raw bytes alone would let the
     # rewriter fold consume the colormarker's chance to.
