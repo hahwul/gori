@@ -927,6 +927,61 @@ describe "Gori::ProjectRegistry tags" do
     expect_raises(Gori::Error, /UTF-8/) { Gori::ProjectRegistry.normalize_tags([String.new(Bytes[0xff])]) }
   end
 
+  it "adopts peer tags on an unchanged edit and accepts a convergent edit" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      project = reg.create("reports", tags: ["old"])
+      before = reg.read_tags(project)
+      peer = Gori::ProjectRegistry.new(root)
+      peer.create_or_reopen("reports", tags: ["new"])
+      reg.set_tags(project, before, expected: before).should eq(["new"])
+      reg.set_tags(project, ["new"], expected: before).should eq(["new"])
+      reg.read_tags(project).should eq(["new"])
+    end
+  end
+
+  it "refuses to edit an unreadable tag sidecar while listings can still show the project" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      project = reg.create("reports")
+      path = File.join(project.dir, Gori::ProjectRegistry::TAGS_FILE)
+      Dir.mkdir(path)
+      File.touch(File.join(path, "keep"))
+      reg.entries.first.tags.should be_empty
+      expect_raises(Gori::Error, /could not read project tags/) { reg.read_tags(project) }
+      expect_raises(Gori::Error, /could not read project tags/) do
+        reg.set_tags(project, ["mine"], expected: [] of String)
+      end
+      File.exists?(File.join(path, "keep")).should be_true
+    end
+  end
+
+  it "compares the tag editor snapshot after acquiring the writers' lock" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      project = reg.create("reports", tags: ["old"])
+      done = Channel(String?).new(1)
+      File.open(File.join(project.dir, Gori::ProjectRegistry::TAGS_LOCK), "a") do |lock|
+        lock.flock_exclusive
+        spawn do
+          reg.set_tags(project, ["draft"], expected: ["old"])
+          done.send(nil)
+        rescue ex : Gori::Error
+          done.send(ex.message)
+        end
+        Fiber.yield
+        select
+        when done.receive
+          fail "tag edit bypassed the active writer"
+        else
+        end
+        File.write(File.join(project.dir, Gori::ProjectRegistry::TAGS_FILE), "peer\n")
+      end
+      done.receive.should match(/changed elsewhere/)
+      reg.tags_of(project).should eq(["peer"])
+    end
+  end
+
   it "stores tags at create, keeps them on a plain reopen, replaces them on a tagged one" do
     with_root do |root|
       reg = Gori::ProjectRegistry.new(root)

@@ -43,6 +43,7 @@ module Gori
     # one database open per project. Case is kept as typed; two spellings differing only in case
     # are one tag (`#normalize_tags`).
     TAGS_FILE     = ".tags"
+    TAGS_LOCK     = ".tags.lock"
     MAX_TAGS      = 10
     MAX_TAG_CHARS = 32
 
@@ -108,14 +109,18 @@ module Gori
     # Keep a stable lock inode beside the projects. The pin itself is renamed
     # on switch and removed on clear, so locking it would not serialize writers.
     private def with_default_pin_lock(&)
-      File.open(File.join(@root, DEFAULT_PIN_LOCK), "a", perm: 0o600) do |lock|
+      with_sidecar_lock(File.join(@root, DEFAULT_PIN_LOCK), "the default project pin") { yield }
+    end
+
+    private def with_sidecar_lock(path : String, subject : String, &)
+      File.open(path, "a", perm: 0o600) do |lock|
         deadline = Time.instant + OpenLock::CONTENTION_BUDGET
         loop do
           lock.flock_exclusive(blocking: false)
           break
         rescue ex : IO::Error
           raise ex unless OpenLock.contention?(ex)
-          raise Gori::Error.new("the default project pin is busy — try again") if Time.instant >= deadline
+          raise Gori::Error.new("#{subject} is busy — try again") if Time.instant >= deadline
           sleep OpenLock::RETRY_DELAY
         end
         yield
@@ -307,11 +312,19 @@ module Gori
     # project's tags refuse it again. Empty for an untagged or legacy project, and for one
     # whose sidecar cannot be read.
     def tags_of(project : Project) : Array(String)
-      file = File.join(project.dir, TAGS_FILE)
-      return [] of String unless File.file?(file) # the common case, without a raise
-      ProjectRegistry.salvage_tags(File.read(file).lines)
-    rescue
+      read_tags(project)
+    rescue IO::Error | Gori::Error
       [] of String
+    end
+
+    # An editor needs an actual snapshot: unreadable tags are not an empty list to replace.
+    def read_tags(project : Project) : Array(String)
+      path = File.join(project.dir, TAGS_FILE)
+      info = File.info?(path, follow_symlinks: false)
+      return [] of String unless info
+      info = File.info(path) if info.symlink?
+      raise Gori::Error.new("could not read project tags at #{path}: not a regular file") unless info.file?
+      ProjectRegistry.salvage_tags(File.read(path).lines)
     end
 
     # `normalize_tags` for tags gori did not just take from the operator (a sidecar on disk, an
@@ -329,11 +342,33 @@ module Gori
     # Replace a project's tags (an empty list removes the sidecar), answering what was stored.
     # Raises `Gori::Error` with the reason for a tag `#normalize_tags` refuses, before anything
     # is written.
-    def set_tags(project : Project, tags : Enumerable(String)) : Array(String)
+    def set_tags(project : Project, tags : Enumerable(String), *, expected : Array(String)? = nil) : Array(String)
+      replace_tags(project, ProjectRegistry.normalize_tags(tags), expected)
+    end
+
+    private def replace_tags(project : Project, tags : Array(String), expected : Array(String)? = nil) : Array(String)
       raise Gori::Error.new("project directory missing") unless Dir.exists?(project.dir)
-      normalized = ProjectRegistry.normalize_tags(tags)
-      write_tags(project.dir, normalized)
-      normalized
+      return read_tags(project) if tags == expected # An unchanged card adopts the current tags.
+      if expected.nil? && tags.empty? && !File.info?(File.join(project.dir, TAGS_FILE), follow_symlinks: false)
+        return tags
+      end
+
+      # Deletion takes the exclusive database guard. All tag writers take a separate, stable
+      # lock because the tag file itself is atomically replaced or unlinked.
+      guard = OpenLock.try_shared(project.db_path)
+      with_sidecar_lock(File.join(project.dir, TAGS_LOCK), "the project tag file") do
+        if expected
+          current = read_tags(project)
+          return current if current == tags
+          unless current == expected
+            raise Gori::Error.new("project tags changed elsewhere — cancel and reopen Edit tags to use the saved tags")
+          end
+        end
+        write_tags(project.dir, tags)
+      end
+      tags
+    ensure
+      guard.try(&.close)
     end
 
     private def write_tags(dir : String, tags : Array(String)) : Nil
@@ -561,16 +596,16 @@ module Gori
         # grammar its bytes are not in and skip the migration that fixes them.
         entries << {Env::PROJECT_SYNTAX_KEY, Settings.env_syntax.to_s.downcase} unless reopened
         raise CreateWriteError.new("could not save project settings — check the database is writable and retry") unless s.set_settings(entries)
+        # Replace tags only after the settings commit, while the store still guards this project.
+        tags.try { |t| write_create_tags(proj, t, !desc.empty?) }
       ensure
         s.close
       end
-      # A failed settings transaction must not still replace a reopened project's tags.
-      tags.try { |t| write_create_tags(dir, t, !desc.empty?) }
       {proj, !reopened}
     end
 
-    private def write_create_tags(dir : String, tags : Array(String), description_saved : Bool) : Nil
-      write_tags(dir, tags)
+    private def write_create_tags(project : Project, tags : Array(String), description_saved : Bool) : Nil
+      replace_tags(project, tags)
     rescue ex : IO::Error | Gori::Error
       detail = description_saved ? "project description was saved, but tags were not saved" : "could not save project tags"
       raise CreateWriteError.new("#{detail}: #{ex.message}", cause: ex)
