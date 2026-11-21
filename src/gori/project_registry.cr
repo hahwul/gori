@@ -687,7 +687,7 @@ module Gori
     # would then keep "successfully" writing flows into a now-pathless inode — a
     # silent, total loss of everything captured after the delete.
     #
-    # True when the project was the pinned `gori run` default, whose pin is then cleared.
+    # Returns true when this delete also cleared the pinned `gori run` default.
     #
     # `only_if` is asked while the open lock is held, so a caller that judged the project by its
     # contents (`gori run project prune`) judges the bytes it removes, not ones a writer added
@@ -723,12 +723,22 @@ module Gori
       pinned = default_pin.try { |pin| (find(pin) rescue nil).try(&.dir) == project.dir } || false
       begin
         raise Gori::Error.new("project changed since it was checked — kept") if only_if && !only_if.call
-        FileUtils.rm_rf(project.dir)
+        # rm_rf swallows filesystem errors, even after removing only part of the tree.
+        begin
+          FileUtils.rm_r(project.dir)
+        rescue ex : File::Error
+          raise Gori::Error.new("could not remove #{project.dir}: #{ex.message} (some files may already have been removed)")
+        end
       ensure
         guard.close
       end
-      File.delete?(default_pin_path) rescue nil if pinned
-      pinned
+      return false unless pinned
+      begin
+        File.delete?(default_pin_path)
+      rescue ex : File::Error
+        ::Log.warn { "deleted #{project.dir}, but could not clear the default pin at #{default_pin_path}: #{ex.message}" }
+        false
+      end
     end
 
     # Rename a project's display name (the `.name` sidecar). The on-disk directory

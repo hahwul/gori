@@ -296,6 +296,45 @@ describe Gori::ProjectRegistry do
     end
   end
 
+  it "reports a failed directory removal and leaves the default pin alone" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      project = reg.create("pinned")
+      id = reg.id_of(project).not_nil!
+      File.write(reg.default_pin_path, id)
+      # Move the directory after the preflight without relying on chmod (ineffective
+      # under root). No other process has this database open.
+      File.delete?(Gori::OpenLock.path(project.db_path))
+      moved = File.join(root, "moved")
+      expect_raises(Gori::Error, /could not remove/) do
+        reg.delete(project, -> {
+          File.rename(project.dir, moved)
+          true
+        })
+      end
+      reg.default_pin.should eq(id)
+      File.rename(moved, project.dir)
+      reg.delete(project).should be_true
+    end
+  end
+
+  it "only reports clearing the default pin when its removal succeeded" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      project = reg.create("pinned")
+      File.write(reg.default_pin_path, reg.id_of(project).not_nil!)
+      # A nonempty directory at the pin path cannot be unlinked on any platform.
+      reg.delete(project, -> {
+        File.delete(reg.default_pin_path)
+        Dir.mkdir(reg.default_pin_path)
+        File.touch(File.join(reg.default_pin_path, "keep"))
+        true
+      }).should be_false
+      Dir.exists?(project.dir).should be_false
+      Dir.exists?(reg.default_pin_path).should be_true
+    end
+  end
+
   it "persists the verbatim display name so list doesn't revert it to the slug" do
     with_root do |root|
       reg = Gori::ProjectRegistry.new(root)
