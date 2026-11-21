@@ -28,6 +28,7 @@ describe Gori::Tui::TagInput do
     input = Gori::Tui::TagInput.new(["web"], known)
     input.suggestions.map(&.[0]).should eq(["bugbounty", "burp-ext", "api"])
     type(input, "bu")
+    input.render_suggestions(Gori::Tui::Screen.new(MemoryBackend.new(60, 1)), 0, 0, 60, Gori::Tui::Theme.panel)
     input.suggestions.map(&.[0]).should eq(["bugbounty", "burp-ext"])
     input.handle(key(Termisu::Input::Key::Right))
     input.handle(key(Termisu::Input::Key::Tab)).should eq(Outcome::Handled)
@@ -38,6 +39,28 @@ describe Gori::Tui::TagInput do
   it "leaves tab to the caller when nothing is suggested" do
     input = Gori::Tui::TagInput.new([] of String, [] of {String, Int32})
     input.handle(key(Termisu::Input::Key::Tab)).should eq(Outcome::Unhandled)
+  end
+
+  it "leaves completion and navigation to the caller when only the overflow count fits" do
+    input = Gori::Tui::TagInput.new([] of String, known)
+    screen = MemoryBackend.new(8, 1)
+    input.render_suggestions(Gori::Tui::Screen.new(screen), 0, 0, 8, Gori::Tui::Theme.panel)
+    screen.row(0).strip.should eq("+4")
+    input.handle(key(Termisu::Input::Key::Right)).should eq(Outcome::Unhandled)
+    input.handle(key(Termisu::Input::Key::Tab)).should eq(Outcome::Unhandled)
+    input.tags.should be_empty
+  end
+
+  it "highlights the tag Tab completes after a resize hides the old pick" do
+    input = Gori::Tui::TagInput.new([] of String, known)
+    wide = MemoryBackend.new(80, 1)
+    input.render_suggestions(Gori::Tui::Screen.new(wide), 0, 0, 80, Gori::Tui::Theme.panel)
+    input.handle(key(Termisu::Input::Key::Right))
+    narrow = MemoryBackend.new(18, 1)
+    input.render_suggestions(Gori::Tui::Screen.new(narrow), 0, 0, 18, Gori::Tui::Theme.panel)
+    narrow.bg_at(0, 0).should eq(Gori::Tui::Theme.accent_bg)
+    input.handle(key(Termisu::Input::Key::Tab)).should eq(Outcome::Handled)
+    input.tags.should eq(["bugbounty"])
   end
 
   it "backspace edits the buffer, then removes the last tag" do

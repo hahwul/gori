@@ -2748,7 +2748,11 @@ module Gori::Tui
       width = {cw - Screen.display_width(prefix) - 2, 1}.max
       @tag_input.render_field(screen, base, y, width, fg, Theme.panel, active, @preedit)
       # Off a terminal so short that the row would land on the hint (h - 2).
-      @tag_input.render_suggestions(screen, base, y + 1, width, Theme.panel) if active && y + 1 < h - 2
+      if active && y + 1 < h - 2
+        @tag_input.render_suggestions(screen, base, y + 1, width, Theme.panel)
+      else
+        @tag_input.hide_suggestions
+      end
     end
 
     # `width` caps the drawn text (Screen#text ellipsizes past it). Uncapped by default,

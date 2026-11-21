@@ -19,10 +19,8 @@ module Gori
       getter buffer = ""
       getter refusal : String? = nil
       @picked = 0
-      # How many suggestion cells the last `render_suggestions` drew (nil before the first
-      # draw). The pick stays inside them: ←/→ over the whole list put it on a cell behind the
-      # `+N`, and ⇥ then committed a tag the operator never saw.
-      @drawn : Int32? = nil
+      # Only suggestions drawn in the current row can be picked.
+      @visible = [] of {String, String} # tag, rendered label
 
       # `known` is `ProjectRegistry.tag_counts` over the host: what to suggest, most-used first.
       def initialize(@tags : Array(String), @known : Array({String, Int32}))
@@ -42,26 +40,24 @@ module Gori
       def handle(ev : Termisu::Event::Key) : Outcome
         @refusal = nil
         key = ev.key
-        sugg = suggestions
-        @picked = @picked.clamp(0, pickable(sugg) - 1)
         if key.enter?
           @buffer.strip.empty? ? Outcome::Submit : commit(@buffer)
-        elsif !sugg.empty? && (key.tab? || key.left? || key.right?)
-          pick(key, sugg)
+        elsif !@visible.empty? && (key.tab? || key.left? || key.right?)
+          pick(key)
         else
           edit(ev)
         end
       end
 
       # tab takes the picked suggestion; ←/→ move the pick.
-      private def pick(key : Termisu::Input::Key, sugg : Array({String, Int32})) : Outcome
-        return commit(sugg[@picked][0]) if key.tab?
-        @picked = (@picked + (key.left? ? -1 : 1)) % pickable(sugg)
+      private def pick(key : Termisu::Input::Key) : Outcome
+        return commit(@visible[@picked][0]) if key.tab?
+        @picked = (@picked + (key.left? ? -1 : 1)) % @visible.size
         Outcome::Handled
       end
 
-      private def pickable(sugg : Array({String, Int32})) : Int32
-        (@drawn || sugg.size).clamp(1, {sugg.size, 1}.max)
+      def hide_suggestions : Nil
+        @visible.clear
       end
 
       private def edit(ev : Termisu::Event::Key) : Outcome
@@ -72,11 +68,13 @@ module Gori
           else
             @buffer = @buffer[0, @buffer.size - 1]
           end
+          hide_suggestions
           @picked = 0
           Outcome::Handled
         elsif (c = ev.char || key.to_char) && !c.control? && !ev.ctrl? && !ev.alt?
           return commit(@buffer) if c == ','
           @buffer += c
+          hide_suggestions
           @picked = 0
           Outcome::Handled
         else
@@ -94,6 +92,7 @@ module Gori
       private def commit(raw : String) : Outcome
         @tags = ProjectRegistry.normalize_tags(@tags + [raw])
         @buffer = ""
+        hide_suggestions
         @picked = 0
         Outcome::Handled
       rescue ex : Gori::Error
@@ -123,18 +122,26 @@ module Gori
       # many more did not fit. Nothing when there is nothing to suggest.
       def render_suggestions(screen : Screen, x : Int32, y : Int32, width : Int32, bg : Color) : Nil
         sugg = suggestions
+        hide_suggestions
         return if sugg.empty?
         right = x + width
         px = x
-        @drawn = sugg.size
         sugg.each_with_index do |(t, n), i|
           cell = "#{t} #{n}"
           more = "+#{sugg.size - i}"
-          if px + Screen.display_width(cell) + (i < sugg.size - 1 ? Screen.display_width(more) + 3 : 0) > right
+          cell_width = Screen.display_width(cell)
+          if px + cell_width + (i < sugg.size - 1 ? Screen.display_width(more) + 3 : 0) > right
             screen.text(px, y, more, Theme.muted, bg) if px + Screen.display_width(more) <= right
-            @drawn = i
             break
           end
+          @visible << {t, cell}
+          px += cell_width + 3
+        end
+        return if @visible.empty?
+
+        @picked = {@picked, @visible.size - 1}.min
+        px = x
+        @visible.each_with_index do |(_, cell), i|
           picked = i == @picked
           px = screen.text(px, y, cell, picked ? Theme.text_bright : Theme.muted, picked ? Theme.accent_bg : bg)
           px += 3
