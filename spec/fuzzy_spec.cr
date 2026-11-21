@@ -17,6 +17,18 @@ describe Gori::Fuzzy do
     contiguous.should be > scattered
   end
 
+  it "scores characters rather than byte offsets in multilingual text" do
+    Gori::Fuzzy.score("한글", "x한글").should eq(30)
+    Gori::Fuzzy.score("한글", "x한x글").should eq(24)
+    Gori::Fuzzy.score("한글", "글한").should be_nil
+  end
+
+  it "finds a match after a long multibyte prefix" do
+    text = "한" * 4096 + "글"
+    Gori::Fuzzy.score("글", text).should eq(15 - 4097)
+    Gori::Fuzzy.score("z", text).should be_nil
+  end
+
   it "does not overflow Int32 on a very long contiguous match (regression)" do
     # ~70k contiguous matches: the per-char `run * 5` bonus summed over the run
     # length exceeds Int32::MAX, which used to raise OverflowError mid-scan.
