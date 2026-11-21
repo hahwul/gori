@@ -286,6 +286,7 @@ module Gori::Tui
       bind(editor)
       @cursor.sync(editor.cy, editor.cx) # the press position — the anchor a drag extends from
       editor.click_to_cursor(rect, mx, my)
+      editor.take_word_character if selecting
       @cursor.move_to(editor.cy, editor.cx, selecting: selecting)
       apply(editor, lines)
     end
@@ -297,8 +298,11 @@ module Gori::Tui
       lines = editor.lines_snapshot
       return false if lines.empty?
       bind(editor)
-      editor.click_to_cursor(rect, mx, my)
-      select_word_at_cursor(editor, lines)
+      unless character = editor.word_character_at(rect, mx, my)
+        sync_to(editor)
+        return false
+      end
+      select_word_at_cursor(editor, lines, character: character)
     end
 
     # The word spread WITHOUT the hit test, for a caller whose caret is already at the pointer
@@ -306,12 +310,12 @@ module Gori::Tui
     # the reason is a layout that can move BETWEEN the two presses — a Repeater split column
     # resizes both of its cards when press 1 adopts the lower one, so a second hit-test would
     # invert the same screen row against a rect that has since shifted.
-    def select_word_at_cursor(editor : TextArea, lines : Array(String)? = nil) : Bool
+    def select_word_at_cursor(editor : TextArea, lines : Array(String)? = nil, *, character : Int32 = editor.cx) : Bool
       lines ||= editor.lines_snapshot
       return false if lines.empty?
       bind(editor)
       @cursor.sync(editor.cy, editor.cx)
-      return false unless @cursor.select_word_at_cursor(lines)
+      return false unless @cursor.select_word_at_cursor(lines, character: character)
       apply(editor, lines)
       true
     end

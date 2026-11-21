@@ -91,6 +91,7 @@ class Gori::Tui::RepeaterView
   # holds Lines built from the current view (theme colours + pretty/raw body), so the two
   # MUST move in lockstep. Every site that invalidates the response view goes through here.
   private def drop_resp_view_cache : Nil
+    @resp_word_press = nil
     @resp_view_cache = nil
     @resp_styled_cache.clear
     @resp_text_i = -1 # same keying, same hazard — see `resp_line_text`

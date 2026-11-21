@@ -237,17 +237,32 @@ describe Gori::Tui::TextField do
       f.selection_text.should eq("X-Custom-Header")
     end
 
-    # The single-line half of the wide-glyph pointer rule (`LineFieldRead#select_word_at_cursor`
-    # is the one home the thirteen fields share). A pointer past the midpoint of a 2-cell glyph
-    # rounds to the position AFTER it, which for a word's last glyph is past the word — so the
-    # spread steps back over that one wide cluster. ASCII is unaffected: the whitespace case
-    # above still takes nothing.
     it "a double-click takes the word from either half of a wide glyph" do
       f, _ = drawn_field("한글 선택")           # 한 cols 0-1, 글 2-3, sp 4, 선 5-6, 택 7-8
       f.select_word_at(5, 1).should be_true # LEFT half of 선
       f.selection_text.should eq("선택")
       f.select_word_at(8, 1).should be_true # RIGHT half of 택 — the value's last glyph
       f.selection_text.should eq("선택")
+    end
+
+    it "keeps the first press's exact glyph when the field scrolls on focus" do
+      f = TextField.new("한/next")
+      b = MemoryBackend.new(20, 3)
+      screen = Screen.new(b)
+      f.render(screen, 0, 1, 3, false, Theme.text, Theme.bg)
+      b.grid[1][0].should eq('한')
+      f.click_to_cursor(1, 1).should be_true
+      f.caret.should eq(1)
+      f.render(screen, 0, 1, 2, true, Theme.text, Theme.bg)
+      b.grid[1][0].should eq('/')
+      f.select_word_at(1, 1).should be_true
+      f.selection_text.should eq("한")
+    end
+
+    it "a double-click on the space after a wide glyph takes nothing" do
+      f, _ = drawn_field("한 next")
+      f.select_word_at(2, 1).should be_false
+      f.selection?.should be_false
     end
 
     it "an UNFOCUSED field is still clickable — that click is how it gets focused" do

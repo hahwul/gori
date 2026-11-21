@@ -220,12 +220,6 @@ describe Gori::Tui::ReadPane do
       pane.select_word(Rect.new(0, 0, 40, 6), 38, 0).should be_false
     end
 
-    # A pointer rounds to the NEAREST cluster boundary (`Screen.column_for_click`), which is
-    # what makes a drag over Hangul/CJK include the glyph the operator is more than half way
-    # across. The cost it must NOT have: a double-click on the right half of a word's LAST
-    # glyph resolves past the word, where the spread would find no token — so
-    # `Screen.step_back_over_wide` walks back over exactly one WIDE cluster in that case.
-    # Both halves of every wide glyph, and the unchanged ASCII contract, are pinned here.
     describe "double-click over wide glyphs" do
       # "한글 선택 테스트" — 한 at cols 0-1, 글 2-3, space 4, 선 5-6, 택 7-8, space 9, 테 10-11.
       it "takes the word from either half of a wide glyph" do
@@ -249,6 +243,19 @@ describe Gori::Tui::ReadPane do
         pane.select_word(rect, 4, 0).should be_true # the 'a' that ends "alpha"
         pane.copy_text.should eq("alpha")
         pane.select_word(rect, 5, 0).should be_false # the space after it
+      end
+
+      it "selects a wide word before punctuation and skips the actual following space" do
+        pane = ReadPane.new(wrap: true)
+        pane.source(["서울/next", "서울 둘"])
+        rect = Rect.new(0, 0, 40, 3)
+        render_pane(pane, h: 3)
+        pane.select_word(rect, 3, 0).should be_true
+        pane.copy_text.should eq("서울")
+        pane.select_word(rect, 4, 0).should be_true
+        pane.copy_text.should eq("/")
+        pane.select_word(rect, 4, 1).should be_false
+        pane.selection?.should be_false
       end
     end
 

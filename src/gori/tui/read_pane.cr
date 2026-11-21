@@ -41,6 +41,7 @@ module Gori::Tui
   # precisely because the two agree. A provider that changed the characters would put a different
   # letter in the caret cell than in the row around it.
   class ReadPane
+    @word_press = nil.as({Int32, Int32, Int32, Int32?}?)
     # Ceiling on the per-line wrap memo — mirrors `TextArea::WRAP_CACHE_CAP` and exists for the
     # same reason: a viewport is tens of rows, so this covers it many times over while a pane
     # scrolled through a huge body can never accumulate an entry per line.
@@ -121,6 +122,7 @@ module Gori::Tui
     # Decoder output, the Intercept preview) call this only when the bytes actually change, and
     # they are the ones the memo is for.
     def source(size : Int32, line_at : Int32 -> String) : Nil
+      @word_press = nil
       @size = {size, 0}.max
       @line_at = line_at
       drop_wrap_cache
@@ -169,6 +171,7 @@ module Gori::Tui
     # Drop the caret, the selection and both scroll offsets — the pane is showing different
     # text now, so a line index from the old text means nothing in the new one.
     def reset : Nil
+      @word_press = nil
       @cursor.reset
       @scroll = 0
       @scroll_sub = 0
@@ -351,6 +354,7 @@ module Gori::Tui
     # Place the caret at (mx, my) inside `rect` — the SAME rect `render` was given.
     # `selecting` is the drag half: the anchor stays where the press left it.
     def click(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
+      @word_press = nil
       return if empty? || rect.empty?
       # The scroll gauge rides `rect.right` (see render) — a click on that column scrolls
       # instead of placing the read caret, for every ReadPane at once: History detail, Probe
@@ -380,7 +384,8 @@ module Gori::Tui
           @scroll = {@scroll + row, 0}.max
         end
       end
-      place_caret_at(rect, mx, my, selecting)
+      character = place_caret_at(rect, mx, my, selecting)
+      @word_press = {mx, my, @cursor.cy, character} unless selecting
       # A line-select pane has no meaningful column, so a drag there grows whole lines — from
       # the row the PRESS landed on. It used to call `select_line`, which re-anchors at the
       # caret's own row: every motion event destroyed the press anchor, so dragging across
@@ -393,35 +398,38 @@ module Gori::Tui
     # there is no single run of text under the pointer to take.
     def select_word(rect : Rect, mx : Int32, my : Int32) : Bool
       return false if empty? || rect.empty? || @line_select_only
-      # The hit test is `place_caret_at`'s, not `ReadCursor#select_word_at`'s: that one resolves
-      # the row as `scroll + row`, which on a wrapping pane names a line that is not drawn
-      # there — so a double-click on a continuation row took a word out of the wrong line.
-      place_caret_at(rect, mx, my, false)
-      took = @cursor.select_word_at_cursor(@size, @line_at)
+      press = @word_press
+      @word_press = nil
+      character = if press && press[0] == mx && press[1] == my && press[2] == @cursor.cy
+                    press[3]
+                  else
+                    place_caret_at(rect, mx, my, false)
+                  end
+      took = character ? @cursor.select_word_at_cursor(@size, @line_at, character: character) : false
       ensure_visible
       took
     end
 
     # The caret half of both mouse gestures. Without wrap this is `ReadCursor`'s own hit test;
     # with it, the row list the draw laid down is inverted instead.
-    private def place_caret_at(rect : Rect, mx : Int32, my : Int32, selecting : Bool) : Nil
+    private def place_caret_at(rect : Rect, mx : Int32, my : Int32, selecting : Bool) : Int32?
       gw = gutter_w(rect)
       unless wrapping?
-        @cursor.click_to_cursor(rect, mx, my, @scroll, @size, @line_at, gw, @xscroll, selecting)
-        return
+        return @cursor.click_to_cursor(rect, mx, my, @scroll, @size, @line_at, gw, @xscroll, selecting)
       end
       row = my - rect.y
       # A drag above the pane pins to its first visible row (the pointer left the top edge with
       # the button down); a plain click there belongs to whatever is drawn above.
       if row < 0
-        return unless selecting
+        return nil unless selecting
         row = 0
       end
       # Rebuilt from the same rect and the same anchor `render` used rather than read off
       # `last_rows`, so the mapping also holds for a click that arrives before the first frame
       # and there is exactly one definition of where a row begins.
-      rows = visible_rows({rect.w - gw, 0}.max, rect.h)
-      return if rows.empty?
+      cw = {rect.w - gw, 0}.max
+      rows = visible_rows(cw, rect.h)
+      return nil if rows.empty?
       vr = rows[row]? || rows[rows.size - 1]
       # `Wrap.row_index` is the exact inverse of `Wrap.row_col`, the measure the draw, the
       # caret and the band all share — so a click lands on the cell the caret would paint, on
@@ -435,9 +443,9 @@ module Gori::Tui
       # short. Same rule the unwrapped branch gets from `Screen.column_for_click`, and the same
       # one `TextArea#click_to_cursor` passes; the caret's own ↓ deliberately does not (a goal
       # column rounded up drifts one glyph right per row).
-      @cursor.move_to(vr.li,
-        Wrap.row_index(line(vr.li), nil, vr.a, vr.b, mx - (rect.x + gw), nearest: true),
-        selecting: selecting)
+      hit = Wrap.row_pointer(line(vr.li), nil, vr.a, vr.b, mx - (rect.x + gw), width: cw)
+      @cursor.move_to(vr.li, hit.caret, selecting: selecting)
+      hit.character if rows[row]?
     end
 
     # --- render ---------------------------------------------------------------

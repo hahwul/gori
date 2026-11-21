@@ -2,6 +2,7 @@ module Gori::Tui
   # Read-mode caret + char selection for a single-line field (target URL, etc.).
   class LineFieldRead
     @anchor = nil.as(Int32?)
+    @word_press = nil.as({String, Int32?}?)
 
     def clear_selection : Nil
       @anchor = nil
@@ -36,6 +37,12 @@ module Gori::Tui
       end
     end
 
+    def click_to_cursor(line : String, cx : Int32, column : Int32, width : Int32, selecting : Bool) : Int32
+      hit = Screen.pointer_hit(line, column, width: width)
+      @word_press = selecting ? nil : {line, hit.character}
+      move_cx(cx, hit.caret - cx, line.size, selecting: selecting)
+    end
+
     # Select the WORD at `cx` (double-click). Same boundary rule as `ReadCursor` and
     # `TextArea#select_word_at`: a word is a run of key-ish chars (letters, digits, `_`, `-`)
     # or a run of punctuation, so a URL breaks at every `/`, `?` and `=` while a host label
@@ -44,8 +51,11 @@ module Gori::Tui
     # Returns the caret's NEW column, or nil when there was no word to take — a caller that
     # gets nil leaves its caret exactly where the press put it, which is what makes a
     # double-click on whitespace fall back to the ordinary click.
-    def select_word_at_cursor(line : String, cx : Int32) : Int32?
-      return nil unless span = LineEdit.word_span(line, cx)
+    def select_word_at_press(line : String) : Int32?
+      press = @word_press
+      @word_press = nil
+      return nil unless press && press[0].same?(line) && (character = press[1])
+      return nil unless span = LineEdit.word_span(line, character)
       a, b = span
       @anchor = a
       b

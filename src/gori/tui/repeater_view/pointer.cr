@@ -181,21 +181,21 @@ class Gori::Tui::RepeaterView
     place_request_caret(inner, mx, my, selecting: true)
   end
 
-  # Mouse DOUBLE-CLICK in the request pane — spread to the word under the CARET, which the
-  # press of the pair has already placed at the pointer (`handle_click` runs first, always).
+  # Mouse DOUBLE-CLICK in the request pane — spread to the word hit by the first press.
   # No geometry, and that is the point: a second hit-test would have to invert the same screen
   # row again, and in a split column the layout MOVED in between — press 1 adopts the lower
   # sub-pane, which grows the active card to ~2/3 and lifts the lower card's top edge by ~1/3
   # of the column. (The upper card's `y` is `col.y` whatever its height, so only this
   # direction was ever wrong.) Inverting against the new rect selected a token about a third of
-  # a column below the pointer; spreading from the caret inherits press 1's correct inverse.
+  # a column below the pointer; the editor keeps the first press's glyph index.
   def request_select_word : Bool
     # `@grpc_fields` alongside `@req_hex_edit`: neither pane is showing the head editor, so a
     # double-click would build a READ selection nothing paints, nothing can copy, and that
     # outlives the form — the same invisible no-op `place_request_caret` returns early for.
     return false unless @loaded && !@req_hex_edit && !@grpc_fields
     ed = req_editor
-    request_insert? ? ed.select_word_at_cursor : @req_read.select_word_at_cursor(ed)
+    return false unless character = ed.take_word_character
+    request_insert? ? ed.select_word_at_cursor(character) : @req_read.select_word_at_cursor(ed, character: character)
   end
 
   # The one place a pointer position becomes a caret in the request column. INS drives the
@@ -223,46 +223,12 @@ class Gori::Tui::RepeaterView
     end
   end
 
-  # Mouse: focus the URL or SNI field of the TARGET band by which row was clicked,
-  # and place that field's caret. The value bases mirror render_target (field_base).
-  # `selecting` is the DRAG half: it extends the read selection from wherever the press
-  # planted the anchor, and — unlike a press — it never switches FIELDS. A drag that
-  # crossed from the URL row down onto the SNI row would otherwise re-aim the anchor at a
-  # different string, so the band would be measured in one value and painted over another.
-  #
-  # A bare press goes through `move_cx` too, rather than assigning the caret: that is what
-  # COLLAPSES a standing selection. Assigning left the anchor behind, so a click after a
-  # ⇧←/→ run repainted the band from the old anchor to the new caret — a selection the
-  # operator had just clicked away from.
-  def target_click_to_cursor(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
-    return unless @loaded
-    # The SNI row is at exactly rect.y+2 (bottom border is rect.y+3) — match it
-    # precisely, so a click on the card's border doesn't route edits into @sni.
-    @target_field = (sni_active? && my == rect.y + 2) ? :sni : :url unless selecting
-    prefix = @target_field == :sni ? SNI_PREFIX : TARGET_PREFIX
-    line = target_active_line
-    to = Screen.column_for_click(line, mx - field_base(rect, prefix))
-    cx = @target_read.move_cx(target_active_cx, to - target_active_cx, line.size, selecting: selecting)
-    @target_field == :sni ? (@scx = cx) : (@tcx = cx)
-  end
-
-  # Double-click: take the word the press already placed the caret on. Spreads from THAT
-  # caret rather than hit-testing again (the same rule the request/response panes follow),
-  # so the two presses of the pair cannot disagree about which character was under the
-  # pointer. False on whitespace or an empty field, leaving the press's caret standing.
-  def target_select_word : Bool
-    return false unless @loaded && !target_insert?
-    cx = @target_read.select_word_at_cursor(target_active_line, target_active_cx)
-    return false unless cx
-    @target_field == :sni ? (@scx = cx) : (@tcx = cx)
-    true
-  end
-
   # Mouse PRESS in the response column. On a split (WebSocket) column the press first adopts
   # the card it landed in — the response half of what `request_click_to_cursor` does — and the
   # body rect is taken BEFORE the switch, because `ws_resp_split` sizes the two cards from
   # `@resp_pane` and switching first would invert the click against a layout not yet drawn.
   def resp_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+    @resp_word_press = nil
     return unless resp_navigable? && @loaded
     col = response_col_rect(rect) || return
     return unless col.contains?(mx, my)
@@ -281,18 +247,22 @@ class Gori::Tui::RepeaterView
     resp_place_caret(response_body_rect(col), mx, my, selecting: true)
   end
 
-  # Mouse DOUBLE-CLICK in the response pane — spread to the word under the CARET, which the
-  # press of the pair already placed (`handle_click` always runs first). No second hit test,
-  # for the reason `request_select_word` spells out: adopting a card resizes the column, so
-  # re-inverting the same screen row would address a rect that has since moved.
+  # Mouse DOUBLE-CLICK in the response pane — spread to the word hit by the first press.
+  # Adopting a card can resize the column before the second press arrives.
   def resp_select_word : Bool
     return false unless resp_navigable? && @loaded
+    press = @resp_word_press
+    @resp_word_press = nil
+    return false unless press && press[0] == @resp_pane && press[1] == @resp_cursor.cy && (character = press[2])
     size, line_at = resp_line_source
     return false if size <= 0
-    @resp_cursor.select_word_at_cursor(size, line_at)
+    @resp_cursor.select_word_at_cursor(size, line_at, character: character)
   end
 
+  @resp_word_press = nil.as({Symbol, Int32, Int32?}?)
+
   private def resp_place_caret(body : Rect, mx : Int32, my : Int32, selecting : Bool) : Nil
+    @resp_word_press = nil
     # Render's own numbers, not a re-derivation — see @resp_last_gw. Falls back to the
     # gutter estimate only before the first frame, when nothing has been laid out yet.
     gw = @resp_last_cw > 0 ? @resp_last_gw : resp_gutter_w(body)
@@ -318,13 +288,17 @@ class Gori::Tui::RepeaterView
     # `+ @resp_xscroll` puts the pointer back into the DRAWN line's column space: it is 0
     # under wrap, and without it a click on a sideways-panned line lands that many columns
     # early.
-    hit = Wrap.row_index(drawn, nil, vr.a, vr.b, mx - (body.x + gw) + resp_xscroll, reveal: @reveal)
-    cx = {hit - off, 0}.max.clamp(0, line_at.call(vr.li).size)
+    hit = Wrap.row_pointer(drawn, nil, vr.a, vr.b, mx - (body.x + gw) + resp_xscroll,
+      nearest: false, reveal: @reveal, left: resp_xscroll, width: cw)
+    cx = {hit.caret - off, 0}.max.clamp(0, line_at.call(vr.li).size)
     if selecting
       @resp_cursor.move_to(vr.li, cx, selecting: true) # keeps (or plants) the anchor
     else
       @resp_cursor.clear_selection
       @resp_cursor.sync(vr.li, cx)
+      if rows[row]? && (character = hit.character) && character >= off
+        @resp_word_press = {@resp_pane, vr.li, character - off}
+      end
     end
     ensure_resp_visible(body.h)
   end

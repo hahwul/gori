@@ -170,6 +170,11 @@ describe Gori::Tui::Wrap do
   end
 
   describe "row_col / row_index" do
+    it "keeps the caret at the break on a click beyond the row and reports no glyph" do
+      hit = Wrap.row_pointer("서울/next", nil, 0, 2, 5, width: 8)
+      hit.should eq(Screen::PointerHit.new(2, nil))
+    end
+
     it "are exact inverses at every cluster boundary within a row" do
       line = "a\t한#{"\u{1F44D}\u{1F3FD}"}e\u{0301}z글"
       lay = Wrap.layout(line, 6)
