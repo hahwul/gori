@@ -382,7 +382,7 @@ module Gori
         end
       end
 
-      # create_or_reopen rejects a name that slugifies to nothing (blank / punctuation-only)
+      # create_or_reopen rejects a new name that slugifies to nothing (blank / punctuation-only)
       # with a Gori::Error, and it both makes the directory and opens the DB — so a full,
       # read-only or otherwise unusable projects root surfaces as File::Error/IO::Error or a
       # driver error. Every one of them becomes a clean `gori run project create:` message
