@@ -71,6 +71,36 @@ module Gori
         flow_id: flow_id, clear_flow: clear_flow)
     end
 
+    enum IssueNotesStatus
+      Committed
+      Conflict
+      Missing
+      Busy
+    end
+
+    record IssueNotesWrite, status : IssueNotesStatus, current : String? = nil
+
+    # Check the exact stored notes under the same writer transaction as the update. The
+    # overwrite confirmation covers one observed peer value, and a deleted row cannot commit
+    # a draft. The batch's commit is authoritative even when the UPDATE executed successfully.
+    def save_issue_notes(id : Int64, text : String, *, expected : String,
+                         overwrite : String? = nil) : IssueNotesWrite
+      result = IssueNotesWrite.new(:missing)
+      committed = exec_task_ok ->(c : DB::Connection) {
+        if bytes = c.query_one?("SELECT #{ISSUE_NOTES_COL} FROM issues WHERE id = ?", id, as: Bytes)
+          current = String.new(bytes)
+          if current == expected || current == overwrite
+            c.exec("UPDATE issues SET notes = ?, updated_at = ? WHERE id = ?", text, now_us, id)
+            result = IssueNotesWrite.new(:committed)
+          else
+            result = IssueNotesWrite.new(:conflict, current)
+          end
+        end
+        nil
+      }
+      committed ? result : IssueNotesWrite.new(:busy)
+    end
+
     # Batch form of update_issue — the Issues list's multi-select severity/status set. ONE
     # exec_task_ok, so re-triaging 12 marked issues costs one transaction and one fsync
     # instead of 12 (P6 — never stall the data path). A batch of one is byte-identical to

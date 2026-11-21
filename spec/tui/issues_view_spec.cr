@@ -318,7 +318,7 @@ describe Gori::Tui::IssuesView do
       begin
         view.enter_notes_insert!
         "Bearer TUINOTESECRET99".each_char { |c| view.notes_insert(c) }
-        view.save_notes(store).should be_true
+        view.save_notes(store).status.committed?.should be_true
       ensure
         Gori::Settings.project_env_vars = previous
       end
@@ -364,7 +364,7 @@ describe Gori::Tui::IssuesView do
       "VERIFY-NOTE-123".each_char { |ch| view.notes_insert(ch) }
       view.esc_closes_detail?.should be_false # INS esc saves the note
 
-      view.save_notes(store).should be_true
+      view.save_notes(store).status.committed?.should be_true
       store.get_issue(id).not_nil!.notes.should eq("VERIFY-NOTE-123")
       view.esc_closes_detail?.should be_false # still on NOTES after the save
       view.focus_links!
@@ -410,7 +410,7 @@ describe Gori::Tui::IssuesView do
       view.notes_read_move(2, 0)
       view.enter_notes_insert!
       "!".each_char { |c| view.notes_insert(c) }
-      view.save_notes(store).should be_true
+      view.save_notes(store).status.committed?.should be_true
       store.get_issue(id).not_nil!.notes.should eq("line0\nline1\n!line2")
       # The re-seed is a no-op on the bytes — the buffer already holds what was committed — so
       # the caret stays on the line that was being edited.
@@ -437,7 +437,7 @@ describe Gori::Tui::IssuesView do
       view.open_detail(store).should be_true
       view.enter_notes_insert!
       view.notes_insert('X')
-      view.save_notes(store).should be_true
+      view.save_notes(store).status.committed?.should be_true
       store.get_issue(a).not_nil!.notes.should eq("X")
 
       view.close_detail
@@ -820,7 +820,7 @@ describe Gori::Tui::IssuesView do
       "writeup".each_char { |c| view.notes_insert(c) }
       store.close
 
-      view.save_notes(store).should be_false
+      view.save_notes(store).status.busy?.should be_true
       # The whole point: refresh_detail would have set_text'd the buffer back to the STORED
       # (empty) notes, so the operator's writeup vanished with no toast and nothing to retry.
       view.notes_copy_all.should contain("writeup")
@@ -857,7 +857,7 @@ describe Gori::Tui::IssuesView do
         view.open_detail(store)
         view.enter_notes_insert!
         "ok".each_char { |c| view.notes_insert(c) }
-        view.save_notes(store).should be_true
+        view.save_notes(store).status.committed?.should be_true
         view.notes_insert_mode?.should be_false
         view.detail_issue.try(&.notes).should eq("ok")
       end

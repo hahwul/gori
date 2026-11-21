@@ -277,13 +277,38 @@ describe "dragging out of the Issues detail" do
       detail_controller(host, store) do |ctl, id|
         ctl.view.enter_notes_insert!
         ctl.view.notes_insert('Z')
-        # A peer rewrites the notes: `save_notes_or_report` arms and stays in INS, so focus and
-        # insert mode are both still on NOTES — which is why the guard cannot read them.
+        # A peer rewrites the notes, so focus and insert mode both stay on NOTES.
         store.update_issue(id, notes: "written by someone else").should be_true
         ctl.handle_click(AREA, related_body(ctl.view).x + 1, related_body(ctl.view).y).should be_true
         ctl.view.notes_insert_mode?.should be_true # refused, as designed
         ctl.view.notes_focused?.should be_true
         ctl.supports_drag?.should be_false
+      end
+    end
+  end
+
+  it "reserves a confirmed notes overwrite for Escape, even after clicking away" do
+    with_session do |host, session|
+      store = session.store
+      detail_controller(host, store) do |ctl, id|
+        ctl.view.enter_notes_insert!
+        ctl.view.notes_insert('Z')
+        store.update_issue(id, notes: "written by someone else").should be_true
+        esc = Termisu::Event::Key.new(Termisu::Input::Key::Escape)
+        ctl.handle_detail_key(esc).should be_true
+        host.statuses.last.should contain("esc again overwrites theirs")
+
+        body = related_body(ctl.view)
+        ctl.handle_click(AREA, body.x + 1, body.y).should be_true
+        ctl.editor_exit_insert.should be_false
+        store.get_issue(id).not_nil!.notes.should eq("written by someone else")
+        ctl.view.notes_insert_mode?.should be_true
+        ctl.view.notes_focused?.should be_true
+        ctl.view.notes_copy_all.should eq("Zalpha\nbravo")
+
+        ctl.handle_detail_key(esc).should be_true
+        store.get_issue(id).not_nil!.notes.should eq("Zalpha\nbravo")
+        ctl.view.notes_insert_mode?.should be_false
       end
     end
   end
