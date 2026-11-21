@@ -31,8 +31,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
            else
              "openapi.json"
            end
-    open_export(:openapi, File.join(Dir.current, base)) do |path|
-      sitemap_controller.export_openapi(path, filter, targets, label)
+    open_export(:openapi, File.join(Dir.current, base)) do |dest|
+      sitemap_controller.export_openapi(dest, filter, targets, label)
       true
     end
   end

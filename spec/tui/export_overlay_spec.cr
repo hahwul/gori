@@ -148,6 +148,20 @@ describe Gori::Tui::ExportOverlay do
     end
   end
 
+  it "asks again when another file replaces the one in the overwrite prompt" do
+    with_tmpdir do |dir|
+      target = File.join(dir, "issues.md")
+      File.write(target, "first")
+      ov = ExportOverlay.new(:note, target)
+      enter(ov).should eq(:stay)
+      other = File.join(dir, "replacement")
+      File.write(other, "a different document")
+      File.rename(other, target)
+      enter(ov).should eq(:stay)
+      enter(ov).should eq(:commit)
+    end
+  end
+
   # `File.exists?` follows a link, so a DANGLING one read as absent and committed unwarned.
   it "arms on a dangling symlink too" do
     with_tmpdir do |dir|

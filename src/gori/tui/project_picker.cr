@@ -183,8 +183,7 @@ module Gori::Tui
       @archive_import_overlay = nil.as(ImportOverlay?)
       @archive_name_overlay = nil.as(NamePromptOverlay?)
       @archive_export_project = nil.as(Project?)
-      @archive_export_path = ""
-      @archive_export_overwrite = false
+      @archive_export_destination = nil.as(ProjectArchive::ExportDestination?)
       @prepared_export = nil.as(ProjectArchive::PreparedExport?)
       @prepared_import = nil.as(ProjectArchive::PreparedImport?)
       # Compress scope popup (space → Compress): choose what to strip, confirm, VACUUM.
@@ -1388,14 +1387,13 @@ module Gori::Tui
     private def prepare_archive_export(overlay : ExportOverlay) : Nil
       project = @archive_export_project
       return close_archive_export unless project
-      @archive_export_path = overlay.resolved_path
-      @archive_export_overwrite = ProjectArchive.destination_exists?(@archive_export_path)
+      @archive_export_destination = overlay.destination
       @archive_export_overlay = nil
       @mode = :preparing_archive
       render
       prepared = ProjectArchive.prepare_export(project)
       @prepared_export = prepared
-      destination_note = @archive_export_overwrite ? "\nReplace the existing file at #{@archive_export_path}?" : ""
+      destination_note = overlay.destination.info ? "\nReplace the existing file at #{overlay.destination.path}?" : ""
       dialog = ConfirmDialog.new("EXPORT PROJECT",
         "#{ProjectArchive.disclosure(prepared.inventory)}#{destination_note}",
         confirm_label: "export", cancel_label: "cancel", danger: false)
@@ -1418,15 +1416,15 @@ module Gori::Tui
 
     private def commit_archive_export : Nil
       prepared = @prepared_export
-      unless prepared
+      approved = @archive_export_destination
+      unless prepared && approved
         cancel_confirm
         return
       end
-      path = @archive_export_path
       @mode = :exporting_archive
       render
       begin
-        destination = prepared.write(path, overwrite: @archive_export_overwrite)
+        destination = prepared.write(approved, overwrite: !approved.info.nil?)
         set_flash("exported project #{prepared.project.name.inspect} to #{destination}", ok: true)
       rescue ex : Gori::Error | File::Error | IO::Error | DB::Error | SQLite3::Exception
         set_flash("project export failed: #{ex.message}", ok: false)
@@ -1548,8 +1546,7 @@ module Gori::Tui
       @prepared_export = nil
       @archive_export_overlay = nil
       @archive_export_project = nil
-      @archive_export_path = ""
-      @archive_export_overwrite = false
+      @archive_export_destination = nil
     end
 
     private def close_archive_import : Nil

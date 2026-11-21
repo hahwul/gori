@@ -49,7 +49,7 @@ describe SitemapController do
       seed(session.store, "https://acme.test/users/2")
       seed(session.store, "https://other.test/x")
       path = File.join(root, "api.json")
-      ctl.export_openapi(path, Gori::QL::EMPTY, {Gori::Sitemap::Origin.new("https", "acme.test", 443) => nil.as(Set(String)?)}, "https://acme.test")
+      ctl.export_openapi(Gori::ProjectArchive::ExportDestination.new(path), Gori::QL::EMPTY, {Gori::Sitemap::Origin.new("https", "acme.test", 443) => nil.as(Set(String)?)}, "https://acme.test")
       host.statuses.last.should contain("exporting")
       # Nothing has run yet: the build is a spawned fiber, not a call the event loop waits on.
       File.exists?(path).should be_false
@@ -61,11 +61,23 @@ describe SitemapController do
     end
   end
 
+  it "preserves a file created after the background export was accepted" do
+    with_sitemap_controller do |ctl, host, session, root|
+      seed(session.store, "https://acme.test/a")
+      path = File.join(root, "api.json")
+      ctl.export_openapi(Gori::ProjectArchive::ExportDestination.new(path), Gori::QL::EMPTY, {Gori::Sitemap::Origin.new("https", "acme.test", 443) => nil.as(Set(String)?)}, "acme.test")
+      File.write(path, "a peer's document")
+      drain_export(ctl)
+      File.read(path).should eq("a peer's document")
+      host.statuses.last.should contain("OpenAPI export failed")
+    end
+  end
+
   it "writes YAML for a .yaml destination" do
     with_sitemap_controller do |ctl, _, session, root|
       seed(session.store, "https://acme.test/a")
       path = File.join(root, "api.yaml")
-      ctl.export_openapi(path, Gori::QL::EMPTY, {Gori::Sitemap::Origin.new("https", "acme.test", 443) => nil.as(Set(String)?)}, "https://acme.test")
+      ctl.export_openapi(Gori::ProjectArchive::ExportDestination.new(path), Gori::QL::EMPTY, {Gori::Sitemap::Origin.new("https", "acme.test", 443) => nil.as(Set(String)?)}, "https://acme.test")
       drain_export(ctl)
       YAML.parse(File.read(path))["openapi"].should eq("3.0.3")
     end
@@ -74,7 +86,7 @@ describe SitemapController do
   it "reports a write failure instead of claiming success" do
     with_sitemap_controller do |ctl, host, session, root|
       seed(session.store, "https://acme.test/a")
-      ctl.export_openapi(File.join(root, "missing-dir", "api.json"), Gori::QL::EMPTY,
+      ctl.export_openapi(Gori::ProjectArchive::ExportDestination.new(File.join(root, "missing-dir", "api.json")), Gori::QL::EMPTY,
         {Gori::Sitemap::Origin.new("https", "acme.test", 443) => nil.as(Set(String)?)}, "acme.test")
       drain_export(ctl)
       host.statuses.last.should start_with("OpenAPI export failed")
@@ -108,7 +120,7 @@ describe SitemapController do
     with_sitemap_controller do |ctl, host, session, root|
       seed(session.store, "https://acme.test/a")
       path = File.join(root, "api.json")
-      ctl.export_openapi(path, Gori::QL::EMPTY, {Gori::Sitemap::Origin.new("https", "other.test", 443) => nil.as(Set(String)?)}, "other.test")
+      ctl.export_openapi(Gori::ProjectArchive::ExportDestination.new(path), Gori::QL::EMPTY, {Gori::Sitemap::Origin.new("https", "other.test", 443) => nil.as(Set(String)?)}, "other.test")
       drain_export(ctl)
       host.statuses.last.should start_with("OpenAPI: nothing to export")
       File.exists?(path).should be_false

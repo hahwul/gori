@@ -38,10 +38,14 @@ module Gori::Tui
       @default_basename = File.basename(default_path)
       @path_complete = PathComplete.new
       @notice = ""
-      @overwrite_armed = false
+      @destination = nil.as(ProjectArchive::ExportDestination?)
       # Deliberately NO @path_complete.refresh here: the field arrives prefilled, and a
       # dropdown covering the card before the user has touched anything reads as noise.
       # TextField#set parked the caret at the END, so the basename is what's under it.
+    end
+
+    def destination : ProjectArchive::ExportDestination
+      @destination || raise Gori::Error.new("export destination has not been accepted")
     end
 
     def path : String
@@ -110,7 +114,7 @@ module Gori::Tui
       # the first ↵ armed the overwrite and wrote nothing, and the strip still promising a
       # write is why that press reads as "nothing happened". The notice lives inside the card;
       # this is the same fact on the line the eye is already on.
-      verb = @overwrite_armed ? "overwrite" : "write"
+      verb = @destination.try(&.info) ? "overwrite" : "write"
       "type to complete · ↹ pick · ↑↓ browse · ↵ #{verb} · esc cancel"
     end
 
@@ -196,19 +200,25 @@ module Gori::Tui
       end
 
       # Not `File.exists?`, which follows a link: a dangling one would read as absent.
-      if ProjectArchive.destination_exists?(p) && !@overwrite_armed
-        @overwrite_armed = true
+      previous = @destination
+      current = ProjectArchive::ExportDestination.new(p)
+      @destination = current
+      if current.info && !previous.try(&.matches?(current))
         @notice = "file exists — ↵ again to overwrite"
         return :stay
       end
 
       :commit
+    rescue ex : File::Error
+      @destination = nil
+      @notice = "cannot inspect destination: #{ex.message}"
+      :stay
     end
 
     # Any edit or completion invalidates the arm: the ↵ that overwrites must be the one
     # immediately after the warning, for the path that was warned about.
     private def disarm : Nil
-      @overwrite_armed = false
+      @destination = nil
       @notice = ""
     end
 

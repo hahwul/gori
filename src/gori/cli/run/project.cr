@@ -411,6 +411,11 @@ module Gori
         end
         abort "gori run project export: no project matching '#{terminal_project_name(name)}'" unless project
 
+        approved = begin
+          ProjectArchive::ExportDestination.new(ProjectArchive.expand_archive_path(output_path))
+        rescue ex : File::Error
+          abort "gori run project export: could not inspect destination: #{ex.message}"
+        end
         prepared = begin
           ProjectArchive.prepare_export(project)
         rescue ex : Gori::Error
@@ -424,7 +429,7 @@ module Gori
           destination = begin
             # The operator's path is theirs (no `archives_only`), but never inside the projects
             # dir: `--force` over a project's own database would leave it unopenable.
-            prepared.write(output_path, overwrite: force, protected_dir: Paths.projects_dir)
+            prepared.write(approved, overwrite: force, protected_dir: Paths.projects_dir)
           rescue ex : ProjectArchive::DestinationExists
             prepared.close
             abort "gori run project export: #{ex.message} (use --force to replace it)"

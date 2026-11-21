@@ -1245,7 +1245,8 @@ module Gori::Tui
     # CLI's DEFAULT --format is `text`, a different report entirely). JSON.build emits no
     # trailing newline of its own, so the JSON export gains one here.
     # `ids` narrows the export to those issues (the marks or the filtered list); nil is all.
-    def issues_export_to(format : Symbol, path : String, ids : Array(Int64)? = nil) : Bool
+    def issues_export_to(format : Symbol, destination : ProjectArchive::ExportDestination, ids : Array(Int64)? = nil) : Bool
+      path = destination.path
       store = @host.session.store
       issues = store.issues
       if ids
@@ -1261,7 +1262,7 @@ module Gori::Tui
                 when :sarif then Issues::Export.sarif(issues, store, @host.session.project.name, matcher: Redact::Policy.ambient(store))
                 else             Issues::Export.markdown(issues, store, @host.session.project.name, Redact::Policy.ambient(store))
                 end
-      ProjectArchive.write_export_file(path, content.ends_with?('\n') ? content : "#{content}\n", @host.session.project)
+      ProjectArchive.write_export_file(destination, content.ends_with?('\n') ? content : "#{content}\n", @host.session.project)
       msg = "exported #{Gori.plural(issues.size, "issue")} → #{path}"
       # Only warn when the report landed INSIDE the ephemeral project dir. The path used to
       # always be in there, so the warning was unconditional; now the operator picks it, and

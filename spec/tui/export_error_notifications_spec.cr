@@ -33,7 +33,7 @@ end
 describe "export failures use the persistent error notification path" do
   it "marks a Notes write failure as an error and keeps the export open" do
     with_export_error_host do |host, directory|
-      NotesController.new(host).notes_export_to(directory, "draft").should be_false
+      NotesController.new(host).notes_export_to(Gori::ProjectArchive::ExportDestination.new(directory), "draft").should be_false
       host.kinds.last?.should eq(:error)
       host.statuses.last.should contain("export failed:")
     end
@@ -42,7 +42,7 @@ describe "export failures use the persistent error notification path" do
   it "marks an Issues write failure as an error and keeps the export open" do
     with_export_error_host do |host, directory|
       host.session.store.insert_issue("Export me", Gori::Store::Severity::Medium, "example.test", nil).should_not eq(0_i64)
-      IssuesController.new(host).issues_export_to(:json, directory).should be_false
+      IssuesController.new(host).issues_export_to(:json, Gori::ProjectArchive::ExportDestination.new(directory)).should be_false
       host.kinds.last?.should eq(:error)
     end
   end
@@ -57,7 +57,7 @@ describe "export failures use the persistent error notification path" do
         ctl.drain_events
       end
       view.report.usable_count.should eq(20)
-      ctl.sequencer_export_to(:json, directory, view.report, view.subject).should be_false
+      ctl.sequencer_export_to(:json, Gori::ProjectArchive::ExportDestination.new(directory), view.report, view.subject).should be_false
       host.kinds.last?.should eq(:error)
     end
   end
