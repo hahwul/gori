@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      document.documentElement.classList.add("has-js");
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Find the LLM and MCP calls in a capture, judge a prompt injection by its hit rate, carry an MCP session, and check the tool definitions a model is told to trust.">
+  
+  <title>Test an AI target - gori</title>
+  <link rel="icon" type="image/png" href="https://gori.hahwul.com/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="https://gori.hahwul.com/icons/favicon.svg" />
+  <link rel="shortcut icon" href="https://gori.hahwul.com/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="https://gori.hahwul.com/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="https://gori.hahwul.com/icons/site.webmanifest" />
+  <meta property="og:title" content="Test an AI target">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/playbooks/test-an-ai-target/">
+  <meta property="og:description" content="Find the LLM and MCP calls in a capture, judge a prompt injection by its hit rate, carry an MCP session, and check the tool definitions a model is told to trust.">
+  <meta property="og:image" content="https://gori.hahwul.com/og-images/playbooks-test-an-ai-target.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Test an AI target">
+  <meta name="twitter:description" content="Find the LLM and MCP calls in a capture, judge a prompt injection by its hit rate, carry an MCP session, and check the tool definitions a model is told to trust.">
+  <meta name="twitter:image" content="https://gori.hahwul.com/og-images/playbooks-test-an-ai-target.png">
+  <meta property="og:site_name" content="gori">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:locale:alternate" content="ko_KR">
+  
+  <link rel="canonical" href="https://gori.hahwul.com/playbooks/test-an-ai-target/">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Test an AI target","url":"https://gori.hahwul.com/playbooks/test-an-ai-target/","description":"Find the LLM and MCP calls in a capture, judge a prompt injection by its hit rate, carry an MCP session, and check the tool definitions a model is told to trust.","image":"https://gori.hahwul.com/og-images/playbooks-test-an-ai-target.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Playbooks","item":"https://gori.hahwul.com/playbooks/"},{"@type":"ListItem","position":3,"name":"Test an AI target"}]}</script>
+  <link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/test-an-ai-target/">
+<link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/test-an-ai-target/">
+<link rel="alternate" hreflang="x-default" href="https://gori.hahwul.com/playbooks/test-an-ai-target/">
+  <link rel="alternate" hreflang="x-default" href="https://gori.hahwul.com/playbooks/test-an-ai-target/">
+  
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/docs.css">
+  
+  <link rel="preload" href="https://gori.hahwul.com/fonts/charis-sil-400.woff2" as="font" type="font/woff2" crossorigin>
+  
+  
+  
+  
+</head>
+<body class="is-doc is-book" data-section="playbooks">
+  <a class="skip-link" href="#main">Skip to content</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/" class="logo" aria-label="gori home">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="Right-click to download logo"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="Primary">
+    <a href="https://gori.hahwul.com/getting-started/">Start</a>
+    <a href="https://gori.hahwul.com/playbooks/" class="active" aria-current="true">Playbooks</a>
+    <a href="https://gori.hahwul.com/guide/">Guide</a>
+    <a href="https://gori.hahwul.com/reference/">Reference</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="Primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="Primary">
+      <a href="https://gori.hahwul.com/getting-started/">Start</a>
+      <a href="https://gori.hahwul.com/playbooks/" class="active" aria-current="true">Playbooks</a>
+      <a href="https://gori.hahwul.com/guide/">Guide</a>
+      <a href="https://gori.hahwul.com/reference/">Reference</a>
+      <a href="https://gori.hahwul.com/getting-started/installation/">Install</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="Search documentation" title="Search documentation (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="Language">
+      
+      <a href="https://gori.hahwul.com/playbooks/test-an-ai-target/" hreflang="en" lang="en" aria-label="EN: English" title="English" class="is-current" aria-current="true">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/playbooks/test-an-ai-target/" hreflang="ko" lang="ko" aria-label="KO: 한국어" title="한국어">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="View on GitHub" title="View on GitHub">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="Download logo">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">Color</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="Copy SVG URL" data-copied="Copied">Copy SVG URL</button>
+  <a role="menuitem" href="https://gori.hahwul.com/reference/brand/">Brand kit →</a>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search documentation">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="Search" placeholder="Search the docs…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+
+<div class="docs-container book-reader">
+  <aside class="docs-sidebar">
+  <details class="docs-navigation" open>
+    <summary class="docs-navigation-toggle">Browse documentation</summary>
+
+    
+    <nav class="manual-nav book-nav" aria-label="The gori field guide">
+      
+      <a class="book-back" href="https://gori.hahwul.com/guide/">← Back to documentation</a>
+      
+
+      
+      <header class="book-nav-header">
+        <span class="manual-nav-label">The gori field guide</span>
+        <strong>Playbooks</strong>
+      </header>
+      <a class="nav-overview" href="https://gori.hahwul.com/playbooks/">Overview</a>
+      <p class="book-contents-label">Contents</p>
+
+      
+      
+      
+      
+      <details class="nav-group book-part">
+        <summary>Foundations</summary>
+        <ol class="nav-links book-chapters">
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/set-up-an-engagement/">
+              <span class="chapter-number" aria-hidden="true">1</span>
+              <span>Set up an engagement</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/map-the-attack-surface/">
+              <span class="chapter-number" aria-hidden="true">2</span>
+              <span>Map the attack surface</span>
+            </a>
+          </li>
+      
+      
+      
+      </ol></details>
+      <details class="nav-group book-part">
+        <summary>The manual loop</summary>
+        <ol class="nav-links book-chapters">
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/intercept-and-modify/">
+              <span class="chapter-number" aria-hidden="true">3</span>
+              <span>Intercept and modify in flight</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/fuzz-a-parameter/">
+              <span class="chapter-number" aria-hidden="true">4</span>
+              <span>Fuzz a parameter</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/carry-a-session/">
+              <span class="chapter-number" aria-hidden="true">5</span>
+              <span>Carry a session</span>
+            </a>
+          </li>
+      
+      
+      
+      </ol></details>
+      <details class="nav-group book-part" open>
+        <summary>Workbenches</summary>
+        <ol class="nav-links book-chapters">
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/test-access-control/">
+              <span class="chapter-number" aria-hidden="true">6</span>
+              <span>Test access control</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/decode-and-transform/">
+              <span class="chapter-number" aria-hidden="true">7</span>
+              <span>Decode and transform data</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/attack-a-jwt/">
+              <span class="chapter-number" aria-hidden="true">8</span>
+              <span>Attack a JWT</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/crack-and-forge-cookies/">
+              <span class="chapter-number" aria-hidden="true">9</span>
+              <span>Crack and forge session cookies</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/grade-token-randomness/">
+              <span class="chapter-number" aria-hidden="true">10</span>
+              <span>Grade token randomness</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/confirm-blind-vulns-oast/">
+              <span class="chapter-number" aria-hidden="true">11</span>
+              <span>Confirm blind vulnerabilities with OAST</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/test-an-ai-target/" class="active" aria-current="page">
+              <span class="chapter-number" aria-hidden="true">12</span>
+              <span>Test an AI target</span>
+            </a>
+          </li>
+      
+      
+      
+      </ol></details>
+      <details class="nav-group book-part">
+        <summary>Wrap up</summary>
+        <ol class="nav-links book-chapters">
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/triage-and-report/">
+              <span class="chapter-number" aria-hidden="true">13</span>
+              <span>Triage and report</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/run-an-ai-co-pilot/">
+              <span class="chapter-number" aria-hidden="true">14</span>
+              <span>Run an AI co-pilot session</span>
+            </a>
+          </li>
+      </ol></details>
+      
+      
+    </nav>
+
+    
+  </details>
+</aside>
+  <main id="main" class="docs-main">
+    <nav class="document-path" aria-label="You are here">
+      <a href="https://gori.hahwul.com/playbooks/">The gori field guide</a>
+      
+      <span aria-hidden="true">/</span><span>Workbenches</span>
+    </nav>
+    <header class="document-heading">
+      
+      
+      
+      <p class="chapter-label">Chapter <span>12</span> <span class="chapter-total">/ 14</span></p>
+      
+      
+      <h1>Test an AI target</h1>
+    </header>
+    <div class="toc-placeholder" aria-hidden="true"></div>
+    <article class="document-body"><p>This playbook treats an application that talks to a model, and an MCP server that hands tools to one, as targets like any other. It finds their calls in History, measures an injection by its hit rate, replays a stateful MCP call, and checks what a tool list tells the model. gori does not call a model. Every request here goes to the target you captured. Budget about fifteen minutes.</p>
+<blockquote>
+<p><strong>Before you begin.</strong> <a href="/playbooks/set-up-an-engagement/">Set up an engagement</a> first, and capture the application's traffic through the proxy: at least one LLM API call, or one MCP exchange (<code>initialize</code>, then <code>tools/list</code> or <code>tools/call</code>). Only test a target you are authorized to test. The examples use <code>mcp.example.com</code> as a stand-in.</p>
+</blockquote>
+<h2 id="1-find-the-calls">1. Find the calls</h2>
+<p>An LLM API call is recognised by its request body (a <code>model</code> beside <code>messages</code> or <code>input</code>), not by its host, so a self-hosted gateway counts too. An MCP call is JSON-RPC, whatever path it is posted to.</p>
+<pre><code class="language-bash hljs">gori run history -q 'llm:true'                              # every LLM API call
+gori run history -q 'llm:claude'                            # one model family
+gori run history -q 'rpc:tools/call'                        # MCP tool calls
+gori run history -q 'rpc:tools/call req.body:get_weather'   # one tool, by name
+</code></pre>
+<p>In the TUI the same queries go in History's filter, and a matching flow gets an <strong>LLM</strong> or <strong>MCP</strong> pane in its detail: the messages and reply, or each call's method, params and result.</p>
+<p><strong>Checkpoint.</strong> The query lists the calls you made, and opening one shows the conversation or the tool call decoded.</p>
+<h2 id="2-read-a-rate-not-one-answer">2. Read a rate, not one answer</h2>
+<p>A model can answer the same request differently each time, so one send proves little either way. Send the request as it stands N times and count the hits. A run whose only payload set is <strong>null</strong> payloads needs no <code>§…§</code> position:</p>
+<pre><code class="language-bash hljs">gori run fuzz &lt;flow-id&gt; --null=20 --mr 'PWNED' --concurrency 2
+# done · 20 sent · 7 shown · 0 errors
+</code></pre>
+<p><code>--mr</code> is the marker your injection asks the model to print. A streamed reply is matched as reassembled text, so a word split across two SSE events still counts. In the TUI add a <strong>Null</strong> set in the Fuzzer and read <code>7 hit</code> in the RESULTS header. Over MCP it is <code>payloads: [{&quot;null&quot;: 20}]</code>, and <code>fuzz_status</code> returns <code>matched</code> beside <code>sent</code>.</p>
+<p>To vary the injection instead, mark the prompt text and sweep a wordlist, as in <a href="/playbooks/fuzz-a-parameter/">Fuzz a parameter</a>.</p>
+<p><strong>Checkpoint.</strong> The run reports hits against sends. Seven of twenty is a measurable finding, and zero of twenty is stronger evidence than zero of one.</p>
+<h2 id="3-keep-the-conversation-for-the-report">3. Keep the conversation for the report</h2>
+<p>A finding needs an exchange a reader can follow, as well as the raw bytes.</p>
+<pre><code class="language-bash hljs">gori run show &lt;flow-id&gt; --format transcript &gt; finding.md
+</code></pre>
+<p>That writes each request message under its role, then the reply and its tool calls, as Markdown. In the TUI it is <strong>Copy as… › LLM transcript</strong> on the flow.</p>
+<p><strong>Checkpoint.</strong> The file reads as a conversation: the system prompt first, your injected message, then what the model answered.</p>
+<h2 id="4-carry-an-mcp-session">4. Carry an MCP session</h2>
+<p>A stateless MCP server answers a replayed <code>tools/call</code> as it is. A stateful one requires an <code>initialize</code> exchange first, returns an <code>Mcp-Session-Id</code>, and answers <code>404</code> once that session is gone. A <a href="/playbooks/carry-a-session/">session slot</a> with two refresh steps does the handshake for you.</p>
+<p>Bind the session id wherever a response carries it:</p>
+<pre><code class="language-bash hljs">gori run rewriter extract add --name MCPSID --kind header --selector Mcp-Session-Id \
+  --when 'header:mcp-session-id'
+</code></pre>
+<p>Save the two handshake requests as Repeater sessions, from the flows you captured:</p>
+<pre><code class="language-bash hljs">gori run repeater create --flow &lt;initialize-flow&gt; --name mcp-init
+gori run repeater create --flow &lt;initialized-notification-flow&gt; --name mcp-ready
+</code></pre>
+<p>Open <code>mcp-ready</code> and change its session header to <code>Mcp-Session-Id: $BIND.MCPSID</code>. A refresh step is sent without the slot's headers, so the stale session is not handed back to <code>initialize</code>, and this one request has to name the fresh id itself. A JSON-RPC <code>id</code> that must be new on every send can be written <code>&quot;id&quot;: &quot;$GEN.UUID&quot;</code>.</p>
+<p>Then make the slot: the header it writes, the rule it owns, the steps that renew it, and how often.</p>
+<pre><code class="language-bash hljs">gori run session add --name mcp --set 'Mcp-Session-Id: $BIND.MCPSID' --rule MCPSID \
+  --refresh &lt;mcp-init-id&gt;,&lt;mcp-ready-id&gt; --refresh-before ttl=10m
+gori run repeater send &lt;tools-call-session&gt; --slot mcp
+</code></pre>
+<p>Pick a <code>ttl</code> shorter than the server keeps an idle session. gori renews before a send, not in response to a <code>404</code>, so a session the server drops early shows up as <code>404</code> rows until the next refresh. <code>gori run session refresh mcp</code> runs the steps by hand to check them, and an agent does the same with <code>refresh_session_slot</code>.</p>
+<p><strong>Checkpoint.</strong> The send prints <code>slot: sending as mcp</code> and the tool's result, and <code>gori run history -q 'src:refresh'</code> lists the two handshake requests.</p>
+<h2 id="5-fuzz-a-tools-arguments">5. Fuzz a tool's arguments</h2>
+<p>With the slot carrying the session, a tool argument is an ordinary position. Mark it in the saved <code>tools/call</code> session and sweep:</p>
+<pre><code class="language-bash hljs"># body: {&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:&quot;$GEN.UUID&quot;,&quot;method&quot;:&quot;tools/call&quot;,
+#        &quot;params&quot;:{&quot;name&quot;:&quot;read_file&quot;,&quot;arguments&quot;:{&quot;path&quot;:&quot;§notes.txt§&quot;}}}
+gori run fuzz --repeater &lt;tools-call-session&gt; --slot mcp --preset traversal --mr 'root:'
+</code></pre>
+<p>A tool's failure usually comes back as <code>200</code> with <code>&quot;isError&quot;: true</code> in the result, so match on the body rather than the status.</p>
+<p><strong>Checkpoint.</strong> Every row is an answer from the tool, not a <code>404</code>, and the rows that matched are the arguments worth reading.</p>
+<h2 id="6-check-what-the-tool-list-tells-the-model">6. Check what the tool list tells the model</h2>
+<p>A <code>tools/list</code> result is text the client's model reads as trusted. The passive <code>llm_prompt_injection</code> rule flags a description that addresses the model behind the user's back:</p>
+<pre><code class="language-bash hljs">gori run probe 'rpc:tools/list'
+</code></pre>
+<p>A server can also change a definition after the client approved it. Compare two captures of the list, taken at different times or as different users:</p>
+<pre><code class="language-bash hljs">tools() { gori run show &quot;$1&quot; --json | jq -r '.json_rpc.calls[0].reply'; }
+diff &lt;(tools 41) &lt;(tools 97)
+</code></pre>
+<p>That prints the reply as indented JSON whether it arrived as one body or as an event stream, so the diff shows only the tool, description or schema that changed.</p>
+<p><strong>Checkpoint.</strong> <code>probe</code> either reports <code>llm_prompt_injection</code> on the list or reports nothing, and the diff is empty for a server whose definitions did not change.</p>
+<h2 id="next-steps">Next Steps</h2>
+<ul>
+<li><a href="/playbooks/carry-a-session/">Carry a session</a>: slots, extract rules and refresh steps in full</li>
+<li><a href="/playbooks/fuzz-a-parameter/">Fuzz a parameter</a>: positions, payload sets and matchers</li>
+<li><a href="/playbooks/triage-and-report/">Triage and report</a>: turn a hit rate and a transcript into an issue</li>
+<li><a href="/reference/query-language/">Query language</a>: <code>llm:</code>, <code>rpc:</code> and the rest of the filter grammar</li>
+</ul>
+</article>
+    
+
+
+<nav class="page-navigation" aria-label="Continue reading">
+  
+  <a href="https://gori.hahwul.com/playbooks/confirm-blind-vulns-oast/" rel="prev"><span>← Previous</span><strong>Confirm blind vulnerabilities with OAST</strong></a>
+  
+  
+  <a href="https://gori.hahwul.com/playbooks/triage-and-report/" rel="next"><span>Next →</span><strong>Triage and report</strong></a>
+  
+</nav>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page" data-title="On this page"></aside>
+</div>
+
+
+<footer class="docs-footer">
+  <p class="footer-meta">
+    <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul, Built with Love">
+      <span class="hahwul-img" aria-hidden="true"></span>
+      <span class="footer-love">Built with Love</span>
+    </a>
+    <span aria-hidden="true">·</span>
+    <span>Apache-2.0 · © HAHWUL</span>
+  </p>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js" defer></script>
+<script src="https://gori.hahwul.com/js/toc.js" defer></script>
+<script src="https://gori.hahwul.com/js/docs.js" defer></script>
+<script src="https://gori.hahwul.com/js/codecopy.js" defer></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js" defer></script>
+
+</body>
+</html>

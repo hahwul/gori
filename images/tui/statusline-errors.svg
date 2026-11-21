@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="110" height="38" viewBox="0 0 110.0 38.0" font-family="ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace" font-size="15.0px" role="img" aria-label="gori statusline row, in red: how many captured responses came back 5xx">
+<rect x="0.5" y="0.5" width="109.0" height="37.0" rx="10" ry="10" fill="#0a0a0b" stroke="#313132" stroke-width="1"/>
+<text x="37.00" y="23.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#cd3131" xml:space="preserve">1</text>
+<text x="55.00" y="23.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#cd3131" xml:space="preserve">×</text>
+<text x="73.00" y="23.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#cd3131" xml:space="preserve">5xx</text>
+</svg>
