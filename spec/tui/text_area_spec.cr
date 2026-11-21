@@ -1302,3 +1302,11 @@ describe "Gori::Tui::TextArea#goto_line with wrap off" do
     big.cy.should eq(1)
   end
 end
+
+describe Gori::Tui::TextArea do
+  it "jumps to the original characters when searching a cached lowercase line" do
+    area = Gori::Tui::TextArea.new("İ漢字字")
+    area.search_hits("字").should eq([{0, 2}, {0, 3}])
+    area.search_hits("漢").should eq([{0, 1}])
+  end
+end

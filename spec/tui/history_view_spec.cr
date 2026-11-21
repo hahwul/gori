@@ -1861,7 +1861,7 @@ describe Gori::Tui::HistoryView do
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: id, status: 200,
         head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice,
-        body: "LINE1\nLINE2\nLINE3\nLINE4".to_slice, content_type: "text/plain"))
+        body: "LINE1\nLINE2\nLINE3\nİ TOKEN".to_slice, content_type: "text/plain"))
 
       view = HistoryView.new
       view.reload(store)
@@ -1869,6 +1869,7 @@ describe Gori::Tui::HistoryView do
       view.toggle_pane                                # request -> response
       line3 = view.detail_search_lines("LINE3").first # 0-based row of the body's 3rd line
 
+      view.detail_search_hits("token").should eq([{line3 + 1, 2}])
       view.goto_detail_line(line3 + 1) # 1-based
       view.detail_copy_text.should eq("LINE3")
       view.detail_move(-1, 0) # ↑ should step to LINE2, not jump from a stale pre-goto caret

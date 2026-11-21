@@ -174,10 +174,31 @@ describe "Gori::Tui::Wrap.mark_search (single unwrapped row)" do
     end
   end
 
-  describe "U+0130 length-change fallback (dt.size != text.size)" do
-    it "does not crash and keeps the column right when downcase expands a glyph" do
+  describe "source glyphs under case expansion" do
+    it "highlights the original glyph when either half of its lowercase spelling matches" do
+      ["i", "\u0307", "İ"].each do |query|
+        b = base_and_mark("xİy", query, 40)
+        b.row(0).rstrip.should eq("xİy")
+        yellow_cols(b).should eq([1])
+      end
+    end
+
+    it "clips matches across wraps at source character boundaries" do
+      line = "aİBCİd"
+      memo = Wrap::SearchMemo.new
+      b = MemoryBackend.new(3, 2)
+      screen = Screen.new(b)
+      Wrap.mark_search(screen, 0, 0, line, 0, 3, "bcİ", 3, memo: memo)
+      Wrap.mark_search(screen, 0, 1, line, 3, 6, "bcİ", 3, memo: memo)
+      b.row(0).should eq("  B")
+      b.row(1).should eq("Cİ ")
+      b.bg_at(2, 0).should eq(Theme.yellow)
+      b.bg_at(1, 1).should eq(Theme.yellow)
+    end
+
+    it "keeps following matches on their original columns" do
       # 'İ' (U+0130) lowercases to "i" + U+0307 (2 codepoints), so the downcased copy
-      # is longer than the source; the code falls back to slicing the downcased string.
+      # has an extra code point before the match.
       text = "İ foo"
       (text.downcase.size != text.size).should be_true # branch is actually live
       b = base_and_mark(text, "foo", 40)
@@ -430,7 +451,7 @@ describe "Gori::Tui::Wrap.mark_search (single unwrapped row)" do
       end
     end
 
-    it "agrees on the U+0130 whole-line fallback (downcase grows the line)" do
+    it "keeps whole-line matches after U+0130 at the same display columns" do
       line = "İ foo " * 50
       memo = Wrap::SearchMemo.new
       got = MemoryBackend.new(48, 1)
