@@ -223,10 +223,39 @@ describe "Gori::Notes.parse with out-of-range numbers" do
     Gori::Notes.parse(%({"notes":[{"id":9223372036854775806,"text":"a"},"b","c"]})).not_nil!.notes.size.should eq(3)
   end
 
-  it "creates a note when the stored next id is Int64::MAX" do
+  it "returns an unused id that addresses the new note when the stored counter is full" do
     with_store do |store|
-      store.set_setting(Gori::Notes::DOCS_KEY, %({"cur":0,"notes":[{"id":9223372036854775807,"text":"a"}],"next_id":9223372036854775807}))
-      Gori::Notes.create(store, "b").should_not be_nil
+      store.set_setting(Gori::Notes::DOCS_KEY, %({"cur":0,"notes":[{"id":9223372036854775807,"text":"original"},{"id":1,"text":"another"}],"next_id":9223372036854775807}))
+      id = Gori::Notes.create(store, "new").not_nil!
+      id.should be > 0
+      Gori::Notes.update(store, id, "edited").should eq(Gori::Notes::Write::Committed)
+      Gori::Notes.load(store).texts.should eq(["original", "another", "edited"])
+      Gori::Notes.delete(store, id).should eq(Gori::Notes::Write::Committed)
+      Gori::Notes.load(store).texts.should eq(["original", "another"])
+    end
+  end
+
+  it "keeps explicit ids and gives mixed legacy and duplicate notes stable distinct identities" do
+    raw = %({"cur":3,"notes":["legacy",{"id":1,"text":"owner"},{"id":1,"text":"duplicate"},{"text":"unnumbered"},{"id":0,"text":"zero"},{"id":-1,"text":"negative"},{"id":5,"text":"later"}]})
+    with_store do |store|
+      store.set_setting(Gori::Notes::DOCS_KEY, raw)
+      doc = Gori::Notes.load(store)
+      ids = doc.notes.map(&.id)
+      ids.uniq.size.should eq(ids.size)
+      [ids[0], ids[2], ids[3]].all?(&.positive?).should be_true
+      ids[4..5].should eq([0_i64, -1_i64])
+      ids[1].should eq(1_i64)
+      ids.last.should eq(5_i64)
+      doc.cur.should eq(3)
+      store.setting(Gori::Notes::DOCS_KEY).should eq(raw)
+      owner = Gori::Store::LinkOwnerKind::Note
+      store.add_link(owner, ids[1], Gori::Store::LinkRefKind::Flow, 7_i64)
+      Gori::Notes.update(store, ids[2], "recovered").should eq(Gori::Notes::Write::Committed)
+      saved = Gori::Notes.load(store)
+      saved.notes.map(&.id).should eq(ids)
+      saved.texts.should eq(["legacy", "owner", "recovered", "unnumbered", "zero", "negative", "later"])
+      Gori::Notes.delete(store, ids[2]).should eq(Gori::Notes::Write::Committed)
+      store.list_links(owner, ids[1]).size.should eq(1)
     end
   end
 end

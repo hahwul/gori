@@ -232,9 +232,7 @@ module Gori
       mine.map do |note|
         disk = latest[note.id]?
         next note if disk == baseline[note.id]? || disk == note.text
-        while used.includes?(candidate)
-          candidate = candidate == Int64::MAX ? 1_i64 : candidate + 1
-        end
+        candidate = available_id(candidate, used)
         used << candidate
         copies[note.id] = candidate
         NoteEntry.new(candidate, note.text)
@@ -255,24 +253,43 @@ module Gori
       return nil unless arr
       cur = doc["cur"]?.try(&.as_i64?).try(&.clamp(0, Int32::MAX).to_i32) || 0
       next_id = doc["next_id"]?.try(&.as_i64?) || 0_i64
-      entries = [] of NoteEntry
-      legacy_id = 1_i64
-      arr.each do |v|
-        if obj = v.as_h?
-          id = obj["id"]?.try(&.as_i64?) || legacy_id
-          text = obj["text"]?.try(&.as_s?) || ""
-          entries << NoteEntry.new(id, text)
-          legacy_id = {legacy_id, id &+ 1}.max
-        else
-          text = v.as_s? || ""
-          entries << NoteEntry.new(legacy_id, text)
-          legacy_id &+= 1
-        end
-      end
-      next_id = {next_id, legacy_id}.max
+      entries, next_id = read_entries(arr, next_id)
       Doc.new(cur, entries, next_id)
     rescue JSON::ParseException
       nil
+    end
+
+    # Reserve stored ids before numbering legacy entries. The first explicit owner keeps
+    # its id (and its evidence links), even when a legacy entry precedes it in the array.
+    private def self.read_entries(arr : Array(JSON::Any), next_id : Int64) : {Array(NoteEntry), Int64}
+      used = Set(Int64).new
+      ids = arr.map do |value|
+        id = value.as_h?.try(&.["id"]?).try(&.as_i64?)
+        id if id && used.add?(id)
+      end
+      candidate = 1_i64
+      entries = arr.map_with_index do |value, i|
+        if id = ids[i]
+          candidate = {candidate, id &+ 1}.max
+        else
+          id = available_id(candidate, used)
+          used << id
+          candidate = id == Int64::MAX ? 1_i64 : id + 1
+        end
+        text = value.as_h?.try(&.["text"]?).try(&.as_s?) || value.as_s? || ""
+        NoteEntry.new(id, text)
+      end
+      {entries, available_id({candidate, next_id}.max, used)}
+    end
+
+    # A stored high-water mark can equal an existing id at Int64::MAX. Wrap only
+    # when needed, skipping occupied ids so a new note can be addressed on its own.
+    private def self.available_id(candidate : Int64, used : Set(Int64)) : Int64
+      candidate = {candidate, 1_i64}.max
+      while used.includes?(candidate)
+        candidate = candidate == Int64::MAX ? 1_i64 : candidate + 1
+      end
+      candidate
     end
 
     # Serialize a note set back to the "notes.docs" JSON value.
