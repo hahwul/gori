@@ -504,6 +504,20 @@ describe Gori::Graphql do
       op.variables.not_nil!.should contain("\"f\": null")
     end
 
+    it "reads only the multipart boundary parameter for the upload pane" do
+      ct = %(multipart/form-data; notboundary=wrong; note="boundary=other"; BOUNDARY="zz")
+      op = GQL.from_flow("/g", ct_head(ct), mp_body).not_nil!
+      op.form.should eq(GQL::Form::Multipart)
+      op.query.should eq("{ me }")
+      op.editable?.should be_false
+    end
+
+    it "does not open an upload pane for a boundary mentioned only in another parameter" do
+      ["notboundary=zz", %(note="a; boundary=zz")].each do |params|
+        GQL.from_flow("/g", ct_head("multipart/form-data; #{params}"), mp_body).should be_nil
+      end
+    end
+
     it "still refuses a plain JSON array / non-GraphQL body (no hijacking)" do
       GQL.from_json(%([{"id":1},{"id":2}])).should be_nil
       GQL.from_json(%([{"query":"{a}"},{"id":2}])).should be_nil # one stray element ⇒ not a batch

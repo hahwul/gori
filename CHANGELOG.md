@@ -6,6 +6,8 @@
 
 - Import GraphQL introspection JSON (`data.__schema` or top-level `__schema`) into unsent POST templates, one per query or mutation, with typed variables and bounded selections from the TUI, CLI and MCP; subscriptions are omitted with a count (#1948).
 
+- GraphQL upload previews find the multipart boundary among adjacent media type parameters (#1968)
+
 - CBOR shows the correct UTC second for fractional timestamps before 1970 and in the last second of year 9999 (#1954)
 
 - MCP: `list_issues` exports Markdown and SARIF reports, and `get_flow` exports curl, Python, fetch, Go, httpie and CSRF PoCs, with credential and body redaction and read-only access. Reports page whole issues within 64 KiB and mark shortened evidence separately (#1947).
