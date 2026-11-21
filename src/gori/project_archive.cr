@@ -394,7 +394,12 @@ module Gori
         File.chmod(snapshot, File::Permissions.new(0o600))
         raise Gori::Error.new(DATABASE_SIZE_ERROR) if File.info(snapshot).size > MAX_DATABASE_BYTES
         version, inventory = inspect_database(snapshot)
-        tags = project.canonical? ? ProjectRegistry.new(File.dirname(project.dir)).tags_of(project) : [] of String
+        # A loose database can also be named gori.db. Its directory belongs to the operator.
+        tags = if !loose_database && project.canonical?
+                 ProjectRegistry.new(File.dirname(project.dir)).tags_of(project)
+               else
+                 [] of String
+               end
         manifest = Manifest.new(FORMAT_VERSION, project.name, Gori::VERSION,
           version, Time.utc.to_rfc3339, inventory.flows, tags.empty? ? nil : JSON::Any.new(tags.map { |t| JSON::Any.new(t) }))
         prepared = PreparedExport.new(workdir, snapshot, project, manifest, inventory, loose_database)

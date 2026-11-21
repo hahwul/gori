@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Project export preserves existing backups when the archive manifest exceeds 64 KiB. Both export and import now report that limit (#1994).
+- Project export preserves existing backups when the manifest exceeds the 64 KiB limit reported by export and import. Exporting a standalone database skips neighboring project tags (#1994, #2002).
 
 - Project compression also removes bodies from saved interception originals and unfinished event streams when their respective request or response bodies are selected (#1990).
 

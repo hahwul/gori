@@ -260,6 +260,22 @@ describe Gori::ProjectArchive do
     end
   end
 
+  it "omits directory tags when a loose database is named gori.db" do
+    with_archive_project do |_registry, _project, _store, root|
+      loose = Gori::Project.new("Backup", File.join(root, Gori::Project::DB_FILE))
+      File.write(File.join(root, Gori::ProjectRegistry::TAGS_FILE), "other-workspace\n")
+      Gori::Store.open(loose.db_path).close
+      export = Gori::ProjectArchive.prepare_export(loose, loose_database: true)
+      begin
+        archive = export.write(File.join(root, "backup.gori"))
+        manifest = Gori::ProjectArchive::Manifest.from_json(read_archive(archive)["manifest.json"])
+        manifest.tags.should be_nil
+      ensure
+        export.close
+      end
+    end
+  end
+
   it "carries the project's tags in the manifest and salvages bad ones on import" do
     with_archive_project do |registry, project, _store, root|
       registry.set_tags(project, ["web", "모바일"])
