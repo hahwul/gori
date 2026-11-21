@@ -387,21 +387,14 @@ module Gori::Tui
       str.size
     end
 
-    # Cheap sufficient test for "index `i` already starts a cluster", so the snap helpers
-    # can skip their O(prefix) grapheme walk on the overwhelmingly common case — every
-    # keystroke in a line that merely CONTAINS a glyph would otherwise re-walk the prefix.
-    # An ASCII char normally starts a cluster: Extend / ZWJ / Prepend / Regional-Indicator
-    # are all non-ASCII, so nothing can bind one to what precedes it.
-    #
-    # The lone exception is the `\n` of a CRLF pair (UAX #29 GB3), and it is tested
-    # explicitly rather than assumed away. No line reaching here can hold one — every
-    # caller splits on '\n' first — but an `ascii_only?` short-circuit would answer TRUE
-    # for it, which is the UNSAFE direction: a wrong "already a boundary" skips the snap
-    # and strands the caret mid-cluster, while a wrong "not a boundary" only costs a walk
-    # that returns the same index. Conservative for real, not by assertion.
+    # Two adjacent ASCII characters have a cluster boundary between them except in CRLF
+    # (UAX #29 GB3). A Unicode Prepend character can join the ASCII character after it
+    # (GB9b), so boundaries next to non-ASCII text use the grapheme walk.
     private def self.boundary?(str : String, i : Int32) : Bool
-      c = str[i]
-      c.ascii? && !(c == '\n' && i > 0 && str[i - 1] == '\r')
+      current = str[i]
+      return false unless current.ascii?
+      previous = str[i - 1]
+      previous.ascii? && (current != '\n' || previous != '\r')
     end
 
     # Snap a character index to the END (exclusive) of the grapheme cluster holding it —
