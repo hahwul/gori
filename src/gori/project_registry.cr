@@ -199,9 +199,7 @@ module Gori
     # The canonical workspace bound to this project, if any. Legacy projects do
     # not have this sidecar and remain usable by name/slug.
     def workspace_of(project : Project) : String?
-      File.read(File.join(project.dir, WORKSPACE_FILE)).strip.presence
-    rescue
-      nil
+      workspace_in(project.dir)
     end
 
     # The project a surface falls back to when the operator named none: the
@@ -616,16 +614,15 @@ module Gori
     private def collides_with_other?(slug : String, display : String) : Bool
       dir = File.join(@root, slug)
       return false unless Dir.exists?(dir)
-      return false unless File.exists?(File.join(dir, Project::DB_FILE)) || workspace_bound?(dir)
+      return false unless File.exists?(File.join(dir, Project::DB_FILE)) || workspace_in(dir)
       display_name(dir, slug).downcase != display.downcase
     end
 
-    # Does this directory carry a source-workspace binding? The path-taking counterpart of
-    # `workspace_of`, for the checks that have a directory rather than a Project in hand.
-    private def workspace_bound?(dir : String) : Bool
-      !File.read(File.join(dir, WORKSPACE_FILE)).strip.presence.nil?
+    # The sidecar holds the canonical path verbatim, including any trailing whitespace.
+    private def workspace_in(dir : String) : String?
+      File.read(File.join(dir, WORKSPACE_FILE)).presence
     rescue
-      false
+      nil
     end
 
     # Assign a stable short id to a freshly created project. WRITE-IF-ABSENT: never
