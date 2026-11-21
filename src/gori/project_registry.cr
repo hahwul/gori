@@ -357,7 +357,9 @@ module Gori
         projects << Project.new(display_name(dir, child), db)
       end
       # Reverse the timestamp order while retaining activity within the same second.
-      projects.sort_by! { |project| Time::UNIX_EPOCH - (project.last_modified || Time::UNIX_EPOCH) }
+      projects.sort_by! do |project|
+        {Time::UNIX_EPOCH - (project.last_modified || Time::UNIX_EPOCH), project.dir}
+      end
     end
 
     # The verbatim display name from the sidecar, falling back to the directory
