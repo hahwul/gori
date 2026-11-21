@@ -380,7 +380,7 @@ module Gori::Tui
       shown = Entity.bytes(head, body)
       cut = false
       if shown && shown.size > DISPLAY_BODY_CAP
-        shown = shown[0, DISPLAY_BODY_CAP]
+        shown = Utf8.trim_incomplete_end(shown[0, DISPLAY_BODY_CAP])
         cut = true
       end
       out = Highlight.message(head, shown, pane == :request)
