@@ -895,10 +895,26 @@ module Gori
       value.starts_with?('"') ? value[1..] : value
     end
 
-    # Quote a completed value only when it needs it — an unquoted space would split the
-    # token in two the next time the query is parsed.
+    # Quote completed field values the lexer would split or treat as syntax.
     def self.quote(value : String) : String
-      value.each_char.any?(&.whitespace?) ? %("#{value}") : value
+      return value unless value.ends_with?(')') || value.each_char.any? { |ch| ch.whitespace? || ch == '"' }
+
+      String.build do |io|
+        quoted = false
+        value.each_char do |ch|
+          # Outside quotes, a backslash is literal even just before a quote.
+          if ch == '\\'
+            io << '"' if quoted
+            quoted = false
+          elsif !quoted
+            io << '"'
+            quoted = true
+          end
+          io << '\\' if ch == '"'
+          io << ch
+        end
+        io << '"' if quoted
+      end
     end
 
     # --- folding into a backend tree -----------------------------------------
