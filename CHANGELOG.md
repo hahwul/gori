@@ -93,6 +93,8 @@
 
 - TUI: selections in long text fields stay inside the field, including at wide characters (#1955)
 
+- Text fields move and delete a Unicode prepend character and its following text as one grapheme (#1969)
+
 - TUI: Find counts every occurrence and scrolls to the match, centred on an unwrapped line, a new History filter puts the cursor on the newest match, Issues export writes the marked or filtered issues and says which, and the `Space` menu shows all its rows again after the terminal grows (#1938, #1941).
 
 - TUI: leaving a filter discards unfinished IME composition and keeps the applied query (#1962)

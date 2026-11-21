@@ -213,7 +213,7 @@ describe Gori::Tui::Screen do
     end
 
     it "cluster_start / cluster_end snap to boundaries and are identity on them" do
-      s = "a#{skin}e\u{0301}z"
+      s = "a#{skin}e\u{0301}\u{0600}7z"
       starts = [] of Int32
       i = 0
       s.each_grapheme { |g| starts << i; i += g.size }
