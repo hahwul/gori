@@ -239,6 +239,21 @@ describe Gori::ProjectSearch do
     end
   end
 
+  it "searches the current body while an older version is still indexed" do
+    with_dir do |dir|
+      proj = project_in(dir, "p")
+      conn = build_db(proj.db_path)
+      id = add_flow(conn, "p.test", "/item", resp: "old text")
+      url = add_flow(conn, "p.test", "/old text", resp: "old text")
+      conn.exec("UPDATE flows SET response_body = ?, fts_dirty = 1", "new text".to_slice)
+      conn.close
+
+      result = search_all([proj], "old text").first
+      result.hits.map { |hit| {hit.flow_id, hit.match} }.should eq([{url, PS::Match::Url}])
+      search_all([proj], "new text").first.hits.map(&.flow_id).should eq([url, id])
+    end
+  end
+
   it "reads an old schema that has no fts_dirty column" do
     with_dir do |dir|
       proj = project_in(dir, "v2")
