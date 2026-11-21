@@ -84,9 +84,23 @@ describe Gori::Msgpack do
       json_of("c70cff000000007fffffffffffffff".hexbytes)
         .should eq(%({"$timestamp_unrepresentable":"out_of_range",) +
                    %("$ext":"AAAAAH//////////","$ext_type":-1}))
-      # A width the spec does not define is the other reason, named apart from the first.
+      # A width the spec does not define gets its own reason.
       json_of(mp(0xd4, 0xff, 0x01))
         .should eq(%({"$timestamp_unrepresentable":"width","$ext":"AQ==","$ext_type":-1}))
+    end
+
+    it "accepts the largest valid nanosecond field in both wider timestamps" do
+      json_of("d7ffee6b27fc00000001".hexbytes)
+        .should eq(%({"$timestamp":"1970-01-01T00:00:01Z","$ext":"7msn/AAAAAE=","$ext_type":-1}))
+      json_of("c70cff3b9ac9ffffffffffffffffff".hexbytes)
+        .should eq(%({"$timestamp":"1969-12-31T23:59:59Z","$ext":"O5rJ////////////","$ext_type":-1}))
+    end
+
+    it "preserves timestamp bytes and labels out-of-range nanoseconds" do
+      json_of("d7ffee6b280000000001".hexbytes)
+        .should eq(%({"$timestamp_unrepresentable":"nanoseconds_out_of_range","$ext":"7msoAAAAAAE=","$ext_type":-1}))
+      json_of("c70cff3b9aca00ffffffffffffffff".hexbytes)
+        .should eq(%({"$timestamp_unrepresentable":"nanoseconds_out_of_range","$ext":"O5rKAP//////////","$ext_type":-1}))
     end
   end
 
