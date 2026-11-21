@@ -30,7 +30,8 @@ end
 
 # A copy big enough to have a second spelling: the small fixture above is under 1 kB, where
 # `34567 bytes (33.8kB)` would read `512 bytes (512B)` and say nothing twice.
-private def frozen_big(store) : Gori::Store::IssueEvidence
+private def frozen_big(store, *, body_bytes : Int32 = 40_000,
+                       response_truncated : Bool = false) : Gori::Store::IssueEvidence
   fid = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_000_i64, scheme: "https", host: "acme.test", port: 443,
     method: "GET", target: "/big", http_version: "HTTP/1.1",
@@ -38,7 +39,8 @@ private def frozen_big(store) : Gori::Store::IssueEvidence
     source: Gori::FlowSource::Kind::Proxy))
   store.update_response(Gori::Store::CapturedResponse.new(
     fid, 200, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice,
-    ("x" * 40_000).to_slice, duration_us: 7_i64))
+    ("x" * body_bytes).to_slice, duration_us: 7_i64,
+    body_truncated: response_truncated, body_size: response_truncated ? body_bytes.to_i64 + 10 : nil))
   iid = store.insert_issue("big", Gori::Store::Severity::Low, "acme.test", nil)
   id, status = store.freeze_evidence(iid, Gori::Evidence.from_flow(store.get_flow(fid).not_nil!))
   status.ok?.should be_true
@@ -162,6 +164,17 @@ describe "gori run evidence" do
     with_store do |store|
       ev = frozen(store)
       Gori::CLI::Run.evidence_line_for_spec(ev.meta).should contain("#{ev.meta.bytes} bytes  sha256")
+    end
+  end
+
+  it "reports the display cap separately from a capture-time truncation" do
+    with_store do |store|
+      cap = Gori::Issues::Export::EVIDENCE_CAP
+      ev = frozen_big(store, body_bytes: cap + 1, response_truncated: true)
+
+      text = Gori::CLI::Run.evidence_text_for_spec(ev, false)
+      text.should contain("response body truncated at capture\n")
+      text.lines.last.should eq("[… body display cut at #{cap} bytes]")
     end
   end
 

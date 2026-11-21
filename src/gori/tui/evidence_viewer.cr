@@ -52,7 +52,7 @@ module Gori::Tui
     # `Highlight.message` materialises a styled line per source line, and a multi-MiB minified
     # body is one line — so the cap is on bytes, and the cut is announced in the pane.
     DISPLAY_BODY_CAP = 256 * 1024
-    TRUNCATED_NOTE   = "… [display truncated — the stored copy is complete]"
+    TRUNCATED_NOTE   = "… [body display truncated]"
 
     # Rows the card spends above the message: provenance, hashes, the chip strip, and the
     # divider under them.

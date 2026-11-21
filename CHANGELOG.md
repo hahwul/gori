@@ -77,6 +77,8 @@
 
 - Text evidence keeps complete UTF-8 characters at the display size limit (#1956)
 
+- Frozen evidence details distinguish a display limit from a capture that was already truncated (#1974)
+
 - Extract rules: a rule that re-binds the same value on every response no longer makes another rule's `extract_miss` warning repeat on most captured flows (#1942).
 
 - Proxy: capture keeps up under load. A new connection is answered during a sustained burst instead of waiting seconds for it to end, the streams of one HTTP/2 connection no longer wait for each other's database write, and a chatty WebSocket no longer waits for each message's (#1942).
