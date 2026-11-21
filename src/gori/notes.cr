@@ -40,10 +40,7 @@ module Gori
       end
 
       # The stable id at sub-tab position `idx`, or nil when there is no such position.
-      # The explicit `idx < 0` guard is not belt-and-braces: Crystal's `Array#[]?` counts a
-      # NEGATIVE index from the END, so a bare `notes[-1]?` answers "the last note" for a
-      # caller that meant "the slot before the first one" — and every caller here is walking
-      # neighbours around a position it is about to remove.
+      # Array#[]? counts a negative index from the end.
       def note_id(idx : Int32) : Int64?
         return nil if idx < 0
         notes[idx]?.try(&.id)
@@ -152,7 +149,7 @@ module Gori
       existing.ends_with?('\n') ? existing + text : "#{existing}\n#{text}"
     end
 
-    # Drop one note. `cur` is re-clamped against the set the transaction read, not ours.
+    # Keep the active note, or select its next neighbour (previous for the last note).
     def self.delete(store : Store, id : Int64) : Write
       legacy = store.setting(LEGACY_KEY)
       found = false
@@ -163,7 +160,9 @@ module Gori
           found = true
           notes = doc.notes.dup
           notes.delete_at(idx)
-          serialize(doc.cur.clamp(0, {notes.size - 1, 0}.max), notes, doc.next_id)
+          cur = doc.cur
+          cur -= 1 if idx < cur
+          serialize(cur.clamp(0, {notes.size - 1, 0}.max), notes, doc.next_id)
         end
       end
       return Write::Busy unless committed

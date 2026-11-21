@@ -208,12 +208,9 @@ describe "gori run — the CLI whole-document writers" do
     create = src[/private def self\.cmd_notes_create.*?\n      end\n/m]
     create.should contain("Notes.create(store, body)")
     delete = src[/private def self\.cmd_notes_delete.*?\n      end\n/m]
-    delete.should contain("Notes.save(store,")
+    delete.should contain("Notes.delete(store, target_id)")
     # The whole point: neither writes the document row itself any more.
     src.should_not contain("set_setting(Notes::DOCS_KEY")
-    # …and the delete still keeps the ACTIVE note by stable id rather than by position,
-    # which is why it goes through `Notes.save` and not the shorter `Notes.delete`.
-    delete.should contain("keep_id")
   end
 
   it "sets and deletes env vars through the transactional Env API" do

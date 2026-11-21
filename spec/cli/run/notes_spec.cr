@@ -201,7 +201,7 @@ describe "gori run notes delete — the gate is actually wired" do
 
   it "runs the gate BEFORE the write, not after it" do
     gate = body.index("note_delete_confirmation_error").not_nil!
-    save = body.index("Notes.save").not_nil!
+    save = body.index("Notes.delete").not_nil!
     gate.should be < save
   end
 end
