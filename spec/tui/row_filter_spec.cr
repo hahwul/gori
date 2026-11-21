@@ -58,6 +58,25 @@ describe Gori::Tui::RowFilter do
     b.row(0).should start_with("   : ab ")
   end
 
+  it "reopens the filter with its committed text and no old composition" do
+    f = RowFilter.new
+    f.start
+    f.handle_key(key(Termisu::Input::Key::LowerA, 'a'))
+    f.set_preedit("zq")
+    area = Rect.new(0, 0, 40, 1)
+    shown = MemoryBackend.new(area.w, area.h)
+    f.render_bar(Screen.new(shown), area)
+    shown.row(0).should contain("filter › azq")
+
+    f.handle_key(key(Termisu::Input::Key::Enter))
+    f.start
+    back = MemoryBackend.new(area.w, area.h)
+    f.render_bar(Screen.new(back), area)
+    f.text.should eq("a")
+    back.row(0).should contain("filter › a")
+    back.contains?("zq").should be_false
+  end
+
   it "names its key on the border while idle, unless there is nothing to narrow" do
     f = RowFilter.new
     b = MemoryBackend.new(40, 1)

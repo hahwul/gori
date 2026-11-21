@@ -207,4 +207,23 @@ describe "QueryBarEdit's per-bar hooks" do
     v.render(Screen.new(back), Rect.new(0, 0, 60, 6), true)
     back.contains?("zq").should be_false
   end
+
+  it "reopens History's query with its committed text and no old composition" do
+    v = HistoryView.new
+    v.start_query
+    "example".each_char { |c| v.query_insert(c) }
+    v.set_preedit("zq")
+    area = Rect.new(0, 0, 80, 10)
+    shown = MemoryBackend.new(area.w, area.h)
+    v.render_list(Screen.new(shown), area)
+    shown.contains?("examplezq").should be_true
+
+    v.stop_query
+    v.start_query
+    back = MemoryBackend.new(area.w, area.h)
+    v.render_list(Screen.new(back), area)
+    v.query.should eq("example")
+    back.contains?("example").should be_true
+    back.contains?("zq").should be_false
+  end
 end

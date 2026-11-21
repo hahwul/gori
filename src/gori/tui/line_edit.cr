@@ -175,7 +175,8 @@ module Gori::Tui
     abstract def query_caret_moved : Nil
 
     # Hook: the bar was left, by Enter or Esc.
-    abstract def query_left : Nil
+    def query_left : Nil
+    end
 
     # Hook: what a `LineEdit` action settles. An action that changes no text (Home, End, ⌥←,
     # ⌥→) takes the caret-move path, so it does not re-run a filter predicate.
@@ -197,6 +198,7 @@ module Gori::Tui
 
     def stop_query : Nil # Enter: keep the filter, leave edit mode
       @querying = false
+      @preedit = ""
       query_left
     end
 
