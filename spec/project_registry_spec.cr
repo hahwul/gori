@@ -26,6 +26,23 @@ private def with_root(&)
 end
 
 describe Gori::ProjectRegistry do
+  it "selects the latest activity when two projects were modified in the same second" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      first = reg.create("First")
+      second = reg.create("Second")
+      timestamp = Time.utc(2025, 1, 1)
+      # Check both orders so the result cannot depend on directory enumeration order.
+      [{first, second}, {second, first}].each do |(older, newer)|
+        File.touch(older.db_path, timestamp + 100.milliseconds)
+        File.touch(newer.db_path, timestamp + 900.milliseconds)
+        projects = reg.list
+        projects.map(&.db_path).should eq([newer.db_path, older.db_path])
+        Gori::ProjectRegistry.default_of(projects).try(&.db_path).should eq(newer.db_path)
+      end
+    end
+  end
+
   it "creates a named project with a slugified directory" do
     with_root do |root|
       reg = Gori::ProjectRegistry.new(root)

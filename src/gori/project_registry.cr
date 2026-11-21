@@ -358,7 +358,8 @@ module Gori
         next unless (Dir.exists?(dir) rescue false) && File.exists?(db)
         projects << Project.new(display_name(dir, child), db)
       end
-      projects.sort_by! { |p| -(p.last_modified.try(&.to_unix) || 0_i64) }
+      # Reverse the timestamp order while retaining activity within the same second.
+      projects.sort_by! { |project| Time::UNIX_EPOCH - (project.last_modified || Time::UNIX_EPOCH) }
     end
 
     # The verbatim display name from the sidecar, falling back to the directory
