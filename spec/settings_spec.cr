@@ -1062,6 +1062,165 @@ describe Gori::Settings do
     end
   end
 
+  describe "independent preference edits in two windows" do
+    it "keeps peer display and notification choices when both sections started at factory defaults" do
+      previous = {Gori::Settings.wrap_lines?, Gori::Settings.notify_bell?}
+      with_recovery_path do |path|
+        Gori::Settings.wrap_lines = true
+        Gori::Settings.notify_bell = false
+        File.write(path, %({"env":{"syntax":"bare"}}))
+        Gori::Settings.load
+        File.write(path, %({"display":{"terminal_title":"off","future_field":"kept"},"notifications":{"toast":false}}))
+        Gori::Settings.wrap_lines = false
+        Gori::Settings.notify_bell = true
+        Gori::Settings.save.should be_true
+        written = JSON.parse(File.read(path))
+        written["display"]["terminal_title"].as_s.should eq("off")
+        written["display"]["future_field"].as_s.should eq("kept")
+        written["display"]["wrap_lines"].as_bool.should be_false
+        written["notifications"]["toast"].as_bool.should be_false
+        written["notifications"]["bell"].as_bool.should be_true
+      end
+    ensure
+      previous.try { |p| Gori::Settings.wrap_lines, Gori::Settings.notify_bell = p }
+    end
+
+    it "resets the last local preference without deleting a peer's new field" do
+      previous = Gori::Settings.wrap_lines?
+      with_recovery_path do |path|
+        File.write(path, %({"display":{"wrap_lines":false}}))
+        Gori::Settings.load
+        File.write(path, %({"display":{"wrap_lines":false,"terminal_title":"off"}}))
+        Gori::Settings.wrap_lines = true
+        Gori::Settings.save.should be_true
+        written = JSON.parse(File.read(path))["display"]
+        written["terminal_title"].as_s.should eq("off")
+        written["wrap_lines"]?.try(&.as_bool).should_not be_false
+      end
+    ensure
+      Gori::Settings.wrap_lines = previous unless previous.nil?
+    end
+
+    it "preserves a normalized field through a sibling edit and drops its original spelling when the panel is reset" do
+      previous = {Gori::Settings.wrap_lines?, Gori::Settings.terminal_title}
+      with_recovery_path do |path|
+        File.write(path, %({"display":{"wrap_lines":true,"terminal_title":"unknown-mode"}}))
+        Gori::Settings.load
+        Gori::Settings.wrap_lines = false
+        Gori::Settings.save.should be_true
+        JSON.parse(File.read(path))["display"]["terminal_title"].as_s.should eq("unknown-mode")
+        Gori::Settings.wrap_lines = true
+        Gori::Settings.save.should be_true
+        JSON.parse(File.read(path)).as_h.has_key?("display").should be_false
+      end
+    ensure
+      previous.try { |p| Gori::Settings.wrap_lines, Gori::Settings.terminal_title = p }
+    end
+
+    it "waits for another writer to publish before reading the file to merge" do
+      previous = Gori::Settings.wrap_lines?
+      with_recovery_path do |path|
+        File.write(path, %({"display":{"wrap_lines":true}}))
+        Gori::Settings.load
+        Gori::Settings.wrap_lines = false
+        done = Channel(Bool).new(1)
+        File.open("#{path}.write.lock", "a") do |peer|
+          peer.flock_exclusive
+          spawn { done.send(Gori::Settings.save) }
+          Fiber.yield
+          File.write(path, %({"update":{"check_enabled":false}}))
+        end
+        done.receive.should be_true
+        written = JSON.parse(File.read(path))
+        written["display"]["wrap_lines"].as_bool.should be_false
+        written["update"]["check_enabled"].as_bool.should be_false
+      end
+    ensure
+      Gori::Settings.wrap_lines = previous unless previous.nil?
+    end
+
+    it "refuses a save while a peer holds the config lock and can retry after it closes" do
+      previous = Gori::Settings.wrap_lines?
+      with_recovery_path do |path|
+        original = %({"display":{"wrap_lines":true}})
+        File.write(path, original)
+        Gori::Settings.load
+        Gori::Settings.wrap_lines = false
+        File.open("#{path}.write.lock", "a") do |peer|
+          peer.flock_exclusive
+          Gori::Settings.save.should be_false
+          File.read(path).should eq(original)
+        end
+        Gori::Settings.save.should be_true
+        JSON.parse(File.read(path))["display"]["wrap_lines"].as_bool.should be_false
+      end
+    ensure
+      Gori::Settings.wrap_lines = previous unless previous.nil?
+    end
+
+    it "shares a settings lock with a writer addressing the same config through a symlink" do
+      posix_only!("File.symlink needs Developer Mode")
+      previous = Gori::Settings.wrap_lines?
+      with_recovery_path do |path|
+        target = "#{path}.target"
+        File.write(target, %({"display":{"wrap_lines":true}}))
+        File.symlink(target, path)
+        Gori::Settings.load
+        Gori::Settings.wrap_lines = false
+        done = Channel(Bool).new(1)
+        File.open("#{target}.write.lock", "a") do |peer|
+          peer.flock_exclusive
+          spawn { done.send(Gori::Settings.save) }
+          Fiber.yield
+          File.write(target, %({"update":{"check_enabled":false}}))
+        end
+        done.receive.should be_true
+        File.symlink?(path).should be_true
+        written = JSON.parse(File.read(target))
+        written["display"]["wrap_lines"].as_bool.should be_false
+        written["update"]["check_enabled"].as_bool.should be_false
+      end
+    ensure
+      Gori::Settings.wrap_lines = previous unless previous.nil?
+    end
+
+    it "records an update check without re-enabling it or marking a peer's unseen notice as read" do
+      previous = {Gori::Settings.update_latest_seen, Gori::Settings.update_checked_at, Gori::Settings.update_notified_version, Gori::Settings.update_check_enabled?}
+      with_recovery_path do |path|
+        File.write(path, %({"update":{"check_enabled":true,"latest_seen":"1","checked_at":10,"notified_version":"1"}}))
+        Gori::Settings.load
+        File.write(path, %({"update":{"check_enabled":false,"latest_seen":"2","checked_at":20,"notified_version":"2"}}))
+        # This check saw version 1 again. Its timestamp and result describe one observation.
+        Gori::Settings.update_checked_at = 30_i64
+        Gori::Settings.save.should be_true
+        written = JSON.parse(File.read(path))["update"]
+        written["check_enabled"].as_bool.should be_false
+        written["notified_version"].as_s.should eq("2")
+        written["latest_seen"].as_s.should eq("1")
+        written["checked_at"].as_i64.should eq(30)
+      end
+    ensure
+      previous.try { |p| Gori::Settings.update_latest_seen, Gori::Settings.update_checked_at, Gori::Settings.update_notified_version, Gori::Settings.update_check_enabled = p }
+    end
+
+    it "keeps per-verb bindings and the peer's choice of editor keyset when unbinding a verb" do
+      previous = {Gori::Settings.keymap_overrides, Gori::Settings.editor_keyset}
+      with_recovery_path do |path|
+        File.write(path, %({"hotkeys":{"keyset":"helix","bindings":{"settings.layout":["g"],"first":["x"]}}}))
+        Gori::Settings.load
+        File.write(path, %({"hotkeys":{"keyset":"vim","bindings":{"settings.layout":["g"],"peer":["v"]}}}))
+        Gori::Settings.keymap_overrides = {"first" => [] of String}
+        Gori::Settings.save.should be_true
+        written = JSON.parse(File.read(path))["hotkeys"]
+        written["keyset"].as_s.should eq("vim")
+        written["bindings"].as_h.keys.sort!.should eq(["first", "peer"])
+        written["bindings"]["first"].as_a.should be_empty
+      end
+    ensure
+      previous.try { |p| Gori::Settings.keymap_overrides, Gori::Settings.editor_keyset = p }
+    end
+  end
+
   it "refuses to save over a settings file that became unreadable after load" do
     dir = File.tempname("gori-settings-merge-unreadable")
     Dir.mkdir_p(dir)

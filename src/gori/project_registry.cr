@@ -127,15 +127,7 @@ module Gori
 
     private def with_sidecar_lock(path : String, subject : String, &)
       File.open(path, "a", perm: 0o600) do |lock|
-        deadline = Time.instant + OpenLock::CONTENTION_BUDGET
-        loop do
-          lock.flock_exclusive(blocking: false)
-          break
-        rescue ex : IO::Error
-          raise ex unless OpenLock.contention?(ex)
-          raise SidecarBusy.new("#{subject} is busy — try again") if Time.instant >= deadline
-          sleep OpenLock::RETRY_DELAY
-        end
+        raise SidecarBusy.new("#{subject} is busy — try again") unless OpenLock.acquire_exclusive(lock)
         yield
       end
     end

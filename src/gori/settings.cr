@@ -1,5 +1,6 @@
 require "json"
 require "./paths"
+require "./open_lock"
 # The global-rule re-spelling `load` runs when `env.syntax` is absent. Required HERE rather than
 # left to `src/gori.cr`: this file NAMES `EnvMigration::GlobalReport`, and the bench harnesses (and
 # other small entry points) require settings.cr directly without the umbrella.
@@ -13,7 +14,17 @@ module Gori::Settings
   # Each field is `{"json_key", getter, DEFAULT}`; the setter is the getter less any `?`.
   # Parsing stays hand-written beside the table: nearly every field clamps or normalizes.
   # Defined before the section files below, which call it at their top level.
+  # These objects hold independent fields. Their serializers omit the entire object at
+  # factory defaults, so the merge needs the same defaults to compare the first/last edit.
+  PREFERENCE_DEFAULTS = {} of String => Hash(String, JSON::Any)
+
   private macro defaulted_section(name, key, *fields)
+    PREFERENCE_DEFAULTS[{{ key }}] = {
+      {% for f in fields %}
+        {{ f[0] }} => JSON::Any.new({{ f[2] }}),
+      {% end %}
+    }
+
     private def self.reset_{{ name.id }} : Nil
       {% for f in fields %}
         self.{{ f[1].id.gsub(/\?$/, "") }} = {{ f[2] }}
@@ -96,6 +107,9 @@ module Gori
     # exactly the clobber `listener_error`'s `among:` comment (settings/listeners.cr) and
     # #508 are written around, reached through the base rather than through a write-back.
     @@loaded_raw : String? = nil
+    # The raw spelling of preference fields normalized on load. Returning the whole panel
+    # to defaults removes those known values, while retaining a peer edit we never loaded.
+    @@loaded_preferences = {} of String => JSON::Any
     # A corrupt load can merge later edits against its defaults, but those defaults
     # do not establish which permissions or preferences the unread document held.
     @@load_corrupt = false
@@ -163,6 +177,7 @@ module Gori
     # malformed file leaves the defaults (or CLI-provided values) in place.
     def self.load : Nil
       @@loaded_raw = nil
+      @@loaded_preferences.clear
       @@load_corrupt = false
       @@load_partial = false
       @@load_unreadable = false
@@ -262,6 +277,7 @@ module Gori
       # Re-base on our OWN serialization of what we just read, the same rule `save` applies
       # to `mine`. See `@@loaded_raw` for why the raw text cannot be the base.
       @@loaded_raw = serialize
+      @@loaded_preferences = root.as_h.select { |key, _| PREFERENCE_DEFAULTS.has_key?(key) }
       # LAST, so the re-base above describes the file as it was READ and the rewrite below is a
       # genuine change to the `env` and `rewriter` sections rather than a no-op the merge discards.
       adopt_env_syntax_for_absent_key if env_syntax_origin.absent?
@@ -791,6 +807,17 @@ module Gori
       # the OPERATOR named and gori does not own (see Paths.ensure_dir). What actually
       # protects the env values and decoder sessions is the file's own 0600, below.
       Paths.ensure_dir(File.dirname(path), tighten: false)
+      # The settings file itself gets renamed. Its stable sidecar covers the entire
+      # read/merge/replace and is shared by symlink aliases of the same --config target.
+      File.open("#{Paths.canonical_file(path)}.write.lock", "a", perm: 0o600) do |lock|
+        return false unless OpenLock.acquire_exclusive(lock)
+        save_locked(factory_reset)
+      end
+    rescue
+      false
+    end
+
+    private def self.save_locked(factory_reset : Bool) : Bool
       # Durable write: a torn File.write (crash / two instances / disk-full) would leave a
       # half-written settings.json that load()'s blanket rescue silently resets to factory
       # defaults — losing theme, hotkeys, hostname overrides, tab prefs, decoder chains.
@@ -807,13 +834,13 @@ module Gori
       # Basing on `mine` keeps "did I change this section?" honest, so an unchanged section
       # always yields to disk on every subsequent save.
       mine = serialize
-      merged = merge_with_disk(mine, factory_reset)
+      retained_preferences = {} of String => JSON::Any
+      merged = merge_with_disk(mine, factory_reset, retained_preferences)
       write_private(path, merged)
       @@load_corrupt = false if @@load_corrupt && merged == mine
       @@loaded_raw = mine
+      @@loaded_preferences = retained_preferences
       true
-    rescue
-      false
     end
 
     # Assign `list` to the list-valued section property `section` and `save`, putting the old
@@ -903,7 +930,8 @@ module Gori
     # The rule LISTS keep their entry-by-entry merge either way — a reset racing a peer's
     # `create_rule` must still delete the rules it knew about without deleting the one it never
     # saw (see RULE_SECTION_LISTS).
-    private def self.merge_with_disk(current : String, factory_reset : Bool = false) : String
+    private def self.merge_with_disk(current : String, factory_reset : Bool,
+                                     retained_preferences : Hash(String, JSON::Any)) : String
       base = @@loaded_raw
       return current unless base || @@load_corrupt
       disk = begin
@@ -927,8 +955,11 @@ module Gori
       JSON.build(indent: "  ") do |j|
         j.object do
           keys.each do |k|
-            chosen = merge_section(k, cur_h[k]?, base_h[k]?, disk_h[k]?, factory_reset)
-            j.field k, chosen if chosen
+            local = cur_h[k]?
+            original = base_h[k]?
+            next unless chosen = merge_section(k, local, original, disk_h[k]?, factory_reset)
+            retain_preference_spellings(k, chosen, retained_preferences)
+            j.field k, chosen
           end
         end
       end
@@ -946,9 +977,67 @@ module Gori
         merge_entry_list(mine, base, disk, list)
       elsif factory_reset
         mine # what a fresh install would hold — nil drops the key entirely
+      elsif defaults = PREFERENCE_DEFAULTS[k]?
+        merge_preferences(k, mine, base, disk, defaults)
       else
         pick_changed(mine, base, disk)
       end
+    end
+
+    # Keep only raw fields the last write left as it originally read them. Comparing
+    # to the merged output prevents later resets from treating a new peer edit as ours.
+    private def self.retain_preference_spellings(section, chosen, retained) : Nil
+      return unless before = @@loaded_preferences[section]?.try(&.as_h?)
+      return unless after = chosen.as_h?
+      same = before.select { |key, value| after[key]? == value }
+      retained[section] = JSON::Any.new(same) unless same.empty?
+    end
+
+    private def self.merge_preferences(section : String, mine : JSON::Any?, base : JSON::Any?,
+                                       disk : JSON::Any?, defaults : Hash(String, JSON::Any)) : JSON::Any?
+      return disk if mine == base
+      return mine if disk == base
+      disk_fields = disk.try(&.as_h?)
+      return mine if disk && !disk_fields
+      mine_fields = mine.try(&.as_h?) || defaults
+      base_fields = base.try(&.as_h?) || defaults
+      merged = disk_fields.try(&.dup) || {} of String => JSON::Any
+      apply_preference_edits(section, mine, mine_fields, base_fields, merged)
+      drop_default_preference_fields(section, merged, defaults) if mine.nil?
+      JSON::Any.new(merged) unless merged.empty?
+    end
+
+    private def self.apply_preference_edits(section, mine, mine_fields, base_fields, merged) : Nil
+      (mine_fields.keys | base_fields.keys).each do |key|
+        next unless preference_changed?(section, key, mine_fields, base_fields)
+        value = mine.try(&.as_h[key]?)
+        if section == "hotkeys" && key == "bindings"
+          value = merge_bindings(value, base_fields[key]?, merged[key]?)
+        end
+        if value
+          merged[key] = value
+        else
+          merged.delete(key)
+        end
+      end
+    end
+
+    # A reset to the default-only panel drops known fields, including a raw spelling
+    # that loaded as a default. Future fields and new peer values still belong to disk.
+    private def self.drop_default_preference_fields(section, merged, defaults) : Nil
+      loaded = @@loaded_preferences[section]?.try(&.as_h?)
+      merged.reject! do |key, value|
+        defaults.has_key?(key) && (defaults[key] == value || loaded.try(&.[key]?) == value)
+      end
+    end
+
+    private def self.preference_changed?(section, key, mine, base) : Bool
+      # The version and timestamp describe one check: a fresh observation of the same
+      # version changes only its timestamp in memory, but still writes that version with it.
+      if section == "update" && {"latest_seen", "checked_at"}.includes?(key)
+        return mine["latest_seen"]? != base["latest_seen"]? || mine["checked_at"]? != base["checked_at"]?
+      end
+      mine[key]? != base[key]?
     end
 
     # The section-level rule, and the default for every key that is not a rule list: I changed
@@ -981,8 +1070,7 @@ module Gori
     # The sections that CANNOT be merged as a unit, and the lists inside them reconciled entry
     # by entry instead.
     #
-    # Every other section is one operator decision, so `pick_changed` loses nothing: whoever
-    # wrote it last meant it. `rewriter`, `colormarker` and `saved_views` are not one decision —
+    # Unlike scalar preferences, `rewriter`, `colormarker` and `saved_views` group entries by id —
     # each holds a whole LIST plus the id counter that numbers it in ONE section, so two
     # processes each adding an entry have both "changed the section" and the section-level rule
     # threw one of the two entries away. Both had also minted from the same counter, so the

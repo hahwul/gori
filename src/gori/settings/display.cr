@@ -315,6 +315,11 @@ module Gori::Settings
     {"confirm_quit", confirm_quit?, DEFAULT_CONFIRM_QUIT},
     {"repeater_record_history", repeater_record_history?, DEFAULT_REPEATER_RECORD_HISTORY}
 
+  PREFERENCE_DEFAULTS["editor"] = {
+    "command"  => JSON::Any.new(DEFAULT_EDITOR),
+    "markdown" => JSON::Any.new(DEFAULT_EDITOR_MARKDOWN),
+  }
+
   private def self.reset_editor : Nil
     self.editor = DEFAULT_EDITOR
     self.editor_markdown = DEFAULT_EDITOR_MARKDOWN

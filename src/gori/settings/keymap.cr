@@ -127,6 +127,37 @@ module Gori::Settings
     out
   end
 
+  PREFERENCE_DEFAULTS["hotkeys"] = {
+    "os"               => JSON::Any.new(DEFAULT_KEYMAP_OS),
+    "command_modifier" => JSON::Any.new(DEFAULT_COMMAND_MODIFIER),
+    "keyset"           => JSON::Any.new(DEFAULT_EDITOR_KEYSET),
+  }
+
+  # Each verb owns its override. A missing entry restores its profile default; an empty
+  # array deliberately unbinds it. Disk can still carry legacy ids that load normalized.
+  private def self.merge_bindings(mine : JSON::Any?, base : JSON::Any?, disk : JSON::Any?) : JSON::Any?
+    disk_map = disk.try(&.as_h?)
+    return mine if disk && !disk_map
+    merged = disk_map.try(&.dup) || {} of String => JSON::Any
+    RENAMED_VERB_IDS.each do |old, current|
+      if legacy = merged.delete(old)
+        merged[current] ||= legacy
+      end
+    end
+    mine_map = mine.try(&.as_h?) || {} of String => JSON::Any
+    base_map = base.try(&.as_h?) || {} of String => JSON::Any
+    (mine_map.keys | base_map.keys).each do |verb|
+      value = mine_map[verb]?
+      next if value == base_map[verb]?
+      if value
+        merged[verb] = value
+      else
+        merged.delete(verb)
+      end
+    end
+    JSON::Any.new(merged) unless merged.empty?
+  end
+
   # Factory reset for this section (dispatched by Settings.reset_to_factory). Drops every
   # rebinding and the OS profile pin; the caller rebuilds the live keymap from what is left.
   private def self.reset_hotkeys : Nil
