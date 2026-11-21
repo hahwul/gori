@@ -513,7 +513,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     ev = selected_evidence || return
     open_export(:evidence_json, File.join(Dir.current, "evidence-#{ev.meta.id}.json")) do |path|
       clean, count = sanitized_evidence(ev)
-      ProjectArchive.write_export_file(path, MCP::Serialize.evidence_json(clean, include_sensitive: false))
+      ProjectArchive.write_export_file(path, MCP::Serialize.evidence_json(clean, include_sensitive: false), @session.project)
       marked = count ? " · SANITIZED (#{count})" : ""
       @toast = "exported evidence ##{ev.meta.id}#{marked} · #{path}"
       true
