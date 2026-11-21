@@ -175,12 +175,15 @@ module Gori::Tui
         return
       end
       raw = {store.setting(Notes::DOCS_KEY), store.setting(Notes::LEGACY_KEY)}
-      soft_merge_from(Notes.doc_from(raw[0], raw[1]))
+      # The startup placeholder can share id 1 with a stored note. Preserve our selection
+      # only once this view has loaded or saved that note.
+      id = @notes[@current].id
+      soft_merge_from(Notes.doc_from(raw[0], raw[1]), @saved_texts.has_key?(id) ? id : nil)
       @merged_raw = raw
     end
 
     # Apply a loaded Doc onto the live note list by stable note id.
-    private def soft_merge_from(doc : Notes::Doc) : Nil
+    private def soft_merge_from(doc : Notes::Doc, cur_id : Int64?) : Nil
       by_id = {} of Int64 => Note
       @notes.each { |n| by_id[n.id] = n }
 
@@ -219,7 +222,6 @@ module Gori::Tui
       end
 
       # Keep the active note by id when it still exists; else fall back to persisted cur.
-      cur_id = @notes[@current]?.try(&.id)
       @notes = merged
       @current =
         if cur_id && (idx = @notes.index { |n| n.id == cur_id })
@@ -622,7 +624,7 @@ module Gori::Tui
           end
         end
         # Keep our live TextArea on the new id and load the peer's version separately.
-        soft_merge_from(merged)
+        soft_merge_from(merged, @notes[@current].id)
       end
       # `next_id` advances on a COMMIT only: the ids the merge handed out are the ones now on
       # disk, and a rolled-back transaction handed out none. That same commit is what makes a
