@@ -35,7 +35,7 @@
 - TUI: OAST callbacks show when they arrived in the local time History uses, as a TIME column on a wide enough pane and in the detail, which printed UTC (#1944).
 - `gori run history`: `--since ID` tails newer flows oldest first and `--before-id ID` pages older ones, as MCP `list_history` does, so a script continues from the last row's id (#1944).
 
-- Notes: deleting a note through MCP or the CLI keeps the active note selected when it survives and selects its neighbour when it is removed (#1949).
+- Notes: deleting a note through MCP or the CLI keeps the active note selected when it survives and selects its neighbour when it is removed. Opening Notes in the TUI restores the selected note for projects created through any surface (#1949, #1992).
 
 - `gori run notes <n>`, `update`, `append` and `delete` refuse, under `--json`, an `<n>` that is also the id of a note at another position, so a script passing the id `--json` prints no longer reads or changes a different note; without `--json` `<n>` is the list position as before, and `--id N` and `--position N` name one or the other on all four (#1944).
 

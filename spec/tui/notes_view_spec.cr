@@ -278,6 +278,21 @@ describe Gori::Tui::NotesView do
     end
   end
 
+  it "restores the saved tab when a stored note shares the placeholder id" do
+    with_store do |store|
+      Gori::Notes.create(store, "first").should eq(1_i64)
+      Gori::Notes.create(store, "second").should_not be_nil
+      view = NotesView.new
+      view.reload(store)
+      view.current_text.should eq("second")
+
+      view.switch_note(0)
+      Gori::Notes.create(store, "third").should_not be_nil
+      view.reload(store)
+      view.current_text.should eq("first")
+    end
+  end
+
   it "does not clobber a peer session's notes on save (concurrent editing)" do
     with_store do |store|
       seed = NotesView.new # an existing note in the project
