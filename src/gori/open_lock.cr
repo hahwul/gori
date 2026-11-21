@@ -186,6 +186,22 @@ module Gori
       ex.os_error.in?(Errno::EAGAIN, WinError::ERROR_LOCK_VIOLATION)
     end
 
+    # Writers replacing a file lock a stable sidecar across the whole read/modify/rename.
+    # Close the file to release it. Unsupported locks raise, and contention has a deadline.
+    def self.acquire_exclusive(file : File) : Bool
+      deadline = Time.instant + CONTENTION_BUDGET
+      loop do
+        begin
+          file.flock_exclusive(blocking: false)
+          return true
+        rescue ex : IO::Error
+          raise ex unless contention?(ex)
+        end
+        return false if Time.instant >= deadline
+        sleep RETRY_DELAY
+      end
+    end
+
     # Take the EXCLUSIVE lock and HOLD it, for a caller about to do something destructive to the
     # database. nil means a live process has it open — refuse. Non-nil is the guard to keep for
     # the duration and `close` after; it may hold no file at all (nothing was lockable), because

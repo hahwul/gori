@@ -73,7 +73,7 @@
 
 - A settings factory reset also clears unknown fields saved inside rule, saved-view and Decoder chain libraries (#1950).
 
-- Settings saves preserve unreadable files and retry failed backups before replacing a damaged file. Edits made after startup merge with a peer’s repaired settings (#1957, #1988).
+- Settings saves preserve unreadable files and retry failed backups before replacing a damaged file. Edits merge with repaired settings and preserve other windows’ independent preferences and hotkey bindings, including the decision to turn off update checks (#1957, #1988, #2011).
 
 - Open sessions detect replaced settings files even when size and modification time stay the same (#1977)
 
