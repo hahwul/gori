@@ -922,7 +922,11 @@ module Gori
     private def self.merge_section(k : String, mine : JSON::Any?, base : JSON::Any?, disk : JSON::Any?,
                                    factory_reset : Bool) : JSON::Any?
       if lists = RULE_SECTION_LISTS[k]?
-        merge_rule_section(mine, base, disk, lists, RULE_SECTION_COUNTERS[k]? || RULE_SECTION_COUNTER)
+        counter = RULE_SECTION_COUNTERS[k]?
+        merged = merge_rule_section(mine, base, disk, lists, counter)
+        # A reset keeps peer-added entries and their counter. Unknown library fields can
+        # contain private data and must disappear just like unknown top-level sections.
+        factory_reset ? reset_library_fields(merged, lists, counter) : merged
       elsif list = ENTRY_SECTIONS[k]?
         merge_entry_list(mine, base, disk, list)
       elsif factory_reset
@@ -1001,14 +1005,21 @@ module Gori
     # The id counter each of those sections carries, merged by MAX rather than by who changed
     # it. Keyed BY SECTION rather than one shared literal: `saved_views` has no rules, and
     # writing a key named `next_rule_id` into it to satisfy a constant would be a lie the next
-    # reader has to un-learn. Sections absent here fall back to the historical name, so a
-    # future section that does spell it `next_rule_id` needs no entry.
+    # reader has to un-learn. The decoder library has no counter.
     RULE_SECTION_COUNTERS = {
       "rewriter"    => "next_rule_id",
       "colormarker" => "next_rule_id",
       "saved_views" => "next_view_id",
     }
-    RULE_SECTION_COUNTER = "next_rule_id"
+
+    private def self.reset_library_fields(merged : JSON::Any?, lists : Array(RuleList), counter : String?) : JSON::Any?
+      fields = merged.try(&.as_h?)
+      return unless fields
+      keys = lists.map(&.[:key])
+      keys << counter if counter
+      kept = fields.select(keys)
+      JSON::Any.new(kept) unless kept.empty?
+    end
 
     # Retired keys INSIDE a rule section, subtracted so a stale one is cleared by the next save:
     # nothing serializes it, so the key-by-key rule below would read it as "I did not change
@@ -1023,7 +1034,7 @@ module Gori
     # mark, anything else by the section-level rule.
     private def self.merge_rule_section(mine : JSON::Any?, base : JSON::Any?, disk : JSON::Any?,
                                         lists : Array(RuleList),
-                                        counter_key : String = RULE_SECTION_COUNTER) : JSON::Any?
+                                        counter_key : String?) : JSON::Any?
       mine_h = mine.try(&.as_h?)
       disk_h = disk.try(&.as_h?)
       # A section made of nothing but optional lists (`decoder`) is itself omitted when they are
