@@ -20,6 +20,8 @@
 
 - MCP: `list_issues` exports Markdown and SARIF reports, and `get_flow` exports curl, Python, fetch, Go, httpie and CSRF PoCs, with credential and body redaction and read-only access. Reports page whole issues within 64 KiB and mark shortened evidence separately (#1947).
 
+- SARIF issue exports use less memory when many findings link to large captured bodies (#1999)
+
 - Markdown and SARIF issue reports mask credential headers even in malformed HTTP evidence and flag truncated request and response bodies. `gori run issues --export` protects the source database and its sidecars from being overwritten (#1966, #1987, #1989, #1996)
 
 - JWT: find HS256/HS384/HS512 signing secrets offline with `gori run jwt --crack` or MCP `jwt_crack`, using inline candidates, files or saved wordlists and reporting the candidates tried. MCP `jwt_crack` and `cookie_crack` stop between candidates when cancelled (#1946).

@@ -143,7 +143,7 @@ module Gori
           rules[Sarif.rule_id(title)] ||= title
         end
         # id => its position in the rules array, which is what `result.ruleIndex` means. Built
-        # here because this hash IS the rules array's order; `annotate_results` links each result
+        # here because this hash IS the rules array's order; `annotate_result` links each result
         # with a lookup instead of `Sarif::Builder.find_rule_index`, whose `rules.index { … }` is
         # a LINEAR SCAN per result — rules × results again, and distinct titles are what make
         # distinct rules, so a list of distinct findings is the quadratic case rather than the
@@ -153,81 +153,61 @@ module Gori
         rule_index = {} of String => Int32
         rules.each_key { |id| rule_index[id] = rule_index.size }
 
-        # ONE store read per issue for each of the two things every pass below wants. The flow
-        # was previously fetched three times (location, markdown message, webRequest/Response)
-        # and its body inflated twice; the links were resolved twice. That ran synchronously on
-        # the TUI's UI fiber, so a large issue list stalled the interface.
-        flows = issues.map do |f|
-          flow = f.flow_id.try { |fid| flow_loader ? flow_loader.call(fid) : store.get_flow(fid) }
-          flow && matcher ? Redact::Wire.flow(flow, matcher)[0] : flow
-        end
-        links = issues.map_with_index { |f, i| Export.resolve_issue_links(f, store, flows[i], include_sensitive) }
-
         log = ::Sarif::Builder.build do |b|
           b.run(Sarif::DRIVER_NAME, Gori::VERSION) do |r|
             r.information_uri(Gori::REPOSITORY_URL)
             rules.each { |id, title| r.rule(id, short_description: title) }
-            issues.each_with_index do |f, i|
-              sarif_result(r, f, location_uri(f, flows[i], include_sensitive), links[i])
-            end
           end
         end
 
         run = log.runs[0]
-        # `Builder` drops an empty results array to `nil`. An explicit `[]` is the friendlier
-        # document: "this tool ran and found nothing" rather than "this tool may not have run".
-        run.results ||= [] of ::Sarif::Result
-        # Results FIRST: a rule's `security-severity` is the worst severity among the results
-        # that cite it, and it reads those off the property bags this pass writes.
-        annotate_results(run, issues, flows, links, project_name, rule_index, include_sensitive)
+        descriptors = run.tool.driver.rules || [] of ::Sarif::ReportingDescriptor
+        # Finish each result while its flow is in hand. Retaining all FlowDetails until
+        # annotation kept every raw body alive even when none appeared in the report.
+        run.results = issues.map do |issue|
+          flow = issue.flow_id.try { |id| flow_loader ? flow_loader.call(id) : store.get_flow(id) }
+          flow = Redact::Wire.flow(flow, matcher)[0] if flow && matcher
+          links = Export.resolve_issue_links(issue, store, flow, include_sensitive)
+          result = sarif_result(issue, location_uri(issue, flow, include_sensitive), links, descriptors)
+          annotate_result(result, issue, flow, links, project_name, rule_index, include_sensitive)
+          result
+        end
         annotate_rules(run)
         log.to_pretty_json
       end
 
-      # The parts of a result the fluent `ResultBuilder` has no hook for — `rank`, the
-      # property bag, and webRequest/webResponse. Done as a post-pass over the built run
-      # rather than by hand-constructing `Sarif::Result`s, so rule-index linking, message
-      # and suppression wiring stay the library's job. Results come back in `issues` order,
-      # which is what makes the zip below sound.
-      private def self.annotate_results(run : ::Sarif::Run, issues : Array(Store::Issue),
-                                        flows : Array(Store::FlowDetail?),
-                                        links : Array(Array(Links::Resolved)),
-                                        project_name : String,
-                                        rule_index : Hash(String, Int32),
-                                        include_sensitive : Bool) : Nil
-        results = run.results
-        return unless results
-        results.each_with_index do |res, i|
-          f = issues[i]
-          # ruleId and ruleIndex, together and from the same map, so the pair a consumer
-          # cross-references cannot come apart. `ResultBuilder` would set both too, by scanning
-          # the whole rules array for every result — see `rule_index` in `sarif`.
-          id = Sarif.rule_id(one_line(f.title))
-          res.rule_id = id
-          res.rule_index = rule_index[id]?
-          res.rank = Sarif.rank(f.severity)
-          bag = ::Sarif::PropertyBag.new
-          bag["gori/project"] = JSON::Any.new(one_line(project_name))
-          bag["gori/issueId"] = JSON::Any.new(f.id)
-          bag["gori/severity"] = JSON::Any.new(f.severity.label) # the UNcollapsed five-way value
-          bag["gori/status"] = JSON::Any.new(f.status.label)
-          bag["gori/createdAt"] = JSON::Any.new(rfc3339(f.created_at))
-          bag["gori/updatedAt"] = JSON::Any.new(rfc3339(f.updated_at))
-          f.host.try { |h| bag["gori/host"] = JSON::Any.new(one_line(h)) }
-          f.flow_id.try { |fid| bag["gori/flowId"] = JSON::Any.new(fid) }
-          f.cvss.try { |c| bag["gori/cvss"] = JSON::Any.new(one_line(c)) }
-          f.cvss_score.try { |s| bag["gori/cvssScore"] = JSON::Any.new(s) }
-          link_json = sarif_links(links[i])
-          bag["gori/links"] = JSON::Any.new(link_json) unless link_json.empty?
-          res.properties = bag
+      # The SARIF builder leaves the rank, properties and web evidence to the caller.
+      private def self.annotate_result(res : ::Sarif::Result, f : Store::Issue, flow : Store::FlowDetail?,
+                                       links : Array(Links::Resolved), project_name : String,
+                                       rule_index : Hash(String, Int32), include_sensitive : Bool) : Nil
+        # ruleId and ruleIndex, together and from the same map, so the pair a consumer
+        # cross-references cannot come apart. `ResultBuilder` would set both too, by scanning
+        # the whole rules array for every result — see `rule_index` in `sarif`.
+        id = Sarif.rule_id(one_line(f.title))
+        res.rule_id = id
+        res.rule_index = rule_index[id]?
+        res.rank = Sarif.rank(f.severity)
+        bag = ::Sarif::PropertyBag.new
+        bag["gori/project"] = JSON::Any.new(one_line(project_name))
+        bag["gori/issueId"] = JSON::Any.new(f.id)
+        bag["gori/severity"] = JSON::Any.new(f.severity.label) # the UNcollapsed five-way value
+        bag["gori/status"] = JSON::Any.new(f.status.label)
+        bag["gori/createdAt"] = JSON::Any.new(rfc3339(f.created_at))
+        bag["gori/updatedAt"] = JSON::Any.new(rfc3339(f.updated_at))
+        f.host.try { |h| bag["gori/host"] = JSON::Any.new(one_line(h)) }
+        f.flow_id.try { |fid| bag["gori/flowId"] = JSON::Any.new(fid) }
+        f.cvss.try { |c| bag["gori/cvss"] = JSON::Any.new(one_line(c)) }
+        f.cvss_score.try { |s| bag["gori/cvssScore"] = JSON::Any.new(s) }
+        link_json = sarif_links(links)
+        bag["gori/links"] = JSON::Any.new(link_json) unless link_json.empty?
+        res.properties = bag
 
-          if flow = flows[i]
-            hide_start = !include_sensitive && Redact.credential_start_line?(flow.request_head, flow.row.target, flow.row.method)
-            version = flow.http_version
-            version = "" if hide_start || (!include_sensitive && Redact.credential_start_line?(flow.request_head, version))
-            res.web_request = sarif_web_request(flow, include_sensitive, hide_start, version)
-            res.web_response = sarif_web_response(flow, include_sensitive, version)
-          end
+        if flow
+          hide_start = !include_sensitive && Redact.credential_start_line?(flow.request_head, flow.row.target, flow.row.method)
+          version = flow.http_version
+          version = "" if hide_start || (!include_sensitive && Redact.credential_start_line?(flow.request_head, version))
+          res.web_request = sarif_web_request(flow, include_sensitive, hide_start, version)
+          res.web_response = sarif_web_response(flow, include_sensitive, version)
         end
       end
 
@@ -287,8 +267,8 @@ module Gori
       #     4000     6.2 ms        83.1 ms       31.6 ms
       #     8000    13.6 ms       299.4 ms       64.4 ms    (doubling cost ~3.6x → ~2x)
       #
-      # It runs SYNCHRONOUSLY on the TUI's UI fiber (`IssuesController`), which is the same fiber
-      # the `flows`/`links` pre-reads at the top of `sarif` were introduced to stop stalling.
+      # This runs on the TUI's UI fiber after each issue's flow and links have been read
+      # once and projected into the result. Only those results are needed to rank the rules.
       private def self.worst_severities(run : ::Sarif::Run) : Hash(String, {Float64?, Float64?})
         out = {} of String => {Float64?, Float64?}
         run.results.try &.each do |res|
@@ -308,34 +288,34 @@ module Gori
         out
       end
 
-      private def self.sarif_result(r : ::Sarif::RunBuilder, f : Store::Issue,
-                                    uri : String?, links : Array(Links::Resolved)) : Nil
+      private def self.sarif_result(f : Store::Issue, uri : String?, links : Array(Links::Resolved),
+                                    descriptors : Array(::Sarif::ReportingDescriptor)) : ::Sarif::Result
         title = one_line(f.title)
-        r.result do |rb|
-          # text is the one-line summary a list renders; markdown is the same per-issue block
-          # the Markdown report writes MINUS the evidence fences — the request and response are
-          # already on this result as webRequest/webResponse, and carrying them twice doubled
-          # the document for no reader's benefit.
-          rb.message(sarif_message_text(f, title),
-            markdown: String.build { |io| append_issue(io, f, links) })
-          # NOT `rb.rule_id` — that is what makes `ResultBuilder#build` scan the rules array for
-          # this result's index. `annotate_results` writes the id and the index together from the
-          # map that already knows both.
-          rb.level(Sarif.level(f.severity))
-          rb.location(uri: uri) if uri
-          sarif_suppression(rb, f)
-          # `gori/issueId` addresses THIS project DB; `gori/finding` survives a re-created one,
-          # which is what lets a dashboard recognise the same finding across engagements.
-          #
-          # The LOCATION is part of what a finding IS. Without it, two separate IDORs on `/one`
-          # and `/two` — same title, same host, same severity, and the two rows a dashboard most
-          # needs to keep apart — hashed to one fingerprint, so a consumer deduplicating on the
-          # fingerprint (which is what a partialFingerprint is FOR) showed one of them. The
-          # material is the same URI written to the location above.
-          rb.partial_fingerprint("gori/issueId", f.id.to_s)
-          rb.partial_fingerprint("gori/finding",
-            Digest::SHA256.hexdigest("#{title}\n#{f.host}\n#{f.severity.label}\n#{uri}"))
-        end
+        rb = ::Sarif::ResultBuilder.new
+        # text is the one-line summary a list renders; markdown is the same per-issue block
+        # the Markdown report writes MINUS the evidence fences — the request and response are
+        # already on this result as webRequest/webResponse, and carrying them twice doubled
+        # the document for no reader's benefit.
+        rb.message(sarif_message_text(f, title),
+          markdown: String.build { |io| append_issue(io, f, links) })
+        # NOT `rb.rule_id` — that is what makes `ResultBuilder#build` scan the rules array for
+        # this result's index. `annotate_result` writes the id and the index together from the
+        # map that already knows both.
+        rb.level(Sarif.level(f.severity))
+        rb.location(uri: uri) if uri
+        sarif_suppression(rb, f)
+        # `gori/issueId` addresses THIS project DB; `gori/finding` survives a re-created one,
+        # which is what lets a dashboard recognise the same finding across engagements.
+        #
+        # The LOCATION is part of what a finding IS. Without it, two separate IDORs on `/one`
+        # and `/two` — same title, same host, same severity, and the two rows a dashboard most
+        # needs to keep apart — hashed to one fingerprint, so a consumer deduplicating on the
+        # fingerprint (which is what a partialFingerprint is FOR) showed one of them. The
+        # material is the same URI written to the location above.
+        rb.partial_fingerprint("gori/issueId", f.id.to_s)
+        rb.partial_fingerprint("gori/finding",
+          Digest::SHA256.hexdigest("#{title}\n#{f.host}\n#{f.severity.label}\n#{uri}"))
+        rb.build(descriptors)
       end
 
       private def self.sarif_message_text(f : Store::Issue, title : String) : String

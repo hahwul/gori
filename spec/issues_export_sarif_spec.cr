@@ -40,6 +40,33 @@ end
 
 describe Gori::Issues::Export do
   describe ".sarif" do
+    it "renders each loaded flow before the loader reuses its body buffer" do
+      with_store do |store|
+        first = seed_flow(store)
+        second = seed_flow(store)
+        [first, second, first].each do |id|
+          store.insert_issue("Linked issue", Gori::Store::Severity::Low, "h.test", id)
+        end
+        issues = store.issues
+        calls = [] of Int64
+        body = Bytes.new(1)
+        loader = ->(id : Int64) do
+          calls << id
+          if flow = store.get_flow(id)
+            body[0] = (id == first ? 'A' : 'B').ord.to_u8
+            Gori::Store::FlowDetail.new(flow.row, flow.http_version, flow.request_head, body, flow.response_head, nil)
+          end
+        end
+
+        report = Gori::Issues::Export.sarif(issues, store, "proj", flow_loader: loader)
+        calls.should eq(issues.compact_map(&.flow_id))
+        JSON.parse(report)["runs"][0]["results"].as_a.each do |result|
+          id = result["properties"]["gori/flowId"].as_i64
+          result["webRequest"]["body"]["text"].as_s.should eq(id == first ? "A" : "B")
+        end
+      end
+    end
+
     it "produces a document the library itself parses and validates" do
       with_store do |store|
         fid = seed_flow(store)
