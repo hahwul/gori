@@ -19,6 +19,20 @@ private def reset_net
   Gori::Settings.capture_max_mib = Gori::Settings::DEFAULT_CAPTURE_MAX_MIB
 end
 
+private def with_recovery_path(&)
+  dir = File.tempname("gori-settings-recovery")
+  Dir.mkdir(dir)
+  previous = Gori::Settings.path_override
+  begin
+    Gori::Settings.path_override = File.join(dir, "settings.json")
+    yield Gori::Settings.path
+  ensure
+    Gori::Settings.path_override = previous
+    Gori::Settings.load
+    FileUtils.rm_rf(dir)
+  end
+end
+
 private def with_net_store(&)
   path = File.tempname("gori-projnet", ".db")
   store = Gori::Store.open(path)
@@ -1237,6 +1251,53 @@ describe Gori::Settings do
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
       Gori::Settings.theme = prev_theme
+    end
+  end
+
+  {true, false}.each do |broken_at_start|
+    it "preserves the original and retries a failed recovery backup (broken at startup: #{broken_at_start})" do
+      with_recovery_path do |path|
+        backup = "#{path}.corrupt"
+        broken = %({"theme":"recover-me",)
+        Dir.mkdir(backup)
+        File.write(path, broken_at_start ? broken : %({"env":{"syntax":"bare"}}))
+        Gori::Settings.load
+        File.write(path, broken) unless broken_at_start
+
+        Gori::Settings.save.should be_false
+        File.read(path).should eq(broken)
+        if broken_at_start
+          Gori::Settings.load_degraded?.should be_true
+          Gori::Settings.load_warning.to_s.should contain("could not back up")
+        end
+
+        Dir.delete(backup)
+        Gori::Settings.save.should be_true
+        File.read(backup).should eq(broken)
+        JSON.parse(File.read(path)).as_h.should_not be_empty
+      end
+    end
+  end
+
+  it "merges a peer's repair after a failed recovery backup" do
+    with_recovery_path do |path|
+      Dir.mkdir("#{path}.corrupt")
+      File.write(path, %({"theme":"recover-me",))
+      Gori::Settings.load
+      previous_mouse = Gori::Settings.mouse
+      begin
+        Gori::Settings.mouse = !previous_mouse
+        File.write(path, %({"theme":"goriday","peer_field":"restored"}))
+        Gori::Settings.save.should be_true
+        written = JSON.parse(File.read(path))
+        written["mouse"].as_bool.should eq(!previous_mouse)
+        written["peer_field"].as_s.should eq("restored")
+        written["theme"].as_s.should eq("goriday")
+        # The peer supplied a theme that this process has never read.
+        Gori::Settings.load_degraded?.should be_true
+      ensure
+        Gori::Settings.mouse = previous_mouse
+      end
     end
   end
 
