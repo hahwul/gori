@@ -170,6 +170,15 @@ describe Gori::Tui::EvidenceViewer do
     OverlayHarness.new(v, area: Rect.new(0, 0, 160, 30)).rendered?("request body truncated at capture").should be_true
   end
 
+  it "shows complete UTF-8 characters before the display cut" do
+    body = "a" * (EvidenceViewer::DISPLAY_BODY_CAP - 4) + "\nOK한"
+    v = EvidenceViewer.new(evidence(body: body.to_slice))
+    v.show(:response)
+    v.lines[-2].map(&.text).join.should eq("OK")
+    v.lines.last.map(&.text).join.should eq(EvidenceViewer::TRUNCATED_NOTE)
+    v.pane_text.should end_with("한")
+  end
+
   # --- LIVE mode ------------------------------------------------------------
   #
   # ↵ on a LIVE RELATED row shows the source AS IT IS NOW. The card carries the same bytes a

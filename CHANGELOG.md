@@ -79,7 +79,7 @@
 
 - Evidence: freezing an exchange an issue already holds with the same bytes writes no second copy; the TUI and `gori run evidence freeze` name the existing copy and MCP `freeze_evidence` returns it with `already_frozen: true`, now named in the tool description. A source whose bytes changed still freezes a new copy (#1942, #1944).
 
-- Text evidence keeps complete UTF-8 characters at the display size limit (#1956)
+- Text evidence keeps complete UTF-8 characters at the display size limit in reports, the CLI, and the TUI evidence viewer (#1956, #1984)
 
 - Frozen evidence details distinguish a display limit from a capture that was already truncated (#1974)
 
