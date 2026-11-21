@@ -587,12 +587,11 @@ module Gori
     private def directory_for_create(display : String) : String
       slug = slugify(display)
       dir = File.join(@root, unique_slug(slug, display)) unless slug.empty?
-      # Preserve the same-name project's claim in the slug sequence, even if an
-      # auto-bound workspace has yet to open its database.
-      return dir if dir && (File.exists?(File.join(dir, Project::DB_FILE)) || workspace_in(dir))
+      # A workspace claim without a database is not yet visible to find.
+      return dir if dir && !File.exists?(File.join(dir, Project::DB_FILE)) && workspace_in(dir)
 
-      # A rename keeps the directory fixed. Reopen such a project by its exact
-      # display name when the slug sequence would allocate a new directory.
+      # Let find resolve existing projects before a reopen can overwrite tags or a
+      # description. A slugified display name can match one of several namesakes.
       if (existing = find(display)) && existing.name.downcase == display.downcase
         return existing.dir
       end
