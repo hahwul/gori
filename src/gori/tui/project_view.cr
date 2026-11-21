@@ -1095,15 +1095,14 @@ module Gori::Tui
     # survived, and becomes an ADD if the peer deleted it — which is what the typed text now
     # means. Either way the operator's half-typed line is untouched, no unrelated row is
     # overwritten, and the index can no longer point past the end.
-    def reload_env_vars : Nil
+    def reload_env_vars(saved_key : String? = nil) : Nil
+      # After a save the field is closed, but a peer may already have moved the saved key.
+      key = @env_edit_key || saved_key
       @env_items = Settings.project_env_vars.dup
+      idx = @env_items.index { |(k, _)| k == key } if key
+      @env_edit_idx = idx if @env_edit_key
+      @env_sel = idx if idx
       clamp_env_sel
-      if @env_edit_key
-        @env_edit_idx = @env_items.index { |(k, _)| k == @env_edit_key }
-        # The editor is drawn ON that row, and the window follows the selection — so the
-        # selection follows the re-anchored row, or the open field could slide off screen.
-        @env_sel = @env_edit_idx || @env_sel
-      end
     end
 
     # --- ACTIVITY pane (#864): a human window over the #124 event feed ------------------

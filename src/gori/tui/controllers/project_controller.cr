@@ -1265,7 +1265,7 @@ module Gori::Tui
       when :dup    then @host.status("env var: KEY already defined")
       when :failed then @host.status("env var NOT saved (project busy or unwritable) — ↵ to retry")
       when :ok
-        @project_view.reload_env_vars
+        @project_view.reload_env_vars(saved_key: @project_view.selected_env_key)
         @host.status("env var saved — #{@project_view.env_vars.size} total")
       end
       outcome

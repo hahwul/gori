@@ -433,15 +433,17 @@ describe Gori::Tui::ProjectController do
     end
 
     with_env_controller do |c, host, session|
-      Gori::Env.save_project(session.store, [{"TOKEN", "sekrit"}])
+      original = [{"TOKEN", "sekrit"}, {"SECOND", "2"}]
+      Gori::Env.save_project(session.store, original)
       c.view.reload_env_vars
       session.store.close
       c.env_delete_var # FakeHost#confirm runs the action
 
       host.statuses.last.should contain("NOT deleted")
       # The row is back, because the store still has it — see the save example above.
-      c.view.env_vars.should eq([{"TOKEN", "sekrit"}])
-      Gori::Settings.project_env_vars.should eq([{"TOKEN", "sekrit"}])
+      c.view.env_vars.should eq(original)
+      c.view.selected_env_key.should eq("TOKEN")
+      Gori::Settings.project_env_vars.should eq(original)
     end
   end
 
@@ -525,6 +527,7 @@ describe Gori::Tui::ProjectController do
         c.view.env_field.not_nil!.set("AVAILABLE local")
         c.handle_body_key(key(Termisu::Input::Key::Enter))
         c.view.env_adding?.should be_false
+        c.view.selected_env_key.should eq("AVAILABLE")
         if renaming
           stored.call.should eq([{"AVAILABLE", "local"}, {"RESERVED", "peer"}])
         else
