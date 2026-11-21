@@ -87,6 +87,10 @@ class Gori::Store
       # A rewritten flow's pre-rule body (V49) goes with its side's bodies.
       resp += sum_len(db, "SELECT COALESCE(SUM(LENGTH(body)), 0) FROM rewrite_originals WHERE side = 'response'")
       req += sum_len(db, "SELECT COALESCE(SUM(LENGTH(body)), 0) FROM rewrite_originals WHERE side = 'request'")
+      resp += sum_len(db, "SELECT COALESCE(SUM(LENGTH(bytes)), 0) FROM flow_live_chunks")
+      if db.query_one?("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'intercept_originals'", as: Int32)
+        each_intercept_body(db) { |_, _, size| req += size }
+      end
       h2 = sum_len(db, "SELECT COALESCE(SUM(LENGTH(payload)), 0) FROM h2_frames")
       ws = sum_len(db, "SELECT COALESCE(SUM(LENGTH(payload)), 0) FROM ws_messages WHERE repeater_id IS NULL")
       # Keep the V1 columns and V24's `wire` in separate guarded aggregates: measure opens
@@ -108,6 +112,43 @@ class Gori::Store
     db.scalar(sql).as(Int64)
   rescue
     0_i64
+  end
+
+  # Intercept originals store the whole request as one BLOB. Split it at the same
+  # byte boundary as the ORIGINAL pane, including LF and mixed line endings.
+  private def self.each_intercept_body(db : DB::Database | DB::Connection, &) : Nil
+    db.query_each("SELECT flow_id, request FROM intercept_originals") do |row|
+      id, raw = row.read(Int64, Bytes)
+      head_size = Env.head_body_boundary(raw)
+      yield id, head_size, raw.size - head_size if head_size < raw.size
+    end
+  end
+
+  private def self.strip_intercept_bodies(conn : DB::Connection) : Nil
+    # Finish the scan before updating its table. Retain only offsets until then.
+    heads = [] of {Int64, Int32}
+    each_intercept_body(conn) { |id, size, _| heads << {id, size} }
+    heads.each do |(id, size)|
+      conn.exec("UPDATE intercept_originals SET request = substr(request, 1, ?) WHERE flow_id = ?", size, id)
+    end
+  end
+
+  # Recovery records the head plus the contiguous prefix of a crashed stream. Keep
+  # its wire size while discarding its bytes, without assembling the whole body.
+  private def self.strip_live_chunks(conn : DB::Connection) : Nil
+    conn.query_each("SELECT DISTINCT flow_id FROM flow_live_chunks") do |row|
+      id = row.read(Int64)
+      size = 0_i64
+      conn.query_each("SELECT off, length(bytes) FROM flow_live_chunks WHERE flow_id = ? ORDER BY off", id) do |chunk|
+        offset, length = chunk.read(Int64, Int64)
+        break unless offset == size
+        size += length
+      end
+      if size > 0
+        conn.exec("UPDATE flows SET response_size = COALESCE(length(response_head), 0) + ? WHERE id = ? AND #{PENDING_WHERE}", size, id)
+      end
+    end
+    conn.exec("DELETE FROM flow_live_chunks")
   end
 
   # Strip the selected data and VACUUM. Returns the before/after on-disk sizes, or
@@ -194,13 +235,15 @@ class Gori::Store
     # stored body", which is the emptied one now.
     if plan.response_bodies
       conn.exec("UPDATE flows SET response_body = X'', response_body_truncated = 1 " \
-                "WHERE response_body IS NOT NULL AND LENGTH(response_body) > 0")
+                "WHERE LENGTH(response_body) > 0 OR id IN (SELECT flow_id FROM flow_live_chunks)")
+      strip_live_chunks(conn)
       conn.exec("UPDATE rewrite_originals SET body = NULL WHERE side = 'response'")
     end
     if plan.request_bodies
       conn.exec("UPDATE flows SET request_body = X'', request_body_truncated = 1 " \
                 "WHERE request_body IS NOT NULL AND LENGTH(request_body) > 0")
       conn.exec("UPDATE rewrite_originals SET body = NULL WHERE side = 'request'")
+      strip_intercept_bodies(conn)
     end
     # Dropping a body drops what `body:` searches, so the FTS index has to go with it. Both
     # siblings already maintain it — `delete_flow_set` deletes the row's entry, `clear_flows`

@@ -41,6 +41,55 @@ private def blob_len(store : Gori::Store, col : String, id : Int64) : Int64
 end
 
 describe "Gori::Store.compact" do
+  {true, false}.each do |strip_request|
+    it "strips only the #{strip_request ? "request" : "response"} body copies" do
+      with_project do |path|
+        head = "POST / HTTP/1.1\nHost: example.test\n\r\n"
+        body = Bytes[0x00, 0xff, 0x01]
+        response_head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n".to_slice
+        store = Gori::Store.open(path)
+        id = store.insert_flow(req_for("/stream"))
+        begin
+          original = head.to_slice + body
+          store.@db.exec("INSERT INTO intercept_originals (flow_id, request) VALUES (?, ?)", id, original)
+          response = Gori::Store::CapturedResponse.new(flow_id: id, status: 200, head: response_head,
+            body: Bytes.empty, content_type: "text/event-stream")
+          store.append_live(id, 0_i64, body, response).should be_true
+          # Stored bytes after a gap are reclaimable but recovery cannot join them to the response.
+          store.append_live(id, 100_i64, body, nil).should be_true
+          store.flush
+        ensure
+          store.close
+        end
+
+        stats = Gori::Store.measure(path)
+        stats.request_body_bytes.should eq(120_000 + body.size)
+        stats.response_body_bytes.should eq(body.size * 2)
+        plan = Gori::Store::CompactPlan.new(request_bodies: strip_request, response_bodies: !strip_request)
+        Gori::Store.compact(path, plan).not_nil!
+
+        store = Gori::Store.open(path)
+        begin
+          store.abandon_pending!("previous session ended")
+          detail = store.get_flow(id).not_nil!
+          detail.row.response_size.should eq(response_head.size + body.size)
+          if strip_request
+            store.intercept_original(id).should eq(head.to_slice)
+            detail.request_body.should eq(Bytes.empty)
+            detail.response_body.should eq(body)
+          else
+            store.intercept_original(id).should eq(head.to_slice + body)
+            detail.request_body.try(&.size).should eq(120_000)
+            detail.response_body.should eq(Bytes.empty)
+            detail.response_body_truncated?.should be_true
+          end
+        ensure
+          store.close
+        end
+      end
+    end
+  end
+
   it "strips selected data + VACUUMs while keeping the flow rows and their projection" do
     with_project do |path|
       ids = [] of Int64
