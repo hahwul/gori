@@ -1,4 +1,5 @@
 require "db"
+require "uri"
 require "sqlite3"
 require "log"
 require "json"
@@ -312,6 +313,12 @@ module Gori
     # one back; the writer fiber is the only reader or writer of this field.
     @writer_conn : DB::Connection?
 
+    # crystal-sqlite3 form-decodes the URI path into the filename. Encode the whole
+    # path so literal '+', '#', '%' and leading '//' survive URI parsing unchanged.
+    def self.sqlite_url(path : String, query : String) : String
+      "sqlite3:#{URI.encode_path_segment(path)}?#{query}"
+    end
+
     # Opens (and migrates) the database. `events`, when given, receives
     # best-effort post-commit notifications for the live TUI; pass nil in
     # headless mode (no consumer => nothing to publish). `probe_events` is the parallel
@@ -371,8 +378,8 @@ module Gori
       # the writer, the probe passive and catch-up fibers, a second `gori mcp` process) could
       # each claim one. Eight caps the worst case at ~512 MiB instead of unbounded, and is
       # well past the handful of readers gori actually runs at once.
-      url = "sqlite3:#{path}?journal_mode=wal&synchronous=normal&busy_timeout=#{busy_timeout_ms}" \
-            "&cache_size=-64000&max_pool_size=8&checkout_timeout=#{checkout_timeout_seconds}"
+      url = sqlite_url(path, "journal_mode=wal&synchronous=normal&busy_timeout=#{busy_timeout_ms}" \
+                             "&cache_size=-64000&max_pool_size=8&checkout_timeout=#{checkout_timeout_seconds}")
       refuse_non_database(path)
       refuse_foreign_database(path, read_only, busy_timeout_ms)
       # Announce that this process has the database open, for as long as it is (see OpenLock).
@@ -575,7 +582,7 @@ module Gori
       wal = "#{path}-wal"
       db_before, wal_before = mtime_of(path), mtime_of(wal)
       activity = newer(db_before, wal_before)
-      db = DB.open("sqlite3:#{path}?busy_timeout=2000")
+      db = DB.open(sqlite_url(path, "busy_timeout=2000"))
       begin
         db.exec("PRAGMA query_only = ON")
         yield db
@@ -733,7 +740,7 @@ module Gori
     # no `journal_mode` in the URL (that pragma is what converts a file to WAL), and
     # `query_only` on the one connection the reads then use.
     private def self.peek_schema(path : String, busy_ms : Int32) : {Int32, Array(String)}
-      DB.open("sqlite3:#{path}?busy_timeout=#{busy_ms}") do |db|
+      DB.open(sqlite_url(path, "busy_timeout=#{busy_ms}")) do |db|
         db.using_connection do |conn|
           conn.exec("PRAGMA query_only = ON")
           version = conn.scalar("PRAGMA user_version").as(Int64).to_i
