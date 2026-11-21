@@ -26,20 +26,25 @@ private def with_root(&)
 end
 
 describe Gori::ProjectRegistry do
-  it "selects the latest activity when two projects were modified in the same second" do
+  it "orders subsecond activity across the database and WAL, breaking ties by directory" do
     with_root do |root|
       reg = Gori::ProjectRegistry.new(root)
-      first = reg.create("First")
-      second = reg.create("Second")
+      first = reg.create("Zeta")
+      second = reg.create("Alpha")
       timestamp = Time.utc(2025, 1, 1)
       # Check both orders so the result cannot depend on directory enumeration order.
       [{first, second}, {second, first}].each do |(older, newer)|
         File.touch(older.db_path, timestamp + 100.milliseconds)
-        File.touch(newer.db_path, timestamp + 900.milliseconds)
+        File.touch("#{older.db_path}-wal", timestamp)
+        File.touch(newer.db_path, timestamp)
+        File.touch("#{newer.db_path}-wal", timestamp + 900.milliseconds)
         projects = reg.list
         projects.map(&.db_path).should eq([newer.db_path, older.db_path])
         Gori::ProjectRegistry.default_of(projects).try(&.db_path).should eq(newer.db_path)
       end
+      # Alpha's DB and Zeta's WAL now report the same activity time.
+      File.touch(second.db_path, timestamp + 900.milliseconds)
+      reg.list.should eq([second, first])
     end
   end
 

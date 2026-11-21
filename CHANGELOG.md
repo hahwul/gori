@@ -71,7 +71,7 @@
 
 - TUI: Tab in project tag fields completes only a visible suggestion. Resizing the terminal keeps the highlighted tag and the completion in sync (#1951).
 
-- Project lists and automatic project selection now distinguish activity within the same second (#1952).
+- Project lists and automatic project selection now distinguish activity within the same second and break exact ties by directory name (#1952, #1964).
 
 - TUI: typed input is no longer lost or changed behind your back. A Repeater or Fuzzer TARGET being edited takes Ctrl-A/E/U/W itself and returns to READ when you leave it, issue and rule forms ask once before `esc` or a click outside discards an edit, `esc` in Project settings cancels the edit instead of saving it, and a Rewriter stub keeps its line endings when it is opened and closed (#1938, #1941).
 
