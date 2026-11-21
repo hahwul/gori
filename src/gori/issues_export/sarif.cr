@@ -161,13 +161,15 @@ module Gori
           flow = f.flow_id.try { |fid| flow_loader ? flow_loader.call(fid) : store.get_flow(fid) }
           flow && matcher ? Redact::Wire.flow(flow, matcher)[0] : flow
         end
-        links = issues.map { |f| Export.resolve_issue_links(f, store) }
+        links = issues.map_with_index { |f, i| Export.resolve_issue_links(f, store, flows[i], include_sensitive) }
 
         log = ::Sarif::Builder.build do |b|
           b.run(Sarif::DRIVER_NAME, Gori::VERSION) do |r|
             r.information_uri(Gori::REPOSITORY_URL)
             rules.each { |id, title| r.rule(id, short_description: title) }
-            issues.each_with_index { |f, i| sarif_result(r, f, flows[i], links[i]) }
+            issues.each_with_index do |f, i|
+              sarif_result(r, f, location_uri(f, flows[i], include_sensitive), links[i])
+            end
           end
         end
 
@@ -220,8 +222,11 @@ module Gori
           res.properties = bag
 
           if flow = flows[i]
-            res.web_request = sarif_web_request(flow, include_sensitive)
-            res.web_response = sarif_web_response(flow, include_sensitive)
+            hide_start = !include_sensitive && Redact.credential_start_line?(flow.request_head, flow.row.target, flow.row.method)
+            version = flow.http_version
+            version = "" if hide_start || (!include_sensitive && Redact.credential_start_line?(flow.request_head, version))
+            res.web_request = sarif_web_request(flow, include_sensitive, hide_start, version)
+            res.web_response = sarif_web_response(flow, include_sensitive, version)
           end
         end
       end
@@ -304,7 +309,7 @@ module Gori
       end
 
       private def self.sarif_result(r : ::Sarif::RunBuilder, f : Store::Issue,
-                                    flow : Store::FlowDetail?, links : Array(Links::Resolved)) : Nil
+                                    uri : String?, links : Array(Links::Resolved)) : Nil
         title = one_line(f.title)
         r.result do |rb|
           # text is the one-line summary a list renders; markdown is the same per-issue block
@@ -317,7 +322,7 @@ module Gori
           # this result's index. `annotate_results` writes the id and the index together from the
           # map that already knows both.
           rb.level(Sarif.level(f.severity))
-          sarif_location(rb, f, flow)
+          rb.location(uri: uri) if uri
           sarif_suppression(rb, f)
           # `gori/issueId` addresses THIS project DB; `gori/finding` survives a re-created one,
           # which is what lets a dashboard recognise the same finding across engagements.
@@ -326,10 +331,10 @@ module Gori
           # and `/two` — same title, same host, same severity, and the two rows a dashboard most
           # needs to keep apart — hashed to one fingerprint, so a consumer deduplicating on the
           # fingerprint (which is what a partialFingerprint is FOR) showed one of them. The
-          # material was already in hand: it is the same URI `sarif_location` writes.
+          # material is the same URI written to the location above.
           rb.partial_fingerprint("gori/issueId", f.id.to_s)
           rb.partial_fingerprint("gori/finding",
-            Digest::SHA256.hexdigest("#{title}\n#{f.host}\n#{f.severity.label}\n#{location_uri(f, flow)}"))
+            Digest::SHA256.hexdigest("#{title}\n#{f.host}\n#{f.severity.label}\n#{uri}"))
         end
       end
 
@@ -342,16 +347,10 @@ module Gori
       # place the scheme/host/port/target composition lives, default ports and IPv6 brackets
       # included — then fall back to the issue's bare host, then to no location at all rather
       # than inventing one.
-      private def self.sarif_location(rb : ::Sarif::ResultBuilder, f : Store::Issue,
-                                      flow : Store::FlowDetail?) : Nil
-        uri = location_uri(f, flow)
-        rb.location(uri: uri) if uri
-      end
-
-      # That URI as a value, so the fingerprint above and the location here cannot disagree about
-      # WHERE a finding is — the fingerprint's whole job is to say which finding this is.
-      private def self.location_uri(f : Store::Issue, flow : Store::FlowDetail?) : String?
-        return one_line(flow.row.url) if flow
+      private def self.location_uri(f : Store::Issue, flow : Store::FlowDetail?, include_sensitive : Bool) : String?
+        if flow && (include_sensitive || !Redact.credential_start_line?(flow.request_head, flow.row.target, flow.row.method))
+          return one_line(flow.row.url)
+        end
         host = f.host.try { |h| one_line(h) }
         host && !host.empty? ? "https://#{host}/" : nil
       end
@@ -372,46 +371,50 @@ module Gori
           status: ::Sarif::SuppressionStatus::Accepted)
       end
 
-      private def self.sarif_web_request(flow : Store::FlowDetail, include_sensitive : Bool) : ::Sarif::WebRequest
-        req = Proxy::Codec::Http1.parse_request_head(flow.request_head)
+      # A malformed credential line can become part of the start line or another
+      # field when parsed. Project it first, leaving the captured bytes intact.
+      private def self.sarif_head(head : Bytes, include_sensitive : Bool) : {Bytes, Bool}
+        return {head, false} if include_sensitive
+        projected, redacted = Redact.redact_head_with_status(String.new(head), false)
+        {projected.to_slice, redacted}
+      end
+
+      private def self.sarif_web_request(flow : Store::FlowDetail, include_sensitive : Bool, hide_start : Bool, request_version : String) : ::Sarif::WebRequest
+        head, redacted = sarif_head(flow.request_head, include_sensitive)
+        req = Proxy::Codec::Http1.parse_request_head(head)
         row = flow.row
-        headers, bag = sarif_headers(req.headers, include_sensitive)
+        headers, bag = sarif_headers(req.headers, include_sensitive, redacted)
         ::Sarif::WebRequest.new(
           protocol: one_line(row.scheme),
-          version: sarif_http_version(req.version.presence || flow.http_version),
-          target: one_line(row.url),
+          version: hide_start ? nil : sarif_http_version(req.version.presence || request_version),
+          target: hide_start ? nil : one_line(row.url),
           # The start-line is the truth (P7): a lowercase or non-standard method is the
           # operator's, and `row.method` is the upcased projection of it. Same rule the HAR
           # writer follows.
-          method: one_line(req.method.presence || row.method),
+          method: hide_start ? nil : one_line(req.method.presence || row.method),
           headers: headers,
           body: sarif_body(flow.request_head, flow.request_body, flow.request_body_truncated?),
           properties: bag,
         )
       end
 
-      private def self.sarif_web_response(flow : Store::FlowDetail, include_sensitive : Bool) : ::Sarif::WebResponse?
+      private def self.sarif_web_response(flow : Store::FlowDetail, include_sensitive : Bool, request_version : String) : ::Sarif::WebResponse?
         head = flow.response_head
         # An Error/Aborted flow never got one. SARIF says so explicitly rather than emitting
         # a webResponse full of nils.
         return ::Sarif::WebResponse.new(no_response_received: true) if head.nil? || head.empty?
-        resp = Proxy::Codec::Http1.parse_response_head(head)
+        projected, redacted = sarif_head(head, include_sensitive)
+        resp = Proxy::Codec::Http1.parse_response_head(projected)
         row = flow.row
-        headers, bag = sarif_headers(resp.headers, include_sensitive)
-        ::Sarif::WebResponse.new(
-          protocol: one_line(row.scheme),
-          # The RESPONSE's own version, not the request's — 1.0 vs 1.1 is semantically
-          # load-bearing (no default keep-alive), and `http_version` is the request column.
-          version: sarif_http_version(resp.version.presence || flow.http_version),
-          status_code: row.status || resp.status,
-          # `.presence`: HTTP/2 has no reason phrase by design (HeadCodec.synth_response stops
-          # at the code) and an h1 status line may omit it, and `"reasonPhrase": ""` is noise —
-          # every other optional field in this record omits itself the same way.
-          reason_phrase: one_line(resp.reason).presence,
-          headers: headers,
-          body: sarif_body(head, flow.response_body, flow.response_body_truncated?),
-          properties: bag,
-        )
+        headers, bag = sarif_headers(resp.headers, include_sensitive, redacted)
+        response = ::Sarif::WebResponse.new(protocol: one_line(row.scheme), headers: headers,
+          body: sarif_body(head, flow.response_body, flow.response_body_truncated?), properties: bag)
+        return response if !include_sensitive && Redact.credential_start_line?(head)
+        # Prefer the response's own HTTP version, which can differ from the request.
+        response.version = sarif_http_version(resp.version.presence || request_version)
+        response.status_code = row.status || resp.status
+        response.reason_phrase = one_line(resp.reason).presence
+        response
       end
 
       # SARIF's `version` is the protocol version alone ("1.1"), while gori stores and parses
@@ -459,11 +462,10 @@ module Gori
       # with a single SP, which is what a recipient that accepts obs-fold must do. (A continuation
       # with no colon never reaches here at all: `Http1.parse_headers` drops a colon-less line.)
       private def self.sarif_headers(list : Proxy::Codec::HeaderList,
-                                     include_sensitive : Bool) : {Hash(String, String)?, ::Sarif::PropertyBag?}
+                                     include_sensitive : Bool, redacted : Bool) : {Hash(String, String)?, ::Sarif::PropertyBag?}
         fields = {} of String => Array(String) # displayed name => one value per field, in order
         seen = {} of String => String          # downcased name => the casing first seen on the wire
         last = nil.as(String?)                 # the key an obs-fold continuation continues
-        redacted = false
         list.each do |h|
           # The name is UNSTRIPPED, so its first byte is the line's: SP/HTAB marks `  X-Fake:
           # part2` (part of the value above) apart from `X-Fake: part2`, and `one_line` erases it.
@@ -489,14 +491,13 @@ module Gori
           (fields[key] ||= [] of String) << (withhold ? Redact.redacted_value(key, one_line(h.value)) : one_line(h.value))
           last = key
         end
-        return {nil, nil} if fields.empty?
         combine_fields(fields, redacted)
       end
 
       # `sarif_headers`' fields as the `headers` object — each name's values combined by its own
       # rule — plus the property bag that says what the object alone cannot.
       private def self.combine_fields(fields : Hash(String, Array(String)),
-                                      redacted : Bool) : {Hash(String, String), ::Sarif::PropertyBag?}
+                                      redacted : Bool) : {Hash(String, String)?, ::Sarif::PropertyBag?}
         headers = {} of String => String
         bag = nil.as(::Sarif::PropertyBag?)
         fields.each do |key, values|
@@ -515,7 +516,7 @@ module Gori
           bag ||= ::Sarif::PropertyBag.new
           bag["gori/sensitiveHeadersRedacted"] = JSON::Any.new(true)
         end
-        {headers, bag}
+        {headers.empty? ? nil : headers, bag}
       end
 
       # Is this field's value withheld from the log? Keyed on the name, so every casing of a

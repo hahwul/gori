@@ -44,7 +44,7 @@ module Gori
                                            include_sensitive : Bool = false) : Nil
         flow = f.flow_id.try { |fid| flow_loader ? flow_loader.call(fid) : store.get_flow(fid) }
         flow = Redact::Wire.flow(flow, matcher)[0] if flow && matcher
-        append_issue(io, f, resolve_issue_links(f, store), store.issue_evidence(f.id))
+        append_issue(io, f, resolve_issue_links(f, store, flow, include_sensitive), store.issue_evidence(f.id))
         if flow
           append_evidence(io, "Request", flow.request_head, flow.request_body, flow.request_body_truncated?, include_sensitive)
           append_evidence(io, "Response", flow.response_head, flow.response_body, flow.response_body_truncated?, include_sensitive)
@@ -100,9 +100,19 @@ module Gori
       # taken OUT of the list because it had a bullet of its own above it, and now it leads the
       # list instead. Same count either way — the flow appears exactly once — so a reader
       # parsing `### Related` sees one more entry and no duplicate.
-      protected def self.resolve_issue_links(f : Store::Issue, store : Store) : Array(Links::Resolved)
-        Links.resolve_all(store,
-          Links.issue_links(store.list_links(Store::LinkOwnerKind::Issue, f.id), f))
+      protected def self.resolve_issue_links(f : Store::Issue, store : Store, flow : Store::FlowDetail?,
+                                             include_sensitive : Bool) : Array(Links::Resolved)
+        links = Links.issue_links(store.list_links(Store::LinkOwnerKind::Issue, f.id), f)
+        links.map do |link|
+          resolved = Links.resolve(store, link)
+          if !include_sensitive && link.ref_kind.flow?
+            head = flow && flow.row.id == link.ref_id ? flow.request_head : store.request_head(link.ref_id)
+            if head && Redact.credential_start_line?(head, resolved.url, resolved.label)
+              next Links::Resolved.new(link, link.ref_kind.tag, "request line redacted", "flow ##{link.ref_id}")
+            end
+          end
+          resolved
+        end
       end
 
       def self.json(issues : Array(Store::Issue), store : Store? = nil) : String

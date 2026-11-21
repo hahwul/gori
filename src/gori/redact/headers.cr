@@ -14,14 +14,39 @@ module Gori
       SENSITIVE_HEADERS.includes?(name.strip.downcase)
     end
 
+    # A credential field in place of the request line can also have its value
+    # stored as the method, target or HTTP version.
+    def self.credential_start_line?(head : Bytes, *projections : String) : Bool
+      return true if credential_start_line?(head)
+      # A strict HTTP/1 start-line token can itself contain a bare CR or LF and
+      # a credential header. Only suppress columns which picked up such a line.
+      projections.each do |value|
+        next unless value.includes?('\r') || value.includes?('\n')
+        value.scrub.split(/[\r\n]/) { |line| return true if credential_start_line?(line.to_slice) }
+      end
+      false
+    end
+
+    def self.credential_start_line?(head : Bytes) : Bool
+      stop = head.index(&.in?(0x3a_u8, 0x0d_u8, 0x0a_u8))
+      !!(stop && head[stop] == 0x3a_u8 && sensitive_header?(String.new(head[0, stop]).scrub))
+    end
+
     # Project just the header lines, preserving line endings, public fields and any body.
     # A clipped sensitive field cannot safely identify even a Set-Cookie attribute.
     def self.redact_head(text : String, include_sensitive : Bool = false, *, truncated : Bool = false) : String
-      return text if include_sensitive || !text.includes?(':')
+      redact_head_with_status(text, include_sensitive, truncated: truncated)[0]
+    end
+
+    # SARIF records whether it withheld a field, even when the parser would treat
+    # the malformed line as a continuation or a reason phrase.
+    def self.redact_head_with_status(text : String, include_sensitive : Bool, *, truncated : Bool = false) : {String, Bool}
+      return {text, false} if include_sensitive || !text.includes?(':')
       bytes = text.to_slice
       buffer = IO::Memory.new(bytes.size)
       pos = 0
       sensitive_continuation = false
+      redacted = false
       while pos < bytes.size
         stop = pos
         while stop < bytes.size && !bytes[stop].in?(0x0a_u8, 0x0d_u8)
@@ -33,6 +58,7 @@ module Gori
         end
         line = bytes[pos, stop - pos]
         sensitive_continuation = write_header_line(buffer, line, sensitive_continuation, truncated && stop == bytes.size)
+        redacted ||= sensitive_continuation
         pos = stop
         if pos < bytes.size
           pos += 1
@@ -40,7 +66,7 @@ module Gori
           buffer.write(bytes[stop, pos - stop])
         end
       end
-      String.new(buffer.to_slice)
+      {String.new(buffer.to_slice), redacted}
     end
 
     private def self.write_header_line(buffer : IO, line : Bytes, sensitive_continuation : Bool, truncated : Bool) : Bool

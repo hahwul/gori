@@ -367,6 +367,67 @@ describe Gori::Issues::Export do
 
     # #1191: a SARIF log is made to leave the machine, so credential header values take the
     # default history JSON and `evidence show` already have — `[REDACTED]` unless opted in.
+    it "withholds credentials before malformed heads become public SARIF fields" do
+      with_store do |store|
+        request = "GET /a HTTP/1.1\r\nX-Public: harmless\r\n Authorization: Bearer folded-secret\r\n\r\n"
+        response = "Authorization: 429 first-line-secret\r\n\r\n"
+        id = seed_flow(store, req_head: request, resp_head: response, status: 429)
+        store.insert_issue("Malformed evidence", Gori::Store::Severity::Low, "h.test", id)
+        result = only_result(store)
+        result.to_json.should_not contain("folded-secret")
+        result.to_json.should_not contain("first-line-secret")
+        result["webRequest"]["headers"]["X-Public"].as_s.should contain("harmless")
+        result["webRequest"]["properties"]["gori/sensitiveHeadersRedacted"].as_bool.should be_true
+        result["webResponse"]["properties"]["gori/sensitiveHeadersRedacted"].as_bool.should be_true
+        result["webResponse"]["statusCode"]?.should be_nil
+
+        raw = only_result(store, include_sensitive: true)
+        raw["webRequest"]["headers"]["X-Public"].as_s.should contain("folded-secret")
+        raw["webResponse"]["reasonPhrase"].as_s.should contain("first-line-secret")
+        flow = store.get_flow(id).not_nil!
+        String.new(flow.request_head).should eq(request)
+        String.new(flow.response_head.not_nil!).should eq(response)
+      end
+    end
+
+    it "keeps a credential-shaped request line out of stored URLs, versions and related-flow labels" do
+      with_store do |store|
+        heads = ["Cookie: sid=primary-secret version-one\r\n\r\n",
+                 "GET \nCookie:sid=related-secret related-secret\r\n\r\n",
+                 "GET /normal HTTP/1.1\nCookie:version-secret\r\n\r\n"]
+        ids = heads.map do |head|
+          request = Gori::Proxy::Codec::Http1.parse_request_head(head.to_slice)
+          id = store.insert_flow(Gori::Store::CapturedRequest.new(
+            created_at: 1_i64, scheme: "https", host: "h.test", port: 443, method: request.method,
+            target: request.target, http_version: request.version, head: head.to_slice, source: Gori::FlowSource::Kind::Proxy))
+          # A response without its own version falls back to the stored request version.
+          store.update_response(Gori::Store::CapturedResponse.new(flow_id: id, status: 200, head: "unknown\r\n\r\n".to_slice))
+          id
+        end
+        issue = store.insert_issue("Malformed start line", Gori::Store::Severity::Low, "h.test", ids[0])
+        store.add_link(Gori::Store::LinkOwnerKind::Issue, issue, Gori::Store::LinkRefKind::Flow, ids[1])
+        store.insert_issue("Bare LF target", Gori::Store::Severity::Low, "h.test", ids[1])
+        store.insert_issue("Normal target", Gori::Store::Severity::Low, "h.test", ids[2])
+        sarif = export(store)
+        markdown = Gori::Issues::Export.markdown(store.issues, store, "proj")
+        raw = export(store, include_sensitive: true)
+        raw_md = Gori::Issues::Export.markdown(store.issues, store, "proj", include_sensitive: true)
+        %w[primary-secret related-secret version-secret].each do |token|
+          sarif.should_not contain(token)
+          markdown.should_not contain(token)
+          raw.should contain(token)
+          raw_md.should contain(token)
+        end
+        results = JSON.parse(sarif)["runs"][0]["results"].as_a.to_h { |r| {r["properties"]["gori/flowId"].as_i64, r} }
+        ids.first(2).each do |id|
+          results[id]["webRequest"]["target"]?.should be_nil
+          results[id]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"].as_s.should eq("https://h.test/")
+          markdown.should contain("flow ##{id}")
+        end
+        results[ids.last]["webRequest"]["target"].as_s.should eq("https://h.test/normal")
+      end
+    end
+
     it "redacts credential header values by default, every casing and obs-fold included (#1191)" do
       with_store do |store|
         fid = seed_flow(store,
