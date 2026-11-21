@@ -80,10 +80,10 @@ private def tamper_archive_database(archive_path : String, scratch : String, &) 
   File.delete(database_path)
 end
 
-private def export_archive(project : Gori::Project, path : String) : String
+private def export_archive(project : Gori::Project, path : String, *, overwrite : Bool = false) : String
   exported = Gori::ProjectArchive.prepare_export(project)
   begin
-    exported.write(path)
+    exported.write(path, overwrite: overwrite)
   ensure
     exported.close
   end
@@ -224,6 +224,39 @@ describe Gori::ProjectArchive do
         prepared_import.close
       end
       store.count.should eq(2)
+    end
+  end
+
+  it "round-trips a manifest at the import limit and preserves it on an oversized overwrite" do
+    with_archive_project do |registry, project, _store, root|
+      path = export_archive(project, File.join(root, "backup.gori"))
+      overhead = read_archive(path)["manifest.json"].bytesize - project.name.bytesize
+      room = Gori::ProjectArchive::MAX_MANIFEST_BYTES - overhead
+      name = "é" * (room // 2) + "a" * (room % 2)
+      renamed = registry.rename(project, name)
+      export_archive(renamed, path, overwrite: true)
+      read_archive(path)["manifest.json"].bytesize.should eq(Gori::ProjectArchive::MAX_MANIFEST_BYTES)
+      imported = Gori::ProjectArchive.prepare_import(path)
+      begin
+        imported.manifest.project_name.should eq(name)
+      ensure
+        imported.close
+      end
+
+      original = File.read(path)
+      oversized = registry.rename(renamed, name + "x")
+      expect_raises(Gori::Error, /manifest.*64 KiB/) { export_archive(oversized, path, overwrite: true) }
+      File.read(path).should eq(original)
+    end
+  end
+
+  it "names the manifest limit when importing an oversized manifest" do
+    with_archive_project do |_registry, project, _store, root|
+      path = export_archive(project, File.join(root, "oversized-manifest.gori"))
+      entries = read_archive(path)
+      entries["manifest.json"] = entries["manifest.json"].ljust(Gori::ProjectArchive::MAX_MANIFEST_BYTES + 1)
+      write_archive(path, entries.to_a)
+      expect_raises(Gori::Error, /manifest.*64 KiB/) { Gori::ProjectArchive.prepare_import(path) }
     end
   end
 
