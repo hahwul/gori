@@ -279,13 +279,18 @@ describe "TextField pointer geometry after scrolling out of view" do
     field = TextField.new("authored value")
     screen = Screen.new(MemoryBackend.new(40, 4))
     field.render(screen, 3, 1, 20, true, Theme.text, Theme.bg)
-    field.hit?(5, 1).should be_true
+    field.click_to_cursor(5, 1).should be_true
     caret = field.caret
     field.forget_geometry
     field.hit?(5, 1).should be_false
+    field.select_word_at(5, 1).should be_false
+    field.selection?.should be_false
     field.click_to_cursor(5, 1).should be_false
     field.caret.should eq(caret)
     field.render(screen, 3, 2, 20, true, Theme.text, Theme.bg)
-    field.hit?(5, 2).should be_true
+    field.click_to_cursor(5, 2).should be_true
+    field.render(screen, 3, 2, 0, true, Theme.text, Theme.bg)
+    field.hit?(5, 2).should be_false
+    field.select_word_at(5, 2).should be_false
   end
 end

@@ -245,6 +245,40 @@ describe Gori::Tui::TextField do
       f.selection_text.should eq("선택")
     end
 
+    it "selects the real glyph painted over the last column by the caret or selection" do
+      b = MemoryBackend.new(12, 3)
+      screen = Screen.new(b)
+      field = TextField.new("ab cat")
+      field.home
+      field.move(3)
+      field.render(screen, 0, 1, 4, true, Theme.text, Theme.bg)
+      b.row(1).strip.should eq("ab c")
+      field.select_word_at(3, 1).should be_true
+      field.selection_text.should eq("cat")
+
+      field.end_of_line
+      field.home(selecting: true)
+      field.render(screen, 0, 1, 4, true, Theme.text, Theme.bg)
+      b.row(1).strip.should eq("ab c")
+      field.select_word_at(3, 1).should be_true
+      field.selection_text.should eq("cat")
+    end
+
+    it "keeps a clipped right-edge glyph out of the selection" do
+      b = MemoryBackend.new(12, 3)
+      screen = Screen.new(b)
+      field = TextField.new("ab 한글")
+      field.home
+      field.move(3)
+      field.render(screen, 0, 1, 4, true, Theme.text, Theme.bg)
+      b.grid[1][3].should eq(' ')
+      field.select_word_at(3, 1).should be_false
+      field.render(screen, 0, 1, 5, true, Theme.text, Theme.bg)
+      b.grid[1][3].should eq('한')
+      field.select_word_at(4, 1).should be_true
+      field.selection_text.should eq("한글")
+    end
+
     it "keeps the first press's exact glyph when the field scrolls on focus" do
       f = TextField.new("한/next")
       b = MemoryBackend.new(20, 3)
