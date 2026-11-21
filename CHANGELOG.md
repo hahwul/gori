@@ -81,6 +81,8 @@
 
 - TUI: an import that duplicates an earlier one, or did not commit every flow, says so on the status row ahead of the path and keeps the warning in Notifications (#1942).
 
+- TUI exports save the note or Sequencer report selected when the destination dialog opened, even if another session deletes it before the file is written (#2004).
+
 - Replacing a private TUI export keeps its existing file permissions throughout the write. TUI exports protect the open project database and its sidecars from being overwritten (#1965, #1997)
 
 - Repeater: stopping a send reads as stopped instead of a red `Closed stream` error, and a response gori cut short names the cause (its read budget, its 8 MiB capture cap, an idle origin) instead of a bare `(stopped)` or `(incomplete)`. A send still waiting for its response says it is sending, for how long and how to stop it, instead of "not sent yet" (#1942, #1943).

@@ -624,7 +624,7 @@ module Gori::Tui
       end
     end
 
-    # Write the current note to `path` (the destination came from ExportOverlay). Returns
+    # Write the note selected when the export overlay opened to `path`. Returns
     # true when the shell should close the popup; false keeps it up so a correctable failure
     # (a read-only directory, a path that lost its parent) doesn't cost the typed path.
     #
@@ -637,8 +637,7 @@ module Gori::Tui
     # live terminal (see the split in `gori run issues`: the --export branch writes raw, the
     # STDOUT branch scrubs). A .md file is not a TTY, and scrubbing would corrupt whatever the
     # operator captured into the note.
-    def notes_export_to(path : String) : Bool
-      text = @notes.current_text
+    def notes_export_to(path : String, text : String) : Bool
       ProjectArchive.write_export_file(path, text.ends_with?('\n') ? text : "#{text}\n", @host.session.project)
       @host.status("exported note → #{path}")
       true

@@ -48,11 +48,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Open the destination-path popup, then write the randomness report there. `format` is
   # :markdown | :json — the same pair `issues_export` offers, and the same overlay.
   def sequence_export(format : Symbol) : Nil
-    return (@toast = "open a sequencer session first") unless sequencer_controller.current_view
+    view = sequencer_controller.current_view || return (@toast = "open a sequencer session first")
+    report = view.report
+    return (@toast = "nothing to export — collect tokens first (^R)") if report.usable_count == 0
+    subject = view.subject
     json = format == :json
     kind = json ? :sequence_json : :sequence_md
     open_export(kind, File.join(Dir.current, "sequence-report.#{json ? "json" : "md"}")) do |p|
-      sequencer_controller.sequencer_export_to(format, p)
+      sequencer_controller.sequencer_export_to(format, p, report, subject)
     end
   end
 

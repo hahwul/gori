@@ -63,6 +63,10 @@ private class RunnerSpecShell < Gori::Tui::Runner
     @space_menu_open
   end
 
+  def refresh_after_peer_write : Nil
+    apply_external_change
+  end
+
   def notification_hint : String
     active_overlay.not_nil!.hint
   end
@@ -86,6 +90,58 @@ describe Gori::Tui::Runner do
       example.run
     ensure
       Gori::Tui::TrafficEmptyState.registry = registry
+    end
+  end
+
+  it "exports the selected note when a peer deletes it while the destination dialog is open" do
+    TuiContract.with_session("runner-note-export") do |session|
+      Gori::Notes.create(session.store, "Other note").should_not be_nil
+      original = "Selected note\noriginal text"
+      selected = Gori::Notes.create(session.store, original).not_nil!
+      runner = RunnerSpecShell.new(session, RunnerSpecTerminal.allocate)
+      runner.focus_tab(:notes, :subtabs)
+      runner.notes_export
+      card = runner.@active_overlay.as(Gori::Tui::ExportOverlay)
+      card.default_basename.should eq("Selected-note.md")
+      path = File.join(session.project.dir, card.default_basename)
+      card.text_fields.first.set(path)
+
+      Gori::Notes.delete(session.store, selected).committed?.should be_true
+      runner.refresh_after_peer_write
+      runner.press(Termisu::Input::Key::Enter)
+
+      File.read(path).should eq("#{original}\n")
+    end
+  end
+
+  it "exports the selected report when a peer removes its session before the write" do
+    TuiContract.with_session("runner-sequence-export") do |session|
+      store = session.store
+      ids = ["Selected session", "Other session"].map_with_index do |name, i|
+        store.insert_sequencer_session("http://localhost", runner_spec_request("/").to_slice,
+          false, nil, "{}", nil, i, name)
+      end
+      runner = RunnerSpecShell.new(session, RunnerSpecTerminal.allocate)
+      runner.focus_tab(:sequencer, :subtabs)
+      ctl = runner.@tabs[:sequencer].as(Gori::Tui::SequencerController)
+      ids.size.times do |i|
+        view = ctl.view_at(i).not_nil!
+        (20 + i).times do |k|
+          view.append_sample(Gori::Sequencer::Sample.new(k, "sample-#{k}", nil, 0, 0_i64, nil))
+        end
+      end
+      runner.sequence_export(:markdown)
+      path = File.join(session.project.dir, "sequence.md")
+      runner.@active_overlay.as(Gori::Tui::ExportOverlay).text_fields.first.set(path)
+
+      store.delete_sequencer_session(ids.first).should be_true
+      runner.refresh_after_peer_write
+      ctl.current_view.not_nil!.subject.session.should eq("Other session")
+      runner.press(Termisu::Input::Key::Enter)
+
+      report = File.read(path)
+      report.should contain("Selected session")
+      report.should contain("20 usable / 20 collected")
     end
   end
 
