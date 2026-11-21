@@ -139,3 +139,31 @@ describe ProjectController do
     end
   end
 end
+
+describe "Project description conflict" do
+  it "keeps the draft on passive commit and only reloads the saved text on confirmed discard" do
+    TuiContract.with_session("project-description-conflict") do |session|
+      host = ApplySpyHost.new(session)
+      ctl = ProjectController.new(host)
+      ctl.on_enter
+      ctl.editor_enter_insert
+      ctl.view.replace_desc("draft")
+      session.store.set_setting(ProjectView::DESC_KEY, "peer").should be_true
+      ctl.commit.should be_false
+      host.confirms.should be_empty
+      host.statuses.last.should contain("your draft")
+      ctl.view.desc_text.should eq("draft")
+
+      host.under_modal = -> {
+        ctl.view.desc_text.should eq("draft")
+        session.store.set_setting(ProjectView::DESC_KEY, "newer peer value").should be_true
+        nil
+      }
+      ctl.editor_exit_insert.should be_true
+      host.confirms.last[0].should eq("DESCRIPTION CHANGED")
+      ctl.view.desc_text.should eq("newer peer value")
+      ctl.view.desc_insert_mode?.should be_false
+      ctl.commit.should be_true
+    end
+  end
+end

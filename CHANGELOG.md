@@ -99,6 +99,8 @@
 
 - CLI: a `gori run` whose output file fills the disk now says so in one line and exits 1, instead of printing a backtrace (#1942).
 
+- The Project description editor keeps your draft when another session changes the saved text. Leaving insert mode lets you discard the draft and load the latest description (#1995).
+
 - In Notes, issue notes, and the project description, Ctrl or Alt with Home or End jumps to the start or end of the document in READ mode. Holding Shift extends the selection to that edge (#1963).
 
 - TUI: Tab in project tag fields completes only a visible suggestion. Resizing the terminal keeps the highlighted tag and the completion in sync (#1951).

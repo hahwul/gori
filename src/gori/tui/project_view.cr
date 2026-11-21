@@ -89,6 +89,8 @@ module Gori::Tui
       @desc_area.wrap = true
       @desc_area.word_wrap = true
       @desc_dirty = false
+      @desc_base = ""
+      @desc_conflict = false
       @desc_mode = InputMode::Read
       @desc_read = TextReadState.new
 
@@ -205,11 +207,7 @@ module Gori::Tui
       # once the write committed, so a still-dirty buffer means the operator's text has not
       # landed yet, and re-seeding it from the stored value here is precisely the clobber that
       # loses it. Every other field on the tab still refreshes.
-      unless @desc_dirty
-        @desc_area.set_text(store.setting(DESC_KEY) || "")
-        @desc_mode = InputMode::Read
-        @desc_read.sync_from(@desc_area)
-      end
+      reload_desc(store) unless @desc_dirty
       refresh_settings unless settings_dirty?
       refresh_protos unless protos_dirty?
       # Tab entry is the other moment a peer's write reaches these lists: the external-change
@@ -1901,19 +1899,52 @@ module Gori::Tui
       @desc_dirty = true
     end
 
-    # Persist description iff edited (called on tab exit paths, like NotesView). Answers
-    # whether there was nothing to do or the write COMMITTED — `set_setting` is `exec_task_ok`,
-    # so that answer has always been available here and was thrown away. Clearing `@desc_dirty`
-    # on a write that rolled back (project busy — another instance's writer holds the lock) is
-    # what turned a transient failure into LOSS: `reload` then set the buffer from the stored
-    # value on the next tab enter, so prose the operator typed was gone with nothing said. The
-    # flag stays up now, so the next exit path retries, and `reload` leaves a dirty buffer
-    # alone. Two siblings already read this Bool (`RewriterController#persist_sample`,
-    # `DecoderController#restore_sessions`); this was the one that did not.
+    getter? desc_conflict : Bool
+
+    def reload_desc(store : Store) : Nil
+      load_desc_text(store.setting(DESC_KEY).to_s)
+    end
+
+    private def load_desc_text(text : String) : Nil
+      @desc_area.set_text(text)
+      @desc_base = @desc_area.text
+      @desc_dirty = false
+      @desc_conflict = false
+      @desc_mode = InputMode::Read
+      @desc_read.sync_from(@desc_area)
+    end
+
+    # An absent row and an empty description display the same text. A draft that
+    # converged with a peer, or that was undone to its base, needs no database write.
     def save(store : Store) : Bool
       return true unless @desc_dirty
-      return false unless store.set_setting(DESC_KEY, @desc_area.text)
-      @desc_dirty = false
+      draft = @desc_area.text
+      base = @desc_base
+      saved = draft.as(String?)
+      committed = store.mutate_setting(DESC_KEY) do |raw|
+        current = raw.to_s
+        # TextArea#text joins its CR-free lines with LF. Compare that projection,
+        # but keep the original stored bytes on a no-op, including mixed endings.
+        visible = TextArea.normalize_lf(current)
+        if draft == visible
+          nil
+        elsif draft == base
+          saved = current
+          nil
+        elsif visible == base
+          draft
+        else
+          saved = nil
+        end
+      end
+      @desc_conflict = committed && saved.nil?
+      return false unless committed && (text = saved)
+      if text == draft
+        @desc_base = text
+        @desc_dirty = false
+      else
+        load_desc_text(text)
+      end
       true
     end
 
