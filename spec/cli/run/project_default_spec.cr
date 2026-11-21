@@ -32,6 +32,18 @@ describe "gori run — the default project (#1387)" do
     end
   end
 
+  it "reports a failed pin clear and keeps resolving the pinned project" do
+    with_projects do |registry|
+      project = registry.create("selected")
+      registry.pin_default("selected").should be_true
+      lock = File.join(File.dirname(registry.default_pin_path), Gori::ProjectRegistry::DEFAULT_PIN_LOCK)
+      File.delete(lock)
+      Dir.mkdir(lock)
+      expect_raises(Gori::Error, /could not clear the default project pin/) { registry.clear_default_pin }
+      pick(registry, nil, registry.default_pin).should eq({project, Gori::CLI::Run::DefaultSource::Pinned})
+    end
+  end
+
   it "refuses a pin naming nothing instead of falling through to the recent project" do
     with_projects do |registry|
       registry.create("alpha")
