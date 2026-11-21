@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Project export preserves existing backups when the archive manifest exceeds 64 KiB. Both export and import now report that limit (#1994).
+
 - Project compression also removes bodies from saved interception originals and unfinished event streams when their respective request or response bodies are selected (#1990).
 
 - Database paths containing characters such as `+`, `#`, or `%` now open the intended project for reads, writes and backups (#1986).

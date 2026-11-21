@@ -27,6 +27,8 @@ module Gori
     # together may use at most 2 GiB uncompressed; reserve the full manifest ceiling here.
     MAX_UNCOMPRESSED_BYTES = 2_i64 * 1024 * 1024 * 1024
     MAX_DATABASE_BYTES     = MAX_UNCOMPRESSED_BYTES - MAX_MANIFEST_BYTES
+    MANIFEST_SIZE_ERROR    = "project archive manifest exceeds the #{MAX_MANIFEST_BYTES // 1024} KiB limit"
+    DATABASE_SIZE_ERROR    = "project database exceeds the 2 GiB uncompressed archive size limit (64 KiB reserved for the manifest)"
     # Per-project answers to the exporter's GLOBAL rule libraries, keyed by that machine's ids.
     GLOBAL_OVERRIDE_KEYS = {Store::REWRITER_OVERRIDES_KEY, Store::COLORMARKER_OVERRIDES_KEY}
     # How the CLI and the picker name another project when the archive's own name is unusable.
@@ -240,11 +242,15 @@ module Gori
       end
 
       private def write_temporary_archive(target : String) : String
+        manifest_json = @manifest.to_json
+        if manifest_json.bytesize > MAX_MANIFEST_BYTES
+          raise Gori::Error.new("#{MANIFEST_SIZE_ERROR}; shorten the project name before exporting")
+        end
         temp = nil.as(String?)
         File.tempfile(".#{File.basename(target)}.gori", ".tmp", dir: File.dirname(target)) do |file|
           temp = file.path
           Compress::Zip::Writer.open(file) do |zip|
-            zip.add("manifest.json", @manifest.to_json)
+            zip.add("manifest.json", manifest_json)
             zip.add("gori.db") do |entry|
               File.open(@database_path, "r") { |db| IO.copy(db, entry) }
             end
@@ -389,7 +395,7 @@ module Gori
           db.using_connection { |conn| conn.exec("VACUUM INTO ?", snapshot) }
         end
         File.chmod(snapshot, File::Permissions.new(0o600))
-        raise Gori::Error.new("project database exceeds the 2 GiB uncompressed archive size limit") if File.info(snapshot).size > MAX_DATABASE_BYTES
+        raise Gori::Error.new(DATABASE_SIZE_ERROR) if File.info(snapshot).size > MAX_DATABASE_BYTES
         version, inventory = inspect_database(snapshot)
         tags = project.canonical? ? ProjectRegistry.new(File.dirname(project.dir)).tags_of(project) : [] of String
         manifest = Manifest.new(FORMAT_VERSION, project.name, Gori::VERSION,
@@ -444,7 +450,7 @@ module Gori
           when "manifest.json"
             raise Gori::Error.new("project archive contains duplicate manifest.json entries") if seen_manifest
             seen_manifest = true
-            raw_manifest = read_entry(entry.io, MAX_MANIFEST_BYTES)
+            raw_manifest = read_manifest(entry.io)
             uncompressed_bytes += raw_manifest.size
             ensure_uncompressed_limit!(uncompressed_bytes)
             manifest_json = String.new(raw_manifest)
@@ -452,7 +458,7 @@ module Gori
             raise Gori::Error.new("project archive contains duplicate gori.db entries") if seen_database
             seen_database = true
             File.open(database, "w", perm: File::Permissions.new(0o600)) do |file|
-              uncompressed_bytes += copy_entry(entry.io, file, MAX_DATABASE_BYTES)
+              uncompressed_bytes += copy_entry(entry.io, file, MAX_DATABASE_BYTES, DATABASE_SIZE_ERROR)
               ensure_uncompressed_limit!(uncompressed_bytes)
               file.flush
               file.fsync
@@ -1184,18 +1190,18 @@ module Gori
       raise Gori::Error.new("project archive has an invalid schema version") unless version > 0
     end
 
-    private def self.read_entry(io : IO, limit : Int64) : Bytes
+    private def self.read_manifest(io : IO) : Bytes
       output = IO::Memory.new
-      copy_entry(io, output, limit)
+      copy_entry(io, output, MAX_MANIFEST_BYTES, MANIFEST_SIZE_ERROR)
       output.to_slice
     end
 
-    private def self.copy_entry(source : IO, destination : IO, limit : Int64) : Int64
+    private def self.copy_entry(source : IO, destination : IO, limit : Int64, size_error : String) : Int64
       buffer = Bytes.new(64 * 1024)
       total = 0_i64
       while (read = source.read(buffer)) > 0
         total += read
-        raise Gori::Error.new("project archive entry exceeds the 2 GiB uncompressed size limit") if total > limit
+        raise Gori::Error.new(size_error) if total > limit
         destination.write(buffer[0, read])
       end
       total
