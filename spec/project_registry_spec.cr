@@ -118,6 +118,21 @@ describe Gori::ProjectRegistry do
     end
   end
 
+  it "leaves the tag sidecar absent for imports with no usable tags" do
+    with_root do |root|
+      Dir.mkdir(root)
+      reg = Gori::ProjectRegistry.new(root)
+      source = File.join(root, "snapshot.db")
+      File.write(source, "validated archive database")
+      untagged = reg.import_database("Untagged", source)
+      invalid = reg.import_database("Invalid tags", source, tags: ["a,b"])
+      {untagged, invalid}.each do |project|
+        File.read(project.db_path).should eq(File.read(source))
+        File.exists?(File.join(project.dir, Gori::ProjectRegistry::TAGS_FILE)).should be_false
+      end
+    end
+  end
+
   it "refuses imports that collide with a display name, slug, or short id" do
     with_root do |root|
       reg = Gori::ProjectRegistry.new(root)

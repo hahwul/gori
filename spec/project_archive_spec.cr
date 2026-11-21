@@ -142,6 +142,17 @@ class ProjectArchiveRacedExportSpec < Gori::ProjectArchive::PreparedExport
   end
 end
 
+# Make the filesystem reject the tag sidecar at the point it is installed.
+private class UnwritableImportTagsRegistry < Gori::ProjectRegistry
+  getter? published_before_tags = false
+
+  private def write_tags(dir : String, tags : Array(String)) : Nil
+    @published_before_tags = File.exists?(File.join(dir, Gori::Project::DB_FILE))
+    Dir.mkdir(File.join(dir, TAGS_FILE))
+    super
+  end
+end
+
 describe Gori::ProjectArchive do
   it "exports the requested database when its path contains URI syntax" do
     with_archive_project do |_registry, project, store, root|
@@ -272,6 +283,25 @@ describe Gori::ProjectArchive do
         manifest.tags.should be_nil
       ensure
         export.close
+      end
+    end
+  end
+
+  it "rolls back an import if the tag sidecar cannot be restored" do
+    with_archive_project do |registry, project, _store, root|
+      registry.set_tags(project, ["work"])
+      path = export_archive(project, File.join(root, "backup.gori"))
+      prepared = Gori::ProjectArchive.prepare_import(path)
+      begin
+        blocked = UnwritableImportTagsRegistry.new(root)
+        expect_raises(IO::Error) { prepared.import_into(blocked, "Restored") }
+        blocked.published_before_tags?.should be_false
+        Dir.exists?(File.join(root, "restored")).should be_false
+
+        copy = prepared.import_into(registry, "Restored")
+        registry.tags_of(copy).should eq(["work"])
+      ensure
+        prepared.close
       end
     end
   end
