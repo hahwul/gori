@@ -896,8 +896,13 @@ module Gori
     # saw (see RULE_SECTION_LISTS).
     private def self.merge_with_disk(current : String, factory_reset : Bool = false) : String
       base = @@loaded_raw
-      return current unless base && File.exists?(path)
-      disk = File.read(path)
+      return current unless base
+      disk = begin
+        File.read(path)
+      rescue File::NotFoundError
+        # A missing file has no changes to merge. Other read failures abort the save.
+        return current
+      end
       return current if disk == base # nobody else wrote since we loaded — nothing to merge
       cur_h = (JSON.parse(current).as_h? rescue nil)
       base_h = (JSON.parse(base).as_h? rescue nil)
@@ -915,8 +920,6 @@ module Gori
           end
         end
       end
-    rescue
-      current # any merge hiccup falls back to the plain write (never worse than before)
     end
 
     private def self.merge_section(k : String, mine : JSON::Any?, base : JSON::Any?, disk : JSON::Any?,

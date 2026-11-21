@@ -1048,6 +1048,43 @@ describe Gori::Settings do
     end
   end
 
+  it "refuses to save over a settings file that became unreadable after load" do
+    dir = File.tempname("gori-settings-merge-unreadable")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    prev_theme = Gori::Settings.theme
+    prev_port = Gori::Settings.bind_port
+    begin
+      ENV["GORI_HOME"] = dir
+      path = Gori::Settings.path
+      File.write(path, %({"theme":"goriday","network":{"bind_port":8070}}))
+      Gori::Settings.load
+      Gori::Settings.load_degraded?.should be_false
+
+      peer = %({"theme":"goriday","network":{"bind_port":4321}})
+      File.write(path, peer)
+      File.chmod(path, 0o000)
+      # Root and filesystems that ignore UNIX modes cannot reproduce the read failure.
+      next if File::Info.readable?(path)
+
+      Gori::Settings.theme = "monokai"
+      Gori::Settings.save.should be_false
+      File.chmod(path, 0o600)
+      File.read(path).should eq(peer)
+
+      Gori::Settings.save.should be_true
+      Gori::Settings.load
+      Gori::Settings.theme.should eq("monokai")
+      Gori::Settings.bind_port.should eq(4321)
+    ensure
+      File.chmod(Gori::Settings.path, 0o600) rescue nil
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.theme = prev_theme
+      Gori::Settings.bind_port = prev_port
+    end
+  end
+
   # No file at load time left the merge with no base, so the first save wrote this process's
   # state WHOLE over a file a peer had created since — a `gori mcp` started on a fresh home erased
   # the wizard's theme and bind the moment it saved anything.
