@@ -38,7 +38,21 @@ describe "Gori::Redact.redacted_value" do
   end
 end
 
+describe "Gori::Redact.credential_start_line?" do
+  it "recognizes a credential in place of the start line without mistaking a URL or a later header for one" do
+    Gori::Redact.credential_start_line?(" cOoKiE : sid=value\r\n".to_slice).should be_true
+    Gori::Redact.credential_start_line?("Cookie http://h/path HTTP/1.1\r\n".to_slice).should be_false
+    Gori::Redact.credential_start_line?("GET / HTTP/1.1\nAuthorization: Bearer token".to_slice).should be_false
+  end
+end
+
 describe "Gori::Redact.redact_head" do
+  it "reports a withheld field even when its captured value already looks redacted" do
+    head = "X-Public: visible\r\n Authorization: [REDACTED]\r\n\r\n"
+    Gori::Redact.redact_head_with_status(head, false).should eq({head, true})
+    Gori::Redact.redact_head_with_status(head, true).should eq({head, false})
+  end
+
   it "withholds incomplete Set-Cookie attributes when the displayed head is capped" do
     head = "Set-Cookie: sid=value; Path=/, second"
     Gori::Redact.redact_head(head, truncated: true).should eq("Set-Cookie: [REDACTED]")
