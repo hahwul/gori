@@ -311,15 +311,13 @@ module Gori
       end
     end
 
-    DATABASE_SUFFIXES = {"", "-wal", "-shm", "-journal", OpenLock::SUFFIX}
-
     # Where an export of *source* to *path* would land, or the refusal. A function of its
     # arguments alone, so a surface can run it BEFORE paying for the snapshot; `write` runs it
     # again for the path it installs to.
     #
     # *loose_database* is a bare database file (`gori mcp --db`), not a registry project: its
-    # directory is the operator's, so only the database and its sidecars (`-wal`, `-shm`, the
-    # open lock) are refused, not everything beside it.
+    # directory is the operator's, so protect its SQLite files, locks and capture status while
+    # allowing an archive beside them.
     #
     # Replacing an existing file is refused outright when it is a database a running gori has
     # open: renaming the archive over it would unlink the file that process keeps writing into.
@@ -365,13 +363,11 @@ module Gori
 
     private def self.refuse_source_destination(canonical_target : String, source : Project,
                                                loose_database : Bool) : Nil
-      source_db = Paths.canonical_file(source.db_path)
       if loose_database
-        # The exact set, not a prefix: `capture.db.gori` beside `capture.db` is an ordinary file.
-        if DATABASE_SUFFIXES.any? { |suffix| canonical_target == source_db + suffix }
+        if SourceDatabaseFiles.new(source).includes?(canonical_target, File.info?(canonical_target))
           raise Gori::Error.new("project archives cannot be written over the source database or its sidecar files")
         end
-      elsif canonical_target == source_db || Paths.within?(canonical_target, Paths.canonical_file(source.dir))
+      elsif canonical_target == Paths.canonical_file(source.db_path) || Paths.within?(canonical_target, Paths.canonical_file(source.dir))
         raise Gori::Error.new("project archives cannot be written inside the source project directory")
       end
     end
@@ -538,21 +534,33 @@ module Gori
     struct SourceDatabaseFiles
       @paths : Array(String)
 
+      private DATABASE_SUFFIXES = {"", "-wal", "-shm", "-journal", OpenLock::SUFFIX}
+
       def initialize(source : Project)
         db = Paths.canonical_file(source.db_path)
         @paths = DATABASE_SUFFIXES.map { |suffix| db + suffix }.to_a
-        @paths << Paths.canonical_file(source.capture_lock_path) << Paths.canonical_file(source.capture_status_path)
+        # A capture may have opened the same database by its symlink or by its real name.
+        {source, Project.new(source.name, db)}.each do |project|
+          @paths << Paths.canonical_file(project.capture_lock_path) << Paths.canonical_file(project.capture_status_path)
+        end
+        @paths.uniq!
       end
 
-      def check!(path : String) : Nil
-        target = resolve_target(path)
-        if @paths.includes?(target) || missing_sidecar?(target)
-          raise IO::Error.new(REFUSAL)
-        end
+      def includes?(target : String, info : File::Info?) : Bool
+        return true if @paths.includes?(target) || missing_sidecar?(target)
+        info ? includes?(info) : false
+      end
+
+      private def includes?(info : File::Info) : Bool
+        @paths.any? { |name| File.info?(name).try(&.same_file?(info)) }
+      end
+
+      def check!(path : String, info : File::Info? = nil) : Nil
+        raise IO::Error.new(REFUSAL) if includes?(resolve_target(path), info)
       end
 
       def check!(info : File::Info) : Nil
-        raise IO::Error.new(REFUSAL) if @paths.any? { |name| File.info?(name).try(&.same_file?(info)) }
+        raise IO::Error.new(REFUSAL) if includes?(info)
       end
 
       private REFUSAL = "refusing to overwrite the source project database or its sidecars"
@@ -602,9 +610,7 @@ module Gori
     def self.write_export_file(path : String, content : String, source : Project) : Nil
       existing = File.info?(path, follow_symlinks: false)
       raise Gori::Error.new("refusing to write through a symlink or special file: #{path}") if existing && !existing.file?
-      database_files = SourceDatabaseFiles.new(source)
-      database_files.check!(path)
-      database_files.check!(existing) if existing
+      SourceDatabaseFiles.new(source).check!(path, existing)
       staged = File.tempname(".#{File.basename(path)}", ".tmp", dir: File.dirname(path))
       File.open(staged, "w", perm: existing.try(&.permissions) || File::Permissions.new(0o666)) do |file|
         file.print(content)

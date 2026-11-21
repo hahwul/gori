@@ -6,7 +6,7 @@
 
 - Project compression also removes bodies from saved interception originals and unfinished event streams when their respective request or response bodies are selected (#1990).
 
-- Database paths containing characters such as `+`, `#`, or `%` now open the intended project for reads, writes and backups (#1986).
+- Database paths containing characters such as `+`, `#`, or `%` now open the intended project for reads, writes and backups. Archive exports beside a database protect its SQLite files, capture lock and status, including alternate file names (#1986, #2000).
 
 - MCP: `jwt_encode` accepts asymmetric private keys only as inline PEM, so a read-only client cannot use a host file as a signing oracle; HMAC and inline-key signing remain available.
 
