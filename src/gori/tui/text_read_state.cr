@@ -180,6 +180,23 @@ module Gori::Tui
       sync_to(editor, selecting)
     end
 
+    # The notes and description panes use the editor's Home/End keymap, including
+    # modified buffer jumps. READ owns the selection across successive shifted motions.
+    def handle_motion_key(editor : TextArea, ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      case
+      when key.home? || key.end?
+        sync_from(editor)
+        editor.handle_motion_key(ev)
+        sync_to(editor, selecting: ev.shift?)
+        editor.clear_selection
+      when key.page_up?   then move(editor, -editor.page_rows, 0, selecting: ev.shift?)
+      when key.page_down? then move(editor, editor.page_rows, 0, selecting: ev.shift?)
+      else                     return false
+      end
+      true
+    end
+
     # Home / End on the READ caret (`dir` -1 / 1), through the editor's own line edges.
     def line_edge(editor : TextArea, dir : Int32) : Nil
       lines = editor.lines_snapshot

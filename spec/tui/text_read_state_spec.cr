@@ -20,6 +20,27 @@ private def select_word(state : TextReadState, ed : TextArea, cy : Int32, cx : I
 end
 
 describe Gori::Tui::TextReadState do
+  it "keeps plain Home and shifted End on the current line, with the band owned by READ" do
+    ed = area("first\nsecond")
+    state = TextReadState.new
+    ed.place_cursor(1, 3)
+    state.handle_motion_key(ed, Termisu::Event::Key.new(Termisu::Input::Key::Home)).should be_true
+    {ed.cy, ed.cx}.should eq({1, 0})
+    state.handle_motion_key(ed, Termisu::Event::Key.new(Termisu::Input::Key::End, Termisu::Input::Modifier::Shift)).should be_true
+    state.copy_text(ed).should eq("second")
+    ed.selection?.should be_false
+  end
+
+  it "extends a held line selection by the visible page" do
+    ed = area("a\nbb\nccc\ndddd\neeeee")
+    state = TextReadState.new
+    ed.render(Screen.new(MemoryBackend.new(20, 4)), Rect.new(0, 0, 20, 4), cursor: false)
+    state.select_line(ed, line_mode: true)
+    state.handle_motion_key(ed, Termisu::Event::Key.new(Termisu::Input::Key::PageDown)).should be_true
+    state.linewise?(ed).should be_true
+    state.copy_text(ed).should eq("a\nbb\nccc")
+  end
+
   it "drops the band when asked about a different editor" do
     a = area("alpha beta\ngamma delta")
     b = area("zzzzzzzzzzzzzz")

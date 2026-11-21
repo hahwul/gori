@@ -1031,18 +1031,7 @@ module Gori::Tui
     # READ-mode Home/End/Page. Home/End move the EDITOR caret, so they are mirrored back onto
     # the read cursor this mode paints.
     def notes_read_motion_key(ev : Termisu::Event::Key) : Bool
-      return false if notes_insert_mode?
-      key = ev.key
-      shift = ev.shift?
-      case
-      when key.home?      then @notes.home(shift)
-      when key.end?       then @notes.end_of_line(shift)
-      when key.page_up?   then notes_read_move(-@notes.page_rows, 0, selecting: shift)
-      when key.page_down? then notes_read_move(@notes.page_rows, 0, selecting: shift)
-      else                     return false
-      end
-      @notes_read.sync_to(@notes, selecting: shift) if key.home? || key.end?
-      true
+      !notes_insert_mode? && @notes_read.handle_motion_key(@notes, ev)
     end
 
     def notes_word_delete_key?(ev : Termisu::Event::Key) : Bool
