@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- MCP: `jwt_encode` accepts asymmetric private keys only as inline PEM, so a read-only client cannot use a host file as a signing oracle; HMAC and inline-key signing remain available.
+
 - Probe: the request-smuggling rule adds the 0.CL-by-`Expect: 100-continue` desync (plain and obfuscated) as a High timing lead, sent as a complete POST so a conformant server answers fast and only a front-end/back-end split hangs; still off by default and behind unsafe (#1945).
 
 - Import GraphQL introspection JSON (`data.__schema` or top-level `__schema`) into unsent POST templates, one per query or mutation, with typed variables and bounded selections from the TUI, CLI and MCP; subscriptions are omitted with a count (#1948).

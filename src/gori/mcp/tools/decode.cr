@@ -210,10 +210,15 @@ module Gori
         if pem && !secret.empty?
           return Result.new("'secret' and 'key' are two names for the same key — pass one", is_error: true)
         end
-        begin
-          secret = Jwt.key_material(secret, pem)
-        rescue ex : Jwt::ForgeError
-          return Result.new("key: #{ex.message}", is_error: true)
+        if pem
+          # MCP is a lower-trust boundary than the interactive/CLI workbenches: resolving a
+          # caller's path here would lend a read-only client gori's host-file authority and
+          # turn jwt_encode into a signing oracle. A string carrying the PEM marker stays on
+          # Asym.pem_for's inline branch, so no spelling accepted here can reach File.read.
+          unless pem.includes?("-----BEGIN")
+            return Result.new("key: jwt_encode accepts inline PEM only; file paths are not allowed", is_error: true)
+          end
+          secret = pem
         end
         # `set` patches individual claims (`role=admin`), the same knob as `gori run jwt --set`.
         # `payload` replaces the claims wholesale, so the two are mutually exclusive — a `set` on
@@ -353,7 +358,7 @@ module Gori
           s.field "set", strarrprop("claim patches \"key=value\" (value is JSON if it parses, else a string). Exclusive with 'payload'")
           s.field "alg", enumprop("signing algorithm (default HS256)", Gori::Jwt::ALGS)
           s.field "secret", strprop("HMAC secret for HS*")
-          s.field "key", strprop("PEM PRIVATE key for RS/PS/ES/EdDSA, inline or a .pem path. Exclusive with 'secret'")
+          s.field "key", strprop("inline PEM PRIVATE key for RS/PS/ES/EdDSA; file paths are refused. Exclusive with 'secret'")
           s.requires_one_of "token", "header", "payload"
         end
 
