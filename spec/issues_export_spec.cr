@@ -277,6 +277,21 @@ describe Gori::Issues::Export do
       end
     end
 
+    it "marks a request body truncated before the report was generated" do
+      with_store do |store|
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "POST", target: "/", http_version: "HTTP/1.1",
+          head: "POST / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice,
+          body: "request prefix".to_slice, body_truncated: true, body_size: 100_i64,
+          source: Gori::FlowSource::Kind::Proxy))
+        store.insert_issue("short captured request", Gori::Store::Severity::Low, "h.test", id)
+
+        md = Gori::Issues::Export.markdown(store.issues, store, "proj")
+        md.should contain("request prefix\n\n[… body truncated or omitted before export …]")
+      end
+    end
+
     it "decodes a gzip Content-Encoding body instead of dropping it as binary" do
       with_store do |store|
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
