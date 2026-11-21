@@ -205,6 +205,20 @@ describe Gori::Cbor do
       json["value"].as_f.should eq(1363896240.5)
     end
 
+    it "shows the containing second for a fractional epoch before 1970" do
+      whole("c1f9b800")
+        .should eq(%({"$tag":1,"$time":"1969-12-31T23:59:59Z","value":-0.5}))
+    end
+
+    it "shows fractional epochs in the final representable second" do
+      json = JSON.parse(whole("c1fb424d7ffa20bfc000"))
+      json["$time"].as_s.should eq("9999-12-31T23:59:59Z")
+      json["value"].as_f.should eq(253402300799.5)
+
+      JSON.parse(whole("c1fb424d7ffa20c00000"))["$time"]?.should be_nil
+      JSON.parse(whole("c1fbc22cef23ee010000"))["$time"]?.should be_nil
+    end
+
     it "does not raise on a tag 1 whose epoch is outside Time's range" do
       # c1 1b 7f ff ff ff ff ff ff ff — year ~292 billion. `Time.unix` raises on
       # it, so $time is simply absent and the number still renders.
