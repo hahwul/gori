@@ -29,6 +29,8 @@
 
 - History: "size" means request + response bytes everywhere. The TUI SIZE column shows the total that `size:` filters on and the CLI and MCP print, and `--sort=largest` (MCP `sort:"largest"`) ranks by it; `respsize:` still filters on the response alone (#1943).
 
+- CBOR identifies text strings with invalid UTF-8 chunks and preserves their bytes (#1959)
+
 - TUI: when a History filter fills its loaded page, marking all and the delete confirmation say the marks cover only the loaded rows (#1943).
 
 - Large projects: a `body:` search returns its first page in milliseconds instead of reading every match first, `path:` and `proto:grpc` scans run up to 40% faster, and the retention sweep removes the oldest flows a bounded chunk at a time, so capture and the TUI no longer freeze while a project over its `retention.max_flows` cap is trimmed (#1942).

@@ -146,6 +146,12 @@ describe Gori::Cbor do
         .should eq(Bytes[0xff, 0xfe])
     end
 
+    it "checks UTF-8 independently in each chunk of an indefinite text string" do
+      whole("7f62c3a96121ff").should eq(%("é!"))
+      # The concatenated bytes also spell é, but neither chunk is valid by itself.
+      whole("7f61c361a9ff").should eq(%({"$str_invalid_utf8":"w6k="}))
+    end
+
     it "keeps the document parseable when a text string is not UTF-8" do
       # The point of the envelope: writing the raw bytes as a JSON string would
       # make the whole render unparseable.
@@ -168,6 +174,12 @@ describe Gori::Cbor do
       json = JSON.parse(whole("a162fffe01"))
       json["$non_string_keys"].as_bool.should be_true
       json[%({"$str_invalid_utf8":"//4="})].as_i.should eq(1)
+    end
+
+    it "does not turn a split code point into a plain map key" do
+      json = JSON.parse(whole("a17f61c361a9ff01"))
+      json["$non_string_keys"].as_bool.should be_true
+      json[%({"$str_invalid_utf8":"w6k="})].as_i.should eq(1)
     end
 
     it "does not flag a map whose keys are all text" do
