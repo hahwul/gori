@@ -453,6 +453,20 @@ describe Gori::ProjectRegistry do
     end
   end
 
+  it "refuses an ambiguous reopen even when the slugified name is an existing directory" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      original = reg.create("Shared label", tags: ["original"])
+      other = reg.rename(reg.create("Other", tags: ["other"]), "Shared label")
+
+      expect_raises(Gori::ProjectRegistry::Ambiguous) do
+        reg.create_or_reopen("Shared label", tags: ["replacement"])
+      end
+      reg.tags_of(original).should eq(["original"])
+      reg.tags_of(other).should eq(["other"])
+    end
+  end
+
   # A 300-character name made a 300-byte directory name, which every filesystem refuses:
   # create failed on every surface with the OS's raw "File name too long".
   it "caps a long name's slug and keeps two long names that share a head apart" do
