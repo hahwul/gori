@@ -22,6 +22,17 @@ private def with_root(&)
   end
 end
 
+private class PausedNamedClaimRegistry < Gori::ProjectRegistry
+  getter claimed = Channel(Nil).new(1)
+  getter resume_create = Channel(Nil).new(1)
+
+  private def create_at(dir : String, display : String, description : String, tags : Array(String)?) : {Gori::Project, Bool}
+    @claimed.send(nil)
+    @resume_create.receive
+    super
+  end
+end
+
 # `create_for_workspace` binds a directory to a source workspace and deliberately leaves
 # the DB for the caller to open (so the binding is visible to a second MCP process before
 # SQLite has created anything — see spec/mcp/project_resolver_spec.cr). That window is not
@@ -38,11 +49,56 @@ describe Gori::ProjectRegistry do
       end
       blocked.published?.should be_false
       registry.find_by_workspace(workspace).should be_nil
-      Dir.children(root).should be_empty
+      Dir.exists?(File.join(root, "client-report")).should be_false
+      registry.list.should be_empty
 
       project = registry.create_for_workspace("Client Report!", workspace)
       File.basename(project.dir).should eq("client-report")
       registry.find_by_workspace(workspace).should eq(project)
+    end
+  end
+
+  it "keeps a workspace out of a colliding named project while it is being created" do
+    with_root do |reg, root|
+      creator = PausedNamedClaimRegistry.new(root)
+      named = Channel(Gori::Project | Exception).new(1)
+      spawn do
+        named.send(creator.create("Client Report!", "private notes"))
+      rescue ex
+        named.send(ex)
+      end
+      select
+      when creator.claimed.receive
+      when result = named.receive
+        fail "creation ended before the directory claim: #{result}"
+      end
+
+      checkout = File.join(root, "checkout")
+      bound = Channel(Gori::Project | Exception).new(1)
+      begin
+        spawn do
+          bound.send(reg.create_for_workspace("Client-Report", checkout))
+        rescue ex
+          bound.send(ex)
+        end
+        Fiber.yield
+        select
+        when result = bound.receive
+          fail "workspace bypassed the named claim: #{result}"
+        else
+        end
+      ensure
+        creator.resume_create.send(nil)
+      end
+      project = named.receive
+      raise project if project.is_a?(Exception)
+      workspace = bound.receive
+      raise workspace if workspace.is_a?(Exception)
+      File.basename(project.dir).should eq("client-report")
+      File.basename(workspace.dir).should eq("client-report-2")
+      reg.workspace_of(project).should be_nil
+      reg.find_by_workspace(checkout).should eq(workspace)
+      File.exists?(workspace.db_path).should be_false
     end
   end
 

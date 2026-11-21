@@ -243,6 +243,21 @@ describe "MCP export_project" do
 end
 
 describe "MCP import_project" do
+  it "reports prolonged project import contention as retryable" do
+    with_archive_server do |tools, registry, _project, _store, root|
+      archive = File.join(root, "source.gori")
+      archive_call(tools, "export_project", {"path" => archive}).is_error.should be_false
+      File.open(File.join(Gori::Paths.projects_dir, ".claims", "copy"), "a") do |lock|
+        lock.flock_exclusive
+        result = archive_call(tools, "import_project", {"path" => archive, "name" => "Copy", "confirm" => true})
+        result.error_code.should eq("PROJECT_BUSY")
+        result.retryable.should be_true
+        result.field.should be_nil
+      end
+      registry.find("Copy").should be_nil
+    end
+  end
+
   it "validates and discloses without importing until confirm, then imports a sanitized copy" do
     with_archive_server do |tools, registry, project, store, root|
       store.insert_flow(archive_flow("/captured"))
