@@ -342,17 +342,18 @@ module Gori
       end
 
       # The spec's three timestamp encodings (4, 8 and 12 bytes) as RFC 3339 text — or nil and
-      # the reason there is none. The two reasons are a width the spec does not define and a
-      # seconds field outside `Time`'s own year 1..9999 range; both are corrupt input rather
-      # than an error to raise on, and neither is a time to print.
+      # the reason there is none: an undefined width, an out-of-range nanosecond field, or a
+      # seconds field outside `Time`'s year 1..9999 range.
       private def timestamp_text(raw : Bytes) : {String?, String}
         case raw.size
         when 4
           {Time.unix(be(raw, 0, 4).to_i64).to_rfc3339, ""}
         when 8
           packed = be(raw, 0, 8)
+          return {nil, "nanoseconds_out_of_range"} if (packed >> 34) >= 1_000_000_000
           {Time.unix((packed & 0x3_ffff_ffff_u64).to_i64).to_rfc3339, ""}
         when 12
+          return {nil, "nanoseconds_out_of_range"} if be(raw, 0, 4) >= 1_000_000_000
           {Time.unix(be(raw, 4, 8).to_i64!).to_rfc3339, ""}
         else
           {nil, "width"}
