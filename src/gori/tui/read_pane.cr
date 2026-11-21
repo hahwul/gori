@@ -165,7 +165,7 @@ module Gori::Tui
 
     # ^F hits per occurrence as `{line, char index}` (see `Wrap.search_hits`).
     def search_hits(query : String) : Array({Int32, Int32})
-      Wrap.search_hits(@size, query) { |i| @line_at.call(i).downcase }
+      Wrap.search_hits(@size, query) { |i| Wrap::SearchLine.new(@line_at.call(i)) }
     end
 
     # Drop the caret, the selection and both scroll offsets — the pane is showing different

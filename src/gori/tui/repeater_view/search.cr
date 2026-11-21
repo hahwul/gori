@@ -127,6 +127,6 @@ class Gori::Tui::RepeaterView
   def response_search_hits(query : String) : Array({Int32, Int32})
     return [] of {Int32, Int32} if query.empty? || resp_hex_active?
     size, line_at = resp_line_source
-    Wrap.search_hits(size, query) { |i| line_at.call(i).downcase }
+    Wrap.search_hits(size, query) { |i| Wrap::SearchLine.new(line_at.call(i)) }
   end
 end

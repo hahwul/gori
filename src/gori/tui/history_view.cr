@@ -2894,10 +2894,10 @@ module Gori::Tui
       # match what goto_detail_line scrolls to — mirroring the hex exclusion above (the
       # decoded/pretty detail_view has a different line count, so its indices would scroll wrong).
       if rl = shown_reveal_lines
-        return Wrap.search_hits(rl.size, query) { |i| rl[i].downcase }
+        return Wrap.search_hits(rl.size, query) { |i| Wrap::SearchLine.new(rl[i]) }
       end
       dv = detail_view
-      Wrap.search_hits(dv.total, query) { |i| dv.line_text(i).downcase }
+      Wrap.search_hits(dv.total, query) { |i| Wrap::SearchLine.new(dv.line_text(i)) }
     end
 
     private def detail_scroll_max : Int32

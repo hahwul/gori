@@ -93,7 +93,7 @@ module Gori::Tui
       @search_memo = Wrap::SearchMemo.new # that query's whole-line scans, kept across frames
       @reveal = false                     # show whitespace (space ·, tab →) instead of syntax colours
       @edits = 0                          # monotonic content-change counter — cheap cache key for owners
-      @lc_lines = [] of String            # downcased lines for ^F search, memoized on @edits
+      @lc_lines = [] of Wrap::SearchLine  # downcased lines for ^F search, memoized on @edits
       @lc_lines_rev = -1
       # Opt-in background tints: [start, end) FULL-buffer char offsets + colour, painted
       # UNDER the text (over syntax/plain, beneath search + cursor). Empty for every editor
@@ -1423,10 +1423,10 @@ module Gori::Tui
       Wrap.search_hits(lc.size, query) { |i| lc[i] }
     end
 
-    private def lowercased_lines : Array(String)
+    private def lowercased_lines : Array(Wrap::SearchLine)
       if @edits != @lc_lines_rev
         @lc_lines_rev = @edits
-        @lc_lines = @lines.map(&.downcase)
+        @lc_lines = @lines.map { |line| Wrap::SearchLine.new(line) }
       end
       @lc_lines
     end

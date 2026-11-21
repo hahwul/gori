@@ -403,7 +403,7 @@ describe "Gori::Tui::RepeaterView diff pane decoration memo" do
   # ^F over the response: one hit per OCCURRENCE, and the jump puts the visual row holding
   # the match on screen — not the first rows of the one logical line a minified body is.
   it "finds every occurrence in a wrapped response line and scrolls to the match's row" do
-    line = "#{"a" * 600}NEEDLE#{"b" * 30}NEEDLE"
+    line = "İ#{"a" * 599}NEEDLE#{"b" * 30}NEEDLE"
     view = loaded_view(line)
     rect = Rect.new(0, 0, 80, 14)
     view.render(Screen.new(MemoryBackend.new(80, 14)), rect)

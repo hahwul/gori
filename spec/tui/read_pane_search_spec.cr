@@ -56,6 +56,13 @@ describe "Gori::Tui::ReadPane ^F search" do
       pane.search_hits("token").should eq([{2, 2}, {2, 8}]) # é is 2 bytes, 1 char
     end
 
+    it "returns original character positions after expanding letters" do
+      line = "aİbİc TOKEN token"
+      pane = search_pane([line])
+      pane.search_hits("token").should eq([{0, 6}, {0, 12}])
+      pane.search_hits("\u0307").should eq([{0, 1}, {0, 3}])
+    end
+
     it "lands goto_line on the match's column" do
       pane = search_pane(["x", "#{"." * 50}token"])
       pane.goto_line(1, 50)

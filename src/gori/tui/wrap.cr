@@ -402,28 +402,11 @@ module Gori::Tui
                          memo : SearchMemo? = nil, *, reveal : Bool = false) : Nil
       return if query.empty? || line.empty? || a >= b
       scan = memo ? memo.scan(line, query) : SearchScan.new(line, query)
-      # Match in the downcased copy, then slice the ORIGINAL to preserve case — valid only
-      # while downcase is 1:1. For the rare char that changes length under it (U+0130 'İ'
-      # → "i" + U+0307) fall back to the downcased string for the COLUMN as well as the
-      # slice: `i` is an index into `dl`, and measuring it against `line` put the band a
-      # glyph off — the two disagree about how many chars precede the match.
-      src = scan.src
+      src = scan.line
       lo, hi = a, b
-      unless scan.one_to_one?
-        # `a`/`b` index `line`, which the downcased copy no longer lines up with, so the
-        # only row that can be marked without mapping the bounds across that difference is
-        # one covering the WHOLE line — every row with soft wrap off, and the only shape the
-        # retired plain-string marker ever had. A wrapped row of such a line is left unmarked
-        # rather than marked at a column, or a length, that is a glyph off.
-        return unless a <= 0 && b >= line.size
-        lo, hi = 0, scan.dl.size
-      end
-      # The hits are in order and do not overlap, so the ones touching the row are one run:
-      # it starts at the first hit that ENDS past the row start (`i + qn > lo`, a match that
-      # straddles the head counts) and stops at the first that starts at or past `hi`.
+      # A match crossing a wrap is clipped to this row in original character coordinates.
       chars = scan.hit_chars
-      qn = scan.qn
-      k = chars.bsearch_index { |c| c + qn > lo }
+      k = scan.first_ending_after(lo)
       return unless k
       cols = nil.as(ColRun?)   # char index → display column, i.e. `row_col` carried forward
       bytes = nil.as(Offsets?) # char index → the byte offset the drawn slice is cut at
@@ -432,7 +415,7 @@ module Gori::Tui
         k += 1
         break if i >= hi # matches only move right, so nothing after this one touches the row
         ma = {i, lo}.max
-        mb = {i + qn, hi}.min
+        mb = {scan.hit_end(k - 1), hi}.min
         next if ma >= mb # this match doesn't touch the row
         col = x + (cols ||= ColRun.new(src, conceal, lo, reveal, scan.src_printable?, scan.marks)).col_at(ma) - xoff
         # `row_col` is monotone in `ma` and `x`/`xoff` are fixed, so `col` only grows: once
@@ -485,25 +468,65 @@ module Gori::Tui
       {curx - cw // 2, 0}.max
     end
 
-    # ^F hits as `{line, char index}`, one per OCCURRENCE — the non-overlapping left-to-right
-    # walk `SearchScan` marks with, so the prompt's `n/N` and the band agree. `lower_at` hands
-    # back line `i` already downcased (a pane may hold that copy cached). A per-occurrence
-    # column is what lets the jump land on the visual row of a match deep in a wrapped line.
-    def self.search_hits(size : Int32, query : String, & : Int32 -> String) : Array({Int32, Int32})
+    # One occurrence per stop, with columns in the original line as expected by goto_line.
+    # Editors cache their search lines across keystrokes.
+    def self.search_hits(size : Int32, query : String, & : Int32 -> SearchLine) : Array({Int32, Int32})
       hits = [] of {Int32, Int32}
       return hits if query.empty?
       q = query.downcase
-      qb = q.bytesize
+      qn = q.size
       size.times do |i|
-        dl = yield i
-        next unless nb = dl.byte_index(q)
-        chars = dl.ascii_only? ? nil : Offsets.new(dl, false)
-        while nb
-          hits << {i, chars ? chars.char_at(nb) : nb}
-          nb = dl.byte_index(q, nb + qb)
-        end
+        (yield i).each_match(q, qn) { |start, _| hits << {i, start} }
       end
       hits
+    end
+
+    # Search in lowercase, but report ranges on the original text. Most letters keep
+    # their character count. For a letter such as İ → i + combining dot, remember only
+    # the extra lowercase character's position. Both halves belong to the same glyph.
+    struct SearchLine
+      getter? expanded : Bool
+      @extra : Array(Int32)?
+
+      def initialize(line : String)
+        @lower = line.downcase
+        @expanded = @lower.size != line.size
+        if @expanded
+          extras = [] of Int32
+          line.each_char_with_index do |ch, i|
+            first = true
+            ch.downcase do |_|
+              extras << i + extras.size + 1 unless first
+              first = false
+            end
+          end
+          @extra = extras
+        end
+      end
+
+      def each_match(needle : String, length : Int32, &) : Nil
+        return if needle.empty?
+        at = @lower.byte_index(needle)
+        return unless at
+        chars = @lower.ascii_only? ? nil : Offsets.new(@lower, false)
+        passed = 0
+        while at
+          start = chars ? chars.char_at(at) : at
+          last = start + length - 1
+          if extra = @extra
+            while passed < extra.size && extra[passed] <= start
+              passed += 1
+            end
+            start -= passed
+            while passed < extra.size && extra[passed] <= last
+              passed += 1
+            end
+            last -= passed
+          end
+          yield start, last + 1
+          at = @lower.byte_index(needle, at + needle.bytesize)
+        end
+      end
     end
 
     # One pane's ^F scan cache, carried across frames: the drawn rows of a logical line, and
@@ -546,95 +569,79 @@ module Gori::Tui
       end
     end
 
-    # The query-independent half of a scan: the downcased copy, which string the band is cut
-    # from, the ASCII verdicts the per-row cursors used to recompute with a full walk each,
-    # and the grapheme checkpoints.
+    # Query-independent material kept by the painter across incremental searches.
     class SearchText
       getter line : String
-      getter dl : String
-      getter src : String
-      getter? one_to_one : Bool # `downcase` kept the char count (see `mark_search`)
-      getter? dl_ascii : Bool
+      getter search_line : SearchLine
       getter? src_ascii : Bool
       @src_printable : Bool? = nil
       @marks : ClusterMarks? = nil
 
       def initialize(@line : String)
-        @dl = @line.downcase
-        # Match in the downcased copy, then slice the ORIGINAL to preserve case — valid only
-        # while downcase is 1:1 (see `mark_search` for the U+0130 fallback).
-        @one_to_one = @dl.size == @line.size
-        @src = @one_to_one ? @line : @dl
-        @dl_ascii = @dl.ascii_only?
-        @src_ascii = @src.same?(@dl) ? @dl_ascii : @src.ascii_only?
+        @search_line = SearchLine.new(@line)
+        @src_ascii = @line.ascii_only?
       end
 
-      # Whether this is `line`'s text. A content-equal line that is a different String is
-      # adopted, so the next row's check is an identity test again.
       def for?(line : String) : Bool
         return true if line.same?(@line)
         return false unless line == @line
         @line = line
-        @src = line if @one_to_one
         true
       end
 
       def src_printable? : Bool
         v = @src_printable
-        v.nil? ? (@src_printable = Screen.printable_ascii?(@src)) : v
+        v.nil? ? (@src_printable = Screen.printable_ascii?(@line)) : v
       end
 
-      # The grapheme checkpoints `ColRun` resumes from, built only when a non-ASCII row asks.
       def marks : ClusterMarks?
         return nil if src_printable?
-        @marks ||= ClusterMarks.new(@src)
+        @marks ||= ClusterMarks.new(@line)
       end
     end
 
-    # A `SearchText` plus one query's matches in it: the retired loop's non-overlapping
-    # left-to-right `byte_index` walk over the downcased copy, verbatim, with the char index
-    # and the drawn string's byte offset of each hit recorded by one forward walk apiece.
     class SearchScan
       getter text : SearchText
       getter query : String
-      getter qn : Int32
-      # Char index (in `dl`, which is also `src`'s char index) of every hit, ascending.
-      getter hit_chars : Array(Int32)
-      # Byte offset in `src` of each hit's first char.
+      getter hit_chars = [] of Int32
       getter hit_src_bytes : Array(Int32)
+      @ends : Array(Int32)?
+      @qn : Int32
 
-      delegate line, dl, src, one_to_one?, src_ascii?, src_printable?, marks, to: @text
+      delegate line, src_ascii?, src_printable?, marks, to: @text
 
       def self.new(line : String, query : String) : SearchScan
         new(SearchText.new(line), query)
       end
 
       def initialize(@text : SearchText, @query : String)
-        q = @query.downcase
-        dl = @text.dl
-        @qn = q.size
-        qb = q.bytesize
-        hit_bytes = [] of Int32
-        pos = 0
-        while nb = dl.byte_index(q, pos)
-          hit_bytes << nb
-          pos = nb + qb
+        needle = @query.downcase
+        @qn = needle.size
+        # On ordinary lines every end is start + query length. Store variable ends only
+        # when case expansion makes that rule insufficient.
+        @ends = ends = [] of Int32 if @text.search_line.expanded?
+        @text.search_line.each_match(needle, @qn) do |start, stop|
+          @hit_chars << start
+          ends.try(&.push(stop))
         end
-        @hit_chars = if @text.dl_ascii?
-                       hit_bytes
-                     else
-                       chars = Offsets.new(dl, false)
-                       hit_bytes.map { |off| chars.char_at(off) }
-                     end
-        src = @text.src
-        @hit_src_bytes = if src.same?(dl)
-                           hit_bytes
-                         elsif @text.src_ascii?
+        @hit_src_bytes = if @text.src_ascii?
                            @hit_chars
                          else
-                           seek = Offsets.new(src, false)
+                           seek = Offsets.new(line, false)
                            @hit_chars.map { |c| seek.byte_at(c) }
                          end
+      end
+
+      def first_ending_after(pos : Int32) : Int32?
+        if ends = @ends
+          ends.bsearch_index { |stop| stop > pos }
+        else
+          @hit_chars.bsearch_index { |start| start + @qn > pos }
+        end
+      end
+
+      def hit_end(index : Int32) : Int32
+        (ends = @ends) ? ends[index] : @hit_chars[index] + @qn
       end
 
       def for?(line : String, query : String) : Bool
