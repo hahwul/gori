@@ -276,6 +276,33 @@ describe Gori::Tui::TextField do
       b.bg_grid[1][6].should eq(Theme.bg)     # past the selection: untouched
     end
 
+    it "keeps a selection inside the field width" do
+      f = TextField.new("a long selected value")
+      f.handle_edit_key(field_key(Termisu::Input::Key::Home, shift: true))
+      b = MemoryBackend.new(40, 3)
+      screen = Screen.new(b)
+      screen.cell(10, 1, '│', Theme.border, Theme.bg)
+      f.render(screen, 2, 1, 8, true, Theme.text, Theme.bg)
+
+      b.bg_at(8, 1).should eq(Theme.accent_bg)
+      b.grid[1][10].should eq('│')
+      b.bg_at(10, 1).should eq(Theme.bg)
+    end
+
+    it "does not draw half of a selected wide glyph at the field edge" do
+      f = TextField.new("abc界 suffix")
+      f.handle_edit_key(field_key(Termisu::Input::Key::Home, shift: true))
+      b = MemoryBackend.new(40, 3)
+      screen = Screen.new(b)
+      screen.cell(6, 1, '│', Theme.border, Theme.bg)
+      f.render(screen, 2, 1, 4, true, Theme.text, Theme.bg)
+
+      b.bg_at(4, 1).should eq(Theme.accent_bg)
+      b.grid[1][5].should eq('…')
+      b.grid[1][6].should eq('│')
+      b.cont_grid[1][6].should be_false
+    end
+
     it "draws no band when there is no selection" do
       f, _ = drawn_field("hello world")
       b = MemoryBackend.new(40, 3)

@@ -685,17 +685,21 @@ module Gori::Tui
     # The WRAPPING panes, History detail and the Repeater request, carry a variant
     # (`paint_char_span_bg`) that takes a `row_start` and measures with `Wrap.row_col` instead;
     # this is the plain one.
-    def char_span_bg(x : Int32, y : Int32, line : String, x0 : Int32, x1 : Int32, bg : Color) : Nil
+    def char_span_bg(x : Int32, y : Int32, line : String, x0 : Int32, x1 : Int32, bg : Color,
+                     width : Int32 = @width - x) : Nil
       return if x0 >= x1
       a = Screen.cluster_start(line, {x0, line.size}.min)
       b = Screen.cluster_end(line, {x1, line.size}.min)
+      right = {x + width, @width}.min
       px = x + Screen.draw_width(line[0, a])
       i = a
-      while i < b
+      while i < b && px < right
         e = Screen.cluster_end(line, i + 1)
         seg = line[i...e]
+        cols = Screen.draw_width(seg)
+        break if px + cols > right
         text(px, y, seg, Theme.text, bg)
-        px += Screen.draw_width(seg)
+        px += cols
         i = e
       end
     end
@@ -733,7 +737,8 @@ module Gori::Tui
       # Only meaningful with no preedit in flight: composing text shifts every column right
       # of the caret, and a band measured against `value` would sit under the wrong glyphs.
       if sel && preedit.empty?
-        char_span_bg(x, y, value, (sel[0] - start).clamp(0, value.size), (sel[1] - start).clamp(0, value.size), Theme.accent_bg)
+        char_span_bg(x, y, value, (sel[0] - start).clamp(0, value.size),
+          (sel[1] - start).clamp(0, value.size), Theme.accent_bg, width: right - x)
       end
       # Block caret sits just after prefix+preedit, over the suffix's first cell
       # (or a space). The terminal's own IME UI anchors at the hardware cursor.
