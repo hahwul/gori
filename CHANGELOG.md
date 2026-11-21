@@ -107,7 +107,7 @@
 
 - In Notes, issue notes, and the project description, Ctrl or Alt with Home or End jumps to the start or end of the document in READ mode. Holding Shift extends the selection to that edge (#1963).
 
-- TUI: Tab in project tag fields completes only a visible suggestion. Resizing the terminal keeps the highlighted tag and the completion in sync (#1951).
+- TUI: Tab in project tag fields completes only a visible suggestion, including after a resize. The tag editor keeps your draft when another session changes the saved tags (#1951, #2001).
 
 - Project deletion and pruning report filesystem failures and leave the default pin in place after an incomplete delete. Switching the default and deleting a project now share a lock so concurrent commands preserve the selected project (#1991, #1993).
 

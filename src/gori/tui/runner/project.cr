@@ -7,15 +7,17 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # A `--db` project has no registry directory to hold them, so it says so instead.
   def project_edit_tags : Nil
     view = project_controller.view
-    unless view.registry_project?(@session.project)
+    project = @session.project
+    unless view.registry_project?(project)
       @toast = "tags belong to registry projects — this one was opened with --db"
       return
     end
     reg = ProjectRegistry.new(Paths.projects_dir)
-    ov = TagPromptOverlay.new(reg.tags_of(@session.project), ProjectRegistry.tag_counts(reg.entries))
+    original = reg.read_tags(project)
+    ov = TagPromptOverlay.new(original, ProjectRegistry.tag_counts(reg.entries))
     ov.on_commit = -> {
       begin
-        stored = reg.set_tags(@session.project, ov.tags)
+        stored = reg.set_tags(project, ov.tags, expected: original)
         view.tags = stored
         @toast = stored.empty? ? "tags cleared" : "tagged #{stored.map { |t| "##{t}" }.join(' ')}"
         true
@@ -25,5 +27,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       end
     }
     open_overlay(ov)
+  rescue ex : Gori::Error | IO::Error
+    @toast = "can't edit tags — #{ex.message}"
   end
 end
