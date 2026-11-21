@@ -99,6 +99,8 @@
 
 - TUI: typed input is no longer lost or changed behind your back. A Repeater or Fuzzer TARGET being edited takes Ctrl-A/E/U/W itself and returns to READ when you leave it, issue and rule forms ask once before `esc` or a click outside discards an edit, `esc` in Project settings cancels the edit instead of saving it, and a Rewriter stub keeps its line endings when it is opened and closed (#1938, #1941).
 
+- TUI: Project ENV keeps edits open after a failed save so they can be retried (#1976)
+
 - TUI: selections in long text fields stay inside the field, including at wide characters (#1955)
 
 - Text fields move and delete a Unicode prepend character and its following text as one grapheme (#1969)

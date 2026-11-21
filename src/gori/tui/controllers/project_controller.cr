@@ -1191,6 +1191,7 @@ module Gori::Tui
           # "deleted" stayed convincing for the whole session, and the var came back at the
           # next launch.
           ok = persist_env_vars(removed)
+          @project_view.reload_env_vars
           @host.status(ok ? "env var deleted: #{removed}" : "env var NOT deleted (project busy or unwritable) — try again")
         else
           @host.status("env var #{key} was already removed")
@@ -1203,13 +1204,8 @@ module Gori::Tui
     # added or deleted while this pane was open is neither dropped nor resurrected. Writing the
     # pane's whole copy back did both.
     #
-    # `upsert` is the row `ProjectView#env_commit` committed (`env_committed`); nil = delete
-    # `key`. An edit that RENAMED its row replaces the old key in place.
-    #
-    # Either way the pane re-seeds from the global afterwards: `mutate_project` publishes the
-    # merged table only when the store committed, so a refused write leaves the global (and
-    # with it the list and every send's substitution table) where the store is — which is what
-    # the "NOT saved" the caller is about to print claims.
+    # `upsert` holds the original key, new key and value for an edit. Nil deletes `key`.
+    # An edit that renames its row replaces the old key in place.
     private def persist_env_vars(key : String, upsert : {String?, String, String}? = nil) : Bool
       store = @host.session.store
       ok = Env.mutate_project(store) do |vars|
@@ -1221,7 +1217,6 @@ module Gori::Tui
         vars.each_with_index.reject { |(k, _), j| k == key && j != i }.map(&.[0]).to_a
       end
       Env.log_saved(store, Settings.project_env_vars) if ok
-      @project_view.reload_env_vars
       ok
     end
 
@@ -1253,22 +1248,18 @@ module Gori::Tui
 
     # Returns the outcome too — see `commit_override`.
     private def commit_project_env : Symbol
-      outcome = @project_view.env_commit
+      outcome = @project_view.env_commit { |row| persist_env_vars(row[1], row) }
       case outcome
       when :empty then @host.status("env var: empty")
       when :invalid then @host.status( # The KEY rule spelled out, as the global editor's copy of this message already did — a
       # rejected entry is usually a key with a dash or a leading digit, so naming the shape is
       # the difference between one retry and three.
 %(env var: need "KEY VALUE" or "KEY=value" — KEY is [A-Za-z_][A-Za-z0-9_]*))
-      when :dup then @host.status("env var: KEY already defined")
+      when :dup    then @host.status("env var: KEY already defined")
+      when :failed then @host.status("env var NOT saved (project busy or unwritable) — ↵ to retry")
       when :ok
-        # See `env_delete_var`: the store answers whether the write committed, and this is the
-        # surface where a false "saved" is least recoverable — nothing here re-reads the store,
-        # so the row keeps showing the value that never landed.
-        row = @project_view.env_committed || return outcome
-        ok = persist_env_vars(row[1], row)
-        n = @project_view.env_vars.size
-        @host.status(ok ? "env var saved — #{n} total" : "env var NOT saved (project busy or unwritable) — try again")
+        @project_view.reload_env_vars
+        @host.status("env var saved — #{@project_view.env_vars.size} total")
       end
       outcome
     end
