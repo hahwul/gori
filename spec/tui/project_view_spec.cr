@@ -925,6 +925,71 @@ private def with_desc_project(&)
   end
 end
 
+describe "ProjectView description saves" do
+  it "keeps a stale description draft across a reload and repeated save attempts" do
+    with_desc_project do |store, project|
+      peer = Gori::Store.open(project.db_path)
+      begin
+        view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+        view.reload(project, store)
+        view.replace_desc("my draft")
+        peer.set_setting(ProjectView::DESC_KEY, "other session").should be_true
+        peer.set_setting("another.setting", "retain").should be_true
+        view.save(store).should be_false
+        view.reload(project, store)
+        view.desc_text.should eq("my draft")
+        view.save(store).should be_false
+        peer.setting(ProjectView::DESC_KEY).should eq("other session")
+        peer.setting("another.setting").should eq("retain")
+        # The same final text can be accepted without writing it again.
+        view.replace_desc("other session")
+        view.save(store).should be_true
+        view.replace_desc("next edit")
+        view.save(store).should be_true
+        peer.setting(ProjectView::DESC_KEY).should eq("next edit")
+      ensure
+        peer.close
+      end
+    end
+  end
+
+  it "recognizes undone and convergent CRLF descriptions without changing their bytes" do
+    with_desc_project do |store, project|
+      store.set_setting(ProjectView::DESC_KEY, "before\r\nedit").should be_true
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      view.reload(project, store)
+      view.replace_desc("draft")
+      view.replace_desc("before\nedit")
+      store.set_setting(ProjectView::DESC_KEY, "peer\r\nvalue").should be_true
+      view.save(store).should be_true
+      view.desc_text.should eq("peer\nvalue")
+      store.setting(ProjectView::DESC_KEY).should eq("peer\r\nvalue")
+
+      view.enter_desc_insert!
+      view.replace_desc("same\nchange")
+      store.set_setting(ProjectView::DESC_KEY, "same\r\nchange").should be_true
+      view.save(store).should be_true
+      view.desc_insert_mode?.should be_true
+      store.setting(ProjectView::DESC_KEY).should eq("same\r\nchange")
+    end
+  end
+
+  it "keeps a peer's cleared description when a local edit is undone" do
+    with_desc_project do |store, project|
+      store.set_setting(ProjectView::DESC_KEY, "opening value").should be_true
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      view.reload(project, store)
+      view.replace_desc("my draft")
+      store.delete_setting(ProjectView::DESC_KEY).should be_true
+      view.save(store).should be_false
+      view.replace_desc("opening value")
+      view.save(store).should be_true
+      view.desc_text.should be_empty
+      store.setting(ProjectView::DESC_KEY).should be_nil
+    end
+  end
+end
+
 describe "ProjectView DESCRIPTION READ selection across a document hand-over" do
   # A view on the DESCRIPTION card with "beta" selected in READ — a band that does not start
   # at the origin, so a re-seeded caret landing on (0, 0) cannot collapse it by accident.

@@ -628,7 +628,11 @@ module Gori::Tui
     end
 
     def save : Bool
-      @project_view.save(@host.session.store)
+      saved = @project_view.save(@host.session.store)
+      if @project_view.desc_conflict?
+        @host.status("project description changed in another session — your draft is still in the editor")
+      end
+      saved
     end
 
     # Re-sync the SETTINGS pane's inherited network fields after a global settings:network
@@ -657,8 +661,7 @@ module Gori::Tui
         @host.open_palette
       elsif key.escape?
         if @project_view.desc_insert_mode?
-          save
-          @project_view.exit_desc_insert!
+          editor_exit_insert
         else
           leave_to_strip
         end
@@ -719,8 +722,16 @@ module Gori::Tui
 
     def editor_exit_insert : Bool
       return false unless editor_pane?
-      save
-      @project_view.exit_desc_insert!
+      if !save && @project_view.desc_conflict?
+        @host.confirm("DESCRIPTION CHANGED", "Discard your draft and load the saved project description?",
+          confirm_label: "discard", danger: true) do
+          @project_view.reload_desc(@host.session.store)
+        rescue DB::Error | SQLite3::Exception
+          @host.status("could not load the saved project description — your draft is still in the editor")
+        end
+      else
+        @project_view.exit_desc_insert!
+      end
       true
     end
 
