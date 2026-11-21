@@ -98,6 +98,7 @@ module Gori::Tui
       # report "no divergence" for exactly the case that loses the peer's writeup. Kept in
       # lock-step with every `@notes.set_text` of stored text — see `seed_notes`.
       @notes_base = ""
+      @notes_stored = "" # Exact persisted bytes for the write precondition.
       # The peer text already announced, so the lost-update toast fires ONCE per divergence.
       # The tick runs on this session's OWN captures too (data_version cannot say whose commit
       # moved it), which during a live capture is ~1.3×/sec of the same warning.
@@ -500,6 +501,7 @@ module Gori::Tui
       end
       @notes_read.sync_from(@notes)
       @notes_base = key
+      @notes_stored = text
       @notes_peer_seen = nil
     end
 
@@ -1031,18 +1033,7 @@ module Gori::Tui
     # READ-mode Home/End/Page. Home/End move the EDITOR caret, so they are mirrored back onto
     # the read cursor this mode paints.
     def notes_read_motion_key(ev : Termisu::Event::Key) : Bool
-      return false if notes_insert_mode?
-      key = ev.key
-      shift = ev.shift?
-      case
-      when key.home?      then @notes.home(shift)
-      when key.end?       then @notes.end_of_line(shift)
-      when key.page_up?   then notes_read_move(-@notes.page_rows, 0, selecting: shift)
-      when key.page_down? then notes_read_move(@notes.page_rows, 0, selecting: shift)
-      else                     return false
-      end
-      @notes_read.sync_to(@notes, selecting: shift) if key.home? || key.end?
-      true
+      !notes_insert_mode? && @notes_read.handle_motion_key(@notes, ev)
     end
 
     def notes_word_delete_key?(ev : Termisu::Event::Key) : Bool
@@ -1073,8 +1064,9 @@ module Gori::Tui
       @notes.set_preedit(text) if notes_insert_mode?
     end
 
-    def save_notes(store : Store) : Bool
-      return true unless issue = @detail
+    def save_notes(store : Store, *, overwrite : String? = nil) : Store::IssueNotesWrite
+      saved = Store::IssueNotesWrite.new(:committed)
+      return saved unless issue = @detail
       # `#text`, not `#to_bytes`. `to_bytes` joins with CRLF because it exists for WIRE text;
       # this is prose in a DB column, and the CRLF made `issues.notes` mean two different
       # things depending on the writer — the TUI stored `a\r\nb` while MCP `update_issue` and
@@ -1082,18 +1074,13 @@ module Gori::Tui
       # hand an agent one or the other. The TUI hid it from itself because `set_text` rstrips
       # `\r` on load. `NotesView` uses `#text` throughout for exactly this reason.
       #
-      # Returns whether the write COMMITTED. On a rollback NOTHING local moves: the buffer
-      # keeps the typed text and the pane stays in INS. That is not cosmetic — every step
-      # below is destructive to the edit. `refresh_detail` re-reads the row and (once INS is
-      # off) `set_text`s the notes buffer back to the STORED text, so swallowing the false
-      # made a busy project silently throw away the operator's writeup and show them the old
-      # one, with no toast and nothing left to retry from. Leaving INS on is what keeps the
-      # text on screen and a second `esc` a real retry. Same correction `NotesView#save` and
-      # `ProjectView#save` already carry.
-      # Masked as `gori run issues` and MCP `update_issue` mask it; the buffer then shows what
-      # was stored (`seed_notes` below), so the baseline still matches the column.
-      text = Env.mask_secrets(@notes.text)
-      return false unless store.update_issue(issue.id, notes: text)
+      # An untouched buffer has no edit to persist. On conflict, deletion or rollback, keep the
+      # draft in INS so the operator can recover it. Mask dirty edits before persisting them.
+      if notes_dirty?
+        text = Env.mask_secrets(@notes.text)
+        result = store.save_issue_notes(issue.id, text, expected: @notes_stored, overwrite: overwrite)
+        return result unless result.status.committed?
+      end
       exit_notes_insert!
       # The BASELINE has to move with the committed write, and only this method knows the
       # write landed. Without it the pane stayed `notes_dirty?` forever against a value only
@@ -1107,12 +1094,12 @@ module Gori::Tui
       # announce latch resets with it — and its guard makes the call free: the buffer already
       # holds this document, so nothing is replaced and the caret stays where the typing left it
       # (unless masking changed it, and then the buffer takes the stored text).
-      seed_notes(text)
+      seed_notes(text) if text
       # refresh_detail already re-syncs @notes from the re-fetched @detail (now that
       # notes-insert mode is off), and it nil-guards a peer-deleted issue — so no
       # separate (unsafe) set_text here.
       refresh_detail(store)
-      true
+      saved
     end
 
     # Leave the notes editor WITHOUT persisting (^W) — discards the in-buffer
@@ -1697,68 +1684,40 @@ module Gori::Tui
     def refresh_detail(store : Store, *, announce : Bool = false) : Bool
       peer_notes = false
       if issue = @detail
-        @detail = store.get_issue(issue.id)
-        reload_detail_links(store)
-        # Beside `reload_detail_links`, and for the same reason this method exists: a peer
-        # session — an agent's MCP `add_retest_step`, another gori's `gori run retest` — can
-        # change an issue's retest while this detail is open. Without it the summary line
-        # stays as it was at open time AND `detail_head_rows` disagrees with what
-        # `render_detail` draws, so the two cards below are laid out against a row that is or
-        # is not there. Nil-safe: it re-reads `@detail` itself and clears on a deleted issue.
-        refresh_retest_summary(store)
-        # get_issue returns nil when the row was deleted by a peer session (supported
-        # cross-session scenario) — guard the deref, mirroring ProbeView#refresh_detail.
-        # When @detail is nil the render path already falls back to the list view.
-        if d = @detail
+        if d = store.get_issue(issue.id)
+          @detail = d
+          reload_detail_links(store)
+          refresh_retest_summary(store)
           if notes_insert_mode? || notes_dirty?
             # NOT a re-seed. In INS `set_text` would discard what is being typed AND reset the
             # caret and undo stack mid-keystroke; dirty-in-READ is the chip-click case above,
             # where the text is on screen and `y` is the only thing that can rescue it. Report
             # instead — and only for a value the operator has not already been told about,
             # because this tick fires on this session's OWN captures too.
-            key = notes_key(d.notes)
-            if key != @notes_base && key != @notes_peer_seen
-              @notes_peer_seen = key if announce
+            if d.notes != @notes_stored && d.notes != @notes_peer_seen
+              @notes_peer_seen = d.notes if announce
               peer_notes = announce
             end
           else
             seed_notes(d.notes)
           end
+        elsif !notes_dirty?
+          # Keep a deleted issue's dirty editor reachable for copying or discarding the draft.
+          close_detail
         end
       end
       reload(store)
       peer_notes
     end
 
-    # True when saving would silently drop a peer's writeup: this window has unsaved text AND
-    # the stored notes have moved off the value the buffer was seeded from. Deliberately a
-    # PREDICATE rather than a branch inside `save_notes` — that method's `false` already means
-    # "the project was busy, your text is still here, esc to retry", and a conflict must not
-    # borrow it: retrying is exactly the wrong move, because the second esc would win.
-    #
-    # A read failure answers false. This is not the authorization kind of check — refusing to
-    # save on an unreadable row would strand the operator's text with no way out, and the write
-    # underneath is a plain UPDATE that will fail on its own if the store is really gone.
+    # Preview a conflict for the exit prompts. The writer checks atomically at save time.
     def notes_conflict?(store : Store) : Bool
-      !notes_conflict_key(store).nil?
-    end
-
-    # The PEER'S text (as a `notes_key`) when saving this buffer would overwrite it, else nil.
-    #
-    # The value, not just a flag, because the refusal it feeds is one the operator can decide to
-    # push through — and "push through" has to mean "through the version I was shown". Arming an
-    # overwrite against a value latches it against THAT value, so a peer who writes again between
-    # the refusal and the second `esc` gets a fresh refusal rather than being silently clobbered
-    # by an arm that was granted for text nobody has now seen.
-    def notes_conflict_key(store : Store) : String?
-      return nil unless issue = @detail
-      return nil unless notes_dirty? # nothing local to lose
+      return false unless issue = @detail
+      return false unless notes_dirty?
       stored = store.get_issue(issue.id)
-      return nil unless stored # deleted by a peer — a different case, and `update_issue` reports it
-      key = notes_key(stored.notes)
-      key == @notes_base ? nil : key
+      stored ? stored.notes != @notes_stored : false
     rescue DB::Error | SQLite3::Exception
-      nil
+      false
     end
 
     # The RELATED scroll window: the rows the last frame drew, floored at 1 so a

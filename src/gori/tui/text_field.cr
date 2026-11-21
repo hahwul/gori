@@ -14,6 +14,7 @@ module Gori::Tui
     record UndoState, value : String, caret : Int32
 
     property value : String
+    @word_press = nil.as({Int32, Int32, String, Int32?}?)
 
     # Successive chars keep their exact insertion offset, even if they join the suffix.
     # Painting and discrete edit keys resolve that offset to the whole glyph's far edge.
@@ -290,18 +291,27 @@ module Gori::Tui
     # Every overlay reaches this the same way (click a field row that is not the selected one),
     # so the fix is here rather than in each form.
     def click_to_cursor(mx : Int32, my : Int32, selecting : Bool = false) : Bool
+      @word_press = nil
       return false unless hit?(mx, my)
       @caret = caret
-      to = Screen.input_click(@value, @last_start, mx - @last_x)
+      hit = Screen.input_pointer(@value, @last_start, mx - @last_x, @last_w)
+      to = hit.caret
       @caret = @sel.move_cx(@caret, to.clamp(0, @value.size) - @caret, @value.size, selecting: selecting)
+      @word_press = {mx, my, @value, hit.character} unless selecting
       true
     end
 
     # Double-click: take the word under the pointer. False when the press missed the field or
     # landed on whitespace / past the value, leaving the caret where the click put it.
     def select_word_at(mx : Int32, my : Int32) : Bool
-      return false unless click_to_cursor(mx, my)
-      return false unless span = LineEdit.word_span(@value, @caret)
+      press = @word_press
+      unless press && press[0] == mx && press[1] == my && press[2].same?(@value)
+        return false unless click_to_cursor(mx, my)
+        press = @word_press
+      end
+      @word_press = nil
+      return false unless character = press.try(&.[3])
+      return false unless span = LineEdit.word_span(@value, character)
       from = Screen.cluster_start(@value, span[0])
       to = Screen.cluster_end(@value, span[1])
       @sel.clear_selection

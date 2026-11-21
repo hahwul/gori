@@ -117,6 +117,24 @@ describe "ChoicePicker — Overlay contract" do
     h.commits.should eq(0)
   end
 
+  it "pages a long list and jumps to its ends without committing" do
+    choices = (0...30).map { |i| ChoicePicker::Choice.new("Issue ##{i + 1}", nil, Theme.text, i) }
+    picker = ChoicePicker.new("OPEN LINKED ISSUE", choices, -1, :evidence_issue)
+    h = OverlayHarness.new(picker, area: Rect.new(0, 0, 60, 12))
+    h.render
+    page = h.box.not_nil!.h - 2
+
+    h.press(Termisu::Input::Key::PageDown).should eq(:open)
+    picker.selected_value.should eq(page)
+    h.press(Termisu::Input::Key::End)
+    picker.selected_value.should eq(29)
+    h.press(Termisu::Input::Key::PageUp)
+    picker.selected_value.should eq(29 - page)
+    h.press(Termisu::Input::Key::Home)
+    picker.selected_value.should eq(0)
+    h.commits.should eq(0)
+  end
+
   it "routes clicks: a row selects AND applies, outside dismisses" do
     p = ChoicePicker.for_severity(4) # opens on CRITICAL (row 0)
     h = OverlayHarness.new(p)

@@ -153,9 +153,6 @@ module Gori::Tui
       # The KEY an open edit row targets, so `reload_env_vars` can re-anchor the index when a
       # peer process reorders or shortens the list under it.
       @env_edit_key = nil.as(String?)
-      # The last `env_commit` as {key the edit row opened on (nil = add), key, value}: the
-      # controller persists that ONE row, not the pane's copy of the table.
-      @env_committed = nil.as({String?, String, String}?)
       # One field for the three sub-modes (add / edit / prefix), which are mutually exclusive —
       # the same shape as `EnvOverlay`. See `@ov_field` for why a TextField and not a triple.
       @env_field = TextField.new
@@ -454,18 +451,7 @@ module Gori::Tui
     # READ-mode Home/End/Page. The caret + selection this mode paints are `@desc_read`'s, so
     # Home/End go through the editor and are then mirrored back onto the read cursor.
     def desc_read_motion_key(ev : Termisu::Event::Key) : Bool
-      return false if desc_insert_mode?
-      key = ev.key
-      shift = ev.shift?
-      case
-      when key.home?      then @desc_area.home(shift)
-      when key.end?       then @desc_area.end_of_line(shift)
-      when key.page_up?   then desc_read_move(-@desc_area.page_rows, 0, selecting: shift)
-      when key.page_down? then desc_read_move(@desc_area.page_rows, 0, selecting: shift)
-      else                     return false
-      end
-      @desc_read.sync_to(@desc_area, selecting: shift) if key.home? || key.end?
-      true
+      !desc_insert_mode? && @desc_read.handle_motion_key(@desc_area, ev)
     end
 
     def desc_word_delete_key?(ev : Termisu::Event::Key) : Bool
@@ -1102,7 +1088,7 @@ module Gori::Tui
     # Unlike SCOPE and HOST OVERRIDES — which this view renders straight out of one live
     # object — the ENV pane holds its own `@env_items` copy. It once persisted that copy
     # WHOLESALE, so a stale copy wrote itself back over a peer's vars; the controller now writes
-    # one key per edit (`env_committed`), and this refresh is what keeps the DRAWN list honest.
+    # one key per edit, and this refresh is what keeps the DRAWN list honest.
     #
     # An open EDIT row names its target by INDEX, and the list that index pointed into is gone,
     # so re-anchor by the KEY the row opened on: the commit still updates that var if it
@@ -1858,14 +1844,16 @@ module Gori::Tui
       @env_field if @env_adding || @env_prefix_editing
     end
 
-    def env_commit : Symbol
+    # Keep the field and list intact until the controller persists the validated row.
+    def env_commit(&persist : {String?, String, String} -> Symbol) : Symbol
       text = @env_field.value
       return :empty if text.strip.empty?
       parsed = Env.parse_line(text)
       return :invalid unless parsed
       key, val = parsed
       idx = @env_edit_idx
-      return :dup if @env_items.each_with_index.any? { |(k, _), i| k == key && i != idx }
+      outcome = persist.call({@env_edit_key, key, val})
+      return outcome unless outcome == :ok
       # `idx` is re-anchored by `reload_env_vars` whenever a peer shortens the list, so it is
       # in range — the bound is checked anyway rather than trusted, because the failure mode of
       # trusting it is an IndexError raised out of a keystroke.
@@ -1876,13 +1864,10 @@ module Gori::Tui
         @env_items << {key, val}
         @env_sel = @env_items.size - 1
       end
-      @env_committed = {@env_edit_key, key, val}
       cancel_env_add
       clamp_env_sel
       :ok
     end
-
-    getter env_committed : {String?, String, String}?
 
     # The selected variable's KEY, for the delete confirm to name it before it is gone. Never
     # the value: a confirm that echoed a secret would print it into a modal the operator may

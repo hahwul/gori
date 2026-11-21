@@ -197,6 +197,40 @@ describe "an open Issues detail under a peer's edit" do
 end
 
 describe "the Issues notes lost-update refusal" do
+  it "leaves a peer edit in place when Esc closes an untouched editor" do
+    with_issues_controller do |ctrl, host, store|
+      id = open_issue(ctrl, store, notes: "original")
+      ctrl.view.enter_notes_insert!
+      store.update_issue(id, notes: "THEIRS").should be_true
+
+      ctrl.handle_detail_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape)).should be_true
+      store.get_issue(id).not_nil!.notes.should eq("THEIRS")
+      ctrl.view.notes_copy_all.should eq("THEIRS")
+      ctrl.view.notes_insert_mode?.should be_false
+      host.statuses.should be_empty
+    end
+  end
+
+  it "keeps a draft available after a peer deleted its issue" do
+    with_issues_controller do |ctrl, host, store|
+      id = open_issue(ctrl, store, notes: "original")
+      ctrl.view.enter_notes_insert!
+      type(ctrl, "mine ")
+      store.delete_issue(id).should be_true
+      ctrl.on_external_change
+
+      ctrl.handle_detail_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape)).should be_true
+      host.last_status.should contain("issue was deleted")
+      ctrl.commit_on_exit.should be_false
+      ctrl.view.notes_copy_all.should eq("mine original")
+      ctrl.view.notes_insert_mode?.should be_true
+      store.get_issue(id).should be_nil
+
+      ctrl.handle_detail_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerW, Termisu::Input::Modifier::Ctrl))
+      ctrl.view.detail_open?.should be_false
+    end
+  end
+
   it "refuses on the `esc` key, which is the save the operator actually presses" do
     # `commit` (tab switch / quit) is speced below; this is the same guard reached through
     # `handle_detail_key`, the only path a keyboard takes. `esc` out of INS is documented as
@@ -366,6 +400,29 @@ describe "the Issues notes refusal, once the operator has read it" do
     end
   end
 
+  it "clears the overwrite confirmation when a tab switch saves the draft" do
+    with_issues_controller do |ctrl, host, store|
+      id = open_issue(ctrl, store, notes: "original")
+      ctrl.view.enter_notes_insert!
+      type(ctrl, "mine ")
+      store.update_issue(id, notes: "THEIRS").should be_true
+      esc = -> { ctrl.handle_detail_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape)) }
+      esc.call
+
+      store.update_issue(id, notes: "original").should be_true
+      ctrl.commit.should be_true
+      store.get_issue(id).not_nil!.notes.should eq("mine original")
+
+      ctrl.view.enter_notes_insert!
+      type(ctrl, "later ")
+      store.update_issue(id, notes: "THEIRS").should be_true
+      esc.call
+      store.get_issue(id).not_nil!.notes.should eq("THEIRS")
+      ctrl.view.notes_insert_mode?.should be_true
+      host.statuses.count(&.includes?("esc again overwrites theirs")).should eq(2)
+    end
+  end
+
   it "drops the arm when ^W answers the refusal instead" do
     # `^W` is the other answer. Leaving the arm behind would make the NEXT conflict on this
     # issue skip its refusal and write over a peer with no warning at all.
@@ -395,7 +452,7 @@ describe "the Issues notes refusal, once the operator has read it" do
       type(ctrl, "mine ")
       store.update_issue(id, notes: "THEIRS")
       ctrl.commit
-      host.last_status.should contain("esc in the notes pane overwrites theirs")
+      host.last_status.should contain("esc in the notes pane prompts before overwriting")
       # And a tab switch does NOT become a save by being repeated — only `esc` is the save key.
       ctrl.commit
       store.get_issue(id).not_nil!.notes.should eq("THEIRS")

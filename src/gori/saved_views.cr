@@ -340,8 +340,12 @@ module Gori
     # view created can take, so a pointer left naming a deleted one would turn that view on.
     # Returns false only when a needed write did not commit.
     def self.clear_active_if(store : Store, view : View) : Bool
-      return true unless store.setting(ACTIVE_KEY) == view.key
-      set_active(store, nil)
+      clear_active_if(store, view.key)
+    end
+
+    # Also used to retire a missing view read from the active setting.
+    def self.clear_active_if(store : Store, key : String) : Bool
+      store.set_setting_if(ACTIVE_KEY, key, all_view.key)
     end
 
     # How `delete` ended, so every surface says the same thing about it.
@@ -366,8 +370,7 @@ module Gori
     # when it named `from`, which no longer resolves (and, for a project view, is a rowid the
     # next view created can take). Returns false only when a needed write did not commit.
     def self.repoint_active_if(store : Store, from : View, to : View) : Bool
-      return true unless store.setting(ACTIVE_KEY) == from.key
-      set_active(store, to)
+      store.set_setting_if(ACTIVE_KEY, from.key, to.key)
     end
 
     # --- scope-aware CRUD --------------------------------------------------------------------

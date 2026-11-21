@@ -1063,6 +1063,8 @@ module Gori::Tui
       @cy == 0 && @cx == 0
     end
 
+    @word_press = nil.as({Int32, Int32, Int32, Int32, Int32?}?)
+
     # Place the cursor at the click (mx,my), inverting render's layout: the visible
     # row maps to @scroll + offset; the display-x (after the optional gutter) maps to
     # a character index (at a cluster start) via Screen.column_for. `rect` is the SAME
@@ -1074,6 +1076,7 @@ module Gori::Tui
     # selection grows to wherever the pointer went — the same anchor rule ⇧arrows use, driven
     # from the mouse instead of the keyboard.
     def click_to_cursor(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
+      @word_press = nil
       return if rect.empty? || @lines.empty?
       # The scroll gauge rides `rect.right` — render draws it there — so a click on that one
       # column is a scroll request, not a caret placement. Answering it HERE covers every
@@ -1111,8 +1114,6 @@ module Gori::Tui
       # + @xscroll: the click lands at display column (mx - content_x) WITHIN the
       # visible window, which is @xscroll columns into the full line (always 0 under wrap).
       target = mx - (rect.x + gw) + @xscroll
-      line = @lines[@cy]
-      cr = @reveal || @conceal_spans.empty? ? nil : line_conceal(line_start_offset(@cy), line.size)
       # `Wrap.row_index` is the exact inverse of `Wrap.row_col`, which is what the caret,
       # the selection tint and the search overdraw all measure with — so a click lands on
       # the cell the caret would paint, on a continuation row as much as on a first row. It
@@ -1120,10 +1121,18 @@ module Gori::Tui
       # start and never an unseen `¦chain` char; it clamps to the row's own end, so a click
       # past the text of a wrapped row stops at the break instead of running into the next
       # row's characters.
-      @cx = Wrap.row_index(line, cr, vr.a, vr.b, target, nearest: true, reveal: @reveal)
+      hit = pointer_hit_on_row(vr, target, cw)
+      @cx = hit.caret
+      @word_press = {mx, my, @cy, @edits, rows[row]?.try { hit.character }} unless selecting
       snap_cx_out_of_conceal(0) # a click on the closing-§ column resolves to it; nudge to a legal rest
       break_run                 # a caret move ends the typing run — see push_undo
       env_complete_close
+    end
+
+    private def pointer_hit_on_row(row : Wrap::Row, column : Int32, width : Int32) : Screen::PointerHit
+      line = @lines[row.li]
+      conceal = @reveal || @conceal_spans.empty? ? nil : line_conceal(line_start_offset(row.li), line.size)
+      Wrap.row_pointer(line, conceal, row.a, row.b, column, reveal: @reveal, left: @xscroll, width: width)
     end
 
     # Select the WORD under (mx, my) — the double-click gesture. Places the caret at the
@@ -1134,21 +1143,29 @@ module Gori::Tui
     # A double-click on whitespace or past the end of a line selects nothing rather than
     # grabbing the run of spaces: the gesture means "give me this token", and there is none.
     def select_word_at(rect : Rect, mx : Int32, my : Int32) : Bool
-      click_to_cursor(rect, mx, my)
-      select_word_at_cursor
+      return false unless character = word_character_at(rect, mx, my)
+      select_word_at_cursor(character)
     end
 
-    # The word-spread half of `select_word_at`, WITHOUT the hit test — for a caller whose caret
-    # is already where the pointer put it. `ReadCursor` carries this same pair for the same
-    # reason (see its comment): a second inverse can disagree with the first when the layout
-    # moved between the two presses of a double-click, which is exactly what a Repeater split
-    # column does — adopting the lower sub-pane on press 1 resizes both cards, so press 2's
-    # rect is no longer the one press 1 was inverted against.
-    def select_word_at_cursor : Bool
+    def word_character_at(rect : Rect, mx : Int32, my : Int32) : Int32?
+      press = @word_press
+      click_to_cursor(rect, mx, my) unless press && press[0] == mx && press[1] == my
+      take_word_character
+    end
+
+    # A press can scroll the editor or resize a split pane before the second press.
+    # Keep the character found in the original geometry and consume it once.
+    def take_word_character : Int32?
+      press = @word_press
+      @word_press = nil
+      press[4] if press && press[2] == @cy && press[3] == @edits
+    end
+
+    def select_word_at_cursor(character : Int32 = @cx) : Bool
       return false if @lines.empty?
       @cy = @cy.clamp(0, @lines.size - 1)
       line = @lines[@cy]
-      return false unless span = LineEdit.word_span(line, @cx)
+      return false unless span = LineEdit.word_span(line, character)
       a, b = span
       @sel_anchor = {@cy, a}
       @cx = b

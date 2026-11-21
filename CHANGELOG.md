@@ -6,9 +6,17 @@
 
 - Import GraphQL introspection JSON (`data.__schema` or top-level `__schema`) into unsent POST templates, one per query or mutation, with typed variables and bounded selections from the TUI, CLI and MCP; subscriptions are omitted with a count (#1948).
 
+- GraphQL upload previews find the multipart boundary among adjacent media type parameters (#1968)
+
+- CBOR shows the correct UTC second for fractional timestamps before 1970 and in the last second of year 9999 (#1954)
+
 - MCP: `list_issues` exports Markdown and SARIF reports, and `get_flow` exports curl, Python, fetch, Go, httpie and CSRF PoCs, with credential and body redaction and read-only access. Reports page whole issues within 64 KiB and mark shortened evidence separately (#1947).
 
+- Markdown and SARIF issue reports mark request and response evidence truncated before export (#1966)
+
 - JWT: find HS256/HS384/HS512 signing secrets offline with `gori run jwt --crack` or MCP `jwt_crack`, using inline candidates, files or saved wordlists and reporting the candidates tried. MCP `jwt_crack` and `cookie_crack` stop between candidates when cancelled (#1946).
+
+- MessagePack labels invalid timestamp nanoseconds and retains the original timestamp bytes (#1958)
 
 - MCP: `race_requests`, `timing_requests` and `minimize_repeater` take `background:true`, which returns a `job_id` at once so other calls are answered while the run goes on; `get_job` returns the call's usual result and `stop_job` cancels it (#1944).
 
@@ -17,6 +25,8 @@
 - TUI: `/` on the tab bar of a tab with no filter says so and points at `^P` before the next letters reach the global keys, a function key says gori binds none instead of doing nothing, and Comparer `←` diffs the requests and `→` the responses instead of both toggling (#1944).
 
 - TUI: the Target → Params list has a `/` filter over parameter name, location and endpoint (#1944).
+
+- TUI: long choice lists, including the Evidence issue picker, respond to Page Up, Page Down, Home, and End (#1960)
 
 - TUI: OAST callbacks show when they arrived in the local time History uses, as a TIME column on a wide enough pane and in the detail, which printed UTC (#1944).
 - `gori run history`: `--since ID` tails newer flows oldest first and `--before-id ID` pages older ones, as MCP `list_history` does, so a script continues from the last row's id (#1944).
@@ -28,6 +38,10 @@
 - MCP: `gori mcp --install-*` writes `--tools=@recon` when no `--tools` is given, so a fresh install loads about a fifth of the full catalogue's tool schemas; `--tools='*'` installs every tool, and a hand-run `gori mcp` is unchanged, as is an existing entry until it is reinstalled. The printed `Command:` quotes glob and spaced arguments for copying into a shell (#1943, #1944).
 
 - History: "size" means request + response bytes everywhere. The TUI SIZE column shows the total that `size:` filters on and the CLI and MCP print, and `--sort=largest` (MCP `sort:"largest"`) ranks by it; `respsize:` still filters on the response alone (#1943).
+
+- History: cleaning up a deleted or moved view preserves a newer selection from another session (#1978)
+
+- CBOR identifies text strings with invalid UTF-8 chunks and preserves their bytes (#1959)
 
 - TUI: when a History filter fills its loaded page, marking all and the delete confirmation say the marks cover only the loaded rows (#1943).
 
@@ -47,17 +61,27 @@
 
 - A settings factory reset also clears unknown fields saved inside rule, saved-view and Decoder chain libraries (#1950).
 
+- Settings saves preserve a file that becomes unreadable during a session and can be retried once it is readable (#1957)
+
+- Open sessions detect replaced settings files even when size and modification time stay the same (#1977)
+
 - TUI: startup warnings show at once instead of behind the greeting and stay in Notifications: a fallback port, capture off, a project dir gori cannot write (no longer blamed on another window), a corrupt settings.json under `--db`, and flows a crash left incomplete. Other action messages no longer wait behind a companion bubble either (#1942).
 
 - Fuzzer: the TUI completion line counts errors as the CLI does, and a run where every request failed ends as `all N failed` instead of a green ✓ (#1942).
 
 - TUI: an import that duplicates an earlier one, or did not commit every flow, says so on the status row ahead of the path and keeps the warning in Notifications (#1942).
 
+- Replacing a private TUI export keeps its existing file permissions throughout the write (#1965)
+
 - Repeater: stopping a send reads as stopped instead of a red `Closed stream` error, and a response gori cut short names the cause (its read budget, its 8 MiB capture cap, an idle origin) instead of a bare `(stopped)` or `(incomplete)`. A send still waiting for its response says it is sending, for how long and how to stop it, instead of "not sent yet" (#1942, #1943).
 
 - TUI: the Intercept queue hint calls `/` the catch condition it sets, not a filter, and held response rows show status before the path so it remains visible on narrow screens. Coming back to Decoder lands on INPUT instead of typing into the chain, and the footer under a sub-tab filter being typed shows the filter's keys instead of strip letters that now type. The Issues list marks a resolved issue `res`, not `done` (#1942, #1943).
 
 - Evidence: freezing an exchange an issue already holds with the same bytes writes no second copy; the TUI and `gori run evidence freeze` name the existing copy and MCP `freeze_evidence` returns it with `already_frozen: true`, now named in the tool description. A source whose bytes changed still freezes a new copy (#1942, #1944).
+
+- Text evidence keeps complete UTF-8 characters at the display size limit (#1956)
+
+- Frozen evidence details distinguish a display limit from a capture that was already truncated (#1974)
 
 - Extract rules: a rule that re-binds the same value on every response no longer makes another rule's `extract_miss` warning repeat on most captured flows (#1942).
 
@@ -69,11 +93,29 @@
 
 - CLI: a `gori run` whose output file fills the disk now says so in one line and exits 1, instead of printing a backtrace (#1942).
 
+- In Notes, issue notes, and the project description, Ctrl or Alt with Home or End jumps to the start or end of the document in READ mode. Holding Shift extends the selection to that edge (#1963).
+
 - TUI: Tab in project tag fields completes only a visible suggestion. Resizing the terminal keeps the highlighted tag and the completion in sync (#1951).
+
+- Project lists and automatic project selection now distinguish activity within the same second and break exact ties by directory name (#1952, #1964).
 
 - TUI: typed input is no longer lost or changed behind your back. A Repeater or Fuzzer TARGET being edited takes Ctrl-A/E/U/W itself and returns to READ when you leave it, issue and rule forms ask once before `esc` or a click outside discards an edit, `esc` in Project settings cancels the edit instead of saving it, and a Rewriter stub keeps its line endings when it is opened and closed (#1938, #1941).
 
+- TUI: Project ENV keeps edits open after a failed save and preserves keys another session claims while editing (#1976, #1979)
+
+- TUI: selections in long text fields stay inside the field, including at wide characters (#1955)
+
+- TUI: double-click word selection follows the glyph under the pointer, including either half of a wide character (#1981)
+
+- Text fields move and delete a Unicode prepend character and its following text as one grapheme (#1969)
+
 - TUI: Find counts every occurrence and scrolls to the match, centred on an unwrapped line, a new History filter puts the cursor on the newest match, Issues export writes the marked or filtered issues and says which, and the `Space` menu shows all its rows again after the terminal grows (#1938, #1941).
+
+- Issue reports close unfinished top-level note code fences so later sections stay visible (#1972)
+
+- TUI: leaving a filter discards unfinished IME composition and keeps the applied query (#1962)
+
+- Filter completion preserves literal quotes, backslashes, and closing parentheses in suggested values (#1967)
 
 - Fuzzer: the payload card shows all eight types and refuses a bound that is not a number until a second `esc` closes it unapplied, the CONFIG card follows its cursor on a short terminal, a refused run stays in Notifications, and Tab on an empty processor chain lists the converters, which `esc` closes without dropping the chain (#1938, #1941).
 
@@ -91,7 +133,15 @@
 
 - TUI: unsaved issue drafts require a save or an explicit discard, simultaneous edits to a note are preserved as separate notes, and closing a note with links requires confirmation (#1929).
 
+- Issue notes preserve drafts and peer edits across concurrent saves and deletions. Closing an untouched editor keeps the latest stored text (#1980)
+
 - TUI: project-wide search restores its results and selection after viewing a flow, blocks opening hidden results and ignores stale body matches while the index catches up. Project-name search supports caret movement and click-to-edit, and the Comparer and link pickers find older flows and keep the filter open when it has no matches (#1929, #1953).
+
+- Fuzzy search stays responsive for long multilingual names (#1970)
+
+- Project workspace bindings preserve trailing spaces in directory names (#1961)
+
+- Creating a project by its renamed display name reopens the existing project (#1973)
 
 - TUI: the command palette keeps the selected result visible in short terminals. If the palette or Space menu no longer fits, resize to resume or press Esc to close it (#1928).
 
@@ -100,6 +150,8 @@
 - TUI: leaving a project asks before discarding temporary JWT, Cookie and Comparer work. Short config forms scroll to the selected field, hidden forms cannot start a run, and Retest keeps its run and close keys visible (#1925).
 
 - TUI: Find keeps its input visible in narrow terminals and lets you click to move the caret. History cancels delayed detail opens when you leave the list and explains how to search from Hex view (#1926).
+
+- Ordinary file pickers complete catalog entries to usable paths (#1975)
 
 - Fuzzer: agents can prepare a sub-tab with `create_fuzzer` while Send traffic is off, and scripts can use `gori run fuzz create`; the operator reviews and runs the saved request, payloads, processors and WebSocket script in the TUI (#1910).
 

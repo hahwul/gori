@@ -332,18 +332,17 @@ module Gori
       # --- strings ------------------------------------------------------------
 
       private def bytes_item(j : JSON::Builder, head : Head) : Bool
-        payload, why = string_payload(head, 2_u8)
+        payload, why, _valid_text = string_payload(head)
         return partial(j, why) unless payload
         j.object { j.field "$bin", Base64.strict_encode(payload) }
         true
       end
 
       private def text_item(j : JSON::Builder, head : Head) : Bool
-        payload, why = string_payload(head, 3_u8)
+        payload, why, valid_text = string_payload(head)
         return partial(j, why) unless payload
-        s = String.new(payload)
-        if s.valid_encoding?
-          j.string(s)
+        if valid_text
+          j.string(String.new(payload))
         else
           # Writing the bytes as a JSON string would emit invalid UTF-8 into the
           # document — the whole render stops being parseable — and scrubbing to
@@ -354,29 +353,33 @@ module Gori
         true
       end
 
-      # Definite length, or the indefinite chunked form. Returns {payload, reason}.
-      private def string_payload(head : Head, major : UInt8) : {Bytes?, String}
-        return indefinite_chunks(major) if head.indefinite
-        payload = take(head.arg)
-        payload ? {payload, ""} : {nil, "truncated"}
+      # Returns {payload, stop reason, text validity}. For a byte string, validity is true.
+      private def string_payload(head : Head) : {Bytes?, String, Bool}
+        return indefinite_chunks(head.major) if head.indefinite
+        payload = take(head.arg) || return {nil, "truncated", false}
+        {payload, "", head.major != 3_u8 || Unicode.valid?(payload)}
       end
 
       # RFC 8949 §3.2.3: the chunks of an indefinite-length string must all be
       # definite-length strings of the same major type, ending at a `break`.
       # Total size is bounded by the input, because every chunk is taken from it.
-      private def indefinite_chunks(major : UInt8) : {Bytes?, String}
+      # Validate each text chunk on its own so a code point split across chunks
+      # stays marked invalid even when concatenating the bytes makes valid UTF-8.
+      private def indefinite_chunks(major : UInt8) : {Bytes?, String, Bool}
         io = IO::Memory.new
+        valid_text = true
         loop do
           @items += 1
-          return {nil, "max_items"} if @items > MAX_ITEMS
+          return {nil, "max_items", false} if @items > MAX_ITEMS
 
           head, why = read_head
-          return {nil, why} unless head
-          return {io.to_slice, ""} if break?(head)
-          return {nil, "malformed"} if head.major != major || head.indefinite
+          return {nil, why, false} unless head
+          return {io.to_slice, "", valid_text} if break?(head)
+          return {nil, "malformed", false} if head.major != major || head.indefinite
 
           chunk = take(head.arg)
-          return {nil, "truncated"} unless chunk
+          return {nil, "truncated", false} unless chunk
+          valid_text &&= Unicode.valid?(chunk) if major == 3_u8
           io.write(chunk)
         end
       end
@@ -498,14 +501,10 @@ module Gori
         if head && head.major == 3_u8
           @items += 1
           if @items <= MAX_ITEMS
-            payload, _reason = string_payload(head, 3_u8)
-            if payload
-              s = String.new(payload)
-              # Invalid UTF-8 falls through deliberately: the scratch render
-              # gives it the `$str_invalid_utf8` envelope and the map gets
-              # flagged, which is truer than a member name JSON cannot hold.
-              return {s, true, true} if s.valid_encoding?
-            end
+            payload, _reason, valid_text = string_payload(head)
+            # Invalid UTF-8 falls through to the scratch render and gets
+            # a `$str_invalid_utf8` envelope and the non-string map key flag.
+            return {String.new(payload), true, true} if payload && valid_text
           end
         end
         @pos = save
@@ -576,7 +575,7 @@ module Gori
         if head && head.major == 2_u8
           @items += 1
           if @items <= MAX_ITEMS
-            payload, _reason = string_payload(head, 2_u8)
+            payload, _reason, _valid_text = string_payload(head)
             if payload
               j.object do
                 j.field("$tag") { write_uint(j, tag) }
@@ -698,8 +697,9 @@ module Gori
       # too, which is the wanted answer. Sub-second precision is dropped from the
       # display string only — `value` still carries the exact number.
       private def rfc3339(seconds : Float64) : String?
-        return nil unless -62_135_596_800.0 <= seconds <= 253_402_300_799.0
-        Time.unix(seconds.to_i64).to_rfc3339
+        whole_second = seconds.floor
+        return nil unless -62_135_596_800.0 <= whole_second <= 253_402_300_799.0
+        Time.unix(whole_second.to_i64).to_rfc3339
       end
 
       # --- bytes --------------------------------------------------------------

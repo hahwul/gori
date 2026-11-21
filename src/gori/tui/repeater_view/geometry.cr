@@ -10,11 +10,6 @@ class Gori::Tui::RepeaterView
     Repeater::FlowRequest.parse_target(Env.expand(@target))
   end
 
-  # The TARGET card row prefixes (marker + the field value 1 col to its right). Kept
-  # as constants so render_target and the click→caret mapping agree on the value base.
-  TARGET_PREFIX = "›"
-  SNI_PREFIX    = "SNI ›"
-
   # The TARGET band's SNI override marker (not a toggle — `^S` edits the row below).
   SNI_BADGE = " SNI "
 

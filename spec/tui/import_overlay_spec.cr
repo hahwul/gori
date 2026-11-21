@@ -78,6 +78,20 @@ describe Gori::Tui::ImportOverlay do
     ov.handle_key(key(Termisu::Input::Key::Enter)).should eq(:commit)
   end
 
+  it "submits the absolute path of a file completed from the wordlists directory" do
+    with_wordlist_home do |directory|
+      Dir.mkdir_p(directory)
+      source = File.join(directory, "captured-session.har")
+      File.write(source, "{}")
+      overlay = ImportOverlay.new(:har)
+      harness = OverlayHarness.new(overlay)
+
+      harness.type("captured-session")
+      harness.press(Termisu::Input::Key::Enter).should eq(:closed)
+      overlay.path.should eq(source)
+    end
+  end
+
   it "collects a GraphQL path and endpoint before committing through the shell" do
     ov = ImportOverlay.new(:graphql)
     h = OverlayHarness.new(ov)

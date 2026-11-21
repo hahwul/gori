@@ -146,6 +146,12 @@ describe Gori::Cbor do
         .should eq(Bytes[0xff, 0xfe])
     end
 
+    it "checks UTF-8 independently in each chunk of an indefinite text string" do
+      whole("7f62c3a96121ff").should eq(%("é!"))
+      # The concatenated bytes also spell é, but neither chunk is valid by itself.
+      whole("7f61c361a9ff").should eq(%({"$str_invalid_utf8":"w6k="}))
+    end
+
     it "keeps the document parseable when a text string is not UTF-8" do
       # The point of the envelope: writing the raw bytes as a JSON string would
       # make the whole render unparseable.
@@ -168,6 +174,12 @@ describe Gori::Cbor do
       json = JSON.parse(whole("a162fffe01"))
       json["$non_string_keys"].as_bool.should be_true
       json[%({"$str_invalid_utf8":"//4="})].as_i.should eq(1)
+    end
+
+    it "does not turn a split code point into a plain map key" do
+      json = JSON.parse(whole("a17f61c361a9ff01"))
+      json["$non_string_keys"].as_bool.should be_true
+      json[%({"$str_invalid_utf8":"w6k="})].as_i.should eq(1)
     end
 
     it "does not flag a map whose keys are all text" do
@@ -203,6 +215,20 @@ describe Gori::Cbor do
       json = JSON.parse(whole("c1fb41d452d9ec200000"))
       json["$time"].as_s.should eq("2013-03-21T20:04:00Z")
       json["value"].as_f.should eq(1363896240.5)
+    end
+
+    it "shows the containing second for a fractional epoch before 1970" do
+      whole("c1f9b800")
+        .should eq(%({"$tag":1,"$time":"1969-12-31T23:59:59Z","value":-0.5}))
+    end
+
+    it "shows fractional epochs in the final representable second" do
+      json = JSON.parse(whole("c1fb424d7ffa20bfc000"))
+      json["$time"].as_s.should eq("9999-12-31T23:59:59Z")
+      json["value"].as_f.should eq(253402300799.5)
+
+      JSON.parse(whole("c1fb424d7ffa20c00000"))["$time"]?.should be_nil
+      JSON.parse(whole("c1fbc22cef23ee010000"))["$time"]?.should be_nil
     end
 
     it "does not raise on a tag 1 whose epoch is outside Time's range" do

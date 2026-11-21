@@ -131,14 +131,7 @@ module Gori::Tui
     # "give me this token", and there is none. The one span TextArea, ReadCursor and
     # LineFieldRead select, so the three cannot disagree.
     def self.word_span(line : String, cx : Int32) : {Int32, Int32}?
-      # `Screen.column_for_click` rounds a POINTER to the NEAREST cluster boundary, so a
-      # double-click on the RIGHT half of a WIDE glyph — a Hangul syllable, a CJK ideograph:
-      # half of every pointer position over such text — resolves to the position AFTER it,
-      # where the word may have already ended and there is no token to take. Step back over
-      # that one glyph, and ONLY when it is wide: a 1-column cluster cannot be rounded past,
-      # so every ASCII gesture is bit-for-bit what it was (including "a double-click on a
-      # space takes nothing").
-      c = Screen.step_back_over_wide(line, cx.clamp(0, line.size))
+      c = cx.clamp(0, line.size)
       return nil if c >= line.size || line[c].whitespace?
       word = word_char?(line[c])
       a = c
@@ -175,7 +168,8 @@ module Gori::Tui
     abstract def query_caret_moved : Nil
 
     # Hook: the bar was left, by Enter or Esc.
-    abstract def query_left : Nil
+    def query_left : Nil
+    end
 
     # Hook: what a `LineEdit` action settles. An action that changes no text (Home, End, ⌥←,
     # ⌥→) takes the caret-move path, so it does not re-run a filter predicate.
@@ -197,6 +191,7 @@ module Gori::Tui
 
     def stop_query : Nil # Enter: keep the filter, leave edit mode
       @querying = false
+      @preedit = ""
       query_left
     end
 

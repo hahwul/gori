@@ -114,34 +114,25 @@ module Gori::Tui
       false
     end
 
-    # ↑/↓ pick, ↵ sets, esc cancels. A printable matching a row's mnemonic sets that row
+    # List navigation moves the highlight, ↵ sets, esc cancels. A matching mnemonic sets its row
     # DIRECTLY (one keystroke, no ↵); j/k fall back to vim-style nav only when they aren't
     # themselves a mnemonic, so the reflex keystroke moves the highlight instead of being
     # ignored. Anything else is swallowed — the picker stays up, a value pick is deliberate.
     def handle_key(ev : Termisu::Event::Key) : Symbol
-      key = ev.key
-      case
-      when key.escape? then :cancel
-      when key.up?
-        move(-1)
-        :stay
-      when key.down?
-        move(1)
-        :stay
-      when key.enter? then :commit
-      else
-        if (c = ev.char) && !ev.ctrl? && !ev.alt?
-          if idx = index_for(c)
-            set_selected(idx)
-            return :commit
-          elsif c == 'j'
-            move(1)
-          elsif c == 'k'
-            move(-1)
-          end
-        end
-        :stay
+      if outcome = nav_key(ev)
+        return outcome
       end
+      if (c = ev.char) && !ev.ctrl? && !ev.alt?
+        if idx = index_for(c)
+          set_selected(idx)
+          return :commit
+        elsif c == 'j'
+          move(1)
+        elsif c == 'k'
+          move(-1)
+        end
+      end
+      :stay
     end
 
     def entry_count : Int32

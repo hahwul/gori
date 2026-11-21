@@ -26,6 +26,34 @@ describe Gori::ProjectRegistry do
     end
   end
 
+  it "keeps paths with and without a trailing space bound to separate projects" do
+    posix_only!("trailing spaces in directory names")
+    with_root do |registry, root|
+      checkout = File.join(root, "checkout")
+      spaced_checkout = "#{checkout} "
+      Dir.mkdir_p(checkout)
+      Dir.mkdir(spaced_checkout)
+
+      spaced_project = registry.create_for_workspace("API", spaced_checkout)
+      registry.workspace_of(spaced_project).should eq(File.realpath(spaced_checkout))
+      registry.find_by_workspace(checkout).should be_nil
+
+      plain_project = registry.create_for_workspace("API", checkout)
+      plain_project.dir.should_not eq(spaced_project.dir)
+      registry.create_for_workspace("API", spaced_checkout).dir.should eq(spaced_project.dir)
+      registry.find_by_workspace(checkout).try(&.dir).should eq(plain_project.dir)
+    end
+  end
+
+  it "leaves projects with absent or blank workspace sidecars unbound" do
+    with_root do |registry, _root|
+      legacy = registry.create("Legacy")
+      registry.workspace_of(legacy).should be_nil
+      File.write(File.join(legacy.dir, Gori::ProjectRegistry::WORKSPACE_FILE), " \t\n")
+      registry.workspace_of(legacy).should be_nil
+    end
+  end
+
   describe "a workspace-bound directory whose database does not exist yet" do
     it "is not taken over by a same-slug create" do
       with_root do |registry, root|
@@ -57,6 +85,17 @@ describe Gori::ProjectRegistry do
         same = registry.create("api")
         same.dir.should eq(bound.dir)
         registry.workspace_of(same).should eq(File.expand_path(File.join(root, "checkout")))
+      end
+    end
+
+    it "keeps the primary workspace claim when another checkout with the same name has a database" do
+      with_root do |registry, root|
+        primary = registry.create_for_workspace("api", File.join(root, "checkout-one"))
+        peer = registry.create_for_workspace("api", File.join(root, "checkout-two"))
+        Gori::Store.open(peer.db_path).close
+
+        registry.create("API").dir.should eq(primary.dir)
+        registry.find("api").try(&.dir).should eq(primary.dir)
       end
     end
 

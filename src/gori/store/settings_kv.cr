@@ -179,6 +179,13 @@ module Gori
       exec_ok("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?", key, value, value)
     end
 
+    # Replace an existing value only if it still matches. A nonmatch succeeds without a write.
+    def set_setting_if(key : String, expected : String, value : String) : Bool
+      return true unless setting_is?(key, expected)
+      # Check again inside the write because a peer can commit after the read above.
+      exec_ok("UPDATE settings SET value = ? WHERE key = ? AND value = ?", value, key, expected)
+    end
+
     # Drop a per-project setting so `setting(key)` reads nil again (the Project settings pane
     # clears a network override this way — reverting the field to inherit the global value).
     # Returns whether the write committed (false = store busy/locked/closing).

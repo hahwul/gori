@@ -98,7 +98,7 @@ module Gori::Tui
 
     # `QueryBarEdit`'s hooks. Every text change re-filters. This bar has no dropdown, so a caret
     # move settles nothing, but a `LineEdit` action re-filters whether or not it changed the
-    # text. Enter drops an IME composition.
+    # text.
     def query_edited : Nil
       apply_filter
     end
@@ -108,10 +108,6 @@ module Gori::Tui
 
     def query_line_edited(action : Symbol) : Nil
       query_edited
-    end
-
-    def query_left : Nil
-      @preedit = ""
     end
 
     private def apply_filter(keep : Int64? = selected.try(&.id)) : Nil

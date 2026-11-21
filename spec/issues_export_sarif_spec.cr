@@ -459,6 +459,20 @@ describe Gori::Issues::Export do
       end
     end
 
+    it "marks a response body truncated before the report was generated" do
+      with_store do |store|
+        fid = seed_flow(store, resp_head: nil, req_body: "complete request".to_slice)
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: fid, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
+          body: "response prefix".to_slice, body_truncated: true, body_size: 100_i64))
+        store.insert_issue("short captured response", Gori::Store::Severity::Low, "h.test", fid)
+
+        result = only_result(store)
+        result["webRequest"]["body"]["text"].as_s.should eq("complete request")
+        result["webResponse"]["body"]["text"].as_s.should eq("response prefix\n\n[… body truncated or omitted before export …]")
+      end
+    end
+
     it "stays valid UTF-8 when the capture carried a raw byte" do
       # Titles, hosts, targets and HEADER BYTES all originate outside gori (an h2 `:path` or an
       # obs-text header value can be invalid UTF-8). One unscrubbed byte makes the whole

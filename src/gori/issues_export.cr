@@ -1,6 +1,7 @@
 require "json"
 require "./store"
 require "./links"
+require "./utf8"
 require "./proxy/codec/content_decode"
 require "./redact/wire"
 require "./issues_export/sarif" # Export.sarif — the SARIF 2.1.0 sibling of .markdown/.json
@@ -15,11 +16,13 @@ module Gori
       # Per-side cap on evidence bytes embedded in the Markdown report.
       EVIDENCE_CAP = 64 * 1024
 
+      private SOURCE_TRUNCATION_NOTE = "[… body truncated or omitted before export …]"
+
       # `matcher` is the project's redaction profile (`Redact::Policy.ambient`): the report embeds
       # each linked flow's request and response, and a shared report is the export that profile
       # exists for — `show`, History and MCP already sanitize the same bodies through it.
-      # `flow_loader` lets a caller bound and project evidence before rendering; absent it,
-      # the existing CLI/TUI report reads the captured flow in full.
+      # `flow_loader` lets a caller bound and project evidence before rendering and flag any
+      # additional truncation. Without it, the flags describe the original stored capture.
       def self.markdown(issues : Array(Store::Issue), store : Store, project_name : String,
                         matcher : Redact::Matcher? = nil,
                         flow_loader : Proc(Int64, Store::FlowDetail?)? = nil) : String
@@ -39,8 +42,7 @@ module Gori
                                            matcher : Redact::Matcher?, flow_loader : Proc(Int64, Store::FlowDetail?)? = nil) : Nil
         flow = f.flow_id.try { |fid| flow_loader ? flow_loader.call(fid) : store.get_flow(fid) }
         flow = Redact::Wire.flow(flow, matcher)[0] if flow && matcher
-        append_issue(io, f, flow, resolve_issue_links(f, store), frozen: store.issue_evidence(f.id),
-          source_cuts: !flow_loader.nil?)
+        append_issue(io, f, flow, resolve_issue_links(f, store), frozen: store.issue_evidence(f.id))
       end
 
       # The Markdown for ONE issue, heading included — the body of `markdown`'s loop, split out
@@ -64,8 +66,7 @@ module Gori
       # copies it does not include would be a list of hashes with nothing to check them against.
       private def self.append_issue(io : String::Builder, f : Store::Issue, flow : Store::FlowDetail?,
                                     resolved_links : Array(Links::Resolved), evidence : Bool = true,
-                                    frozen : Array(Store::IssueEvidenceMeta) = [] of Store::IssueEvidenceMeta,
-                                    source_cuts : Bool = false) : Nil
+                                    frozen : Array(Store::IssueEvidenceMeta) = [] of Store::IssueEvidenceMeta) : Nil
         io << "\n## [" << f.severity.label << "] " << one_line(f.title) << "\n\n"
         io << "- **Severity:** " << f.severity.label << "\n"
         if cvss = f.cvss
@@ -90,8 +91,8 @@ module Gori
         # yet keeps its newlines (unlike one_line, which would flatten title/host to a line).
         io << "\n" << demote_note_headings(scrub_controls(f.notes)) << "\n" unless f.notes.strip.empty?
         if flow && evidence
-          append_evidence(io, "Request", flow.request_head, flow.request_body, source_cuts && flow.request_body_truncated?)
-          append_evidence(io, "Response", flow.response_head, flow.response_body, source_cuts && flow.response_body_truncated?)
+          append_evidence(io, "Request", flow.request_head, flow.request_body, flow.request_body_truncated?)
+          append_evidence(io, "Response", flow.response_head, flow.response_body, flow.response_body_truncated?)
         end
       end
 
@@ -171,21 +172,27 @@ module Gori
       end
 
       NOTE_HEADING = /\A( {0,3})(\#{1,6})(?=[ \t\r\n]|\z)/
-      NOTE_FENCE   = /\A {0,3}(`{3,}|~{3,})/
+      # A backtick fence's info string cannot contain backticks. Tilde fences allow them.
+      NOTE_FENCE      = /\A {0,3}(`{3,}(?=[^`\r\n]*\r?\n?\z)|~{3,})/
+      NOTE_HTML_START = /\A {0,3}</
+      NOTE_LIST_ITEM  = /\A {0,3}(?:[-+*]|[0-9]{1,9}[.)])(?=[ \t\r\n]|\z)/
 
       # An issue's notes sit under its `##` heading, so a `## Repro` in them read as the next
       # issue. Every ATX heading outside a code fence goes three levels down (capped at `######`),
       # so even a `#` lands below the issue's `###` sections. Setext headings, and headings inside
-      # a blockquote or list item, are left as typed.
+      # a blockquote or list item, are left as typed. Close an unfinished top-level fence at
+      # the end of the notes so the following evidence and issue sections remain outside it.
       def self.demote_note_headings(notes : String) : String
         fence = nil.as(String?)
+        opener_line = 0
         String.build do |io|
-          notes.each_line(chomp: false) do |line|
+          notes.each_line(chomp: false).with_index do |line, line_number|
             if m = line.match(NOTE_FENCE)
               mark = m[1]
               if fence.nil?
-                fence = mark
-              elsif mark[0] == fence[0] && mark.size >= fence.size && m.post_match.strip.empty?
+                fence = m[0]
+                opener_line = line_number
+              elsif mark.starts_with?(fence.lstrip(' ')) && m.post_match.strip(" \t\r\n").empty?
                 # A closing fence carries no info string; "```python" inside a block is content.
                 fence = nil
               end
@@ -194,7 +201,19 @@ module Gori
             end
             io << line
           end
+          close_note_fence(io, notes, fence, opener_line) if fence
         end
+      end
+
+      private def self.close_note_fence(io : String::Builder, notes : String, fence : String, opener_line : Int32) : Nil
+        # A fence-like line inside raw HTML can be literal text. A list can also close its own
+        # fence when the container ends. Adding a fence at EOF in either case could open a new
+        # block, so only repair candidates with an unambiguous top-level start.
+        indented_for_list = fence.starts_with?("  ")
+        prefix = notes.each_line.first(opener_line)
+        return if prefix.any? { |line| line.matches?(NOTE_HTML_START) || (indented_for_list && line.matches?(NOTE_LIST_ITEM)) }
+        io << '\n' unless notes.ends_with?('\n')
+        io << fence
       end
 
       # Collapse control characters (CR/LF/tab/…) to a single space so a value with
@@ -350,7 +369,7 @@ module Gori
         # that is valid text up to the cap but has a stray byte deeper still shows its
         # readable prefix. But back the cut off to a UTF-8 codepoint boundary first, so a
         # multi-byte char split at exactly `cap` isn't misread as binary.
-        slice = truncated ? trim_to_codepoint_boundary(display_body[0, EVIDENCE_CAP]) : display_body
+        slice = truncated ? Utf8.trim_incomplete_end(display_body[0, EVIDENCE_CAP]) : display_body
         text = String.new(slice)
         BodyEvidence.new(text.valid_encoding? ? text : nil, display_body.size, truncated)
       end
@@ -377,23 +396,11 @@ module Gori
           elsif ev.binary?
             c << "\n\n[binary body omitted, #{ev.size} bytes]"
           end
-          c << "\n\n[… body truncated or omitted before export …]" if source_cut
+          c << "\n\n" << SOURCE_TRUNCATION_NOTE if source_cut
         end
         fence = "`" * fence_len(content)
         io << "\n### " << label << "\n\n" << fence << "http\n"
         io << content << "\n" << fence << "\n"
-      end
-
-      # Drop a UTF-8 sequence the `cap` cut left incomplete: walk back over trailing
-      # continuation bytes (10xxxxxx), then over the lead byte (11xxxxxx) they belonged to.
-      # Leaves the slice ending on a whole codepoint so a split char isn't read as binary.
-      def self.trim_to_codepoint_boundary(slice : Bytes) : Bytes
-        n = slice.size
-        while n > 0 && (slice[n - 1] & 0xC0) == 0x80 # continuation byte
-          n -= 1
-        end
-        n -= 1 if n > 0 && (slice[n - 1] & 0xC0) == 0xC0 # the lead byte whose tail was cut
-        slice[0, n]
       end
 
       # A CommonMark fenced block is closed only by a line of >= as many backticks

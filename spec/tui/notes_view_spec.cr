@@ -22,6 +22,20 @@ private def render_text(view : NotesView, w = 80, h = 10) : MemoryBackend
 end
 
 describe Gori::Tui::NotesView do
+  it "moves to document edges and extends the READ selection with modified Home and End" do
+    [Termisu::Input::Modifier::Ctrl, Termisu::Input::Modifier::Alt].each do |modifier|
+      view = NotesView.new
+      view.set_current_text("first\nmiddle\nlast")
+      view.read_move(1, 0)
+      view.read_move(0, 2)
+      view.read_motion_key(Termisu::Event::Key.new(Termisu::Input::Key::End, modifier | Termisu::Input::Modifier::Shift)).should be_true
+      view.copy_text.should eq("ddle\nlast")
+      view.read_motion_key(Termisu::Event::Key.new(Termisu::Input::Key::Home, modifier)).should be_true
+      view.selection?.should be_false
+      view.copy_text.should eq("first")
+    end
+  end
+
   it "shows the scratchpad guide on a blank note" do
     with_store do |store|
       view = NotesView.new

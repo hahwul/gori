@@ -237,6 +237,24 @@ describe Gori::Issues::Export do
       end
     end
 
+    it "preserves a multibyte character ending exactly at the evidence cap" do
+      with_store do |store|
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "GET", target: "/", http_version: "HTTP/1.1",
+          head: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+        cap = Gori::Issues::Export::EVIDENCE_CAP
+        prefix = "a" * (cap - "한".bytesize) + "한"
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
+          body: (prefix + "outside the cap").to_slice, reason: "OK", content_type: "text/plain", duration_us: 1_i64))
+        store.insert_issue("big utf8 body", Gori::Store::Severity::High, "h.test", id)
+
+        md = Gori::Issues::Export.markdown(store.issues, store, "proj")
+        md.includes?("aa한\n\n[… body truncated").should be_true
+      end
+    end
+
     it "still shows the readable prefix when an invalid byte is deeper than the cap" do
       with_store do |store|
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
@@ -256,6 +274,21 @@ describe Gori::Issues::Export do
         md = Gori::Issues::Export.markdown(store.issues, store, "proj")
         md.should_not contain("binary body omitted")
         md.should contain("body truncated")
+      end
+    end
+
+    it "marks a request body truncated before the report was generated" do
+      with_store do |store|
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "POST", target: "/", http_version: "HTTP/1.1",
+          head: "POST / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice,
+          body: "request prefix".to_slice, body_truncated: true, body_size: 100_i64,
+          source: Gori::FlowSource::Kind::Proxy))
+        store.insert_issue("short captured request", Gori::Store::Severity::Low, "h.test", id)
+
+        md = Gori::Issues::Export.markdown(store.issues, store, "proj")
+        md.should contain("request prefix\n\n[… body truncated or omitted before export …]")
       end
     end
 
@@ -346,6 +379,38 @@ describe Gori::Issues::Export do
         md.should contain("\n# still code\n")
         md.should contain("\n##### after")
       end
+    end
+
+    it "closes an unfinished notes fence before the next issue" do
+      with_store do |store|
+        id = store.insert_issue("first", Gori::Store::Severity::High, nil, nil)
+        store.update_issue(id, notes: "````sh\n# notes code")
+        store.insert_issue("next", Gori::Store::Severity::Low, nil, nil)
+
+        md = Gori::Issues::Export.markdown(store.issues, store, "proj")
+        md.should contain("\n````sh\n# notes code\n````\n\n## [low] next\n")
+      end
+    end
+
+    it "preserves the opener's indentation and fence length in the closing line" do
+      notes = "Example\n\n  ~~~~ `info`\n  ~~~\n  ~~~~\u00a0\n  # code\n"
+      Gori::Issues::Export.demote_note_headings(notes).should eq(notes + "  ~~~~")
+    end
+
+    it "leaves fence-like lines in a list item or HTML block alone" do
+      ["- Example\n  ~~~\n  code\n\nAs prose\n", "<div>\n```\n\nAs prose\n"].each do |notes|
+        Gori::Issues::Export.demote_note_headings(notes).should eq(notes)
+      end
+    end
+
+    it "closes an unindented top-level fence after a list" do
+      notes = "- Example\n\n```\n# code"
+      Gori::Issues::Export.demote_note_headings(notes).should eq(notes + "\n```")
+    end
+
+    it "demotes headings after an invalid backtick opener" do
+      notes = "``` info `inline code`\n## Notes heading"
+      Gori::Issues::Export.demote_note_headings(notes).should eq("``` info `inline code`\n##### Notes heading")
     end
 
     it "neutralizes terminal escape sequences in an issue's notes field (markdown printed to a TTY)" do

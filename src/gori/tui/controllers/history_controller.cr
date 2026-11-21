@@ -78,7 +78,7 @@ module Gori::Tui
       # peer re-created a view that happened to land on the same id — which is exactly the
       # collision the never-reused id counters exist to prevent, and not a promise this key
       # should be relying on.
-      SavedViews.set_active(store, nil)
+      SavedViews.clear_active_if(store, key)
       key
     end
 

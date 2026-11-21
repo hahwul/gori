@@ -346,6 +346,14 @@ describe Gori::FilterAst do
     parse(%(a "b c" d)).should eq("(and a b c d)")
   end
 
+  it "preserves completed values with spaces, quotes, backslashes, and closing parens" do
+    ["plain", "with space", %(a"b), "a\\\"b", "a\\\\\"b", "with space\\", "a)"].each do |value|
+      quoted = Gori::FilterAst.quote(value)
+      parse("(name:#{quoted} OR name:other)").should eq("(or name:#{value} name:other)")
+    end
+    Gori::FilterAst.quote("plain").should eq("plain")
+  end
+
   it "reads \\\" inside quotes as a literal quote, and leaves every other backslash alone" do
     parse(%(body:"\\"role\\":\\"admin\\"")).should eq(%(body:"role":"admin"))
     parse(%(body:"a\\\\" host:x)).should eq(%((and body:a\\\\ host:x))) # `\\` stays, quote closes

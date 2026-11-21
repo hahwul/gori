@@ -221,33 +221,36 @@ module Gori::Tui
     def click_to_cursor(rect : Rect, mx : Int32, my : Int32, scroll : Int32,
                         size : Int32, line_at : Int32 -> String,
                         gutter_w : Int32 = 0, xscroll : Int32 = 0,
-                        selecting : Bool = false) : Nil
-      return if rect.empty? || size <= 0
+                        selecting : Bool = false) : Int32?
+      return nil if rect.empty? || size <= 0
       row = my - rect.y
       # A drag above the pane pins to its first visible row (the pointer left the top edge
       # with the button down); a plain click there belongs to whatever is drawn above.
       if row < 0
-        return unless selecting
+        return nil unless selecting
         row = 0
       end
       selecting ? (@anchor ||= {@cy, @cx}) : (@anchor = nil)
       @linewise = false
       @cy = {scroll + row, size - 1}.min
       cx0 = rect.x + gutter_w
-      @cx = Screen.column_for_click(line_at.call(@cy), mx - cx0 + xscroll)
+      line = line_at.call(@cy)
+      hit = Screen.pointer_hit(line, mx - cx0 + xscroll, left: xscroll, width: rect.w - gutter_w)
+      @cx = hit.caret
+      hit.character if rect.contains?(mx, my) && mx >= cx0 && scroll + row < size
     end
 
     # The word half of `select_word_at`, without the hit test — for a caller that has already
     # placed the caret through a layout only IT can invert (a soft-wrapped editor pane).
-    def select_word_at_cursor(lines : Array(String)) : Bool
-      select_word_at_cursor(lines.size, ->(i : Int32) { lines[i] })
+    def select_word_at_cursor(lines : Array(String), *, character : Int32 = @cx) : Bool
+      select_word_at_cursor(lines.size, ->(i : Int32) { lines[i] }, character: character)
     end
 
-    def select_word_at_cursor(size : Int32, line_at : Int32 -> String) : Bool
+    def select_word_at_cursor(size : Int32, line_at : Int32 -> String, *, character : Int32 = @cx) : Bool
       return false if size <= 0
       @cy = @cy.clamp(0, size - 1)
       line = line_at.call(@cy)
-      return false unless span = LineEdit.word_span(line, @cx)
+      return false unless span = LineEdit.word_span(line, character)
       a, b = span
       @linewise = false
       @anchor = {@cy, a}

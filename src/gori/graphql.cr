@@ -1,4 +1,5 @@
 require "json"
+require "mime/multipart"
 require "uri"
 require "./media_type"
 require "./json_spans"
@@ -106,25 +107,29 @@ module Gori
     # operator's request on the strength of a misdetection. A GET carrying a stray body still falls through, which is
     # what the fallback was written for.
     def from_flow(target : String, req_head : Bytes?, req_body : Bytes?) : Op?
-      ct = MediaType.of(req_head)
       # The ENTITY, not the wire body: a gzip'd or chunked GraphQL POST is still a GraphQL
       # POST, and reading the wire form found neither an envelope nor a reason — the pane
       # simply was not offered, which is the answer an ordinary REST call gets. `projected`
       # then keeps the re-encode off bytes the envelope still holds compressed.
       entity, projected = Entity.of(req_head, req_body, MAX_BODY)
-      if (b = entity) && !b.empty?
-        if b.size <= MAX_BODY
-          if op = from_body(b, ct)
-            return projected ? op.copy_with(projected: true) : op
-          end
-        end
-        # It did not parse. If the request is GraphQL-CARRYING by its Content-Type or by the
-        # shape of its body, report the failure instead of deleting the view.
-        if reason = unparsed_reason(b, ct)
-          return Op.new(nil, "", nil, Form::Invalid, reason, projected)
+      return from_query(target) if entity.nil? || entity.empty?
+
+      ct = MediaType.of(req_head)
+      multipart = MediaType.multipart?(ct)
+      # The upload pane shares the Content-Type parser used by the other multipart views.
+      boundary = MIME::Multipart.parse_boundary(ct) if multipart && ct
+      if entity.size <= MAX_BODY
+        op = multipart ? from_multipart(entity, boundary) : from_body(entity, ct)
+        if op
+          return projected ? op.copy_with(projected: true) : op
         end
       end
-      return nil if (b = entity) && !b.empty? && body_is_payload?(req_head)
+      # It did not parse. If the request is GraphQL-CARRYING by its Content-Type or by the
+      # shape of its body, report the failure instead of deleting the view.
+      if reason = unparsed_reason(entity, ct, boundary)
+        return Op.new(nil, "", nil, Form::Invalid, reason, projected)
+      end
+      return nil if body_is_payload?(req_head)
       from_query(target)
     end
 
@@ -159,9 +164,9 @@ module Gori
     # Deliberately narrow: a Content-Type the GraphQL-over-HTTP spec defines, or a body that
     # opens as the envelope. A `multipart/form-data` POST is NOT enough on its own — that is
     # every ordinary file upload — so it qualifies only once its `operations` part is present.
-    private def unparsed_reason(body : Bytes, content_type : String?) : String?
+    private def unparsed_reason(body : Bytes, content_type : String?, boundary : String?) : String?
       over = body.size > MAX_BODY
-      if declared = declared_reason(body, content_type, over)
+      if declared = declared_reason(body, content_type, over, boundary)
         return declared
       end
       return nil unless envelope_head?(body)
@@ -178,7 +183,7 @@ module Gori
     # GraphQL and did not parse. nil means "the header did not claim it" — the caller then
     # falls back to the body's own shape. (Falling through is safe for the multipart branch
     # too: a multipart body opens with its boundary, never with a JSON envelope.)
-    private def declared_reason(body : Bytes, content_type : String?, over : Bool) : String?
+    private def declared_reason(body : Bytes, content_type : String?, over : Bool, boundary : String?) : String?
       case essence = MediaType.essence(content_type)
       when "application/graphql"
         over ? too_big : "Content-Type is application/graphql but the body carries no selection set"
@@ -188,9 +193,7 @@ module Gori
         # failed, and saying so is the point.
         over ? too_big : "Content-Type is #{essence} but the body is not a valid GraphQL envelope"
       else
-        return nil unless MediaType.multipart?(content_type)
-        boundary = MediaType.boundary(content_type) || return nil
-        return nil unless multipart_part(body, boundary, "operations")
+        return nil unless boundary && multipart_part(body, boundary, "operations")
         over ? too_big : "the multipart `operations` part is not a valid GraphQL envelope"
       end
     end
@@ -221,7 +224,7 @@ module Gori
       when "application/x-www-form-urlencoded"
         from_urlencoded(String.new(body))
       else
-        return from_multipart(body, content_type || "") if MediaType.multipart?(content_type)
+        return from_multipart(body, MediaType.boundary(content_type)) if MediaType.multipart?(content_type)
         from_json(String.new(body))
       end
     end
@@ -261,8 +264,8 @@ module Gori
     # A GraphQL multipart request (the `operations`/`map`/`0…` upload convention): the
     # `operations` part carries the ordinary JSON envelope, so parse that and keep the form
     # so nothing tries to re-encode the multipart body from the pane.
-    private def from_multipart(body : Bytes, content_type : String) : Op?
-      boundary = MediaType.boundary(content_type) || return nil
+    private def from_multipart(body : Bytes, boundary : String?) : Op?
+      return nil unless boundary
       ops = multipart_part(body, boundary, "operations") || return nil
       op = from_json(ops) || return nil
       Op.new(op.operation, op.query, op.variables, Form::Multipart)

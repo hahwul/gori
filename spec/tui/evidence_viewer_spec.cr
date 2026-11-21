@@ -15,10 +15,10 @@ include Gori::Tui
 # what is pinned here is that the two never say each other's sentence.
 
 private def meta(*, status : Int32? = 200, error : String? = nil, resp_sha : String? = "b" * 64,
-                 bytes : Int64 = 120_i64, req_trunc = false) : Gori::Store::IssueEvidenceMeta
+                 bytes : Int64 = 120_i64, req_trunc = false, resp_trunc = false) : Gori::Store::IssueEvidenceMeta
   Gori::Store::IssueEvidenceMeta.new(42_i64, [7_i64], 1_757_600_000_000_000_i64,
     Gori::Store::LinkRefKind::Flow, 12_i64, "POST", "https://acme.test/login", "HTTP/1.1",
-    status, 4_200_i64, error, req_trunc, false, "a" * 64, resp_sha, bytes)
+    status, 4_200_i64, error, req_trunc, resp_trunc, "a" * 64, resp_sha, bytes)
 end
 
 private def evidence(m = meta, *, body : Bytes? = "welcome".to_slice,
@@ -155,11 +155,12 @@ describe Gori::Tui::EvidenceViewer do
     (v.scroll > 1).should be_true
   end
 
-  it "caps what it styles of a huge body and says so, without touching the copy" do
+  it "reports the display cap separately from a capture-time truncation" do
     big = Bytes.new(EvidenceViewer::DISPLAY_BODY_CAP + 10, 0x41_u8)
-    v = EvidenceViewer.new(evidence(body: big))
+    v = EvidenceViewer.new(evidence(meta(resp_trunc: true), body: big))
     v.show(:response)
-    v.lines.last.map(&.text).join.should eq(EvidenceViewer::TRUNCATED_NOTE)
+    v.provenance_line.map(&.text).join.should contain("response body truncated at capture")
+    v.lines.last.map(&.text).join.should eq("… [body display truncated]")
     v.snapshot.response_body.not_nil!.size.should eq(big.size)
   end
 

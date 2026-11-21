@@ -148,7 +148,7 @@ end
 
 describe "TextField grapheme boundaries" do
   it "moves and deletes whole committed glyphs in either direction" do
-    {"e\u0301", "한", "👩‍💻", "👨‍👩‍👧‍👦", "🇰🇷"}.each do |glyph|
+    {"e\u0301", "한", "👩‍💻", "👨‍👩‍👧‍👦", "🇰🇷", "\u{0600}7"}.each do |glyph|
       field = TextField.new("a#{glyph}b")
       field.home
       field.move(1)

@@ -62,6 +62,7 @@ module Gori::Tui
       key = ev.key
       if key.enter?
         @editing = false
+        @field.set_preedit("")
       elsif key.escape?
         clear
       else

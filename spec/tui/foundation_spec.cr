@@ -158,18 +158,18 @@ describe Gori::Tui::Screen do
       end
     end
 
-    # The double-click's companion: a pointer that rounded PAST a wide glyph has nothing to
-    # take, so the word spread steps back over that one cluster. Narrow on purpose — a 1-column
-    # cluster can never be rounded past, so "a double-click on a space takes nothing" survives.
-    it "step_back_over_wide moves off a rounded-past WIDE glyph and nothing else" do
-      s = "한글 선택"
-      Screen.step_back_over_wide(s, 2).should eq(1) # the space after 글 ← back onto 글
-      Screen.step_back_over_wide(s, 5).should eq(4) # past the end ← back onto 택
-      Screen.step_back_over_wide(s, 1).should eq(1) # 글 is not whitespace/EOL — untouched
-      a = "alpha bravo"
-      Screen.step_back_over_wide(a, 5).should eq(5) # the space stays the space
-      Screen.step_back_over_wide(a, a.size).should eq(a.size)
-      Screen.step_back_over_wide(a, 0).should eq(0)
+    it "distinguishes the glyph under the pointer from the rounded caret" do
+      text = "한 /"
+      Screen.pointer_hit(text, 1).should eq(Screen::PointerHit.new(1, 0))
+      Screen.pointer_hit(text, 2).should eq(Screen::PointerHit.new(1, 1))
+      Screen.pointer_hit(text, 3).should eq(Screen::PointerHit.new(2, 2))
+      Screen.pointer_hit(text, 4).should eq(Screen::PointerHit.new(3, nil))
+    end
+
+    it "does not report clipped glyphs or ellipses as word hits" do
+      Screen.pointer_hit("x한abc", 2, left: 2, width: 3).character.should be_nil
+      Screen.pointer_hit("x한abc", 4, left: 2, width: 3).character.should be_nil
+      Screen.pointer_hit("x한abc", 3, left: 2, width: 3).character.should eq(2)
     end
 
     it "column_for never returns an index inside a cluster" do
@@ -213,7 +213,7 @@ describe Gori::Tui::Screen do
     end
 
     it "cluster_start / cluster_end snap to boundaries and are identity on them" do
-      s = "a#{skin}e\u{0301}z"
+      s = "a#{skin}e\u{0301}\u{0600}7z"
       starts = [] of Int32
       i = 0
       s.each_grapheme { |g| starts << i; i += g.size }
