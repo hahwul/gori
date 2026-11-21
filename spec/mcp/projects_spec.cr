@@ -72,6 +72,20 @@ describe "Gori::MCP::Tools project lifecycle" do
 end
 
 describe "Gori::MCP::Tools project description receipts" do
+  it "reports a project metadata failure without blaming a valid name" do
+    with_isolated_projects do |tools|
+      mcp_ok_json(tools, "create_project", %({"name":"Docs","description":"before"}))
+      store = tools.current_store.not_nil!
+      store.@db.exec("CREATE TRIGGER refuse_description BEFORE UPDATE OF value ON settings " \
+                     "WHEN NEW.key = 'description' BEGIN SELECT RAISE(ABORT, 'description write refused'); END")
+      result = tools.call("create_project", JSON.parse(%({"name":"Docs","description":"after"})))
+      result.is_error.should be_true
+      result.error_code.should eq("INTERNAL")
+      result.field.should be_nil
+      result.text.should contain("could not save project settings")
+    end
+  end
+
   it "shares capped guidance on auto-bind and switch, but omits it without a rebind" do
     root = File.tempname("gori-description")
     Dir.mkdir_p(root)

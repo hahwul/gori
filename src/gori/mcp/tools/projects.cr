@@ -133,8 +133,8 @@ module Gori
       end
 
       private def create_project(h) : Result
-        name = str(h, "name")
-        return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") if name.nil? || name.strip.empty?
+        name = str(h, "name").presence
+        return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") unless name
         description = str(h, "description") || ""
         # Absent (or null) leaves a reopened project's tags alone; a list, `[]` included, replaces them.
         tags = begin
@@ -177,6 +177,8 @@ module Gori
             end
           end
         end)
+      rescue ex : ProjectRegistry::CreateWriteError
+        err(ex.to_s, "INTERNAL")
       rescue ex : Gori::Error
         err(ex.message || "could not create project", "INVALID_ARGUMENT", field: "name")
       end

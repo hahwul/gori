@@ -134,6 +134,10 @@ module Gori
       end
     end
 
+    # A valid create/reopen request whose metadata could not be persisted.
+    class CreateWriteError < Gori::Error
+    end
+
     # Resolve a project by (case-insensitively, in priority order): its exact short
     # id, its exact directory slug or verbatim display name, or a UNIQUE PREFIX of its
     # short id — git-style abbreviation. Lets `gori mcp --project=api` work when the
@@ -539,15 +543,15 @@ module Gori
         display = stored
       end
       write_id_if_absent(dir) # a fresh project gets a stable short id; a reopen keeps its own
-      tags.try { |t| write_tags(dir, t) }
       proj = Project.new(display, db_path)
       # Open once even with no description: this creates the DB + runs migrations, and #list
       # SKIPS a directory without one. Leaving it lazy made a freshly created project
       # invisible to `gori run project list` / --project until something captured into it.
+      desc = description.strip
       s = Store.open(proj.db_path, retention_flows: Store::RETENTION_UNLIMITED)
       begin
-        desc = description.strip
-        s.set_setting(Project::DESCRIPTION_KEY, desc) unless desc.empty?
+        entries = [] of {String, String?}
+        entries << {Project::DESCRIPTION_KEY, desc} unless desc.empty?
         # A BRAND-NEW database is born speaking this install's token grammar, so it says so. The
         # marker's absence means bare (every project written before namespaces existed carries no
         # marker), and a fresh namespaced project that left it absent would hand its first opener a
@@ -555,11 +559,21 @@ module Gori
         # no name in either table is spelled `ENV` or `BIND`. Only when the file did NOT exist
         # before: `create_or_reopen` also REOPENS, and stamping a bare-era database would claim a
         # grammar its bytes are not in and skip the migration that fixes them.
-        s.set_setting(Env::PROJECT_SYNTAX_KEY, Settings.env_syntax.to_s.downcase) unless reopened
+        entries << {Env::PROJECT_SYNTAX_KEY, Settings.env_syntax.to_s.downcase} unless reopened
+        raise CreateWriteError.new("could not save project settings — check the database is writable and retry") unless s.set_settings(entries)
       ensure
         s.close
       end
+      # A failed settings transaction must not still replace a reopened project's tags.
+      tags.try { |t| write_create_tags(dir, t, !desc.empty?) }
       {proj, !reopened}
+    end
+
+    private def write_create_tags(dir : String, tags : Array(String), description_saved : Bool) : Nil
+      write_tags(dir, tags)
+    rescue ex : IO::Error | Gori::Error
+      detail = description_saved ? "project description was saved, but tags were not saved" : "could not save project tags"
+      raise CreateWriteError.new("#{detail}: #{ex.message}", cause: ex)
     end
 
     # Resolve or create the project for a source workspace. Exact path binding

@@ -382,6 +382,55 @@ describe Gori::ProjectRegistry do
     end
   end
 
+  it "reports a refused description write before replacing tags on reopen" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      original = reg.create("docs", "original description", tags: ["old"])
+      id = reg.id_of(original)
+      store = Gori::Store.open(original.db_path)
+      begin
+        store.set_setting("other.setting", "keep").should be_true
+        store.@db.exec("CREATE TRIGGER refuse_description BEFORE UPDATE OF value ON settings " \
+                       "WHEN NEW.key = 'description' BEGIN SELECT RAISE(ABORT, 'description write refused'); END")
+        expect_raises(Gori::Error, /could not save project settings/) do
+          reg.create_or_reopen("docs", "new description", tags: ["new"])
+        end
+        store.setting(Gori::Project::DESCRIPTION_KEY).should eq("original description")
+        reg.tags_of(original).should eq(["old"])
+        store.@db.exec("DROP TRIGGER refuse_description")
+
+        restored, created = reg.create_or_reopen("docs", "new description", tags: ["new"])
+        created.should be_false
+        reg.id_of(restored).should eq(id)
+        reg.tags_of(restored).should eq(["new"])
+        store.setting(Gori::Project::DESCRIPTION_KEY).should eq("new description")
+        store.setting("other.setting").should eq("keep")
+      ensure
+        store.close
+      end
+    end
+  end
+
+  it "reports a project metadata failure after committing the description if tags cannot be replaced" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      project = reg.create("docs", "before")
+      path = File.join(project.dir, Gori::ProjectRegistry::TAGS_FILE)
+      Dir.mkdir(path)
+      File.touch(File.join(path, "keep"))
+      expect_raises(Gori::Error, /description was saved.*tags were not saved/) do
+        reg.create_or_reopen("docs", "after", tags: ["new"])
+      end
+      store = Gori::Store.open(project.db_path)
+      begin
+        store.setting(Gori::Project::DESCRIPTION_KEY).should eq("after")
+      ensure
+        store.close
+      end
+      File.exists?(File.join(path, "keep")).should be_true
+    end
+  end
+
   it "persists the verbatim display name so list doesn't revert it to the slug" do
     with_root do |root|
       reg = Gori::ProjectRegistry.new(root)
