@@ -164,13 +164,7 @@ module Gori
       def import_into(registry : ProjectRegistry, name : String? = nil, *,
                       rename_hint : String = DEFAULT_RENAME_HINT) : Project
         raise Gori::Error.new("project archive is already closed") if @closed
-        project = registry.import_database(target_name(name), @database_path)
-        # Best-effort and salvaged, not validated: the archive is untrusted, and a bad tag is no
-        # reason to refuse the traffic it came with.
-        unless (tags = @manifest.tag_strings).empty?
-          registry.set_tags(project, ProjectRegistry.salvage_tags(tags)) rescue nil
-        end
-        project
+        registry.import_database(target_name(name), @database_path, tags: @manifest.tag_strings)
       rescue ex : Gori::Error
         raise explain_name_error(ex, name, rename_hint)
       end

@@ -513,7 +513,7 @@ module Gori
     # never reopen an existing project and replace its database. A directory is claimed
     # atomically, sidecars are written before the DB becomes visible to #list, and the archive's
     # machine-local `.workspace` / lock files are not copied.
-    def import_database(name : String, database_path : String) : Project
+    def import_database(name : String, database_path : String, *, tags : Array(String) = [] of String) : Project
       raise Gori::Error.new("project archive database is missing") unless File.file?(database_path)
       display, base_slug = import_target(name)
 
@@ -532,6 +532,8 @@ module Gori
           perm: File::Permissions.new(0o600), inherit: false)
         DurableFile.write(File.join(dir, ID_FILE), generate_id,
           perm: File::Permissions.new(0o600), inherit: false)
+        project = Project.new(display, File.join(dir, Project::DB_FILE))
+        replace_tags(project, ProjectRegistry.salvage_tags(tags)) unless tags.empty?
         staged_db = File.tempname(".gori.db.import", ".tmp", dir: dir)
         begin
           File.open(staged_db, "w", perm: File::Permissions.new(0o600)) do |target|
@@ -539,11 +541,11 @@ module Gori
             target.flush
             target.fsync
           end
-          File.rename(staged_db, File.join(dir, Project::DB_FILE))
+          File.rename(staged_db, project.db_path)
         ensure
           File.delete?(staged_db)
         end
-        Project.new(display, File.join(dir, Project::DB_FILE))
+        project
       rescue ex
         FileUtils.rm_rf(dir)
         raise ex
