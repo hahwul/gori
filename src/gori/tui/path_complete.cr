@@ -103,19 +103,12 @@ module Gori::Tui
       end
     end
 
-    # What picking a list from the GLOBAL catalog puts in the field: its bare name when the
-    # engine will resolve that name to this very list, and its absolute path when it would not.
-    #
-    # It used to be the absolute path always, because the engine opened wordlist paths relative
-    # to the working directory and a name that lived only under ~/.gori/wordlists would have
-    # failed at run time. `WordlistCatalog.resolve` closed that (#1353), so the name is enough —
-    # and it is what the operator would type, what `gori run fuzz -w NAME` takes, and what the
-    # recent/favorite lists remember. The one case it is NOT enough is a same-named file in the
-    # current directory (a bare name reads the working directory first): there the name would
-    # run the wrong list, so the path is inserted instead. `resolve` is the judge, not a copy of
-    # its rule.
+    # Ordinary file fields use the catalog file's absolute path. The wordlist field
+    # inserts a bare name when its resolver finds the selected file. A same-named
+    # file in the working directory takes precedence in wordlist lookup (#1353).
     private def catalog_insert(name : String) : String
-      Gori::WordlistCatalog.resolve(name).source.catalog? ? name : File.join(Gori::Paths.wordlists_dir, name)
+      return name if @wordlist_history && Gori::WordlistCatalog.resolve(name).source.catalog?
+      File.expand_path(name, Gori::Paths.wordlists_dir)
     end
 
     # Favorites, then recents, then the catalog: a blank field is "what do I usually reach for",

@@ -1368,7 +1368,7 @@ describe Gori::Tui::PathComplete do
     with_wordlist_home do |wl|
       Dir.mkdir_p(wl)
       File.write(File.join(wl, "rockyou.txt"), "")
-      pc = PathComplete.new
+      pc = PathComplete.new(wordlist_history: true)
       pc.refresh("rock")
       hit = pc.entries.find(&.label.starts_with?("rockyou.txt")).not_nil!
       hit.insert.should eq("rockyou.txt")
@@ -1381,7 +1381,7 @@ describe Gori::Tui::PathComplete do
       Dir.mkdir_p(wl)
       File.write(File.join(wl, "rockyou.txt"), "")
       File.write("rockyou.txt", "cwd copy\n")
-      pc = PathComplete.new
+      pc = PathComplete.new(wordlist_history: true)
       pc.refresh("rock")
       global = pc.entries.find(&.label.includes?("·~/.gori")).not_nil!
       global.insert.should eq(File.join(wl, "rockyou.txt"))
@@ -1395,7 +1395,7 @@ describe Gori::Tui::PathComplete do
     with_wordlist_home do |wl|
       Dir.mkdir_p(wl)
       File.write(File.join(wl, "trailing.dot."), "")
-      pc = PathComplete.new
+      pc = PathComplete.new(wordlist_history: true)
       pc.refresh("trail")
       hit = pc.entries.find(&.label.starts_with?("trailing.dot.")).not_nil!
       hit.insert.should eq(File.join(wl, "trailing.dot."))
