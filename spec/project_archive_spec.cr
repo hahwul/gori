@@ -143,6 +143,22 @@ class ProjectArchiveRacedExportSpec < Gori::ProjectArchive::PreparedExport
 end
 
 describe Gori::ProjectArchive do
+  it "exports the requested database when its path contains URI syntax" do
+    with_archive_project do |_registry, project, store, root|
+      store.set_setting("marker", "requested").should be_true
+      store.close
+      literal = File.join(root, "qa+%2E#1")
+      File.rename(project.dir, literal)
+      moved = Gori::Project.new(project.name, File.join(literal, Gori::Project::DB_FILE))
+      archive = export_archive(moved, File.join(root, "literal.gori"))
+      plain = File.join(root, "restored.db")
+      File.write(plain, read_archive(archive)["gori.db"])
+      DB.open("sqlite3:#{plain}") do |db|
+        db.scalar("SELECT value FROM settings WHERE key = 'marker'").should eq("requested")
+      end
+    end
+  end
+
   it "exports a compact WAL snapshot and imports a fresh project without local sidecars" do
     with_archive_project do |registry, project, store, root|
       store.insert_flow(archive_request("/captured"))

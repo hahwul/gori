@@ -43,6 +43,35 @@ private def with_future_version_db(&)
 end
 
 describe "Gori::Store.open failure handling" do
+  it "preserves SQLite's in-memory filename" do
+    DB.open(Gori::Store.sqlite_url(":memory:", "busy_timeout=50")) do |db|
+      db.scalar("SELECT file FROM pragma_database_list WHERE name = 'main'").should eq("")
+    end
+  end
+
+  it "writes the literal database path when its name has URL metacharacters" do
+    dir = File.tempname("gori-literal-path")
+    Dir.mkdir_p(dir)
+    begin
+      path = File.join(dir, "qa+%2E#1.db")
+      store = Gori::Store.open(path)
+      begin
+        store.set_setting("marker", "literal").should be_true
+      ensure
+        store.close
+      end
+      # Inspect the actual file through an ordinary name, independently of Store.open.
+      plain = File.join(dir, "checked.db")
+      File.file?(path).should be_true
+      File.rename(path, plain)
+      DB.open("sqlite3:#{plain}") do |db|
+        db.scalar("SELECT value FROM settings WHERE key = 'marker'").should eq("literal")
+      end
+    ensure
+      FileUtils.rm_rf(dir)
+    end
+  end
+
   it "names a file that is not a database instead of an opaque driver refusal" do
     with_corrupt_db do |path|
       ex = expect_raises(Gori::Error) { Gori::Store.open(path) }

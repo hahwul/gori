@@ -587,7 +587,7 @@ module Gori
     private def self.apply_writes(pre : Plan, store : Store, db_path : String, backup : String?,
                                   busy_timeout_ms : Int32) : Plan?
       applied = nil.as(Plan?)
-      ::DB.open("sqlite3:#{db_path}?busy_timeout=#{busy_timeout_ms}") do |db|
+      ::DB.open(Store.sqlite_url(db_path, "busy_timeout=#{busy_timeout_ms}")) do |db|
         db.using_connection do |conn|
           conn.exec("BEGIN IMMEDIATE")
           begin
@@ -691,7 +691,7 @@ module Gori
       Dir.mkdir(staging, 0o700)
       begin
         staged = File.join(staging, "backup.db")
-        ::DB.open("sqlite3:#{db_path}?busy_timeout=#{busy_timeout_ms}") do |db|
+        ::DB.open(Store.sqlite_url(db_path, "busy_timeout=#{busy_timeout_ms}")) do |db|
           db.using_connection(&.exec("VACUUM INTO ?", staged))
         end
         File.chmod(staged, 0o600)

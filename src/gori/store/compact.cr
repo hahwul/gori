@@ -60,7 +60,7 @@ class Gori::Store
 
   # SQLite connection URL for a project db (WAL, same pragmas as Store.open).
   private def self.compact_url(path : String) : String
-    "sqlite3:#{path}?journal_mode=wal&synchronous=normal&busy_timeout=5000"
+    sqlite_url(path, "journal_mode=wal&synchronous=normal&busy_timeout=5000")
   end
 
   # Read-only measurement for the compress popup. Opens the db, sums the blob

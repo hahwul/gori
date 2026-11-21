@@ -385,7 +385,7 @@ module Gori
       success = false
       begin
         guard = OpenLock.try_shared(project.db_path)
-        DB.open("sqlite3:#{project.db_path}?busy_timeout=5000") do |db|
+        DB.open(Store.sqlite_url(project.db_path, "busy_timeout=5000")) do |db|
           db.using_connection { |conn| conn.exec("VACUUM INTO ?", snapshot) }
         end
         File.chmod(snapshot, File::Permissions.new(0o600))
@@ -577,7 +577,7 @@ module Gori
     end
 
     private def self.inspect_database(path : String, *, importing : Bool = false) : {Int32, Inventory}
-      DB.open("sqlite3:#{path}?busy_timeout=5000") do |db|
+      DB.open(Store.sqlite_url(path, "busy_timeout=5000")) do |db|
         db.using_connection do |conn|
           conn.exec("PRAGMA query_only = ON")
           version = conn.scalar("PRAGMA user_version").as(Int64).to_i
@@ -812,7 +812,7 @@ module Gori
         Store::Schema.migrate!(db)
         {key_shapes(db), constraint_shapes(db)}
       end
-      DB.open("sqlite3:#{path}?busy_timeout=5000") do |db|
+      DB.open(Store.sqlite_url(path, "busy_timeout=5000")) do |db|
         Store::Schema.migrate!(db)
         actual = key_shapes(db)
         expected.each do |table, shape|
@@ -912,7 +912,7 @@ module Gori
     end
 
     private def self.sanitize_import_database(path : String) : Nil
-      DB.open("sqlite3:#{path}?busy_timeout=5000") do |db|
+      DB.open(Store.sqlite_url(path, "busy_timeout=5000")) do |db|
         db.using_connection do |conn|
           conn.exec("BEGIN IMMEDIATE")
           begin
