@@ -135,7 +135,7 @@
 
 - Issue notes preserve drafts and peer edits across concurrent saves and deletions. Closing an untouched editor keeps the latest stored text (#1980)
 
-- TUI: project-wide search restores its results and selection after viewing a flow and blocks opening hidden results, while project-name search supports caret movement and click-to-edit. The Comparer and link pickers find older flows and keep the filter open when it has no matches (#1929).
+- TUI: project-wide search restores its results and selection after viewing a flow, blocks opening hidden results and ignores stale body matches while the index catches up. Project-name search supports caret movement and click-to-edit, and the Comparer and link pickers find older flows and keep the filter open when it has no matches (#1929, #1953).
 
 - Fuzzy search stays responsive for long multilingual names (#1970)
 

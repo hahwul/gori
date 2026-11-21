@@ -252,13 +252,16 @@ module Gori
       handle.guard(control)
       dirty = check_schema(handle)
       fts = body_searchable?(needle) && handle.table?("flows_fts") ? QL.fts_cond(needle) : nil
+      # Read the backlog first: a row the indexer drains between queries will be covered
+      # by the indexed pass. Only clean index entries describe the current body.
+      if fts && dirty
+        pending = unindexed_hits(handle, needle, control)
+        fts = {"(fts_dirty = 0 AND #{fts[0]})", fts[1]}
+      end
       # One past the cap, so a project with exactly `cap` matches is not reported as having more.
       hits = indexed_hits(handle, needle, fts, cap + 1, control)
-      unindexed = 0
-      if fts && dirty
-        hits = merge(hits, unindexed_hits(handle, needle, control))
-        unindexed = unindexed_count(handle, control)
-      end
+      hits = merge(hits, pending) if pending
+      unindexed = pending ? unindexed_count(handle, control) : 0
       Result.new(project, hits.first(cap), unindexed: unindexed, body_searched: !fts.nil?,
         truncated: hits.size > cap)
     end
@@ -319,8 +322,7 @@ module Gori
       hits
     end
 
-    # Newest first, one entry per flow. A dirty row the indexed query also found — by its URL, or
-    # through an index entry from before it was re-dirtied — keeps that answer.
+    # Newest first, one entry per flow. A URL match takes precedence over a dirty body match.
     private def self.merge(indexed : Array(Hit), unindexed : Array(Hit)) : Array(Hit)
       seen = indexed.map(&.flow_id).to_set
       (indexed + unindexed.reject { |h| seen.includes?(h.flow_id) }).sort_by!(&.flow_id).reverse!
