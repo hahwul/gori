@@ -404,6 +404,72 @@ describe Gori::ProjectArchive do
     end
   end
 
+  it "keeps loose database capture locks and status files out of archive destinations" do
+    with_archive_project do |_registry, _project, _store, root|
+      loose = Gori::Project.new("Capture", File.join(root, "capture.db"))
+      Gori::Store.open(loose.db_path).close
+      prepared = Gori::ProjectArchive.prepare_export(loose, loose_database: true)
+      begin
+        {loose.capture_lock_path, loose.capture_status_path}.each do |sidecar|
+          expect_raises(Gori::Error, /source database or its sidecar/) { prepared.write(sidecar) }
+          File.exists?(sidecar).should be_false
+          File.write(sidecar, "capture metadata")
+          expect_raises(Gori::Error, /source database or its sidecar/) { prepared.write(sidecar, overwrite: true) }
+          File.read(sidecar).should eq("capture metadata")
+        end
+        path = prepared.write(loose.db_path + ".gori")
+        Gori::ProjectArchive.prepare_import(path).close
+      ensure
+        prepared.close
+      end
+    end
+  end
+
+  it "protects capture files of both the symlinked and real database names" do
+    posix_only!("File.symlink needs Developer Mode")
+    with_archive_project do |_registry, project, _store, root|
+      loose = Gori::Project.new("alias", File.join(root, "alias.db"))
+      File.symlink(project.db_path, loose.db_path)
+      {project, loose}.each do |source|
+        {source.capture_lock_path, source.capture_status_path}.each do |path|
+          expect_raises(Gori::Error, /source database or its sidecar/) do
+            Gori::ProjectArchive.resolve_destination(path, loose, loose_database: true, overwrite: true)
+          end
+        end
+      end
+    end
+  end
+
+  it "refuses hard links to an existing loose database sidecar" do
+    with_archive_project do |_registry, _project, _store, root|
+      loose = Gori::Project.new("Capture", File.join(root, "capture.db"))
+      File.write(loose.capture_status_path, "capture metadata")
+      alias_path = File.join(root, "capture.gori")
+      File.link(loose.capture_status_path, alias_path)
+      expect_raises(Gori::Error, /source database or its sidecar/) do
+        Gori::ProjectArchive.resolve_destination(alias_path, loose, loose_database: true, overwrite: true)
+      end
+    end
+  end
+
+  it "reserves missing SQLite sidecar aliases for a loose archive source" do
+    with_archive_project do |_registry, _project, _store, root|
+      loose = Gori::Project.new("Capture", File.join(root, "café.db"))
+      File.touch(loose.db_path)
+      # Exercise alternate spellings only when this filesystem maps them to the source database.
+      {"cafe\u0301.db", "CAFÉ.DB"}.each do |spelling|
+        alias_path = File.join(root, spelling)
+        next unless File.exists?(alias_path)
+        {"-wal", "-journal"}.each do |suffix|
+          expect_raises(Gori::Error, /source database or its sidecar/) do
+            Gori::ProjectArchive.resolve_destination(alias_path + suffix, loose, loose_database: true)
+          end
+          File.exists?(loose.db_path + suffix).should be_false
+        end
+      end
+    end
+  end
+
   it "refuses manifest version and time fields that are not what gori writes" do
     with_archive_project do |_registry, project, _store, root|
       exported = Gori::ProjectArchive.prepare_export(project)
