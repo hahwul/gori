@@ -381,6 +381,38 @@ describe Gori::Issues::Export do
       end
     end
 
+    it "closes an unfinished notes fence before the next issue" do
+      with_store do |store|
+        id = store.insert_issue("first", Gori::Store::Severity::High, nil, nil)
+        store.update_issue(id, notes: "````sh\n# notes code")
+        store.insert_issue("next", Gori::Store::Severity::Low, nil, nil)
+
+        md = Gori::Issues::Export.markdown(store.issues, store, "proj")
+        md.should contain("\n````sh\n# notes code\n````\n\n## [low] next\n")
+      end
+    end
+
+    it "preserves the opener's indentation and fence length in the closing line" do
+      notes = "Example\n\n  ~~~~ `info`\n  ~~~\n  ~~~~\u00a0\n  # code\n"
+      Gori::Issues::Export.demote_note_headings(notes).should eq(notes + "  ~~~~")
+    end
+
+    it "leaves fence-like lines in a list item or HTML block alone" do
+      ["- Example\n  ~~~\n  code\n\nAs prose\n", "<div>\n```\n\nAs prose\n"].each do |notes|
+        Gori::Issues::Export.demote_note_headings(notes).should eq(notes)
+      end
+    end
+
+    it "closes an unindented top-level fence after a list" do
+      notes = "- Example\n\n```\n# code"
+      Gori::Issues::Export.demote_note_headings(notes).should eq(notes + "\n```")
+    end
+
+    it "demotes headings after an invalid backtick opener" do
+      notes = "``` info `inline code`\n## Notes heading"
+      Gori::Issues::Export.demote_note_headings(notes).should eq("``` info `inline code`\n##### Notes heading")
+    end
+
     it "neutralizes terminal escape sequences in an issue's notes field (markdown printed to a TTY)" do
       # notes routes through scrub_controls: an OSC "set window title" (ESC ] 0 ; … BEL) embedded
       # in a notes field would otherwise reach the terminal when `gori run issues --format markdown`

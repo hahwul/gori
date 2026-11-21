@@ -97,6 +97,8 @@
 
 - TUI: Find counts every occurrence and scrolls to the match, centred on an unwrapped line, a new History filter puts the cursor on the newest match, Issues export writes the marked or filtered issues and says which, and the `Space` menu shows all its rows again after the terminal grows (#1938, #1941).
 
+- Issue reports close unfinished top-level note code fences so later sections stay visible (#1972)
+
 - TUI: leaving a filter discards unfinished IME composition and keeps the applied query (#1962)
 
 - Filter completion preserves literal quotes, backslashes, and closing parentheses in suggested values (#1967)

@@ -172,21 +172,27 @@ module Gori
       end
 
       NOTE_HEADING = /\A( {0,3})(\#{1,6})(?=[ \t\r\n]|\z)/
-      NOTE_FENCE   = /\A {0,3}(`{3,}|~{3,})/
+      # A backtick fence's info string cannot contain backticks. Tilde fences allow them.
+      NOTE_FENCE      = /\A {0,3}(`{3,}(?=[^`\r\n]*\r?\n?\z)|~{3,})/
+      NOTE_HTML_START = /\A {0,3}</
+      NOTE_LIST_ITEM  = /\A {0,3}(?:[-+*]|[0-9]{1,9}[.)])(?=[ \t\r\n]|\z)/
 
       # An issue's notes sit under its `##` heading, so a `## Repro` in them read as the next
       # issue. Every ATX heading outside a code fence goes three levels down (capped at `######`),
       # so even a `#` lands below the issue's `###` sections. Setext headings, and headings inside
-      # a blockquote or list item, are left as typed.
+      # a blockquote or list item, are left as typed. Close an unfinished top-level fence at
+      # the end of the notes so the following evidence and issue sections remain outside it.
       def self.demote_note_headings(notes : String) : String
         fence = nil.as(String?)
+        opener_line = 0
         String.build do |io|
-          notes.each_line(chomp: false) do |line|
+          notes.each_line(chomp: false).with_index do |line, line_number|
             if m = line.match(NOTE_FENCE)
               mark = m[1]
               if fence.nil?
-                fence = mark
-              elsif mark[0] == fence[0] && mark.size >= fence.size && m.post_match.strip.empty?
+                fence = m[0]
+                opener_line = line_number
+              elsif mark.starts_with?(fence.lstrip(' ')) && m.post_match.strip(" \t\r\n").empty?
                 # A closing fence carries no info string; "```python" inside a block is content.
                 fence = nil
               end
@@ -195,7 +201,19 @@ module Gori
             end
             io << line
           end
+          close_note_fence(io, notes, fence, opener_line) if fence
         end
+      end
+
+      private def self.close_note_fence(io : String::Builder, notes : String, fence : String, opener_line : Int32) : Nil
+        # A fence-like line inside raw HTML can be literal text. A list can also close its own
+        # fence when the container ends. Adding a fence at EOF in either case could open a new
+        # block, so only repair candidates with an unambiguous top-level start.
+        indented_for_list = fence.starts_with?("  ")
+        prefix = notes.each_line.first(opener_line)
+        return if prefix.any? { |line| line.matches?(NOTE_HTML_START) || (indented_for_list && line.matches?(NOTE_LIST_ITEM)) }
+        io << '\n' unless notes.ends_with?('\n')
+        io << fence
       end
 
       # Collapse control characters (CR/LF/tab/…) to a single space so a value with
