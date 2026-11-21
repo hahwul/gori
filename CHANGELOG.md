@@ -49,6 +49,8 @@
 
 - A settings factory reset also clears unknown fields saved inside rule, saved-view and Decoder chain libraries (#1950).
 
+- Settings saves preserve a file that becomes unreadable during a session and can be retried once it is readable (#1957)
+
 - TUI: startup warnings show at once instead of behind the greeting and stay in Notifications: a fallback port, capture off, a project dir gori cannot write (no longer blamed on another window), a corrupt settings.json under `--db`, and flows a crash left incomplete. Other action messages no longer wait behind a companion bubble either (#1942).
 
 - Fuzzer: the TUI completion line counts errors as the CLI does, and a run where every request failed ends as `all N failed` instead of a green ✓ (#1942).
