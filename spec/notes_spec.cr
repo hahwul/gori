@@ -146,6 +146,21 @@ describe Gori::Notes do
       Gori::Notes.merge(persisted, mine, Set(Int64).new, 9_i64, 10_i64).next_id.should eq(10_i64)
     end
   end
+  describe ".delete" do
+    it "keeps the active note when deleting an earlier note, then selects its neighbour on deletion" do
+      with_store do |store|
+        store.set_setting(Gori::Notes::DOCS_KEY, %({"cur":1,"notes":["first","active","next","last"]}))
+        doc = Gori::Notes.load(store)
+        ids = doc.notes.map(&.id)
+        [{ids[0], ids[1]}, {ids[1], ids[2]}, {ids[3], ids[2]}].each do |deleted, active|
+          Gori::Notes.delete(store, deleted).should eq(Gori::Notes::Write::Committed)
+          after = Gori::Notes.load(store)
+          after.notes[after.cur].id.should eq(active)
+        end
+      end
+    end
+  end
+
   # `entity_links` rows are keyed by (Note, id), and nothing else ever reclaims them. Only the
   # TUI dropped a closed note's links, and it dropped them on the KEYPRESS — before the
   # document that removes the note had been written — so a refused save left the note alive

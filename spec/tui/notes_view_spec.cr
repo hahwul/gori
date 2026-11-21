@@ -462,8 +462,6 @@ describe Gori::Tui::NotesView do
   end
 
   it "Doc#note_id refuses a negative position instead of wrapping to the last note" do
-    # Crystal's Array#[]? counts a negative index from the END, and the delete path walks
-    # `cur - 1` looking for the neighbour before the first slot.
     doc = Gori::Notes::Doc.new(0, [
       Gori::Notes::NoteEntry.new(1_i64, "a"),
       Gori::Notes::NoteEntry.new(2_i64, "b"),

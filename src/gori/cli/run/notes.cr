@@ -296,23 +296,13 @@ module Gori
           if err = note_delete_confirmation_error(n, target, yes)
             abort_closing(store, "gori run notes delete: #{err}")
           end
-          # Delete by the note's STABLE id (not its list position) and merge, so a concurrent
-          # writer's other notes aren't clobbered by a blind overwrite. See Notes.merge.
           target_id = target.id
-          # Keep the ACTIVE note active across the delete, by id. `persisted.cur` is a
-          # position, and removing a note ahead of it slides every later one up — so deleting
-          # note 1 while note 3 was active left `cur` on 3, which is now the note that used to
-          # be 4. When the active note is the one being deleted, fall to its neighbour (next,
-          # else previous), which is what closing a sub-tab does in the TUI.
-          keep_id = persisted.note_id(persisted.cur)
-          keep_id = persisted.note_id(persisted.cur + 1) || persisted.note_id(persisted.cur - 1) if keep_id == target_id
-          # `Notes.save` re-runs that merge against the set the WRITE TRANSACTION reads, so a
-          # note a peer added between the load above and this line survives the delete. The
-          # two-statement version committed a document built before the peer's row landed and
-          # reported success. (`Notes.delete` would be the smaller call but it re-clamps `cur`
-          # by POSITION, which is exactly the drift `keep_id` above exists to avoid.)
-          merged = Notes.save(store, [] of Notes::NoteEntry, Set{target_id}, keep_id, persisted.next_id)
-          merged || busy_abort("gori run notes delete", "project is busy (write did not commit) — try again", store)
+          case Notes.delete(store, target_id)
+          when .busy?
+            busy_abort("gori run notes delete", "project is busy (write did not commit) — try again", store)
+          when .missing?
+            not_found_abort("gori run notes delete", "note (id #{target_id}) was already deleted", format, store)
+          end
           puts format == :json ? deleted_json("id", target_id) : "#{note_ref(idx, target_id)} deleted."
         end
       end
