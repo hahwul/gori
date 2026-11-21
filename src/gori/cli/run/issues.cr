@@ -110,7 +110,7 @@ module Gori
           store.close
         end
         content, count = result
-        write_issues_report(content, count, export_path)
+        write_issues_report(content, count, export_path, project)
       end
 
       # The listing's query: positional terms or `-q` (history's composition), refused before
@@ -144,7 +144,7 @@ module Gori
         end
       end
 
-      private def self.write_issues_report(content : String, count : Int32, export_path : String?,
+      private def self.write_issues_report(content : String, count : Int32, export_path : String?, project : Project,
                                            stdout : IO = STDOUT, stderr : IO = STDERR) : Nil
         if export_path == "-"
           # The file's bytes on STDOUT, for a pipe; the count goes to STDERR so STDOUT is only
@@ -154,7 +154,7 @@ module Gori
           stderr.puts "exported #{Gori.plural(count, "issue")} → stdout"
         elsif path = export_path
           begin
-            File.write(path, content.ends_with?('\n') ? content : "#{content}\n")
+            write_issues_file(path, project, content.ends_with?('\n') ? content : "#{content}\n")
           rescue ex : IO::Error
             abort "gori run issues: cannot write to #{path}: #{ex.message}"
           end
@@ -168,6 +168,46 @@ module Gori
           # is not a live terminal, and stripping would corrupt captured evidence.
           stdout.puts Issues::Export.scrub_controls(content)
         end
+      end
+
+      private def self.write_issues_file(path : String, project : Project, document : String) : Nil
+        db = Paths.canonical_file(project.db_path)
+        protected_paths = {"", "-wal", "-shm", "-journal", OpenLock::SUFFIX}.map { |suffix| db + suffix }
+        target = issues_export_target(path)
+        refusal = "refusing to overwrite the source project database or its sidecars"
+        raise IO::Error.new(refusal) if protected_paths.includes?(target) || missing_issue_sidecar?(target, protected_paths)
+
+        # Opening without truncation lets us check the actual file, including hard links,
+        # before writing. Keep that descriptor for the write so a renamed alias cannot race it.
+        File.open(path, "a") do |file|
+          info = file.info
+          if protected_paths.any? { |name| File.info?(name).try(&.same_file?(info)) }
+            raise IO::Error.new(refusal)
+          end
+          file.truncate if info.file?
+          file.print(document)
+        end
+      end
+
+      # A missing WAL has no inode to compare. Reserve its case variants in the database
+      # directory before opening, so a case-insensitive volume never gets even an empty WAL.
+      private def self.missing_issue_sidecar?(target : String, protected_paths) : Bool
+        return false if File.exists?(target)
+        protected_paths.any? do |name|
+          name.compare(target, case_insensitive: true) == 0 && !File.exists?(name) &&
+            File.same?(File.dirname(name), File.dirname(target), follow_symlinks: true)
+        end
+      end
+
+      private def self.issues_export_target(path : String) : String
+        target = Paths.canonical_file(path)
+        # A dangling output symlink can name a WAL or journal SQLite hasn't created yet.
+        40.times do
+          link = File.readlink?(target) || return target
+          link = File.join(File.dirname(target), link) unless Path[link].absolute?
+          target = Paths.canonical_file(link)
+        end
+        raise IO::Error.new("too many symbolic links")
       end
 
       # `--count` prints a number; a report format, a file or a sensitive-header switch all
