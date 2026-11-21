@@ -45,6 +45,7 @@ module Gori::Tui
     def export_openapi(path : String, filter : QL::Filter, targets : Hash(Sitemap::Origin, Set(String)?),
                        label : String) : Nil
       store = @host.session.store
+      project = @host.session.project
       results = @export_results
       opts = Export::OpenApi::Options.new(filter: filter, targets: targets)
       yaml = {".yaml", ".yml"}.includes?(File.extname(path).downcase)
@@ -55,7 +56,7 @@ module Gori::Tui
           # An empty document is not a file anyone asked for; the toast says why it is empty.
           if result.report.operations > 0
             text = yaml ? Export::OpenApi.to_yaml(result.doc) : Export::OpenApi.to_json(result.doc)
-            ProjectArchive.write_export_file(path, text)
+            ProjectArchive.write_export_file(path, text, project)
           end
           SitemapController.export_toast(result.report, path)
         rescue ex

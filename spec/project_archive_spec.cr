@@ -981,12 +981,26 @@ describe Gori::ProjectArchive do
   # A TUI export lands where the operator points it, often a shared directory: never write
   # through a link someone else planted there, dangling or live.
   describe ".write_export_file" do
+    it "protects a journal reached through an equivalent Unicode spelling of the database" do
+      with_archive_project do |_registry, _source, _store, dir|
+        project = Gori::Project.new("example", File.join(dir, "café.db"))
+        File.touch(project.db_path)
+        alias_path = File.join(dir, "cafe\u0301.db")
+        next unless File.exists?(alias_path) # volume treats these spellings as one name
+        expect_raises(IO::Error, /source project database/) do
+          Gori::ProjectArchive.write_export_file(alias_path + "-journal", "report", project)
+        end
+        File.exists?(project.db_path + "-journal").should be_false
+      end
+    end
+
     it "creates a new file, replaces a confirmed regular file, and refuses a symlink" do
       dir = File.tempname("gori-export-file")
       Dir.mkdir(dir)
       begin
+        project = Gori::Project.new("example", File.join(dir, "gori.db"))
         fresh = File.join(dir, "issues.md")
-        Gori::ProjectArchive.write_export_file(fresh, "one\n")
+        Gori::ProjectArchive.write_export_file(fresh, "one\n", project)
         File.read(fresh).should eq("one\n")
         # Created under the umask, the mode `File.write` gives a new file.
         control = File.join(dir, "control")
@@ -997,7 +1011,7 @@ describe Gori::ProjectArchive do
           File.chmod(fresh, 0o600)
         {% end %}
         mode = File.info(fresh).permissions
-        Gori::ProjectArchive.write_export_file(fresh, "two\n")
+        Gori::ProjectArchive.write_export_file(fresh, "two\n", project)
         File.read(fresh).should eq("two\n")
         File.info(fresh).permissions.should eq(mode)
 
@@ -1006,7 +1020,7 @@ describe Gori::ProjectArchive do
         {victim, File.join(dir, "absent")}.each_with_index do |to, i|
           link = File.join(dir, "link#{i}.md")
           File.symlink(to, link)
-          expect_raises(Gori::Error, /symlink/) { Gori::ProjectArchive.write_export_file(link, "x") }
+          expect_raises(Gori::Error, /symlink/) { Gori::ProjectArchive.write_export_file(link, "x", project) }
         end
         File.read(victim).should eq("keep")
         File.exists?(File.join(dir, "absent")).should be_false

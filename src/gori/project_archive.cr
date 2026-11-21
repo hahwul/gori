@@ -311,6 +311,8 @@ module Gori
       end
     end
 
+    DATABASE_SUFFIXES = {"", "-wal", "-shm", "-journal", OpenLock::SUFFIX}
+
     # Where an export of *source* to *path* would land, or the refusal. A function of its
     # arguments alone, so a surface can run it BEFORE paying for the snapshot; `write` runs it
     # again for the path it installs to.
@@ -366,8 +368,7 @@ module Gori
       source_db = Paths.canonical_file(source.db_path)
       if loose_database
         # The exact set, not a prefix: `capture.db.gori` beside `capture.db` is an ordinary file.
-        if canonical_target == source_db ||
-           {"-wal", "-shm", "-journal", OpenLock::SUFFIX}.any? { |s| canonical_target == source_db + s }
+        if DATABASE_SUFFIXES.any? { |suffix| canonical_target == source_db + suffix }
           raise Gori::Error.new("project archives cannot be written over the source database or its sidecar files")
         end
       elsif canonical_target == source_db || Paths.within?(canonical_target, Paths.canonical_file(source.dir))
@@ -531,6 +532,59 @@ module Gori
       File.exists?(path) || File.symlink?(path)
     end
 
+    # A report can live beside the database, but replacing the database or a lock
+    # would detach a running session from its data. Check names before creating
+    # a file and check identity before replacing or truncating an existing one.
+    struct SourceDatabaseFiles
+      @paths : Array(String)
+
+      def initialize(source : Project)
+        db = Paths.canonical_file(source.db_path)
+        @paths = DATABASE_SUFFIXES.map { |suffix| db + suffix }.to_a
+        @paths << Paths.canonical_file(source.capture_lock_path) << Paths.canonical_file(source.capture_status_path)
+      end
+
+      def check!(path : String) : Nil
+        target = resolve_target(path)
+        if @paths.includes?(target) || missing_sidecar?(target)
+          raise IO::Error.new(REFUSAL)
+        end
+      end
+
+      def check!(info : File::Info) : Nil
+        raise IO::Error.new(REFUSAL) if @paths.any? { |name| File.info?(name).try(&.same_file?(info)) }
+      end
+
+      private REFUSAL = "refusing to overwrite the source project database or its sidecars"
+
+      # A missing WAL has no inode to compare. A volume can treat names differing
+      # only in case or Unicode normalization as the same file.
+      private def missing_sidecar?(target : String) : Bool
+        return false if File.exists?(target)
+        basename = comparable_basename(target)
+        @paths.any? do |name|
+          comparable_basename(name).compare(basename, case_insensitive: true) == 0 && !File.exists?(name) &&
+            File.same?(File.dirname(name), File.dirname(target), follow_symlinks: true)
+        end
+      end
+
+      private def comparable_basename(path : String) : String
+        name = File.basename(path)
+        name.valid_encoding? ? name.unicode_normalize : name
+      end
+
+      private def resolve_target(path : String) : String
+        target = Paths.canonical_file(path)
+        # A dangling output symlink can name a journal SQLite hasn't created yet.
+        40.times do
+          link = File.readlink?(target) || return target
+          link = File.join(File.dirname(target), link) unless Path[link].absolute?
+          target = Paths.canonical_file(link)
+        end
+        raise IO::Error.new("too many symbolic links")
+      end
+    end
+
     # The write behind a TUI export (issues, notes, sequencer report, evidence, OpenAPI), whose
     # overlay asked before overwriting anything `destination_exists?` saw. It never writes
     # THROUGH a link: a destination in a shared directory such as /tmp can be a symlink another
@@ -545,9 +599,12 @@ module Gori
     # * nothing there: hard-linked into place, which fails if anything (a link included)
     #   appeared meanwhile. A filesystem with no hard links gets the same existence check
     #   immediately before a rename, as `install_archive_copy` does.
-    def self.write_export_file(path : String, content : String) : Nil
+    def self.write_export_file(path : String, content : String, source : Project) : Nil
       existing = File.info?(path, follow_symlinks: false)
       raise Gori::Error.new("refusing to write through a symlink or special file: #{path}") if existing && !existing.file?
+      database_files = SourceDatabaseFiles.new(source)
+      database_files.check!(path)
+      database_files.check!(existing) if existing
       staged = File.tempname(".#{File.basename(path)}", ".tmp", dir: File.dirname(path))
       File.open(staged, "w", perm: existing.try(&.permissions) || File::Permissions.new(0o666)) do |file|
         file.print(content)
