@@ -97,6 +97,8 @@
 
 - TUI: leaving a filter discards unfinished IME composition and keeps the applied query (#1962)
 
+- Filter completion preserves literal quotes, backslashes, and closing parentheses in suggested values (#1967)
+
 - Fuzzer: the payload card shows all eight types and refuses a bound that is not a number until a second `esc` closes it unapplied, the CONFIG card follows its cursor on a short terminal, a refused run stays in Notifications, and Tab on an empty processor chain lists the converters, which `esc` closes without dropping the chain (#1938, #1941).
 
 - Palette: `Ctrl-P` finds actions by Burp Suite and Caido words such as `replay`, `send to intruder`, `findings`, `httpql` and `preferences` (#1938).
