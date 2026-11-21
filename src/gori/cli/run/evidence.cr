@@ -378,7 +378,7 @@ module Gori
         else
           io << "[binary body omitted, " << decoded_size << " decoded bytes]\n"
         end
-        io << "[… body display cut at " << Issues::Export::EVIDENCE_CAP << " bytes; the stored copy is complete]\n" if cut
+        io << "[… body display cut at " << Issues::Export::EVIDENCE_CAP << " bytes]\n" if cut
       end
     end
   end
