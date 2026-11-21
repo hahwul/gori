@@ -127,6 +127,14 @@ gori run history -q 'host:api.example.com status:200' --format har > evidence.ha
 
 **체크포인트.** `report.md`가 디스크에 있고 심각도 순으로 정렬된 이슈 목록이 들어 있으며, `evidence.har`에는 근거가 된 플로우가 들어 있습니다. SARIF로 내보냈다면 `jq '.runs[0].results | length' issues.sarif`가 이슈 개수와 일치합니다.
 
+## 저장한 응답 두 개로 인계 연습하기
+
+[샘플 HAR](/samples/evidence-handoff.har)를 내려받아 새 연습 프로젝트에 가져옵니다. 같은 URL에서 얻은 응답 두 개가 담겨 있습니다.
+
+1. 작성자는 두 번째 응답에서 달라진 점을 찾아 이슈를 만들고, 판단의 근거가 된 교환을 고정합니다. Markdown 보고서를 내보냅니다.
+2. 검토자에게 보고서와 같은 연습 프로젝트를 건넵니다. 고정한 응답을 열어 상태 코드와 본문의 `revision` 값을 알려 달라고 합니다. 걸린 시간과 작성자에게 도움을 요청했는지를 기록합니다.
+3. 읽기 전용 MCP 클라이언트에 같은 보고서와 프로젝트를 주고, 두 값과 증거 ID를 묻습니다. 작성자가 고정한 사본과 세 값이 일치하는지 확인합니다.
+
 ## 다음 단계 {#next-steps}
 
 - [AI 코파일럿 세션 실행](/ko/playbooks/run-an-ai-co-pilot/): 같은 프로젝트에 에이전트를 붙이고 중요한 동작을 계속 확인하기

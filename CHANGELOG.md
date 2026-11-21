@@ -95,7 +95,7 @@
 
 - Text evidence keeps complete UTF-8 characters at the display size limit in reports, the CLI, and the TUI evidence viewer (#1956, #1984)
 
-- Frozen evidence details distinguish a display limit from a capture that was already truncated (#1974)
+- Frozen evidence details distinguish a display limit from a capture that was already truncated. Markdown issue reports identify each frozen copy by ID and show how to reopen it in the same project (#1038, #1974)
 
 - Extract rules: a rule that re-binds the same value on every response no longer makes another rule's `extract_miss` warning repeat on most captured flows (#1942).
 

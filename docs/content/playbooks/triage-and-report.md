@@ -127,6 +127,14 @@ gori run history -q 'host:api.example.com status:200' --format har > evidence.ha
 
 **Checkpoint.** `report.md` exists on disk and reads as a severity-ordered list of your issues, and `evidence.har` carries the flows behind them. If you exported SARIF, `jq '.runs[0].results | length' issues.sarif` matches your issue count.
 
+## Try a handoff with two saved responses
+
+Download the [sample HAR](/samples/evidence-handoff.har) and import it into a fresh practice project. It contains two responses to the same URL.
+
+1. As the author, identify the change in the second response, file an issue, and freeze the exchange that supports your conclusion. Export the Markdown report.
+2. Give a reviewer the report and the same practice project. Ask them to open the frozen response and tell you its status and the `revision` in its body. Record how long this takes and whether they need to ask the author for help.
+3. Give a read-only MCP client the same report and project. Ask for the same two values and the evidence ID. Check all three against the copy the author froze.
+
 ## Next Steps
 
 - [Run an AI co-pilot session](/playbooks/run-an-ai-co-pilot/): put an agent on the same project and keep its consequential actions visible
