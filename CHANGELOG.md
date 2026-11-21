@@ -105,7 +105,7 @@
 
 - TUI: selections in long text fields stay inside the field, including at wide characters (#1955)
 
-- TUI: double-click word selection follows the glyph under the pointer, including either half of a wide character (#1981)
+- TUI: double-click selects the word under the pointer on either half of a wide character and on the last visible glyph of an active text field. Scrolled-off fields no longer capture the click (#1981, #1985)
 
 - Text fields move and delete a Unicode prepend character and its following text as one grapheme (#1969)
 

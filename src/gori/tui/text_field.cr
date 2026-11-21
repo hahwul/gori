@@ -24,6 +24,9 @@ module Gori::Tui
 
     getter preedit : String = ""
 
+    # The caret and selection paint actual glyphs over the field's trailing ellipsis.
+    @last_painted = nil.as(Range(Int32, Int32)?)
+
     def initialize(@value : String = "")
       @caret = @value.size
       @undo_stack = [] of UndoState
@@ -294,7 +297,7 @@ module Gori::Tui
       @word_press = nil
       return false unless hit?(mx, my)
       @caret = caret
-      hit = Screen.input_pointer(@value, @last_start, mx - @last_x, @last_w)
+      hit = Screen.input_pointer(@value, @last_start, mx - @last_x, @last_w, @last_painted)
       to = hit.caret
       @caret = @sel.move_cx(@caret, to.clamp(0, @value.size) - @caret, @value.size, selecting: selecting)
       @word_press = {mx, my, @value, hit.character} unless selecting
@@ -304,9 +307,10 @@ module Gori::Tui
     # Double-click: take the word under the pointer. False when the press missed the field or
     # landed on whitespace / past the value, leaving the caret where the click put it.
     def select_word_at(mx : Int32, my : Int32) : Bool
+      return false unless hit?(mx, my)
       press = @word_press
       unless press && press[0] == mx && press[1] == my && press[2].same?(@value)
-        return false unless click_to_cursor(mx, my)
+        click_to_cursor(mx, my)
         press = @word_press
       end
       @word_press = nil
@@ -336,10 +340,11 @@ module Gori::Tui
     # a long absolute path.
     def render(screen : Screen, x : Int32, y : Int32, width : Int32, focused : Bool,
                fg : Color, bg : Color) : Nil
-      return if width <= 0
+      return forget_geometry if width <= 0
       # Remembered BEFORE the early return, so an unfocused field is still clickable — that
       # click is how the operator focuses it (see `hit?`).
       @last_x, @last_y, @last_w = x, y, width
+      @last_painted = nil
       unless focused
         @last_start = 0
         screen.text(x, y, @value, fg, bg, width: width)
@@ -348,8 +353,13 @@ module Gori::Tui
       # The band rides along inside `input_line` (see there): it has to land between the
       # value and the block caret, and only that method sits between them. It windows the
       # value, the caret and the band by the same offset, and says which.
-      @last_start = screen.input_line(x, y, @value, caret, @preedit, fg, bg, width: width,
-        sel: @sel.selection_span(@caret))
+      cx = caret
+      sel = @sel.selection_span(@caret)
+      if @preedit.empty?
+        first, last = sel || {cx, cx}
+        @last_painted = first..{last - 1, cx}.max
+      end
+      @last_start = screen.input_line(x, y, @value, cx, @preedit, fg, bg, width: width, sel: sel)
     end
 
     private def push_undo : Nil

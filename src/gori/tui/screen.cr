@@ -344,11 +344,12 @@ module Gori::Tui
 
     # A click places the caret at the nearest edge. A double-click selects the glyph
     # under the pointer, whose start can precede that edge.
-    def self.pointer_hit(str : String, target : Int32, *, left : Int32 = 0, width : Int32? = nil) : PointerHit
+    def self.pointer_hit(str : String, target : Int32, *, left : Int32 = 0, width : Int32? = nil,
+                         painted : Range(Int32, Int32)? = nil) : PointerHit
       return PointerHit.new(0, nil) if target < 0
       return PointerHit.new(0, str.empty? ? nil : 0) if target == 0 && width.nil?
       if printable_ascii?(str)
-        character = target if target < str.size && !clipped_pointer?(target, 1, left, width) { target + 1 < str.size }
+        character = target if target < str.size && !clipped_pointer?(target, 1, left, width, painted.try(&.covers?(target))) { target + 1 < str.size }
         return PointerHit.new({target, str.size}.min, character)
       end
       acc = 0
@@ -359,7 +360,7 @@ module Gori::Tui
         # splitting a 2-wide one down the middle.
         if target < acc + w
           caret = target < acc + (w + 1) // 2 ? i : i + g.size
-          character = i unless clipped_pointer?(acc, w, left, width) { i + g.size < str.size }
+          character = i unless clipped_pointer?(acc, w, left, width, painted.try(&.covers?(i))) { i + g.size < str.size }
           return PointerHit.new(caret, character)
         end
         acc += w
@@ -370,10 +371,10 @@ module Gori::Tui
 
     # The renderer replaces a partial leading glyph with spaces and reserves the
     # last column for an ellipsis when the line continues past the viewport.
-    def self.clipped_pointer?(col : Int32, cols : Int32, left : Int32, width : Int32?, & : -> Bool) : Bool
+    def self.clipped_pointer?(col : Int32, cols : Int32, left : Int32, width : Int32?, painted : Bool? = false, & : -> Bool) : Bool
       return false unless width
       right = left + width
-      col < left || col + cols > right || (width > 1 && col + cols == right && yield)
+      col < left || col + cols > right || (!painted && width > 1 && col + cols == right && yield)
     end
 
     # Snap a character index to the START of the grapheme cluster holding it (the caret's
@@ -812,9 +813,11 @@ module Gori::Tui
       start + column_for_click(value[start..], dx)
     end
 
-    def self.input_pointer(value : String, start : Int32, dx : Int32, width : Int32) : PointerHit
+    def self.input_pointer(value : String, start : Int32, dx : Int32, width : Int32,
+                           painted : Range(Int32, Int32)? = nil) : PointerHit
       start = start.clamp(0, value.size)
-      hit = pointer_hit(value[start..], dx, width: width)
+      window = painted.try { |span| (span.begin - start)..(span.end - start) }
+      hit = pointer_hit(value[start..], dx, width: width, painted: window)
       PointerHit.new(start + hit.caret, hit.character.try { |i| start + i })
     end
 
