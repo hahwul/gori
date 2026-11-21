@@ -37,3 +37,11 @@ describe "Gori::Redact.redacted_value" do
     out.should_not contain("tok")
   end
 end
+
+describe "Gori::Redact.redact_head" do
+  it "withholds incomplete Set-Cookie attributes when the displayed head is capped" do
+    head = "Set-Cookie: sid=value; Path=/, second"
+    Gori::Redact.redact_head(head, truncated: true).should eq("Set-Cookie: [REDACTED]")
+    Gori::Redact.redact_head(head, include_sensitive: true, truncated: true).should eq(head)
+  end
+end

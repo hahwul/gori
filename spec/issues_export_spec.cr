@@ -114,6 +114,44 @@ describe Gori::Issues::Export do
   end
 
   describe ".markdown" do
+    it "redacts request and response credentials in reports and single-issue views" do
+      with_store do |store|
+        request = "GET / HTTP/1.1\r\nAuthorization: Bearer request-secret\r\n\tfolded-secret\nX-Api-Key: key-secret\rHost: example.test\r\n\r\n"
+        response = "HTTP/1.1 200 OK\r\nSet-Cookie: session=response-secret; HttpOnly\r\n\r\n"
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "https", host: "example.test", port: 443, method: "GET", target: "/",
+          http_version: "HTTP/1.1", head: request.to_slice, source: Gori::FlowSource::Kind::Proxy))
+        store.update_response(Gori::Store::CapturedResponse.new(flow_id: id, status: 200,
+          head: response.to_slice, body: "Cookie: ordinary body text".to_slice))
+        store.insert_issue("header evidence", Gori::Store::Severity::Low, "example.test", id)
+        issues = store.issues
+        reports = {Gori::Issues::Export.markdown(issues, store, "proj"), Gori::Issues::Export.issue_markdown(issues.first, store)}
+        reports.each do |report|
+          %w[request-secret folded-secret key-secret response-secret].each { |secret| report.should_not contain(secret) }
+          report.should contain("Authorization: [REDACTED]\r\n\t[REDACTED]\nX-Api-Key: [REDACTED]\rHost: example.test")
+          report.should contain("Set-Cookie: session=[REDACTED]; HttpOnly")
+          report.should contain("Cookie: ordinary body text")
+        end
+        stored = store.get_flow(id).not_nil!
+        String.new(stored.request_head).should eq(request)
+        String.new(stored.response_head.not_nil!).should eq(response)
+      end
+    end
+
+    it "caps the rendered headers when redaction expands their values" do
+      with_store do |store|
+        request = "GET / HTTP/1.1\r\n" + "Cookie: x\r\n" * 4096 + "\r\n"
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "https", host: "example.test", port: 443, method: "GET", target: "/",
+          http_version: "HTTP/1.1", head: request.to_slice, source: Gori::FlowSource::Kind::Proxy))
+        store.insert_issue("bounded headers", Gori::Store::Severity::Low, "example.test", id)
+        report = Gori::Issues::Export.issue_markdown(store.issues.first, store)
+        head = report.split("```http\n").last
+        head.should contain("[… headers truncated,")
+        head.split("\n\n[… headers truncated,").first.bytesize.should be <= Gori::Issues::Export::EVIDENCE_CAP
+      end
+    end
+
     # The primary flow is the FIRST bullet of `### Related` and appears exactly once. There is
     # no `- **Flow:**` line above the list any more: a report reader asking what backs a
     # finding was being answered twice, in two spellings, one of them above the list of the

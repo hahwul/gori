@@ -164,67 +164,8 @@ module Gori
         nil
       end
 
-      # Replace the value of any sensitive header line in a raw HTTP head/request
-      # with [REDACTED], leaving names, the request/status line, and the body
-      # untouched. CRLF, bare LF and bare CR terminators are all preserved byte-for-byte.
-      # An obs-fold continuation of a sensitive field is sensitive too: redacting only the
-      # first line leaves the credential in `Authorization:\r\n Bearer secret` untouched.
-      # Returns `text` verbatim when `include_sensitive` is set or the text has nothing
-      # header-shaped.
       def self.redact_head(text : String, include_sensitive : Bool) : String
-        return text if include_sensitive || !text.includes?(':')
-        bytes = text.to_slice
-        buffer = IO::Memory.new(bytes.size)
-        pos = 0
-        headers_done = false
-        sensitive_continuation = false
-
-        while pos < bytes.size
-          stop = pos
-          while stop < bytes.size && !bytes[stop].in?(0x0a_u8, 0x0d_u8)
-            stop += 1
-          end
-          term_stop = stop
-          if term_stop < bytes.size
-            if bytes[term_stop] == 0x0d_u8 && term_stop + 1 < bytes.size &&
-               bytes[term_stop + 1] == 0x0a_u8
-              term_stop += 2
-            else
-              term_stop += 1
-            end
-          end
-          line = bytes[pos, stop - pos]
-
-          if headers_done
-            buffer.write(line)
-          elsif line.empty?
-            headers_done = true
-            sensitive_continuation = false
-          elsif line[0].in?(0x20_u8, 0x09_u8) && sensitive_continuation
-            indent = 0
-            while indent < line.size && line[indent].in?(0x20_u8, 0x09_u8)
-              indent += 1
-            end
-            buffer.write(line[0, indent])
-            buffer << "[REDACTED]"
-          else
-            colon = line.index(0x3a_u8)
-            sensitive_continuation = false
-            name = String.new(line[0, colon || 0]).scrub
-            if colon && Redact.sensitive_header?(name)
-              # A malformed head may begin directly with Authorization/Cookie rather than a
-              # request/status line. Fail closed on that header-shaped first line too.
-              buffer.write(line[0, colon])
-              buffer << ": " << Redact.redacted_value(name, String.new(line[colon + 1, line.size - colon - 1]).scrub.strip)
-              sensitive_continuation = true
-            else
-              buffer.write(line)
-            end
-          end
-          buffer.write(bytes[stop, term_stop - stop]) if term_stop > stop
-          pos = term_stop
-        end
-        String.new(buffer.to_slice)
+        Redact.redact_head(text, include_sensitive)
       end
 
       # The bytes `get_response_body_chunk` pages, and its `find` and `gori run show --find`
