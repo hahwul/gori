@@ -46,6 +46,49 @@ module Gori
       end
     end
 
+    # The file the operator agreed to replace, or the absence of one. Keep that observation
+    # across prompts, snapshotting and report generation, all of which can outlive a peer edit.
+    struct ExportDestination
+      getter path : String
+      getter info : File::Info?
+
+      def initialize(@path : String)
+        @parent = File.info?(File.dirname(@path))
+        @info = File.info?(@path, follow_symlinks: false)
+        @link = File.readlink?(@path) if @info.try(&.symlink?)
+        @referent = File.info?(@path) if @link
+      end
+
+      def matches?(other : self) : Bool
+        return false unless @path == other.path && @link == other.@link
+        if parent = @parent
+          current_parent = other.@parent
+          return false unless current_parent && parent.same_file?(current_parent)
+        elsif other.@parent
+          return false
+        end
+        @link ? same_revision?(@referent, other.@referent) : same_revision?(@info, other.info)
+      end
+
+      def check! : Nil
+        current = ExportDestination.new(@path)
+        return if matches?(current)
+        raise DestinationExists.new(@path) if !@info && current.info
+        raise Gori::Error.new("export destination changed: #{@path} — select it again")
+      end
+
+      def check_source!(source : Project?) : Nil
+        SourceDatabaseFiles.new(source).check!(@path, @info) if source
+      end
+
+      private def same_revision?(before : File::Info?, after : File::Info?) : Bool
+        return after.nil? unless before
+        return false unless after
+        before.same_file?(after) && before.size == after.size &&
+          before.modification_time == after.modification_time && before.permissions == after.permissions
+      end
+    end
+
     # An export refused because its destination is inside a directory the caller protected
     # (MCP protects gori's home, which holds every project's database and the settings).
     class ProtectedDestination < Gori::Error
@@ -219,14 +262,17 @@ module Gori
       # *protected_dir* is refused as a destination along with the source project, and
       # *archives_only* limits `overwrite` to an existing archive; see
       # `ProjectArchive.resolve_destination`, which runs again here for the path installed to.
-      def write(path : String, *, overwrite : Bool = false, protected_dir : String? = nil,
+      def write(path : String | ExportDestination, *, overwrite : Bool = false, protected_dir : String? = nil,
                 archives_only : Bool = false) : String
         raise Gori::Error.new("project archive is already closed") if @closed
-        target = ProjectArchive.resolve_destination(path, @project, overwrite: overwrite,
+        approved = path.is_a?(ExportDestination) ? path : ExportDestination.new(ProjectArchive.expand_archive_path(path))
+        target = ProjectArchive.resolve_destination(approved.path, @project, overwrite: overwrite,
           loose_database: @loose_database, protected_dir: protected_dir, archives_only: archives_only)
+        approved.check!
         temp = write_temporary_archive(target)
         begin
-          install_archive(temp, target, overwrite)
+          approved.check!
+          install_archive(temp, target, overwrite && !approved.info.nil?)
         ensure
           File.delete?(temp)
         end
@@ -346,9 +392,13 @@ module Gori
       false
     end
 
-    private def self.expand_destination(path : String) : String
+    def self.expand_archive_path(path : String) : String
       raise Gori::Error.new("project archive destination is blank") if path.strip.empty?
-      target = Path[path].expand(home: true).to_s
+      Path[path].expand(home: true).to_s
+    end
+
+    private def self.expand_destination(path : String) : String
+      target = expand_archive_path(path)
       raise Gori::Error.new("project archive destination is a directory: #{target}") if File.directory?(target)
       parent = File.dirname(target)
       raise Gori::Error.new("no such directory: #{parent}") unless Dir.exists?(parent)
@@ -592,8 +642,8 @@ module Gori
       end
     end
 
-    # The write behind a TUI export (issues, notes, sequencer report, evidence, OpenAPI), whose
-    # overlay asked before overwriting anything `destination_exists?` saw. It never writes
+    # The shared report writer. The TUI passes the destination the overlay confirmed; MCP
+    # passes the resolved OpenAPI path it accepted under its overwrite policy. It never writes
     # THROUGH a link: a destination in a shared directory such as /tmp can be a symlink another
     # local user planted (`issues.md -> ~/.zshenv`), dangling so it read as absent, or live so
     # the operator confirmed "file exists" for a file that is not theirs.
@@ -605,17 +655,23 @@ module Gori
     # * anything else that exists — a symlink, a FIFO, a device — is refused;
     # * nothing there: hard-linked into place, which fails if anything (a link included)
     #   appeared meanwhile. A filesystem with no hard links gets the same existence check
-    #   immediately before a rename, as `install_archive_copy` does.
-    def self.write_export_file(path : String, content : String, source : Project) : Nil
-      existing = File.info?(path, follow_symlinks: false)
+    #   immediately before a rename, as `install_archive_copy` does. On that fallback a peer
+    #   can still create a file between the final check and the rename.
+    def self.write_export_file(destination : String | ExportDestination, content : String, source : Project?,
+                               *, perm : File::Permissions = File::Permissions.new(0o666)) : Nil
+      approved = destination.is_a?(ExportDestination) ? destination : ExportDestination.new(destination)
+      path = approved.path
+      approved.check!
+      existing = approved.info
       raise Gori::Error.new("refusing to write through a symlink or special file: #{path}") if existing && !existing.file?
-      SourceDatabaseFiles.new(source).check!(path, existing)
+      approved.check_source!(source)
       staged = File.tempname(".#{File.basename(path)}", ".tmp", dir: File.dirname(path))
-      File.open(staged, "w", perm: existing.try(&.permissions) || File::Permissions.new(0o666)) do |file|
+      File.open(staged, "w", perm: existing.try(&.permissions) || perm) do |file|
         file.print(content)
         file.flush
         file.fsync
       end
+      approved.check!
       if existing
         File.chmod(staged, existing.permissions)
         File.rename(staged, path)

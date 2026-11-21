@@ -54,8 +54,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     subject = view.subject
     json = format == :json
     kind = json ? :sequence_json : :sequence_md
-    open_export(kind, File.join(Dir.current, "sequence-report.#{json ? "json" : "md"}")) do |p|
-      sequencer_controller.sequencer_export_to(format, p, report, subject)
+    open_export(kind, File.join(Dir.current, "sequence-report.#{json ? "json" : "md"}")) do |dest|
+      sequencer_controller.sequencer_export_to(format, dest, report, subject)
     end
   end
 

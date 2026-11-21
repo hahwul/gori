@@ -40,7 +40,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     end
     # A peer can delete the selected note while the destination dialog is open.
     base = Notes.export_basename(text, view.current_index)
-    open_export(:note, File.join(Dir.current, base)) { |p| notes_controller.notes_export_to(p, text) }
+    open_export(:note, File.join(Dir.current, base)) { |dest| notes_controller.notes_export_to(dest, text) }
   end
 
   def notes_edit : Nil

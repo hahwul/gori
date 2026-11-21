@@ -129,6 +129,15 @@ class ProjectArchiveFallbackExportSpec < Gori::ProjectArchive::PreparedExport
   end
 end
 
+# A peer saves a document while the ZIP is being written.
+private class ProjectArchiveChangedDuringZipSpec < Gori::ProjectArchive::PreparedExport
+  private def write_temporary_archive(target : String) : String
+    tmp = super
+    File.write(target, "a peer's document")
+    tmp
+  end
+end
+
 # A peer claims the destination between the existence check and the hard link.
 class ProjectArchiveRacedExportSpec < Gori::ProjectArchive::PreparedExport
   def initialize(workdir : String, project : Gori::Project, manifest : Gori::ProjectArchive::Manifest,
@@ -381,6 +390,32 @@ describe Gori::ProjectArchive do
         error = expect_raises(Gori::Error) { prepared.write(source_path, overwrite: true) }
         error.message.not_nil!.should contain("inside the source project directory")
         File.exists?(source_path).should be_false
+      ensure
+        prepared.close
+      end
+    end
+  end
+
+  it "rejects a blank archive destination before expanding the path" do
+    with_archive_project do |_registry, project, _store, root|
+      Dir.cd(root) do
+        expect_raises(Gori::Error, /destination is blank/) { export_archive(project, "  ") }
+        File.exists?("  ").should be_false
+      end
+    end
+  end
+
+  it "preserves a new or modified file when a forced export builds its ZIP" do
+    with_archive_project do |_registry, project, _store, root|
+      prepared = Gori::ProjectArchive.prepare_export(project)
+      begin
+        staged = ProjectArchiveChangedDuringZipSpec.new(root, project.db_path, project, prepared.manifest, prepared.inventory)
+        {false, true}.each do |existing|
+          path = File.join(root, "#{existing}.gori")
+          File.write(path, "old backup") if existing
+          expect_raises(Gori::Error, /destination/) { staged.write(path, overwrite: true) }
+          File.read(path).should eq("a peer's document")
+        end
       ensure
         prepared.close
       end

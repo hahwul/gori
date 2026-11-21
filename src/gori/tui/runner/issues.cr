@@ -212,7 +212,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
                 when :sarif then {"sarif", :issues_sarif}
                 else             {"md", :issues_md}
                 end
-    open_export(kind, File.join(Dir.current, "issues.#{ext}"), subject) { |p| issues_controller.issues_export_to(format, p, ids) }
+    open_export(kind, File.join(Dir.current, "issues.#{ext}"), subject) { |dest| issues_controller.issues_export_to(format, dest, ids) }
   end
 
   private def issues_export_refusal : String?

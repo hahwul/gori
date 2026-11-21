@@ -45,9 +45,13 @@ module Gori
         # The destination is judged BEFORE the snapshot, which can be a multi-GiB VACUUM INTO:
         # a refused path should cost a stat, not a copy of the project. `write` judges it again
         # for the path it installs to.
-        begin
+        approved = begin
+          dest = ProjectArchive::ExportDestination.new(ProjectArchive.expand_archive_path(path))
           ProjectArchive.resolve_destination(path, project, overwrite: overwrite,
             loose_database: !registered, protected_dir: Paths.home_dir, archives_only: true)
+          dest
+        rescue ex : File::Error
+          return err("could not inspect destination: #{ex.message}", "INVALID_ARGUMENT", field: "path")
         rescue ex : Gori::Error
           return archive_destination_error(ex)
         end
@@ -61,9 +65,9 @@ module Gori
             "INVALID_ARGUMENT", field: "project")
         end
         begin
-          replaced = overwrite && ProjectArchive.destination_exists?(Path[path].expand(home: true).to_s)
+          replaced = !approved.info.nil?
           destination = begin
-            prepared.write(path, overwrite: overwrite, protected_dir: Paths.home_dir, archives_only: true)
+            prepared.write(approved, overwrite: overwrite, protected_dir: Paths.home_dir, archives_only: true)
           rescue ex : Gori::Error
             return archive_destination_error(ex)
           rescue ex : File::Error | IO::Error

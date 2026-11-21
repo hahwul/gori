@@ -63,6 +63,48 @@ describe "MCP export_openapi" do
     end
   end
 
+  it "preserves a new or changed output while building the OpenAPI document" do
+    with_store do |store|
+      eo_flow(store, "/users")
+      tools = tools_for(store)
+      {false, true}.each do |overwrite|
+        path = File.tempname("gori-openapi", ".json")
+        begin
+          File.write(path, %({"openapi":"3.0.3","info":{},"paths":{}})) if overwrite
+          args = JSON.parse({output_path: path, overwrite: overwrite}.to_json)
+          # The first selected flow yields to other fibers during the build.
+          spawn { File.write(path, "a peer's document") }
+          result = tools.call("export_openapi", args)
+          File.read(path).should eq("a peer's document")
+          result.is_error.should be_true
+          result.field.should eq("output_path")
+        ensure
+          File.delete?(path)
+        end
+      end
+    end
+  end
+
+  it "protects missing sidecars beside its loose database while serving inline reports" do
+    with_store do |store|
+      eo_flow(store, "/users")
+      db = store.@db.scalar("SELECT file FROM pragma_database_list WHERE name = 'main'").as(String)
+      project = Gori::Project.new("loose", db)
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false, db_path: db)
+      {db + "-journal", project.capture_status_path}.each do |path|
+        File.exists?(path).should be_false
+        result = tools.call("export_openapi", JSON.parse({output_path: path, overwrite: true}.to_json))
+        File.exists?(path).should be_false
+        result.error_code.should eq("INVALID_ARGUMENT")
+        result.field.should eq("output_path")
+        result.text.should contain("source project database or its sidecars")
+      ensure
+        File.delete?(path)
+      end
+      eo(tools, "{}")["document"]["paths"].as_h.keys.should eq(["/users"])
+    end
+  end
+
   it "keeps credential values out, and examples off, by default" do
     with_store do |store|
       eo_flow(store, "/me?token=t0ps3cret", req_headers: "Authorization: Bearer b3arer\r\nCookie: sid=c00kie\r\n")

@@ -517,9 +517,10 @@ module Gori
         ignored = [] of String
         filter = openapi_filter(h, ignored)
         return filter if filter.is_a?(Result)
-        destination = openapi_destination(h)
+        source = current_db_path.try { |db| Project.new(@project_name || "", db) }
+        destination = openapi_destination(h, source)
         return destination if destination.is_a?(Result)
-        yaml = openapi_yaml?(h, destination)
+        yaml = openapi_yaml?(h, destination.try(&.path))
         return yaml if yaml.is_a?(Result)
         examples = bool_arg(h, "examples", false)
         choice = openapi_redactor(h, examples)
@@ -540,11 +541,11 @@ module Gori
         return Result.new(openapi_json(doc, result.report, yaml, choice, ignored)) unless destination
         text = yaml ? Export::OpenApi.to_yaml(doc) : Export::OpenApi.to_json(doc)
         begin
-          DurableFile.write(destination, text, perm: File::Permissions.new(0o644))
-        rescue ex : File::Error | IO::Error
+          ProjectArchive.write_export_file(destination, text, source, perm: File::Permissions.new(0o644))
+        rescue ex : Gori::Error | File::Error | IO::Error
           return err("could not write the OpenAPI document: #{ex.message}", "INVALID_ARGUMENT", field: "output_path")
         end
-        Result.new(openapi_json(doc, result.report, yaml, choice, ignored, written: {destination, text.bytesize}))
+        Result.new(openapi_json(doc, result.report, yaml, choice, ignored, written: {destination.path, text.bytesize}))
       end
 
       # The inline document's default size cap, and the ceiling either way. Inline is the reply
@@ -556,9 +557,8 @@ module Gori
       # inline; or the refusal. The rules are `export_project`'s, the one other MCP tool that
       # writes a file an agent names: the parent directory must exist, a directory or an
       # existing file is refused unless `overwrite:true` (and a directory always), a symlink is
-      # written THROUGH (`DurableFile`), and gori's home — every project's database and the
-      # settings — is off limits.
-      private def openapi_destination(h) : (String | Result)?
+      # written through after resolving its target, and gori's home is off limits.
+      private def openapi_destination(h, source : Project?) : (ProjectArchive::ExportDestination | Result)?
         # Blank is absent: a client that fills every property sends `output_path: ""` with the
         # inline document in mind (`describes?`).
         return nil unless describes?(h, "output_path")
@@ -570,8 +570,7 @@ module Gori
         end
         overwrite = bool_arg(h, "overwrite", false)
         target = Path[raw].expand(home: true).to_s
-        # A symlink is judged — and written — at what it points to (`DurableFile` writes
-        # through it), so resolve it first; one that points nowhere cannot be judged at all.
+        # A live symlink is checked and written at its resolved target.
         if File.symlink?(target)
           return err("output_path is a symlink to nothing: #{target}", "INVALID_ARGUMENT", field: "output_path") unless File.exists?(target)
           target = File.realpath(target)
@@ -583,20 +582,22 @@ module Gori
           return err("refusing to write inside gori's home (#{Paths.home_dir}): it holds every project's database " \
                      "and gori's settings — choose an output_path outside it", "INVALID_ARGUMENT", field: "output_path")
         end
-        if File.exists?(target)
-          unless overwrite
-            return err("output_path already exists: #{target} — pass overwrite:true to replace it, or choose another path",
-              "INVALID_ARGUMENT", field: "output_path")
-          end
-          if refusal = openapi_replace_refusal(target)
-            return refusal
-          end
+        destination = ProjectArchive::ExportDestination.new(target)
+        destination.check_source!(source)
+        if destination.info && (refusal = openapi_replace_refusal(target, overwrite))
+          return refusal
         end
-        target
+        destination
+      rescue ex : IO::Error
+        err("could not inspect output_path: #{ex.message}", "INVALID_ARGUMENT", field: "output_path")
       end
 
       # Why `overwrite:true` may not replace the existing *target*, or nil.
-      private def openapi_replace_refusal(target : String) : Result?
+      private def openapi_replace_refusal(target : String, overwrite : Bool) : Result?
+        unless overwrite
+          return err("output_path already exists: #{target} — pass overwrite:true to replace it, or choose another path",
+            "INVALID_ARGUMENT", field: "output_path")
+        end
         # A loose `--db` project lives anywhere; replacing one a gori has open would unlink a
         # live database. `export_project` refuses the same target.
         if OpenLock.in_use?(target)

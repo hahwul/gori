@@ -42,8 +42,9 @@ module Gori::Tui
     # with their bodies, and on the one cooperative scheduler a synchronous walk would freeze
     # the terminal for its length. The engine yields between flows; the finished toast lands
     # through `drain_export`. `.yaml`/`.yml` writes YAML, anything else JSON.
-    def export_openapi(path : String, filter : QL::Filter, targets : Hash(Sitemap::Origin, Set(String)?),
+    def export_openapi(destination : ProjectArchive::ExportDestination, filter : QL::Filter, targets : Hash(Sitemap::Origin, Set(String)?),
                        label : String) : Nil
+      path = destination.path
       store = @host.session.store
       project = @host.session.project
       results = @export_results
@@ -56,7 +57,7 @@ module Gori::Tui
           # An empty document is not a file anyone asked for; the toast says why it is empty.
           if result.report.operations > 0
             text = yaml ? Export::OpenApi.to_yaml(result.doc) : Export::OpenApi.to_json(result.doc)
-            ProjectArchive.write_export_file(path, text, project)
+            ProjectArchive.write_export_file(destination, text, project)
           end
           SitemapController.export_toast(result.report, path)
         rescue ex

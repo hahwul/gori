@@ -10,9 +10,9 @@ describe Gori::Tui::IssuesController do
       controller = IssuesController.new(TuiContract::Host.new(session))
       db = session.project.db_path
       original = File.info(db)
-      controller.issues_export_to(:json, db).should be_false
+      controller.issues_export_to(:json, Gori::ProjectArchive::ExportDestination.new(db)).should be_false
       File.info(db).same_file?(original).should be_true
-      controller.issues_export_to(:json, db + "-journal").should be_false
+      controller.issues_export_to(:json, Gori::ProjectArchive::ExportDestination.new(db + "-journal")).should be_false
       File.exists?(db + "-journal").should be_false
       session.store.get_issue(id).not_nil!.title.should eq("keep this issue")
     end
@@ -28,11 +28,11 @@ describe Gori::Tui::IssuesController do
       ctl = IssuesController.new(TuiContract::Host.new(session))
       path = File.tempname("gori-issues-export", ".json")
       begin
-        ctl.issues_export_to(:json, path, [keep]).should be_true
+        ctl.issues_export_to(:json, Gori::ProjectArchive::ExportDestination.new(path), [keep]).should be_true
         File.read(path).should contain("keep me")
         File.read(path).should_not contain("leave me")
         File.delete(path)
-        ctl.issues_export_to(:json, path).should be_true
+        ctl.issues_export_to(:json, Gori::ProjectArchive::ExportDestination.new(path)).should be_true
         File.read(path).should contain("leave me")
       ensure
         FileUtils.rm_rf(path)

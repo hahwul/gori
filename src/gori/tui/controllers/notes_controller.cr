@@ -637,8 +637,9 @@ module Gori::Tui
     # live terminal (see the split in `gori run issues`: the --export branch writes raw, the
     # STDOUT branch scrubs). A .md file is not a TTY, and scrubbing would corrupt whatever the
     # operator captured into the note.
-    def notes_export_to(path : String, text : String) : Bool
-      ProjectArchive.write_export_file(path, text.ends_with?('\n') ? text : "#{text}\n", @host.session.project)
+    def notes_export_to(destination : ProjectArchive::ExportDestination, text : String) : Bool
+      path = destination.path
+      ProjectArchive.write_export_file(destination, text.ends_with?('\n') ? text : "#{text}\n", @host.session.project)
       @host.status("exported note → #{path}")
       true
     rescue ex

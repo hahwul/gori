@@ -83,7 +83,7 @@
 
 - TUI: an import that duplicates an earlier one, or did not commit every flow, says so on the status row ahead of the path and keeps the warning in Notifications (#1942).
 
-- TUI exports save the note or Sequencer report selected when the destination dialog opened, even if another session deletes it before the file is written (#2004).
+- TUI exports save the note or Sequencer report selected when the destination dialog opened. Report and archive exports recheck the approved destination before writing, and MCP OpenAPI exports protect SQLite and capture sidecar paths (#2004, #2010).
 
 - Replacing a private TUI export keeps its existing file permissions throughout the write. TUI exports protect the open project database and its sidecars from being overwritten (#1965, #1997)
 

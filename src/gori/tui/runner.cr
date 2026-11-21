@@ -5183,9 +5183,9 @@ module Gori::Tui
     # retype it — the same "keep the form up on a correctable failure" the CA import commit
     # relies on.
     private def open_export(kind : Symbol, default_path : String, subject : String = "every issue",
-                            &write : String -> Bool) : Nil
+                            &write : ProjectArchive::ExportDestination -> Bool) : Nil
       ov = ExportOverlay.new(kind, default_path, subject)
-      ov.on_commit = -> { write.call(ov.resolved_path) }
+      ov.on_commit = -> { write.call(ov.destination) }
       open_overlay(ov)
     end
 
