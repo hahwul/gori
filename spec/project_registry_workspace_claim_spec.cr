@@ -1,6 +1,18 @@
 require "./spec_helper"
 require "file_utils"
 
+# Interpose only a real directory at the name-file path, after this instance has won
+# mkdir. The normal durable write and the claim's rollback both still run.
+private class BlockedWorkspaceName < Gori::ProjectRegistry
+  getter? published = false
+
+  private def write_display_name(dir : String, display : String) : Nil
+    @published = File.exists?(File.join(dir, WORKSPACE_FILE))
+    Dir.mkdir(File.join(dir, NAME_FILE))
+    super
+  end
+end
+
 private def with_root(&)
   root = File.tempname("gori-ws-claim")
   begin
@@ -17,6 +29,23 @@ end
 # fails, and a killed process closes it never. So a workspace-bound directory with no db
 # is a state the registry has to keep honouring.
 describe Gori::ProjectRegistry do
+  it "publishes the workspace only after saving its name and releases a failed claim for retry" do
+    with_root do |registry, root|
+      workspace = File.join(root, "checkout")
+      blocked = BlockedWorkspaceName.new(root)
+      expect_raises(Gori::ProjectRegistry::CreateWriteError, /could not save project display name/) do
+        blocked.create_for_workspace("Client Report!", workspace)
+      end
+      blocked.published?.should be_false
+      registry.find_by_workspace(workspace).should be_nil
+      Dir.children(root).should be_empty
+
+      project = registry.create_for_workspace("Client Report!", workspace)
+      File.basename(project.dir).should eq("client-report")
+      registry.find_by_workspace(workspace).should eq(project)
+    end
+  end
+
   it "claims a workspace directory under a projects root that does not exist yet" do
     with_root do |registry, root|
       Dir.exists?(root).should be_false # no Paths.ensure_dirs ran first

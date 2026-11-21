@@ -111,6 +111,8 @@
 
 - TUI: Tab in project tag fields completes only a visible suggestion, including after a resize. The tag editor keeps your draft when another session changes the saved tags (#1951, #2001).
 
+- Creating a named project stops if its display name cannot be read or saved. Retrying after repair uses the original project directory (#2005).
+
 - Project deletion and pruning report filesystem failures and leave the default pin in place after an incomplete delete. Switching the default and deleting a project now share a lock so concurrent commands preserve the selected project (#1991, #1993).
 
 - Project lists and automatic project selection now distinguish activity within the same second and break exact ties by directory name (#1952, #1964).

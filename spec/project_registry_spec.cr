@@ -432,6 +432,58 @@ describe Gori::ProjectRegistry do
     end
   end
 
+  it "refuses a create whose display name cannot be saved, then retries the original slug" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      dir = File.join(root, "client-report")
+      name_path = File.join(dir, Gori::ProjectRegistry::NAME_FILE)
+      Dir.mkdir_p(name_path)
+      keep = File.join(name_path, "keep")
+      File.touch(keep)
+
+      expect_raises(Gori::ProjectRegistry::CreateWriteError, /could not save project display name/) do
+        reg.create_or_reopen("Client Report!", "notes", tags: ["client"])
+      end
+      File.exists?(keep).should be_true
+      File.exists?(File.join(dir, Gori::ProjectRegistry::ID_FILE)).should be_false
+      reg.list.should be_empty
+
+      File.delete(keep)
+      Dir.delete(name_path)
+      project, created = reg.create_or_reopen("Client Report!", "notes", tags: ["client"])
+      created.should be_true
+      project.dir.should eq(dir)
+      reg.find("Client Report!").should eq(project)
+      reg.list.should eq([project])
+    end
+  end
+
+  it "refuses to reopen or duplicate an existing project whose display name is unreadable" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      original = reg.create("Client Report!", "original notes", tags: ["old"])
+      name_path = File.join(original.dir, Gori::ProjectRegistry::NAME_FILE)
+      File.delete(name_path)
+      Dir.mkdir(name_path)
+      File.touch(File.join(name_path, "keep"))
+      reg.list.first.name.should eq("client-report")
+      ["Client Report!", "client-report"].each do |name|
+        expect_raises(Gori::ProjectRegistry::CreateWriteError, /could not read project display name/) do
+          reg.create_or_reopen(name, "replacement", tags: ["new"])
+        end
+      end
+      reg.list.size.should eq(1)
+      reg.tags_of(original).should eq(["old"])
+      File.exists?(File.join(name_path, "keep")).should be_true
+      store = Gori::Store.open(original.db_path)
+      begin
+        store.setting(Gori::Project::DESCRIPTION_KEY).should eq("original notes")
+      ensure
+        store.close
+      end
+    end
+  end
+
   it "persists the verbatim display name so list doesn't revert it to the slug" do
     with_root do |root|
       reg = Gori::ProjectRegistry.new(root)
