@@ -33,12 +33,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # the body's cursor.
   def notes_export : Nil
     view = notes_controller.view
-    if view.current_text.strip.empty?
+    text = view.current_text
+    if text.strip.empty?
       @toast = "note is empty — nothing to export"
       return
     end
-    base = Notes.export_basename(view.current_text, view.current_index)
-    open_export(:note, File.join(Dir.current, base)) { |p| notes_controller.notes_export_to(p) }
+    # A peer can delete the selected note while the destination dialog is open.
+    base = Notes.export_basename(text, view.current_index)
+    open_export(:note, File.join(Dir.current, base)) { |p| notes_controller.notes_export_to(p, text) }
   end
 
   def notes_edit : Nil

@@ -313,21 +313,12 @@ module Gori::Tui
     #
     # The trailing newline matches the Issues/Notes exports and `gori run sequence`, so the
     # same verdict written from the TUI and from the CLI produces byte-identical files.
-    def sequencer_export_to(format : Symbol, path : String) : Bool
-      v = current_view
-      unless v
-        @host.status("no sequencer session")
-        return true
-      end
-      rep = v.report
-      if rep.usable_count == 0
-        @host.status("nothing to export — collect tokens first (^R)")
-        return true
-      end
+    def sequencer_export_to(format : Symbol, path : String, rep : Sequencer::Stats::Report,
+                            subject : Sequencer::Present::Subject) : Bool
       content = if format == :json
                   Sequencer::Present.report_json(rep)
                 else
-                  Sequencer::Present.report_markdown(rep, v.subject, heading: "Token randomness")
+                  Sequencer::Present.report_markdown(rep, subject, heading: "Token randomness")
                 end
       ProjectArchive.write_export_file(path, content.ends_with?('\n') ? content : "#{content}\n", @host.session.project)
       msg = "exported #{rep.rating.label} report · #{rep.usable_count} tokens → #{path}"
