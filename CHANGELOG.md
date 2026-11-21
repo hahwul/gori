@@ -103,7 +103,7 @@
 
 - TUI: Tab in project tag fields completes only a visible suggestion. Resizing the terminal keeps the highlighted tag and the completion in sync (#1951).
 
-- Project deletion and pruning report filesystem failures and leave the default pin in place after an incomplete delete (#1991).
+- Project deletion and pruning report filesystem failures and leave the default pin in place after an incomplete delete. Switching the default and deleting a project now share a lock so concurrent commands preserve the selected project (#1991, #1993).
 
 - Project lists and automatic project selection now distinguish activity within the same second and break exact ties by directory name (#1952, #1964).
 

@@ -35,6 +35,7 @@ module Gori
     # `#delete` clears it: a project deleted from MCP or the TUI picker otherwise left every
     # later `gori run` refusing a pin that can never resolve again.
     DEFAULT_PIN_FILE = ".cli-default"
+    DEFAULT_PIN_LOCK = ".cli-default.lock"
     # The operator's classification labels for a project (`web`, `bugbounty`, `모바일`), one per
     # line. A sidecar beside `.name` rather than a DB setting like the description, because the
     # surfaces that READ tags are listings: the picker's search and the new-project form's
@@ -75,6 +76,50 @@ module Gori
       File.read(default_pin_path).strip.presence
     rescue File::Error
       nil
+    end
+
+    # Resolve under the same lock that delete holds through removing the project.
+    # Otherwise a switch can publish an id that was deleted after its lookup.
+    def pin_default(name : String) : Bool
+      return false unless Dir.exists?(@root)
+      with_default_pin_lock do
+        project = find(name)
+        return false unless project
+        # Readers see a complete id without taking the writers' lock.
+        tmp = File.tempname(".cli-default", ".tmp", dir: @root)
+        begin
+          File.write(tmp, "#{id_of(project) || slug_of(project)}\n")
+          File.rename(tmp, default_pin_path)
+        ensure
+          File.delete?(tmp)
+        end
+        true
+      end
+    end
+
+    def clear_default_pin : Bool
+      # An absent pin is already clear. A dangling symlink is still a pin file to unlink.
+      return false unless File.info?(default_pin_path, follow_symlinks: false)
+      with_default_pin_lock { File.delete?(default_pin_path) }
+    rescue ex : IO::Error
+      raise Gori::Error.new("could not clear the default project pin at #{default_pin_path}: #{ex.message}")
+    end
+
+    # Keep a stable lock inode beside the projects. The pin itself is renamed
+    # on switch and removed on clear, so locking it would not serialize writers.
+    private def with_default_pin_lock(&)
+      File.open(File.join(@root, DEFAULT_PIN_LOCK), "a", perm: 0o600) do |lock|
+        deadline = Time.instant + OpenLock::CONTENTION_BUDGET
+        loop do
+          lock.flock_exclusive(blocking: false)
+          break
+        rescue ex : IO::Error
+          raise ex unless OpenLock.contention?(ex)
+          raise Gori::Error.new("the default project pin is busy — try again") if Time.instant >= deadline
+          sleep OpenLock::RETRY_DELAY
+        end
+        yield
+      end
     end
 
     # Why a name was refused because it addresses MORE THAN ONE project. A `Gori::Error`, so
@@ -719,26 +764,35 @@ module Gori
       unless guard
         raise Gori::Error.new("project is open in another gori instance — close it there first")
       end
-      # Asked before the rm_rf, which takes the `.id` sidecar the pin names.
-      pinned = default_pin.try { |pin| (find(pin) rescue nil).try(&.dir) == project.dir } || false
       begin
         raise Gori::Error.new("project changed since it was checked — kept") if only_if && !only_if.call
-        # rm_rf swallows filesystem errors, even after removing only part of the tree.
+        delete_with_default_pin(project)
+      ensure
+        guard.close
+      end
+    end
+
+    private def delete_with_default_pin(project : Project) : Bool
+      with_default_pin_lock do
+        # Read after the preflight and before rm_r removes the id the pin names.
+        pin = default_pin if File.file?(default_pin_path)
+        pinned = pin && (find(pin) rescue nil).try(&.dir) == project.dir
         begin
           FileUtils.rm_r(project.dir)
         rescue ex : File::Error
           raise Gori::Error.new("could not remove #{project.dir}: #{ex.message} (some files may already have been removed)")
         end
-      ensure
-        guard.close
+        pinned ? clear_deleted_project_pin(project) : false
       end
-      return false unless pinned
-      begin
-        File.delete?(default_pin_path)
-      rescue ex : File::Error
-        ::Log.warn { "deleted #{project.dir}, but could not clear the default pin at #{default_pin_path}: #{ex.message}" }
-        false
-      end
+    rescue ex : IO::Error
+      raise Gori::Error.new("could not update the default pin at #{default_pin_path}: #{ex.message}")
+    end
+
+    private def clear_deleted_project_pin(project : Project) : Bool
+      File.delete?(default_pin_path)
+    rescue ex : File::Error
+      ::Log.warn { "deleted #{project.dir}, but could not clear the default pin at #{default_pin_path}: #{ex.message}" }
+      false
     end
 
     # Rename a project's display name (the `.name` sidecar). The on-disk directory

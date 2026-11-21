@@ -129,28 +129,20 @@ module Gori
         abort "gori run project switch: too many arguments (expected one NAME)" if positional.size > 1
         abort "gori run project switch: pass NAME or --clear, not both" if clear && !positional.empty?
         registry = ProjectRegistry.new(Paths.projects_dir)
-        if clear
-          File.delete?(default_pin_path)
-        elsif name = positional.first?
-          pin_default_project(registry, name)
-        end
-        report_default_project(registry, format)
-      end
-
-      private def self.pin_default_project(registry : ProjectRegistry, name : String) : Nil
-        project = begin
-          registry.find(name)
+        begin
+          if clear
+            registry.clear_default_pin
+          elsif name = positional.first?
+            unless registry.pin_default(name)
+              not_found_abort("gori run project switch", "no project matching '#{CLI::Output.term_safe(name)}'#{have_projects(registry, name)}")
+            end
+          end
         rescue ex : ProjectRegistry::Ambiguous
           abort "gori run project switch: #{ex.message}"
+        rescue ex : IO::Error
+          abort "gori run project switch: could not write #{default_pin_path}: #{ex.message}"
         end
-        not_found_abort("gori run project switch", "no project matching '#{CLI::Output.term_safe(name)}'#{have_projects(registry, name)}") unless project
-        # Written to a sibling and renamed, so a concurrent reader sees the old pin or the new
-        # one, never half of either.
-        tmp = "#{default_pin_path}.#{Process.pid}.tmp"
-        File.write(tmp, "#{registry.id_of(project) || registry.slug_of(project)}\n")
-        File.rename(tmp, default_pin_path)
-      rescue ex : File::Error
-        abort "gori run project switch: could not write #{default_pin_path}: #{ex.message}"
+        report_default_project(registry, format)
       end
 
       private def self.report_default_project(registry : ProjectRegistry, format : Symbol) : Nil

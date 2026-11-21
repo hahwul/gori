@@ -296,6 +296,53 @@ describe Gori::ProjectRegistry do
     end
   end
 
+  it "keeps a new default pinned during the old project's deletion preflight" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      old = reg.create("old")
+      new_pin = reg.id_of(reg.create("new")).not_nil!
+      reg.pin_default("old").should be_true
+      peer = Gori::ProjectRegistry.new(root)
+      reg.delete(old, -> {
+        peer.pin_default(new_pin)
+      }).should be_false
+      reg.default_pin.should eq(new_pin)
+      Dir.exists?(old.dir).should be_false
+    end
+  end
+
+  it "looks up a project after acquiring the pin lock" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      previous = reg.create("default")
+      target = reg.create("target")
+      reg.pin_default("default").should be_true
+      result = Channel(Bool).new(1)
+      File.open(File.join(root, Gori::ProjectRegistry::DEFAULT_PIN_LOCK), "a") do |lock|
+        lock.flock_exclusive
+        spawn { result.send(Gori::ProjectRegistry.new(root).pin_default("target")) }
+        Fiber.yield
+        # A delete holding this lock can remove the target before the switch runs.
+        FileUtils.rm_r(target.dir)
+      end
+      result.receive.should be_false
+      reg.default_pin.should eq(reg.id_of(previous))
+      reg.clear_default_pin.should be_true
+      reg.default_pin.should be_nil
+    end
+  end
+
+  it "clears an absent default without creating the projects directory" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      reg.clear_default_pin.should be_false
+      Dir.exists?(root).should be_false
+      Dir.mkdir(root)
+      reg.clear_default_pin.should be_false
+      Dir.children(root).should be_empty
+    end
+  end
+
   it "reports a failed directory removal and leaves the default pin alone" do
     with_root do |root|
       reg = Gori::ProjectRegistry.new(root)
