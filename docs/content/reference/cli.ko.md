@@ -1269,6 +1269,8 @@ gori run issues create --title "IDOR on /v1/users/{id}" --severity high --notes-
 report-generator | gori run issues update 7 --status confirmed --notes-stdin
 ```
 
+`issues create`로 플로우나 Repeater 탭을 연결하면 텍스트 출력에 각 링크와 현재 교환을 같은 데이터베이스에 고정하는 명령이 표시됩니다. JSON 결과에서는 `issues show --format json`과 같은 `links`와 `evidence` 배열을 확인할 수 있습니다.
+
 `--notes`, `--notes-file`, `--notes-stdin`은 함께 쓸 수 없고, 본문은 바이트 그대로 읽습니다. 여러 줄 UTF-8도 CRLF도 보존됩니다. 프로젝트 env var로 바인딩된 값은 다른 이슈 필드와 마찬가지로 `$ENV.NAME`으로 마스킹됩니다. 파일이나 파이프로 넘긴 본문은 프로세스 목록과 셸 히스토리에 남지 않습니다. `create`에서는 이슈와 한 트랜잭션에 기록됩니다. 노트를 비울 때는 `update`에 `--notes ''`를 씁니다. 내용이 없는 파일이나 파이프는 거부되므로, 리포트 생성기가 죽어도 기존 노트가 지워지지 않습니다. `--notes-stdin`도 `--request-stdin`처럼 파이프나 리다이렉트(`--notes-stdin < notes.md`)를 요구하고 터미널은 거부합니다.
 
 | Option | Description |

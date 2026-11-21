@@ -1281,6 +1281,8 @@ gori run issues create --title "IDOR on /v1/users/{id}" --severity high --notes-
 report-generator | gori run issues update 7 --status confirmed --notes-stdin
 ```
 
+When `issues create` links a flow or Repeater tab, its text output identifies each link and gives a command to freeze the current exchange in the same database. The JSON result uses the same `links` and `evidence` arrays as `issues show --format json`.
+
 `--notes`, `--notes-file` and `--notes-stdin` are mutually exclusive, and the body is read byte-for-byte, multiline UTF-8 and CRLF included. The value of a bound project env var is still masked to `$ENV.NAME` on the way in, as it is for every issue field. A write-up piped in or read from a file stays out of the process listing and the shell history. On `create` it is written with the issue in one transaction. `--notes ''` clears the notes on `update`. A file or a pipe that yields nothing is refused, so a report generator that dies cannot erase a write-up. `--notes-stdin` needs a pipe or a redirect (`--notes-stdin < notes.md`) and refuses a terminal, as `--request-stdin` does.
 
 | Option | Description |

@@ -629,10 +629,19 @@ describe "MCP create_issue evidence" do
     end
   end
 
-  it "still accepts a real flow_id" do
+  it "returns only the linked IDs and the number of copies created by this call" do
     with_store do |store|
       id = mcp_seed_flow(store, "/a")
-      mcp_ok_json(tools_for(store), "create_issue", %({"title":"boom","flow_id":#{id}}))["id"].as_i64.should be > 0
+      rid = store.insert_repeater("https://ex.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+      tools = tools_for(store)
+      { {nil, nil}, {id, nil}, {nil, rid}, {id, rid} }.each do |(flow, repeater)|
+        args = {"title" => "test"}.merge({"flow_id" => flow, "repeater_id" => repeater}.compact)
+        receipt = mcp_ok_json(tools, "create_issue", args.to_json)
+        receipt["flow_id"]?.try(&.as_i64).should eq(flow)
+        receipt["repeater_id"]?.try(&.as_i64).should eq(repeater)
+        receipt["copies_frozen"].as_i.should eq(0)
+        store.issue_evidence(receipt["id"].as_i64).should be_empty
+      end
     end
   end
 end
@@ -686,6 +695,7 @@ describe "MCP issue-repeater links over a write that did not commit" do
       r.error_code.should eq("PROJECT_BUSY")
       iid = store.issues.first.id
       r.text.should contain("issue #{iid} created")
+      r.text.should contain("retry with update_issue(id: #{iid}, repeater_id: #{rid})")
     end
   end
 

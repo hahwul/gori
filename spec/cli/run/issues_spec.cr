@@ -25,8 +25,10 @@ module Gori::CLI::Run
     issue_flow_range_error(flow_id)
   end
 
-  def self.issue_created_output_for_spec(store : Gori::Store, id : Int64, format : Symbol) : String
-    issue_created_output(store, id, format)
+  def self.issue_created_output_for_spec(store : Gori::Store, id : Int64, format : Symbol,
+                                         flow_id : Int64? = nil, repeater_id : Int64? = nil,
+                                         db_path : String = "/project dir/test.db") : String
+    issue_created_output(store, id, format, db_path, flow_id, repeater_id)
   end
 
   def self.issue_host_for_spec(store : Gori::Store, host : String?, flow_id : Int64?) : String?
@@ -250,6 +252,28 @@ describe "gori run issues create --format json" do
       listed = JSON.parse(Gori::Issues::Export.json(store.issues, store)).as_a.find! { |o| o["id"].as_i64 == id }
       created.as_h.keys.should eq(listed.as_h.keys)
       created.should eq(listed)
+    end
+  end
+
+  it "names each committed live link and its project-bound freeze command" do
+    with_store do |store|
+      { {4_i64, nil}, {nil, 5_i64}, {4_i64, 5_i64} }.each do |(flow, repeater)|
+        text = Gori::CLI::Run.issue_created_output_for_spec(store, 7_i64, :text, flow, repeater)
+        text.should contain("0 evidence copies frozen by this command.")
+        text.scan("gori run evidence freeze").size.should eq({flow, repeater}.count(&.itself))
+        text.should contain("project dir")
+        text.should contain("test.db")
+        text.should contain("--ref=flow --ref-id=4 --db=") if flow
+        text.should contain("--ref=repeater --ref-id=5 --db=") if repeater
+      end
+    end
+  end
+
+  it "keeps control characters in a database path off the terminal" do
+    with_store do |store|
+      text = Gori::CLI::Run.issue_created_output_for_spec(store, 7_i64, :text, 4_i64, db_path: "/tmp/x\e[2J.db")
+      text.should contain("--issue=7 --ref=flow --ref-id=4 and the same project selection")
+      text.should_not contain("\e")
     end
   end
 
