@@ -223,6 +223,7 @@ module Gori::Tui
   # build gori's chrome and views, nothing more (P0 — DESIGN.md §5 "minimal,
   # grow-as-needed widgets"). All writes are bounds-checked.
   class Screen
+    record PointerHit, caret : Int32, character : Int32?
     getter width : Int32
     getter height : Int32
     # Boxes the host wants to know are EMPTY. While set, `inked?` turns true the first time a
@@ -338,35 +339,41 @@ module Gori::Tui
     # string to a column budget, where rounding up would return an index whose prefix is one
     # column wider than the space it has to fit.
     def self.column_for_click(str : String, target : Int32) : Int32
-      return 0 if target <= 0
-      return {target, str.size}.min if printable_ascii?(str) # 1 char == 1 cluster == 1 column
+      pointer_hit(str, target).caret
+    end
+
+    # A click places the caret at the nearest edge. A double-click selects the glyph
+    # under the pointer, whose start can precede that edge.
+    def self.pointer_hit(str : String, target : Int32, *, left : Int32 = 0, width : Int32? = nil) : PointerHit
+      return PointerHit.new(0, nil) if target < 0
+      return PointerHit.new(0, str.empty? ? nil : 0) if target == 0 && width.nil?
+      if printable_ascii?(str)
+        character = target if target < str.size && !clipped_pointer?(target, 1, left, width) { target + 1 < str.size }
+        return PointerHit.new({target, str.size}.min, character)
+      end
       acc = 0
       i = 0
       str.each_grapheme do |g|
         w = grapheme_cols(g.to_s)
         # (w + 1) // 2 keeps a 1-wide cluster flooring (its only cell is its near half) while
         # splitting a 2-wide one down the middle.
-        return i if target < acc + (w + 1) // 2
-        return i + g.size if target < acc + w
+        if target < acc + w
+          caret = target < acc + (w + 1) // 2 ? i : i + g.size
+          character = i unless clipped_pointer?(acc, w, left, width) { i + g.size < str.size }
+          return PointerHit.new(caret, character)
+        end
         acc += w
         i += g.size
       end
-      str.size
+      PointerHit.new(str.size, nil)
     end
 
-    # The companion to `column_for_click` for a DOUBLE-CLICK: `i` back over the preceding
-    # cluster when that cluster is WIDE and `i` itself has nothing to take (past the end of
-    # the line, or on whitespace). A pointer in the right half of a 2-cell glyph rounds to the
-    # position after it, which for a word's last glyph is where the word has already ended —
-    # so the word spread would find no token and the gesture would do nothing over exactly the
-    # text (Hangul, CJK) where it is hardest to click precisely.
-    #
-    # Deliberately narrow: a 1-column cluster can never be rounded past, so `i` is returned
-    # unchanged for all ASCII and every existing behaviour built on it survives untouched.
-    def self.step_back_over_wide(str : String, i : Int32) : Int32
-      return i unless i > 0 && (i >= str.size || str[i].whitespace?)
-      prev = cluster_start(str, i - 1)
-      draw_width(str[prev...i]) > 1 ? prev : i
+    # The renderer replaces a partial leading glyph with spaces and reserves the
+    # last column for an ellipsis when the line continues past the viewport.
+    def self.clipped_pointer?(col : Int32, cols : Int32, left : Int32, width : Int32?, & : -> Bool) : Bool
+      return false unless width
+      right = left + width
+      col < left || col + cols > right || (width > 1 && col + cols == right && yield)
     end
 
     # Snap a character index to the START of the grapheme cluster holding it (the caret's
@@ -803,6 +810,12 @@ module Gori::Tui
     def self.input_click(value : String, start : Int32, dx : Int32) : Int32
       start = start.clamp(0, value.size)
       start + column_for_click(value[start..], dx)
+    end
+
+    def self.input_pointer(value : String, start : Int32, dx : Int32, width : Int32) : PointerHit
+      start = start.clamp(0, value.size)
+      hit = pointer_hit(value[start..], dx, width: width)
+      PointerHit.new(start + hit.caret, hit.character.try { |i| start + i })
     end
 
     # Per-character-coloured text with no caret — the static counterpart to input_line,

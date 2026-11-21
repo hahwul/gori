@@ -2987,11 +2987,7 @@ module Gori::Tui
       @show_dist ? "distribution shown" : "distribution hidden"
     end
 
-    # The TARGET card row prefixes (marker + the field value 1 col to its right). Constants
-    # so render_target and the click→caret mapping agree on the value base.
-    TARGET_PREFIX = "›"
-    SNI_PREFIX    = "SNI ›"
-    SNI_BADGE     = " SNI "
+    SNI_BADGE = " SNI "
 
     private def render_target(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.h < 2
@@ -4133,44 +4129,6 @@ module Gori::Tui
     end
 
     # --- clicks --------------------------------------------------------------
-    # Mouse: place the TARGET field caret at a click. Single-line field; the value
-    # base mirrors render_target (the "›" marker at rect.x+2, the value at rect.x+4).
-    # `selecting` is the DRAG half — see `RepeaterView#target_click_to_cursor`, whose
-    # reasoning this mirrors: a drag never switches FIELDS (the anchor would end up measured
-    # in one value and painted over another), and even a bare press routes through `move_cx`
-    # so it COLLAPSES a standing selection instead of leaving the anchor behind.
-    def target_click_to_cursor(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
-      return unless @loaded
-      # Row 2 is the SNI field when it is showing — a click there selects that field, the
-      # same mapping RepeaterView#target_click_to_cursor makes, so the caret cannot land on
-      # the row the click did not point at.
-      @target_field = (sni_active? && my == rect.y + 2) ? :sni : :url unless selecting
-      if @target_field == :sni
-        to = Screen.column_for_click(@sni, mx - field_base(rect, SNI_PREFIX))
-        @scx = @target_read.move_cx(@scx, to - @scx, @sni.size, selecting: selecting)
-      else
-        to = Screen.column_for_click(@target, mx - field_base(rect, TARGET_PREFIX))
-        @tcx = @target_read.move_cx(@tcx, to - @tcx, @target.size, selecting: selecting)
-      end
-    end
-
-    # Double-click: take the word the press already placed the caret on, spreading from THAT
-    # caret rather than hit-testing again. False on whitespace or an empty field, leaving the
-    # press's caret standing.
-    def target_select_word : Bool
-      return false unless @loaded && !target_insert?
-      if @target_field == :sni
-        cx = @target_read.select_word_at_cursor(@sni, @scx)
-        return false unless cx
-        @scx = cx
-      else
-        cx = @target_read.select_word_at_cursor(@target, @tcx)
-        return false unless cx
-        @tcx = cx
-      end
-      true
-    end
-
     # Mouse: place the TEMPLATE editor caret at a click, in the rect render draws the
     # editor in (`template_editor_rect`), so the caret lands where the click points.
     def template_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil

@@ -31,7 +31,7 @@ describe "RepeaterView WebSocket editor parity" do
   msgs = -> {
     [
       Gori::Store::WsOutMessage.text("hello world"),
-      Gori::Store::WsOutMessage.text("second frame"),
+      Gori::Store::WsOutMessage.text("second frame 서울/next"),
       Gori::Store::WsOutMessage.text("third frame"),
     ]
   }
@@ -175,20 +175,21 @@ describe "RepeaterView WebSocket editor parity" do
     # top edge moves UP by ~1/3 of the column (`env.y` is always `col.y`, which is why the
     # upper card is immune and only this direction was ever wrong). A second hit-test would
     # therefore invert the same screen row against a rect that has since moved and spread a
-    # word ~10 rows below the pointer. The double-click spreads from the caret press 1 placed
-    # instead, so no second inverse exists to disagree.
+    # word ~10 rows below the pointer. The double-click keeps the exact glyph from press 1.
     it "takes the word actually under the pointer when the press crossed into MESSAGES" do
       rect = Rect.new(0, 0, 100, 30)
       view, b = render_ws.call(rect, true) # HANDSHAKE active → MESSAGES is the small lower card
       view.req_pane.should eq(:envelope)
       _, dec = sub_rects.call(view, rect)
-      y = dec.y + 1 # "second frame", the 2nd message line
-      x = col_of.call(b, y, "second") + 2
+      y = dec.y + 1                         # the 2nd message line
+      x = b.grid[y].index('울').not_nil! + 1 # the right half of the glyph, before '/'
 
       view.request_click_to_cursor(rect, x, y) # press 1: adopts MESSAGES, split resizes
       view.req_pane.should eq(:decoded)
+      view.render(Screen.new(MemoryBackend.new(rect.w, rect.h)), rect)
+      sub_rects.call(view, rect)[1].y.should be < dec.y
       view.request_select_word.should be_true # press 2: SAME cell, no re-derive
-      view.pane_copy_text.should eq("second")
+      view.pane_copy_text.should eq("서울")
     end
   end
 
@@ -402,7 +403,8 @@ describe "RepeaterView WebSocket editor parity" do
   describe "response column split" do
     handshake = "HTTP/1.1 101 Switching Protocols\r\n" \
                 "Upgrade: websocket\r\nConnection: Upgrade\r\n" \
-                "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n"
+                "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n" \
+                "X-Label: 서울 next\r\n\r\n"
 
     sent = -> {
       view = RepeaterView.new
@@ -493,6 +495,24 @@ describe "RepeaterView WebSocket editor parity" do
       view.resp_click_to_cursor(rect, x, y)
       view.resp_select_word.should be_true
       view.resp_copy_text.should eq("Sec-WebSocket-Accept")
+    end
+
+    it "selects the right half of a wide glyph while leaving its following space alone" do
+      view = sent.call
+      rect = Rect.new(0, 0, 140, 30)
+      b = render.call(view, rect)
+      hs, _ = resp_rects.call(view, rect)
+      y = hs.y + 4
+      lead = (hs.x...hs.right).find { |x| b.grid[y][x] == '울' }.not_nil!
+
+      view.resp_click_to_cursor(rect, lead + 1, y)
+      view.resp_pane.should eq(:handshake)
+      render.call(view, rect)
+      view.resp_select_word.should be_true
+      view.resp_copy_text.should eq("서울")
+      view.resp_click_to_cursor(rect, lead + 2, y)
+      view.resp_select_word.should be_false
+      view.pane_selection?.should be_false
     end
 
     it "selects a whole handshake line with x and copies it" do

@@ -928,9 +928,17 @@ module Gori::Tui
     # afterwards (`TextArea#click_to_cursor`'s `snap_cx_out_of_conceal`).
     def self.row_index(line : String, conceal : Array({Int32, Int32})?, a : Int32, b : Int32,
                        target : Int32, nearest : Bool = false, *, reveal : Bool = false) : Int32
+      row_pointer(line, conceal, a, b, target, nearest: nearest, reveal: reveal).caret
+    end
+
+    # The caret can clamp to the end of a visual row. Word selection also needs to know
+    # whether the pointer actually covered a glyph in the visible part of that row.
+    def self.row_pointer(line : String, conceal : Array({Int32, Int32})?, a : Int32, b : Int32,
+                         target : Int32, *, nearest : Bool = true, reveal : Bool = false,
+                         left : Int32 = 0, width : Int32? = nil) : Screen::PointerHit
       lo = a.clamp(0, line.size)
       hi = b.clamp(lo, line.size)
-      return lo if target <= 0
+      return Screen::PointerHit.new(lo, nil) if target < 0
       col = 0
       i = lo
       last = lo # start of the row's last visible cluster
@@ -941,16 +949,39 @@ module Gori::Tui
         end
         e = {Screen.cluster_end(line, i + 1), hi}.min
         w = draw_width(line[i...e], reveal)
-        return i if target < col + (nearest ? (w + 1) // 2 : w)
-        if nearest && target < col + w
-          run = conceal.try &.find { |(ra, rb)| e >= ra && e < rb }
-          return run ? {run[1], hi}.min : e
+        if target < col + w
+          return hit_cluster({i, e}, {col, w}, {lo, hi}, conceal, target, nearest, left, width)
         end
         col += w
         last = i
         i = e
       end
-      past_row_end(line, lo, hi, last)
+      Screen::PointerHit.new(target == 0 ? lo : past_row_end(line, lo, hi, last), nil)
+    end
+
+    private def self.hit_cluster(cluster : {Int32, Int32}, columns : {Int32, Int32}, row : {Int32, Int32},
+                                 conceal : Array({Int32, Int32})?, target : Int32, nearest : Bool,
+                                 left : Int32, width : Int32?) : Screen::PointerHit
+      i, e = cluster
+      col, cols = columns
+      lo, hi = row
+      round_up = nearest && target >= col + (cols + 1) // 2
+      viewport_edge = width && width > 1 && col + cols == left + width
+      after = round_up || viewport_edge ? end_outside_conceal(conceal, e, hi) : e
+      caret = if target == 0
+                lo
+              elsif round_up
+                after
+              else
+                i
+              end
+      character = i unless Screen.clipped_pointer?(col, cols, left, width) { after < hi }
+      Screen::PointerHit.new(caret, character)
+    end
+
+    private def self.end_outside_conceal(conceal : Array({Int32, Int32})?, ending : Int32, hi : Int32) : Int32
+      run = conceal.try &.find { |(a, b)| ending >= a && ending < b }
+      run ? {run[1], hi}.min : ending
     end
 
     # Past the row's text: the break, `hi` — except on a row a `words` layout ended at its

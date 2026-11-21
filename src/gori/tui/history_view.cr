@@ -2258,7 +2258,7 @@ module Gori::Tui
     # the old arithmetic skipped.
     def detail_click_to_cursor(rect : Rect, mx : Int32, my : Int32, focused : Bool,
                                selecting : Bool = false) : Nil
-      @detail_click_hit = false
+      @detail_word_press = nil
       return unless focused && detail_navigable?
       size, line_at = detail_line_source
       return if rect.empty? || size <= 0
@@ -2275,28 +2275,26 @@ module Gori::Tui
       end
       rows = detail_rows(cw, rect.h, size, line_at)
       return if rows.empty?
-      @detail_click_hit = true
       # `Wrap.row_index` clamps to the row it was given, so a click past the end of a wrapped
       # row stops at the break rather than selecting the next row's first char.
       vr = rows[row]? || rows[rows.size - 1]
       # `+ @detail_xscroll` puts the pointer back into the LINE's column space: it is 0 under
       # wrap and the columns panned off the left edge without it, so a click on a sideways-
       # scrolled line would land that many columns early.
-      cx = Wrap.row_index(line_at.call(vr.li), nil, vr.a, vr.b,
-        mx - (rect.x + gw) + detail_xscroll, nearest: true, reveal: detail_reveal_active?)
+      hit = Wrap.row_pointer(line_at.call(vr.li), nil, vr.a, vr.b,
+        mx - (rect.x + gw) + detail_xscroll, reveal: detail_reveal_active?, left: detail_xscroll, width: cw)
       if selecting
-        @detail_read.move_to(vr.li, cx, selecting: true) # keeps (or plants) the anchor
+        @detail_read.move_to(vr.li, hit.caret, selecting: true) # keeps (or plants) the anchor
       else
         @detail_read.clear_selection
-        @detail_read.sync(vr.li, cx)
+        @detail_read.sync(vr.li, hit.caret)
+        character = rows[row]?.try { hit.character }
+        @detail_word_press = {mx, my, @detail_pane, vr.li, character}
       end
       ensure_detail_visible(rect.h)
     end
 
-    # Whether the last `detail_click_to_cursor` actually landed on the pane (as opposed to
-    # returning early on a click outside it) — the double-click needs to tell "the caret did
-    # not move because the pointer was already there" from "the click missed entirely".
-    @detail_click_hit = false
+    @detail_word_press = nil.as({Int32, Int32, Symbol, Int32, Int32?}?)
 
     # Double-click: select the word under the pointer. The hit test is
     # `detail_click_to_cursor`'s (the pane's own wrap + windowed line source), so this only
@@ -2306,9 +2304,14 @@ module Gori::Tui
       return false unless detail_navigable?
       size, line_at = detail_line_source
       return false if rect.empty? || size <= 0
-      detail_click_to_cursor(rect, mx, my, focused: true)
-      return false unless @detail_click_hit
-      hit = @detail_read.select_word_at_cursor(size, line_at)
+      press = @detail_word_press
+      unless press && press[0] == mx && press[1] == my && press[2] == @detail_pane && press[3] == @detail_read.cy
+        detail_click_to_cursor(rect, mx, my, focused: true)
+        press = @detail_word_press
+      end
+      @detail_word_press = nil
+      return false unless character = press.try(&.[4])
+      hit = @detail_read.select_word_at_cursor(size, line_at, character: character)
       ensure_detail_visible(rect.h)
       hit
     end
@@ -2696,6 +2699,7 @@ module Gori::Tui
     # to zero the horizontal offset, which is not a coincidence: those are exactly the moments
     # the old layout stops describing the pane.
     private def detail_wrap_reset : Nil
+      @detail_word_press = nil
       @detail_scroll_sub = 0
       @detail_xscroll = 0
       @detail_wrap.clear
@@ -4873,6 +4877,7 @@ module Gori::Tui
     # move in lockstep. Every site that invalidates the detail view goes through here (mirrors
     # RepeaterView#drop_resp_view_cache).
     private def drop_detail_cache : Nil
+      @detail_word_press = nil
       @detail_cache = nil
       @split_companion = nil
       @detail_styled_cache.clear

@@ -24,15 +24,15 @@ private URL = "https://example.com/a/b?q=1"
 
 # A view focused on the target row, caret at column 0, in READ mode (the mode whose band
 # `draw_target_row` paints). The two constructors differ; everything after them does not.
-private def each_target_view(&)
+private def each_target_view(url : String = URL, &)
   rv = RepeaterView.new
-  rv.restore(URL, "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n", false, true)
+  rv.restore(url, "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n", false, true)
   rv.focus_pane(:target)
   rv.target_home
   yield rv, "Repeater"
 
   fv = FuzzerView.new
-  fv.load_request(URL, "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n", false, "")
+  fv.load_request(url, "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n", false, "")
   fv.focus_pane(:target)
   fv.target_home
   yield fv, "Fuzzer"
@@ -161,6 +161,17 @@ describe "the TARGET row selection" do
         v.target_click_to_cursor(rect, px, py)
         v.target_select_word.should be_false, "#{name}: took a word off the end of the value"
         v.pane_selection?.should be_false
+      end
+    end
+
+    it "a double-click on a wide glyph's right half selects the word before the slash" do
+      prefix = "https://example.com/"
+      each_target_view("#{prefix}서울/next") do |v, name|
+        rect = Rect.new(0, 0, 120, 20)
+        x, y = url_cell(prefix.size + 3)
+        v.target_click_to_cursor(rect, x, y)
+        v.target_select_word.should be_true, "#{name}: no word taken"
+        v.target_copy_text.should eq("서울"), "#{name}: wrong word"
       end
     end
 

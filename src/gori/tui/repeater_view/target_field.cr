@@ -2,8 +2,10 @@
 # shared by RepeaterView and FuzzerView: editing them, moving between them, READ-mode motion,
 # copy, the card's height rule and the row painter. An includer holds `@target`/`@tcx`,
 # `@sni`/`@scx`, `@target_field`, `@target_mode`, `@target_read`, `@focus` and `@dirty`, and
-# answers `target_insert?`, `target_click_to_cursor` and `paint_char_span_bg`.
+# answers `target_insert?` and `paint_char_span_bg`.
 module Gori::Tui::TargetField
+  TARGET_PREFIX = "›"
+  SNI_PREFIX    = "SNI ›"
   # --- target field (focus == :target) ---
   # The TARGET pane edits one of two single-line fields — the URL or the SNI host
   # override — selected by @target_field (^S toggles). The mutators below act on
@@ -136,6 +138,25 @@ module Gori::Tui::TargetField
 
   private def field_base(rect : Rect, prefix : String) : Int32
     rect.x + 2 + prefix.size + 1
+  end
+
+  # A press picks the URL or SNI row. A drag keeps the active field and its anchor.
+  def target_click_to_cursor(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
+    return unless @loaded
+    @target_field = (sni_active? && my == rect.y + 2) ? :sni : :url unless selecting
+    sni = @target_field == :sni
+    base = field_base(rect, sni ? SNI_PREFIX : TARGET_PREFIX)
+    row = rect.y + (sni ? 2 : 1)
+    width = my == row ? {rect.right - base - 1, 1}.max : 0
+    cx = @target_read.click_to_cursor(target_active_line, target_active_cx, mx - base, width, selecting)
+    sni ? (@scx = cx) : (@tcx = cx)
+  end
+
+  def target_select_word : Bool
+    return false unless @loaded && !target_insert?
+    return false unless cx = @target_read.select_word_at_press(target_active_line)
+    @target_field == :sni ? (@scx = cx) : (@tcx = cx)
+    true
   end
 
   # One single-line field row of the TARGET card: a marker prefix, then the value,
