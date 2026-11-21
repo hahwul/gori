@@ -72,6 +72,19 @@ describe "Gori::MCP::Tools project lifecycle" do
 end
 
 describe "Gori::MCP::Tools project description receipts" do
+  it "reports prolonged project creation contention as retryable" do
+    with_isolated_projects do |tools|
+      mcp_ok_json(tools, "create_project", %({"name":"Other"}))
+      File.open(File.join(Gori::Paths.projects_dir, ".claims", "busy"), "a") do |lock|
+        lock.flock_exclusive
+        result = tools.call("create_project", JSON.parse(%({"name":"Busy"})))
+        result.error_code.should eq("PROJECT_BUSY")
+        result.retryable.should be_true
+        result.field.should be_nil
+      end
+    end
+  end
+
   it "reports a project metadata failure without blaming a valid name" do
     with_isolated_projects do |tools|
       mcp_ok_json(tools, "create_project", %({"name":"Docs","description":"before"}))

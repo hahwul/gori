@@ -159,6 +159,8 @@ module Gori
           return archive_import_preview(reg, prepared, source, name) unless confirm
           project = begin
             prepared.import_into(reg, name, rename_hint: ARCHIVE_RENAME_HINT)
+          rescue ex : ProjectRegistry::SidecarBusy
+            return busy(ex.to_s)
           rescue ex : Gori::Error
             # `name` only when the name is what failed: an agent reads the field as the argument
             # to change, and renaming cannot fix anything else.

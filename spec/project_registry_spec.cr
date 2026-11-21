@@ -25,6 +25,20 @@ private def with_root(&)
   end
 end
 
+# Pause after the import has claimed its directory, before the database is published.
+private class PausedImportRegistry < Gori::ProjectRegistry
+  getter claimed = Channel(Nil).new(1)
+  getter resume_import = Channel(Nil).new(1)
+  property? fail_write = false
+
+  private def write_tags(dir : String, tags : Array(String)) : Nil
+    @claimed.send(nil)
+    @resume_import.receive
+    raise IO::Error.new("tag write failed") if fail_write?
+    super
+  end
+end
+
 describe Gori::ProjectRegistry do
   it "orders subsecond activity across the database and WAL, breaking ties by directory" do
     with_root do |root|
@@ -115,6 +129,85 @@ describe Gori::ProjectRegistry do
       id.should match(/\A[0-9a-f]{8}\z/) # Random::Secure.hex(4)
       reg.find(id).try(&.dir).should eq(p.dir)
       reg.find(id.upcase).try(&.dir).should eq(p.dir)
+    end
+  end
+
+  {
+    "reopens a completed import"                => {"Collision", false, "collision", false},
+    "uses the next slug after a colliding name" => {"Collision!", false, "collision-2", true},
+    "creates the project after a failed import" => {"Collision", true, "collision", true},
+  }.each do |behavior, (requested, fail_import, slug, fresh)|
+    it "#{behavior} when creation starts inside the import" do
+      with_root do |root|
+        reg = Gori::ProjectRegistry.new(root)
+        source = reg.create("Source", "archive description")
+        importer = PausedImportRegistry.new(root)
+        importer.fail_write = fail_import
+        imported = Channel(Exception?).new(1)
+        spawn do
+          importer.import_database("Collision", source.db_path, tags: ["backup"])
+          imported.send(nil)
+        rescue ex
+          imported.send(ex)
+        end
+        select
+        when importer.claimed.receive
+        when error = imported.receive
+          fail "import ended before its tag write: #{error}"
+        end
+
+        created = Channel({Gori::Project, Bool} | Exception).new(1)
+        begin
+          spawn do
+            created.send(reg.create_or_reopen(requested, "creator description"))
+          rescue ex
+            created.send(ex)
+          end
+          Fiber.yield
+          reg.create("Unrelated") # A different slug stays available during the copy.
+          select
+          when result = created.receive
+            fail "creator entered the import's directory: #{result}"
+          else
+          end
+        ensure
+          importer.resume_import.send(nil)
+        end
+        error = imported.receive
+        fail_import ? error.should(be_a(IO::Error)) : error.should(be_nil)
+        result = created.receive
+        raise result if result.is_a?(Exception)
+        project, newly_created = result
+        newly_created.should eq(fresh)
+        project.dir.should eq(File.join(root, slug))
+        reg.tags_of(project).should eq(fresh ? [] of String : ["backup"])
+        store = Gori::Store.open(project.db_path)
+        begin
+          store.setting(Gori::Project::DESCRIPTION_KEY).should eq("creator description")
+        ensure
+          store.close
+        end
+        if slug == "collision-2"
+          original = reg.find("Collision").not_nil!
+          reg.tags_of(original).should eq(["backup"])
+          File.read(original.db_path).should eq(File.read(source.db_path))
+        end
+      end
+    end
+  end
+
+  it "reopens a published database without needing to write a registry claim" do
+    with_root do |root|
+      dir = File.join(root, "existing")
+      Dir.mkdir_p(dir)
+      Gori::Store.open(File.join(dir, Gori::Project::DB_FILE)).close
+      # Make root-level claim creation fail even when the spec runs as root.
+      File.write(File.join(root, ".claims"), "keep")
+      reg = Gori::ProjectRegistry.new(root)
+      project, created = reg.create_or_reopen("existing", "new description")
+      created.should be_false
+      project.dir.should eq(dir)
+      File.read(File.join(root, ".claims")).should eq("keep")
     end
   end
 

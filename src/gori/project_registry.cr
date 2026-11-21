@@ -112,6 +112,19 @@ module Gori
       with_sidecar_lock(File.join(@root, DEFAULT_PIN_LOCK), "the default project pin") { yield }
     end
 
+    class SidecarBusy < Gori::Error
+    end
+
+    # Keep the lock outside the claimed directory: a failed import removes that directory,
+    # while another creator may already be waiting on the lock inode. Kernel locks release
+    # on process exit, so an abandoned, database-less directory is still available to create.
+    private def with_project_claim(dir : String, &)
+      locks = File.join(@root, ".claims")
+      Paths.ensure_dir(locks)
+      slug = File.basename(dir)
+      with_sidecar_lock(File.join(locks, slug), "project #{slug.inspect}") { yield }
+    end
+
     private def with_sidecar_lock(path : String, subject : String, &)
       File.open(path, "a", perm: 0o600) do |lock|
         deadline = Time.instant + OpenLock::CONTENTION_BUDGET
@@ -120,7 +133,7 @@ module Gori
           break
         rescue ex : IO::Error
           raise ex unless OpenLock.contention?(ex)
-          raise Gori::Error.new("#{subject} is busy — try again") if Time.instant >= deadline
+          raise SidecarBusy.new("#{subject} is busy — try again") if Time.instant >= deadline
           sleep OpenLock::RETRY_DELAY
         end
         yield
@@ -486,9 +499,19 @@ module Gori
     # report a name collision before the operator confirms the import; #import_database still
     # claims the directory atomically, for a peer that wins between the two.
     def import_target(name : String) : {String, String}
+      display, base_slug = import_name(name)
+      check_import_target(display, base_slug)
+      {display, base_slug}
+    end
+
+    private def import_name(name : String) : {String, String}
       display = validated_display_name(name)
       base_slug = slugify(display)
       raise Gori::Error.new(UNSLUGGABLE_NAME) if base_slug.empty?
+      {display, base_slug}
+    end
+
+    private def check_import_target(display : String, base_slug : String) : Nil
       projects = list
       raise Gori::Error.new("project #{display.inspect} already exists — choose another name") \
         if projects.any? { |project| project.name.downcase == display.downcase }
@@ -506,7 +529,6 @@ module Gori
       if File.exists?(File.join(@root, base_slug))
         raise Gori::Error.new("project slug #{base_slug.inspect} is already in use — choose another name")
       end
-      {display, base_slug}
     end
 
     # Register a validated database snapshot as a NEW project. Unlike #create, importing must
@@ -515,16 +537,23 @@ module Gori
     # machine-local `.workspace` / lock files are not copied.
     def import_database(name : String, database_path : String, *, tags : Array(String) = [] of String) : Project
       raise Gori::Error.new("project archive database is missing") unless File.file?(database_path)
-      display, base_slug = import_target(name)
-
+      display, base_slug = import_name(name)
       Paths.ensure_dir(@root)
       dir = File.join(@root, base_slug)
+      with_project_claim(dir) do
+        check_import_target(display, base_slug)
+        install_database(dir, display, database_path, tags)
+      end
+    end
+
+    private def install_database(dir : String, display : String, database_path : String,
+                                 tags : Array(String)) : Project
       begin
         Dir.mkdir(dir, Paths::DIR_MODE)
         File.chmod(dir, Paths::DIR_MODE) rescue nil
       rescue File::AlreadyExistsError
         # The atomic claim also catches an importer/creator that won after the checks above.
-        raise Gori::Error.new("project slug #{base_slug.inspect} is already in use — choose another name")
+        raise Gori::Error.new("project slug #{File.basename(dir).inspect} is already in use — choose another name")
       end
 
       begin
@@ -535,16 +564,14 @@ module Gori
         project = Project.new(display, File.join(dir, Project::DB_FILE))
         replace_tags(project, ProjectRegistry.salvage_tags(tags)) unless tags.empty?
         staged_db = File.tempname(".gori.db.import", ".tmp", dir: dir)
-        begin
-          File.open(staged_db, "w", perm: File::Permissions.new(0o600)) do |target|
-            File.open(database_path, "r") { |source| IO.copy(source, target) }
-            target.flush
-            target.fsync
-          end
-          File.rename(staged_db, project.db_path)
-        ensure
-          File.delete?(staged_db)
+        File.open(staged_db, "w", perm: File::Permissions.new(0o600)) do |target|
+          File.open(database_path, "r") { |source| IO.copy(source, target) }
+          target.flush
+          target.fsync
         end
+        # Publication is the final filesystem operation. Once a reopen can see the DB,
+        # no subsequent cleanup can fail and roll it back.
+        File.rename(staged_db, project.db_path)
         project
       rescue ex
         FileUtils.rm_rf(dir)
@@ -565,7 +592,33 @@ module Gori
                          tags : Array(String)? = nil) : {Project, Bool}
       tags = tags.try { |t| ProjectRegistry.normalize_tags(t) }
       display = validated_display_name(name)
-      dir = directory_for_create(display)
+      loop do
+        dir = directory_for_create(display)
+        if project = reopen_published(dir, display, description, tags)
+          return project
+        end
+        with_project_claim(dir) do
+          # A peer may have claimed this slug for a different display name. Release
+          # this lock before trying the newly resolved directory.
+          next unless directory_for_create(display) == dir
+          return create_at(dir, display, description, tags)
+        end
+      end
+    end
+
+    # A published DB cannot be claimed by an import while this guard keeps it open.
+    # Reopen without requiring permission to create lock files in the registry root.
+    private def reopen_published(dir : String, display : String, description : String, tags : Array(String)?) : {Project, Bool}?
+      path = File.join(dir, Project::DB_FILE)
+      return unless File.file?(path)
+      guard = OpenLock.try_shared(path)
+      return unless guard && File.file?(path) && directory_for_create(display) == dir
+      create_at(dir, display, description, tags)
+    ensure
+      guard.try(&.close)
+    end
+
+    private def create_at(dir : String, display : String, description : String, tags : Array(String)?) : {Project, Bool}
       db_path = File.join(dir, Project::DB_FILE)
       # A DB at the resolved path is the same thing #list calls an existing project.
       reopened = File.exists?(db_path)
@@ -656,8 +709,21 @@ module Gori
       n = 2
       loop do
         dir = File.join(@root, slug)
+        if project = claim_workspace_candidate(dir, slug, display, workspace)
+          return project
+        end
+        slug = "#{base_slug}-#{n}"
+        n += 1
+      end
+    end
+
+    private def claim_workspace_candidate(dir : String, slug : String, display : String, workspace : String) : Project?
+      with_project_claim(dir) do
         db = File.join(dir, Project::DB_FILE)
         unless Dir.exists?(dir)
+          if existing = find_by_workspace(workspace)
+            return existing
+          end
           claimed = false
           begin
             # Unlike mkdir_p, mkdir is an atomic claim. Two different workspaces
@@ -691,8 +757,7 @@ module Gori
           return project
         end
 
-        slug = "#{base_slug}-#{n}"
-        n += 1
+        nil
       end
     end
 
