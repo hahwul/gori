@@ -1,5 +1,23 @@
 require "./spec_helper"
 
+describe "Gori::Utf8.trim_incomplete_end" do
+  it "trims only incomplete trailing codepoints" do
+    ["é", "한", "🙂"].each do |character|
+      complete = ("abc" + character).to_slice
+      Gori::Utf8.trim_incomplete_end(complete).should eq(complete)
+      (4...complete.size).each do |cut|
+        Gori::Utf8.trim_incomplete_end(complete[0, cut]).should eq("abc".to_slice)
+      end
+    end
+  end
+
+  it "leaves malformed trailing bytes available for binary detection" do
+    [Bytes[0x61, 0x80], Bytes[0x61, 0xFF], Bytes[0xE0, 0x80]].each do |bytes|
+      Gori::Utf8.trim_incomplete_end(bytes).should eq(bytes)
+    end
+  end
+end
+
 # `Utf8.tolerant` recompiles a rule regex with PCRE2_MATCH_INVALID_UTF so a body-sized subject
 # is not re-validated on every match. On valid UTF-8 it must match exactly like the literal it
 # wraps; the rule tables that run over bodies must actually carry it, or the win silently goes.

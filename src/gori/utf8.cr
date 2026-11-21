@@ -36,6 +36,23 @@ module Gori
       str.valid_encoding? ? str : scrub(str.to_slice)
     end
 
+    # Drop a trailing sequence that could have been cut mid-codepoint. Keep complete
+    # codepoints and malformed bytes so the caller can still detect binary data.
+    def self.trim_incomplete_end(bytes : Bytes) : Bytes
+      start = bytes.size - 1
+      while start >= 0 && (bytes[start] & 0xC0) == 0x80
+        start -= 1
+        return bytes if bytes.size - start >= 4
+      end
+      return bytes if start < 0
+
+      first = bytes[start]
+      available = bytes.size - start
+      return bytes if lead_width(first) <= available
+      return bytes if available > 1 && !second_in_range?(first, bytes[start + 1])
+      bytes[0, start]
+    end
+
     # `String.new(bytes).scrub`, byte for byte, without the intermediate copy or the builder:
     # one pass counts the invalid bytes (each becomes the three bytes of U+FFFD), the second
     # copies valid runs whole into a String of exactly the right size. "Invalid" is exactly

@@ -9,6 +9,7 @@
 # link is gone, which is exactly the copy that needs finding.
 require "../../evidence"
 require "../../mcp/serialize"
+require "../../utf8"
 
 module Gori
   module CLI
@@ -370,7 +371,7 @@ module Gori
         cut = decoded_size > Issues::Export::EVIDENCE_CAP
         # Back the cut off to a codepoint boundary first — the Markdown report's own rule —
         # or a multibyte character split at exactly the cap reads the whole page as binary.
-        shown = Issues::Export.trim_to_codepoint_boundary(shown[0, Issues::Export::EVIDENCE_CAP]) if cut
+        shown = Utf8.trim_incomplete_end(shown[0, Issues::Export::EVIDENCE_CAP]) if cut
         text = String.new(shown)
         if text.valid_encoding?
           io << Issues::Export.scrub_controls(text) << "\n"

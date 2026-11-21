@@ -237,6 +237,24 @@ describe Gori::Issues::Export do
       end
     end
 
+    it "preserves a multibyte character ending exactly at the evidence cap" do
+      with_store do |store|
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "GET", target: "/", http_version: "HTTP/1.1",
+          head: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+        cap = Gori::Issues::Export::EVIDENCE_CAP
+        prefix = "a" * (cap - "한".bytesize) + "한"
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
+          body: (prefix + "outside the cap").to_slice, reason: "OK", content_type: "text/plain", duration_us: 1_i64))
+        store.insert_issue("big utf8 body", Gori::Store::Severity::High, "h.test", id)
+
+        md = Gori::Issues::Export.markdown(store.issues, store, "proj")
+        md.includes?("aa한\n\n[… body truncated").should be_true
+      end
+    end
+
     it "still shows the readable prefix when an invalid byte is deeper than the cap" do
       with_store do |store|
         id = store.insert_flow(Gori::Store::CapturedRequest.new(

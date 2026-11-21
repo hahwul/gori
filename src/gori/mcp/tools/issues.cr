@@ -2,6 +2,7 @@ require "json"
 require "../../store"
 require "../serialize"
 require "../../env"
+require "../../utf8"
 
 module Gori
   module MCP
@@ -129,7 +130,7 @@ module Gori
         # A partial JSON document cannot honor JSON Pointers. Withhold it under a profile,
         # and never feed compressed prefixes back to an exporter for unbounded inflation.
         return {head, nil, true} if (cut && matcher) || Proxy::Codec::ContentDecode.decode_failed?(note)
-        entity = Issues::Export.trim_to_codepoint_boundary(entity[0, cap]) if entity.size > cap
+        entity = Utf8.trim_incomplete_end(entity[0, cap]) if entity.size > cap
         head, entity = redact_report_message(head, entity, matcher, !decoded.nil?)
         return {head, nil, true} if entity.size > cap
         {head, entity, cut}

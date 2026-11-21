@@ -1,6 +1,7 @@
 require "json"
 require "./store"
 require "./links"
+require "./utf8"
 require "./proxy/codec/content_decode"
 require "./redact/wire"
 require "./issues_export/sarif" # Export.sarif — the SARIF 2.1.0 sibling of .markdown/.json
@@ -350,7 +351,7 @@ module Gori
         # that is valid text up to the cap but has a stray byte deeper still shows its
         # readable prefix. But back the cut off to a UTF-8 codepoint boundary first, so a
         # multi-byte char split at exactly `cap` isn't misread as binary.
-        slice = truncated ? trim_to_codepoint_boundary(display_body[0, EVIDENCE_CAP]) : display_body
+        slice = truncated ? Utf8.trim_incomplete_end(display_body[0, EVIDENCE_CAP]) : display_body
         text = String.new(slice)
         BodyEvidence.new(text.valid_encoding? ? text : nil, display_body.size, truncated)
       end
@@ -382,18 +383,6 @@ module Gori
         fence = "`" * fence_len(content)
         io << "\n### " << label << "\n\n" << fence << "http\n"
         io << content << "\n" << fence << "\n"
-      end
-
-      # Drop a UTF-8 sequence the `cap` cut left incomplete: walk back over trailing
-      # continuation bytes (10xxxxxx), then over the lead byte (11xxxxxx) they belonged to.
-      # Leaves the slice ending on a whole codepoint so a split char isn't read as binary.
-      def self.trim_to_codepoint_boundary(slice : Bytes) : Bytes
-        n = slice.size
-        while n > 0 && (slice[n - 1] & 0xC0) == 0x80 # continuation byte
-          n -= 1
-        end
-        n -= 1 if n > 0 && (slice[n - 1] & 0xC0) == 0xC0 # the lead byte whose tail was cut
-        slice[0, n]
       end
 
       # A CommonMark fenced block is closed only by a line of >= as many backticks
