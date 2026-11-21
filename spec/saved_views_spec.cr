@@ -481,6 +481,36 @@ describe Gori::SavedViews do
   end
 
   describe ".repoint_active_if" do
+    it "preserves a peer selection made before the move's pointer update commits" do
+      with_store do |store|
+        from = Gori::SavedViews.add(store, "from", "host:from", "project").not_nil!
+        moved = Gori::SavedViews.add(store, "moved", "host:moved", "project").not_nil!
+        peer = Gori::SavedViews.add(store, "peer", "host:peer", "project").not_nil!
+        Gori::SavedViews.set_active(store, from).should be_true
+
+        writing = Channel(Nil).new
+        resume = Channel(Nil).new
+        peer_done = Channel(Bool).new(1)
+        spawn do
+          peer_done.send(store.mutate_setting(Gori::SavedViews::ACTIVE_KEY) do
+            writing.send(nil)
+            resume.receive
+            peer.key
+          end)
+        end
+        writing.receive
+
+        # Let the move queue its write while readers still see the old committed pointer.
+        move_done = Channel(Bool).new(1)
+        spawn { move_done.send(Gori::SavedViews.repoint_active_if(store, from, moved)) }
+        Fiber.yield
+        resume.send(nil)
+        peer_done.receive.should be_true
+        move_done.receive.should be_true
+        store.setting(Gori::SavedViews::ACTIVE_KEY).should eq(peer.key)
+      end
+    end
+
     it "moves the saved pointer to the moved view, and answers false when that does not commit" do
       with_globals do
         with_store do |store|

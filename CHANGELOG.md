@@ -39,6 +39,8 @@
 
 - History: "size" means request + response bytes everywhere. The TUI SIZE column shows the total that `size:` filters on and the CLI and MCP print, and `--sort=largest` (MCP `sort:"largest"`) ranks by it; `respsize:` still filters on the response alone (#1943).
 
+- History: cleaning up a deleted or moved view preserves a newer selection from another session (#1978)
+
 - CBOR identifies text strings with invalid UTF-8 chunks and preserves their bytes (#1959)
 
 - TUI: when a History filter fills its loaded page, marking all and the delete confirmation say the marks cover only the loaded rows (#1943).
