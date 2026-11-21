@@ -16,11 +16,13 @@ module Gori
       # Per-side cap on evidence bytes embedded in the Markdown report.
       EVIDENCE_CAP = 64 * 1024
 
+      private SOURCE_TRUNCATION_NOTE = "[… body truncated or omitted before export …]"
+
       # `matcher` is the project's redaction profile (`Redact::Policy.ambient`): the report embeds
       # each linked flow's request and response, and a shared report is the export that profile
       # exists for — `show`, History and MCP already sanitize the same bodies through it.
-      # `flow_loader` lets a caller bound and project evidence before rendering; absent it,
-      # the existing CLI/TUI report reads the captured flow in full.
+      # `flow_loader` lets a caller bound and project evidence before rendering and flag any
+      # additional truncation. Without it, the flags describe the original stored capture.
       def self.markdown(issues : Array(Store::Issue), store : Store, project_name : String,
                         matcher : Redact::Matcher? = nil,
                         flow_loader : Proc(Int64, Store::FlowDetail?)? = nil) : String
@@ -40,8 +42,7 @@ module Gori
                                            matcher : Redact::Matcher?, flow_loader : Proc(Int64, Store::FlowDetail?)? = nil) : Nil
         flow = f.flow_id.try { |fid| flow_loader ? flow_loader.call(fid) : store.get_flow(fid) }
         flow = Redact::Wire.flow(flow, matcher)[0] if flow && matcher
-        append_issue(io, f, flow, resolve_issue_links(f, store), frozen: store.issue_evidence(f.id),
-          source_cuts: !flow_loader.nil?)
+        append_issue(io, f, flow, resolve_issue_links(f, store), frozen: store.issue_evidence(f.id))
       end
 
       # The Markdown for ONE issue, heading included — the body of `markdown`'s loop, split out
@@ -65,8 +66,7 @@ module Gori
       # copies it does not include would be a list of hashes with nothing to check them against.
       private def self.append_issue(io : String::Builder, f : Store::Issue, flow : Store::FlowDetail?,
                                     resolved_links : Array(Links::Resolved), evidence : Bool = true,
-                                    frozen : Array(Store::IssueEvidenceMeta) = [] of Store::IssueEvidenceMeta,
-                                    source_cuts : Bool = false) : Nil
+                                    frozen : Array(Store::IssueEvidenceMeta) = [] of Store::IssueEvidenceMeta) : Nil
         io << "\n## [" << f.severity.label << "] " << one_line(f.title) << "\n\n"
         io << "- **Severity:** " << f.severity.label << "\n"
         if cvss = f.cvss
@@ -91,8 +91,8 @@ module Gori
         # yet keeps its newlines (unlike one_line, which would flatten title/host to a line).
         io << "\n" << demote_note_headings(scrub_controls(f.notes)) << "\n" unless f.notes.strip.empty?
         if flow && evidence
-          append_evidence(io, "Request", flow.request_head, flow.request_body, source_cuts && flow.request_body_truncated?)
-          append_evidence(io, "Response", flow.response_head, flow.response_body, source_cuts && flow.response_body_truncated?)
+          append_evidence(io, "Request", flow.request_head, flow.request_body, flow.request_body_truncated?)
+          append_evidence(io, "Response", flow.response_head, flow.response_body, flow.response_body_truncated?)
         end
       end
 
@@ -378,7 +378,7 @@ module Gori
           elsif ev.binary?
             c << "\n\n[binary body omitted, #{ev.size} bytes]"
           end
-          c << "\n\n[… body truncated or omitted before export …]" if source_cut
+          c << "\n\n" << SOURCE_TRUNCATION_NOTE if source_cut
         end
         fence = "`" * fence_len(content)
         io << "\n### " << label << "\n\n" << fence << "http\n"
