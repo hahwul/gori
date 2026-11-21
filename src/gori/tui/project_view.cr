@@ -451,18 +451,7 @@ module Gori::Tui
     # READ-mode Home/End/Page. The caret + selection this mode paints are `@desc_read`'s, so
     # Home/End go through the editor and are then mirrored back onto the read cursor.
     def desc_read_motion_key(ev : Termisu::Event::Key) : Bool
-      return false if desc_insert_mode?
-      key = ev.key
-      shift = ev.shift?
-      case
-      when key.home?      then @desc_area.home(shift)
-      when key.end?       then @desc_area.end_of_line(shift)
-      when key.page_up?   then desc_read_move(-@desc_area.page_rows, 0, selecting: shift)
-      when key.page_down? then desc_read_move(@desc_area.page_rows, 0, selecting: shift)
-      else                     return false
-      end
-      @desc_read.sync_to(@desc_area, selecting: shift) if key.home? || key.end?
-      true
+      !desc_insert_mode? && @desc_read.handle_motion_key(@desc_area, ev)
     end
 
     def desc_word_delete_key?(ev : Termisu::Event::Key) : Bool

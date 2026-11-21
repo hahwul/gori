@@ -404,21 +404,7 @@ module Gori::Tui
     # READ-mode motion. The caret + selection live in `@read` (that is what this mode
     # paints), so the shared keymap is applied to the READ cursor rather than the editor's.
     def read_motion_key(ev : Termisu::Event::Key) : Bool
-      return false if insert_mode?
-      key = ev.key
-      shift = ev.shift?
-      ed = current.area
-      case
-      when key.home?      then ed.home(shift)
-      when key.end?       then ed.end_of_line(shift)
-      when key.page_up?   then read_move(-ed.page_rows, 0, selecting: shift)
-      when key.page_down? then read_move(ed.page_rows, 0, selecting: shift)
-      else                     return false
-      end
-      # Home/End moved the EDITOR's caret; mirror it into the read cursor, extending or
-      # collapsing the read selection to match what the key promised.
-      @read.sync_to(ed, selecting: shift) if key.home? || key.end?
-      true
+      !insert_mode? && @read.handle_motion_key(current.area, ev)
     end
 
     def scroll_view(step : Int32) : Nil

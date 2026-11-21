@@ -93,6 +93,8 @@
 
 - CLI: a `gori run` whose output file fills the disk now says so in one line and exits 1, instead of printing a backtrace (#1942).
 
+- In Notes, issue notes, and the project description, Ctrl or Alt with Home or End jumps to the start or end of the document in READ mode. Holding Shift extends the selection to that edge (#1963).
+
 - TUI: Tab in project tag fields completes only a visible suggestion. Resizing the terminal keeps the highlighted tag and the completion in sync (#1951).
 
 - Project lists and automatic project selection now distinguish activity within the same second and break exact ties by directory name (#1952, #1964).
