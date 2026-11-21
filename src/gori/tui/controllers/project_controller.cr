@@ -1190,7 +1190,7 @@ module Gori::Tui
           # `delete_env_var` / `gori run project env delete`. A dropped write reported as
           # "deleted" stayed convincing for the whole session, and the var came back at the
           # next launch.
-          ok = persist_env_vars(removed)
+          ok = persist_env_vars(removed) == :ok
           @project_view.reload_env_vars
           @host.status(ok ? "env var deleted: #{removed}" : "env var NOT deleted (project busy or unwritable) — try again")
         else
@@ -1206,18 +1206,25 @@ module Gori::Tui
     #
     # `upsert` holds the original key, new key and value for an edit. Nil deletes `key`.
     # An edit that renames its row replaces the old key in place.
-    private def persist_env_vars(key : String, upsert : {String?, String, String}? = nil) : Bool
+    private def persist_env_vars(key : String, upsert : {String?, String, String}? = nil) : Symbol
       store = @host.session.store
+      duplicate = false
       ok = Env.mutate_project(store) do |vars|
         next vars.reject! { |(k, _)| k == key } unless upsert
         orig, _, val = upsert
-        i = orig.try { |o| vars.index { |(k, _)| k == o } } || vars.index { |(k, _)| k == key }
+        # Check the destination against the transaction's table. A peer can claim it
+        # while the pane is editing.
+        duplicate = orig != key && vars.any? { |(k, _)| k == key }
+        next nil if duplicate
+        i = orig.try { |o| vars.index { |(k, _)| k == o } }
         next vars << {key, val} unless i
         vars[i] = {key, val}
         vars.each_with_index.reject { |(k, _), j| k == key && j != i }.map(&.[0]).to_a
       end
-      Env.log_saved(store, Settings.project_env_vars) if ok
-      ok
+      return :failed unless ok
+      return :dup if duplicate
+      Env.log_saved(store, Settings.project_env_vars)
+      :ok
     end
 
     def env_edit_prefix : Nil

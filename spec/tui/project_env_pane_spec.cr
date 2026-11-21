@@ -149,7 +149,7 @@ describe "ProjectView ENV pane" do
 
         # A caret at 0 with text behind it makes ⌫ a no-op, never a discard of the line.
         view.env_field.not_nil!.backspace
-        view.env_commit { true }.should eq(:ok)
+        view.env_commit { :ok }.should eq(:ok)
         view.env_vars.should eq([{"TOKEN", "abc123"}])
       end
     end
@@ -162,7 +162,7 @@ describe "ProjectView ENV pane" do
         view.env_add_start
         type(view, "TOKEN=  value  ")
 
-        view.env_commit { true }.should eq(:ok)
+        view.env_commit { :ok }.should eq(:ok)
         view.env_vars.should eq([{"TOKEN", "  value  "}])
       end
     end
@@ -196,7 +196,7 @@ describe "ProjectView ENV pane" do
         # clobber test: adding a var here must not take the peer's with it.
         view.env_add_start
         type(view, "MINE 7")
-        view.env_commit { true }.should eq(:ok)
+        view.env_commit { :ok }.should eq(:ok)
         Gori::Env.save_project(store, view.env_vars).should be_true
         store.flush
         Gori::Env.parse_vars_json(store.setting(Gori::Env::PROJECT_VARS_KEY))
@@ -217,7 +217,7 @@ describe "ProjectView ENV pane" do
         Gori::Settings.project_env_vars = [{"PEER", "0"}, {"ALPHA", "1"}]
         view.reload_env_vars # ALPHA is index 1 now
 
-        view.env_commit { true }.should eq(:ok)
+        view.env_commit { :ok }.should eq(:ok)
         # The edit landed on ALPHA. Against the index alone it hit PEER's slot — or, once the
         # duplicate check saw ALPHA elsewhere, refused the operator's edit as a dup.
         view.env_vars.should eq([{"PEER", "0"}, {"ALPHA", "19"}])
@@ -240,7 +240,7 @@ describe "ProjectView ENV pane" do
         Gori::Settings.project_env_vars = [{"PEER", "0"}, {"ALPHA", "1"}]
         view.reload(project, store) # ← tab entry, not the external-change path
 
-        view.env_commit { true }.should eq(:ok)
+        view.env_commit { :ok }.should eq(:ok)
         # In range but stale, the index wrote PEER's slot and `Env.save_project` then persisted
         # the whole array — the peer's var deleted by the very commit that added the refresh.
         view.env_vars.should eq([{"PEER", "0"}, {"ALPHA", "19"}])
@@ -259,7 +259,7 @@ describe "ProjectView ENV pane" do
 
         # `@env_items[idx] = …` on the emptied list would have raised IndexError out of a
         # keystroke; the typed text is re-added instead.
-        view.env_commit { true }.should eq(:ok)
+        view.env_commit { :ok }.should eq(:ok)
         view.env_vars.should eq([{"ALPHA", "1"}])
       end
     end
@@ -500,6 +500,59 @@ describe Gori::Tui::ProjectController do
 
       c.env_delete_var # B is still selected
       stored.call.should eq([{"PEER", "9"}])
+    end
+  end
+
+  {false, true}.each do |renaming|
+    it "preserves a peer's destination key during a stale #{renaming ? "rename" : "add"}" do
+      with_env_controller do |c, host, session|
+        store = session.store
+        original = [{"ALPHA", "original"}]
+        Gori::Env.save_project(store, original).should be_true
+        c.view.reload_env_vars
+        renaming ? c.env_edit_var : c.env_add_var
+        c.view.env_field.not_nil!.set("RESERVED local")
+
+        Gori::Env.set_project_var(store, "RESERVED", "peer").should be_true
+        c.view.env_vars.should eq(original)
+        stored = -> { Gori::Env.parse_vars_json(store.setting(Gori::Env::PROJECT_VARS_KEY)) }
+        c.handle_body_key(key(Termisu::Input::Key::Enter))
+
+        stored.call.should eq([{"ALPHA", "original"}, {"RESERVED", "peer"}])
+        host.statuses.last.should contain("already defined")
+        c.view.env_field.try(&.value).should eq("RESERVED local")
+
+        c.view.env_field.not_nil!.set("AVAILABLE local")
+        c.handle_body_key(key(Termisu::Input::Key::Enter))
+        c.view.env_adding?.should be_false
+        if renaming
+          stored.call.should eq([{"AVAILABLE", "local"}, {"RESERVED", "peer"}])
+        else
+          stored.call.should eq([{"ALPHA", "original"}, {"RESERVED", "peer"}, {"AVAILABLE", "local"}])
+        end
+      end
+    end
+  end
+
+  it "retries an unchanged draft after a peer frees the destination key" do
+    with_env_controller do |c, host, session|
+      store = session.store
+      before = [{"RESERVED", "peer"}]
+      Gori::Env.save_project(store, before).should be_true
+      c.view.reload_env_vars
+      c.env_add_var
+      type_keys(c, "RESERVED local")
+      c.handle_body_key(key(Termisu::Input::Key::Enter))
+      host.statuses.last.should contain("already defined")
+      c.view.env_field.try(&.value).should eq("RESERVED local")
+
+      Gori::Env.delete_project_var(store, "RESERVED").should be_true
+      c.view.env_vars.should eq(before)
+      c.handle_body_key(key(Termisu::Input::Key::Enter))
+
+      c.view.env_adding?.should be_false
+      c.view.env_vars.should eq([{"RESERVED", "local"}])
+      Gori::Env.parse_vars_json(store.setting(Gori::Env::PROJECT_VARS_KEY)).should eq(c.view.env_vars)
     end
   end
 

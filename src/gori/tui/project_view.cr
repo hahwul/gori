@@ -1856,15 +1856,15 @@ module Gori::Tui
     end
 
     # Keep the field and list intact until the controller persists the validated row.
-    def env_commit(&persist : {String?, String, String} -> Bool) : Symbol
+    def env_commit(&persist : {String?, String, String} -> Symbol) : Symbol
       text = @env_field.value
       return :empty if text.strip.empty?
       parsed = Env.parse_line(text)
       return :invalid unless parsed
       key, val = parsed
       idx = @env_edit_idx
-      return :dup if @env_items.each_with_index.any? { |(k, _), i| k == key && i != idx }
-      return :failed unless persist.call({@env_edit_key, key, val})
+      outcome = persist.call({@env_edit_key, key, val})
+      return outcome unless outcome == :ok
       # `idx` is re-anchored by `reload_env_vars` whenever a peer shortens the list, so it is
       # in range — the bound is checked anyway rather than trusted, because the failure mode of
       # trusting it is an IndexError raised out of a keystroke.
