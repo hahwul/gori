@@ -531,8 +531,8 @@ module Gori
     # local user planted (`issues.md -> ~/.zshenv`), dangling so it read as absent, or live so
     # the operator confirmed "file exists" for a file that is not theirs.
     #
-    # The content is staged in a temp file beside it (created under the umask, as `File.write`
-    # would, and fsync'd), then:
+    # The content is staged in a temp file beside it (created using the destination's mode,
+    # or the default under the umask for a new file, and fsync'd), then:
     # * an existing regular file is replaced by a rename (the confirmed overwrite; its mode is
     #   carried over, and a crash leaves the old file, never a truncated one);
     # * anything else that exists — a symlink, a FIFO, a device — is refused;
@@ -543,7 +543,7 @@ module Gori
       existing = File.info?(path, follow_symlinks: false)
       raise Gori::Error.new("refusing to write through a symlink or special file: #{path}") if existing && !existing.file?
       staged = File.tempname(".#{File.basename(path)}", ".tmp", dir: File.dirname(path))
-      File.open(staged, "w", perm: File::Permissions.new(0o666)) do |file|
+      File.open(staged, "w", perm: existing.try(&.permissions) || File::Permissions.new(0o666)) do |file|
         file.print(content)
         file.flush
         file.fsync
