@@ -293,6 +293,19 @@ describe "Settings.reset_to_factory" do
     end
   end
 
+  it "clears unrecognised fields inside libraries while retaining them on ordinary saves" do
+    with_settings_snapshot do |dir|
+      path = File.join(dir, "settings.json")
+      File.write(path, %({"env":{"syntax":"bare"},"decoder":{"chains":[],"next_rule_id":7,"other":"private draft"}}))
+      Gori::Settings.load
+      Gori::Settings.save.should be_true
+      JSON.parse(File.read(path))["decoder"]["other"].as_s.should eq("private draft")
+
+      Gori::Settings.reset_to_factory.saved?.should be_true
+      JSON.parse(File.read(path))["decoder"]?.should be_nil
+    end
+  end
+
   # …and the same merge path used to write an INCOMPLETE document on the way out. `serialize`
   # writes these four unconditionally, but each one sat at its factory default in memory AND
   # was absent from a disk file that never mentioned it — "unchanged", so disk (nothing) won,
