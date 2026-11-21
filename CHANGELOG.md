@@ -18,6 +18,8 @@
 
 - TUI: the Target → Params list has a `/` filter over parameter name, location and endpoint (#1944).
 
+- TUI: long choice lists, including the Evidence issue picker, respond to Page Up, Page Down, Home, and End (#1960)
+
 - TUI: OAST callbacks show when they arrived in the local time History uses, as a TIME column on a wide enough pane and in the detail, which printed UTC (#1944).
 - `gori run history`: `--since ID` tails newer flows oldest first and `--before-id ID` pages older ones, as MCP `list_history` does, so a script continues from the last row's id (#1944).
 
