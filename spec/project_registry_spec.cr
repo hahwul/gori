@@ -421,6 +421,7 @@ describe Gori::ProjectRegistry do
       expect_raises(Gori::Error, /description was saved.*tags were not saved/) do
         reg.create_or_reopen("docs", "after", tags: ["new"])
       end
+      Gori::OpenLock.in_use?(project.db_path).should be_false
       store = Gori::Store.open(project.db_path)
       begin
         store.setting(Gori::Project::DESCRIPTION_KEY).should eq("after")

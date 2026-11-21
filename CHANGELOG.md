@@ -155,7 +155,7 @@
 
 - Project workspace bindings preserve trailing spaces in directory names (#1961)
 
-- Creating a project by its renamed display name reopens it, and an ambiguous name leaves all matches untouched. Creation reports when settings or tags could not be saved, including when only the description was saved (#1973, #1983, #1998).
+- Creating a project by its renamed display name reopens it, and an ambiguous name leaves all matches untouched. Creation reports settings and tag write failures on Windows too, including when only the description was saved (#1973, #1983, #1998, #2003).
 
 - TUI: the command palette keeps the selected result visible in short terminals. If the palette or Space menu no longer fits, resize to resume or press Esc to close it (#1928).
 

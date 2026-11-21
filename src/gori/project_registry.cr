@@ -584,7 +584,7 @@ module Gori
       # invisible to `gori run project list` / --project until something captured into it.
       desc = description.strip
       s = Store.open(proj.db_path, retention_flows: Store::RETENTION_UNLIMITED)
-      begin
+      failure = begin
         entries = [] of {String, String?}
         entries << {Project::DESCRIPTION_KEY, desc} unless desc.empty?
         # A BRAND-NEW database is born speaking this install's token grammar, so it says so. The
@@ -598,9 +598,14 @@ module Gori
         raise CreateWriteError.new("could not save project settings — check the database is writable and retry") unless s.set_settings(entries)
         # Replace tags only after the settings commit, while the store still guards this project.
         tags.try { |t| write_create_tags(proj, t, !desc.empty?) }
-      ensure
-        s.close
+        nil
+      rescue ex
+        ex
       end
+      # Closing waits for the writer fiber. On Windows this switch must occur after
+      # the metadata exception has unwound or the process exits before reporting it.
+      s.close
+      raise failure if failure
       {proj, !reopened}
     end
 
