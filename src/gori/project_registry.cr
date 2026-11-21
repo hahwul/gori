@@ -449,14 +449,28 @@ module Gori
     # The verbatim display name from the sidecar, falling back to the directory
     # name for legacy projects created before the name was persisted.
     private def display_name(dir : String, slug : String) : String
-      name_path = File.join(dir, NAME_FILE)
-      if File.exists?(name_path)
-        n = File.read(name_path).strip
-        return n unless n.empty?
-      end
+      stored_display_name(dir) || slug
+    rescue CreateWriteError
       slug
-    rescue
-      slug
+    end
+
+    # A listing can fall back to its slug. Choosing which database a create may update
+    # needs to distinguish a missing legacy name from one we cannot read.
+    private def stored_display_name(dir : String) : String?
+      path = File.join(dir, NAME_FILE)
+      info = File.info?(path, follow_symlinks: false)
+      return nil unless info
+      info = File.info(path) if info.symlink?
+      raise CreateWriteError.new("could not read project display name at #{path}: not a regular file") unless info.file?
+      File.read(path).strip.presence
+    rescue ex : IO::Error
+      raise CreateWriteError.new("could not read project display name at #{path}: #{ex.message}", cause: ex)
+    end
+
+    private def write_display_name(dir : String, display : String) : Nil
+      DurableFile.write(File.join(dir, NAME_FILE), display, perm: File::Permissions.new(0o600))
+    rescue ex : IO::Error | Gori::Error
+      raise CreateWriteError.new("could not save project display name in #{dir}: #{ex.message}", cause: ex)
     end
 
     # Create (or reopen) a named project. A new project's directory starts from
@@ -570,12 +584,10 @@ module Gori
       # Durably, because `File.write` truncates first: a crash or a full disk between the two
       # leaves the picker showing a half-written name, or none. Same helper the
       # settings/CA/marker writes use.
-      stored = reopened ? display_name(dir, "") : ""
-      if stored.empty?
-        DurableFile.write(File.join(dir, NAME_FILE), display,
-          perm: File::Permissions.new(0o600)) rescue nil
-      else
+      if reopened && (stored = stored_display_name(dir))
         display = stored
+      else
+        write_display_name(dir, display)
       end
       write_id_if_absent(dir) # a fresh project gets a stable short id; a reopen keeps its own
       proj = Project.new(display, db_path)
@@ -646,12 +658,11 @@ module Gori
             Dir.mkdir(dir, Paths::DIR_MODE)
             claimed = true
             File.chmod(dir, Paths::DIR_MODE) rescue nil
-            # The binding itself: a torn write here mis-binds a workspace to a project.
+            write_display_name(dir, display)
+            write_id_if_absent(dir)
+            # Publish the binding last: peers may open the project as soon as they see it.
             DurableFile.write(File.join(dir, WORKSPACE_FILE), workspace,
               perm: File::Permissions.new(0o600))
-            DurableFile.write(File.join(dir, NAME_FILE), display,
-              perm: File::Permissions.new(0o600)) rescue nil
-            write_id_if_absent(dir)
             return Project.new(display, db)
           rescue File::AlreadyExistsError
             # Another process claimed it after the exists? check; inspect below.
@@ -724,7 +735,7 @@ module Gori
       dir = File.join(@root, slug)
       return false unless Dir.exists?(dir)
       return false unless File.exists?(File.join(dir, Project::DB_FILE)) || workspace_in(dir)
-      display_name(dir, slug).downcase != display.downcase
+      (stored_display_name(dir) || slug).downcase != display.downcase
     end
 
     # The sidecar holds the canonical path verbatim, including any trailing whitespace.
@@ -738,7 +749,7 @@ module Gori
     # overwrites an existing id (it must stay stable across reopens), and it is only
     # ever called from create/create_for_workspace — never from read/list — so
     # legacy projects keep resolving by slug/name until explicitly (re)created.
-    # Best-effort like NAME_FILE: an unwritable id sidecar just leaves the project
+    # Best-effort: an unwritable id sidecar just leaves the project
     # id-less, still fully addressable by slug/name.
     private def write_id_if_absent(dir : String) : Nil
       path = File.join(dir, ID_FILE)
@@ -855,9 +866,7 @@ module Gori
       # The rename twin of `create_or_reopen`'s check: a name that another project's slug or
       # short id already answers to would make `--project NAME` resolve elsewhere or refuse.
       shadowed_name_reason(display, except: project).try { |why| raise Gori::Error.new(why) }
-      # A rename replaces a name that is already there, so it gets the same durable
-      # replace as `create`'s — and unlike that one it is NOT best-effort: a rename the
-      # operator asked for either lands or raises.
+      # A rename replaces the sidecar durably before reporting the new display name.
       DurableFile.write(File.join(project.dir, NAME_FILE), display,
         perm: File::Permissions.new(0o600))
       Project.new(display, project.db_path, project.ephemeral?)
