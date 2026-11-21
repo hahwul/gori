@@ -96,6 +96,9 @@ module Gori
     # exactly the clobber `listener_error`'s `among:` comment (settings/listeners.cr) and
     # #508 are written around, reached through the base rather than through a write-back.
     @@loaded_raw : String? = nil
+    # A corrupt load can merge later edits against its defaults, but those defaults
+    # do not establish which permissions or preferences the unread document held.
+    @@load_corrupt = false
 
     # `load` read a file but could not finish applying it: some section raised and every
     # section BELOW it is sitting at its factory default. While this is set, `save` refuses —
@@ -160,6 +163,7 @@ module Gori
     # malformed file leaves the defaults (or CLI-provided values) in place.
     def self.load : Nil
       @@loaded_raw = nil
+      @@load_corrupt = false
       @@load_partial = false
       @@load_unreadable = false
       @@env_syntax_unread = nil
@@ -202,12 +206,10 @@ module Gori
       end
       root = load_root(raw)
       unless root
-        # present but unparseable — kept a .corrupt copy, keep defaults. The grammar is the one
-        # exception, and `load_root` has already settled it: it is recovered TEXTUALLY from the
-        # raw file when the file still spells it, and otherwise reset to the default with a
-        # warning that says so. Resetting it here unconditionally was a silent DOWNGRADE — `save`
-        # stays armed on this path, `serialize_env` would then omit the section, and the next
-        # start would read the absence as bare forever.
+        # If a peer repairs the file before we save, only changes relative to the
+        # fallback state (including the recovered token grammar) belong to us.
+        @@load_corrupt = true
+        @@loaded_raw = serialize
         return
       end
       begin
@@ -657,7 +659,7 @@ module Gori
     # the warning therefore misses exactly the cases that leave no trace at all, which is how
     # `gori settings import` still replaced a live config with defaults and reported success.
     def self.load_degraded? : Bool
-      @@load_partial || (@@loaded_raw.nil? && File.exists?(path))
+      @@load_partial || @@load_corrupt || (@@loaded_raw.nil? && File.exists?(path))
     end
 
     # Why the last load fell back to defaults, or nil when it did not. Read by the TUI to
@@ -686,9 +688,8 @@ module Gori
     # Parse the settings JSON. On a PRESENT-but-unparseable file, preserve a recoverable
     # copy at "<path>.corrupt" FIRST — otherwise the next save() overwrites the file with
     # an all-defaults document (merge_with_disk gives up on an unparseable base), silently
-    # and permanently losing the user's real settings — then return nil so load keeps the
-    # in-memory defaults and leaves @@loaded_raw nil (the next save is a clean write, not a
-    # merge against corrupt bytes).
+    # and permanently losing the user's real settings. A save retries preservation
+    # against the bytes then on disk before writing anything.
     #
     # And SAY SO. Falling back to defaults is not a quiet event for this file: it carries
     # the bind address, the upstream connection rules and the TLS pass-through list, so a
@@ -704,12 +705,12 @@ module Gori
       # it landed decides the wording: pointing at a copy that isn't there is worse than
       # not mentioning one (write_private returns Nil, so track it with a flag).
       kept = false
-      if raw.presence
+      unless raw.empty?
         begin
           write_private("#{path}.corrupt", raw)
           kept = true
         rescue
-          # unwritable dir / full disk — the warning still goes out, minus the recovery hint
+          # A later save retries before replacing the unreadable document.
         end
       end
       # The token GRAMMAR is recovered here rather than defaulted with everything else, and it is
@@ -722,7 +723,11 @@ module Gori
         # The reason first: a toast or the picker's row cuts the line at its width, and the path
         # alone told nobody what was wrong.
         s << "settings.json is not valid JSON — using defaults for this run (#{path})"
-        s << "; your file is preserved at #{path}.corrupt" if kept
+        if kept
+          s << "; your file is preserved at #{path}.corrupt"
+        elsif !raw.empty?
+          s << "; could not back up the file to #{path}.corrupt — a save will retry first"
+        end
         s << "; #{grammar_note}" if grammar_note
       end
       note_load_warning(warning)
@@ -730,12 +735,13 @@ module Gori
     end
 
     private def self.keep_unmergeable(disk : String) : Nil
-      return unless disk.presence
+      return if disk.empty?
       write_private("#{path}.corrupt", disk)
       # `Log`, not `warning_io`: this runs mid-session, where stderr is under the TUI's screen.
-      ::Log.warn { "settings: #{path} was not valid JSON when gori saved over it — kept at #{path}.corrupt" }
-    rescue
-      nil
+      ::Log.warn { "settings: #{path} is not a settings object — kept at #{path}.corrupt" }
+    rescue ex
+      ::Log.warn { "settings: could not back up #{path} to #{path}.corrupt — original kept (#{ex.message})" }
+      raise ex
     end
 
     # Record the reason and put it on the warning io at most once — shared with `load`'s rescue
@@ -801,7 +807,9 @@ module Gori
       # Basing on `mine` keeps "did I change this section?" honest, so an unchanged section
       # always yields to disk on every subsequent save.
       mine = serialize
-      write_private(path, merge_with_disk(mine, factory_reset))
+      merged = merge_with_disk(mine, factory_reset)
+      write_private(path, merged)
+      @@load_corrupt = false if @@load_corrupt && merged == mine
       @@loaded_raw = mine
       true
     rescue
@@ -897,7 +905,7 @@ module Gori
     # saw (see RULE_SECTION_LISTS).
     private def self.merge_with_disk(current : String, factory_reset : Bool = false) : String
       base = @@loaded_raw
-      return current unless base
+      return current unless base || @@load_corrupt
       disk = begin
         File.read(path)
       rescue File::NotFoundError
@@ -906,12 +914,15 @@ module Gori
       end
       return current if disk == base # nobody else wrote since we loaded — nothing to merge
       cur_h = (JSON.parse(current).as_h? rescue nil)
-      base_h = (JSON.parse(base).as_h? rescue nil)
+      base_h = base.try { |b| JSON.parse(b).as_h? }
       disk_h = (JSON.parse(disk).as_h? rescue nil)
       # A file a peer or a hand edit (`gori settings --edit` validates nothing) left unparseable is
       # replaced by this write, so its bytes are set aside first, as `load_root` does at startup.
-      keep_unmergeable(disk) unless disk_h
-      return current unless cur_h && base_h && disk_h
+      unless disk_h
+        keep_unmergeable(disk)
+        return current
+      end
+      raise Error.new("could not merge settings without a baseline") unless cur_h && base_h
       keys = (cur_h.keys + disk_h.keys).uniq!
       JSON.build(indent: "  ") do |j|
         j.object do
