@@ -129,6 +129,8 @@
 
 - TUI: unsaved issue drafts require a save or an explicit discard, simultaneous edits to a note are preserved as separate notes, and closing a note with links requires confirmation (#1929).
 
+- Issue notes preserve drafts and peer edits across concurrent saves and deletions. Closing an untouched editor keeps the latest stored text (#1980)
+
 - TUI: project-wide search restores its results and selection after viewing a flow and blocks opening hidden results, while project-name search supports caret movement and click-to-edit. The Comparer and link pickers find older flows and keep the filter open when it has no matches (#1929).
 
 - Fuzzy search stays responsive for long multilingual names (#1970)

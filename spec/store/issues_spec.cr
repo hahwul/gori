@@ -110,6 +110,46 @@ describe "Store#insert_issue" do
   end
 end
 
+describe "Store#save_issue_notes" do
+  it "compares the complete stored value, including bytes after a NUL" do
+    with_store do |store|
+      original = "line\0original"
+      peer = "line\0peer"
+      newer_peer = "line\0newer peer"
+      id = store.insert_issue("writeup", Gori::Store::Severity::Low, nil, nil, notes: original)
+      expected = store.get_issue(id).not_nil!.notes
+      store.update_issue(id, notes: peer).should be_true
+
+      refused = store.save_issue_notes(id, "mine", expected: expected)
+      refused.status.conflict?.should be_true
+      refused.current.should eq(peer)
+      store.update_issue(id, notes: newer_peer).should be_true
+
+      refused_again = store.save_issue_notes(id, "mine", expected: expected, overwrite: refused.current)
+      refused_again.status.conflict?.should be_true
+      refused_again.current.should eq(newer_peer)
+      store.get_issue(id).not_nil!.notes.should eq(newer_peer)
+
+      store.save_issue_notes(id, "mine", expected: expected, overwrite: refused_again.current)
+        .status.committed?.should be_true
+      store.get_issue(id).not_nil!.notes.should eq("mine")
+    end
+  end
+
+  it "reports a deleted issue even when an overwrite was confirmed" do
+    with_store do |store|
+      id = store.insert_issue("writeup", Gori::Store::Severity::Low, nil, nil, notes: "original")
+      store.update_issue(id, notes: "peer").should be_true
+      refused = store.save_issue_notes(id, "mine", expected: "original")
+      store.delete_issue(id).should be_true
+
+      store.save_issue_notes(id, "mine", expected: "original", overwrite: refused.current)
+        .status.missing?.should be_true
+      store.get_issue(id).should be_nil
+    end
+  end
+end
+
 # An issue's host and seed flow can be rewritten after create (#1686). A new seed gets its
 # link row as `insert_issue` writes one; the old seed stays as an ordinary link.
 describe "Store#update_issue host and flow" do
