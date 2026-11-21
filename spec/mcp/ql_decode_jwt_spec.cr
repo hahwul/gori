@@ -349,6 +349,22 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "jwt_encode refuses a host private-key path under read-only" do
+      dir = File.tempname("gori-spec-mcp-jwt")
+      Dir.mkdir_p(dir)
+      begin
+        path = JoseKeys.write(dir, "ec256.pem", JoseKeys::EC256)
+        with_store do |store|
+          call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_encode","arguments":{"token":"#{jwt}","alg":"ES256","key":#{path.to_json}}}})
+          resp = mcp_drive(store, call, allow_actions: false)[0]
+          resp["result"]["isError"].as_bool.should be_true
+          resp["result"]["content"][0]["text"].as_s.should contain("inline PEM only")
+        end
+      ensure
+        FileUtils.rm_rf(dir)
+      end
+    end
+
     it "jwt_encode refuses secret and key together rather than picking one" do
       with_store do |store|
         pem = JoseKeys::EC256.gsub('\n', "\\n")
