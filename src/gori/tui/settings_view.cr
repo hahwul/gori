@@ -281,10 +281,16 @@ module Gori::Tui
         "write every Repeater send into History as a flow (SRC column: RPTR) so it can be filtered, compared and exported — TUI only; gori run and MCP take their own per-call argument; ←/→/space toggles",
         bool: true),
     ]
-    # MCP: how `gori mcp` talks back to an attached agent ("Tell the agent…").
+    # MCP server: the `mcp` object of settings.json, one row per key — how `gori mcp` talks
+    # back to an attached agent ("Tell the agent…"), and whether it records its own use.
     MCP_FIELDS = [
       Field.new("Channel delivery",
         "push \"Tell the agent…\" messages as a claude/channel event when no confirmed route answers — research preview, needs Claude Code launched with --dangerously-load-development-channels server:gori; the inbox socket, codex queue, operator_messages poll and tool-result carry run either way, and a confirmed route is always tried first; applies to agents started after the change — ←/→/space toggles",
+        bool: true),
+      # `Settings.mcp_usage_log?`. The hint says what is NOT written before it says how to
+      # read the file: that is the question a row that starts a record has to answer first.
+      Field.new("Usage log",
+        "record each gori mcp tool call's name, argument names, outcome, size and duration in ~/.gori/mcp-usage.jsonl — never an argument's value, a reply, a host or a project name; nothing is sent anywhere; read it with gori mcp --usage; applies to agents started after the change — ←/→/space toggles",
         bool: true),
     ]
     # MCP permissions: one row per `Settings::MCP_PERMISSIONS` group, in its order, so a group
@@ -452,6 +458,7 @@ module Gori::Tui
                 ]
                 when :mcp then [
                   Settings::DEFAULT_MCP_CHANNELS ? "on" : "off",
+                  Settings::DEFAULT_MCP_USAGE_LOG ? "on" : "off",
                 ]
                 when :mcp_permissions then Settings::MCP_PERMISSIONS.map { "on" } # every group allowed
                 else                       [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s,
@@ -659,6 +666,7 @@ module Gori::Tui
     private def mcp_values : Array(String)
       [
         Settings.mcp_channels? ? "on" : "off",
+        Settings.mcp_usage_log? ? "on" : "off",
       ]
     end
 
@@ -940,6 +948,7 @@ module Gori::Tui
       end
       if @section == :mcp
         Settings.mcp_channels = @values[0] == "on"
+        Settings.mcp_usage_log = @values[1] == "on"
         @values = mcp_values
         return persist
       end

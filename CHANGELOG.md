@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- MCP: an opt-in usage log (`"mcp": {"usage_log": true}` in `settings.json`, off by default) records each tool call's name, argument names, outcome, reply size and duration in `~/.gori/mcp-usage.jsonl`, never an argument value, a reply, a host or a project name, and `gori mcp --usage` prints the summary (`--since`, `--json`) (#2014).
+- MCP: an opt-in usage log (Preferences › AI › **MCP server** › Usage log, or `"mcp": {"usage_log": true}` in `settings.json`; off by default) records each tool call's name, argument names, outcome, reply size and duration in `~/.gori/mcp-usage.jsonl`, never an argument value, a reply, a host or a project name, and `gori mcp --usage` prints the summary (`--since`, `--json`) (#2014, #2015).
 
 - Concurrent imports and project creation now reserve their destination slug, preserving saved data and workspace bindings when names collide (#2007).
 

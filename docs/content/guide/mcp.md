@@ -404,7 +404,7 @@ Tools run one at a time, in the order they arrive. A fuzz or a slow `send_reques
 
 ## Usage Log {#usage-log}
 
-`gori mcp` can keep a local record of how it is used: which tools an agent calls, which fail, and how large the answers are. It is **off by default**. Turn it on by setting `usage_log` under `mcp` in `settings.json` (`gori settings --edit`), then restart the agent's server, which says on stderr that the log is on.
+`gori mcp` can keep a local record of how it is used: which tools an agent calls, which fail, and how large the answers are. It is **off by default**. Turn it on with **Settings → AI → MCP server → Usage log**, or by setting `usage_log` under `mcp` in `settings.json` (`gori settings --edit`), then restart the agent's server, which says on stderr that the log is on.
 
 ```json
 { "mcp": { "usage_log": true } }

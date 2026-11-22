@@ -114,10 +114,12 @@ Placement는 *세션에서의* 비용을 결정합니다 (선택 화면에는 �
 
 | 섹션 | 필드 |
 |------|------|
-| **Agent messaging** | Channel delivery (off) |
+| **MCP server** | Channel delivery (off), Usage log (off) |
 | **MCP permissions** | Send traffic, Intercept control, Edit project data, Change scope & sandbox, Manage projects, Run local commands (각각 `on`·`ask`·`off`, 기본값은 모두 `on`) |
 
-**Agent messaging**은 `gori mcp`가 "Tell the agent…" 메시지를 붙어 있는 에이전트에게 전달하는 방식을 정합니다. inbox socket, Codex queue, tool-result, `operator_messages` poll 계층은 항상 동작합니다. **Channel delivery**는 그 *뒤에* `claude/channel` push를 놓습니다. 전달을 확인할 수 있는 경로가 하나도 답하지 않았을 때에만 시도합니다. 개발 채널 플래그로 Claude Code를 띄워야 하는 research preview라 기본은 off입니다. 이 값은 `gori mcp` 프로세스가 시작할 때 읽으므로, 이미 떠 있는 에이전트는 받았던 답을 그대로 유지합니다. [gori가 보내는 메시지](/ko/guide/mcp/#messages-from-gori)를 참고하세요.
+**MCP server**에는 `gori mcp` 서버에 대한 스위치가 둘 있습니다. **Channel delivery**는 "Tell the agent…" 메시지를 붙어 있는 에이전트에게 전달하는 방식에 관한 것입니다. inbox socket, Codex queue, tool-result, `operator_messages` poll 계층은 항상 동작합니다. **Channel delivery**는 그 *뒤에* `claude/channel` push를 놓습니다. 전달을 확인할 수 있는 경로가 하나도 답하지 않았을 때에만 시도합니다. 개발 채널 플래그로 Claude Code를 띄워야 하는 research preview라 기본은 off입니다. 이 값은 `gori mcp` 프로세스가 시작할 때 읽으므로, 이미 떠 있는 에이전트는 받았던 답을 그대로 유지합니다. [gori가 보내는 메시지](/ko/guide/mcp/#messages-from-gori)를 참고하세요.
+
+**Usage log**를 켜면 `gori mcp`가 도구 호출마다 이름, 인자 이름, 결과, 크기, 걸린 시간을 `~/.gori/mcp-usage.jsonl`에 기록합니다. 인자의 값, 응답, 호스트, 프로젝트 이름은 남기지 않습니다. 어디로도 전송되지 않으며, `gori mcp --usage`가 요약을 출력합니다. 기본은 off이고, Channel delivery처럼 서버가 시작할 때 읽습니다. [사용 기록](/ko/guide/mcp/#usage-log)을 참고하세요.
 
 **MCP permissions**는 `gori mcp`로 붙은 에이전트가 무엇을 할 수 있는지 묶음 단위로 정합니다. `off`는 그 묶음을 막고, `ask`는 각 호출을 TUI의 `ask:` 카드에 올려 승인을 기다리게 합니다. 캡처를 읽는 것은 항상 허용됩니다. 이 설정도 Channel delivery처럼 서버가 시작할 때 읽습니다. [Preferences에서 권한 정하기](/ko/guide/mcp/#permissions-from-preferences)를 참고하세요.
 

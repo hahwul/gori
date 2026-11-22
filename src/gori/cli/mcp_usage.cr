@@ -7,7 +7,8 @@ require "../plural"
 module Gori::CLI
   MCP_USAGE_DEFAULT_SINCE = "7d"
 
-  MCP_USAGE_ENABLE_HINT = "set \"mcp\": {\"usage_log\": true} in settings.json " \
+  MCP_USAGE_ENABLE_HINT = "switch on Preferences › AI › MCP server › Usage log, or set " \
+                          "\"mcp\": {\"usage_log\": true} in settings.json " \
                           "(`gori settings --edit`), then restart the agent's gori MCP server"
 
   # The arguments a tool row names, most-passed first. The rest are in `--json`.

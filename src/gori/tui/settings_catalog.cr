@@ -113,8 +113,13 @@ module Gori::Tui
       # AI: how gori talks to the coding agents attached over MCP (#1090). Its own group,
       # not a row under Network — an operator looking for "how do I message my agent" should
       # not have to open the proxy-address section to find it.
-      Section.new(:mcp, "settings.mcp", "Agent messaging",
-        "How gori mcp delivers \"Tell the agent…\" messages — enable the claude/channel push as a last resort behind the inbox socket, codex queue, operator_messages poll and tool-result carry", :ai, :form),
+      #
+      # "MCP server", not "Agent messaging": the section is the `mcp` object of settings.json,
+      # one row per key, and since the usage log joined it the old name covered half of it.
+      # The keywords keep that name, and both rows, findable from the palette.
+      Section.new(:mcp, "settings.mcp", "MCP server",
+        "How the gori mcp server behaves — the claude/channel push for \"Tell the agent…\" messages, and the opt-in usage log behind gori mcp --usage", :ai, :form,
+        keywords: %w[agent messaging channel channels usage log]),
       # What an attached agent may DO: coarse switches over groups of `gori mcp` tools. All on
       # by default, which is what gori mcp served before they existed.
       Section.new(:mcp_permissions, "settings.mcp-permissions", "MCP permissions",

@@ -959,6 +959,44 @@ describe SettingsView do
     end
   end
 
+  # The form is positional, so the two rows start on OPPOSITE values: a reader, a save arm
+  # or a reset arm that swapped them, or skipped one, moves a value these lines name.
+  it "switches the MCP usage log on beside Channel delivery, and resets both" do
+    dir = File.tempname("gori-settings-mcp-server")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev = {Gori::Settings.mcp_channels?, Gori::Settings.mcp_usage_log?}
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.mcp_channels = true
+      Gori::Settings.mcp_usage_log = false
+      v = SettingsView.new
+      v.reload(:mcp)
+      backend = MemoryBackend.new(140, 30)
+      v.render(Screen.new(backend), Rect.new(0, 0, 140, 30))
+      backend.contains?("Channel delivery › ◉ on").should be_true
+      backend.contains?("Usage log        › ◯ off").should be_true
+
+      v.move_field(1)
+      v.toggle_or_move(1) # Usage log: off → on
+      v.save.should eq("settings saved")
+      Gori::Settings.mcp_usage_log?.should be_true
+      Gori::Settings.mcp_channels?.should be_true
+      JSON.parse(File.read(Gori::Settings.path))["mcp"].should eq(
+        JSON.parse(%({"channels":true,"usage_log":true})))
+
+      v.reset_to_defaults
+      v.save.should eq("settings saved")
+      Gori::Settings.mcp_usage_log?.should be_false
+      Gori::Settings.mcp_channels?.should be_false
+      JSON.parse(File.read(Gori::Settings.path))["mcp"]?.should be_nil
+    ensure
+      Gori::Settings.mcp_channels, Gori::Settings.mcp_usage_log = prev
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+    end
+  end
+
   # One row per Settings::MCP_PERMISSIONS group, all on at the factory default and cycling
   # on → ask → off (#1585); a save sets exactly the groups cycled and leaves a key this gori
   # does not draw where it was.
