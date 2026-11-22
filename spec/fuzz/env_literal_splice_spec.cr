@@ -105,3 +105,76 @@ describe "an env value spliced into a fuzz template" do
     end
   end
 end
+
+# An env value may give a chain step its ARGUMENT, never be the step that runs a command: the exec
+# gate judges the template as authored, and `§v¦$P§` with a benign P passes it.
+describe "an env value inside a ¦chain" do
+  it "is refused when it supplies the command step, with commands allowed, and runs nothing" do
+    with_counting_hook do |hook, runs|
+      with_project_env([{"P", "exec:#{hook}"}]) do
+        ex = expect_raises(F::CommandsRefused, F::Plan::ENV_COMMAND_REFUSAL) do
+          F::Plan.build(splice_options("GET /q?a=§v¦$P§ HTTP/1.1\r\nHost: t.test\r\n\r\n"), ungated_outbound)
+        end
+        ex.from_env?.should be_true
+        runs.call.should eq(0)
+      end
+    end
+  end
+
+  it "is refused per position: a literal exec position does not license an env-supplied one" do
+    with_counting_hook do |hook, runs|
+      with_project_env([{"P", "exec:#{hook}"}]) do
+        expect_raises(F::CommandsRefused, F::Plan::ENV_COMMAND_REFUSAL) do
+          F::Plan.build(splice_options("GET /q?a=§x¦exec:#{hook}§&b=§v¦$P§ HTTP/1.1\r\nHost: t.test\r\n\r\n",
+            ["1", "2"]), ungated_outbound)
+        end
+        runs.call.should eq(0)
+      end
+    end
+  end
+
+  it "still supplies the argument of an exec step the template names" do
+    with_counting_hook do |hook, runs|
+      with_project_env([{"H", hook}]) do
+        plan = F::Plan.build(splice_options("GET /q?a=§abc¦exec:$H§ HTTP/1.1\r\nHost: t.test\r\n\r\n"), ungated_outbound)
+        jobs_of(plan)[0].lines.first.should eq("GET /q?a=x HTTP/1.1")
+        runs.call.should be > 0
+      end
+    end
+  end
+
+  it "still supplies a step that runs no command" do
+    with_project_env([{"ENC", "base64"}]) do
+      plan = F::Plan.build(splice_options("GET /q?a=§abc¦$ENC§ HTTP/1.1\r\nHost: t.test\r\n\r\n"), ungated_outbound)
+      jobs_of(plan)[0].lines.first.should eq("GET /q?a=eA== HTTP/1.1")
+    end
+  end
+
+  it "is refused in a typed WebSocket frame too" do
+    with_counting_hook do |hook, runs|
+      with_project_env([{"P", "exec:#{hook}"}]) do
+        options = splice_options("GET /ws HTTP/1.1\r\nHost: t.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" \
+                                 "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n")
+        options.ws_messages = [F::WsMessageSource.new(Gori::Proxy::WS::OP_TEXT.to_i, "{\"a\":\"§v¦$P§\"}")]
+        expect_raises(F::CommandsRefused, F::Plan::ENV_COMMAND_REFUSAL) { F::Plan.build(options, ungated_outbound) }
+        runs.call.should eq(0)
+      end
+    end
+  end
+
+  it "reads as the builder's sentence on the TUI Fuzzer tab" do
+    with_counting_hook do |hook, runs|
+      with_project_env([{"P", "exec:#{hook}"}]) do
+        with_store do |store|
+          view = Gori::Tui::FuzzerView.new
+          view.load_request("http://127.0.0.1:9", "GET /?q=§v¦$P§ HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+          view.apply_set(nil, Gori::Tui::SetSpec.list(["p"]))
+          engine, error = view.build_engine(false, Gori::Scope.load(store))
+          engine.should be_nil
+          error.should eq(F::Plan::ENV_COMMAND_REFUSAL)
+          runs.call.should eq(0)
+        end
+      end
+    end
+  end
+end

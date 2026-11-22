@@ -261,8 +261,16 @@ module Gori::Fuzz
     end
   end
 
-  # `Plan.build`'s refusal under `commands_allowed? == false`; not a `PlanError::Reason`.
-  class CommandsRefused < Exception
+  # `Plan.build`'s refusal of a chain step that runs a local command: under
+  # `commands_allowed? == false`, or (`from_env?`) on any surface when an env value supplied
+  # that step (`Plan.env_supplied_command?`). Not a `PlanError::Reason`. A `Gori::Error`, so
+  # the TUI and `gori run fuzz` print the message as they print every other builder refusal.
+  class CommandsRefused < Gori::Error
+    getter? from_env : Bool
+
+    def initialize(message : String, @from_env : Bool = false)
+      super(message)
+    end
   end
 
   # A ready-to-run fuzz job: THE only place a `Fuzz::Engine` is constructed.
@@ -504,6 +512,8 @@ module Gori::Fuzz
           # data, and the `§…§` parse below must not read a position or a `¦chain` out of it.
           String.new(Env.expand_wire(options.template, splice: Template.literal_splice(options.template)))
         end
+      # An env value may supply a chain step's argument, never the command step itself.
+      refuse_env_supplied_command(options.template, text)
       # The FRAME payloads, expanded on the same provenance axis as the head one line up: a
       # frame the operator typed (`--message`, MCP `messages`) resolves its `$KEY`, a CAPTURED
       # frame does not. `Env.expand`, not `expand_wire` — a frame has no head, so there is no
@@ -516,7 +526,9 @@ module Gori::Fuzz
         if detail = Env.unresolved_env(m.payload)
           raise PlanError.new(PlanError::Reason::UnresolvedEnv, "unresolved env #{detail}", detail)
         end
-        Env.expand(m.payload, splice: Template.literal_splice(m.payload))
+        Env.expand(m.payload, splice: Template.literal_splice(m.payload)).tap do |frame|
+          refuse_env_supplied_command(m.payload, frame)
+        end
       end)
 
       text, mark_matches, shadowed_marks = mark_text(text, options.auto_mark?, options.marks)
@@ -996,6 +1008,34 @@ module Gori::Fuzz
     # isn't valid input for it" (`base64-decode` over a `§admin§` default raises, and refusing
     # that run would block a legitimate sweep). Asking whether the converter can run at all
     # answers the first and leaves the second — genuinely per-payload — alone.
+    ENV_COMMAND_REFUSAL = "an env value supplied a §…§ chain step that runs a local command — " \
+                          "name the exec: step in the template itself (an env value may only supply its argument)"
+
+    # Did env expansion make a `¦chain` run a local command that the template as WRITTEN does
+    # not? An env value may supply a step's ARGUMENT (`§v¦exec:$TOOL§`, `§v¦hmac:$KEY§`), never
+    # the command step itself: the exec gate (`commands_allowed`, MCP `exec`) judges the template
+    # when it is authored, and a value set later (`set_env_var`) would otherwise arm `§v¦$P§`.
+    #
+    # PER POSITION, so one literal exec position cannot license a second whose command came from
+    # env. `raw` and `expanded` have the same positions in the same order, because each value is
+    # spliced as a literal (`Template.literal_splice`) and so adds or removes no delimiter;
+    # whole-template is the fallback should the counts ever differ. Asks the registry, runs nothing.
+    def self.env_supplied_command?(raw : String, expanded : String) : Bool
+      return false if raw == expanded
+      registry = Decoder.shared_registry
+      after = Template.parse(expanded).positions
+      return false unless Template.runs_commands?(after, registry)
+      before = Template.parse(raw).positions
+      return !Template.runs_commands?(before, registry) unless before.size == after.size
+      after.each_with_index.any? do |pos, i|
+        Template.runs_commands?([pos], registry) && !Template.runs_commands?([before[i]], registry)
+      end
+    end
+
+    private def self.refuse_env_supplied_command(raw : String, expanded : String) : Nil
+      raise CommandsRefused.new(ENV_COMMAND_REFUSAL, from_env: true) if env_supplied_command?(raw, expanded)
+    end
+
     def self.refuse_unrunnable_chains(positions : Array(Template::Position),
                                       registry : Decoder::Registry) : Nil
       bad = [] of String

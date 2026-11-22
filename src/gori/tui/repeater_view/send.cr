@@ -221,8 +221,15 @@ class Gori::Tui::RepeaterView
   # that cannot run is REFUSED here (`Fuzz::Plan.refuse_unrunnable_chains` for a chain that
   # could never run, `refuse_failed_chains` for one that failed on this value) rather than let
   # `Template#apply_chains` drop the raw, untransformed value onto the socket.
+  #
+  # Refused, too, when an env value supplied a chain step that runs a local command
+  # (`Fuzz::Plan.env_supplied_command?`): a value may give a step its argument, not the step.
   private def marked_request_bytes : Bytes
-    finalize_wire(render_marked(marked_editor_bytes, refuse: true))
+    bytes = marked_editor_bytes
+    if Fuzz::Plan.env_supplied_command?(@editor.wire_text, String.new(bytes))
+      raise Fuzz::ChainError.new(Fuzz::Plan::ENV_COMMAND_REFUSAL)
+    end
+    finalize_wire(render_marked(bytes, refuse: true))
   end
 
   # Render the §…§ template in `raw` (each marked default through its inline Decoder
