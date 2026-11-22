@@ -12,7 +12,7 @@
 
 - HTTP/2: on a connection with a Match & Replace body or stub rule, a peer that keeps sending DATA past the window its receiver allowed has the connection closed instead of every frame buffered in memory, and a re-encoded head keeps the peer's HPACK table size update.
 
-- Scope: the Sandbox, the scope gate and intercept judge a request under the origin gori actually dials and, over HTTP/2, the connection's own scheme, so a request-target without a leading slash (`GET 0/`), an absolute-form target naming another authority or a spoofed `:scheme` can no longer pass an include or dodge an exclude. A url-level exclude also holds when the origin is spelled differently (`ACME.test`, `acme.test.`, `HTTP://`, `:80`, `u@`).
+- Scope: the Sandbox, the scope gate and intercept judge a request under the origin gori actually dials and, over HTTP/2, the connection's own scheme, so a request-target without a leading slash (`GET 0/`), an absolute-form target naming another authority or a spoofed `:scheme` can no longer pass an include or dodge an exclude. A url-level exclude also holds when the origin is spelled differently (`ACME.test`, `acme.test.`, `HTTP://`, `:80`, `:08080`, `u@`).
 
 - Intercept: a WebSocket hold can no longer be stalled by a flood of tiny messages queued behind it; the queue fails open past 4096 messages as it already did past 1 MiB, and one direction holds at most 256 messages at once, queueing further matches unheld and in order.
 
@@ -22,7 +22,7 @@
 
 - Repeater/Fuzzer: an HTTP/1.1 send's response head phase, interim 1xx responses included, is bounded once by three times the send's timeout (90 s at the defaults) instead of a fresh 30 s per head, so an origin dripping 103s can no longer hold a send for minutes.
 
-- Fuzzer/Repeater: a project env value in a `§…§` template is sent as its own bytes, so a `§` or `¦` in it no longer adds a position or arms a chain, and an env value can no longer be or add the chain step that runs a local command (it may still supply that step's argument); a value with `§` or `¦` right beside a marker is refused rather than placed ambiguously.
+- Fuzzer/Repeater: a project env value in a `§…§` template is sent as its own bytes, so a `§` or `¦` in it no longer adds a position or arms a chain, and an env value can no longer be or add the chain step that runs a local command (it may still supply that step's argument, or name converters that run none); a value that cannot be placed beside a marker, or an empty one as a marker's whole default, is refused rather than sent ambiguously.
 
 - MCP: `create_repeater`, `update_repeater` and `create_repeaters` ask the `exec` permission before storing a request whose `§…§` chain runs a local command, and preparing a Fuzzer tab (`create_fuzzer`, `gori run fuzz create`) no longer runs an `exec:` step.
 

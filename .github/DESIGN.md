@@ -6278,8 +6278,9 @@ a request-target without a leading slash was glued onto the host (`127.0.0.1` + 
   recovers the URL. One that does name the resolved origin keeps its verbatim spelling, so an
   include that names a port on plaintext forward-proxy traffic keeps matching.
 - A string or regex EXCLUDE is also asked of the URL in canonical spelling (`Scope.canonical_url`:
-  scheme lowercased, userinfo and a default port dropped, host folded as a `host` rule folds
-  it). Includes keep matching the raw spelling, so no include changes meaning.
+  scheme lowercased, userinfo and a default port dropped, a zero-padded port rewritten to
+  plain decimal, host folded as a `host` rule folds it). A port is ASCII digits only, as the
+  forward dial's `URI.parse` reads it; `:+80` names no port, so that target is not same-origin. Includes keep matching the raw spelling, so no include changes meaning.
 
 `Url.request_url` and its SQL twin `QL::URL_EXPR_NO_PORT` are unchanged: History shows and
 filters the stored spelling. So for these shapes a live gate refuses more than the lens hides,
@@ -6297,9 +6298,10 @@ ban: a chain STEP that runs a command after expansion while its raw step does no
 (raised as `CommandsRefused`, which is now a `Gori::Error`).
 The escape cannot win every case: the parser pairs `§§§` greedily, so a value that begins or
 ends with `§` beside a delimiter merges with it. So the expanded parse is VERIFIED against the
-raw one (`Plan.env_splice_refusal`): same positions, the same literal runs, defaults and chain
-steps once each raw fragment is expanded on its own, and no step that runs a command unless its
-raw step does. Anything else is refused before a byte is sent. `set_env_var` stays ungated. The same decision closes two neighbours: MCP `create_repeater`,
+raw one (`Plan.env_splice_refusal`): same positions, the same literal runs and defaults once
+each raw fragment is expanded on its own, and a chain equal to its raw steps each expanded and
+split in place, so a value may name a converter list (`base64|base64`) but no derived step may
+run a command unless its raw step does. Anything else is refused before a byte is sent. `set_env_var` stays ungated. The same decision closes two neighbours: MCP `create_repeater`,
 `update_repeater` and `create_repeaters` ask `exec` before storing a command-running chain,
 and preparing a Fuzzer tab builds its plan with hooks off.
 
