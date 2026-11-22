@@ -31,4 +31,24 @@ describe Gori::Fuzz::SessionOptions do
     message.payload.should eq("%%%")
     expect_raises(Base64::Error) { message.build }
   end
+
+  # The prepared tab's preview counts what the plan counts: an env value is spliced as a literal,
+  # so its marker pair is no position.
+  it "previews the positions Plan.build counts when an env value carries a marker pair" do
+    prev = Gori::Settings.project_env_vars
+    Gori::Settings.project_env_vars = [{"TOK", "ab§cd§ef"}]
+    Gori::Env.bump_highlight_rev
+    begin
+      template = "GET /q?a=§v§ HTTP/1.1\r\nHost: t.test\r\nX-Tok: $TOK\r\n\r\n"
+      options = Gori::Fuzz::PlanOptions.new(template, target: "http://t.test",
+        sources: [Gori::Fuzz::InlineList.new(["1"]).as(Gori::Fuzz::PayloadSource)],
+        config: Gori::Fuzz::Config.new(keep_bodies: :none), verify: false)
+      preview = Gori::Fuzz::SessionOptions.capture(options).position_count(template, false, false)
+      preview.should eq(Gori::Fuzz::Plan.build(options, ungated_outbound).position_count)
+      preview.should eq(1)
+    ensure
+      Gori::Settings.project_env_vars = prev
+      Gori::Env.bump_highlight_rev
+    end
+  end
 end

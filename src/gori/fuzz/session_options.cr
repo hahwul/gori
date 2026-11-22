@@ -53,15 +53,15 @@ module Gori::Fuzz
       request = if @verbatim
                   text
                 elsif evidence
-                  env_vars ? Env.expand(text, env_vars, unescape: Env::Owns::None) : text
+                  env_vars ? Env.expand(text, env_vars, unescape: Env::Owns::None, splice: Template.literal_splice(text)) : text
                 else
-                  String.new(Env.expand_wire(text))
+                  String.new(Env.expand_wire(text, splice: Template.literal_splice(text)))
                 end
       marked = Plan.mark_text(request, @auto_mark, @marks)[0]
       count = Template.parse(marked, http2).position_count
       @messages.try(&.each do |message|
         frame = String.new(Base64.decode(message.payload))
-        frame = Env.expand(frame) unless message.evidence? || @verbatim || message.opcode != Proxy::WS::OP_TEXT.to_i
+        frame = Env.expand(frame, splice: Template.literal_splice(frame)) unless message.evidence? || @verbatim || message.opcode != Proxy::WS::OP_TEXT.to_i
         count += Template.parse(Plan.mark_text(frame, @auto_mark, @marks, message.opcode)[0]).position_count
       end)
       count
