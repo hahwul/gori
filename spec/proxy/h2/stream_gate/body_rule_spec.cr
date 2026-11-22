@@ -1398,3 +1398,94 @@ describe "H2::Relay body-rule path" do
     end
   end
 end
+
+# The two gates of a body-rule connection over in-memory legs, driven frame by frame, so a spec
+# can play a sender that ignores flow control (the peers in `H2FlowRig` never do).
+private class MemRig
+  getter c2s : Gori::Proxy::H2::StreamGate
+  getter s2c : Gori::Proxy::H2::StreamGate
+  getter client = IO::Memory.new
+  getter enc_out = HPACK::Encoder.new
+  getter enc_in = HPACK::Encoder.new
+
+  def initialize(rules : Gori::Rules, ic : Gori::Interceptor)
+    sink = BodySink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "api.example.com", 443)
+    @c2s = Gori::Proxy::H2::StreamGate.new("out", IO::Memory.new, 1_i64, sink, assembler, "api.example.com", 443, ic,
+      Gori::Proxy::H2::HeadRewrite.new("out", rules, assembler, "api.example.com", true), body_rewriter: rules)
+    @s2c = Gori::Proxy::H2::StreamGate.new("in", @client, 1_i64, sink, assembler, "api.example.com", 443, ic,
+      Gori::Proxy::H2::HeadRewrite.new("in", rules, assembler, "api.example.com", true), nil, rules)
+    @c2s.peer = @s2c
+    @s2c.peer = @c2s
+  end
+
+  def open(response : Array({String, String})) : Nil
+    @c2s.accept(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS | Frame::END_STREAM, 1_u32,
+      @enc_out.encode(get("/big", "api.example.com"))))
+    @s2c.accept(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS, 1_u32, @enc_in.encode(response)))
+  end
+
+  def written_data : Int32
+    frames = [] of Frame::Header
+    reader = IO::Memory.new(@client.to_slice)
+    while frame = (Frame.read(reader) rescue nil)
+      frames << frame
+    end
+    frames.select { |f| f.frame_type == Frame::Type::Data }.sum(&.payload.size)
+  end
+end
+
+# How many of `count` 16 KiB DATA frames the origin got to send before the gate ended the
+# connection, or nil when it took them all. `padded` pads the first one (pad length 0).
+private def blast_until_refused(rig : MemRig, count : Int32, padded = false) : Int32?
+  count.times do |i|
+    flags = padded && i == 0 ? Frame::PADDED : 0_u8
+    payload = Bytes.new(16384) { |j| flags != 0 && j == 0 ? 0_u8 : 0x41_u8 }
+    rig.s2c.accept(Frame::Header.new(Frame::Type::Data.value, flags, 1_u32, payload))
+  rescue Gori::Error
+    return i
+  end
+  nil
+end
+
+private BLAST_BOUND = 65_535 + Gori::Proxy::H2::StreamGate::OVERRUN_SLACK + 16384
+
+# A conformant sender never sends past the window its receiver advertised; on the plain relay TCP
+# backpressure is what stops one that does. Nothing blocks on the body-rule path, so every frame
+# such a sender sent past the window used to be parked here, without bound.
+describe "H2::StreamGate body rules against a sender that ignores flow control" do
+  it "ends the connection instead of parking passthrough DATA past the receiver's window" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "secret", "x", host: "api.example.com")
+      rig = MemRig.new(rules, ic)
+      # gzip: the rule cannot read it, so this is a passthrough stream on a rule connection.
+      rig.open(ok + [{"content-encoding", "gzip"}])
+      refused_at = blast_until_refused(rig, 256).not_nil!
+      (refused_at * 16384).should be <= BLAST_BOUND
+      rig.written_data.should be <= 65_535 # nothing past the receiver's window was written
+    end
+  end
+
+  it "ends the connection instead of queueing an owned stream's DATA past the windows" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "secret", "x", host: "api.example.com")
+      rig = MemRig.new(rules, ic)
+      rig.open(ok) # owned: the rule can read it, and the padded first frame spills it at once
+      refused_at = blast_until_refused(rig, 256, padded: true).not_nil!
+      # gori credits the sender for every owned byte it writes, so the window it may legitimately
+      # fill is the receiver's twice over: what gori wrote, and what that credit allowed after it.
+      (refused_at * 16384).should be <= BLAST_BOUND + 65_535
+    end
+  end
+
+  it "takes everything a sender that keeps to the window sends" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "secret", "x", host: "api.example.com")
+      rig = MemRig.new(rules, ic)
+      rig.open(ok + [{"content-encoding", "gzip"}])
+      blast_until_refused(rig, 3).should be_nil
+      rig.s2c.accept(Frame::Header.new(Frame::Type::Data.value, 0_u8, 1_u32, Bytes.new(16383, 0x41_u8)))
+      rig.written_data.should eq(65_535)
+    end
+  end
+end

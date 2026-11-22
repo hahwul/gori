@@ -608,6 +608,7 @@ module Gori::Proxy::H2
           after_park(slot)
         end
       end
+      check_overrun_locked(frame)
       take_deferred_cross(cross)
     end
 
