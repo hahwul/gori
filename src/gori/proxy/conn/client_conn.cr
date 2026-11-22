@@ -1409,7 +1409,7 @@ module Gori::Proxy
       # open; the return value is the CLIENT keep-alive decision (separate sides).
       # The origin side keys on sent_req (what it received); the client side on req.
       update_upstream_reuse(origin_keep_alive?(sent_req, resp, resp_framing))
-      keep_alive?(req, resp, resp_framing)
+      client_keep_alive?(req, sent_req, resp, resp_framing)
     end
 
     # Interim 1xx (RFC 9110 §15.2): an informational response (100 Continue,
@@ -2007,7 +2007,7 @@ module Gori::Proxy
         error: error, advisory: advisory)
       update_upstream_reuse(complete && origin_keep_alive?(sent_req, resp, framing))
       return false unless complete
-      keep_alive?(req, resp, framing)
+      client_keep_alive?(req, sent_req, resp, framing)
     end
 
     # The buffered response-body path (no intercept): buffer the whole body, rewrite the entity,
@@ -2081,7 +2081,7 @@ module Gori::Proxy
       # block its next keep-alive request on the missing bytes.
       update_upstream_reuse(resp_complete && origin_keep_alive?(sent_req, resp, resp_framing))
       return false unless resp_complete
-      keep_alive?(req, resp, resp_framing)
+      client_keep_alive?(req, sent_req, resp, resp_framing)
     end
 
     # Reads the response head, transparently redialing + resending ONCE if a
@@ -3961,6 +3961,21 @@ module Gori::Proxy
       return false if req.headers.lists?("Connection", "close")
       return false if resp.headers.lists?("Connection", "close")
       req.version == "HTTP/1.1" || req.headers.lists?("Connection", "keep-alive")
+    end
+
+    # `keep_alive?` for a response framed by `framing`, which the method that went UPSTREAM
+    # decided (`sent_req`). The client frames the same head by its OWN method, and a
+    # Match&Replace rule or an intercept edit can change the method in between: HEAD rewritten
+    # to GET forwards a body the HEAD client reads as its next response, GET rewritten to HEAD
+    # leaves a GET client waiting for a body that never comes. Where the two framings differ
+    # the connection closes after this response; nothing is added to it or stripped from it.
+    private def client_keep_alive?(req : Codec::RawRequest, sent_req : Codec::RawRequest,
+                                   resp : Codec::RawResponse, framing : Codec::BodyFraming) : Bool
+      if req.method != sent_req.method
+        client_framing = (Codec::Body.response_framing(resp, req.method)[0] rescue nil)
+        return false unless client_framing == framing
+      end
+      keep_alive?(req, resp, framing)
     end
 
     # Whether the ORIGIN will keep its connection open after this response, so its
