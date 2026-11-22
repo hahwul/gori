@@ -6169,3 +6169,55 @@ pre-filter still gates the probe, the complete-prefix differential stays behind 
 a variant not safely sendable on a flow's transport is not offered. The Expect probe is a self-damaging
 timing probe on gori's own fresh socket (it rides `followups`), so it smuggles nothing into a
 neighbour's request.
+
+### 2026-11-22: `gori mcp` can record its own use, opt-in, and never a value
+
+Refines: [P0](#p0), [P4](#p4).
+
+Every MCP decision so far rested on made-up evidence: evaluator agents, the `eval/` tasks, an
+audit round. Nothing recorded what an attached agent actually does. The project `events` feed
+logs only the calls that send or write (`Tools#log_agent_action`), a `--read-only` server
+cannot write it, and it is pruned; the presence marker is gone when the process is. So a read
+call, an error code, a reply's size and a session that never called a tool left no trace.
+
+`MCP::UsageLog` is that trace, and it is **off by default** (`mcp.usage_log`). The operator
+chose opt-in over the recommended default-on: a security tool that starts keeping a file
+about its use, unasked, has changed what it is, and the price of that choice — less evidence,
+only from people who looked for the switch — is accepted. A server with it on says so on
+stderr at start.
+
+**What a line may hold is the design.** The summary has to be safe to paste into a public
+issue, so a line carries text gori itself wrote: a tool's name, the NAMES of the declared
+arguments that were passed, the outcome code, the declared argument an error blamed, the
+reply's size (`result.text`, what the model reads) and the duration. Never a value, a reply,
+a host, a URL or a project's name. Three peer-chosen strings are cleaned and capped before
+they land: the client's name and version, and a tool name that does not exist, which is
+reduced to `[a-z0-9_]` and 64 characters. The session line adds what decided the catalogue,
+all of it the operator's or gori's own words: the `--tools` spec, `--read-only` and the
+permission groups switched off, without which "advertised and never called" cannot be
+computed. A failed send's code is read back out of the envelope gori answered with, and kept
+only when it has a code's shape. An argument name the tool does not declare is the
+model's free text, so it is counted and not written — which is also why the `field` of an
+unknown-argument refusal is dropped (it is the caller's own spelling) while the `field` of
+any other error is kept only when the tool declares it.
+
+**One global file, not one per project.** `$GORI_HOME/mcp-usage.jsonl`, append-only, opened
+and closed per line, rotated to `.1` past 4 MB under a sidecar lock that is never waited
+for (the size is asked before every line, so a session that runs for days is bounded too). Beside the project
+database it would have needed the archive, delete and prune paths to learn about it and
+would have named a project by where it sat. Per-call JSONL rather than counters flushed at
+exit, because a client that kills the server skips the exit and because the SEQUENCE is the
+finding — an agent re-sending an argument it had spelled correctly is visible only in order.
+
+**The hook is the transport, not `Tools#call`.** `gori run` reaches the same tools layer, and
+only `Server#handle_tools_call` knows whether an answer left. A real tool the `--tools`
+filter withheld is recorded as `NOT_SERVED`, apart from an invented name, though both are
+the same -32602 on the wire: "the profile hid a tool the agent wanted" is the finding that
+decides a profile's contents. A request cancelled before the worker reached it ran nothing
+and records nothing.
+
+**One reader, on one surface.** `gori mcp --usage [--since] [--json]` prints the summary and
+starts no server. It is not an MCP tool (an agent does not need it, and it would cost
+catalogue bytes in every session) and not a TUI readout yet: a Preferences row and a call
+count in the Agents card are a layout decision that has not been made, so the setting is a
+`settings.json` key for now, like `listeners`.

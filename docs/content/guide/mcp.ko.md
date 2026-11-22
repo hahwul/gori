@@ -401,6 +401,40 @@ gori가 지원하지 않는 버전은 `-32022`와 지원 버전 목록으로 거
 
 `race_requests`, `timing_requests`, `minimize_repeater`는 `background:true`도 받습니다. 호출은 이 인자가 없을 때와 똑같이 거부되거나 게이트를 거친 뒤 곧바로 `bg_*` `job_id`를 돌려주고, 실행은 다음 호출을 처리하는 동안 계속됩니다. `get_job`은 동기 호출이 돌려줬을 것과 같은 결과를 돌려주고(`wait_ms`를 주면 실행이 끝날 때까지 기다립니다), `stop_job`은 다음 확인 지점에서 실행을 취소합니다. 중지된 실행의 결과에는 `incomplete_reason:"stopped"`가 더 붙습니다. 이미 전송된 race는 끝까지 갑니다.
 
+## 사용 기록 {#usage-log}
+
+`gori mcp`는 자신이 어떻게 쓰이는지를 로컬에 기록할 수 있습니다. 에이전트가 어떤 도구를 부르는지, 어떤 호출이 실패하는지, 응답이 얼마나 큰지를 남깁니다. **기본값은 꺼짐**입니다. `settings.json`(`gori settings --edit`)의 `mcp` 아래에 `usage_log`를 켜고 에이전트의 서버를 다시 시작하면, 서버가 stderr에 기록이 켜졌다고 알립니다.
+
+```json
+{ "mcp": { "usage_log": true } }
+```
+
+도구 호출마다 `~/.gori/mcp-usage.jsonl`(`$GORI_HOME` 아래)에 한 줄이 추가됩니다.
+
+- 도구 이름과, 넘긴 인자 중 선언된 것의 **이름**
+- 결과(`ok` 또는 오류 코드)와, 오류가 지목한 선언된 인자
+- 응답 크기, 호출에 걸린 시간, 응답이 클라이언트에 전달됐는지 여부
+
+인자의 값, 응답 내용, 호스트, URL, 프로젝트 이름은 기록하지 않습니다. 도구가 선언하지 않은 인자 이름은 개수만 세고 남기지 않으며, 존재하지 않는 도구 이름은 영문자·숫자·밑줄만 남깁니다. 세션마다 gori 버전, 클라이언트 이름과 버전, 카탈로그를 정한 조건(`--tools` 지정, `--read-only`, 꺼 둔 [권한 그룹](#permissions-from-preferences), 그 결과 도구 수), `tools/list` 응답 크기도 기록합니다. 이 파일은 어디로도 전송되지 않습니다. 4 MB를 넘으면 이전 파일을 대체하며 `mcp-usage.jsonl.1`로 회전합니다.
+
+`gori mcp --usage`는 서버를 띄우지 않고 요약을 출력합니다.
+
+```
+gori mcp usage · last 7d · 14 sessions (9 made no calls) · 78 calls
+clients    claude-code 12 · codex 2
+profile    @recon 11 · * 3
+catalogue  45.5kB per tools/list
+
+TOOL          CALLS  ERR  TOP ERROR                  REPLY p50 / max  p50 ms  ARGS
+list_history     41    3  INVALID_ARGUMENT:query ×3  6.1kB / 39.8kB       12  query×38 limit×20 sort×4
+get_flow         28    0                             2.4kB / 31.0kB        4  id×28
+
+never called: 31 of 39 advertised tools (--json lists them)
+unknown tool names: search_history ×2
+```
+
+`--since=24h`, `--since=7d`(기본값), `--since=all`로 읽을 기간을 정하고, `--json`은 한 번도 불리지 않은 도구 목록을 포함한 모든 집계를 출력합니다. 서버가 `--tools`로 제외한 실제 도구를 부른 호출은 **not served, but asked for**로 따로 표시됩니다.
+
 ## MCP 이음새인 이유 {#why-an-mcp-seam}
 
 gori에는 내장 AI 챗이 없습니다. 에이전트는 MCP로 gori에 접근하므로 모델을 직접 고를 수 있고, 트래픽은 보낸 곳 외에는 가지 않으며, 같은 인터페이스가 스크립트와 에이전트를 모두 지원합니다. [`gori run`](/ko/guide/scripting/)은 비대화형 경로를, MCP는 대화형 에이전트 경로를 담당합니다.

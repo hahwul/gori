@@ -130,6 +130,7 @@ private def with_every_section_populated(&)
   redaction_active = Gori::Settings.redaction_active
   redaction_default = Gori::Settings.redaction_default?
   mcp_channels = Gori::Settings.mcp_channels?
+  mcp_usage_log = Gori::Settings.mcp_usage_log?
   mcp_denied = Gori::Settings.mcp_denied_permissions
   user_agents = Gori::Settings.user_agents
   begin
@@ -179,6 +180,7 @@ private def with_every_section_populated(&)
     Gori::Settings.redaction_active = redaction_active
     Gori::Settings.redaction_default = redaction_default
     Gori::Settings.mcp_channels = mcp_channels
+    Gori::Settings.mcp_usage_log = mcp_usage_log
     Gori::Settings.mcp_denied_permissions = mcp_denied
   end
 end

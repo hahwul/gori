@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- MCP: an opt-in usage log (`"mcp": {"usage_log": true}` in `settings.json`, off by default) records each tool call's name, argument names, outcome, reply size and duration in `~/.gori/mcp-usage.jsonl`, never an argument value, a reply, a host or a project name, and `gori mcp --usage` prints the summary (`--since`, `--json`) (#2014).
+
 - Concurrent imports and project creation now reserve their destination slug, preserving saved data and workspace bindings when names collide (#2007).
 
 - Project export preserves existing backups when the manifest exceeds the 64 KiB limit reported by export and import. Standalone database exports skip neighboring tags, and project imports roll back if archived tags cannot be saved (#1994, #2002, #2006).

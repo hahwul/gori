@@ -28,6 +28,9 @@ module Gori::CLI
     # "accepted, then quietly discarded" failure MCP::Install.build_args documents for the
     # selector flags, spent on a whole client instead of one flag.
     install_targets = [] of String
+    usage = false
+    usage_since = nil.as(String?)
+    usage_json = false
 
     parser = option_parser("gori mcp") do |p|
       p.banner = "Usage: gori mcp [options]\n\n" \
@@ -51,8 +54,22 @@ module Gori::CLI
       p.on("--install-grok", "Install gori as an MCP server in Grok (~/.grok/config.toml)") { install_targets << "grok" }
       p.on("--install-hermes", "Install gori as an MCP server in Hermes ($HERMES_HOME, default ~/.hermes/config.yaml)") { install_targets << "hermes" }
       p.on("--install-pi", "Install gori as an MCP server in Pi ($PI_CODING_AGENT_DIR, default ~/.pi/agent/mcp.json; requires an MCP adapter)") { install_targets << "pi" }
+      p.on("--usage", "Print what the usage log recorded and exit, starting no server (the log is off by default: mcp.usage_log in settings.json)") { usage = true }
+      p.on("--since=AGE", "With --usage: how far back to read: 24h, 7d (default: #{MCP_USAGE_DEFAULT_SINCE}), or all") { |v| usage_since = v }
+      p.on("--json", "With --usage: print the report as JSON") { usage_json = true }
     end
     parser.parse(args)
+
+    # A report, not a server: every serving and install flag beside it would be accepted and
+    # then quietly discarded, which is the failure `install_targets` above was made a list for.
+    if usage
+      serving = db_path || project || tools_spec || use_active_project || no_project ||
+                insecure_upstream || read_only || pin_project || !install_targets.empty?
+      abort "gori mcp: --usage prints a report and starts no server; it takes only --since and --json" if serving
+      return run_mcp_usage(usage_since.try(&.itself) || MCP_USAGE_DEFAULT_SINCE, usage_json)
+    elsif usage_since || usage_json
+      abort "gori mcp: --since and --json apply to --usage"
+    end
 
     if use_active_project && (db_path.try(&.presence) || project.try(&.presence))
       abort "gori mcp: --use-active-project cannot be combined with --db/--project"
@@ -144,6 +161,13 @@ module Gori::CLI
       end
     end
 
+    # Off unless the operator switched it on, and said on stderr when it is: a file gori keeps
+    # about its own use is not something to start writing without a line that says so.
+    usage_log = mcp_usage_log
+    if log = usage_log
+      Log.info { "mcp: usage log on — each tool call's name, argument names, outcome and size (never a value) is appended to #{log.path}; read it with `gori mcp --usage`" }
+    end
+
     # The catalogue is the first thing this server spends, and it spends it on the operator's
     # behalf before a question is asked: an MCP client loads every tool description into the
     # model's context and keeps it there for the session. Said on EVERY start — which is why
@@ -170,7 +194,8 @@ module Gori::CLI
       server = MCP::Server.new(nil, allow_actions: !read_only, verify_upstream: !insecure_upstream,
         project_name: nil, project_slug: nil, db_path: nil,
         selection_source: selection.source, workspace_root: nil, project_id: nil,
-        bind_error: bind_error, tool_filter: tool_filter, denied_permissions: denied, asked_permissions: asked)
+        bind_error: bind_error, tool_filter: tool_filter, denied_permissions: denied, asked_permissions: asked,
+        usage_log: usage_log)
       server.trap_shutdown_signals
       server.run
       server.current_store.try(&.close) # bound later by create/switch_project
@@ -220,7 +245,8 @@ module Gori::CLI
         server = MCP::Server.new(nil, allow_actions: !read_only, verify_upstream: !insecure_upstream,
           project_name: nil, project_slug: nil, db_path: nil,
           selection_source: "unbound", workspace_root: nil, project_id: nil,
-          bind_error: reason, tool_filter: tool_filter, denied_permissions: denied, asked_permissions: asked)
+          bind_error: reason, tool_filter: tool_filter, denied_permissions: denied, asked_permissions: asked,
+          usage_log: usage_log)
         server.trap_shutdown_signals
         server.run
         server.current_store.try(&.close) # bound later by create/switch_project
@@ -232,7 +258,8 @@ module Gori::CLI
       server = MCP::Server.new(store, allow_actions: !read_only, verify_upstream: !insecure_upstream,
         project_name: project_name, project_slug: project_slug, db_path: resolved,
         selection_source: selection.source, workspace_root: selection.workspace_root,
-        project_id: project_id, tool_filter: tool_filter, denied_permissions: denied, asked_permissions: asked)
+        project_id: project_id, tool_filter: tool_filter, denied_permissions: denied, asked_permissions: asked,
+        usage_log: usage_log)
       server.trap_shutdown_signals
       server.run # blocks until STDIN EOF (client closed), or INT/TERM
     ensure

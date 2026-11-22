@@ -13,6 +13,7 @@ require "./proxy/tls/cert_authority"
 
 require "./cli/ca"
 require "./cli/mcp"
+require "./cli/mcp_usage"
 require "./cli/settings"
 
 module Gori
