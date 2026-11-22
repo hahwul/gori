@@ -1239,6 +1239,7 @@ module Gori::Proxy
       return false unless final
       resp_head, resp = final
       @resp_orig_head = resp_head # the origin's own head, for a rule's record (#1589)
+      return false if refused_unsolicited_upgrade?(resp, sent_req, flow_id)
       # Judged HERE — on the peer's final head, before Match&Replace or the Alt-Svc seam get
       # to it — because it is a fact about what the ORIGIN sent, not about what a rule made.
       @status_line_note = status_line_note(resp)
@@ -1679,6 +1680,22 @@ module Gori::Proxy
         head: resp.raw_head, interims: @interims))
       release_upstream
       nil
+    end
+
+    # A 101 answering a request that asked for no upgrade (the request gori SENT carried no
+    # `Upgrade` field) opens nothing the client agreed to. A browser reads such a 101 as an
+    # interim response and keeps waiting on the socket, so tunnelling it would pass everything
+    # after it through uncaptured. Refused like an unframeable response: recorded with the
+    # origin's head, a 502 to the client, both sides closed. True when it refused.
+    private def refused_unsolicited_upgrade?(resp : Codec::RawResponse, sent_req : Codec::RawRequest,
+                                             flow_id : Int64) : Bool
+      return false unless resp.status == 101 && !sent_req.headers.has?("Upgrade")
+      capture_response(FlowMapper.error_response(flow_id,
+        "unsolicited 101 Switching Protocols (the request carried no Upgrade header)",
+        head: resp.raw_head, interims: @interims))
+      write_gateway_error
+      release_upstream
+      true
     end
 
     # Streams the non-held response to the client while capturing it, then records
