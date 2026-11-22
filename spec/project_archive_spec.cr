@@ -163,53 +163,22 @@ private class UnwritableImportTagsRegistry < Gori::ProjectRegistry
 end
 
 describe Gori::ProjectArchive do
-  # TEMPORARY (diagnosis of the Windows-only death of this file): each step says so on STDERR
-  # before it runs, so the last line printed names the step the process died in.
+  # TEMPORARY (diagnosis of the Windows-only death of this file): reports, as a failure the
+  # summary prints, what the three predicates do with a name Windows cannot spell.
   it "DIAG windows" do
-    say = ->(m : String) { STDERR.puts "DIAG #{m}"; STDERR.flush }
-    say.call "1 exists?(two spaces) in repo cwd"
-    say.call "1 = #{File.exists?("  ")} dir=#{File.directory?("  ")} file=#{File.file?("  ")}"
-    with_archive_project do |_registry, project, _store, root|
-      say.call "2 Dir.cd(root) alone"
-      Dir.cd(root) { say.call "2 exists?=#{File.exists?("  ")} cwd=#{Dir.current}" }
-      say.call "3 expand_archive_path"
-      begin
-        Gori::ProjectArchive.expand_archive_path("  ")
-      rescue ex : Gori::Error
-        say.call "3 rescued #{ex.message}"
+    seen = [] of String
+    { {"exists?", -> { File.exists?("  ").to_s }}, {"directory?", -> { File.directory?("  ").to_s }},
+     {"file?", -> { File.file?("  ").to_s }}, {"info?", -> { File.info?("  ").nil?.to_s }},
+     {"children", -> { Dir.children(".").includes?("  ").to_s }} }.each do |(name, probe)|
+      seen << begin
+        "#{name}=#{probe.call}"
+      rescue ex
+        "#{name} RAISED #{ex.class}: #{ex.message}"
       end
-      say.call "4 prepare + close, no raise"
-      Gori::ProjectArchive.prepare_export(project).close
-      say.call "5 prepare, write raises, rescued, close afterwards"
-      p5 = Gori::ProjectArchive.prepare_export(project)
-      begin
-        p5.write("  ")
-      rescue ex : Gori::Error
-        say.call "5 rescued #{ex.message}"
-      end
-      p5.close
-      say.call "6 close inside ensure while the error unwinds, no cd"
-      begin
-        export_archive(project, "  ")
-      rescue ex : Gori::Error
-        say.call "6 rescued #{ex.message}"
-      end
-      say.call "7 the same inside Dir.cd(root)"
-      Dir.cd(root) do
-        begin
-          export_archive(project, "  ")
-        rescue ex : Gori::Error
-          say.call "7 rescued #{ex.message}"
-        end
-      end
-      say.call "8 expect_raises inside Dir.cd(root)"
-      Dir.cd(root) do
-        expect_raises(Gori::Error, /destination is blank/) { export_archive(project, "  ") }
-        say.call "8 raised as expected; exists?=#{File.exists?("  ")}"
-      end
-      say.call "9 leaving with_archive_project"
     end
-    say.call "10 done"
+    {% if flag?(:win32) %}
+      fail seen.join(" | ")
+    {% end %}
   end
 
   it "exports the requested database when its path contains URI syntax" do
@@ -448,8 +417,11 @@ describe Gori::ProjectArchive do
   it "rejects a blank archive destination before expanding the path" do
     with_archive_project do |_registry, project, _store, root|
       Dir.cd(root) do
+        before = Dir.children(".").sort!
         expect_raises(Gori::Error, /destination is blank/) { export_archive(project, "  ") }
-        File.exists?("  ").should be_false
+        # The directory, not `File.exists?("  ")`: Windows cannot spell that name, and asking
+        # for it raises there instead of answering false. This also sees a temp file left behind.
+        Dir.children(".").sort!.should eq(before)
       end
     end
   end
