@@ -6245,13 +6245,18 @@ frame a non-chunked `Transfer-Encoding` with `Content-Length` by the length, and
 while gori read all of them to the connection's close. The client then reuses the socket, and
 on a forward-proxy connection the origin's later bytes answered a request for another host.
 Both shapes are refused (`Body.response_framing`, `Http1.lenient_status`); a non-chunked
-`Transfer-Encoding` alone stays close-delimited. The capture keeps the origin's head, and the
+`Transfer-Encoding` alone stays close-delimited. The lenient reading follows what Chrome was
+measured to accept and errs toward refusing: `http` in any case within the first 8 bytes of the
+line (Chrome's slop is 4, so a leading SP, HTAB or `XXXX` reads as a status line), then the
+leading digit run, so `204x` is a 204. The capture keeps the origin's head, and the
 Repeater still shows such a response.
 
 The backstop covers the shapes nobody has measured yet: during a CLOSE-DELIMITED response, a
 client byte other than CR/LF means the client took the response as complete, so the exchange
 ends there and the flow says why. A chunked or Content-Length stream keeps being watched as
-before. A `101` answering a request that carried no `Upgrade` is refused for the same reason:
+before, and so does a PIPELINED exchange: client bytes already pending before the response head
+is written (`SocketResidue.pending?`) were not sent in answer to it, and ending the stream for
+them would hand that client a truncated body it reads as complete. A `101` answering a request that carried no `Upgrade` is refused for the same reason:
 the client did not ask to leave HTTP, so what follows would pass uncaptured. When a rule or an
 intercept edit changes the method, the upstream hop is framed by the sent method and the
 client connection is closed after the response, since the client frames by its own.
@@ -6266,8 +6271,15 @@ a request-target without a leading slash was glued onto the host (`127.0.0.1` + 
 - `Url.gate_url` is what every live gate builds (`Outbound.scope_url`, the Interceptor's
   sandbox, scope and port-exclude tests): the target always follows a `/`.
 - The h2 gates take the TRANSPORT's scheme (`https` in the TLS tunnel, `http` for h2c).
-- A string or regex EXCLUDE is also asked of the URL with its host folded as a `host` rule
-  folds it. Includes keep matching the raw spelling, so no include changes meaning.
+- An absolute-form target that does not name the resolved origin (`Interceptor.same_origin?`:
+  scheme, folded host, port defaulted by the target's scheme) is reduced to its path and judged
+  under that origin. A pinned listener dials its pin whatever the target says, and a request
+  line the strict parse cannot read is dialled by `Host` while the tolerant gate reading still
+  recovers the URL. One that does name the resolved origin keeps its verbatim spelling, so an
+  include that names a port on plaintext forward-proxy traffic keeps matching.
+- A string or regex EXCLUDE is also asked of the URL in canonical spelling (`Scope.canonical_url`:
+  scheme lowercased, userinfo and a default port dropped, host folded as a `host` rule folds
+  it). Includes keep matching the raw spelling, so no include changes meaning.
 
 `Url.request_url` and its SQL twin `QL::URL_EXPR_NO_PORT` are unchanged: History shows and
 filters the stored spelling. So for these shapes a live gate refuses more than the lens hides,
@@ -6281,9 +6293,13 @@ holding a chain armed an `exec:` step after the exec gate had judged the templat
 needs only `write`. Values are now spliced as literals (`Fuzz::Template.literal_splice`, through
 `Env.expand(splice:)`): the wire carries exactly the value. Env inside a chain stays a feature
 for arguments (a key for a step the template names), so the second half is a comparison, not a
-ban: a position whose expanded chain runs a command while its raw chain does not is refused
-(`Plan.env_supplied_command?`, raised as `CommandsRefused`, which is now a `Gori::Error`).
-`set_env_var` stays ungated. The same decision closes two neighbours: MCP `create_repeater`,
+ban: a chain STEP that runs a command after expansion while its raw step does not is refused
+(raised as `CommandsRefused`, which is now a `Gori::Error`).
+The escape cannot win every case: the parser pairs `§§§` greedily, so a value that begins or
+ends with `§` beside a delimiter merges with it. So the expanded parse is VERIFIED against the
+raw one (`Plan.env_splice_refusal`): same positions, the same literal runs, defaults and chain
+steps once each raw fragment is expanded on its own, and no step that runs a command unless its
+raw step does. Anything else is refused before a byte is sent. `set_env_var` stays ungated. The same decision closes two neighbours: MCP `create_repeater`,
 `update_repeater` and `create_repeaters` ask `exec` before storing a command-running chain,
 and preparing a Fuzzer tab builds its plan with hooks off.
 
@@ -6294,7 +6310,9 @@ the head pipeline synthesized its h1 text per block on the pump fiber, rules or 
 list past `Codec::Http1::MAX_HEAD_BYTES` now gets no `head`: no rule, no hold, no extract, and
 the block is forwarded as a rules-less connection forwards it, with an advisory on the flow.
 With the sandbox on, such an opening request is refused, since its URL cannot be judged; h1
-refuses a head that size outright.
+refuses a head that size outright. On a direction that already re-encodes (a rule, a hold or a
+strip engaged it) the block cannot go out verbatim, and writing 16 MiB of literals is the same
+stall, so its stream is reset toward both peers and the connection carries on.
 
 On the body-rule path nothing blocks the way TCP backpressure blocks the plain relay, so DATA
 a sender pushed past its receiver's window was parked without bound. Parked bytes are held to
@@ -6317,7 +6335,8 @@ held: gori must not turn a frame the peer has to reject into one it accepts.
 Every complete header block on a scripted h2 connection is decoded, whatever stream it rides
 (a finished stream's trailers, PUSH_PROMISE); only the result is dropped. A block that cannot
 be decoded means the table is lost: the exchange fails naming it and the connection is not
-pooled. The h1 response head phase has one deadline, interim 1xx heads included: the idle
+pooled. The same holds for a frame that arrives inside an open header block (RFC 9113 §6.10,
+`H2Engine::HeaderBlockGate`): the blocks would decode out of order. The h1 response head phase has one deadline, interim 1xx heads included: the idle
 timeout times `DEFAULT_BUDGET_FACTOR` (90 s at the defaults, what h2 gives an exchange), with
 `HEAD_DEADLINE` still bounding a single head. Capping the phase at one `HEAD_DEADLINE` was
 tried and dropped: an origin that sends `102 Processing` while it works would fail.

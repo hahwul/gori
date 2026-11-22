@@ -263,7 +263,7 @@ module Gori::Fuzz
 
   # `Plan.build`'s refusal of a chain step that runs a local command: under
   # `commands_allowed? == false`, or (`from_env?`) on any surface when an env value supplied
-  # that step (`Plan.env_supplied_command?`). Not a `PlanError::Reason`. A `Gori::Error`, so
+  # that step (`Plan.env_splice_refusal`). Not a `PlanError::Reason`. A `Gori::Error`, so
   # the TUI and `gori run fuzz` print the message as they print every other builder refusal.
   class CommandsRefused < Gori::Error
     getter? from_env : Bool
