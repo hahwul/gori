@@ -264,7 +264,12 @@ module Gori::Proxy::H2
     def initialize(@direction : String, @dst : IO, @conn_id : Int64, @sink : FlowSink,
                    @assembler : Assembler, @host : String, @port : Int32,
                    @interceptor : Gori::Interceptor, @heads : HeadRewrite,
-                   @extract : Extract? = nil, @body_rewriter : Proxy::HeadRewriter? = nil)
+                   @extract : Extract? = nil, @body_rewriter : Proxy::HeadRewriter? = nil,
+                   @scheme : String = "https")
+      # `@scheme` is the connection's TRANSPORT scheme, never a stream's `:scheme`. The bytes go
+      # over this one connection whatever the peer spells there, so a gate that judged the
+      # pseudo-header let `HTTPS`, `http` or a string carrying an in-scope URL prefix pick the
+      # URL it tested. h1 judges on the tunnel's own scheme (`ClientConn#@scheme`) the same way.
       @mutex = Mutex.new
       @slots = {} of UInt32 => Slot
       # Deferred stream-OPENING ids in arrival order (= increasing id order), request direction
@@ -843,7 +848,7 @@ module Gori::Proxy::H2
       host, port = Upstream.split_host_port(authority, @port)
       method = HeadCodec.pseudo_of(fields, ":method") || "GET"
       target = HeadCodec.pseudo_of(fields, ":path") || "/"
-      scheme = HeadCodec.pseudo_of(fields, ":scheme") || "https"
+      scheme = @scheme # the transport's, as the sandbox judges it (`sandbox_blocked_url`)
       # `head` is the encoded h1-shaped head this block projects to, which is what the operator
       # sees when the message is held — so a `header:` term reads the same bytes on h2 as on h1.
       # The gate reads the HEAD even when the hold will carry a body: a `header:` term is a
@@ -873,10 +878,10 @@ module Gori::Proxy::H2
       host, port = Upstream.split_host_port(ref.authority, @port)
       return nil unless @interceptor.intercepts_response?(
                           method: ref.method, host: host, target: ref.target,
-                          scheme: ref.scheme, port: port, status: status, head: head)
+                          scheme: @scheme, port: port, status: status, head: head)
       # h1's response Item carries "<status> <reason>"; h2 has no reason phrase (§8.3.2).
       Held.new(request: false, stream_id: block.stream_id, method: ref.method,
-        target: status.to_s, host: host, port: port, scheme: ref.scheme,
+        target: status.to_s, host: host, port: port, scheme: @scheme,
         refusal: edit_refusal(block), request_target: ref.target)
     end
 

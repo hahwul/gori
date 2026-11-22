@@ -47,7 +47,7 @@ class Gori::Proxy::H2::StreamGate
   # the two are equal and the second test is skipped, so the common path costs one evaluation.
   private def sandbox_blocked_url(block : HeadRewrite::Block) : {String, String, String}?
     fields = block.fields
-    scheme = HeadCodec.pseudo_of(fields, ":scheme") || "https"
+    scheme = @scheme # the transport's, never the peer's `:scheme` (see `StreamGate#initialize`)
     host_header = fields.find { |field| field.name.compare("host", case_insensitive: true) == 0 }.try(&.value)
     authority = HeadCodec.pseudo_of(fields, ":authority") || host_header || @host
     host, port = Upstream.split_host_port(authority, @port)
@@ -64,6 +64,10 @@ class Gori::Proxy::H2::StreamGate
     # bullet of `pinned_origin_head`, which is this same finding on the other protocol. The wire
     # bytes are untouched (P7); only the url the decision is made on changes.
     target = Gori::Url.origin_path(HeadCodec.pseudo_of(fields, ":path") || "/")
+    # Nothing rejects a `:path` with no leading slash either (`admin`, `?x`), and the URL the
+    # scope tests is the host with the target appended, so `admin` read as the host
+    # `api.example.comadmin`. Anchored for the gate URL only; the wire keeps the peer's bytes.
+    target = "/#{target}" unless target.starts_with?('/') || target == "*"
     blocked = @interceptor.sandbox_blocks?(scheme, host, target, port) ||
               ((host != @host || port != @port) && @interceptor.sandbox_blocks?(scheme, @host, target, @port))
     blocked ? {scheme, host, target} : nil

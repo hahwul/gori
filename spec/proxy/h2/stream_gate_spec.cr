@@ -75,7 +75,7 @@ private class Rig
   # insert into its dynamic table, i.e. behave like a browser rather than like gori's own
   # literal-only encoder.
   def initialize(@ic : Gori::Interceptor, host : String = "api.example.com", indexing : Bool = false,
-                 port : Int32 = 443, rewriter : Gori::Proxy::HeadRewriter? = nil)
+                 port : Int32 = 443, rewriter : Gori::Proxy::HeadRewriter? = nil, scheme : String = "https")
     @sink = RecSink.new
     @upstream = IO::Memory.new
     @client = IO::Memory.new
@@ -83,8 +83,8 @@ private class Rig
     @assembler = Gori::Proxy::H2::Assembler.new(@sink, host, port)
     @heads_out = Gori::Proxy::H2::HeadRewrite.new("out", rewriter, @assembler, host)
     @heads_in = Gori::Proxy::H2::HeadRewrite.new("in", nil, @assembler, host)
-    @c2s = Gate.new("out", @upstream, 1_i64, @sink, @assembler, host, port, @ic, @heads_out)
-    @s2c = Gate.new("in", @client, 1_i64, @sink, @assembler, host, port, @ic, @heads_in)
+    @c2s = Gate.new("out", @upstream, 1_i64, @sink, @assembler, host, port, @ic, @heads_out, scheme: scheme)
+    @s2c = Gate.new("in", @client, 1_i64, @sink, @assembler, host, port, @ic, @heads_in, scheme: scheme)
     @c2s.peer = @s2c
     @s2c.peer = @c2s
   end
@@ -1136,6 +1136,73 @@ describe Gori::Proxy::H2::StreamGate do
       # Visible in History under h1's own string for a blocked request (`client_conn.cr:1249`).
       rig.sink.requests.map(&.target).should eq(["/admin"])
       rig.sink.responses.first.error.should eq(Gate::SANDBOX_REASON)
+    end
+  end
+
+  # The bytes go over this one connection whatever the client spells in `:scheme`, so the gate
+  # judges the TRANSPORT's scheme, as h1 judges the tunnel's (`ClientConn#@scheme`).
+  describe "the URL the sandbox tests takes the transport's scheme, not the peer's :scheme" do
+    it "does not let a :scheme carrying an in-scope URL prefix pass a path-scoped include" do
+      with_ic(intercept: false) do |ic, scope|
+        scope.add("include", "string", "https://api.example.com/public/")
+        scope.enable_sandbox
+        rig = Rig.new(ic)
+        spoof = [{":method", "GET"}, {":scheme", "https://api.example.com/public/?"},
+                 {":authority", "api.example.com"}, {":path", "/admin"}]
+        rig.c2s.accept(headers(1_u32, rig.enc_out.encode(spoof)))
+        rig.to_origin.should be_empty
+        rig.c2s.accept(headers(3_u32, rig.enc_out.encode(request("/public/x"))))
+        rig.to_origin.map(&.stream_id).should eq([3_u32]) # control: an in-scope path still goes
+      end
+    end
+
+    it "does not let HTTPS or http dodge a scheme-anchored exclude" do
+      with_ic(intercept: false) do |ic, scope|
+        scope.add("include", "host", "api.example.com")
+        scope.add("exclude", "regex", "^https://api\\.example\\.com/admin")
+        scope.enable_sandbox
+        rig = Rig.new(ic)
+        ["HTTPS", "http"].each_with_index do |spelling, i|
+          spoof = [{":method", "GET"}, {":scheme", spelling}, {":authority", "api.example.com"}, {":path", "/admin"}]
+          rig.c2s.accept(headers((2 * i + 1).to_u32, rig.enc_out.encode(spoof)))
+        end
+        rig.to_origin.should be_empty
+      end
+    end
+
+    it "judges an h2c connection as http, whatever :scheme says" do
+      with_ic(intercept: false) do |ic, scope|
+        scope.add("include", "host", "api.example.com")
+        scope.add("exclude", "regex", "^http://")
+        scope.enable_sandbox
+        rig = Rig.new(ic, scheme: "http")
+        rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/x")))) # `:scheme: https`
+        rig.to_origin.should be_empty
+      end
+    end
+
+    it "anchors a :path with no leading slash, so it is not glued onto the host" do
+      with_ic(intercept: false) do |ic, scope|
+        scope.add("include", "host", "api.example.com")
+        scope.add("exclude", "string", "https://api.example.com/admin")
+        scope.enable_sandbox
+        rig = Rig.new(ic)
+        rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("admin"))))
+        rig.to_origin.should be_empty
+      end
+    end
+
+    it "holds an in-scope request at intercept whatever :scheme says" do
+      with_ic do |ic, scope|
+        scope.add("include", "string", "https://api.example.com/")
+        rig = Rig.new(ic)
+        spoof = [{":method", "GET"}, {":scheme", "http"}, {":authority", "api.example.com"}, {":path", "/x"}]
+        rig.c2s.accept(headers(1_u32, rig.enc_out.encode(spoof)))
+        settle
+        ic.pending.size.should eq(1)
+        ic.pending.first.scheme.should eq("https")
+        rig.to_origin.should be_empty
+      end
     end
   end
 

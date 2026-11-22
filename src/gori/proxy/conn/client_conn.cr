@@ -2423,7 +2423,7 @@ module Gori::Proxy
         # a decision (the surrounding comments enumerate the sandbox and `http2_disabled?`
         # gates and say nothing about rules or intercept).
         H2::Relay.run(client, upstream, host, port, @sink,
-          rewriter: @rewriter, interceptor: @interceptor, extractor: @extractor)
+          rewriter: @rewriter, interceptor: @interceptor, extractor: @extractor, scheme: "http")
       ensure
         upstream.close rescue nil
       end
