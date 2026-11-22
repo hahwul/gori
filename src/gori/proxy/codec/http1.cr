@@ -846,6 +846,58 @@ module Gori::Proxy::Codec::Http1
     )
   end
 
+  # The status code a LENIENT client reads off a response head's status line, or nil when it
+  # finds none. `build_response` above is strict on purpose and stays the record; this is the
+  # other reading, the one `Body.response_framing` compares against it. A browser (Chrome
+  # measured) skips blank lines in front of the status line, takes the version token up to the
+  # first SP or HTAB and compares `HTTP/` case-insensitively, skips the separator run after it,
+  # and reads the leading run of digits as the code, leading zeros included. So
+  # `HTTP/1.1  204`, `http/1.1 204`, `HTTP/1.1 204\tNo Content` and `HTTP/1.1 0204` are all a
+  # 204 to that client while the strict parse calls them malformed. Allocation-free: it walks
+  # the bytes and never builds the line.
+  def self.lenient_status(raw : Bytes) : Int32?
+    i = skip_bytes(raw, 0) { |b| b == 0x0d_u8 || b == 0x0a_u8 }
+    return nil unless i + 5 <= raw.size && lenient_http_prefix?(raw, i)
+    return nil unless sep = lenient_version_end(raw, i + 5)
+    lenient_code(raw, skip_bytes(raw, sep) { |b| status_separator?(b) })
+  end
+
+  # The index of the separator that ends the version token, or nil when the line (or the head)
+  # ends inside it.
+  private def self.lenient_version_end(raw : Bytes, from : Int32) : Int32?
+    i = skip_bytes(raw, from) { |b| !status_separator?(b) && b != 0x0d_u8 && b != 0x0a_u8 }
+    i < raw.size && status_separator?(raw.unsafe_fetch(i)) ? i : nil
+  end
+
+  # The leading run of digits at `from` as a code, or nil when there is none. Past three digits
+  # the value stops growing: it is no bodyless code either way, and it cannot overflow.
+  private def self.lenient_code(raw : Bytes, from : Int32) : Int32?
+    stop = skip_bytes(raw, from) { |b| b >= 0x30_u8 && b <= 0x39_u8 }
+    return nil if stop == from
+    code = 0
+    (from...stop).each { |j| code = code * 10 + (raw.unsafe_fetch(j) - 0x30_u8) if code < 1000 }
+    code
+  end
+
+  # The first index at or after `from` whose byte the block rejects, or `raw.size`.
+  private def self.skip_bytes(raw : Bytes, from : Int32, & : UInt8 -> Bool) : Int32
+    i = from
+    while i < raw.size && yield raw.unsafe_fetch(i)
+      i += 1
+    end
+    i
+  end
+
+  private def self.lenient_http_prefix?(raw : Bytes, at : Int32) : Bool
+    raw.unsafe_fetch(at) | 0x20_u8 == 'h'.ord && raw.unsafe_fetch(at + 1) | 0x20_u8 == 't'.ord &&
+      raw.unsafe_fetch(at + 2) | 0x20_u8 == 't'.ord && raw.unsafe_fetch(at + 3) | 0x20_u8 == 'p'.ord &&
+      raw.unsafe_fetch(at + 4) == '/'.ord
+  end
+
+  private def self.status_separator?(b : UInt8) : Bool
+    b == 0x20_u8 || b == 0x09_u8
+  end
+
   # Forwarding/serialization is byte-exact: emit the captured head as-is (P7).
   def self.serialize_head(req : RawRequest) : Bytes
     req.raw_head

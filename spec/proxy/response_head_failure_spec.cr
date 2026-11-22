@@ -107,7 +107,9 @@ describe "proxy response head failures" do
             break unless request
             case (requests.add(1) + 1).to_i
             when 1
-              conn << "HTTP/1.1 204x Odd\r\nContent-Length: 4\r\nConnection: keep-alive\r\n\r\nJUNK"
+              # A lenient client reads the leading `2`, a bodied status. (A `204x` it reads as a
+              # bodyless 204, which `Body.response_framing` refuses.)
+              conn << "HTTP/1.1 2x04 Odd\r\nContent-Length: 4\r\nConnection: keep-alive\r\n\r\nJUNK"
             else
               conn << "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: keep-alive\r\n\r\nhello"
             end
@@ -140,10 +142,10 @@ describe "proxy response head failures" do
       second = sink.responses.receive
       first.status.should eq(0)
       first.reason.should eq("Odd")
-      first.head.should eq("HTTP/1.1 204x Odd\r\nContent-Length: 4\r\nConnection: keep-alive\r\n\r\n".to_slice)
+      first.head.should eq("HTTP/1.1 2x04 Odd\r\nContent-Length: 4\r\nConnection: keep-alive\r\n\r\n".to_slice)
       first.body.should_not be_nil
       String.new(first.body.not_nil!).should eq("JUNK")
-      first.advisory.not_nil!.should contain("204x Odd")
+      first.advisory.not_nil!.should contain("2x04 Odd")
       second.status.should eq(200)
       String.new(second.head).should start_with("HTTP/1.1 200 OK")
       connections.get.should eq(2)

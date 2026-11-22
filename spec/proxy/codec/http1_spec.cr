@@ -276,6 +276,37 @@ describe Gori::Proxy::Codec::Http1 do
     end
   end
 
+  describe ".lenient_status" do
+    it "reads the code a lenient browser reads off a status line the strict parse rejects" do
+      {
+        "HTTP/1.1 204 No Content\r\n\r\n"       => 204,
+        "HTTP/1.1  204 No Content\r\n\r\n"      => 204, # a doubled separator
+        "http/1.1 204 No Content\r\n\r\n"       => 204, # the version in lower case
+        "HTTP/1.1 204\tNo Content\r\n\r\n"      => 204, # a tab after the code
+        "HTTP/1.1\t204 No Content\r\n\r\n"      => 204, # a tab after the version
+        "HTTP/1.1 0204 No Content\r\n\r\n"      => 204, # leading zero
+        "HTTP/1.1 204x\r\n\r\n"                 => 204, # digits, then junk
+        "\r\nHTTP/1.1 304 Not Modified\r\n\r\n" => 304, # a blank line before it
+        "HTTP/1.1 2x04 Odd\r\n\r\n"             => 2,
+      }.each do |head, code|
+        Http1.lenient_status(bytes(head)).should eq(code)
+      end
+    end
+
+    it "finds no code where there is no version token or no digit" do
+      ["HTTP/1.1 OK\r\n\r\n", "HTTP/1.1\r\n\r\n", "XHTTP/1.1 204\r\n\r\n", "HTTP 204\r\n\r\n",
+       "junkHTTP/1.1 204 No Content\r\n\r\n", "", "HTTP/1.1"].each do |head|
+        Http1.lenient_status(bytes(head)).should be_nil
+      end
+    end
+
+    it "leaves the strict projection the capture records untouched" do
+      resp = Http1.parse_response_head(bytes("HTTP/1.1  204 No Content\r\n\r\n"))
+      resp.status.should eq(0)
+      resp.malformed?.should be_true
+    end
+  end
+
   describe ".lf_terminated_head?" do
     it "is true only for a blank line a CRLF-only reader does not recognise" do
       Http1.lf_terminated_head?(bytes("HTTP/1.1 200 OK\n\n")).should be_true

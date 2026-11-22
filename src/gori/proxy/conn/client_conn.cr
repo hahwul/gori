@@ -320,6 +320,21 @@ module Gori::Proxy
       def claim? : Bool
         @claimed.compare_and_set(0, 1)[1]
       end
+
+      # Set by the watcher before it claims, when the CLIENT sent bytes during a close-delimited
+      # stream, so the copy that then loses the claim records why (`FramingDisagreement`).
+      property? client_spoke = false
+    end
+
+    # A close-delimited response the client stopped reading as one: it sent bytes mid-stream
+    # (see `watch_client_abort`). The message is the flow's error.
+    private class FramingDisagreement < IO::Error
+      def initialize
+        super("the client sent its next request while this close-delimited response was still " \
+              "streaming: it had framed the response as complete where gori reads it to the " \
+              "connection's close (a response framing disagreement), so gori closed the " \
+              "connection instead of forwarding more of the origin's bytes as the answer to it")
+      end
     end
 
     def run : Nil
@@ -1691,9 +1706,10 @@ module Gori::Proxy
         observe_delivered(extract_ref, sent_resp_head, nil)
         resp_complete = stream_response_body(upstream, resp_framing, resp_len, resp_capture, relaxed)
         @lf_residue_note = lf_residue_note(upstream) if resp_complete
-      rescue
+      rescue ex
         record_streamed_response(sent_resp, resp_framing, resp_capture, flow_id, ttfb, started,
-          state: Store::FlowState::Aborted, error: "connection closed mid-response", advisory: advisory)
+          state: Store::FlowState::Aborted, advisory: advisory,
+          error: ex.is_a?(FramingDisagreement) ? ex.message : "connection closed mid-response")
         return false
       end
       record_streamed_response(sent_resp, resp_framing, resp_capture, flow_id, ttfb, started,
@@ -1734,26 +1750,43 @@ module Gori::Proxy
                                      relaxed : Bool) : Bool
       return stream_body(upstream, @io, resp_framing, resp_len, resp_capture) unless relaxed
       latch = TeardownLatch.new
-      spawn watch_client_abort(upstream, latch)
+      spawn watch_client_abort(upstream, latch, resp_framing.close_delimited?)
       begin
         stream_body(upstream, @io, resp_framing, resp_len, resp_capture)
       ensure
         # Claim teardown so a still-parked watcher can't close `upstream` after we hand it back.
-        # Losing the claim means the watcher already fired (client gone, upstream closed under the
-        # copy) — surface that as an abort so the caller records Aborted, not a clean/half read.
+        # Losing the claim means the watcher already fired (client gone, or it spoke during a
+        # close-delimited stream; upstream closed under the copy) — surface that as an abort so
+        # the caller records Aborted, not a clean/half read.
         # (claim? is non-blocking, so it can't interleave with the watcher's on the single thread.)
-        raise IO::Error.new("client disconnected mid-stream") unless latch.claim?
+        unless latch.claim?
+          raise FramingDisagreement.new if latch.client_spoke?
+          raise IO::Error.new("client disconnected mid-stream")
+        end
       end
     end
 
     # The client-leg watcher for a relaxed streaming response (see stream_response_body). Blocks
     # reading @io: a 0-byte read (clean FIN) or any read error (reset) means the client closed
     # its side, so — if it wins the one-shot `latch` — it closes `upstream` to unblock the copy
-    # loop. Bytes arriving from the client mid-stream are unusual for SSE/close-delimited (no
-    # keep-alive follows) and are NOT proof the client left, so it just keeps watching.
-    private def watch_client_abort(upstream : IO, latch : TeardownLatch) : Nil
+    # loop.
+    #
+    # Bytes arriving from the client mid-stream are not proof it left. On a chunked or
+    # Content-Length stream (SSE) the framing is unambiguous, so it just keeps watching. During a
+    # CLOSE-DELIMITED response they are proof of something else: the client believes the response
+    # is over, because it framed the head differently than gori did, and what it sent is its next
+    # request. Nothing can answer that request on this connection, since the response ends with
+    # it, and every further origin byte would reach the client as that answer. So the watcher
+    # tears the exchange down at once and marks the latch, and the copy records why. A CR or LF
+    # is not such a byte: RFC 9112 §2.2 documents clients that send a stray CRLF after a request
+    # body, and tearing a close-delimited page down for one would cut it short.
+    private def watch_client_abort(upstream : IO, latch : TeardownLatch, close_delimited : Bool) : Nil
       buf = Bytes.new(1)
       while @io.read(buf) > 0
+        next unless close_delimited
+        next if buf[0] == 0x0d_u8 || buf[0] == 0x0a_u8
+        latch.client_spoke = true
+        break
       end
     rescue
       # client reset / read error → treat as gone (fall through to teardown)

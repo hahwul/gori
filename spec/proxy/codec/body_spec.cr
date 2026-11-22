@@ -240,9 +240,32 @@ describe Gori::Proxy::Codec::Body do
     end
 
     it "uses explicit framing for a malformed status instead of assuming a bodyless status" do
+      # A lenient client reads the leading digits, `2` here: a bodied status, so nobody disagrees.
       malformed = Http1.parse_response_head(
-        "HTTP/1.1 204x Odd\r\nContent-Length: 4\r\n\r\n".to_slice)
+        "HTTP/1.1 2x04 Odd\r\nContent-Length: 4\r\n\r\n".to_slice)
       Body.response_framing(malformed, "GET").should eq({BodyFraming::Length, 4_i64})
+      no_code = Http1.parse_response_head("HTTP/1.1 OK\r\nContent-Length: 4\r\n\r\n".to_slice)
+      Body.response_framing(no_code, "GET").should eq({BodyFraming::Length, 4_i64})
+    end
+
+    it "refuses a malformed status line a lenient client reads as a bodyless status" do
+      # Each is a 1xx/204/304 to a browser (leading digits after any SP/HTAB run, version token
+      # in any case) and a malformed, bodied response to the strict parse: framed to the close,
+      # the origin's later bytes would answer the client's next request.
+      ["HTTP/1.1  204 No Content\r\n\r\n", "http/1.1 204 No Content\r\n\r\n",
+       "HTTP/1.1 204\tNo Content\r\n\r\n", "HTTP/1.1 0204 No Content\r\n\r\n",
+       "HTTP/1.1\t204 No Content\r\n\r\n", "HTTP/1.1 204x Odd\r\nContent-Length: 4\r\n\r\n",
+       "HTTP/1.1  304 Not Modified\r\n\r\n", "HTTP/1.1  100 Continue\r\n\r\n",
+       "\r\nHTTP/1.1 204 No Content\r\n\r\n"].each do |head|
+        resp = Http1.parse_response_head(head.to_slice)
+        resp.malformed?.should be_true
+        expect_raises(Gori::Error, /ambiguous status line/) { Body.response_framing(resp, "GET") }
+      end
+    end
+
+    it "leaves a malformed bodyless-looking status alone where the method already ends the body" do
+      resp = Http1.parse_response_head("HTTP/1.1  204 No Content\r\n\r\n".to_slice)
+      Body.response_framing(resp, "HEAD").should eq({BodyFraming::None, 0_i64})
     end
 
     it "treats a 2xx CONNECT response as bodyless but frames a non-2xx CONNECT entity" do
@@ -496,11 +519,14 @@ describe Gori::Proxy::Codec::Body do
       Body.response_framing(resp, "GET").should eq({BodyFraming::CloseDelimited, 0_i64})
     end
 
-    it "frames a response with a non-chunked TE AND a Content-Length as close-delimited, NOT by CL" do
-      # RFC 7230 §3.3.3 rule 3: TE outranks CL. Framing by CL would read only CL bytes and
-      # leave the rest on the wire to misframe the next response on a reused upstream (desync).
-      resp = Http1.parse_response_head("HTTP/1.1 200 OK\r\nTransfer-Encoding: identity\r\nContent-Length: 3\r\n\r\n".to_slice)
-      Body.response_framing(resp, "GET").should eq({BodyFraming::CloseDelimited, 0_i64})
+    it "refuses a response with a non-chunked TE AND a Content-Length, as chunked + CL is" do
+      # gori would read it to the close (TE outranks CL), while browsers and curl frame it by
+      # the length and reuse the connection: the bytes after it answer their next request.
+      ["identity", "gzip"].each do |coding|
+        resp = Http1.parse_response_head(
+          "HTTP/1.1 200 OK\r\nTransfer-Encoding: #{coding}\r\nContent-Length: 3\r\n\r\n".to_slice)
+        expect_raises(Gori::Error, /Transfer-Encoding and Content-Length/) { Body.response_framing(resp, "GET") }
+      end
     end
   end
 

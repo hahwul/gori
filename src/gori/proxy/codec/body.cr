@@ -235,7 +235,19 @@ module Gori::Proxy::Codec
       if request_method == "CONNECT" && (200..299).includes?(s)
         return {BodyFraming::None, 0_i64}
       end
-      return {BodyFraming::None, 0_i64} if !resp.malformed? && ((s >= 100 && s < 200) || s == 204 || s == 304)
+      if resp.malformed?
+        # A status line the strict parse cannot read is framed as bodied below, to the close
+        # when nothing declares a length. A browser reads `HTTP/1.1  204` or `http/1.1 204` as
+        # a bodyless 204 (`Http1.lenient_status`), takes the response as over at its head and
+        # sends its next request on this connection, while gori is still forwarding the
+        # origin's bytes as this body: the origin then answers a request it never saw, for any
+        # host on a forward-proxy connection. Refused like the ambiguous headers above.
+        if (lenient = Http1.lenient_status(resp.raw_head)) && bodyless_status?(lenient)
+          raise Gori::Error.new("ambiguous status line (a lenient recipient reads status #{lenient}, which has no body)")
+        end
+      elsif bodyless_status?(s)
+        return {BodyFraming::None, 0_i64}
+      end
 
       te = resp.headers.has?("Transfer-Encoding") ? resp.headers.get_all("Transfer-Encoding") : EMPTY_TE
       if chunked?(te)
@@ -243,9 +255,12 @@ module Gori::Proxy::Codec
         {BodyFraming::Chunked, 0_i64}
       elsif te_present?(te)
         # RFC 7230 §3.3.3 rule 3: a response with a non-chunked Transfer-Encoding (e.g.
-        # `identity`/`gzip`) is close-delimited — TE takes precedence over any Content-Length
-        # (the CL.TE ambiguity). Framing by CL would leave the real body on the wire to
-        # misframe the next response on a reused upstream (a response-desync primitive).
+        # `identity`/`gzip`) is close-delimited, and TE takes precedence over a Content-Length.
+        # Alone that is unambiguous. WITH a Content-Length it is not: browsers and curl frame
+        # `Transfer-Encoding: gzip` + `Content-Length` by the length and reuse the connection,
+        # so the bytes gori forwards after it as this body reach that client as the response
+        # to its NEXT request. Refused, as chunked + Content-Length is.
+        reject_te_with_cl(resp.headers)
         {BodyFraming::CloseDelimited, 0_i64}
       elsif cl = content_length(resp.headers)
         {BodyFraming::Length, cl}
@@ -340,6 +355,11 @@ module Gori::Proxy::Codec
     private def self.read_buffer(framing : BodyFraming, length : Int64) : Bytes
       return Bytes.new(BUFSIZE) unless framing.length? && length > 0 && length < BUFSIZE
       Bytes.new(length.to_i)
+    end
+
+    # RFC 9110 §15.2/§15.3.5/§15.4.5: a 1xx, 204 or 304 response never has content.
+    private def self.bodyless_status?(s : Int32) : Bool
+      (s >= 100 && s < 200) || s == 204 || s == 304
     end
 
     # RFC 7230 §3.3.1: `chunked` must be the FINAL transfer-coding. Accept it only
