@@ -37,9 +37,9 @@ class Gori::Tui::RepeaterView
     # every chunk it renders — asking there doubled the parse count on the busiest editor in
     # the app. `allow_hooks` is what an explicit gesture (`^L`) passes; see the method below.
     return if !allow_hooks && marker_chain_runs_command?
-    # Not even on `^L` when an env value supplied that command: the send refuses such a buffer.
-    # (Without `allow_hooks` the line above has already declined it.)
-    return if allow_hooks && env_supplied_marker_command?
+    # Not even on `^L` when the send would refuse the buffer's env splice (an env-supplied
+    # command among them). Without `allow_hooks` the line above has declined any command.
+    return if allow_hooks && env_splice_refused?
 
     wl = @editor.wire_lines
     # `chunked_reflection?`, not "is there a `%%%` anywhere". A separator the CAPTURE brought
@@ -79,11 +79,11 @@ class Gori::Tui::RepeaterView
     Fuzz::Template.parse(String.new(marked_editor_bytes)).runs_commands?(Decoder.shared_registry)
   end
 
-  # Did an env value supply a chain step that runs a local command? The send refuses that
-  # buffer (`marked_request_bytes`), so nothing may run it for the reflection either.
-  private def env_supplied_marker_command? : Bool
+  # Would the send refuse this buffer's env splice (`marked_request_bytes`)? Then nothing may run
+  # its chains for the reflection either.
+  private def env_splice_refused? : Bool
     return false if marker_regions.empty?
-    Fuzz::Plan.env_supplied_command?(@editor.wire_text, String.new(marked_editor_bytes))
+    !marker_env_refusal(marked_editor_bytes).nil?
   end
 
   # The reflection for ONE request: `text` is exactly the bytes that request will be built

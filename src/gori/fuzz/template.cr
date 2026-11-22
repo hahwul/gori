@@ -535,8 +535,10 @@ module Gori::Fuzz
     # inside one, `¦` splits the value from its chain, so both are doubled. A token in a marker's
     # CHAIN part is still chain text, as the operator spelled it, but it cannot close the marker.
     #
-    # The regions are read off `marked` itself, before expansion: a token is ASCII and no
-    # escaped value adds or removes a delimiter, so the structure is the same on either side.
+    # The regions are read off `marked` itself, before expansion: a token is ASCII, so the
+    # structure is the same on either side — EXCEPT where a value begins or ends with `§` beside
+    # a delimiter, which `parse`'s left-to-right `§§` pairing merges whatever the escaping. A
+    # caller therefore checks the result with `Plan.env_splice_refusal` and refuses that case.
     def self.literal_splice(marked : String) : (String, Int32 -> String)
       regions = splice_regions(marked.to_slice)
       ->(value : String, at : Int32) do

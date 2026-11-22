@@ -222,14 +222,27 @@ class Gori::Tui::RepeaterView
   # could never run, `refuse_failed_chains` for one that failed on this value) rather than let
   # `Template#apply_chains` drop the raw, untransformed value onto the socket.
   #
-  # Refused, too, when an env value supplied a chain step that runs a local command
-  # (`Fuzz::Plan.env_supplied_command?`): a value may give a step its argument, not the step.
+  # Refused, too, when the expanded markers are not the ones the editor wrote, or an env value
+  # supplied a chain step that runs a local command (`Fuzz::Plan.env_splice_refusal`).
   private def marked_request_bytes : Bytes
     bytes = marked_editor_bytes
-    if Fuzz::Plan.env_supplied_command?(@editor.wire_text, String.new(bytes))
-      raise Fuzz::ChainError.new(Fuzz::Plan::ENV_COMMAND_REFUSAL)
+    if refusal = marker_env_refusal(bytes)
+      raise Fuzz::ChainError.new(Fuzz::Plan.env_splice_message(refusal))
     end
     finalize_wire(render_marked(bytes, refuse: true))
+  end
+
+  # `Fuzz::Plan.env_splice_refusal` for this editor: `expanded` is `marked_editor_bytes`, and the
+  # fragment pass is the one `expanded_text_to_bytes` ran, without the splice.
+  private def marker_env_refusal(expanded : Bytes) : Symbol?
+    fragment =
+      if @evidence
+        vars = operator_env_vars
+        ->(frag : String) { Env.expand(frag, vars, unescape: Env::Owns::None) }
+      else
+        ->(frag : String) { Env.expand(frag) }
+      end
+    Fuzz::Plan.env_splice_refusal(@editor.wire_text, String.new(expanded), fragment)
   end
 
   # Render the §…§ template in `raw` (each marked default through its inline Decoder

@@ -178,3 +178,64 @@ describe "an env value inside a ¦chain" do
     end
   end
 end
+
+# `parse` pairs `§§` greedily from the left, so a value that begins or ends with `§` beside a
+# marker delimiter merges with it whatever the escaping. The expanded parse is checked against
+# the raw one and refused when the two disagree, rather than sweeping a different template.
+describe "an env value that cannot be placed beside a marker" do
+  {
+    {"§", "GET /q?a=§a§$M§c§ HTTP/1.1\r\nHost: t.test\r\n\r\n"},   # two positions read as one
+    {"§x", "GET /q?a=§d§$M&z=1 HTTP/1.1\r\nHost: t.test\r\n\r\n"}, # the default becomes `d§`
+    {"§a", "GET /q?a=§$M§ HTTP/1.1\r\nHost: t.test\r\n\r\n"},      # a stray § before the default
+  }.each do |(value, template)|
+    it "is refused, not swept (#{template.lines.first.inspect}, M=#{value.inspect})" do
+      with_project_env([{"M", value}]) do
+        expect_raises(F::ChainError, F::Plan::ENV_SPLICE_REFUSAL) do
+          F::Plan.build(splice_options(template, ["1", "2"]), ungated_outbound)
+        end
+      end
+    end
+  end
+
+  it "refuses an env value that adds a command step beside a literal one, and runs nothing" do
+    with_counting_hook do |hook, runs|
+      with_project_env([{"P", "exec:#{hook}"}]) do
+        expect_raises(F::CommandsRefused, F::Plan::ENV_COMMAND_REFUSAL) do
+          F::Plan.build(splice_options("GET /q?a=§v¦exec:#{hook}|$P§ HTTP/1.1\r\nHost: t.test\r\n\r\n"), ungated_outbound)
+        end
+        runs.call.should eq(0)
+      end
+    end
+  end
+
+  it "refuses an env value that merges two positions to smuggle a command step, and runs nothing" do
+    with_counting_hook do |hook, runs|
+      with_project_env([{"M", "§"}, {"P", "|exec:#{hook}"}]) do
+        expect_raises(F::ChainError, F::Plan::ENV_SPLICE_REFUSAL) do
+          F::Plan.build(splice_options("GET /q?a=§a¦exec:#{hook}§$M§b¦$P§ HTTP/1.1\r\nHost: t.test\r\n\r\n",
+            ["1", "2"]), ungated_outbound)
+        end
+        runs.call.should eq(0)
+      end
+    end
+  end
+
+  it "refuses an env value that splits one chain step into two" do
+    with_project_env([{"E", "base64|base64"}]) do
+      expect_raises(F::ChainError, F::Plan::ENV_SPLICE_REFUSAL) do
+        F::Plan.build(splice_options("GET /q?a=§v¦$E§ HTTP/1.1\r\nHost: t.test\r\n\r\n"), ungated_outbound)
+      end
+    end
+  end
+
+  it "keeps a literal exec step whose argument comes from env, running once per request" do
+    with_counting_hook do |hook, runs|
+      with_project_env([{"H", hook}]) do
+        plan = F::Plan.build(splice_options("GET /q?a=§abc¦exec:$H§ HTTP/1.1\r\nHost: t.test\r\n\r\n"), ungated_outbound)
+        before = runs.call
+        jobs_of(plan).size.should eq(1)
+        (runs.call - before).should eq(1)
+      end
+    end
+  end
+end

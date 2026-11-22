@@ -58,4 +58,30 @@ describe "RepeaterView marker send with an env value" do
       FileUtils.rm_rf(dir)
     end
   end
+
+  it "refuses a value it cannot place beside a marker, and one adding a command step beside a literal one" do
+    posix_only!("a #!/bin/sh hook script")
+    dir = File.tempname("gori-rv-misplace")
+    Dir.mkdir_p(dir)
+    hook = File.join(dir, "h.sh")
+    tally = File.join(dir, "tally")
+    File.write(hook, "#!/bin/sh\necho ran >> '#{tally}'\ncat\n")
+    File.chmod(hook, 0o755)
+    prev = Gori::Settings.project_env_vars
+    Gori::Settings.project_env_vars = [{"M", "§a"}, {"P", "exec:#{hook}"}]
+    Gori::Env.bump_highlight_rev
+    begin
+      view = RepeaterView.new
+      view.restore("https://h.test", "GET /?a=§$M§ HTTP/1.1\r\nHost: h.test\r\n\r\n", false, true)
+      expect_raises(Gori::Fuzz::ChainError, Gori::Fuzz::Plan::ENV_SPLICE_REFUSAL) { view.request_bytes }
+      added = RepeaterView.new
+      added.restore("https://h.test", "GET /?a=§v¦exec:#{hook}|$P§ HTTP/1.1\r\nHost: h.test\r\n\r\n", false, true)
+      expect_raises(Gori::Fuzz::ChainError, Gori::Fuzz::Plan::ENV_COMMAND_REFUSAL) { added.request_bytes }
+      File.exists?(tally).should be_false
+    ensure
+      Gori::Settings.project_env_vars = prev
+      Gori::Env.bump_highlight_rev
+      FileUtils.rm_rf(dir)
+    end
+  end
 end

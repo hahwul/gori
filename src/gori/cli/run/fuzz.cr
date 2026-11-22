@@ -462,7 +462,7 @@ module Gori
             end
           rescue ex : Fuzz::PlanError
             abort "#{command}: #{fuzz_plan_error(ex, text)}"
-          rescue ex : Fuzz::CommandsRefused
+          rescue ex : Fuzz::CommandsRefused | Fuzz::ChainError
             abort "#{command}: #{ex.message}"
           ensure
             write_store.try(&.close)

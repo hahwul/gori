@@ -4022,7 +4022,12 @@ module Gori::Tui
     private def run_template : Fuzz::Template
       @run_template || begin
         text = @editor.wire_text
-        Fuzz::Template.parse(String.new(Env.expand_wire(text, splice: Fuzz::Template.literal_splice(text))), @http2)
+        expanded = String.new(Env.expand_wire(text, splice: Fuzz::Template.literal_splice(text)))
+        # A splice the run would refuse is drawn as the operator wrote it rather than misplaced.
+        if Fuzz::Plan.env_splice_refusal(text, expanded, ->(frag : String) { Env.expand(frag) })
+          expanded = String.new(Env.normalize_wire(text))
+        end
+        Fuzz::Template.parse(expanded, @http2)
       end
     end
 
