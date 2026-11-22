@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- Proxy: a response a browser frames differently from gori (a non-chunked `Transfer-Encoding` with `Content-Length`, or a status line such as `HTTP/1.1  204` or `http/1.1 204` that it reads as bodyless) is refused, and a close-delimited response ends when the client sends its next request mid-stream, so an origin can no longer answer a request it never received.
+
+- Proxy: a `101 Switching Protocols` answering a request that carried no `Upgrade` header is refused with a 502 instead of opening an uncaptured tunnel, and a Match & Replace rule or intercept edit that changes the method (HEAD↔GET) closes the client connection after the response instead of keeping it alive out of step.
+
+- Proxy: a request preceded by a blank line is read by its real request-line, so a `HEAD` no longer stalls waiting for a body and History records its method; `https://gori.proxy` reached through the SOCKS5 or transparent listener is answered by the setup page instead of being dialled by name.
+
+- HTTP/2: a header block that decodes to more than 256 KiB of headers (a few hundred bytes of HPACK can) is forwarded without being turned into an HTTP/1.1 head for rules, intercept or extraction, so an origin can no longer stall the proxy with repeated 103 blocks; the flow says the head was skipped.
+
+- HTTP/2: on a connection with a Match & Replace body or stub rule, a peer that keeps sending DATA past the window its receiver allowed has the connection closed instead of every frame buffered in memory, and a re-encoded head keeps the peer's HPACK table size update.
+
+- Scope: the Sandbox, the scope gate and intercept judge a request under the host gori actually dials and, over HTTP/2, the connection's own scheme, so a request-target without a leading slash (`GET 0/`) or a spoofed `:scheme` can no longer pass an include or dodge an exclude; a url-level exclude also holds when the host is spelled with different case or a trailing dot.
+
+- Intercept: a WebSocket hold can no longer be stalled by a flood of tiny messages queued behind it; the queue fails open past 4096 messages as it already did past 1 MiB, and one direction holds at most 256 messages at once, queueing further matches unheld and in order.
+
+- WebSocket: a continuation frame with no message in progress is recorded as opcode 0 over HTTP/1.1 and HTTP/2, and is forwarded byte-exact instead of being rewritten by a `part: ws` rule or re-framed as a text frame.
+
+- Repeater/Fuzzer: HTTP/2 sends decode every header block on the connection, a finished stream's trailers and PUSH_PROMISE included, so a later response no longer comes back with the wrong headers; a block gori cannot decode fails the exchange as "HPACK state lost" and retires the connection.
+
+- Repeater/Fuzzer: an HTTP/1.1 send's response head phase, interim 1xx responses included, is bounded once by three times the send's timeout (90 s at the defaults) instead of a fresh 30 s per head, so an origin dripping 103s can no longer hold a send for minutes.
+
+- Fuzzer/Repeater: a project env value in a `§…§` template is sent as its own bytes, so a `§` or `¦` in it no longer adds a position or arms a chain, and an env value can no longer be the chain step that runs a local command (it may still supply that step's argument).
+
+- MCP: `create_repeater`, `update_repeater` and `create_repeaters` ask the `exec` permission before storing a request whose `§…§` chain runs a local command, and preparing a Fuzzer tab (`create_fuzzer`, `gori run fuzz create`) no longer runs an `exec:` step.
+
+- Fuzzer: a saved tab whose mode, match/filter regex or payload set kind this gori cannot read keeps those values and refuses to run until they are set again, instead of running a different sweep.
+
+- Discover: a redirect whose `Location` carries a space or control byte is no longer followed; it used to be percent-encoded and fetched.
+
 - MCP: `gori mcp --install-agy` now writes Antigravity's global `~/.gemini/config/mcp_config.json` (used by Antigravity CLI, App, and IDE) instead of the CLI app-data directory, sets `timeoutSeconds: 600`, and preserves existing `timeoutSeconds` and per-tool `tools` overrides on reinstall (#2017).
 
 - MCP: an opt-in usage log (Preferences › AI › **MCP server** › Usage log, or `"mcp": {"usage_log": true}` in `settings.json`; off by default) records each tool call's name, argument names, outcome, reply size and duration in `~/.gori/mcp-usage.jsonl`, never an argument value, a reply, a host or a project name, and `gori mcp --usage` prints the summary (`--since`, `--json`) (#2014, #2015).
@@ -107,7 +135,7 @@
 
 - Proxy: capture keeps up under load. A new connection is answered during a sustained burst instead of waiting seconds for it to end, the streams of one HTTP/2 connection no longer wait for each other's database write, and a chatty WebSocket no longer waits for each message's (#1942).
 
-- Fuzzer: recording a run to History (`--record-history`, MCP `record_history`) commits its flows in chunks instead of two writes per request, so a recording sweep uses about a third of the CPU it did; a recorded row prints once its chunk lands (#1942).
+- Fuzzer: recording a run to History (`--record-history`, MCP `record_history`) commits its flows in chunks instead of two writes per request, so a recording sweep uses about a third of the CPU it did; a recorded row prints once its chunk lands, on the CLI and in MCP `fuzz_results` (#1942).
 
 - CLI: `gori run` and `gori mcp` start with about 30% less work, because Probe's passive rules are compiled on the first scan instead of at every launch, and an HTTPS send with `-k` no longer loads the CA bundle (#1942).
 
