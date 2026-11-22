@@ -343,42 +343,50 @@ module Gori
 
     # `url` in canonical form, or nil when it already is: the scheme lowercased, a userinfo
     # dropped, the host folded the way `HostPattern.normalize` folds it (lowercased, trailing
-    # root dots stripped; brackets kept so an IPv6 url still reads as one), and a port equal to
-    # the scheme's default dropped (an empty one too, RFC 3986 §3.2.3). Path, query and
-    # fragment are kept as written. Lexical (`Url.authority_span`), so a port or byte
-    # `URI.parse` refuses cannot skip it; an already-canonical url is answered from its bytes,
-    # with nothing allocated.
+    # root dots stripped; brackets kept so an IPv6 url still reads as one), and a digits-only
+    # port written as plain decimal (`:08080` is `:8080`, the port `URI.parse` dials) and
+    # dropped when it is the scheme's default (an empty one too, RFC 3986 §3.2.3). A port that
+    # is not digits only stays as written. Path, query and fragment are kept as written.
+    # Lexical (`Url.authority_span`), so a port or byte `URI.parse` refuses cannot skip it; an
+    # already-canonical url is answered from its bytes, with nothing allocated.
     def self.canonical_url(url : String) : String?
       return nil unless span = Url.authority_span(url)
       bytes = url.to_slice
       scheme = bytes[0, span.scheme_end]
       hs = span.host_start
       he = span.host_end
-      drop_port = Scope.default_port_written?(bytes, span)
-      return nil unless drop_port || span.userinfo? || scheme.any? { |b| 0x41_u8 <= b <= 0x5a_u8 } ||
+      port = Scope.canonical_port(bytes, span)
+      return nil unless port || span.userinfo? || scheme.any? { |b| 0x41_u8 <= b <= 0x5a_u8 } ||
                         (he > hs && (bytes[he - 1] == '.'.ord ||
                         (hs...he).any? { |i| (0x41_u8 <= bytes[i] <= 0x5a_u8) || bytes[i] >= 0x80_u8 }))
       host = HostPattern.down(String.new(bytes[hs, he - hs])).rstrip('.')
-      rest = drop_port ? span.auth_end : he
+      rest = port ? span.auth_end : he
       canonical = String.build do |io|
         scheme.each { |b| io.write_byte(AsciiBytes.downcase(b)) }
         io << "://" << host
+        io << ':' << port unless port.nil? || port.empty?
         io.write(bytes[rest, bytes.size - rest])
       end
       canonical == url ? nil : canonical
     end
 
-    # Does `bytes`' authority write a port that is its scheme's default (`:80` on http,
-    # `:0443` on https, or an empty `:`)? Compared on the bytes, so asking allocates nothing.
-    protected def self.default_port_written?(bytes : Bytes, span : Url::AuthoritySpan) : Bool
-      return false unless start = span.port_start
-      return false unless default = Url.default_port(bytes[0, span.scheme_end])
-      return true if start == span.auth_end
-      i = start
-      while i < span.auth_end && bytes[i] == '0'.ord
-        i += 1
+    # The port `canonical_url` writes in place of the one `bytes` spells, or nil to keep that one
+    # as it is: "" to drop a default (or empty) port, the decimal without its leading zeros for
+    # any other digits-only port that had them. Answered on the bytes; a String is built only
+    # when the port is rewritten.
+    protected def self.canonical_port(bytes : Bytes, span : Url::AuthoritySpan) : String?
+      return nil unless start = span.port_start
+      return "" if start == span.auth_end
+      digits = bytes[start, span.auth_end - start]
+      return nil unless Url.digits?(digits)
+      zeros = 0
+      while zeros < digits.size - 1 && digits[zeros] == '0'.ord
+        zeros += 1
       end
-      bytes[i, span.auth_end - i] == (default == 80 ? "80" : "443").to_slice
+      plain = digits[zeros, digits.size - zeros]
+      default = Url.default_port(bytes[0, span.scheme_end])
+      return "" if default && plain == (default == 80 ? "80" : "443").to_slice
+      zeros == 0 ? nil : String.new(plain)
     end
 
     # The id of the first INCLUDE rule that matches — the audit trail the active-sender gate

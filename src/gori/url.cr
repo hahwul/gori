@@ -195,17 +195,26 @@ module Gori
     end
 
     # The port an absolute URL names, explicitly or by its scheme's default; nil when the
-    # written port is not a number (or out of range) or the scheme has no default. An empty
-    # port (`http://h:/`) is the default, as RFC 3986 §3.2.3 says.
+    # written port is not ASCII digits only (a sign, a space, an `_`), is past 65535, or the
+    # scheme has no default. An empty port (`http://h:/`) is the default, as RFC 3986 §3.2.3
+    # says. Digits only is exactly what `URI.parse`, the proxy's forward dial, accepts: it reads
+    # `:08080` as 8080 and refuses `:+80`, so this never calls a target the dial would read
+    # differently the same origin.
     def self.effective_port(url : String, span : AuthoritySpan) : Int32?
       bytes = url.to_slice
-      if (start = span.port_start) && start < span.auth_end
-        text = String.new(bytes[start, span.auth_end - start])
-        port = text.to_i?(whitespace: false, underscore: false, prefix: false, strict: true)
-        return port if port && 0 <= port <= 65_535
-        return nil
+      return default_port(bytes[0, span.scheme_end]) unless (start = span.port_start) && start < span.auth_end
+      port = 0
+      bytes[start, span.auth_end - start].each do |b|
+        return nil unless '0'.ord <= b <= '9'.ord
+        port = port * 10 + (b - '0'.ord)
+        return nil if port > 65_535
       end
-      default_port(bytes[0, span.scheme_end])
+      port
+    end
+
+    # Is every byte of `bytes` an ASCII digit (and there is at least one)?
+    def self.digits?(bytes : Bytes) : Bool
+      !bytes.empty? && bytes.all? { |b| '0'.ord <= b <= '9'.ord }
     end
   end
 end

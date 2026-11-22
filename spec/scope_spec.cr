@@ -997,6 +997,12 @@ describe "Gori::Scope url-level excludes and the host's spelling" do
     Gori::Scope.canonical_url("http://acme.test:0/x").should be_nil
     Gori::Scope.canonical_url("http://u:p@ACME.test:80/x?y@z").should eq("http://acme.test/x?y@z")
     Gori::Scope.canonical_url("http://[::1]:80/x").should eq("http://[::1]/x")
+    # A digits-only port is the decimal `URI.parse` dials; anything else is left as written.
+    Gori::Scope.canonical_url("http://h.test:08080/admin").should eq("http://h.test:8080/admin")
+    Gori::Scope.canonical_url("http://h.test:00/x").should eq("http://h.test:0/x")
+    Gori::Scope.canonical_url("http://h.test:8080/admin").should be_nil
+    Gori::Scope.canonical_url("https://h.test:8443/x").should be_nil
+    Gori::Scope.canonical_url("http://h.test:+80/x").should be_nil
   end
 
   # A forward-proxy request's absolute-form target is the url the gate reads, so its scheme

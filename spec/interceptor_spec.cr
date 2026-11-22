@@ -529,6 +529,36 @@ describe "Interceptor scope gates over an ABSOLUTE-FORM target" do
     Gori::Interceptor.same_origin?("http://acme.test/x", "https", "acme.test", 80).should be_false
     Gori::Interceptor.same_origin?("http://acme.test/x", "http", "acme.test", 8080).should be_false
     Gori::Interceptor.same_origin?("http://acme.test:abc/x", "http", "acme.test", 80).should be_false
+    # Digits only, as the forward dial (`URI.parse`) reads a port: no sign, space or `_`.
+    Gori::Interceptor.same_origin?("http://acme.test:08080/x", "http", "acme.test", 8080).should be_true
+    Gori::Interceptor.same_origin?("http://acme.test:+80/x", "http", "acme.test", 80).should be_false
+    Gori::Interceptor.same_origin?("http://acme.test: 80/x", "http", "acme.test", 80).should be_false
+    Gori::Interceptor.same_origin?("http://acme.test:8_0/x", "http", "acme.test", 80).should be_false
+  end
+
+  # A port spelled with leading zeros, or with a sign the dial would never read, dodged a
+  # url-level exclude that origin-form traffic to the same place hit.
+  it "holds url-level excludes against a zero-padded or signed port" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      ic = Gori::Interceptor.new(scope)
+      scope.add("include", "host", "h.test")
+      scope.add("exclude", "string", "h.test:8080/admin")
+      scope.add("exclude", "regex", "^http://h\\.test/secret")
+      scope.enable
+      scope.enable_sandbox
+      ic.sandbox_blocks?("http", "h.test", "/admin", 8080).should be_true
+      ic.sandbox_blocks?("http", "h.test", "http://h.test:8080/admin", 8080).should be_true
+      ic.sandbox_blocks?("http", "h.test", "http://h.test:08080/admin", 8080).should be_true
+      ic.sandbox_blocks?("http", "h.test", "http://h.test:0080/secret", 80).should be_true
+      ic.sandbox_blocks?("http", "h.test", "http://h.test:+80/secret", 80).should be_true
+      ic.sandbox_blocks?("http", "h.test", "http://h.test:08080/public", 8080).should be_false
+      ic.toggle
+      ic.intercepts_request?(method: "GET", host: "h.test", target: "http://h.test:08080/admin",
+        scheme: "http", port: 8080).should be_false
+      ic.intercepts_request?(method: "GET", host: "h.test", target: "/admin", scheme: "http", port: 8080)
+        .should be_false
+    end
     Gori::Interceptor.same_origin?("http://other.test/x", "http", "acme.test", 80).should be_false
   end
 
