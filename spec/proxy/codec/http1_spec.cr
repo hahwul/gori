@@ -333,14 +333,21 @@ describe Gori::Proxy::Codec::Http1 do
         "HTTP/1.1 204x\r\n\r\n"                 => 204, # digits, then junk
         "\r\nHTTP/1.1 304 Not Modified\r\n\r\n" => 304, # a blank line before it
         "HTTP/1.1 2x04 Odd\r\n\r\n"             => 2,
+        " HTTP/1.1 204 No Content\r\n\r\n"      => 204, # a leading SP
+        "\tHTTP/1.1 204 No Content\r\n\r\n"     => 204, # a leading HTAB
+        "X HTTP/1.1 204 No Content\r\n\r\n"     => 204, # a junk byte and a space
+        "XXXXHTTP/1.1 204 No Content\r\n\r\n"   => 204, # four junk bytes
+        "XXXXXHTTP/1.1 204\r\n\r\n"             => 204, # five: Chrome reads none, refusing errs safe
+        "HTTP 204 No Content\r\n\r\n"           => 204, # no slash, likewise
+        "HTTPS/1.1 204 No Content\r\n\r\n"      => 204, # likewise
       }.each do |head, code|
         Http1.lenient_status(bytes(head)).should eq(code)
       end
     end
 
     it "finds no code where there is no version token or no digit" do
-      ["HTTP/1.1 OK\r\n\r\n", "HTTP/1.1\r\n\r\n", "XHTTP/1.1 204\r\n\r\n", "HTTP 204\r\n\r\n",
-       "junkHTTP/1.1 204 No Content\r\n\r\n", "", "HTTP/1.1"].each do |head|
+      ["HTTP/1.1 OK\r\n\r\n", "HTTP/1.1\r\n\r\n", "XXXXXXXXHTTP/1.1 204\r\n\r\n", "FOO/1.1 204\r\n\r\n",
+       "X\r\nHTTP/1.1 204\r\n\r\n", "", "HTTP/1.1", "HTT"].each do |head|
         Http1.lenient_status(bytes(head)).should be_nil
       end
     end

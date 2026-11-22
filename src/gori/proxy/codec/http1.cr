@@ -899,18 +899,37 @@ module Gori::Proxy::Codec::Http1
 
   # The status code a LENIENT client reads off a response head's status line, or nil when it
   # finds none. `build_response` above is strict on purpose and stays the record; this is the
-  # other reading, the one `Body.response_framing` compares against it. A browser (Chrome
-  # measured) skips blank lines in front of the status line, takes the version token up to the
-  # first SP or HTAB and compares `HTTP/` case-insensitively, skips the separator run after it,
-  # and reads the leading run of digits as the code, leading zeros included. So
-  # `HTTP/1.1  204`, `http/1.1 204`, `HTTP/1.1 204\tNo Content` and `HTTP/1.1 0204` are all a
-  # 204 to that client while the strict parse calls them malformed. Allocation-free: it walks
-  # the bytes and never builds the line.
+  # other reading, the one `Body.response_framing` compares against it.
+  #
+  # Measured against headless Chrome (a reused socket means it read a bodyless 204): it took
+  # `HTTP/1.1  204`, `http/1.1 204`, `HTTP/1.1 204\tNo Content`, `HTTP/1.1 0204`,
+  # `HTTP/1.1 204x`, a leading CRLF, a leading SP or HTAB, `X HTTP/1.1 204` and
+  # `XXXXHTTP/1.1 204` as a 204. It did not for five junk bytes before `HTTP`, `HTTP 204`,
+  # `HTTPS/1.1 204` or `HTTP/1.1 2x04`. So it looks for `http`, any case, within a small slop
+  # of the start of the line. This reading is at least that lenient and errs toward refusing:
+  # past leading CR/LF it finds `http` starting within the first `LENIENT_STATUS_SLOP` bytes
+  # of the line, does not require the `/`, takes the version token up to the first SP or
+  # HTAB, skips the separator run, and reads the leading run of digits as the code, leading
+  # zeros included. Allocation-free: it walks the bytes and never builds the line.
   def self.lenient_status(raw : Bytes) : Int32?
-    i = skip_bytes(raw, 0) { |b| b == 0x0d_u8 || b == 0x0a_u8 }
-    return nil unless i + 5 <= raw.size && lenient_http_prefix?(raw, i)
-    return nil unless sep = lenient_version_end(raw, i + 5)
+    line = skip_bytes(raw, 0) { |b| b == 0x0d_u8 || b == 0x0a_u8 }
+    return nil unless at = lenient_http_at(raw, line)
+    return nil unless sep = lenient_version_end(raw, at + 4)
     lenient_code(raw, skip_bytes(raw, sep) { |b| status_separator?(b) })
+  end
+
+  # How far into the status line `lenient_status` looks for `http` (Chrome allows four bytes).
+  LENIENT_STATUS_SLOP = 8
+
+  # Where `http` (any case) starts within the slop of the line at `line`, or nil.
+  private def self.lenient_http_at(raw : Bytes, line : Int32) : Int32?
+    (line...line + LENIENT_STATUS_SLOP).each do |at|
+      return nil if at + 4 > raw.size
+      b = raw.unsafe_fetch(at)
+      return nil if b == 0x0d_u8 || b == 0x0a_u8 # the line ended first
+      return at if lenient_http_prefix?(raw, at)
+    end
+    nil
   end
 
   # The index of the separator that ends the version token, or nil when the line (or the head)
@@ -941,8 +960,7 @@ module Gori::Proxy::Codec::Http1
 
   private def self.lenient_http_prefix?(raw : Bytes, at : Int32) : Bool
     raw.unsafe_fetch(at) | 0x20_u8 == 'h'.ord && raw.unsafe_fetch(at + 1) | 0x20_u8 == 't'.ord &&
-      raw.unsafe_fetch(at + 2) | 0x20_u8 == 't'.ord && raw.unsafe_fetch(at + 3) | 0x20_u8 == 'p'.ord &&
-      raw.unsafe_fetch(at + 4) == '/'.ord
+      raw.unsafe_fetch(at + 2) | 0x20_u8 == 't'.ord && raw.unsafe_fetch(at + 3) | 0x20_u8 == 'p'.ord
   end
 
   private def self.status_separator?(b : UInt8) : Bool

@@ -263,6 +263,20 @@ describe Gori::Proxy::Codec::Body do
       end
     end
 
+    it "refuses the junk-before-version spellings Chrome reads as a bodyless 204" do
+      # Measured with headless Chrome: it reused the socket after each of these.
+      [" HTTP/1.1 ", "\tHTTP/1.1 ", "X HTTP/1.1 ", "XXXXHTTP/1.1 ", "\r\nHTTP/1.1 "].each do |prefix|
+        resp = Http1.parse_response_head("#{prefix}204 No Content\r\n\r\n".to_slice)
+        resp.malformed?.should be_true
+        expect_raises(Gori::Error, /ambiguous status line/) { Body.response_framing(resp, "GET") }
+        # The same spelling with a bodied status is framed by its length, as Chrome frames it.
+        bodied = Http1.parse_response_head("#{prefix}200 OK\r\nContent-Length: 4\r\n\r\n".to_slice)
+        Body.response_framing(bodied, "GET").should eq({BodyFraming::Length, 4_i64})
+      end
+      bodied = Http1.parse_response_head("HTTP/1.1 200x Odd\r\nContent-Length: 4\r\n\r\n".to_slice)
+      Body.response_framing(bodied, "GET").should eq({BodyFraming::Length, 4_i64})
+    end
+
     it "leaves a malformed bodyless-looking status alone where the method already ends the body" do
       resp = Http1.parse_response_head("HTTP/1.1  204 No Content\r\n\r\n".to_slice)
       Body.response_framing(resp, "HEAD").should eq({BodyFraming::None, 0_i64})
