@@ -255,7 +255,10 @@ module Gori
         # fuzz_config already set Config/Matcher.auto_calibrate from the arg, but nothing
         # here ever sampled — so auto_calibrate:true was a documented silent no-op.
         engine.calibrate_baseline if engine.auto_calibrate?
-        engine.run { |ev| drain_fuzz_event(fjob, ev, history) }
+        # When the next event is not queued yet, a due History chunk commits now rather than on
+        # the next result, so `fuzz_results` shows a finished row while a slow one is in flight.
+        idle = -> { flush_due_fuzz_history(fjob, history) }
+        engine.run(idle) { |ev| drain_fuzz_event(fjob, ev, history) }
       rescue ex
         Log.error(exception: ex) { "fuzz job #{fjob.id} crashed" }
         fjob.error_msg ||= ex.message || "internal fuzz job error"
@@ -354,6 +357,17 @@ module Gori
       end
 
       # Commit the queued History rows and store each with the flow id it landed as.
+      # `Engine#run`'s idle hook: the chunk commits once due, else how long until it is. Contained
+      # like `drain_fuzz_event`, so a failure cannot unwind out of the drain.
+      private def flush_due_fuzz_history(fjob : FuzzJob,
+                                         history : Fuzz::HistoryRecord::Batch({Fuzz::Result, String})) : Time::Span?
+        history.idle { flush_fuzz_history(fjob, history) }
+      rescue ex
+        fjob.drain_errors += 1
+        Log.error(exception: ex) { "fuzz job #{fjob.id} history flush error" } if fjob.drain_errors <= DRAIN_LOG_CAP
+        nil
+      end
+
       private def flush_fuzz_history(fjob : FuzzJob,
                                      history : Fuzz::HistoryRecord::Batch({Fuzz::Result, String})) : Nil
         history.flush do |(r, flow_ref), fid|
