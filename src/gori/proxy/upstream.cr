@@ -247,6 +247,17 @@ module Gori::Proxy
       overrides.try(&.connect_address(host)) || Settings.host_override_address(host)
     end
 
+    # Whether `host` is a name gori answers for ITSELF (`SelfPage.magic_host?`) rather than
+    # dials, which every listener path has to ask before any dial: the CONNECT path and the
+    # cleartext proxy path (`ClientConn#reserved_self_host?`) and the pinned TLS path of the
+    # SOCKS5 and transparent listeners (`Server#serve_pinned_tls`). An explicit host override
+    # on the name, from either layer, is the escape hatch for a real box called `gori`. One
+    # home, because a listener that skipped it dialled the reserved name, and bare `gori`
+    # resolves to a stranger on any network with a DNS search domain.
+    def self.reserved_self_host?(host : String, overrides : Gori::HostOverrides?) : Bool
+      SelfPage.magic_host?(host) && override_address(host, overrides).nil?
+    end
+
     # True when dialing `host:port` (after override resolution) would connect back
     # to gori's own listener `self_addr` — an unbounded self-proxy loop (gori dials
     # itself, its accept loop treats that as a new client, re-resolves the same

@@ -2942,7 +2942,7 @@ module Gori::Proxy
     # stayed reserved no matter what the operator wrote. Both spellings ended at the 502 in
     # `handle_reserved_host` with no way out.
     private def reserved_self_host?(host : String) : Bool
-      SelfPage.magic_host?(host) && Upstream.override_address(host, @host_overrides).nil?
+      Upstream.reserved_self_host?(host, @host_overrides)
     end
 
     # The plaintext half of the reserved-host route. Returns true when the request was
