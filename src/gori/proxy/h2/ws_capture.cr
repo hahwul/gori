@@ -94,6 +94,8 @@ module Gori::Proxy::H2
       @pending = IO::Memory.new
       @assembling = IO::Memory.new
       @opcode = WS::OP_TEXT
+      # Whether a data message has started and not yet sent its FIN (see `Relay.pump`).
+      @in_message = false
       @shape = WS::MessageShape.new
       @controls = 0
       # Payload bytes of an oversized frame still to be discarded. A frame past `WS::MAX_FRAME`
@@ -196,7 +198,11 @@ module Gori::Proxy::H2
           @assembling = WS::Relay.emit_pending(@assembling, @direction, @flow_id, @sink,
             @opcode, @shape)
           @opcode = frame.opcode
+        elsif !@in_message
+          # A CONT with no message to continue is recorded as opcode 0, as `Relay.pump` does.
+          @opcode = WS::OP_CONT
         end
+        @in_message = !frame.fin?
         @shape.note(frame)
         @assembling = WS::Relay.capture_frame(frame, @assembling, @direction, @flow_id, @sink,
           @opcode, @shape)
@@ -217,7 +223,12 @@ module Gori::Proxy::H2
         # binary on an h1 one — and any CONT fragments after it inherited the stale opcode
         # too. `Relay.pump` sets its `message_opcode` before it reaches its own oversized
         # branch; the two reassemblers have to record identical facts about identical bytes.
-        @opcode = h.opcode if h.opcode != WS::OP_CONT
+        if h.opcode != WS::OP_CONT
+          @opcode = h.opcode
+        elsif !@in_message
+          @opcode = WS::OP_CONT
+        end
+        @in_message = !h.fin?
         marker = "#{WS::NOTICE_PREFIX}#{h.len}-byte WebSocket frame forwarded; " \
                  "too large to capture".to_slice
         @sink.on_ws_message(@flow_id, @direction, @opcode.to_i, marker, h.shape)

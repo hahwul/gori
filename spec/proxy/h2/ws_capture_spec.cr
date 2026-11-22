@@ -204,6 +204,32 @@ describe Gori::Proxy::H2::WsCapture do
     sink.frames.map { |r| {r.opcode, r.text} }.should eq([{WS::OP_BIN.to_i, "tail"}])
   end
 
+  # A CONT with no message to continue (§5.4 violation) is recorded as opcode 0, never under
+  # the previous message's opcode — `Relay.pump` and the scripted engines agree.
+  it "records a stray continuation frame as opcode 0" do
+    sink = WsSink.new
+    a = open_socket(sink)
+    a.feed("in", data_frame(1_u32, 0_u8, cat(
+      ws_in(WS::OP_TEXT, "aaa"), ws_in(WS::OP_CONT, "bbb"),
+      ws_in(WS::OP_TEXT, "frag", fin: false), ws_in(WS::OP_PING, "mid"),
+      ws_in(WS::OP_CONT, "mented"))))
+
+    sink.frames.map { |r| {r.opcode, r.text} }.should eq([
+      {WS::OP_TEXT.to_i, "aaa"}, {WS::OP_CONT.to_i, "bbb"},
+      {WS::OP_PING.to_i, "mid"}, {WS::OP_TEXT.to_i, "fragmented"},
+    ])
+  end
+
+  it "records an oversized stray continuation frame's marker as opcode 0" do
+    sink = WsSink.new
+    a = open_socket(sink)
+    a.feed("in", data_frame(1_u32, 0_u8, ws_in(WS::OP_BIN, "whole")))
+    a.feed("in", data_frame(1_u32, 0_u8, oversized_header(WS::OP_CONT)))
+
+    marker = sink.ws.find!(&.text.includes?("too large to capture"))
+    marker.opcode.should eq(WS::OP_CONT.to_i)
+  end
+
   # Control frames are the diagnostic half of a WebSocket transcript: a CLOSE carries the code
   # and reason, which is the single most useful thing a failed socket produces.
   it "captures control frames, CLOSE code included" do

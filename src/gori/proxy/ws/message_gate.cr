@@ -175,11 +175,14 @@ module Gori::Proxy::WS
     # `raw` is the sender's own frame bytes when they are still usable; `payload` is what
     # would go out. The pump owns both only until this returns, so anything the gate keeps is
     # duplicated here.
+    #
+    # `holdable: false` keeps the message out of the Interceptor whatever the condition says:
+    # it is still ordered behind anything held, and released as the peer's own frames.
     def submit(opcode : UInt8, payload : Bytes, raw : WS::RawFrames?,
-               shape : WS::Shape = WS::Shape::DEFAULT) : Nil
+               shape : WS::Shape = WS::Shape::DEFAULT, *, holdable : Bool = true) : Nil
       @mutex.synchronize do
         return if @closed
-        held = holds?(payload)
+        held = holdable && holds?(payload)
         if !held && @queue.empty?
           # Nothing is waiting, so this message goes out now and the peer's own interleave is
           # still reproducible — its fragments and any control frame that sat between them,

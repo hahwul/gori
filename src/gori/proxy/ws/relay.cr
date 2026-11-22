@@ -458,6 +458,9 @@ module Gori::Proxy::WS
     private def self.pump(src : IO, dst : Leg, direction : String, flow_id : Int64, sink : FlowSink) : Ending
       assembling = IO::Memory.new
       message_opcode = OP_TEXT
+      # Whether a data message has started and not yet sent its FIN. Control frames never
+      # touch it: §5.4 lets them arrive between a message's fragments.
+      in_message = false
       scratch = Bytes.new(STREAM_CHUNK)
       ending = Ending::Eof
       shape = MessageShape.new
@@ -471,9 +474,17 @@ module Gori::Proxy::WS
         # was given this reset explicitly (`start_message`) and the oversized branch below has
         # it too; the default pump, which every socket with no rule and no hold runs, did not —
         # so the two pumps disagreed about identical bytes. Capture only: the wire is untouched.
-        if h.data? && h.opcode != OP_CONT
-          assembling = emit_pending(assembling, direction, flow_id, sink, message_opcode, shape)
-          message_opcode = h.opcode
+        if h.data?
+          if h.opcode != OP_CONT
+            assembling = emit_pending(assembling, direction, flow_id, sink, message_opcode, shape)
+            message_opcode = h.opcode
+          elsif !in_message
+            # A CONT with no message to continue (§5.4 violation) is recorded as what it is,
+            # opcode 0, never under the previous message's opcode — the scripted engines
+            # (`Repeater::WsSession`, `WsEngine.drain`) record it the same way.
+            message_opcode = OP_CONT
+          end
+          in_message = !h.fin?
         end
 
         if h.len > WS::MAX_FRAME
@@ -603,6 +614,7 @@ module Gori::Proxy::WS
     private class AssemblingPump
       @buffer = IO::Memory.new
       @opcode = OP_TEXT
+      @in_message = false  # a data message has started and not yet sent its FIN
       @passthrough = false # this message fell back to frame-by-frame byte-exact forwarding
       @rewritable = false  # ... and this one is eligible for Match & Replace (TEXT + a live rule)
       # This message's own wire frames, concatenated in arrival order — headers, FIN/RSV bits
@@ -723,7 +735,18 @@ module Gori::Proxy::WS
           return Step::Stop unless forward_control(h)
           return h.close? ? Step::Closed : Step::Continue
         end
-        start_message(h.opcode) if h.opcode != OP_CONT
+        if h.opcode != OP_CONT
+          start_message(h.opcode)
+        elsif !@in_message
+          # A CONT with no message to continue (§5.4 violation) is a message of its own with
+          # opcode 0. The previous message's `@opcode` and `@rewritable` must not stay in
+          # force: a `part: ws` rule would rewrite it and `emit_message` re-frame it as a valid
+          # TEXT frame — gori turning a frame the peer must reject into one it accepts.
+          # `start_message` makes it non-rewritable; `stray?` keeps it off the hold and out of
+          # re-framing.
+          start_message(OP_CONT)
+        end
+        @in_message = !h.fin?
         if h.len > WS::MAX_FRAME
           return forward_oversized(h) ? Step::Continue : Step::Stop
         end
@@ -1054,7 +1077,12 @@ module Gori::Proxy::WS
         # the rest of THIS message stream byte-exact — the same disposition the oversized
         # path takes, and the same one the HTTP body rewrite takes past MAX_REWRITE_BODY:
         # leave it alone rather than grow the proxy heap while a rule is on.
-        if @buffer.size + frame.payload.size > MAX_MESSAGE
+        #
+        # A stray CONT takes this path at the RAW cap too: `keep_raw` would otherwise drop its
+        # own frames and leave re-framing as the only way out, and there is no opcode gori
+        # could re-frame a stray continuation under without changing what the peer sent.
+        if @buffer.size + frame.payload.size > MAX_MESSAGE ||
+           (stray? && @raw.size + frame.raw.size > MAX_MESSAGE)
           bypass("a message outgrew the #{MAX_MESSAGE}-byte assembly buffer") do
             flush_buffered
             write_direct(frame.raw, frame.fin?)
@@ -1125,10 +1153,15 @@ module Gori::Proxy::WS
           # on write, and the arrived multi-fragment RSV/mask is a lie about what goes out
           # (one frame, gori's key). `emitted` was already computed above and was a dead
           # store on this branch.
+          #
+          # A stray CONT is queued for order only, never offered as a hold: an edit could only
+          # go back out re-framed, and a held row would present it as a message of a type the
+          # peer never sent. It leaves as the peer's own frames, exactly as a message the
+          # condition declined.
           gate.submit(@opcode, rewritten,
             reusable ? WS::RawFrames.new(interleaved: interleaved_raw.dup,
               data_only: @raw.to_slice.dup, controls: parked_bytes) : nil,
-            emitted)
+            emitted, holdable: !stray?)
         else
           write_direct(reusable ? interleaved_raw : WS.encode(@opcode, rewritten, mask: @mask, fin: true), true)
           # Record what gori WROTE rather than what arrived, the way #513 keeps P7 on h2: the
@@ -1136,11 +1169,11 @@ module Gori::Proxy::WS
           @sink.on_ws_message(@flow_id, @direction, @opcode.to_i, rewritten.dup, emitted)
         end
         # This message is over, so the NEXT data frame starts one — even a stray `OP_CONT`,
-        # which does not go through `start_message`. Without `reset_buffer`'s reset of the
-        # accumulated wire bytes, that frame would ride out behind the PREVIOUS message's
-        # frames: gori silently REPAIRING a §5.4 violation that the byte-exact pump passes
-        # through for the peer to judge. That breaks this class's stated invariant — gori's
-        # own framing is used only for a message a rule or the operator actually changed.
+        # which `step` starts as an opcode-0 message of its own. Without `reset_buffer`'s
+        # reset of the accumulated wire bytes, that frame would ride out behind the PREVIOUS
+        # message's frames: gori silently REPAIRING a §5.4 violation that the byte-exact pump
+        # passes through for the peer to judge. That breaks this class's stated invariant —
+        # gori's own framing is used only for a message a rule or the operator actually changed.
         reset_buffer
       end
 
@@ -1255,6 +1288,11 @@ module Gori::Proxy::WS
         ok = false
         bypass(reason) { ok = block.call }
         ok
+      end
+
+      # The message in hand began with a CONT that had no message to continue.
+      private def stray? : Bool
+        @opcode == OP_CONT
       end
 
       private def reset_buffer : Nil
