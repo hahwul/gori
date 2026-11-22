@@ -67,9 +67,7 @@ module Gori::Proxy::H2
       return unless fields
       status = HeadCodec.pseudo(fields, ":status").try(&.to_i?)
       return unless status
-      # Interim 1xx never carries the final head; h1 skips these before its own gates
-      # (`client_conn.cr#skip_interim_responses`), so this is parity rather than a new rule.
-      return if status < 200
+      return unless readable_final?(fields, status)
       # An extract rule's condition scopes on the REQUEST's method and target, and an h2
       # response head carries neither — the assembler's live stream map is the source, exactly
       # as the intercept response gate uses it (`StreamGate#hold_response`).
@@ -93,6 +91,16 @@ module Gori::Proxy::H2
     rescue ex
       # An extract rule must never be able to break a relayed connection.
       ::Log.warn { "extract rules skipped for an h2 response: #{ex.message}" }
+    end
+
+    # Interim 1xx never carries the final head; h1 skips these before its own gates
+    # (`client_conn.cr#skip_interim_responses`), so this is parity rather than a new rule.
+    #
+    # A list past the h1 head limit has no h1 text form (`HeadCodec.h1_head_too_large?`): h1
+    # refuses such a head before any rule sees it, and synthesizing one here is up to 16 MiB of
+    # String per block from a few hundred wire bytes, on the pump fiber.
+    private def readable_final?(fields : Array({String, String}), status : Int32) : Bool
+      status >= 200 && !HeadCodec.h1_head_too_large?(fields)
     end
 
     # Whether a body-scoped rule wants this response's body, and it is one that ends.

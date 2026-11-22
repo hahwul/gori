@@ -1,4 +1,5 @@
 require "./hpack"
+require "../codec/http1"
 
 module Gori::Proxy::H2
   # The bridge between an h2 header block and the HTTP/1.1 head text every other gori
@@ -343,6 +344,31 @@ module Gori::Proxy::H2
     # drops only a second `:status`. Duplicate pseudo-headers are malformed either way.
     def h1_faithful?(fields : Array(HPACK::Field), request : Bool) : Bool
       h1_unfaithful_reason(fields, request).nil?
+    end
+
+    # Whether a decoded header list is past the HTTP/1.1 head limit, so it has no h1 text form
+    # gori will build. HPACK indexing amplifies: a few hundred wire bytes of one-byte references
+    # to one large dynamic-table entry decode to a list of up to `HPACK::Decoder::MAX_HEADER_LIST`
+    # (16 MiB), and a synthesized head of it is a String that size, built on the pump fiber per
+    # block. Measured the way `Assembler#fit_head` bounds the stored projection (RFC 7541 §4.1
+    # size, which covers each synthesized line's `: ` + CRLF), off the decoded sizes and without
+    # building the text, stopping at the first field past the limit.
+    def h1_head_too_large?(fields : Array(HPACK::Field)) : Bool
+      past_head_limit?(fields) { |f| f.name.bytesize + f.value.bytesize }
+    end
+
+    # :ditto:
+    def h1_head_too_large?(fields : Array({String, String})) : Bool
+      past_head_limit?(fields) { |(n, v)| n.bytesize + v.bytesize }
+    end
+
+    private def past_head_limit?(fields, &) : Bool
+      size = 0
+      fields.each do |f|
+        size += (yield f) + HPACK::Decoder::ENTRY_OVERHEAD
+        return true if size > Codec::Http1::MAX_HEAD_BYTES
+      end
+      false
     end
 
     # `h1_faithful?`, but it says WHICH field and WHY — nil when the round trip is sound.

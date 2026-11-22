@@ -366,6 +366,10 @@ module Gori::Proxy::H2
       return unreadable(first, snapshot) if fields.nil?
 
       request = @direction == "out"
+      # Judged on the PEER's list, before any strip, so no synth below (the rule record's
+      # `synth(peer_fields)` included) ever sees a list past the h1 head limit. Such a block gets
+      # no `head`: no rule, no hold, forwarded as a rules-less connection forwards it.
+      oversized = HeadCodec.h1_head_too_large?(fields)
       # `first.stream_id`, NOT `@block_stream`: `reset` above zeroed it (deliberately — it
       # closes the buffered-block leak class), so every warning below `finish` named "stream 0",
       # a stream that cannot exist. `encode_edited` was never affected because it reads
@@ -405,9 +409,11 @@ module Gori::Proxy::H2
       # edits. Gated because the response pipeline is now built even with no rewriter (see
       # `Relay#pump_plain`), and a rules-less connection must not pay a synthesis per response
       # for a value with no consumer.
-      head = if @rewriter || @deferrer
+      consumer = @rewriter || @deferrer
+      head = if consumer && !oversized
                head_text(fields, first, request)
              end
+      note_oversized(stream_id, request) if consumer && oversized && head_text_shape?(fields, first, request)
       # Before the rewrite, and NOT from inside it: what this announces is a seam the relay
       # cannot reach at all, which is true whether or not a head rule is live. Running it from
       # `rewrite` put it behind `rw.active?`, so an operator whose only rule is a body or stub rule
@@ -472,9 +478,12 @@ module Gori::Proxy::H2
     # trailer rather than help. Both are re-encoded once engaged, never rule-applied and never
     # held — which also keeps h1 and h2 equivalent, since h1 sees neither.
     private def head_text(fields : Array(HPACK::Field), first : Frame::Header, request : Bool) : Bytes?
-      return nil if first.frame_type == Frame::Type::PushPromise
-      return nil unless message_head?(fields, request)
+      return nil unless head_text_shape?(fields, first, request)
       synth(fields, request)
+    end
+
+    private def head_text_shape?(fields : Array(HPACK::Field), first : Frame::Header, request : Bool) : Bool
+      first.frame_type != Frame::Type::PushPromise && message_head?(fields, request)
     end
 
     private def synth(fields : Array(HPACK::Field), request : Bool) : Bytes
@@ -725,6 +734,17 @@ module Gori::Proxy::H2
         "Match&Replace was NOT applied to this #{@direction == "out" ? "request" : "response"} " \
         "head: it has no HTTP/1.1 text form (#{reason}). The fields went out exactly as they " \
         "arrived, and an intercept edit to it would be refused for the same reason (#517)")
+    end
+
+    # The flow's record of a message head `finish` gave no h1 text form because its decoded list
+    # is past the h1 head limit (`HeadCodec.h1_head_too_large?`). h1 refuses such a head outright;
+    # here it is forwarded as a rules-less connection forwards it, and the flow says what did not
+    # run on it.
+    private def note_oversized(stream_id : UInt32, request : Bool) : Nil
+      @assembler.note_advisory(stream_id,
+        "A #{request ? "request" : "response"} header block on this stream decoded to more than " \
+        "#{Codec::Http1::MAX_HEAD_BYTES // 1024} KiB of header list, the h1 head limit, so it has " \
+        "no HTTP/1.1 text form: Match&Replace and intercept were not applied to it")
     end
 
     # The mirror of `warn_unparseable` for a head the PEER sent that the h1 text cannot carry

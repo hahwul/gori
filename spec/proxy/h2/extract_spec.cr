@@ -161,6 +161,23 @@ describe Gori::Proxy::H2::Extract do
     end
   end
 
+  # h1 refuses a head past `MAX_HEAD_BYTES` before any rule sees it, and HPACK indexing lets a
+  # few hundred wire bytes decode to a 16 MiB list, so such a head is not synthesized to be read.
+  it "does not read a response head whose list is past the h1 head limit" do
+    with_bindings do |bindings, _|
+      bindings.add("SESSION", "", Gori::ExtractKind::Cookie, "sid").should be_nil
+      extract, assembler = pipeline(bindings)
+      open_stream(assembler, 1_u32)
+      big = "A" * 65000
+      fields = [{":status", "200"}, {"set-cookie", "sid=huge"}] + Array.new(5) { {"x-big", big} }
+      extract.observe(response_frame(1_u32), HeadBlock.new(fields))
+      bindings.bound?("SESSION").should be_false
+      open_stream(assembler, 3_u32)
+      extract.observe(response_frame(3_u32), HeadBlock.new(fields[0, 3]))
+      bindings.values["SESSION"].should eq "huge" # control: the same head under the limit
+    end
+  end
+
   it "ignores a request head, a trailer block and every DATA frame" do
     with_bindings do |bindings, store|
       bindings.add("SESSION", "", Gori::ExtractKind::Cookie, "sid").should be_nil
