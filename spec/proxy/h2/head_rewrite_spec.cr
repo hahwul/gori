@@ -138,6 +138,20 @@ private class HeadRecorder
   end
 end
 
+# Records every block it is offered, and never defers one.
+private class BlockRecorder
+  include Gori::Proxy::H2::HeadRewrite::Deferrer
+  getter blocks = [] of Gori::Proxy::H2::HeadRewrite::Block
+
+  def defer?(block : Gori::Proxy::H2::HeadRewrite::Block) : Bool
+    @blocks << block
+    false
+  end
+
+  def undecodable(stream_id : UInt32) : Nil
+  end
+end
+
 private def pipeline(rewriter : Gori::Proxy::HeadRewriter, direction = "out",
                      sink = RecSink.new) : {Gori::Proxy::H2::HeadRewrite, Gori::Proxy::H2::Assembler, RecSink}
   assembler = Gori::Proxy::H2::Assembler.new(sink, "api.example.com", 443)
@@ -1196,6 +1210,47 @@ describe Gori::Proxy::H2::HeadRewrite do
       pipe.accept(headers(1_u32, block)) { |f, pre| emitted << f; assembler.feed("in", f, pre) }
       HPACK::Decoder.new.decode(emitted.first.payload)
         .should eq([{":status", "200"}, {"x-tag", "b"}, {"x-added", "1"}])
+    end
+  end
+
+  # RFC 7541 §4.2: a receiver that lowered SETTINGS_HEADER_TABLE_SIZE may require a dynamic table
+  # size update at the start of the next block, and the shared decoder has already consumed the
+  # peer's. A re-encode must carry it over, at the start, as the peer sent it.
+  describe "a dynamic table size update at the start of a re-encoded block" do
+    it "is carried over once the direction re-encodes" do
+      pipe, assembler, _ = pipeline(SubRewriter.new("nothing", "matches", on: false))
+      pipe.latch
+      updates = Bytes[0x20, 0x3f, 0xe1, 0x1f] # §6.3: to 0, then to 4096 (a multi-byte integer)
+      block = IO::Memory.new
+      block.write(updates)
+      block.write(HPACK::Encoder.new.encode(req("/x")))
+      sent = push(pipe, assembler, headers(1_u32, block.to_slice))
+
+      sent.first.payload[0, 4].should eq(updates)
+      receiver = HPACK::Decoder.new
+      receiver.decode(sent.first.payload).should eq(req("/x"))
+      receiver.max_size.should eq(4096)
+    end
+
+    it "is carried over when a passthrough block is engaged later, as a hold engages it" do
+      pipe, assembler, _ = pipeline(SubRewriter.new("nothing", "matches", on: false))
+      recorder = BlockRecorder.new
+      pipe.deferrer = recorder
+      block = IO::Memory.new
+      block.write_byte(0x20_u8)
+      block.write(HPACK::Encoder.new.encode(req("/x")))
+      push(pipe, assembler, headers(1_u32, block.to_slice)).first.payload.should eq(block.to_slice)
+
+      engaged = pipe.engage(recorder.blocks.first)
+      engaged.frames.first.payload[0].should eq(0x20_u8)
+      HPACK::Decoder.new.decode(engaged.frames.first.payload).should eq(req("/x"))
+    end
+
+    it "adds none to a block that carried none" do
+      pipe, assembler, _ = pipeline(SubRewriter.new("nothing", "matches", on: false))
+      pipe.latch
+      sent = push(pipe, assembler, headers(1_u32, HPACK::Encoder.new.encode(req("/x"))))
+      sent.first.payload.should eq(HPACK::Encoder.new.encode(req("/x")))
     end
   end
 

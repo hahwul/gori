@@ -70,6 +70,9 @@ module Gori::Proxy::H2
     # `first`/`prefix` are what re-framing the result needs. `head` is nil for a block that is
     # not a message head — trailers, PUSH_PROMISE, or a block that could not be decoded — and
     # those are exactly the blocks that are never rule-applied and never held.
+    #
+    # `size_updates` is the peer's own leading §6.3 instructions, which every re-encode of the
+    # block carries over (`reencoded`).
     record Block,
       frames : Array(Frame::Header),
       pre : Assembler::HeadBlock,
@@ -77,7 +80,8 @@ module Gori::Proxy::H2
       head : Bytes?,
       first : Frame::Header,
       prefix : Bytes,
-      request : Bool do
+      request : Bool,
+      size_updates : Bytes = Bytes.empty do
       def stream_id : UInt32
         first.stream_id
       end
@@ -146,7 +150,7 @@ module Gori::Proxy::H2
     def engage(block : Block) : Block
       return block if @engaged
       latch
-      block.copy_with(frames: reframe(block.first, block.prefix, @encoder.encode(block.fields)))
+      block.copy_with(frames: reframe(block.first, block.prefix, reencoded(block.size_updates, block.fields)))
     end
 
     # `engage` for a block that will never be written AT ALL — #492 step 4's sandbox refusal
@@ -196,8 +200,9 @@ module Gori::Proxy::H2
         @assembler.remember_request_authority(block.stream_id, HeadCodec.pseudo_of(fields, ":authority"))
       end
       @engaged = true
-      Block.new(reframe(block.first, block.prefix, @encoder.encode(fields)),
-        Assembler::HeadBlock.new(pairs(fields)), fields, head, block.first, block.prefix, block.request)
+      Block.new(reframe(block.first, block.prefix, reencoded(block.size_updates, fields)),
+        Assembler::HeadBlock.new(pairs(fields)), fields, head, block.first, block.prefix, block.request,
+        block.size_updates)
     end
 
     # Re-encode a held block with `fields` in place of its own, and latch — `StreamGate` making a
@@ -205,8 +210,9 @@ module Gori::Proxy::H2
     def reencode(block : Block, fields : Array(HPACK::Field)) : Block
       latch
       head = block.head && head_text(fields, block.first, block.request)
-      Block.new(reframe(block.first, block.prefix, @encoder.encode(fields)),
-        Assembler::HeadBlock.new(pairs(fields)), fields, head, block.first, block.prefix, block.request)
+      Block.new(reframe(block.first, block.prefix, reencoded(block.size_updates, fields)),
+        Assembler::HeadBlock.new(pairs(fields)), fields, head, block.first, block.prefix, block.request,
+        block.size_updates)
     end
 
     # The frames of a head gori AUTHORS on this direction — a short-circuit stub's answer
@@ -364,6 +370,7 @@ module Gori::Proxy::H2
       # Malformed/hostile HPACK. Same disposition, and the nil projection is what stops the
       # assembler from running a second (differently-positioned) decode over the same bytes.
       return unreadable(first, snapshot) if fields.nil?
+      updates = leading_size_updates(block)
 
       request = @direction == "out"
       # Judged on the PEER's list, before any strip, so no synth below (the rule record's
@@ -443,15 +450,17 @@ module Gori::Proxy::H2
                 # Unchanged, and this direction has never re-encoded: byte-exact passthrough,
                 # which is also what keeps the peer's HPACK table driven by the original encoder.
                 # `snapshot`, not `@buf` — `@buf` was cleared above.
-                Block.new(snapshot, Assembler::HeadBlock.new(pairs(fields)), fields, head, first, prefix, request)
+                Block.new(snapshot, Assembler::HeadBlock.new(pairs(fields)), fields, head, first, prefix,
+                  request, updates)
               else
                 @engaged = true
                 # A rule changed the head, so the TEXT the gate would show a human is the
                 # rewritten one — re-synthesized from the fields actually going out, so what the
                 # operator edits is what would have been sent.
                 shown = rewritten ? head_text(emit_fields, first, request) : head
-                Block.new(reframe(first, prefix, @encoder.encode(emit_fields)),
-                  Assembler::HeadBlock.new(pairs(emit_fields)), emit_fields, shown, first, prefix, request)
+                Block.new(reframe(first, prefix, reencoded(updates, emit_fields)),
+                  Assembler::HeadBlock.new(pairs(emit_fields)), emit_fields, shown, first, prefix, request,
+                  updates)
               end
       # `@buf` was already cleared at the top, so `defer?` raising here (StreamGate ends the
       # connection past MAX_REFUSED_STREAMS) leaves `close`'s drain nothing to write.
@@ -912,6 +921,39 @@ module Gori::Proxy::H2
       io.write(head)
       @buf.each_with_index { |f, i| io.write(f.payload) if i > 0 }
       {prefix, io.to_slice}
+    end
+
+    # The peer's §6.3 dynamic table size updates at the start of `block`, as the bytes it sent
+    # (empty when there are none). The shared decoder has already applied them, so a re-encode
+    # of `fields` alone drops them, and a receiver that lowered SETTINGS_HEADER_TABLE_SIZE may
+    # require one at the start of the first block after its SETTINGS was acknowledged (RFC 7541
+    # §4.2) and fail the connection with COMPRESSION_ERROR without it. Only the leading run: §4.2
+    # allows them nowhere else. The decode succeeded, so every integer here is complete.
+    private def leading_size_updates(block : Bytes) : Bytes
+      pos = 0
+      while pos < block.size && block[pos] & 0xe0 == 0x20
+        long = block[pos] & 0x1f == 0x1f
+        pos += 1
+        next unless long
+        while pos < block.size && block[pos] & 0x80 != 0
+          pos += 1
+        end
+        pos += 1
+      end
+      block[0, {pos, block.size}.min]
+    end
+
+    # `fields` re-encoded behind the peer's own size updates, carried verbatim. Not gori's own
+    # update to 0, though this encoder never reads or writes the dynamic table: a head held
+    # verbatim still reads the far decoder's table after a re-encoded block overtakes it
+    # (`StreamGate#overtakes_verbatim_locked`), so gori must not empty it.
+    private def reencoded(updates : Bytes, fields : Array(HPACK::Field)) : Bytes
+      encoded = @encoder.encode(fields)
+      return encoded if updates.empty?
+      joined = Bytes.new(updates.size + encoded.size)
+      updates.copy_to(joined)
+      encoded.copy_to(joined + updates.size)
+      joined
     end
 
     # HEADERS/PUSH_PROMISE + CONTINUATION for a re-encoded block, split at
