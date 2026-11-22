@@ -314,6 +314,10 @@ module Gori
         # and over both handshakes (`replayable?`).
         is_ws = Repeater::WsEngine.replayable?(request)
 
+        if marker_chain_runs_commands?(request) && (denied = exec_refusal)
+          return denied
+        end
+
         # Read and REFUSED before the insert, like the frames below: an unknown preset name
         # applies nothing, so a session stored with one would dial with gori's bare hello on
         # every later send while the row claimed a browser. See `Settings.tls_preset_error`.
@@ -591,6 +595,14 @@ module Gori
         Settings.tls_preset_normalize(raw)
       end
 
+      # A `§value¦chain§` in a stored request is the TUI Repeater's draft language, and the
+      # operator's send runs its chain, `exec:` steps included. An agent may write the request
+      # but not arm the command (DESIGN.md §7, 2026-10-11), so the `exec` gate is asked here, as
+      # `create_fuzzer` asks it of a template.
+      private def marker_chain_runs_commands?(request : String) : Bool
+        Fuzz::Template.parse(request).runs_commands?(Decoder.shared_registry)
+      end
+
       @[Tool("update_repeater", gated: true, agent_action: true, permission: "write")]
       private def update_repeater(h) : Result
         id = int(h, "id")
@@ -608,6 +620,11 @@ module Gori
         # Only a target this call names: a rename must not fail over the row's stored one.
         if present?(h, "target") && (why = Repeater::Plan.target_error(target))
           return err("invalid 'target': #{why}", "INVALID_ARGUMENT", field: "target")
+        end
+
+        # Only a request this call writes: renaming a tab the operator armed is not arming it.
+        if request != String.new(existing.request) && marker_chain_runs_commands?(request) && (denied = exec_refusal)
+          return denied
         end
 
         http2 = bool_arg(h, "http2", existing.http2?)
@@ -963,6 +980,11 @@ module Gori
           next failed << {fid, "flow disappeared before it could be seeded"} unless flow
 
           seed = seed_from_flow(flow, fid, keep_request_line, seed_ws_messages: true)
+          # The `create_repeater` gate, per flow: a capture can carry a `§v¦exec:…§` too (an
+          # imported HAR), and a session holding one is a command the operator's send can run.
+          if marker_chain_runs_commands?(seed.request) && (denied = exec_refusal)
+            next failed << {fid, "its request holds a §…§ chain that runs a local command: #{denied.text}"}
+          end
           id = store.insert_repeater(
             target: seed.target,
             request: seed.request.to_slice,
