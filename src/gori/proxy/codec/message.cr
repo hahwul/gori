@@ -144,11 +144,12 @@ module Gori::Proxy::Codec
     # The raw request-line as it arrived, up to (but excluding) the first CR/LF.
     # `method`/`target`/`version` come from split(' '), which mis-slices a malformed line
     # (an unencoded space ⇒ >3 tokens): target is truncated and version is a garbage token.
-    # This returns the honest whole line for the stored projection (FlowMapper), mirroring
-    # the first-line scan in Codec::Http1.rewrite_request_line.
+    # This returns the honest whole line for the stored projection (FlowMapper): the line
+    # `Codec::Http1.parse_request_head` read, past any blank lines in front of it.
     def request_line : String
-      nl = raw_head.index(0x0a_u8)
-      line = nl ? raw_head[0, nl] : raw_head
+      from = Http1.request_line_start(raw_head) # past blank lines, as `Http1.parse_request_head`
+      nl = raw_head.index(0x0a_u8, from)
+      line = nl ? raw_head[from, nl - from] : raw_head[from..]
       line = line[0, line.size - 1] if line.size > 0 && line.unsafe_fetch(line.size - 1) == 0x0d_u8
       String.new(line)
     end

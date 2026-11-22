@@ -532,11 +532,17 @@ module Gori::Proxy::Codec::Http1
   # callers can reject the connection cleanly instead of accepting a fake request.
   H2_PREFACE_LINE = "PRI * HTTP/2.0"
 
+  # The method/target/version projection reads the first NON-BLANK line, as `request_target_line`
+  # does for the gate: RFC 9112 §2.2 lets a server ignore blank lines before the request-line,
+  # so an origin reads `\r\nHEAD / HTTP/1.1` as a HEAD, and a method of `""` framed its
+  # response by Content-Length. Such a head stays `malformed?` (an origin may not skip them) and
+  # `raw_head` keeps the blank lines (P7).
   def self.parse_request_head(raw : Bytes) : RawRequest
-    first_crlf = index_crlf(raw, 0)
-    start = String.new(raw[0, first_crlf || raw.size])
+    from = request_line_start(raw)
+    first_crlf = index_crlf(raw, from)
+    start = String.new(raw[from, (first_crlf || raw.size) - from])
     parts = start.split(' ')
-    malformed = start_line_malformed?(start, parts)
+    malformed = from > 0 || start_line_malformed?(start, parts)
     RawRequest.new(
       raw_head: raw,
       method: parts[0]? || "",
@@ -581,18 +587,21 @@ module Gori::Proxy::Codec::Http1
   # scan would call a bare-LF `verbatim` head malformed, which is the misreading
   # `authored_start_line` exists to avoid. The flip side is deliberate: a bare LF INSIDE a
   # CRLF line ends it here, where the proxy reads on to the CRLF. The wire bytes are
-  # untouched either way (P7).
+  # untouched either way (P7). Blank lines in front of the request-line are skipped and make
+  # the line malformed, as in the proxy's parse.
   def self.authored_projection(raw : Bytes) : {String, String, String}
-    line = authored_line(raw)
+    from = request_line_start(raw)
+    line = authored_line(raw, from)
     parts = line.split(' ')
     method = parts[0]? || ""
-    return {method, line, ""} if start_line_malformed?(line, parts)
+    return {method, line, ""} if from > 0 || start_line_malformed?(line, parts)
     {method, parts[1], parts[2]}
   end
 
-  # The first line of a hand-authored head, ended by a bare LF or a CRLF (a lone CR is kept).
-  private def self.authored_line(raw : Bytes) : String
-    i = 0
+  # The line of a hand-authored head that starts at `from`, ended by a bare LF or a CRLF (a
+  # lone CR is kept).
+  private def self.authored_line(raw : Bytes, from : Int32 = 0) : String
+    i = from
     n = raw.size
     eol = n
     while i < n
@@ -603,7 +612,7 @@ module Gori::Proxy::Codec::Http1
       end
       i += 1
     end
-    String.new(raw[0, eol])
+    String.new(raw[from, eol - from])
   end
 
   # Whether a request start-line `split(' ')` cannot frame: anything but exactly three tokens
@@ -668,16 +677,53 @@ module Gori::Proxy::Codec::Http1
   end
 
   # The request start-line's {method, target, malformed} WITHOUT parsing/allocating the header
-  # block. Mirrors parse_request_head's start-line parse EXACTLY (same index_crlf + String.new
-  # over the first line + split(' ') + `parts.size != 3 || start == H2_PREFACE_LINE` malformed
-  # rule), so a caller that only needs method+target (the active-probe dedup_key gate) keys
-  # byte-identically to a full parse. The dedup_key ⇔ plan equivalence spec guards against any
+  # block. Mirrors parse_request_head's start-line parse EXACTLY (same blank-line skip +
+  # index_crlf + String.new over the request-line + split(' ') + malformed rule), so a caller
+  # that only needs method+target (the active-probe dedup_key gate) keys byte-identically to a
+  # full parse. The dedup_key ⇔ plan equivalence spec guards against any
   # drift from parse_request_head.
   def self.parse_request_line(raw : Bytes) : {String, String, Bool}
-    first_crlf = index_crlf(raw, 0)
-    start = String.new(raw[0, first_crlf || raw.size])
+    from = request_line_start(raw)
+    first_crlf = index_crlf(raw, from)
+    start = String.new(raw[from, (first_crlf || raw.size) - from])
     parts = start.split(' ')
-    {parts[0]? || "", parts[1]? || "", start_line_malformed?(start, parts)}
+    {parts[0]? || "", parts[1]? || "", from > 0 || start_line_malformed?(start, parts)}
+  end
+
+  # Where the request-line starts: past any blank lines (CRLF, or a bare LF) in front of it,
+  # when the line after them is shaped like a request-line. 0 for every ordinary head, and 0
+  # when that line is a header field (`header_field_line?`): `\r\nHost: h` is an EMPTY
+  # request-line followed by its headers, a shape a tester sends on purpose, and reading
+  # `Host: h` as the request-line would take the Host the forward proxy routes it by.
+  def self.request_line_start(raw : Bytes) : Int32
+    i = 0
+    n = raw.size
+    loop do
+      if i < n && raw.unsafe_fetch(i) == 0x0a_u8
+        i += 1
+      elsif i + 1 < n && raw.unsafe_fetch(i) == 0x0d_u8 && raw.unsafe_fetch(i + 1) == 0x0a_u8
+        i += 2
+      else
+        return header_field_line?(raw, i) ? 0 : i
+      end
+    end
+  end
+
+  # Whether the line at `from` is shaped like a header field rather than a request-line,
+  # decided lexically: a field is `token ":"` with the colon before any SP/HTAB, while a
+  # request-line has SP after its method before any colon (an absolute-form target's colon
+  # comes after that SP). The one home for that test, so the request projections and the
+  # gate's `request_target_line` cannot read a line behind a blank line differently.
+  private def self.header_field_line?(raw : Bytes, from : Int32) : Bool
+    i = from
+    while i < raw.size
+      case raw.unsafe_fetch(i)
+      when 0x3a_u8                            then return i > from
+      when 0x20_u8, 0x09_u8, 0x0d_u8, 0x0a_u8 then return false
+      end
+      i += 1
+    end
+    false
   end
 
   # The request-target the SCOPE GATE reads — NOT what goes on the wire.
@@ -772,7 +818,12 @@ module Gori::Proxy::Codec::Http1
       # no-arg `split` (the tokenizer) treat that CR as whitespace either way. The corpus in
       # spec/outbound_spec.cr covers the CR-bearing shapes for exactly this reason.
       line = String.new(raw[pos, stop - pos])
-      return line.split[1]? || "/" unless line.strip.empty?
+      unless line.strip.empty?
+        # A header field behind blank lines is no request-line: the request-line was the empty
+        # one, which has no target (`request_line_start`).
+        return "/" if pos > 0 && header_field_line?(raw, pos)
+        return line.split[1]? || "/"
+      end
       break unless nl
       pos = nl + 1
     end
