@@ -473,6 +473,23 @@ describe "Interceptor scope gates over an ABSOLUTE-FORM target" do
 
   # A tunnelled client's slash-less target (`GET 0/`) used to be spliced onto the host, so the
   # gate judged `http://127.0.0.10/` for a request bound for 127.0.0.1.
+  # R3: a forward-proxy re-spelling of the same origin dodged a url-level exclude.
+  it "holds a url-level exclude against a re-spelled absolute-form target" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test")
+      scope.add("exclude", "regex", "^http://acme\\.test/internal")
+      scope.enable
+      scope.enable_sandbox
+      ic = Gori::Interceptor.new(scope)
+      ic.sandbox_blocks?("http", "acme.test", "/internal", 80).should be_true
+      {"HTTP://acme.test/internal", "http://acme.test:80/internal", "http://u@acme.test/internal",
+       "http://ACME.test/internal"}.each do |t|
+        ic.sandbox_blocks?("http", "acme.test", t, 80).should be_true
+      end
+    end
+  end
+
   it "never lets a slash-less target re-spell the host the sandbox and hold judge" do
     with_store do |store|
       scope = Gori::Scope.load(store)

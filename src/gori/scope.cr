@@ -317,66 +317,68 @@ module Gori
     end
 
     # The first EXCLUDE that matches (callers hold @mutex), asked of the url as spelled AND of
-    # the same url with its host folded the way a `host` rule folds it (`Scope.host_folded_url`).
+    # its canonical spelling (`Scope.canonical_url`).
     #
     # A `host` rule compares `HostPattern.normalize(host)`, but a `string`/`regex` rule reads the
-    # url, which carries the host exactly as the client or operator typed it. So `acme.test./admin`
-    # dodged `exclude string acme.test/admin`, and `ACME.test/internal` or `acme.test./internal`
-    # dodged `exclude regex ^https://acme\.test/internal`, while a host include still admitted
-    # both: the same host, one resolver answer, a carve-out that did not hold. Only the EXCLUDE
-    # side is widened, so it only ever refuses more; an include keeps matching the raw spelling,
-    # and no include rule changes meaning. The SQL lens (`filter_sql`) is not widened: History
-    # still filters the stored spelling, and this is a containment gate.
+    # url, which carries the authority exactly as the client or operator typed it. So
+    # `acme.test./admin` dodged `exclude string acme.test/admin`, and `ACME.test/internal`,
+    # `HTTP://acme.test/internal`, `http://acme.test:80/internal` or `http://u@acme.test/internal`
+    # dodged `exclude regex ^http://acme\.test/internal`, while a host include still admitted
+    # each: the same origin, a carve-out that did not hold. Only the EXCLUDE side is widened, so
+    # it only ever refuses more; an include keeps matching the raw spelling, and no include rule
+    # changes meaning. The SQL lens (`filter_sql`) is not widened: History still filters the
+    # stored spelling, and this is a containment gate.
     #
     # The second url is built only when a url-level exclude exists, no exclude matched as
-    # spelled, and the host is not already in folded form, which is the ordinary case.
+    # spelled, and the url is not already canonical, which is the ordinary case.
     private def exclude_match_unlocked(url : String, host : String, url_down : String, bare : String) : Rule?
-      if rule = @excludes.find { |r| r.matches?(url, host, url_down, bare) }
+      if rule = @excludes.find(&.matches?(url, host, url_down, bare))
         return rule
       end
       return nil unless @url_excludes
-      return nil unless folded = Scope.host_folded_url(url)
-      folded_down = url_down_unlocked(folded)
-      @excludes.find { |r| !r.host_type? && r.matches?(folded, host, folded_down, bare) }
+      return nil unless canonical = Scope.canonical_url(url)
+      canonical_down = url_down_unlocked(canonical)
+      @excludes.find { |r| !r.host_type? && r.matches?(canonical, host, canonical_down, bare) }
     end
 
-    # `url` with the host of its authority lowercased and its trailing root dots stripped (the
-    # `HostPattern.normalize` fold, brackets kept so an IPv6 url still reads as one), or nil when
-    # that host is already in that form. Lexical, like `Url.origin_path`: a url the gate is asked
-    # about may hold a port or a byte `URI.parse` refuses, and that must not skip the fold.
-    def self.host_folded_url(url : String) : String?
-      return nil unless sep = url.byte_index("://")
+    # `url` in canonical form, or nil when it already is: the scheme lowercased, a userinfo
+    # dropped, the host folded the way `HostPattern.normalize` folds it (lowercased, trailing
+    # root dots stripped; brackets kept so an IPv6 url still reads as one), and a port equal to
+    # the scheme's default dropped (an empty one too, RFC 3986 §3.2.3). Path, query and
+    # fragment are kept as written. Lexical (`Url.authority_span`), so a port or byte
+    # `URI.parse` refuses cannot skip it; an already-canonical url is answered from its bytes,
+    # with nothing allocated.
+    def self.canonical_url(url : String) : String?
+      return nil unless span = Url.authority_span(url)
       bytes = url.to_slice
-      start = sep + 3
-      # The authority ends at the first '/', '?' or '#'; a userinfo ends at its last '@'.
-      auth_end = start
-      while auth_end < bytes.size
-        b = bytes[auth_end]
-        break if b == '/'.ord || b == '?'.ord || b == '#'.ord
-        start = auth_end + 1 if b == '@'.ord
-        auth_end += 1
+      scheme = bytes[0, span.scheme_end]
+      hs = span.host_start
+      he = span.host_end
+      drop_port = Scope.default_port_written?(bytes, span)
+      return nil unless drop_port || span.userinfo? || scheme.any? { |b| 0x41_u8 <= b <= 0x5a_u8 } ||
+                        (he > hs && (bytes[he - 1] == '.'.ord ||
+                        (hs...he).any? { |i| (0x41_u8 <= bytes[i] <= 0x5a_u8) || bytes[i] >= 0x80_u8 }))
+      host = HostPattern.down(String.new(bytes[hs, he - hs])).rstrip('.')
+      rest = drop_port ? span.auth_end : he
+      canonical = String.build do |io|
+        scheme.each { |b| io.write_byte(AsciiBytes.downcase(b)) }
+        io << "://" << host
+        io.write(bytes[rest, bytes.size - rest])
       end
-      stop = start
-      # The host ends at the port's ':', or just after the ']' of a bracketed IPv6 literal.
-      terminator = stop < auth_end && bytes[stop] == '['.ord ? ']'.ord : ':'.ord
-      while stop < auth_end && bytes[stop] != terminator
-        stop += 1
+      canonical == url ? nil : canonical
+    end
+
+    # Does `bytes`' authority write a port that is its scheme's default (`:80` on http,
+    # `:0443` on https, or an empty `:`)? Compared on the bytes, so asking allocates nothing.
+    protected def self.default_port_written?(bytes : Bytes, span : Url::AuthoritySpan) : Bool
+      return false unless start = span.port_start
+      return false unless default = Url.default_port(bytes[0, span.scheme_end])
+      return true if start == span.auth_end
+      i = start
+      while i < span.auth_end && bytes[i] == '0'.ord
+        i += 1
       end
-      stop += 1 if terminator == ']'.ord && stop < auth_end
-      return nil if stop == start
-      # Already folded: no ASCII capital, no non-ASCII byte (`HostPattern.down`'s test) and no
-      # trailing dot. Checked on the bytes so the common case allocates nothing.
-      unfolded = bytes[stop - 1] == '.'.ord ||
-                 (start...stop).any? { |i| (0x41_u8 <= bytes[i] <= 0x5a_u8) || bytes[i] >= 0x80_u8 }
-      return nil unless unfolded
-      span = String.new(bytes[start, stop - start])
-      folded = HostPattern.down(span).rstrip('.')
-      return nil if folded == span
-      String.build do |io|
-        io.write(bytes[0, start])
-        io << folded
-        io.write(bytes[stop, bytes.size - stop])
-      end
+      bytes[i, span.auth_end - i] == (default == 80 ? "80" : "443").to_slice
     end
 
     # The id of the first INCLUDE rule that matches — the audit trail the active-sender gate

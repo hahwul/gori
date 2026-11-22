@@ -139,5 +139,73 @@ module Gori
       return "#{scheme}://#{host}#{path}" unless port
       "#{scheme}://#{authority(scheme, host, port)}#{path}"
     end
+
+    # Byte offsets of an absolute URL's authority parts, found lexically rather than with
+    # `URI.parse`, which raises on exactly the ports and bytes a security tool is handed.
+    # `scheme_end` is the offset of `://`; the userinfo, when there is one, runs from
+    # `scheme_end + 3` to `host_start - 1` (its `@`); the host is `host_start...host_end`,
+    # brackets included for an IPv6 literal; a port, when written, follows a `:` at `host_end`
+    # and runs to `auth_end`, where the path, query or fragment starts.
+    record AuthoritySpan, scheme_end : Int32, host_start : Int32, host_end : Int32, auth_end : Int32 do
+      def userinfo? : Bool
+        host_start > scheme_end + 3
+      end
+
+      def port_start : Int32?
+        host_end + 1 if host_end < auth_end
+      end
+    end
+
+    # The `AuthoritySpan` of `url`, or nil when it has no `://`.
+    def self.authority_span(url : String) : AuthoritySpan?
+      bytes = url.to_slice
+      return nil unless sep = AsciiBytes.index(bytes, "://".to_slice)
+      host_start = sep + 3
+      auth_end = host_start
+      while auth_end < bytes.size
+        b = bytes.unsafe_fetch(auth_end)
+        break if b == '/'.ord || b == '?'.ord || b == '#'.ord
+        host_start = auth_end + 1 if b == '@'.ord # a userinfo ends at the authority's last '@'
+        auth_end += 1
+      end
+      AuthoritySpan.new(sep, host_start, host_end(bytes, host_start, auth_end), auth_end)
+    end
+
+    # Where a host starting at `from` ends: at the port's ':', or just after the ']' of a
+    # bracketed IPv6 literal.
+    private def self.host_end(bytes : Bytes, from : Int32, auth_end : Int32) : Int32
+      at = from
+      terminator = at < auth_end && bytes[at] == '['.ord ? ']'.ord : ':'.ord
+      while at < auth_end && bytes.unsafe_fetch(at) != terminator
+        at += 1
+      end
+      terminator == ']'.ord && at < auth_end ? at + 1 : at
+    end
+
+    # The default port of `scheme` (ASCII case-insensitive), or nil for one gori has no
+    # default for.
+    def self.default_port(scheme : Bytes) : Int32?
+      if AsciiBytes.range_eq_ci?(scheme, 0, scheme.size, "http".to_slice) ||
+         AsciiBytes.range_eq_ci?(scheme, 0, scheme.size, "ws".to_slice)
+        80
+      elsif AsciiBytes.range_eq_ci?(scheme, 0, scheme.size, "https".to_slice) ||
+            AsciiBytes.range_eq_ci?(scheme, 0, scheme.size, "wss".to_slice)
+        443
+      end
+    end
+
+    # The port an absolute URL names, explicitly or by its scheme's default; nil when the
+    # written port is not a number (or out of range) or the scheme has no default. An empty
+    # port (`http://h:/`) is the default, as RFC 3986 §3.2.3 says.
+    def self.effective_port(url : String, span : AuthoritySpan) : Int32?
+      bytes = url.to_slice
+      if (start = span.port_start) && start < span.auth_end
+        text = String.new(bytes[start, span.auth_end - start])
+        port = text.to_i?(whitespace: false, underscore: false, prefix: false, strict: true)
+        return port if port && 0 <= port <= 65_535
+        return nil
+      end
+      default_port(bytes[0, span.scheme_end])
+    end
   end
 end

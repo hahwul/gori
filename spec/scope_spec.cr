@@ -982,13 +982,38 @@ describe "Gori::Scope url-level excludes and the host's spelling" do
     end
   end
 
-  it "folds only the authority's host, and answers nil when it is already folded" do
-    Gori::Scope.host_folded_url("https://ACME.test./A?B#C").should eq("https://acme.test/A?B#C")
-    Gori::Scope.host_folded_url("https://ACME.test.:8443/x").should eq("https://acme.test:8443/x")
-    Gori::Scope.host_folded_url("https://[::1]:8443/X").should be_nil
-    Gori::Scope.host_folded_url("https://[FE80::A]/x").should eq("https://[fe80::a]/x")
-    Gori::Scope.host_folded_url("https://acme.test/ADMIN").should be_nil
-    Gori::Scope.host_folded_url("not a url").should be_nil
+  it "canonicalises only the authority, and answers nil when it already is canonical" do
+    Gori::Scope.canonical_url("https://ACME.test./A?B#C").should eq("https://acme.test/A?B#C")
+    Gori::Scope.canonical_url("https://ACME.test.:8443/x").should eq("https://acme.test:8443/x")
+    Gori::Scope.canonical_url("https://[::1]:8443/X").should be_nil
+    Gori::Scope.canonical_url("https://[FE80::A]/x").should eq("https://[fe80::a]/x")
+    Gori::Scope.canonical_url("https://acme.test/ADMIN").should be_nil
+    Gori::Scope.canonical_url("not a url").should be_nil
+    Gori::Scope.canonical_url("HTTP://acme.test/x").should eq("http://acme.test/x")
+    Gori::Scope.canonical_url("http://acme.test:80/x").should eq("http://acme.test/x")
+    Gori::Scope.canonical_url("https://acme.test:0443/x").should eq("https://acme.test/x")
+    Gori::Scope.canonical_url("http://acme.test:/x").should eq("http://acme.test/x")
+    Gori::Scope.canonical_url("http://acme.test:443/x").should be_nil
+    Gori::Scope.canonical_url("http://acme.test:0/x").should be_nil
+    Gori::Scope.canonical_url("http://u:p@ACME.test:80/x?y@z").should eq("http://acme.test/x?y@z")
+    Gori::Scope.canonical_url("http://[::1]:80/x").should eq("http://[::1]/x")
+  end
+
+  # A forward-proxy request's absolute-form target is the url the gate reads, so its scheme
+  # case, a default port and a userinfo dodged a url-level exclude a host include admitted.
+  it "holds a regex exclude against a re-spelled scheme, default port or userinfo" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test").should be_true
+      scope.add("exclude", "regex", "^http://acme\\.test/internal").should be_true
+      scope.enable_sandbox
+      {"HTTP://acme.test/internal", "http://acme.test:80/internal", "http://u@acme.test/internal",
+       "Http://u:p@ACME.test.:080/internal"}.each do |url|
+        scope.excluded?(url, "acme.test").should be_true
+        scope.sandbox_blocks?(url, "acme.test").should be_true
+      end
+      scope.sandbox_blocks?("http://acme.test:8080/internal", "acme.test").should be_false
+    end
   end
 end
 
