@@ -24,6 +24,14 @@ module Gori::Fuzz
     property macro_every : String
     property macro_expect : String
     property macro_on_failure : String
+    # Stored top-level values this gori cannot apply, RAW under their key: an unknown `mode`, a
+    # `match_regex`/`filter_regex` that does not compile, a `sets` list holding a set of an
+    # unknown `kind`. Kept the way `plan_options` is: `to_json` writes them back unchanged and the
+    # run is refused (`unread_error`). Applied anyway they ran a Sniper sweep the row never asked
+    # for, matched every response, or moved the remaining sets onto other positions — and a
+    # re-save then erased what the row said. The trigger is a row from a newer gori or an
+    # imported archive. A surface drops a key once the operator sets that knob again.
+    property unread : Hash(String, JSON::Any) = {} of String => JSON::Any
 
     def initialize(@config = Config.new(keep_bodies: :all), @matcher = Matcher.new,
                    @http2 = false, @sni = "", @sets = [] of SetSpec,
@@ -48,7 +56,7 @@ module Gori::Fuzz
             j.field "timeout_ms", timeout.total_milliseconds.to_i64
           end
           j.field "evidence", @evidence unless @evidence.nil?
-          j.field "mode", @config.mode.to_s
+          j.field "mode", stored("mode", @config.mode.to_s)
           j.field "http2", @http2
           j.field "sni", @sni
           j.field "concurrency", @config.concurrency
@@ -69,7 +77,7 @@ module Gori::Fuzz
           j.field "update_cl", @config.update_content_length?
           j.field "reframe_grpc", @config.reframe_grpc?
           j.field "tls_preset", @config.tls_preset
-          j.field("sets") { j.array { @sets.each { |s| j.object { j.field "kind", s.kind.to_s; j.field "value", s.value } } } }
+          write_sets(j)
           j.field "match_status", @matcher.match_status
           j.field "filter_status", @matcher.filter_status
           j.field "match_size", @matcher.match_size
@@ -78,8 +86,8 @@ module Gori::Fuzz
           j.field "filter_words", @matcher.filter_words
           j.field "match_time", @matcher.match_time
           j.field "filter_time", @matcher.filter_time
-          j.field "match_regex", @matcher.match_regex.try(&.source)
-          j.field "filter_regex", @matcher.filter_regex.try(&.source)
+          j.field "match_regex", stored("match_regex", @matcher.match_regex.try(&.source))
+          j.field "filter_regex", stored("filter_regex", @matcher.filter_regex.try(&.source))
           j.field "match_grpc", @matcher.match_grpc if @matcher.match_grpc
           j.field "filter_grpc", @matcher.filter_grpc if @matcher.filter_grpc
           j.field "match_lines", @matcher.match_lines if @matcher.match_lines
@@ -108,9 +116,10 @@ module Gori::Fuzz
     def apply_json(raw : String) : Bool
       return false if raw.strip.empty?
       obj = JSON.parse(raw).as_h? || return false
+      @unread = {} of String => JSON::Any
       apply_options_json(obj)
       @evidence = obj["evidence"]?.try(&.as_bool?)
-      obj["mode"]?.try(&.as_s?).try { |m| Fuzz::Mode.parse?(m).try { |mode| @config.mode = mode } }
+      apply_mode_json(obj)
       @http2 = obj["http2"]?.try(&.as_bool?) || @http2
       @sni = obj["sni"]?.try(&.as_s?) || @sni
       Settings.int_field(obj, "concurrency").try { |n| @config.concurrency = n }
@@ -151,8 +160,8 @@ module Gori::Fuzz
       # an unconstrained dimension. Same nilable-string reading as every matcher spec above.
       @matcher.match_time = obj["match_time"]?.try(&.as_s?)
       @matcher.filter_time = obj["filter_time"]?.try(&.as_s?)
-      @matcher.match_regex = obj["match_regex"]?.try(&.as_s?).try { |s| Regex.new(s) rescue nil }
-      @matcher.filter_regex = obj["filter_regex"]?.try(&.as_s?).try { |s| Regex.new(s) rescue nil }
+      @matcher.match_regex = regex_knob(obj, "match_regex")
+      @matcher.filter_regex = regex_knob(obj, "filter_regex")
       @matcher.match_grpc = obj["match_grpc"]?.try(&.as_s?)
       @matcher.filter_grpc = obj["filter_grpc"]?.try(&.as_s?)
       @matcher.match_lines = obj["match_lines"]?.try(&.as_s?)
@@ -166,6 +175,29 @@ module Gori::Fuzz
     rescue
       # tolerate a malformed/older config blob — keep defaults
       false
+    end
+
+    # Why this row may not run, naming each value `unread` holds; nil when there is none.
+    def unread_error : String?
+      SessionConfig.unread_error(@unread)
+    end
+
+    # The same sentence for a surface that keeps the hash itself (`FuzzerView`).
+    def self.unread_error(unread : Hash(String, JSON::Any)) : String?
+      return nil if unread.empty?
+      parts = unread.map do |key, raw|
+        case key
+        when "mode" then "mode #{raw.to_json} is not one this gori knows"
+        when "sets"
+          kinds = (raw.as_a? || [] of JSON::Any).compact_map do |set|
+            kind = set.as_h?.try(&.["kind"]?)
+            kind.to_json unless kind.try(&.as_s?).try { |k| SessionConfig.parse_set_kind(k) }
+          end
+          "payload set kind #{kinds.join(", ")} is not one this gori knows"
+        else "#{key} #{raw.to_json} does not compile"
+        end
+      end
+      "saved Fuzzer settings cannot be read: #{parts.join("; ")}. Set them again to run this tab"
     end
 
     def options_raw_json : String?
@@ -238,18 +270,57 @@ module Gori::Fuzz
       @macro_on_failure = string_knob(obj, "macro_on_failure")
     end
 
-    private def apply_sets_json(arr : JSON::Any?) : Nil
-      arr.try(&.as_a?).try do |sets|
-        @sets = sets.compact_map do |sp|
-          h = sp.as_h?
-          kind = parse_set_kind(h.try(&.["kind"]?).try(&.as_s?))
-          v = h.try(&.["value"]?).try(&.as_s?) || ""
-          kind ? SetSpec.new(kind, v) : nil
-        end
+    private def write_sets(j : JSON::Builder) : Nil
+      if raw_sets = @unread["sets"]?
+        j.field "sets", raw_sets
+      else
+        j.field("sets") { j.array { @sets.each { |s| j.object { j.field "kind", s.kind.to_s; j.field "value", s.value } } } }
       end
     end
 
-    private def parse_set_kind(k : String?) : Symbol?
+    # A stored value this gori could not apply wins over the live one, so a re-save keeps it.
+    private def stored(key : String, value)
+      @unread[key]? || value
+    end
+
+    private def apply_mode_json(obj : Hash(String, JSON::Any)) : Nil
+      raw = obj["mode"]? || return
+      if mode = raw.as_s?.try { |m| Fuzz::Mode.parse?(m) }
+        @config.mode = mode
+      else
+        @unread["mode"] = raw
+      end
+    end
+
+    # A stored pattern, or nil when there is none. One that does not compile is kept in `unread`
+    # rather than read as "no pattern", which for `match_regex` matches every response.
+    private def regex_knob(obj : Hash(String, JSON::Any), key : String) : Regex?
+      raw = obj[key]?
+      return nil if raw.nil? || raw.raw.nil?
+      if re = raw.as_s?.try { |src| Regex.new(src) rescue nil }
+        return re
+      end
+      @unread[key] = raw
+      nil
+    end
+
+    # The known sets stay listed; one of an unknown kind keeps the whole stored list in `unread`,
+    # because dropping it moves every later set onto another position.
+    private def apply_sets_json(arr : JSON::Any?) : Nil
+      arr.try(&.as_a?).try do |sets|
+        unknown = false
+        @sets = sets.compact_map do |sp|
+          h = sp.as_h?
+          kind = SessionConfig.parse_set_kind(h.try(&.["kind"]?).try(&.as_s?))
+          unknown = true unless kind
+          v = h.try(&.["value"]?).try(&.as_s?) || ""
+          kind ? SetSpec.new(kind, v) : nil
+        end
+        @unread["sets"] = JSON::Any.new(sets) if unknown
+      end
+    end
+
+    def self.parse_set_kind(k : String?) : Symbol?
       case k
       when "list"    then :list
       when "bytes"   then :bytes

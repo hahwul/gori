@@ -170,6 +170,9 @@ module Gori::Tui
       @session_options = nil.as(Fuzz::SessionOptions?)
       @session_options_error = nil.as(String?)
       @session_options_raw = nil.as(String?)
+      # `Fuzz::SessionConfig#unread`: stored values this view could not apply, kept for the
+      # re-save and refused at run; a key goes once the operator sets that knob again.
+      @session_unread = {} of String => JSON::Any
       @evidence_override = nil.as(Bool?)
       @evidence = false
       # The `$NAME`s the SEEDED template arrived with — see `operator_env_vars`, and
@@ -1383,6 +1386,7 @@ module Gori::Tui
     # set. A nil spec (blank required input) leaves @sets unchanged.
     def apply_set(edit_index : Int32?, spec : SetSpec?) : Nil
       return unless spec
+      @session_unread.delete("sets")
       if i = edit_index
         @sets[i] = spec if 0 <= i < @sets.size
       else
@@ -1395,6 +1399,7 @@ module Gori::Tui
 
     private def remove_set(i : Int32) : Nil
       return unless 0 <= i < @sets.size
+      @session_unread.delete("sets")
       @sets.delete_at(i)
       @cfg_row = @cfg_row.clamp(0, {config_row_count - 1, 0}.max)
       @dirty = true
@@ -1404,6 +1409,7 @@ module Gori::Tui
       modes = [Fuzz::Mode::Sniper, Fuzz::Mode::BatteringRam, Fuzz::Mode::Pitchfork, Fuzz::Mode::ClusterBomb]
       i = modes.index(@config.mode) || 0
       @config.mode = modes[(i + d) % modes.size]
+      @session_unread.delete("mode")
       @dirty = true
     end
 
@@ -1456,10 +1462,12 @@ module Gori::Tui
       @matcher.match_status = blank_nil(s.m_status)
       @matcher.match_size = blank_nil(s.m_size)
       @matcher.match_words = blank_nil(s.m_words)
+      @session_unread.delete("match_regex") if s.m_regex != @s_m_regex
       @s_m_regex = s.m_regex
       @matcher.filter_status = blank_nil(s.f_status)
       @matcher.filter_size = blank_nil(s.f_size)
       @matcher.filter_words = blank_nil(s.f_words)
+      @session_unread.delete("filter_regex") if s.f_regex != @s_f_regex
       @s_f_regex = s.f_regex
       @s_grpc_fields = s.grpc_fields
       # Normalised, not stored as typed: "" and "  " both mean "no override", and a
@@ -1754,6 +1762,12 @@ module Gori::Tui
       "invalid Stop after N hits: #{@s_stop_after.strip} (0 to #{Int32::MAX}; blank or 0 = off)"
     end
 
+    # Why the restored row cannot run as stored: options it cannot read, or a top-level knob
+    # it could not apply (`Fuzz::SessionConfig#unread`).
+    private def saved_session_error : String?
+      @session_options_error || Fuzz::SessionConfig.unread_error(@session_unread)
+    end
+
     # --- engine assembly -----------------------------------------------------
     # Build an engine ready to run, or {nil, error}. `scope` becomes the interactive
     # `Gori::Outbound` decision the sender dials through: no up-front allowlist gate (the
@@ -1766,7 +1780,9 @@ module Gori::Tui
     def build_engine(verify : Bool, scope : Gori::Scope,
                      overrides : Gori::HostOverrides? = nil,
                      project : Gori::Store? = nil) : {Fuzz::Engine?, String?}
-      return {nil, @session_options_error} if @session_options_error
+      if err = saved_session_error
+        return {nil, err}
+      end
       commit_buffers
       if err = regex_error
         return {nil, err} # don't silently run match-everything on a bad pattern
@@ -2878,6 +2894,7 @@ module Gori::Tui
         state.options = @session_options
         # Preserve malformed options so a save never turns an inert row into an armed default.
         state.apply_options_raw(@session_options_raw) if @session_options_error
+        state.unread = @session_unread.dup
       end
     end
 
@@ -2893,6 +2910,7 @@ module Gori::Tui
       @session_options = state.options
       @session_options_error = state.options_error
       @session_options_raw = state.options_raw_json
+      @session_unread = state.unread
       @evidence_override = state.evidence
       @evidence = state.evidence == true unless state.evidence.nil?
       @editor.env_literal_source = @evidence ? @evidence_env_seed : nil
