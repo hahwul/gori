@@ -30,25 +30,40 @@ module Gori
         String.build do |io|
           io << "# Issues — " << project_name << "\n\n"
           io << "_" << issues.size << " issues · exported " << Time.local.to_s("%Y-%m-%d %H:%M") << "_\n"
-          issues.each { |f| append_stored_issue(io, f, store, matcher, flow_loader, include_sensitive) }
+          first_copy = nil
+          issues.each do |f|
+            id = append_stored_issue(io, f, store, matcher, flow_loader, include_sensitive)
+            first_copy ||= id
+          end
+          append_evidence_hint(io, first_copy)
         end
       end
 
       # ONE issue's block, exactly as `markdown` writes it into the report: `gori run issues show`.
       def self.issue_markdown(f : Store::Issue, store : Store, matcher : Redact::Matcher? = nil) : String
-        String.build { |io| append_stored_issue(io, f, store, matcher) }
+        String.build do |io|
+          first_copy = append_stored_issue(io, f, store, matcher)
+          append_evidence_hint(io, first_copy)
+        end
       end
 
       private def self.append_stored_issue(io : String::Builder, f : Store::Issue, store : Store,
                                            matcher : Redact::Matcher?, flow_loader : Proc(Int64, Store::FlowDetail?)? = nil,
-                                           include_sensitive : Bool = false) : Nil
+                                           include_sensitive : Bool = false) : Int64?
         flow = f.flow_id.try { |fid| flow_loader ? flow_loader.call(fid) : store.get_flow(fid) }
         flow = Redact::Wire.flow(flow, matcher)[0] if flow && matcher
-        append_issue(io, f, resolve_issue_links(f, store, flow, include_sensitive), store.issue_evidence(f.id))
+        frozen = store.issue_evidence(f.id)
+        append_issue(io, f, resolve_issue_links(f, store, flow, include_sensitive), frozen)
         if flow
           append_evidence(io, "Request", flow.request_head, flow.request_body, flow.request_body_truncated?, include_sensitive)
           append_evidence(io, "Response", flow.response_head, flow.response_body, flow.response_body_truncated?, include_sensitive)
         end
+        frozen.first?.try(&.id)
+      end
+
+      private def self.append_evidence_hint(io : String::Builder, first_copy : Int64?) : Nil
+        return unless first_copy
+        io << "\nOpen a frozen copy by its evidence ID in the same project, e.g. `gori run evidence show #{first_copy}`.\n"
       end
 
       # The Markdown for ONE issue, heading included — the body of `markdown`'s loop, split out
@@ -250,7 +265,7 @@ module Gori
         return if metas.empty?
         io << "\n### Frozen evidence\n\n"
         metas.each do |m|
-          io << "- **frozen** " << one_line(m.method) << " " << one_line(m.url)
+          io << "- **evidence #" << m.id << "** " << one_line(m.method) << " " << one_line(m.url)
           io << " — " << m.source_label << " · " << Gori::LocalTime.utc(m.created_at, "%Y-%m-%d %H:%M:%S UTC")
           io << " · " << Evidence.outcome(m)
           io << " · " << m.bytes << " bytes"

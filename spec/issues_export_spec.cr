@@ -543,7 +543,8 @@ describe Gori::Issues::Export do
 
         md = Gori::Issues::Export.markdown(store.issues, store, "proj")
         md.should contain("### Frozen evidence")
-        md.should contain("- **frozen** POST https://h.test/login — hist ##{fid} (deleted) · ")
+        md.should contain("- **evidence ##{eid}** POST https://h.test/login — hist ##{fid} (deleted) · ")
+        md.should contain("`gori run evidence show #{eid}`")
         md.should contain(" · 200 · #{snap.bytes} bytes · sha256 req #{snap.request_sha256} res #{snap.response_sha256}")
         md.should_not contain("SECRET-BODY")
 
@@ -562,10 +563,39 @@ describe Gori::Issues::Export do
       end
     end
 
+    it "prints the lookup hint once across issues, even if the first has no copies" do
+      with_store do |store|
+        plain = store.insert_issue("no copies", Gori::Store::Severity::Low, nil, nil)
+        first = store.insert_issue("first copy", Gori::Store::Severity::Low, nil, nil)
+        second = store.insert_issue("second copy", Gori::Store::Severity::Low, nil, nil)
+        first_copy = nil
+        [first, second].each_with_index do |issue, index|
+          fid = store.insert_flow(Gori::Store::CapturedRequest.new(
+            created_at: index.to_i64, scheme: "https", host: "h.test", port: 443,
+            method: "GET", target: "/", http_version: "HTTP/1.1",
+            head: "GET / HTTP/1.1\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+          store.update_response(Gori::Store::CapturedResponse.new(
+            fid, 200, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "revision #{index}".to_slice, duration_us: 1_i64))
+          snap = Gori::Evidence.from_flow(store.get_flow(fid).not_nil!)
+          eid, _ = store.freeze_evidence(issue, snap)
+          first_copy ||= eid
+          store.delete_flows([fid]).should be_true
+          Gori::Issues::Export.issue_markdown(store.get_issue(issue).not_nil!, store).should contain("`gori run evidence show #{eid}`")
+        end
+        issues = [plain, first, second].map { |id| store.get_issue(id).not_nil! }
+        md = Gori::Issues::Export.markdown(issues, store, "proj")
+        md.scan("gori run evidence show").size.should eq(1)
+        md.should contain("`gori run evidence show #{first_copy}`")
+        md.scan("**evidence #").size.should eq(2)
+      end
+    end
+
     it "emits an empty array and no section for an issue with nothing frozen" do
       with_store do |store|
         store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
-        Gori::Issues::Export.markdown(store.issues, store, "proj").should_not contain("Frozen evidence")
+        md = Gori::Issues::Export.markdown(store.issues, store, "proj")
+        md.should_not contain("Frozen evidence")
+        md.should_not contain("gori run evidence show")
         JSON.parse(Gori::Issues::Export.json(store.issues, store))[0]["evidence"].as_a.should be_empty
       end
     end
