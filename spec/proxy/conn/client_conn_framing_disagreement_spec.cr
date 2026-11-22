@@ -174,6 +174,46 @@ describe "Gori::Proxy::ClientConn response framing disagreement" do
     end
   end
 
+  it "delivers a close-delimited response whole to a client that pipelined its next request" do
+    # RFC 9112 §9.3.2: request 2 was sent before response 1 began, so it proves nothing about
+    # how the client framed response 1.
+    srv = TCPServer.new("127.0.0.1", 0)
+    origin_port = srv.local_address.port
+    spawn do
+      if conn = srv.accept?
+        Gori::Proxy::Codec::Http1.read_head(conn)
+        conn << "HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\n"
+        conn.flush
+        10.times do
+          conn << ("a" * 1000)
+          conn.flush
+          sleep 20.milliseconds
+        end
+        conn.close rescue nil
+      end
+    rescue
+    end
+    done = Channel(Nil).new(4)
+    sink = DisagreementSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+    begin
+      client = TCPSocket.new("127.0.0.1", proxy.port)
+      client.read_timeout = 3.seconds
+      client << "GET /a HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n" \
+                "GET /b HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+      client.flush
+      body = drain(client).partition("\r\n\r\n")[2]
+      client.close rescue nil
+      body.bytesize.should eq(10_000)
+      received_within?(done, 3.seconds).should be_true
+      sink.responses.first.state.should eq(Gori::Store::FlowState::Complete)
+    ensure
+      proxy.stop
+      srv.close rescue nil
+    end
+  end
+
   it "keeps a close-delimited stream flowing past a stray CRLF from the client" do
     # RFC 9112 §2.2: some clients send a CRLF after a request. That is not a next request.
     release = Channel(Nil).new(1)

@@ -1714,6 +1714,10 @@ module Gori::Proxy
                                         relaxed : Bool = false,
                                         extract_ref : ExtractRef? = nil,
                                         advisory : String? = nil) : Bool
+      # Asked BEFORE the head goes out: bytes the client sent before it could have seen this
+      # response are a pipelined request, not a reaction to it (`watch_client_abort`). After the
+      # write, a loopback client can answer within microseconds and look the same.
+      backstop = relaxed && resp_framing.close_delimited? && !SocketResidue.pending?(@io)
       begin
         @io.write(sent_resp_head)
         @io.flush
@@ -1721,7 +1725,7 @@ module Gori::Proxy
         # it — this is the streaming path, and P6 keeps it that way: no body is buffered here,
         # so a body-scoped rule is told it had nothing to read rather than silently missing.
         observe_delivered(extract_ref, sent_resp_head, nil)
-        resp_complete = stream_response_body(upstream, resp_framing, resp_len, resp_capture, relaxed)
+        resp_complete = stream_response_body(upstream, resp_framing, resp_len, resp_capture, relaxed, backstop)
         @lf_residue_note = lf_residue_note(upstream) if resp_complete
       rescue ex
         record_streamed_response(sent_resp, resp_framing, resp_capture, flow_id, ttfb, started,
@@ -1764,10 +1768,10 @@ module Gori::Proxy
     # risk of colliding with a next reused request on this connection.
     private def stream_response_body(upstream : IO, resp_framing : Codec::BodyFraming,
                                      resp_len : Int64, resp_capture : Codec::CaptureBuffer,
-                                     relaxed : Bool) : Bool
+                                     relaxed : Bool, backstop : Bool) : Bool
       return stream_body(upstream, @io, resp_framing, resp_len, resp_capture) unless relaxed
       latch = TeardownLatch.new
-      spawn watch_client_abort(upstream, latch, resp_framing.close_delimited?)
+      spawn watch_client_abort(upstream, latch, backstop)
       begin
         stream_body(upstream, @io, resp_framing, resp_len, resp_capture)
       ensure
@@ -1796,11 +1800,14 @@ module Gori::Proxy
     # it, and every further origin byte would reach the client as that answer. So the watcher
     # tears the exchange down at once and marks the latch, and the copy records why. A CR or LF
     # is not such a byte: RFC 9112 §2.2 documents clients that send a stray CRLF after a request
-    # body, and tearing a close-delimited page down for one would cut it short.
-    private def watch_client_abort(upstream : IO, latch : TeardownLatch, close_delimited : Bool) : Nil
+    # body, and tearing a close-delimited page down for one would cut it short. Nor is a request
+    # the client PIPELINED (RFC 9112 §9.3.2): `backstop` is false when client bytes were already
+    # waiting before the head was written (`stream_nonhold_response`), and then the watcher only
+    # watches for the client leaving, as it does for a chunked or Content-Length stream.
+    private def watch_client_abort(upstream : IO, latch : TeardownLatch, backstop : Bool) : Nil
       buf = Bytes.new(1)
       while @io.read(buf) > 0
-        next unless close_delimited
+        next unless backstop
         next if buf[0] == 0x0d_u8 || buf[0] == 0x0a_u8
         latch.client_spoke = true
         break

@@ -22,6 +22,11 @@ module Gori::Proxy
       @inner.read(slice)
     end
 
+    # Whether replayed bytes are still waiting to be read (`SocketResidue.pending?`).
+    def prefix_pending? : Bool
+      @pos < @prefix.size
+    end
+
     def write(slice : Bytes) : Nil
       @inner.write(slice)
     end
