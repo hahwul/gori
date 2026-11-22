@@ -318,9 +318,10 @@ module Gori
         progress = Time.instant
         frames = 0
         foreign = ForeignBlock.new # blocks of finished or unknown streams, decoded and dropped
+        blocks = HeaderBlockGate.new
 
         while remaining > 0
-          frame = read_next_frame(io, progress, patience, hard)
+          frame = read_ordered_frame(io, progress, patience, hard, blocks, streams, started)
           break unless frame # idle / budget / socket drop — open streams left incomplete
           frames += 1
           break if frames > MAX_FRAMES
@@ -340,6 +341,22 @@ module Gori
             # WINDOW_UPDATE (moot — all request bytes are written), PRIORITY.
           end
         end
+      end
+
+      # `read_next_frame`, passed through `HeaderBlockGate#check`. A frame out of block order
+      # fails every live stream, since the shared table is lost for all of them, and answers nil
+      # to end the read.
+      private def self.read_ordered_frame(io : IO, progress : Time::Instant, patience : Time::Span,
+                                          hard : Time::Instant, blocks : HeaderBlockGate,
+                                          streams : Hash(UInt32, PacketStream),
+                                          started : Time::Instant) : Frame::Header?
+        return nil unless frame = read_next_frame(io, progress, patience, hard)
+        blocks.check(frame)
+        frame
+      rescue ex : Gori::Error
+        msg = ex.message || "h2 header block interrupted — HPACK state lost"
+        streams.each_value(&.fail(msg, started))
+        nil
       end
 
       # Read the next frame, or nil to end the read: on a no-progress stall past `patience`, past

@@ -240,6 +240,27 @@ describe "Repeater::H2Engine.single_packet" do
 
   # A foreign block that cannot be decoded leaves the table unknown: every live stream says so
   # rather than decoding against it.
+  # RFC 9113 §6.10: a sibling's HEADERS inside an open block decoded the two blocks out of the
+  # order the peer's table was built in.
+  it "fails the live streams when a frame interrupts an open header block" do
+    port = start_h2_scripted_origin(2) do |io, ended|
+      sids = ended.to_h { |(sid, path)| {path, sid} }
+      a = Bytes[STATUS_200_INDEX] + SYNC_FIELD
+      io.write(Frame::Header.new(Frame::Type::Headers.value, Frame::END_STREAM, sids["/a"], a[0, 3]).to_bytes)
+      io.write(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS | Frame::END_STREAM,
+        sids["/b"], Bytes[STATUS_200_INDEX]).to_bytes)
+      io.write(Frame::Header.new(Frame::Type::Continuation.value, Frame::END_HEADERS, sids["/a"],
+        a[3, a.size - 3]).to_bytes)
+      io.flush
+    end
+
+    a, b = Gori::Repeater::H2Engine.single_packet(race_wires("/a", "/b"),
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+
+    a.error.not_nil!.should contain("HPACK state lost")
+    b.error.not_nil!.should contain("HPACK state lost")
+  end
+
   it "fails the live streams when a finished stream's block cannot be decoded" do
     port = start_h2_scripted_origin(2) do |io, ended|
       sids = ended.to_h { |(sid, path)| {path, sid} }

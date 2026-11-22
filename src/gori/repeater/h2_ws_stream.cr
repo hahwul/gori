@@ -289,6 +289,7 @@ module Gori
         io = conn.io
         block = IO::Memory.new
         foreign = H2Engine::ForeignBlock.new # other streams' blocks, decoded and dropped
+        blocks = H2Engine::HeaderBlockGate.new
         seen = 0
         loop do
           seen += 1
@@ -307,6 +308,12 @@ module Gori
           end
           return refused("the origin at #{host}:#{port} closed the HTTP/2 connection before " \
                          "answering the extended CONNECT") if frame.nil?
+          begin
+            blocks.check(frame)
+          rescue ex : Gori::Error
+            return refused("the origin at #{host}:#{port} broke the HTTP/2 connection's header " \
+                           "state before answering the extended CONNECT (#{ex.message})")
+          end
           case frame.frame_type
           when Frame::Type::Settings
             unless frame.ack?

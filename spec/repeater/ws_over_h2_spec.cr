@@ -662,7 +662,8 @@ end
 
 # An origin that writes another stream's header block (inserting `x-sync: foreign` into the
 # connection's dynamic table) before answering the extended CONNECT with a 403 that refers to it.
-private def start_h2_ws_origin_foreign_block : Int32
+# `left_open` sends that block without END_HEADERS and never finishes it (RFC 9113 §6.10).
+private def start_h2_ws_origin_foreign_block(left_open : Bool = false) : Int32
   origin = TCPServer.new("127.0.0.1", 0)
   port = origin.local_address.port
   spawn do
@@ -684,8 +685,8 @@ private def start_h2_ws_origin_foreign_block : Int32
       end
       status = 0x80_u8 | (HPACK::STATIC.index({":status", "200"}).not_nil! + 1).to_u8
       foreign = Bytes[status, 0x40, 0x06] + "x-sync".to_slice + Bytes[0x07] + "foreign".to_slice
-      conn.write(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS | Frame::END_STREAM,
-        stream + 1, foreign).to_bytes)
+      conn.write(Frame::Header.new(Frame::Type::Headers.value,
+        left_open ? Frame::END_STREAM : (Frame::END_HEADERS | Frame::END_STREAM), stream + 1, foreign).to_bytes)
       refusal = Bytes[0x08, 0x03] + "403".to_slice + Bytes[0xbe] # :status 403, then index 62
       conn.write(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS | Frame::END_STREAM,
         stream, refusal).to_bytes)
@@ -708,5 +709,12 @@ describe "WebSocket over HTTP/2 — the connection's header table" do
     res.upgraded?.should be_false
     String.new(res.handshake_head).should start_with "HTTP/2 403"
     String.new(res.handshake_head).should contain "x-sync: foreign"
+  end
+
+  it "refuses an answer that arrives inside another stream's open header block" do
+    port = start_h2_ws_origin_foreign_block(left_open: true)
+    res = send_over_h2(port, [text("hello")])
+    res.upgraded?.should be_false
+    res.error.not_nil!.should contain "HPACK state lost"
   end
 end

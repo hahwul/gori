@@ -372,6 +372,32 @@ module Gori
         end
       end
 
+      # RFC 9113 §6.10 for one connection's reader: while a header block is open (a HEADERS or
+      # PUSH_PROMISE without END_HEADERS, on any stream, ours or not), the ONLY frame the peer may
+      # send is a CONTINUATION on that same stream, and a CONTINUATION with no block open is no
+      # frame at all. Anything else is a connection error, and it is the HPACK one: the open
+      # block was never decoded, so a block decoded after it would resolve against a table the
+      # peer has not built yet (or one that never gets the open block's entries). Every frame
+      # the reader takes off the socket is passed through `check` before it is acted on.
+      class HeaderBlockGate
+        @open : UInt32? = nil
+
+        def check(frame : Frame::Header) : Nil
+          type = frame.frame_type
+          if open = @open
+            unless type == Frame::Type::Continuation && frame.stream_id == open
+              raise H2Engine.hpack_lost("a #{type} frame on stream #{frame.stream_id} arrived inside the " \
+                                        "header block still open on stream #{open} (RFC 9113 §6.10)")
+            end
+            @open = nil if frame.end_headers?
+          elsif type == Frame::Type::Continuation
+            raise H2Engine.hpack_lost("a CONTINUATION on stream #{frame.stream_id} continues no header block")
+          elsif (type == Frame::Type::Headers || type == Frame::Type::PushPromise) && !frame.end_headers?
+            @open = frame.stream_id
+          end
+        end
+      end
+
       # The error a reader fails a connection with once its HPACK table no longer matches the
       # peer's. One spelling, so every reader and the MCP error kinds name it the same way.
       def self.hpack_lost(what : String) : Gori::Error
@@ -1122,6 +1148,7 @@ module Gori
         end
         header_buf = IO::Memory.new
         foreign = ForeignBlock.new # blocks of other streams, decoded and dropped
+        blocks = HeaderBlockGate.new
         body = IO::Memory.new
         headers = [] of {String, String}
         status = 0
@@ -1232,6 +1259,7 @@ module Gori
             flow.frames += 1
             break if flow.frames > MAX_FRAMES
           end
+          break unless in_block_order(blocks, frame, flow)
           case frame.frame_type
           when Frame::Type::Settings
             unless frame.ack?
@@ -1371,6 +1399,16 @@ module Gori
           run.try(&.reason), run.try(&.times))
       ensure
         sock.try(&.read_timeout = idle) if run
+      end
+
+      # `HeaderBlockGate#check`, with a violation recorded on `flow` as the lost table it is:
+      # false ends the read.
+      private def self.in_block_order(blocks : HeaderBlockGate, frame : Frame::Header, flow : SendFlow) : Bool
+        blocks.check(frame)
+        true
+      rescue ex : Gori::Error
+        flow.hpack_lost = ex.message
+        false
       end
 
       # Run a block this exchange does not read through the connection's decoder (`ForeignBlock`).

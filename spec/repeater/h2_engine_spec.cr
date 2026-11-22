@@ -2517,6 +2517,37 @@ describe "Gori::Repeater::H2Engine — header blocks this exchange does not read
     String.new(r.head).should contain("x-sync: pushed")
   end
 
+  # RFC 9113 §6.10: while a block is open only its CONTINUATION may follow. Decoding our final
+  # head inside stream 2's open block resolved index 62 against a table that block had not
+  # finished building, and reported the wrong header with no error.
+  it "fails the exchange when our HEADERS arrives inside another stream's open block" do
+    port = start_h2_origin_scripted do |io|
+      h2_frame(io, Frame::Type::Headers, Frame::END_HEADERS, 1_u32, H2_STATUS_103 + indexed_literal("x-sync", "own"))
+      h2_frame(io, Frame::Type::Headers, Frame::END_STREAM, 2_u32, Bytes[H2_STATUS_200] + indexed_literal("x-sync", "foreign"))
+      h2_frame(io, Frame::Type::Headers, Frame::END_HEADERS | Frame::END_STREAM, 1_u32, Bytes[H2_STATUS_200, 0xbe_u8])
+      h2_frame(io, Frame::Type::Continuation, Frame::END_HEADERS, 2_u32, Bytes.empty)
+    end
+    r = Gori::Repeater::H2Engine.send("GET /x HTTP/2\r\nHost: h\r\n\r\n".to_slice,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false, timeout: 3.seconds)
+    r.error.not_nil!.should contain("HPACK state lost")
+    r.error.not_nil!.should contain("§6.10")
+  end
+
+  it "fails the exchange when another stream's HEADERS arrives inside our open block" do
+    port = start_h2_origin_scripted do |io|
+      own = Bytes[H2_STATUS_200] + indexed_literal("x-sync", "own")
+      h2_frame(io, Frame::Type::Headers, 0_u8, 1_u32, own[0, 3])
+      h2_frame(io, Frame::Type::Headers, Frame::END_HEADERS | Frame::END_STREAM, 2_u32,
+        Bytes[H2_STATUS_200] + indexed_literal("x-sync", "foreign"))
+      h2_frame(io, Frame::Type::Continuation, Frame::END_HEADERS, 1_u32, own[3, own.size - 3])
+      h2_frame(io, Frame::Type::Data, Frame::END_STREAM, 1_u32, "ok".to_slice)
+    end
+    r = Gori::Repeater::H2Engine.send("GET /x HTTP/2\r\nHost: h\r\n\r\n".to_slice,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false, timeout: 3.seconds)
+    r.ok?.should be_false
+    r.error.not_nil!.should contain("HPACK state lost")
+  end
+
   it "fails the exchange and retires the connection when that block cannot be decoded" do
     port = start_h2_origin_scripted do |io|
       h2_frame(io, Frame::Type::Headers, Frame::END_HEADERS | Frame::END_STREAM, 2_u32,
