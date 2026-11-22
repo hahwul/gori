@@ -62,13 +62,31 @@ module Gori::Proxy::WS
   # into a gate; `item.reply.receive` is the one thing that must never happen under it, and
   # that is exactly why the wait lives on its own fiber.
   class MessageGate
-    # Ceiling on the payload bytes queued BEHIND the head of the FIFO. The head itself is
-    # exempt: it is already buffered by the pump that assembled it (up to `Relay::MAX_MESSAGE`),
-    # so charging it here would make a single large message unholdable rather than bound
-    # anything. Past the ceiling the hold FAILS OPEN — everything queued forwards unedited,
-    # in order, with one warning — the same disposition as toggle-off (`interceptor.cr`),
-    # `release_all`, the #123 reaper and `H2::StreamGate#fail_open`.
+    # Ceiling on what is queued BEHIND the head of the FIFO, measured as `Slot#cost` (the
+    # larger of a message's payload and its retained wire frames, plus `SLOT_OVERHEAD_BYTES`).
+    # The head itself is exempt: it is already buffered by the pump that assembled it (up to
+    # `Relay::MAX_MESSAGE`), so charging it here would make a single large message unholdable
+    # rather than bound anything. Past the ceiling the hold FAILS OPEN — everything queued
+    # forwards unedited, in order, with one warning — the same disposition as toggle-off
+    # (`interceptor.cr`), `release_all`, the #123 reaper and `H2::StreamGate#fail_open`.
     MAX_DEFERRED_BYTES = 1 << 20
+
+    # What one queued slot costs beyond its bytes: the Slot, its RawFrames and their slice
+    # headers. Charged against `MAX_DEFERRED_BYTES` so a message with an empty payload is
+    # never free — a peer sending zero-byte frames behind a hold would otherwise grow the
+    # queue forever without ever reaching the ceiling.
+    SLOT_OVERHEAD_BYTES = 128
+
+    # Ceiling on how many messages may queue BEHIND the head, whatever their size. Past it
+    # the hold fails open exactly as it does past `MAX_DEFERRED_BYTES`.
+    MAX_QUEUED_MESSAGES = 4096
+
+    # Ceiling on how many messages of this direction may be held for a human at once. Each
+    # one is an Interceptor queue row plus a parked wait fiber. Past it a message the
+    # condition matches is queued behind the held ones for ORDER only, the same as one the
+    # condition declined: it goes out unedited, in arrival order, once everything ahead of it
+    # is decided. Every message already held stays the operator's.
+    MAX_HELD_MESSAGES = 256
 
     # How many scheduler turns `bypass` will give a decision that is already on its channel
     # but whose wait fiber has not run yet. The fiber is runnable, so one turn is normally
@@ -100,8 +118,24 @@ module Gori::Proxy::WS
       # must claim the sender's RSV bits and fragment count, and an edited one must not.
       getter shape : WS::Shape
 
+      # What this slot is charged against `MAX_DEFERRED_BYTES`, fixed at creation so the
+      # running total in `@queued_cost` can be kept without re-walking the queue.
+      getter cost : Int64
+
       def initialize(@opcode : UInt8, @payload : Bytes, @raw : WS::RawFrames?,
                      @shape : WS::Shape = WS::Shape::DEFAULT)
+        @cost = {@payload.size.to_i64, retained_raw}.max + SLOT_OVERHEAD_BYTES
+      end
+
+      # The wire bytes this slot keeps alive. `interleaved` and `data_only` are one slice
+      # when nothing was interleaved, so that case is counted once.
+      private def retained_raw : Int64
+        return 0_i64 unless r = @raw
+        n = r.interleaved.size.to_i64
+        same = r.data_only.to_unsafe == r.interleaved.to_unsafe &&
+               r.data_only.size == r.interleaved.size
+        n += r.data_only.size unless same
+        n + (r.controls.try(&.size) || 0)
       end
     end
 
@@ -109,6 +143,13 @@ module Gori::Proxy::WS
                    @interceptor : Gori::Interceptor, @ctx : Context, @mask : Bool)
       @mutex = Mutex.new
       @queue = [] of Slot
+      # Sum of `Slot#cost` over `@queue`, kept in step with every push and shift: `submit`
+      # asks the ceiling on every message, and summing the queue there would make a flood of
+      # tiny frames behind a hold quadratic on a fiber that never yields (P6).
+      @queued_cost = 0_i64
+      # Slots in `@queue` that still own an Interceptor item (see `MAX_HELD_MESSAGES`).
+      @held_items = 0
+      @warned_held_cap = false
       @closed = false
       @warned_overflow = false
       @dropped = 0
@@ -166,16 +207,19 @@ module Gori::Proxy::WS
         end
         kept = payload.dup
         slot = Slot.new(opcode, kept, raw, shape)
-        item = held ? start_hold(opcode, kept) : nil
+        item = held && hold_capacity? ? start_hold(opcode, kept) : nil
         if item
           slot.item = item
+          @held_items += 1
           wait_for(item, slot)
         else
-          # Queued for ORDER only — nothing to decide. Either the condition declined it, or
-          # the interceptor was toggled off between the two calls above.
+          # Queued for ORDER only — nothing to decide. Either the condition declined it, the
+          # interceptor was toggled off between the two calls above, or `MAX_HELD_MESSAGES`
+          # are already held on this direction.
           slot.ready = true
         end
         @queue << slot
+        @queued_cost += slot.cost
         check_ceiling
         # A slot born READY at the head of the queue has nobody to release it otherwise:
         # `drain_locked` is reachable only from `resolve_locked` (which needs an Item) and
@@ -282,6 +326,8 @@ module Gori::Proxy::WS
         fail_open_locked("the socket closed with the message still held")
         q = @queue
         @queue = [] of Slot
+        @queued_cost = 0_i64
+        @held_items = 0
         @closed = true
         q
       end
@@ -325,6 +371,7 @@ module Gori::Proxy::WS
       # there is nothing left to apply it to.
       return unless slot.item == item
       slot.item = nil
+      @held_items -= 1
       if decision.action.drop?
         slot.dropped = true
       else
@@ -342,6 +389,7 @@ module Gori::Proxy::WS
     private def drain_locked : Nil
       while (slot = @queue.first?) && slot.ready?
         @queue.shift
+        @queued_cost -= slot.cost
         release_locked(slot)
       end
     end
@@ -401,16 +449,32 @@ module Gori::Proxy::WS
 
     # --- ceiling / fail-open --------------------------------------------------
 
+    # O(1): both measures come from running counts, never from walking the queue.
     private def check_ceiling : Nil
-      return if deferred_bytes <= MAX_DEFERRED_BYTES
-      fail_open_locked("over #{MAX_DEFERRED_BYTES} bytes queued behind a held message")
+      if @queue.size - 1 > MAX_QUEUED_MESSAGES
+        fail_open_locked("over #{MAX_QUEUED_MESSAGES} messages queued behind a held message")
+      elsif deferred_cost > MAX_DEFERRED_BYTES
+        fail_open_locked("over #{MAX_DEFERRED_BYTES} bytes queued behind a held message")
+      end
     end
 
     # Everything after the head. See `MAX_DEFERRED_BYTES` for why the head is exempt.
-    private def deferred_bytes : Int32
-      total = 0
-      @queue.each_with_index { |s, i| total += s.payload.size if i > 0 }
-      total
+    private def deferred_cost : Int64
+      head = @queue.first?
+      head ? @queued_cost - head.cost : 0_i64
+    end
+
+    # Room for one more Interceptor item on this direction? Says so once when there is not,
+    # because from here on a message the condition matches is no longer offered to anyone.
+    private def hold_capacity? : Bool
+      return true if @held_items < MAX_HELD_MESSAGES
+      unless @warned_held_cap
+        @warned_held_cap = true
+        note("#{MAX_HELD_MESSAGES} messages are already held — further matching messages " \
+             "are not held; they queue behind the held ones and go out unedited, in " \
+             "arrival order, once those are decided")
+      end
+      false
     end
 
     # Release the whole queue, forwarding undecided messages unedited and IN ORDER. Reached
@@ -435,6 +499,7 @@ module Gori::Proxy::WS
         # wait fiber's `slot.item == item` guard while this loop released the message anyway.
         next unless @interceptor.forward(item.id)
         slot.item = nil
+        @held_items -= 1
         slot.ready = true
       end
       drain_locked
