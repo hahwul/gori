@@ -946,6 +946,52 @@ describe Gori::Scope do
   end
 end
 
+# A `host` rule folds the host (case, root dot); a `string`/`regex` rule reads the url, which
+# carries the host as typed. The EXCLUDE side is asked of the folded spelling too, so a
+# carve-out cannot be dodged by re-spelling the host a host include still admits.
+describe "Gori::Scope url-level excludes and the host's spelling" do
+  it "holds a string and a regex exclude against a re-cased or root-dotted host" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test").should be_true
+      scope.add("exclude", "string", "acme.test/admin").should be_true
+      scope.add("exclude", "regex", "^https://acme\\.test/internal").should be_true
+      scope.enable
+      scope.enable_sandbox
+      ["https://acme.test./admin", "https://ACME.test/admin", "https://acme.test/internal",
+       "https://ACME.test/internal", "https://acme.test./internal", "https://Acme.Test../admin",
+       "http://u@ACME.test./admin"].each do |url|
+        host = url.split("://")[1].split('/')[0].split('@').last.split(':')[0]
+        scope.excluded?(url, host).should be_true
+        scope.in_scope_url?(url, host).should be_false
+        scope.matches_url?(url, host).should be_false
+        scope.sandbox_blocks?(url, host).should be_true
+      end
+      scope.in_scope_url?("https://ACME.test./public", "ACME.test.").should be_true
+      scope.sandbox_blocks?("https://ACME.test./public", "ACME.test.").should be_false
+    end
+  end
+
+  it "keeps an include matching the raw spelling only" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "regex", "^https://acme\\.test/").should be_true
+      scope.matches_url?("https://acme.test/x", "acme.test").should be_true
+      scope.matches_url?("https://ACME.test/x", "ACME.test").should be_false
+      scope.matches_url?("https://acme.test./x", "acme.test.").should be_false
+    end
+  end
+
+  it "folds only the authority's host, and answers nil when it is already folded" do
+    Gori::Scope.host_folded_url("https://ACME.test./A?B#C").should eq("https://acme.test/A?B#C")
+    Gori::Scope.host_folded_url("https://ACME.test.:8443/x").should eq("https://acme.test:8443/x")
+    Gori::Scope.host_folded_url("https://[::1]:8443/X").should be_nil
+    Gori::Scope.host_folded_url("https://[FE80::A]/x").should eq("https://[fe80::a]/x")
+    Gori::Scope.host_folded_url("https://acme.test/ADMIN").should be_nil
+    Gori::Scope.host_folded_url("not a url").should be_nil
+  end
+end
+
 # The per-request evaluators reduce the url and the host ONCE for a whole rule walk instead of
 # once per rule — `url_down` only when a `string` rule can read it (nothing else does), and the
 # host through `HostPattern.normalize`. Both are allocation changes and neither may move a

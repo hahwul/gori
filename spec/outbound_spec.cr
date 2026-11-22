@@ -578,6 +578,24 @@ describe Gori::Outbound do
       end
     end
 
+    # A url-level exclude reads the host as typed; a host include folds it. `sweep_block`
+    # promises excludes hold even under --allow-unscoped, so re-spelling the host must not dodge.
+    it "holds a url-level exclude against a re-cased or root-dotted dial host" do
+      with_scope do |scope, _store|
+        scope.add("include", "host", "acme.test").should be_true
+        scope.add("exclude", "string", "acme.test/admin").should be_true
+        scope.add("exclude", "regex", "^https://acme\\.test/internal").should be_true
+        agent = Gori::Outbound.agent(scope, false)
+        ob = Gori::Outbound.interactive(scope)
+        [{"acme.test.", "/admin"}, {"ACME.test", "/internal"}, {"acme.test.", "/internal"}].each do |(h, p)|
+          agent.check_request("https", h, p, 443).blocked?.should be_true
+          ob.sweep_block("https", h, p, 443).should eq(Gori::Outbound::EXCLUDE_SWEEP_ERROR)
+          ob.sweep_block("https", h, p, 8443).should eq(Gori::Outbound::EXCLUDE_SWEEP_ERROR)
+        end
+        agent.check_request("https", "ACME.test.", "/public", 443).blocked?.should be_false
+      end
+    end
+
     it "holds an exclude for the dial host against a slash-less request-target" do
       with_scope do |scope, _store|
         scope.add("include", "host", "app.example.co").should be_true

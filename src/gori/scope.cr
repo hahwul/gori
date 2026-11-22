@@ -168,11 +168,16 @@ module Gori
     # partition and read under the SAME @mutex, so the flag can never describe a rule list
     # other than the one being walked.
     @string_rules : Bool
+    # Is any EXCLUDE a `string` or `regex` rule? Only those read the url's HOST spelling, so
+    # only they need the host-folded second url (`exclude_match_unlocked`); a scope whose
+    # excludes are all host rules never builds it. Swapped with @excludes in `assign_rules`.
+    @url_excludes : Bool
 
     def initialize(@store : Store, @rules : Array(Rule), @enabled : Bool, @sandbox : Bool = false)
       @includes = @rules.select(&.include?)
       @excludes = @rules.select(&.exclude?)
       @string_rules = @rules.any? { |r| r.match_type == "string" }
+      @url_excludes = @excludes.any? { |r| !r.host_type? }
       # @rules/@enabled are read on the PROXY hot path (in_scope_url?/may_match_host?/
       # filter/active?) while the TUI fiber mutates them (add/remove/update/toggle).
       # Guard every cross-fiber access with a mutex — only the TUI mutates, so its own
@@ -307,7 +312,70 @@ module Gori
         # the single-threaded scheduler (no -Dpreview_mt) nothing else can run inside it.
         url_down = url_down_unlocked(url)
         bare = HostPattern.normalize(host)
-        @excludes.find { |r| r.matches?(url, host, url_down, bare) }
+        exclude_match_unlocked(url, host, url_down, bare)
+      end
+    end
+
+    # The first EXCLUDE that matches (callers hold @mutex), asked of the url as spelled AND of
+    # the same url with its host folded the way a `host` rule folds it (`Scope.host_folded_url`).
+    #
+    # A `host` rule compares `HostPattern.normalize(host)`, but a `string`/`regex` rule reads the
+    # url, which carries the host exactly as the client or operator typed it. So `acme.test./admin`
+    # dodged `exclude string acme.test/admin`, and `ACME.test/internal` or `acme.test./internal`
+    # dodged `exclude regex ^https://acme\.test/internal`, while a host include still admitted
+    # both: the same host, one resolver answer, a carve-out that did not hold. Only the EXCLUDE
+    # side is widened, so it only ever refuses more; an include keeps matching the raw spelling,
+    # and no include rule changes meaning. The SQL lens (`filter_sql`) is not widened: History
+    # still filters the stored spelling, and this is a containment gate.
+    #
+    # The second url is built only when a url-level exclude exists, no exclude matched as
+    # spelled, and the host is not already in folded form, which is the ordinary case.
+    private def exclude_match_unlocked(url : String, host : String, url_down : String, bare : String) : Rule?
+      if rule = @excludes.find { |r| r.matches?(url, host, url_down, bare) }
+        return rule
+      end
+      return nil unless @url_excludes
+      return nil unless folded = Scope.host_folded_url(url)
+      folded_down = url_down_unlocked(folded)
+      @excludes.find { |r| !r.host_type? && r.matches?(folded, host, folded_down, bare) }
+    end
+
+    # `url` with the host of its authority lowercased and its trailing root dots stripped (the
+    # `HostPattern.normalize` fold, brackets kept so an IPv6 url still reads as one), or nil when
+    # that host is already in that form. Lexical, like `Url.origin_path`: a url the gate is asked
+    # about may hold a port or a byte `URI.parse` refuses, and that must not skip the fold.
+    def self.host_folded_url(url : String) : String?
+      return nil unless sep = url.byte_index("://")
+      bytes = url.to_slice
+      start = sep + 3
+      # The authority ends at the first '/', '?' or '#'; a userinfo ends at its last '@'.
+      auth_end = start
+      while auth_end < bytes.size
+        b = bytes[auth_end]
+        break if b == '/'.ord || b == '?'.ord || b == '#'.ord
+        start = auth_end + 1 if b == '@'.ord
+        auth_end += 1
+      end
+      stop = start
+      # The host ends at the port's ':', or just after the ']' of a bracketed IPv6 literal.
+      terminator = stop < auth_end && bytes[stop] == '['.ord ? ']'.ord : ':'.ord
+      while stop < auth_end && bytes[stop] != terminator
+        stop += 1
+      end
+      stop += 1 if terminator == ']'.ord && stop < auth_end
+      return nil if stop == start
+      # Already folded: no ASCII capital, no non-ASCII byte (`HostPattern.down`'s test) and no
+      # trailing dot. Checked on the bytes so the common case allocates nothing.
+      unfolded = bytes[stop - 1] == '.'.ord ||
+                 (start...stop).any? { |i| (0x41_u8 <= bytes[i] <= 0x5a_u8) || bytes[i] >= 0x80_u8 }
+      return nil unless unfolded
+      span = String.new(bytes[start, stop - start])
+      folded = HostPattern.down(span).rstrip('.')
+      return nil if folded == span
+      String.build do |io|
+        io.write(bytes[0, start])
+        io << folded
+        io.write(bytes[stop, bytes.size - stop])
       end
     end
 
@@ -338,7 +406,7 @@ module Gori
       url_down = url_down_unlocked(url)
       bare = HostPattern.normalize(host)
       @includes.any? { |r| r.matches?(url, host, url_down, bare) } &&
-        @excludes.none? { |r| r.matches?(url, host, url_down, bare) }
+        exclude_match_unlocked(url, host, url_down, bare).nil?
     end
 
     # Pure Burp evaluation (includes empty ⇒ match all; then carve excludes). Shared by
@@ -349,7 +417,7 @@ module Gori
       url_down = url_down_unlocked(url)
       bare = HostPattern.normalize(host)
       inc_ok = @includes.empty? || @includes.any? { |r| r.matches?(url, host, url_down, bare) }
-      inc_ok && @excludes.none? { |r| r.matches?(url, host, url_down, bare) }
+      inc_ok && exclude_match_unlocked(url, host, url_down, bare).nil?
     end
 
     # Conservative HOST-level check behind `Interceptor#intercepts_host?`, made BEFORE any
@@ -851,6 +919,7 @@ module Gori
       @includes = fresh.select(&.include?)
       @excludes = fresh.select(&.exclude?)
       @string_rules = fresh.any? { |r| r.match_type == "string" }
+      @url_excludes = @excludes.any? { |r| !r.host_type? }
     end
 
     # The `url_down` the rule walk should be handed (callers hold @mutex). `url` itself when
