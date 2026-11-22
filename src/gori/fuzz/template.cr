@@ -525,6 +525,51 @@ module Gori::Fuzz
       io.to_slice
     end
 
+    # The `Env.expand(splice:)` hook for a template that `parse` reads after expansion: each
+    # substituted value is escaped for the spot its token sits in, so `parse` gives back exactly
+    # the value's bytes and never a position or a `¦chain` the template did not spell.
+    #
+    # An env value is data. Spliced in raw, a value carrying `§…§` added a position nobody
+    # marked, and one carrying `§x¦exec:…§` armed a command when the value changed after the
+    # template was checked. Outside a marker only `§` is syntax (`¦` is ordinary text there);
+    # inside one, `¦` splits the value from its chain, so both are doubled. A token in a marker's
+    # CHAIN part is still chain text, as the operator spelled it, but it cannot close the marker.
+    #
+    # The regions are read off `marked` itself, before expansion: a token is ASCII and no
+    # escaped value adds or removes a delimiter, so the structure is the same on either side.
+    def self.literal_splice(marked : String) : (String, Int32 -> String)
+      regions = splice_regions(marked.to_slice)
+      ->(value : String, at : Int32) do
+        return value unless value.includes?(MARKER) || value.includes?(CHAIN_SEP)
+        if regions.any? { |(open, stop)| open < at < stop }
+          value.gsub(MARKER.to_s, "#{MARKER}#{MARKER}").gsub(CHAIN_SEP.to_s, "#{CHAIN_SEP}#{CHAIN_SEP}")
+        else
+          value.gsub(MARKER.to_s, "#{MARKER}#{MARKER}")
+        end
+      end
+    end
+
+    # `[open, stop)` BYTE ranges of every marker region `parse` would open in `bytes`, closed or
+    # not (an unbalanced trailing `§` runs to the end and still decodes `§§`/`¦¦` in its tail).
+    # Same escape rules as `parse` / `scan_interior`.
+    private def self.splice_regions(bytes : Bytes) : Array({Int32, Int32})
+      regions = [] of {Int32, Int32}
+      n = bytes.size
+      i = 0
+      while i < n
+        if !marker_at?(bytes, i)
+          i += 1
+        elsif marker_at?(bytes, i + 2)
+          i += 4
+        else
+          s = scan_interior(bytes, i, n)
+          regions << {i, s.next_i}
+          i = s.next_i
+        end
+      end
+      regions
+    end
+
     # True when `raw` holds the two-byte UTF-8 encoding of `§`. A BYTE scan, so a buffer
     # carrying invalid UTF-8 is never walked as chars (`String#includes?('§')` would be, and
     # this is asked about captured request bytes). As precise as the char test: UTF-8 is

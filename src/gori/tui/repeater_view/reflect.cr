@@ -73,7 +73,7 @@ class Gori::Tui::RepeaterView
   # scanning for the marker: a saved chain is callable by NAME and its token says nothing.
   private def marker_chain_runs_command? : Bool
     return false if marker_regions.empty? # the common case, and `marker_regions` is cached
-    Fuzz::Template.parse(String.new(expanded_editor_bytes)).runs_commands?(Decoder.shared_registry)
+    Fuzz::Template.parse(String.new(marked_editor_bytes)).runs_commands?(Decoder.shared_registry)
   end
 
   # The reflection for ONE request: `text` is exactly the bytes that request will be built
@@ -85,11 +85,10 @@ class Gori::Tui::RepeaterView
     # Expand env tokens first (like the send path's expanded_editor_bytes) — a `$KEY`
     # whose expansion changes the body length must reflect the SENT Content-Length, or
     # the visible header goes stale and, once Auto-CL is toggled off, is sent mismatched.
-    raw = expanded_text_to_bytes(text)
     # With §…§ markers present the CL that ^R actually sends is computed from the
     # RENDERED template (markers stripped, chains applied), not the raw marked text —
     # reflect THAT value so the visible header matches request_bytes.
-    source = marker_regions.empty? ? raw : render_marked(raw)
+    source = marker_regions.empty? ? expanded_text_to_bytes(text) : render_marked(expanded_text_to_bytes(text, marked: true))
     synced = sync_content_length(source)
     return if synced == source
 

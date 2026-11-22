@@ -479,7 +479,12 @@ module Gori::Fuzz
           # narrowed evidence expansion CONSUMED `$$ENV.X` and replayed `$ENV.X`. The narrowing is
           # about the var TABLE; the escape belongs to the capture either way.
           # Evidence framing is already wire data; an editor owns any newline promotion.
-          (vars = options.env_vars) ? Env.expand(options.template, vars, unescape: Env::Owns::None) : options.template
+          if vars = options.env_vars
+            Env.expand(options.template, vars, unescape: Env::Owns::None,
+              splice: Template.literal_splice(options.template))
+          else
+            options.template
+          end
         elsif options.verbatim?
           # `PlanOptions#verbatim?`: the operator's bytes, no pass at all — and so no
           # unresolved-env refusal either, as for the Repeater's `--verbatim`.
@@ -489,7 +494,9 @@ module Gori::Fuzz
           if detail = Env.unresolved_env(options.template)
             raise PlanError.new(PlanError::Reason::UnresolvedEnv, "unresolved env #{detail}", detail)
           end
-          String.new(Env.expand_wire(options.template))
+          # Each value is spliced as a LITERAL (`Template.literal_splice`): a project value is
+          # data, and the `§…§` parse below must not read a position or a `¦chain` out of it.
+          String.new(Env.expand_wire(options.template, splice: Template.literal_splice(options.template)))
         end
       # The FRAME payloads, expanded on the same provenance axis as the head one line up: a
       # frame the operator typed (`--message`, MCP `messages`) resolves its `$KEY`, a CAPTURED
@@ -503,7 +510,7 @@ module Gori::Fuzz
         if detail = Env.unresolved_env(m.payload)
           raise PlanError.new(PlanError::Reason::UnresolvedEnv, "unresolved env #{detail}", detail)
         end
-        Env.expand(m.payload)
+        Env.expand(m.payload, splice: Template.literal_splice(m.payload))
       end)
 
       text, mark_matches, shadowed_marks = mark_text(text, options.auto_mark?, options.marks)

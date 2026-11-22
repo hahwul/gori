@@ -4002,7 +4002,10 @@ module Gori::Tui
     # The template a rebuild renders through: the run's frozen one, or the live buffer before a
     # run has frozen anything. Named because three callers now need exactly this fallback.
     private def run_template : Fuzz::Template
-      @run_template || Fuzz::Template.parse(String.new(Env.expand_wire(@editor.wire_text)), @http2)
+      @run_template || begin
+        text = @editor.wire_text
+        Fuzz::Template.parse(String.new(Env.expand_wire(text, splice: Fuzz::Template.literal_splice(text))), @http2)
+      end
     end
 
     # Bytes only — for callers that have already accounted for provenance (the decode strip,
