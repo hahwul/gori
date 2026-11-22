@@ -45,6 +45,69 @@ describe "the h1 response read under a timeout" do
     r.delivered?.should be_true
   end
 
+  # Each interim head used to restart every head clock, so 103s dripped inside the idle gap held
+  # a 150 ms send for seconds (and, at the defaults, up to 64 head deadlines).
+  it "bounds a run of interim 1xx heads by one head-phase deadline" do
+    port = one_shot_origin do |c|
+      60.times do
+        c << "HTTP/1.1 103 Early Hints\r\nLink: </a>; rel=preload\r\n\r\n"
+        c.flush
+        sleep 100.milliseconds
+      end
+    end
+    t = Time.instant
+    r = get(port, 150.milliseconds)
+    (Time.instant - t).should be < 1.5.seconds
+    r.ok?.should be_false
+    r.timed_out?.should be_true
+    r.delivered?.should be_true
+    r.error.not_nil!.should contain("interim")
+    Gori::Repeater::SendError.kind(r.error).should eq("timeout")
+  end
+
+  # A head dripped a byte at a time inside the idle gap ran to the fixed 30 s head deadline.
+  it "bounds a dripped head by the caller's timeout, not the fixed head deadline" do
+    port = one_shot_origin do |c|
+      "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".each_char do |ch|
+        c << ch
+        c.flush
+        sleep 100.milliseconds
+      end
+    end
+    t = Time.instant
+    r = get(port, 150.milliseconds)
+    (Time.instant - t).should be < 1.5.seconds
+    r.ok?.should be_false
+    r.timed_out?.should be_true
+  end
+
+  # The phase is several idle timeouts long, not one: an origin that keeps sending interims while
+  # it works reaches its final head after more than one timeout, and that is a success.
+  it "lets interim heads spread past one idle timeout reach the final head" do
+    port = one_shot_origin do |c|
+      3.times do
+        sleep 200.milliseconds
+        c << "HTTP/1.1 102 Processing\r\n\r\n"
+        c.flush
+      end
+      sleep 200.milliseconds
+      c << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+      c.flush
+    end
+    r = get(port, 300.milliseconds)
+    r.error.should be_nil
+    r.response.not_nil!.status.should eq(200)
+    String.new(r.body.not_nil!).should eq("ok")
+  end
+
+  it "derives the phase budget from the idle timeout and caps only each head" do
+    E.head_phase_budget(30.seconds).should eq(90.seconds)
+    E.head_phase_budget(150.milliseconds).should eq(450.milliseconds)
+    E.head_phase_budget(nil).should eq(Gori::Proxy::SocketTuning::HEAD_DEADLINE)
+    E.head_read_deadline(90.seconds).should eq(Gori::Proxy::SocketTuning::HEAD_DEADLINE)
+    E.head_read_deadline(450.milliseconds).should eq(450.milliseconds)
+  end
+
   it "keeps the caller's timeout once a head has started arriving" do
     port = one_shot_origin do |c|
       c << "HTTP/1.1 200 OK\r\n"
