@@ -659,3 +659,54 @@ describe "permessage-deflate over RFC 8441 (#1897)" do
     Gori::Repeater::WsDeflate.inflate(got.frames.first.payload, 100).should eq("hello h2".to_slice)
   end
 end
+
+# An origin that writes another stream's header block (inserting `x-sync: foreign` into the
+# connection's dynamic table) before answering the extended CONNECT with a 403 that refers to it.
+private def start_h2_ws_origin_foreign_block : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    next unless conn = origin.accept?
+    begin
+      conn.read_timeout = 5.seconds
+      Frame.read_preface(conn)
+      conn.write(Frame::Header.new(Frame::Type::Settings.value, 0_u8, 0_u32,
+        Bytes[0x00, 0x08, 0x00, 0x00, 0x00, 0x01]).to_bytes)
+      conn.flush
+      stream = 0_u32
+      loop do
+        f = Frame.read(conn)
+        break if f.nil?
+        if f.frame_type == Frame::Type::Headers
+          stream = f.stream_id
+          break if f.end_headers?
+        end
+      end
+      status = 0x80_u8 | (HPACK::STATIC.index({":status", "200"}).not_nil! + 1).to_u8
+      foreign = Bytes[status, 0x40, 0x06] + "x-sync".to_slice + Bytes[0x07] + "foreign".to_slice
+      conn.write(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS | Frame::END_STREAM,
+        stream + 1, foreign).to_bytes)
+      refusal = Bytes[0x08, 0x03] + "403".to_slice + Bytes[0xbe] # :status 403, then index 62
+      conn.write(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS | Frame::END_STREAM,
+        stream, refusal).to_bytes)
+      conn.flush
+      sleep 0.3.seconds
+    rescue
+    ensure
+      conn.close rescue nil
+    end
+  end
+  port
+end
+
+describe "WebSocket over HTTP/2 — the connection's header table" do
+  # Another stream's block was skipped while waiting for the answer, so the answer's dynamic
+  # index resolved against a table missing the entry that block inserted.
+  it "decodes another stream's block before the extended CONNECT is answered" do
+    port = start_h2_ws_origin_foreign_block
+    res = send_over_h2(port, [text("hello")])
+    res.upgraded?.should be_false
+    String.new(res.handshake_head).should start_with "HTTP/2 403"
+    String.new(res.handshake_head).should contain "x-sync: foreign"
+  end
+end

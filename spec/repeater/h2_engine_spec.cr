@@ -2441,3 +2441,99 @@ describe "Gori::Repeater::H2Engine — an h1-only origin behind an h2c send" do
     Gori::Repeater::SendError.kind(r.error).should eq("no_response")
   end
 end
+
+# An h2c origin that reads the request on stream 1, then writes the frames `answer` builds.
+private def start_h2_origin_scripted(&answer : IO ->) : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    next unless conn = origin.accept?
+    conn.read_timeout = 5.seconds
+    Frame.read_preface(conn)
+    send_server_preface(conn)
+    begin
+      loop do
+        f = Frame.read(conn)
+        break if f.nil?
+        break if f.frame_type.in?(Frame::Type::Headers, Frame::Type::Data) && f.end_stream?
+      end
+      answer.call(conn)
+      conn.flush
+      sleep 0.3.seconds
+    rescue
+    end
+    conn.close rescue nil
+  end
+  port
+end
+
+# Literal with incremental indexing (`name: value` lands at dynamic index 62).
+private def indexed_literal(name : String, value : String) : Bytes
+  io = IO::Memory.new
+  io.write_byte(0x40_u8)
+  io.write_byte(name.bytesize.to_u8)
+  io << name
+  io.write_byte(value.bytesize.to_u8)
+  io << value
+  io.to_slice
+end
+
+private H2_STATUS_200 = 0x80_u8 | (HPACK::STATIC.index({":status", "200"}).not_nil! + 1).to_u8
+private H2_STATUS_103 = Bytes[0x08_u8, 0x03_u8] + "103".to_slice # :status (static 8), not indexed
+
+private def h2_frame(io : IO, type : Frame::Type, flags : UInt8, sid : UInt32, payload : Bytes) : Nil
+  io.write(Frame::Header.new(type.value, flags, sid, payload).to_bytes)
+end
+
+# HPACK's dynamic table is the CONNECTION's: a header block on another stream, or a
+# PUSH_PROMISE's, that the reader skipped left every later index resolving to the wrong entry,
+# and the response came back with the wrong headers and no error.
+describe "Gori::Repeater::H2Engine — header blocks this exchange does not read" do
+  it "decodes another stream's block so a later index resolves to the entry it inserted" do
+    port = start_h2_origin_scripted do |io|
+      h2_frame(io, Frame::Type::Headers, Frame::END_HEADERS, 1_u32, H2_STATUS_103 + indexed_literal("x-sync", "own"))
+      h2_frame(io, Frame::Type::Headers, Frame::END_HEADERS | Frame::END_STREAM, 2_u32,
+        Bytes[H2_STATUS_200] + indexed_literal("x-sync", "foreign"))
+      h2_frame(io, Frame::Type::Headers, Frame::END_HEADERS | Frame::END_STREAM, 1_u32, Bytes[H2_STATUS_200, 0xbe_u8])
+    end
+    r = Gori::Repeater::H2Engine.send("GET /x HTTP/2\r\nHost: h\r\n\r\n".to_slice,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false, timeout: 3.seconds)
+    r.error.should be_nil
+    String.new(r.head).should contain("x-sync: foreign")
+  end
+
+  it "decodes a PUSH_PROMISE's block, CONTINUATION included, without taking it as the response" do
+    port = start_h2_origin_scripted do |io|
+      block = Bytes[H2_STATUS_200] + indexed_literal("x-sync", "pushed")
+      promised = Bytes[0, 0, 0, 2]
+      h2_frame(io, Frame::Type::PushPromise, 0_u8, 1_u32, promised + block[0, 3])
+      h2_frame(io, Frame::Type::Continuation, Frame::END_HEADERS, 1_u32, block[3, block.size - 3])
+      h2_frame(io, Frame::Type::Headers, Frame::END_HEADERS | Frame::END_STREAM, 1_u32, Bytes[H2_STATUS_200, 0xbe_u8])
+    end
+    r = Gori::Repeater::H2Engine.send("GET /x HTTP/2\r\nHost: h\r\n\r\n".to_slice,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false, timeout: 3.seconds)
+    r.error.should be_nil
+    r.response.not_nil!.status.should eq(200)
+    String.new(r.head).should contain("x-sync: pushed")
+  end
+
+  it "fails the exchange and retires the connection when that block cannot be decoded" do
+    port = start_h2_origin_scripted do |io|
+      h2_frame(io, Frame::Type::Headers, Frame::END_HEADERS | Frame::END_STREAM, 2_u32,
+        Bytes[0xff_u8, 0xff_u8, 0xff_u8, 0x0f_u8]) # an index far past the table
+      h2_frame(io, Frame::Type::Headers, Frame::END_HEADERS | Frame::END_STREAM, 1_u32, Bytes[H2_STATUS_200])
+    end
+    conn, err = Gori::Repeater::H2Engine.dial("http", "127.0.0.1", port, false, nil, 3.seconds, nil, nil)
+    err.should be_nil
+    conn = conn.not_nil!
+    begin
+      r = Gori::Repeater::H2Engine.exchange_request(conn, "GET /x HTTP/2\r\nHost: h\r\n\r\n".to_slice,
+        scheme: "http", host: "127.0.0.1", port: port, started: Time.instant, timeout: 3.seconds)
+      r.error.not_nil!.should contain("HPACK state lost")
+      r.ok?.should be_false
+      conn.poisoned?.should be_true
+    ensure
+      conn.close
+    end
+  end
+end

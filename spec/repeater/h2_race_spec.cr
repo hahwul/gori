@@ -210,6 +210,53 @@ describe "Repeater::H2Engine.single_packet" do
     ok.error.not_nil!.should contain("HPACK state lost")
   end
 
+  # A stream failed locally (header list too large) was skipped on its later HEADERS, so its
+  # trailers' dynamic-table insert never reached the shared decoder and the sibling's index 62
+  # resolved to the head's `x-sync: yes` instead of the trailers' `x-sync: trailer`, error nil.
+  it "decodes a finished stream's trailers so a sibling resolves the table the origin built" do
+    port = start_h2_scripted_origin(2) do |io, ended|
+      sids = ended.to_h { |(sid, path)| {path, sid} }
+      repeat_count = HPACK::Decoder::MAX_HEADER_LIST // ("server".bytesize + HPACK::Decoder::ENTRY_OVERHEAD) + 1
+      big = IO::Memory.new
+      big.write_byte(STATUS_200_INDEX)
+      repeat_count.times { big.write_byte(SERVER_INDEX) }
+      big.write(SYNC_FIELD)
+      write_header_block(io, sids["/large"], big.to_slice, end_stream: false)
+      trailer = Bytes[0x40, 0x06, 'x'.ord.to_u8, '-'.ord.to_u8, 's'.ord.to_u8, 'y'.ord.to_u8,
+        'n'.ord.to_u8, 'c'.ord.to_u8, 0x07] + "trailer".to_slice
+      write_header_block(io, sids["/large"], trailer, end_stream: true)
+      io.write(Frame::Header.new(Frame::Type::Headers.value,
+        Frame::END_HEADERS | Frame::END_STREAM, sids["/ok"], Bytes[STATUS_200_INDEX, 0xbe_u8]).to_bytes)
+      io.flush
+    end
+
+    large, ok = Gori::Repeater::H2Engine.single_packet(race_wires("/large", "/ok"),
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+
+    large.error.not_nil!.should contain("header list too large")
+    ok.ok?.should be_true
+    String.new(ok.head).should contain("x-sync: trailer")
+  end
+
+  # A foreign block that cannot be decoded leaves the table unknown: every live stream says so
+  # rather than decoding against it.
+  it "fails the live streams when a finished stream's block cannot be decoded" do
+    port = start_h2_scripted_origin(2) do |io, ended|
+      sids = ended.to_h { |(sid, path)| {path, sid} }
+      h2_headers(io, sids["/a"], [{":status", "204"}], end_stream: true)
+      io.write(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS, sids["/a"],
+        Bytes[0xff_u8, 0xff_u8, 0xff_u8, 0x0f_u8]).to_bytes) # an index far past the table
+      h2_headers(io, sids["/b"], [{":status", "200"}], end_stream: true)
+    end
+
+    a, b = Gori::Repeater::H2Engine.single_packet(race_wires("/a", "/b"),
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+
+    a.response.not_nil!.status.should eq(204)
+    b.ok?.should be_false
+    b.error.not_nil!.should contain("HPACK state lost")
+  end
+
   # DATA for a stream the race already closed returned before crediting the CONNECTION window,
   # so a failed stream's body could drain the shared 65535 bytes and stall every sibling.
   it "credits the connection window for DATA on a stream it already closed" do

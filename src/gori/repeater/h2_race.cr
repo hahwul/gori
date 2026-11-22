@@ -80,7 +80,7 @@ module Gori
             @rst = H2Engine.rst_reason(frame)
             return finish(started)
           else
-            # PRIORITY / PUSH_PROMISE / WINDOW_UPDATE for this stream — nothing to reassemble.
+            # PRIORITY / WINDOW_UPDATE for this stream — nothing to reassemble.
           end
           done?
         end
@@ -117,7 +117,7 @@ module Gori
         # against the wrong table. Raise: `route_or_fail` fails every live stream with the reason.
         private def buffer_header(chunk : Bytes) : Nil
           if @header_buf.bytesize + chunk.size > H2Engine::MAX_HEADER_BLOCK
-            raise Gori::Error.new("h2 header block exceeds #{H2Engine::MAX_HEADER_BLOCK} bytes — HPACK state lost")
+            raise H2Engine.hpack_lost("h2 header block exceeds #{H2Engine::MAX_HEADER_BLOCK} bytes")
           end
           @header_buf.write(chunk)
         end
@@ -317,6 +317,7 @@ module Gori
         hard = started + (timeout || Settings.io_timeout * DEFAULT_BUDGET_FACTOR)
         progress = Time.instant
         frames = 0
+        foreign = ForeignBlock.new # blocks of finished or unknown streams, decoded and dropped
 
         while remaining > 0
           frame = read_next_frame(io, progress, patience, hard)
@@ -329,13 +330,14 @@ module Gori
             # nil: a GOAWAY too short to name a last-stream-id, which ends the whole read.
             break unless closed = handle_connection_frame(io, frame, streams, started)
             remaining -= closed
-          when Frame::Type::Headers, Frame::Type::Continuation, Frame::Type::Data, Frame::Type::RstStream
-            break unless routed = route_or_fail(io, conn, streams, frame, started)
+          when Frame::Type::Headers, Frame::Type::Continuation, Frame::Type::Data, Frame::Type::RstStream,
+               Frame::Type::PushPromise
+            break unless routed = route_or_fail(io, conn, streams, frame, started, foreign)
             advanced, closed = routed
             progress = Time.instant if advanced
             remaining -= 1 if closed
           else
-            # WINDOW_UPDATE (moot — all request bytes are written), PRIORITY, PUSH_PROMISE.
+            # WINDOW_UPDATE (moot — all request bytes are written), PRIORITY.
           end
         end
       end
@@ -384,13 +386,24 @@ module Gori
       # read's no-progress clock resets), `closed` when it just ended that stream (so the caller
       # drops it from the live count). A DATA frame is credited back to the connection window so a
       # body past the default keeps flowing — the reader half of `read_response`'s rule.
+      #
+      # A header block of a stream that is done or not ours is still decoded, and only its
+      # fields dropped (`ForeignBlock`): the table is the connection's, so skipping a finished
+      # stream's trailers misdecoded every sibling block after them. So is a PUSH_PROMISE's,
+      # which continues on the stream it was sent on. A table that can no longer be trusted
+      # raises, and `route_or_fail` fails every live stream with the reason.
       private def self.route_stream_frame(io : IO, conn : Conn, streams : Hash(UInt32, PacketStream),
-                                          frame : Frame::Header, started : Time::Instant) : {Bool, Bool}
+                                          frame : Frame::Header, started : Time::Instant,
+                                          foreign : ForeignBlock) : {Bool, Bool}
         # Every DATA payload (padding included) counts against the CONNECTION window, even on a
         # stream already done or never ours (RFC 9113 §6.9): an uncredited one starves siblings.
         data = frame.frame_type == Frame::Type::Data
         window_update(io, 0_u32, frame.payload.size) if data
         st = streams[frame.stream_id]?
+        if foreign_block?(frame, st, foreign)
+          foreign.feed(frame, conn.decoder)
+          return {false, false}
+        end
         return {false, false} unless st # a frame for a stream we do not own
         return {false, false} if st.done?
         if data
@@ -402,12 +415,25 @@ module Gori
         end
       end
 
+      # Does this frame belong to a header block no live stream reads?
+      private def self.foreign_block?(frame : Frame::Header, st : PacketStream?, foreign : ForeignBlock) : Bool
+        case frame.frame_type
+        when Frame::Type::PushPromise then true
+        when Frame::Type::Headers     then st.nil? || st.done?
+        when Frame::Type::Continuation
+          foreign.open_on?(frame.stream_id) || st.nil? || st.done?
+        else
+          false
+        end
+      end
+
       # `route_stream_frame`, or nil once an HPACK/framing error leaves the connection's shared
       # decoder unusable. A cleanly decoded but over-limit header list is stream-local: the decoder
       # has consumed the whole block and applied its table updates, so only that stream is failed.
       private def self.route_or_fail(io : IO, conn : Conn, streams : Hash(UInt32, PacketStream),
-                                     frame : Frame::Header, started : Time::Instant) : {Bool, Bool}?
-        route_stream_frame(io, conn, streams, frame, started)
+                                     frame : Frame::Header, started : Time::Instant,
+                                     foreign : ForeignBlock) : {Bool, Bool}?
+        route_stream_frame(io, conn, streams, frame, started, foreign)
       rescue ex : HPACK::HeaderListTooLarge
         if st = streams[frame.stream_id]?
           st.fail(ex.message || "hpack: header list too large", started)
