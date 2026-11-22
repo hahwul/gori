@@ -16,6 +16,8 @@ class Gori::Proxy::H2::StreamGate
   # one connection, i.e. a client that has ignored thousands of RST_STREAMs.
   MAX_REFUSED_STREAMS           = 4096
   SANDBOX_PROTOCOL_ERROR_REASON = "h2 sandbox: malformed request headers (missing :method, duplicate pseudo-header or conflicting authority)"
+  SANDBOX_OVERSIZED_REASON      = "h2 sandbox: the request's decoded header list is past the " \
+                                  "#{Codec::Http1::MAX_HEAD_BYTES // 1024} KiB h1 head limit, so its URL cannot be judged"
 
   # The URL test both refusal gates below make, and the only place the stream's own
   # `:authority` and the connection's host are reconciled. Returns the blocked request's
@@ -85,13 +87,24 @@ class Gori::Proxy::H2::StreamGate
     return false unless @ordered             # a response exists only for a request already allowed
     return false unless block.head || opener # trailers carry no request URL to test
     return false unless @interceptor.sandbox_enabled?
-    if block.head.nil? || sandbox_request_malformed?(block.fields)
-      refuse_locked(block, SANDBOX_PROTOCOL_ERROR_REASON, PROTOCOL_ERROR)
+    if reason = sandbox_unjudgeable_reason(block)
+      refuse_locked(block, reason, PROTOCOL_ERROR)
       return true
     end
     return false unless sandbox_blocked_url(block)
     refuse_locked(block)
     true
+  end
+
+  # Why this request head has no URL the sandbox can judge, or nil when it has one. A head past
+  # the h1 head limit is given no `head` (`HeadRewrite#finish`) for a different reason than a
+  # methodless one, and the flow is told which.
+  private def sandbox_unjudgeable_reason(block : HeadRewrite::Block) : String?
+    if block.head.nil?
+      HeadCodec.h1_head_too_large?(block.fields) ? SANDBOX_OVERSIZED_REASON : SANDBOX_PROTOCOL_ERROR_REASON
+    elsif sandbox_request_malformed?(block.fields)
+      SANDBOX_PROTOCOL_ERROR_REASON
+    end
   end
 
   private def sandbox_request_malformed?(fields : Array(HPACK::Field)) : Bool

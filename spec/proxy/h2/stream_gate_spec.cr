@@ -1236,6 +1236,30 @@ describe Gori::Proxy::H2::StreamGate do
     end
   end
 
+  # A head past the h1 head limit has no h1 text form, so it reaches the sandbox with no `head`,
+  # the shape a methodless one has. Both are refused; the flow names which one it was.
+  it "names an oversized request head's refusal for its size, not as malformed" do
+    with_ic(intercept: false) do |ic, scope|
+      scope.add("include", "host", "api.example.com")
+      scope.enable_sandbox
+      rig = Rig.new(ic)
+      big = IO::Memory.new
+      big.write(Bytes[0x3f, 0xe1, 0xff, 0x03]) # §6.3 size update to 65536
+      big.write(HPACK::Encoder.new(65536, indexing: true).encode(request("/x") + [{"x-big", "A" * 65000}]))
+      5.times { big.write_byte(0xbe_u8) } # five more references to the 65 KB entry
+      rig.c2s.accept(headers(1_u32, big.to_slice))
+      methodless = request("/x").reject { |(n, _)| n == ":method" }
+      rig.c2s.accept(headers(3_u32, rig.enc_out.encode(methodless)))
+
+      rig.to_origin.should be_empty
+      resets = rig.to_client
+      resets.map(&.stream_id).should eq([1_u32, 3_u32])
+      resets.each { |r| IO::ByteFormat::BigEndian.decode(UInt32, r.payload).should eq(Gate::PROTOCOL_ERROR) }
+      rig.sink.responses.map(&.error).should eq([Gate::SANDBOX_OVERSIZED_REASON, Gate::SANDBOX_PROTOCOL_ERROR_REASON])
+      Gate::SANDBOX_OVERSIZED_REASON.should contain("h1 head limit")
+    end
+  end
+
   # No `:method` leaves the block without a head, the shape trailers have, and it used to pass
   # the sandbox untested with its body behind it.
   it "refuses a stream-opening HEADERS with no :method, and its DATA" do
