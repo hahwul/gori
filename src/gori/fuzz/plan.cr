@@ -228,6 +228,11 @@ module Gori::Fuzz
     # Whether a `¦chain` may run an `exec:` step (false: MCP's `exec` denied, see
     # `MCP::Tools#exec_refusal`). Checked before the seed rendering, which already runs a chain.
     property? commands_allowed : Bool
+    # Whether a `¦chain`'s `exec:` step may run while the plan is BUILT. False for a build that
+    # only validates and is never run (`PreparedSession`): the baseline render the builder reads
+    # for the gRPC and Content-Length checks replays every chain, and preparing a tab sends
+    # nothing, so it must not fork the operator's command either. A run keeps the default.
+    property? run_hooks : Bool
 
     def initialize(@template : String = "",
                    *,
@@ -251,7 +256,8 @@ module Gori::Fuzz
                    @ws_messages : Array(WsMessageSource)? = nil,
                    @project : Gori::Store? = nil,
                    @project_drain_fts : Bool = true,
-                   @commands_allowed : Bool = true)
+                   @commands_allowed : Bool = true,
+                   @run_hooks : Bool = true)
     end
   end
 
@@ -648,7 +654,7 @@ module Gori::Fuzz
       # The shared decoder registry applies each position's inline `¦chain` at render time.
       # Wired here so a new surface cannot forget it and silently send un-transformed payloads.
       generator = Generator.new(marked, gen_sets, config, registry: Decoder.shared_registry,
-        auto_encode: auto_encode)
+        auto_encode: auto_encode, run_hooks: options.run_hooks?)
       # gRPC framing, decided ONCE off the seed rendering: a template that declares
       # `content-type: application/grpc` and whose body frames cleanly has a 5-byte length
       # prefix that a payload of a different length will INVALIDATE. gori keeps the operator's

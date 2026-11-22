@@ -43,10 +43,16 @@ module Gori::Fuzz
     # a handshake plus N frames, or a head plus a re-encoded protobuf message — so only `emit`
     # and `baseline_raw` branch, and `sniper`/`battering`/`pitchfork`/`cluster`/`total`
     # are untouched.
+    #
+    # `run_hooks: false` withholds every `exec:` chain step (`Decoder.run(run_hooks:)`), for a
+    # generator built only to answer questions about the template — a prepared tab's
+    # `Plan.build` (`PlanOptions#run_hooks?`) — whose memoized baseline would otherwise fork the
+    # operator's command with nothing to send.
     def initialize(marked : Template | WsScript | GrpcFieldTemplate,
                    @sets : Array(PayloadSet), @config : Config,
                    @registry : Decoder::Registry? = nil,
-                   @auto_encode : AutoEncode = AutoEncode.none)
+                   @auto_encode : AutoEncode = AutoEncode.none,
+                   @run_hooks : Bool = true)
       @marked = marked
       # Whether ANY marked position carries an inline `¦chain`. Computed once over the
       # immutable template so the per-request `chained` hot path can skip apply_chains'
@@ -405,7 +411,7 @@ module Gori::Fuzz
     private def chained(payloads : Array(String)) : Array(String)
       # No registry, or no position has a chain ⇒ apply_chains is a per-element identity, so
       # return payloads verbatim (byte-for-byte the same wire request) and skip its allocation.
-      (reg = @registry) && @has_chains ? @marked.apply_chains(payloads, reg) : payloads
+      (reg = @registry) && @has_chains ? @marked.apply_chains(payloads, reg, @run_hooks) : payloads
     end
 
     # Like `chained`, but for a REPORTED request: also returns the first position's chain
@@ -414,7 +420,7 @@ module Gori::Fuzz
     # extra allocation, so the common `auto_mark` / bare `§v§` sweep is unchanged.
     private def chained_reported(payloads : Array(String)) : {Array(String), String?}
       return {payloads, nil} unless (reg = @registry) && @has_chains
-      transformed = @marked.apply_chains_reported(payloads, reg)
+      transformed = @marked.apply_chains_reported(payloads, reg, @run_hooks)
       # First failing position wins the row's reason; a request with several failing chains is
       # still one wrong-on-the-wire request, and the first named cause is enough to act on.
       err = transformed.each.compact_map(&.[1]).first?
