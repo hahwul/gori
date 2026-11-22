@@ -220,10 +220,32 @@ describe "an env value that cannot be placed beside a marker" do
     end
   end
 
-  it "refuses an env value that splits one chain step into two" do
-    with_project_env([{"E", "base64|base64"}]) do
-      expect_raises(F::ChainError, F::Plan::ENV_SPLICE_REFUSAL) do
-        F::Plan.build(splice_options("GET /q?a=§v¦$E§ HTTP/1.1\r\nHost: t.test\r\n\r\n"), ungated_outbound)
+  # An env value may hold a converter LIST: one raw step expands into the steps it names.
+  ["base64|base64", "base64,base64"].each do |list|
+    it "runs every converter an env value names (#{list.inspect})" do
+      with_project_env([{"ENC", list}]) do
+        plan = F::Plan.build(splice_options("GET /q?a=§abc¦$ENC§ HTTP/1.1\r\nHost: t.test\r\n\r\n"), ungated_outbound)
+        jobs_of(plan)[0].lines.first.should eq("GET /q?a=ZUE9PQ== HTTP/1.1") # base64(base64("x"))
+      end
+    end
+  end
+
+  it "refuses a converter list in an env value that includes a command step, and runs nothing" do
+    with_counting_hook do |hook, runs|
+      with_project_env([{"ENC", "base64|exec:#{hook}"}]) do
+        expect_raises(F::CommandsRefused, F::Plan::ENV_COMMAND_REFUSAL) do
+          F::Plan.build(splice_options("GET /q?a=§abc¦$ENC§ HTTP/1.1\r\nHost: t.test\r\n\r\n"), ungated_outbound)
+        end
+        runs.call.should eq(0)
+      end
+    end
+  end
+
+  # `§$E§` with E empty leaves `§§`, the literal-§ escape: refused, and in words that say so.
+  it "refuses an empty value as a position's whole default, naming it as empty" do
+    with_project_env([{"E", ""}]) do
+      expect_raises(F::ChainError, F::Plan::ENV_EMPTY_DEFAULT_REFUSAL) do
+        F::Plan.build(splice_options("GET /q?a=§$E§&b=$E&c=§w§ HTTP/1.1\r\nHost: t.test\r\n\r\n"), ungated_outbound)
       end
     end
   end
