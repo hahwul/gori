@@ -1996,7 +1996,7 @@ MCP stdio 서버입니다. 도구 세부사항은 [MCP 가이드](/ko/guide/mcp/
 | `--install-claude` | Claude Desktop `mcpServers` 설정 기록 |
 | `--install-claude-code` | Claude Code `~/.claude.json` `mcpServers` 항목 기록 (또는 `$CLAUDE_CONFIG_DIR`) |
 | `--install-codex` | OpenAI Codex `~/.codex/config.toml` `[mcp_servers.gori]` 기록 (또는 `$CODEX_HOME`) |
-| `--install-agy` | Antigravity `~/.gemini/antigravity-cli/mcp_config.json` 기록 |
+| `--install-agy` | Antigravity `~/.gemini/config/mcp_config.json` `mcpServers.gori` 기록 |
 | `--install-grok` | Grok `~/.grok/config.toml` `[mcp_servers.gori]` 기록 |
 | `--install-hermes` | Hermes `~/.hermes/config.yaml` `mcp_servers.gori` 기록 (또는 `$HERMES_HOME`) |
 | `--install-pi` | Pi `~/.pi/agent/mcp.json` `mcpServers.gori` 기록 (또는 `$PI_CODING_AGENT_DIR`). MCP 어댑터 필요 |

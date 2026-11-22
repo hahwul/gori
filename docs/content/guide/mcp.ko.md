@@ -156,7 +156,7 @@ gori는 널리 쓰이는 클라이언트의 MCP 설정을 대신 작성해 줍�
 | `--install-claude` | Claude Desktop | 플랫폼별 앱 설정 디렉터리의 `claude_desktop_config.json` (아래 참고) |
 | `--install-claude-code` | Claude Code | `~/.claude.json` (`mcpServers.gori`), 또는 `$CLAUDE_CONFIG_DIR` |
 | `--install-codex` | OpenAI Codex | `~/.codex/config.toml` (`[mcp_servers.gori]`), 또는 `$CODEX_HOME` |
-| `--install-agy` | Antigravity CLI | `~/.gemini/antigravity-cli/mcp_config.json` |
+| `--install-agy` | Antigravity (CLI, App, IDE) | `~/.gemini/config/mcp_config.json` (`mcpServers.gori`) |
 | `--install-grok` | Grok | `~/.grok/config.toml` (`[mcp_servers.gori]`) |
 | `--install-hermes` | Hermes | `~/.hermes/config.yaml` (`mcp_servers.gori`), 또는 `$HERMES_HOME` |
 | `--install-pi` | Pi | `~/.pi/agent/mcp.json` (`mcpServers.gori`), 또는 `$PI_CODING_AGENT_DIR` |
@@ -176,7 +176,7 @@ gori mcp --install-pi
 gori mcp --install-claude-code --install-codex  # 한 번에 여러 클라이언트
 ```
 
-Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mcp_servers:` 항목이 있는 YAML을 사용합니다. 나머지 클라이언트는 JSON을 씁니다. 설치 후 클라이언트를 재시작하거나 세션을 다시 열어 MCP 서버를 다시 로드하세요. TOML 테이블에는 `tool_timeout_sec = 600`도 함께 씁니다. Codex는 기본적으로 60초가 지난 도구 호출을 취소하므로(Grok도 같은 키를 읽습니다), `minimize_repeater`나 active `probe_scan`처럼 오래 걸리는 동기 도구가 중간에 끊깁니다. 이미 값을 적어 두었다면 다시 설치해도 그 값을 유지합니다. 기존 설정 파일은 제자리에서 갱신됩니다. 다른 서버·테이블·주석은 그대로 두고, 파일 권한도 유지하며, 교체는 원자적이라 설치가 중간에 끊겨도 파일이 잘려 나가지 않습니다. gori는 TOML과 YAML 파일을 텍스트로 편집하므로 설정 주변에 적어 둔 주석이 남습니다. 주석이 없는 JSON 설정은 파싱한 뒤 다른 키를 유지한 채 다시 씁니다. 안전하게 끼워 넣을 수 없는 설정 파일은 건드리지 않고 그 사실을 알립니다.
+Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mcp_servers:` 항목이 있는 YAML을 사용합니다. 나머지 클라이언트는 JSON을 씁니다. 설치 후 클라이언트를 재시작하거나 세션을 다시 열어 MCP 서버를 다시 로드하세요. TOML 테이블에는 `tool_timeout_sec = 600`을, `--install-agy` 항목에는 `timeoutSeconds: 600`을 함께 씁니다. Codex는 기본적으로 60초, Antigravity는 도구 호출당 180초가 지나면 호출을 취소하므로(Grok도 같은 TOML 키를 읽습니다), `minimize_repeater`나 active `probe_scan`처럼 오래 걸리는 동기 도구가 중간에 끊깁니다. 이미 적어 둔 타임아웃 값(및 Antigravity의 `eager` 같은 도구별 `tools` 설정)은 다시 설치해도 유지합니다. 기존 설정 파일은 제자리에서 갱신됩니다. 다른 서버·테이블·주석은 그대로 두고, 파일 권한도 유지하며, 교체는 원자적이라 설치가 중간에 끊겨도 파일이 잘려 나가지 않습니다. gori는 TOML과 YAML 파일을 텍스트로 편집하므로 설정 주변에 적어 둔 주석이 남습니다. 주석이 없는 JSON 설정은 파싱한 뒤 다른 키를 유지한 채 다시 씁니다. 안전하게 끼워 넣을 수 없는 설정 파일은 건드리지 않고 그 사실을 알립니다.
 
 클라이언트가 리포지토리 디렉터리 밖에서 MCP를 시작해도 서버는 unbound로 연결되며, 에이전트가 도구로 프로젝트를 고르거나 만들 수 있습니다. 설치 시점에 engagement 하나로 고정해 두려면 선택자를 넘기세요. 예: `gori mcp --project my-engagement --install-codex`.
 

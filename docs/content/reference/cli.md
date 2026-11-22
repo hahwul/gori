@@ -2008,7 +2008,7 @@ MCP stdio server. See the [MCP guide](/guide/mcp/) for tool details.
 | `--install-claude` | Write Claude Desktop `mcpServers` config |
 | `--install-claude-code` | Write Claude Code `~/.claude.json` `mcpServers` entry (or `$CLAUDE_CONFIG_DIR`) |
 | `--install-codex` | Write OpenAI Codex `~/.codex/config.toml` `[mcp_servers.gori]` (or `$CODEX_HOME`) |
-| `--install-agy` | Write Antigravity `~/.gemini/antigravity-cli/mcp_config.json` |
+| `--install-agy` | Write Antigravity `~/.gemini/config/mcp_config.json` `mcpServers.gori` |
 | `--install-grok` | Write Grok `~/.grok/config.toml` `[mcp_servers.gori]` |
 | `--install-hermes` | Write Hermes `~/.hermes/config.yaml` `mcp_servers.gori` (or `$HERMES_HOME`) |
 | `--install-pi` | Write Pi `~/.pi/agent/mcp.json` `mcpServers.gori` (or `$PI_CODING_AGENT_DIR`). Requires an MCP adapter |

@@ -157,7 +157,7 @@ gori can write the MCP configuration for common clients for you:
 | `--install-claude` | Claude Desktop | `claude_desktop_config.json` in the platform's app-config directory (see below) |
 | `--install-claude-code` | Claude Code | `~/.claude.json` (`mcpServers.gori`), or `$CLAUDE_CONFIG_DIR` |
 | `--install-codex` | OpenAI Codex | `~/.codex/config.toml` (`[mcp_servers.gori]`), or `$CODEX_HOME` |
-| `--install-agy` | Antigravity CLI | `~/.gemini/antigravity-cli/mcp_config.json` |
+| `--install-agy` | Antigravity (CLI, App, IDE) | `~/.gemini/config/mcp_config.json` (`mcpServers.gori`) |
 | `--install-grok` | Grok | `~/.grok/config.toml` (`[mcp_servers.gori]`) |
 | `--install-hermes` | Hermes | `~/.hermes/config.yaml` (`mcp_servers.gori`), or `$HERMES_HOME` |
 | `--install-pi` | Pi | `~/.pi/agent/mcp.json` (`mcpServers.gori`), or `$PI_CODING_AGENT_DIR` |
@@ -177,7 +177,7 @@ gori mcp --install-pi
 gori mcp --install-claude-code --install-codex  # several clients in one run
 ```
 
-Codex and Grok use TOML with an `[mcp_servers.gori]` table, and Hermes uses YAML with an `mcp_servers:` entry. The other clients use JSON. Restart the client (or re-open the session) after installing so it reloads MCP servers. The TOML table also sets `tool_timeout_sec = 600`. Codex cancels a tool call after 60 seconds by default (Grok reads the same key), which cuts off a long synchronous tool such as `minimize_repeater` or an active `probe_scan`. A value already set there is kept on a re-install. Existing config files are updated in place. Other servers, tables and comments are preserved, the file's permissions are kept, and the replacement is atomic, so an interrupted install cannot truncate it. gori edits the TOML and YAML files as text, so the comments around your own settings survive the install. A JSON config, which holds no comments, is parsed and written back with its other keys kept. A config gori cannot splice safely is reported and left unchanged.
+Codex and Grok use TOML with an `[mcp_servers.gori]` table, and Hermes uses YAML with an `mcp_servers:` entry. The other clients use JSON. Restart the client (or re-open the session) after installing so it reloads MCP servers. The TOML table also sets `tool_timeout_sec = 600`, and `--install-agy` sets `timeoutSeconds: 600` (Antigravity defaults to 180 seconds per tool call, and Codex cancels after 60 seconds; Grok reads the same TOML key), so long synchronous tools such as `minimize_repeater` or an active `probe_scan` are not cut off early. A timeout already set there (and Antigravity's per-tool `tools` overrides such as `eager`) is kept on a re-install. Existing config files are updated in place. Other servers, tables and comments are preserved, the file's permissions are kept, and the replacement is atomic, so an interrupted install cannot truncate it. gori edits the TOML and YAML files as text, so the comments around your own settings survive the install. A JSON config, which holds no comments, is parsed and written back with its other keys kept. A config gori cannot splice safely is reported and left unchanged.
 
 If a client starts MCP outside your repository directory, the server starts unbound and the agent can pick or create a project over tools. To pin a fixed engagement at install time instead, pass a selector, for example `gori mcp --project my-engagement --install-codex`.
 
