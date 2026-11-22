@@ -6221,3 +6221,17 @@ starts no server. It is not an MCP tool (an agent does not need it, and it would
 catalogue bytes in every session) and not a TUI readout yet: a Preferences row and a call
 count in the Agents card are a layout decision that has not been made, so the setting is a
 `settings.json` key for now, like `listeners`.
+
+### 2026-11-22: the usage log gets its Preferences row; "Agent messaging" becomes "MCP server"
+
+Refines: 2026-11-22, "`gori mcp` can record its own use, opt-in, and never a value".
+
+The row that entry left undecided is in: Preferences › AI now has **Usage log** under
+**Channel delivery**, and the section that holds them is renamed from "Agent messaging" to
+"MCP server". One section, not a third beside "MCP permissions": the section already was
+the `mcp` object of `settings.json`, one row per key, and a second section over the same
+object would have been two one-row sections and three more lines for the same two switches.
+Nothing forced it — a section resets and saves only its own rows, so either shape works; this
+one is the smaller. The old name covered only the first row once the second joined it; it
+stays a palette keyword. The row's hint says what is never written before it says how to read the
+file. A call count in the Agents card is still not built.

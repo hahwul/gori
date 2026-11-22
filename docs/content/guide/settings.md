@@ -114,10 +114,12 @@ Network here is the **global default**. A project can pin its own bind address, 
 
 | Section | Fields |
 |---------|--------|
-| **Agent messaging** | Channel delivery (off) |
+| **MCP server** | Channel delivery (off), Usage log (off) |
 | **MCP permissions** | Send traffic, Intercept control, Edit project data, Change scope & sandbox, Manage projects, Run local commands (each `on`, `ask` or `off`; all `on` by default) |
 
-**Agent messaging** sets how `gori mcp` delivers a "Tell the agent…" message to an attached agent. The inbox-socket, Codex-queue, tool-result and `operator_messages`-poll layers always run. **Channel delivery** adds the `claude/channel` push *behind* them, tried only when no route that can confirm delivery has answered. It is off by default because it is a research preview that needs Claude Code launched with a development-channels flag. It is read when a `gori mcp` process starts, so an agent already running keeps the answer it was given. See [Messages from gori](/guide/mcp/#messages-from-gori).
+**MCP server** holds two switches for the `gori mcp` server. **Channel delivery** concerns how it delivers a "Tell the agent…" message to an attached agent. The inbox-socket, Codex-queue, tool-result and `operator_messages`-poll layers always run. **Channel delivery** adds the `claude/channel` push *behind* them, tried only when no route that can confirm delivery has answered. It is off by default because it is a research preview that needs Claude Code launched with a development-channels flag. It is read when a `gori mcp` process starts, so an agent already running keeps the answer it was given. See [Messages from gori](/guide/mcp/#messages-from-gori).
+
+**Usage log** makes `gori mcp` record each tool call's name, argument names, outcome, size and duration in `~/.gori/mcp-usage.jsonl`, never an argument's value, a reply, a host or a project name. Nothing is sent anywhere, and `gori mcp --usage` prints the summary. It is off by default and, like Channel delivery, read when the server starts. See [Usage Log](/guide/mcp/#usage-log).
 
 **MCP permissions** decides what an agent attached over `gori mcp` may do, one group at a time: `off` withholds the group, and `ask` holds each of its calls for your approval on the TUI's `ask:` card. Reading the capture is always allowed. Like Channel delivery, the setting is read when the server starts. See [Permissions from Preferences](/guide/mcp/#permissions-from-preferences).
 

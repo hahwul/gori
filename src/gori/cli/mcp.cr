@@ -54,7 +54,7 @@ module Gori::CLI
       p.on("--install-grok", "Install gori as an MCP server in Grok (~/.grok/config.toml)") { install_targets << "grok" }
       p.on("--install-hermes", "Install gori as an MCP server in Hermes ($HERMES_HOME, default ~/.hermes/config.yaml)") { install_targets << "hermes" }
       p.on("--install-pi", "Install gori as an MCP server in Pi ($PI_CODING_AGENT_DIR, default ~/.pi/agent/mcp.json; requires an MCP adapter)") { install_targets << "pi" }
-      p.on("--usage", "Print what the usage log recorded and exit, starting no server (the log is off by default: mcp.usage_log in settings.json)") { usage = true }
+      p.on("--usage", "Print what the usage log recorded and exit, starting no server (the log is off by default: Preferences › AI › MCP server, or mcp.usage_log in settings.json)") { usage = true }
       p.on("--since=AGE", "With --usage: how far back to read: 24h, 7d (default: #{MCP_USAGE_DEFAULT_SINCE}), or all") { |v| usage_since = v }
       p.on("--json", "With --usage: print the report as JSON") { usage_json = true }
     end

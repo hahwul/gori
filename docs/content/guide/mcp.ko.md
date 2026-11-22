@@ -403,7 +403,7 @@ gori가 지원하지 않는 버전은 `-32022`와 지원 버전 목록으로 거
 
 ## 사용 기록 {#usage-log}
 
-`gori mcp`는 자신이 어떻게 쓰이는지를 로컬에 기록할 수 있습니다. 에이전트가 어떤 도구를 부르는지, 어떤 호출이 실패하는지, 응답이 얼마나 큰지를 남깁니다. **기본값은 꺼짐**입니다. `settings.json`(`gori settings --edit`)의 `mcp` 아래에 `usage_log`를 켜고 에이전트의 서버를 다시 시작하면, 서버가 stderr에 기록이 켜졌다고 알립니다.
+`gori mcp`는 자신이 어떻게 쓰이는지를 로컬에 기록할 수 있습니다. 에이전트가 어떤 도구를 부르는지, 어떤 호출이 실패하는지, 응답이 얼마나 큰지를 남깁니다. **기본값은 꺼짐**입니다. **Settings → AI → MCP server → Usage log**를 켜거나 `settings.json`(`gori settings --edit`)의 `mcp` 아래에 `usage_log`를 켜고 에이전트의 서버를 다시 시작하면, 서버가 stderr에 기록이 켜졌다고 알립니다.
 
 ```json
 { "mcp": { "usage_log": true } }
