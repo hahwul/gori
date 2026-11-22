@@ -387,7 +387,7 @@ module Gori
           link_issue_repeater(store, id, repeater_id, "gori run issues create",
             "issue ##{id} created but its repeater link NOT written (store busy " \
             "or unwritable); retry with `gori run issues update #{id} --repeater #{repeater_id}`")
-          puts issue_created_output(store, id, format)
+          puts issue_created_output(store, id, format, project.db_path, flow_id, repeater_id)
         end
       end
 
@@ -399,11 +399,37 @@ module Gori
       # one the listing never shows, so that case refuses instead of printing a partial one.
       # Its own method, rather than a branch in `cmd_issues_create`, because that command is
       # at the complexity bar the lint gate holds.
-      private def self.issue_created_output(store : Store, id : Int64, format : Symbol) : String
-        return "Issue ##{id} created successfully." unless format == :json
+      private def self.issue_created_output(store : Store, id : Int64, format : Symbol, db_path : String,
+                                            flow_id : Int64?, repeater_id : Int64?) : String
+        unless format == :json
+          return "Issue ##{id} created successfully." unless flow_id || repeater_id
+          return String.build do |io|
+            io << "Issue ##{id} created. 0 evidence copies frozen by this command."
+            {"flow" => flow_id, "repeater" => repeater_id}.each do |kind, ref_id|
+              next unless ref_id
+              io << "\nLinked #{kind} ##{ref_id}. To freeze its current exchange, "
+              if db_arg = evidence_db_argument(db_path)
+                io << "run:\n  gori run evidence freeze --issue=#{id} --ref=#{kind} --ref-id=#{ref_id} --db " << db_arg
+              else
+                io << "run `gori run evidence freeze` with --issue=#{id} --ref=#{kind} --ref-id=#{ref_id} and the same project selection."
+              end
+            end
+          end
+        end
         issue = store.get_issue(id) ||
                 abort_closing(store, "gori run issues create: issue ##{id} was created, but it was gone before it could be read back")
         Issues::Export.issue_json(issue, store)
+      end
+
+      # Bind the suggested write to the same database even when the active project changes.
+      private def self.evidence_db_argument(path : String) : String?
+        path = File.expand_path(path)
+        return nil unless CLI::Output.term_line(path) == path
+        case ShellEnv::Syntax.for_shell(ENV["SHELL"]?)
+        in .powershell? then ShellEnv.powershell_quote(path)
+        in .fish?       then ShellEnv.fish_quote(path)
+        in .posix?      then Process.quote_posix(path)
+        end
       end
 
       # `--host`, or the `--flow`'s host when none was given.

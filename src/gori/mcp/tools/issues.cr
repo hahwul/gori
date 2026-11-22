@@ -214,7 +214,9 @@ module Gori
         Result.new(JSON.build do |j|
           j.object do
             j.field "id", id
+            j.field "flow_id", flow_id if flow_id
             j.field "repeater_id", repeater_id if repeater_id
+            j.field "copies_frozen", 0
           end
         end)
       end
@@ -337,7 +339,7 @@ module Gori
         # agent reads when CHOOSING a tool — #1076 was filed over a create+update_issue habit
         # formed when nothing here said otherwise, and a per-property description (below) is
         # only read once this tool has already been picked.
-        tool j, "create_issue", "Record a new issue in the project, with its notes body, in one transaction." do |s|
+        tool j, "create_issue", "Record an issue and its notes in one transaction. Returns the linked IDs and copies_frozen (0)." do |s|
           s.field "title", strprop("issue title"), required: true
           s.field "severity", enumprop("default: derived from cvss, else info", SEVERITIES)
           s.field "cvss", strprop("CVSS vector or score (e.g. 9.8)")

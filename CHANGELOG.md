@@ -91,6 +91,8 @@
 
 - TUI: the Intercept queue hint calls `/` the catch condition it sets, not a filter, and held response rows show status before the path so it remains visible on narrow screens. Coming back to Decoder lands on INPUT instead of typing into the chain, and the footer under a sub-tab filter being typed shows the filter's keys instead of strip letters that now type. The Issues list marks a resolved issue `res`, not `done` (#1942, #1943).
 
+- Creating an issue in the CLI or MCP identifies its live links and reports that the operation froze no evidence copies (#1038).
+
 - Evidence: freezing an exchange an issue already holds with the same bytes writes no second copy; the TUI and `gori run evidence freeze` name the existing copy and MCP `freeze_evidence` returns it with `already_frozen: true`, now named in the tool description. A source whose bytes changed still freezes a new copy (#1942, #1944).
 
 - Text evidence keeps complete UTF-8 characters at the display size limit in reports, the CLI, and the TUI evidence viewer (#1956, #1984)
