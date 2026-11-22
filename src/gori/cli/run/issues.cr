@@ -409,7 +409,7 @@ module Gori
               next unless ref_id
               io << "\nLinked #{kind} ##{ref_id}. To freeze its current exchange, "
               if db_arg = evidence_db_argument(db_path)
-                io << "run:\n  gori run evidence freeze --issue=#{id} --ref=#{kind} --ref-id=#{ref_id} --db=" << db_arg
+                io << "run:\n  gori run evidence freeze --issue=#{id} --ref=#{kind} --ref-id=#{ref_id} --db " << db_arg
               else
                 io << "run `gori run evidence freeze` with --issue=#{id} --ref=#{kind} --ref-id=#{ref_id} and the same project selection."
               end

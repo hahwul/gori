@@ -263,9 +263,25 @@ describe "gori run issues create --format json" do
         text.scan("gori run evidence freeze").size.should eq({flow, repeater}.count(&.itself))
         text.should contain("project dir")
         text.should contain("test.db")
-        text.should contain("--ref=flow --ref-id=4 --db=") if flow
-        text.should contain("--ref=repeater --ref-id=5 --db=") if repeater
+        text.should contain("--ref=flow --ref-id=4 --db ") if flow
+        text.should contain("--ref=repeater --ref-id=5 --db ") if repeater
       end
+    end
+  end
+
+  it "separates --db from a PowerShell-quoted path so quotes start their own token" do
+    prev_shell = ENV["SHELL"]?
+    ENV["SHELL"] = "pwsh"
+    begin
+      with_store do |store|
+        db_path = "/project dir/o'neil $var.db"
+        expected = Gori::ShellEnv.powershell_quote(File.expand_path(db_path))
+        text = Gori::CLI::Run.issue_created_output_for_spec(store, 7_i64, :text, 4_i64, db_path: db_path)
+        text.should contain("--ref=flow --ref-id=4 --db #{expected}")
+        text.should_not contain("--db='")
+      end
+    ensure
+      prev_shell ? (ENV["SHELL"] = prev_shell) : ENV.delete("SHELL")
     end
   end
 
