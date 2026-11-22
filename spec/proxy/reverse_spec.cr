@@ -304,6 +304,56 @@ describe "reverse listener" do
     end
   end
 
+  # A pinned listener dials its origin and cuts an absolute target to origin form, so the
+  # target's own authority is not where the request goes; judged under it, an exclude on the
+  # pinned origin missed `GET http://other.test/admin`, forwarded as `GET /admin`.
+  it "judges an absolute-form target under the pinned origin, not its own authority" do
+    seen = Channel(String).new(4)
+    origin_port = start_plain_origin(seen)
+    dir = File.tempname("gori-reverse-absolute")
+    db = File.tempname("gori-reverse-absolute", ".db")
+    Dir.mkdir_p(dir)
+    store = Gori::Store.open(db)
+    begin
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "127.0.0.1").should be_true
+      scope.add("exclude", "regex", "^http://127\\.0\\.0\\.1/admin").should be_true
+      scope.enable
+      scope.enable_sandbox
+      ca = CertAuthority.load_or_create(dir)
+      proxy = Server.new("127.0.0.1", 0, RecordingSink.new(Channel(Nil).new(4)),
+        tls: Tunnel.new(ca, verify_upstream: false), interceptor: Gori::Interceptor.new(scope),
+        origin: {"http", "127.0.0.1", origin_port})
+      proxy.start
+      begin
+        answers = ["GET /admin HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+                   "GET http://other.test/admin HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"].map do |req|
+          s = TCPSocket.new("127.0.0.1", proxy.port)
+          s.read_timeout = 3.seconds
+          s << req
+          s.flush
+          line = s.gets || ""
+          s.close
+          line
+        end
+        answers.each(&.should(contain("403")))
+        hit = select
+        when seen.receive then true
+        when timeout(300.milliseconds) then false
+        end
+        hit.should be_false
+      ensure
+        proxy.stop
+      end
+    ensure
+      store.close
+      FileUtils.rm_rf(dir)
+      File.delete?(db)
+      File.delete?("#{db}-wal")
+      File.delete?("#{db}-shm")
+    end
+  end
+
   # Layer 2 is the layer that must be identical on every surface. A reverse listener does not
   # get to be the exception just because its destination was configured.
   it "applies the Sandbox gate before the origin handshake" do

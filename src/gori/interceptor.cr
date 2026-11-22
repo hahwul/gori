@@ -546,8 +546,41 @@ module Gori
     # here would let the next caller re-open that hole without the compiler saying so.
     def sandbox_blocks?(scheme : String, host : String, target : String, port : Int32) : Bool
       return false unless @scope.sandbox?
+      target = gate_target(scheme, host, target, port)
       @scope.sandbox_blocks?(Gori::Url.gate_url(scheme, host, target), host) ||
         port_excluded?(scheme, host, target, port)
+    end
+
+    # The target the gates judge, given the scheme/host/port gori resolved for this request:
+    # `target` itself, unless it is absolute-form AND names a different origin — then its
+    # path+query (`Url.origin_path`), so `Url.gate_url` builds it under the resolved one, as
+    # `Outbound.scope_url` does for the active tools.
+    #
+    # An absolute target is not always the destination. On a CONNECT, SOCKS5 or reverse
+    # listener gori dials the PINNED host and cuts the head to origin form, and on a forward
+    # request line the strict parse cannot frame (`GET  http://ok.test/x`, a leading space or
+    # blank line) the dial follows `Host` while `Codec::Http1.gate_target` still recovers the
+    # absolute target. Judged verbatim, its authority stood in for the host gori actually
+    # contacted: an include naming that authority admitted an out-of-scope origin, and an
+    # exclude on the dialled one missed. When the authority IS the resolved one — every
+    # ordinary plaintext forward-proxy request — the verbatim spelling stays, so an include that
+    # names a port on such traffic (#884) keeps matching.
+    private def gate_target(scheme : String, host : String, target : String, port : Int32) : String
+      return target unless Gori::Url.absolute_form?(target)
+      Interceptor.same_origin?(target, scheme, host, port) ? target : Gori::Url.origin_path(target)
+    end
+
+    # Does absolute-form `url` name `scheme`://`host`:`port`? Lexical (`Url.authority_span`):
+    # the scheme compared case-insensitively, a userinfo ignored, the port defaulted by the
+    # url's own scheme, and both hosts folded the way `HostPattern.normalize` folds them. A port
+    # that is not a number is no match.
+    def self.same_origin?(url : String, scheme : String, host : String, port : Int32) : Bool
+      return false unless span = Gori::Url.authority_span(url)
+      bytes = url.to_slice
+      return false unless AsciiBytes.range_eq_ci?(bytes, 0, span.scheme_end, HostPattern.down(scheme).to_slice)
+      return false unless Gori::Url.effective_port(url, span) == port
+      named = String.new(bytes[span.host_start, span.host_end - span.host_start])
+      HostPattern.normalize(named) == HostPattern.normalize(host)
     end
 
     # Does an EXCLUDE rule match this request once the URL carries its port? The second half of
@@ -562,7 +595,9 @@ module Gori
     #
     # Skipped where the two urls are the SAME string and the allowlist test above already
     # covered it: a default port (nothing to add), and an absolute-form target, which is
-    # returned verbatim by both builders because it already carries its own authority.
+    # returned verbatim by both builders because it already carries its own authority. Only
+    # the resolved origin's own absolute target reaches here: `gate_target` has reduced any
+    # other one to origin form.
     private def port_excluded?(scheme : String, host : String, target : String, port : Int32) : Bool
       return false if port == (scheme == "https" ? 443 : 80)
       return false if Gori::Url.absolute_form?(target)
@@ -657,6 +692,7 @@ module Gori
     # setup still skips the interpolation.
     private def scope_allows?(scheme : String, host : String, target : String, port : Int32) : Bool
       return true unless @scope.active?
+      target = gate_target(scheme, host, target, port)
       @scope.in_scope_url?(Gori::Url.gate_url(scheme, host, target), host) &&
         !port_excluded?(scheme, host, target, port)
     end

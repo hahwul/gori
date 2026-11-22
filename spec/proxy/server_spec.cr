@@ -2819,6 +2819,66 @@ describe Gori::Proxy::Server do
     end
   end
 
+  # The strict parse cannot frame these request lines as absolute-form, so the dial follows
+  # `Host` (an out-of-scope origin) while the tolerant gate parse recovers `http://ok.test/x`;
+  # judged verbatim, `include string ok.test` admitted the request to the `Host` origin.
+  it "sandbox judges a recovered absolute target under the host the dial follows" do
+    contacted = Channel(String).new(4)
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    spawn do
+      while conn = origin.accept?
+        begin
+          head = Gori::Proxy::Codec::Http1.read_head(conn)
+          contacted.send(head ? String.new(head) : "") rescue nil
+          conn << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+          conn.flush
+        rescue
+        ensure
+          conn.close rescue nil
+        end
+      end
+    rescue
+    end
+
+    store_path = File.tempname("gori-sbx-recovered", ".db")
+    store = Gori::Store.open(store_path)
+    scope = Gori::Scope.load(store)
+    scope.add("include", "string", "ok.test")
+    scope.enable_sandbox
+    done = Channel(Nil).new(4)
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, interceptor: Gori::Interceptor.new(scope))
+    proxy.start
+    answers = [] of String
+    begin
+      [" \r\nGET http://ok.test/x HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n",
+       " GET http://ok.test/x HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n",
+       "GET  http://ok.test/x HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"].each do |req|
+        client = TCPSocket.new("127.0.0.1", proxy.port)
+        client.read_timeout = 3.seconds
+        client << req
+        client.flush
+        answers << (client.gets_to_end rescue "")
+        client.close
+      end
+    ensure
+      proxy.stop
+      origin.close rescue nil
+      store.close
+      File.delete?(store_path)
+      File.delete?("#{store_path}-wal")
+      File.delete?("#{store_path}-shm")
+    end
+
+    answers.each(&.should(contain("403 Forbidden")))
+    hit = select
+    when contacted.receive then true
+    when timeout(300.milliseconds) then false
+    end
+    hit.should be_false
+  end
+
   it "still forwards a doubled-space request line byte-exact when the scope allows it" do
     # The gate got stricter; the WIRE did not. gori is a proxy for malformed bytes (P7), so the
     # origin must receive the operator's octets unchanged — doubled space included.
