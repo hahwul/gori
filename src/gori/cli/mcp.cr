@@ -47,7 +47,7 @@ module Gori::CLI
       p.on("--read-only", "Disable action tools (send_request, create/update_issue); serve the project without a writer") { read_only = true }
       p.on("--tools=SPEC", mcp_tools_help) { |v| tools_spec = v }
       p.on("--pin-project", "Keep the server on the project it starts with: withhold #{MCP_PIN_EXCLUDES.join(", ")}") { pin_project = true }
-      p.on("--install-agy", "Install gori as an MCP server in Antigravity (~/.gemini/antigravity-cli/mcp_config.json)") { install_targets << "agy" }
+      p.on("--install-agy", "Install gori as an MCP server in Antigravity (~/.gemini/config/mcp_config.json)") { install_targets << "agy" }
       p.on("--install-codex", "Install gori as an MCP server in Codex (~/.codex/config.toml)") { install_targets << "codex" }
       p.on("--install-claude", "Install gori as an MCP server in Claude Desktop config") { install_targets << "claude" }
       p.on("--install-claude-code", "Install gori as an MCP server in Claude Code (~/.claude.json, or $CLAUDE_CONFIG_DIR)") { install_targets << "claude-code" }

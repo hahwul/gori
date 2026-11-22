@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- MCP: `gori mcp --install-agy` now writes Antigravity's global `~/.gemini/config/mcp_config.json` (used by Antigravity CLI, App, and IDE) instead of the CLI app-data directory, sets `timeoutSeconds: 600`, and preserves existing `timeoutSeconds` and per-tool `tools` overrides on reinstall (#2017).
+
 - MCP: an opt-in usage log (Preferences › AI › **MCP server** › Usage log, or `"mcp": {"usage_log": true}` in `settings.json`; off by default) records each tool call's name, argument names, outcome, reply size and duration in `~/.gori/mcp-usage.jsonl`, never an argument value, a reply, a host or a project name, and `gori mcp --usage` prints the summary (`--since`, `--json`) (#2014, #2015).
 
 - Concurrent imports and project creation now reserve their destination slug, preserving saved data and workspace bindings when names collide (#2007).

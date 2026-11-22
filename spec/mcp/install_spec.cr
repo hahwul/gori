@@ -99,9 +99,9 @@ describe Gori::MCP::Install do
       end
     end
 
-    it "maps agy to the antigravity-cli mcp_config.json" do
+    it "maps agy to Antigravity's ~/.gemini/config/mcp_config.json" do
       Gori::MCP::Install.config_path("agy").should eq(
-        File.join(user_home, ".gemini", "antigravity-cli", "mcp_config.json"))
+        File.join(user_home, ".gemini", "config", "mcp_config.json"))
     end
 
     it "maps claude to the platform's Claude Desktop config" do
@@ -869,9 +869,9 @@ describe Gori::MCP::Install do
       end
     end
 
-    it "writes a JSON mcpServers entry for claude-style targets" do
+    it "writes a JSON mcpServers entry for agy with timeoutSeconds and preserves agy overrides" do
       Dir.tempdir.try do |base|
-        # Point HOME at a temp tree so we don't touch the real Claude config.
+        # Point HOME at a temp tree so we don't touch the real Antigravity config.
         home = File.join(base, "home-json-#{Random::Secure.hex(4)}")
         Dir.mkdir_p(home)
         old_home = ENV["HOME"]?
@@ -879,13 +879,57 @@ describe Gori::MCP::Install do
         begin
           path = install_one("agy", exe_path: "/opt/gori/bin/gori",
             project: "demo", read_only: true)
-          path.should eq(File.join(home, ".gemini", "antigravity-cli", "mcp_config.json"))
+          path.should eq(File.join(home, ".gemini", "config", "mcp_config.json"))
           parsed = JSON.parse(File.read(path))
           entry = parsed["mcpServers"]["gori"]
           entry["command"].as_s.should eq("/opt/gori/bin/gori")
           entry["args"].as_a.map(&.as_s).should eq(["mcp", "--project=demo", "--read-only", "--tools=@recon"])
+          entry["timeoutSeconds"].as_i64.should eq(Gori::MCP::Install::AGY_TOOL_TIMEOUT_SEC)
+
+          # Reinstall keeps custom positive/negative timeoutSeconds and per-tool overrides,
+          # while dropping stale disabled/env flags.
+          File.write(path, {
+            mcpServers: {
+              other: {command: "/bin/other"},
+              gori:  {
+                command:        "/old/gori",
+                args:           ["mcp"],
+                timeoutSeconds: 1200,
+                disabled:       true,
+                env:            {STALE: "1"},
+                tools:          {project_info: {eager: true}},
+              },
+            },
+          }.to_json)
+          install_one("agy", exe_path: "/opt/gori2", tools_spec: "*")
+          reinstalled = JSON.parse(File.read(path))["mcpServers"]
+          reinstalled["other"]["command"].as_s.should eq("/bin/other")
+          gori = reinstalled["gori"]
+          gori["command"].as_s.should eq("/opt/gori2")
+          gori["args"].as_a.map(&.as_s).should eq(["mcp", "--tools=*"])
+          gori["timeoutSeconds"].as_i64.should eq(1200)
+          gori["tools"]["project_info"]["eager"].as_bool.should be_true
+          gori["disabled"]?.should be_nil
+          gori["env"]?.should be_nil
+
+          # Negative timeoutSeconds (-1 disables limits in Antigravity) is kept; 0 falls back to 600.
+          File.write(path, %({"mcpServers":{"gori":{"command":"/old","timeoutSeconds":-1}}}))
+          install_one("agy", exe_path: "/opt/gori2")
+          JSON.parse(File.read(path))["mcpServers"]["gori"]["timeoutSeconds"].as_i64.should eq(-1)
+
+          File.write(path, %({"mcpServers":{"gori":{"command":"/old","timeoutSeconds":0,"tools":["bad"]}}}))
+          install_one("agy", exe_path: "/opt/gori2")
+          reset = JSON.parse(File.read(path))["mcpServers"]["gori"]
+          reset["timeoutSeconds"].as_i64.should eq(Gori::MCP::Install::AGY_TOOL_TIMEOUT_SEC)
+          reset["tools"]?.should be_nil
+
+          File.write(path, %({"mcpServers":{"gori":{"command":"/old","timeoutSeconds":"600"}}}))
+          install_one("agy", exe_path: "/opt/gori2")
+          JSON.parse(File.read(path))["mcpServers"]["gori"]["timeoutSeconds"].as_i64.should eq(
+            Gori::MCP::Install::AGY_TOOL_TIMEOUT_SEC)
         ensure
           old_home ? (ENV["HOME"] = old_home) : ENV.delete("HOME")
+          FileUtils.rm_rf(home)
         end
       end
     end
@@ -910,7 +954,9 @@ describe Gori::MCP::Install do
           path = install_one("claude", exe_path: "/opt/gori")
           path.should eq(Gori::MCP::Install.claude_desktop_path(home))
           path.should start_with(home)
-          JSON.parse(File.read(path))["mcpServers"]["gori"]["command"].as_s.should eq("/opt/gori")
+          entry = JSON.parse(File.read(path))["mcpServers"]["gori"]
+          entry["command"].as_s.should eq("/opt/gori")
+          entry["timeoutSeconds"]?.should be_nil
         ensure
           old_home ? (ENV["HOME"] = old_home) : ENV.delete("HOME")
           old_xdg ? (ENV["XDG_CONFIG_HOME"] = old_xdg) : ENV.delete("XDG_CONFIG_HOME")
@@ -922,8 +968,8 @@ describe Gori::MCP::Install do
     it "refuses to clobber a non-JSON config file" do
       Dir.tempdir.try do |base|
         home = File.join(base, "home-bad-#{Random::Secure.hex(4)}")
-        Dir.mkdir_p(File.join(home, ".gemini", "antigravity-cli"))
-        bad = File.join(home, ".gemini", "antigravity-cli", "mcp_config.json")
+        Dir.mkdir_p(File.join(home, ".gemini", "config"))
+        bad = File.join(home, ".gemini", "config", "mcp_config.json")
         File.write(bad, "not-json{")
         old_home = ENV["HOME"]?
         ENV["HOME"] = home
@@ -943,7 +989,7 @@ describe Gori::MCP::Install do
       # 0600 file to the umask default, nor litter the directory with partial writes.
       Dir.tempdir.try do |base|
         home = File.join(base, "home-perm-#{Random::Secure.hex(4)}")
-        dir = File.join(home, ".gemini", "antigravity-cli")
+        dir = File.join(home, ".gemini", "config")
         Dir.mkdir_p(dir)
         config = File.join(dir, "mcp_config.json")
         File.write(config, %({"other":{"keep":true}}))

@@ -18,7 +18,7 @@ There is no chat window inside the TUI. You bring your own model and client. gor
 gori mcp --install-claude-code   # Claude Code
 gori mcp --install-claude        # Claude Desktop
 gori mcp --install-codex         # OpenAI Codex
-gori mcp --install-agy           # Antigravity CLI
+gori mcp --install-agy           # Antigravity (CLI, App, IDE)
 gori mcp --install-grok          # Grok
 gori mcp --install-hermes        # Hermes
 gori mcp --install-pi            # Pi
@@ -29,7 +29,7 @@ gori mcp --install-pi            # Pi
 | `--install-claude` | Claude Desktop | `claude_desktop_config.json` in the platform's app-config directory (see below) |
 | `--install-claude-code` | Claude Code | `~/.claude.json` (`mcpServers.gori`), or `$CLAUDE_CONFIG_DIR` |
 | `--install-codex` | OpenAI Codex | `~/.codex/config.toml` (`[mcp_servers.gori]`), or `$CODEX_HOME` |
-| `--install-agy` | Antigravity CLI | `~/.gemini/antigravity-cli/mcp_config.json` |
+| `--install-agy` | Antigravity (CLI, App, IDE) | `~/.gemini/config/mcp_config.json` (`mcpServers.gori`) |
 | `--install-grok` | Grok | `~/.grok/config.toml` (`[mcp_servers.gori]`) |
 | `--install-hermes` | Hermes | `~/.hermes/config.yaml` (`mcp_servers.gori`), or `$HERMES_HOME` |
 | `--install-pi` | Pi | `~/.pi/agent/mcp.json` (`mcpServers.gori`), or `$PI_CODING_AGENT_DIR` |

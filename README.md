@@ -146,7 +146,7 @@ agent, then restart the client:
 gori mcp --install-claude-code   # Claude Code   (~/.claude.json)
 gori mcp --install-claude        # Claude Desktop
 gori mcp --install-codex         # OpenAI Codex
-gori mcp --install-agy           # Antigravity CLI
+gori mcp --install-agy           # Antigravity   (~/.gemini/config/mcp_config.json)
 gori mcp --install-grok          # Grok
 gori mcp --install-hermes        # Hermes        (~/.hermes/config.yaml)
 gori mcp --install-pi            # Pi            (~/.pi/agent/mcp.json)

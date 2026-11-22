@@ -51,8 +51,11 @@ module Gori
         home = ENV["HOME"]? || ENV["USERPROFILE"]? || abort "HOME is not set"
         case target
         when "agy"
-          # Antigravity CLI app-data path (also used by some IDE builds).
-          File.join(home, ".gemini", "antigravity-cli", "mcp_config.json")
+          # Antigravity (CLI, App, and IDE) reads global MCP servers from
+          # `~/.gemini/config/mcp_config.json`. `~/.gemini/antigravity-cli/` is the CLI's
+          # app-data directory (logs, settings, lazy schema caches), not where it reads
+          # `mcp_config.json`.
+          File.join(home, ".gemini", "config", "mcp_config.json")
         when "codex"
           # OpenAI Codex: CODEX_HOME overrides the default ~/.codex directory.
           codex_home = ENV["CODEX_HOME"]?.presence || File.join(home, ".codex")
@@ -257,7 +260,7 @@ module Gori
         elsif yaml_target?(target)
           install_yaml(config_path, exe_path, args)
         else
-          install_json(config_path, exe_path, args)
+          install_json(config_path, exe_path, args, agy: target == "agy")
         end
         config_path
       end
@@ -291,7 +294,13 @@ module Gori
 
       # --- JSON clients (Claude Desktop, Claude Code, Antigravity, Pi) ---------
 
-      def self.install_json(config_path : String, exe_path : String, args : Array(String)) : Nil
+      # Antigravity defaults to 180 s per tool call (`timeoutSeconds`). Match the TOML
+      # installers' 10-minute budget so synchronous long tools (`minimize_repeater`, active
+      # `probe_scan`, `timing_requests`, high-timeout `send_request`) are not cut off early.
+      AGY_TOOL_TIMEOUT_SEC = 600_i64
+
+      def self.install_json(config_path : String, exe_path : String, args : Array(String),
+                            *, agy : Bool = false) : Nil
         # Load existing config or initialize. If the file exists but doesn't parse as a
         # JSON object, REFUSE rather than clobber it — for `claude-code` this is
         # ~/.claude.json (the user's entire CLI state: projects, auth, other MCP servers),
@@ -313,16 +322,32 @@ module Gori
                  end
 
         mcp_servers = config["mcpServers"]?.try(&.as_h?) || Hash(String, JSON::Any).new
+        existing_gori = mcp_servers[SERVER_NAME]?.try(&.as_h?)
         json_args = args.map { |a| JSON::Any.new(a) }
 
         gori_entry = Hash(String, JSON::Any).new
         gori_entry["command"] = JSON::Any.new(exe_path)
         gori_entry["args"] = JSON::Any.new(json_args)
+        apply_agy_options(gori_entry, existing_gori) if agy
 
         mcp_servers[SERVER_NAME] = JSON::Any.new(gori_entry)
         config["mcpServers"] = JSON::Any.new(mcp_servers)
 
         write_atomic(config_path, config.to_pretty_json, bom: bom)
+      end
+
+      # Antigravity-specific `mcpServers.gori` options: raise the per-tool timeout past its
+      # 180 s default while keeping any non-zero `timeoutSeconds` the operator already set
+      # (including `-1`, which disables timeouts; `0` means default), and keep per-tool
+      # `tools` overrides (`eager` / `background`) across reinstalls.
+      private def self.apply_agy_options(entry : Hash(String, JSON::Any),
+                                         existing : Hash(String, JSON::Any)?) : Nil
+        kept_timeout = existing.try(&.[]?("timeoutSeconds")).try(&.as_i64?)
+        timeout = kept_timeout && kept_timeout != 0 ? kept_timeout : AGY_TOOL_TIMEOUT_SEC
+        entry["timeoutSeconds"] = JSON::Any.new(timeout)
+        if (tools = existing.try(&.[]?("tools"))) && tools.as_h?
+          entry["tools"] = tools
+        end
       end
 
       # --- TOML clients (Codex, Grok) ------------------------------------------

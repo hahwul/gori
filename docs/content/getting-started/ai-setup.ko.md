@@ -18,7 +18,7 @@ TUI 안에는 채팅 창이 없습니다. 모델과 클라이언트는 사용자
 gori mcp --install-claude-code   # Claude Code
 gori mcp --install-claude        # Claude Desktop
 gori mcp --install-codex         # OpenAI Codex
-gori mcp --install-agy           # Antigravity CLI
+gori mcp --install-agy           # Antigravity (CLI, App, IDE)
 gori mcp --install-grok          # Grok
 gori mcp --install-hermes        # Hermes
 gori mcp --install-pi            # Pi
@@ -29,7 +29,7 @@ gori mcp --install-pi            # Pi
 | `--install-claude` | Claude Desktop | 플랫폼별 앱 설정 디렉터리의 `claude_desktop_config.json` (아래 참고) |
 | `--install-claude-code` | Claude Code | `~/.claude.json` (`mcpServers.gori`), 또는 `$CLAUDE_CONFIG_DIR` |
 | `--install-codex` | OpenAI Codex | `~/.codex/config.toml` (`[mcp_servers.gori]`), 또는 `$CODEX_HOME` |
-| `--install-agy` | Antigravity CLI | `~/.gemini/antigravity-cli/mcp_config.json` |
+| `--install-agy` | Antigravity (CLI, App, IDE) | `~/.gemini/config/mcp_config.json` (`mcpServers.gori`) |
 | `--install-grok` | Grok | `~/.grok/config.toml` (`[mcp_servers.gori]`) |
 | `--install-hermes` | Hermes | `~/.hermes/config.yaml` (`mcp_servers.gori`), 또는 `$HERMES_HOME` |
 | `--install-pi` | Pi | `~/.pi/agent/mcp.json` (`mcpServers.gori`), 또는 `$PI_CODING_AGENT_DIR` |
