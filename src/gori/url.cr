@@ -120,5 +120,24 @@ module Gori
       return "#{scheme}://#{host}#{target}" unless port
       "#{scheme}://#{authority(scheme, host, port)}#{url_path(target)}"
     end
+
+    # The URL a scope GATE judges (sandbox, intercept hold, the active tools' Layer 1 and 2):
+    # `request_url`, except that the target always arrives after a `/` of its own, on both arms.
+    #
+    # `request_url`'s port-free arm splices the target straight onto the host because it must stay
+    # the SQL lens's twin, and that is a display question. Asked by a gate it is a scope bypass: a
+    # request-target with no leading slash re-spells the DIALLED host, so `GET 0/` to 127.0.0.1 is
+    # judged as `http://127.0.0.10/` and `GET m/` to `app.example.co` as `app.example.com` — an
+    # anchored include for the other host admits the send, and an exclude for the dialled one
+    # misses it. The bytes still go out as written (P7); only the string judged changes. The same
+    # `/` covers the asterisk-form (`OPTIONS *`), an authority-form target (`CONNECT h:443`) and an
+    # empty one, none of which may read as part of the host. An absolute-form target is returned
+    # verbatim as before: it carries its own authority (`Outbound.scope_url` reduces it first).
+    def self.gate_url(scheme : String, host : String, target : String, port : Int32? = nil) : String
+      return target if absolute_form?(target)
+      path = target.starts_with?('/') ? target : "/#{target}"
+      return "#{scheme}://#{host}#{path}" unless port
+      "#{scheme}://#{authority(scheme, host, port)}#{path}"
+    end
   end
 end

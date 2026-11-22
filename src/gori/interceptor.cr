@@ -546,14 +546,14 @@ module Gori
     # here would let the next caller re-open that hole without the compiler saying so.
     def sandbox_blocks?(scheme : String, host : String, target : String, port : Int32) : Bool
       return false unless @scope.sandbox?
-      @scope.sandbox_blocks?(Scope.request_url(scheme, host, target), host) ||
+      @scope.sandbox_blocks?(Gori::Url.gate_url(scheme, host, target), host) ||
         port_excluded?(scheme, host, target, port)
     end
 
     # Does an EXCLUDE rule match this request once the URL carries its port? The second half of
     # every scope answer here, and the reason it is a separate question: the allowlist above is
-    # asked about the PORT-FREE url (`Scope.request_url`) because that is the only spelling a
-    # url-level include has ever been written in — Discover strips the port before asking
+    # asked about the PORT-FREE url (`Url.gate_url`, no port) because that is the only spelling
+    # a url-level include has ever been written in — Discover strips the port before asking
     # (#407), `Outbound.scope_url` does the same for the active tools, and adding one would put
     # every origin on :8443 outside an include that names the host and path. An exclude is the
     # opposite shape: it is the operator's carve-out, it has no port dimension to lose, and
@@ -566,7 +566,7 @@ module Gori
     private def port_excluded?(scheme : String, host : String, target : String, port : Int32) : Bool
       return false if port == (scheme == "https" ? 443 : 80)
       return false if Gori::Url.absolute_form?(target)
-      @scope.excluded?(Gori::Url.request_url(scheme, host, target, port), host)
+      @scope.excluded?(Gori::Url.gate_url(scheme, host, target, port), host)
     end
 
     # Coarse HOST-level block for the CONNECT gate, made before any request exists.
@@ -657,7 +657,7 @@ module Gori
     # setup still skips the interpolation.
     private def scope_allows?(scheme : String, host : String, target : String, port : Int32) : Bool
       return true unless @scope.active?
-      @scope.in_scope_url?(Scope.request_url(scheme, host, target), host) &&
+      @scope.in_scope_url?(Gori::Url.gate_url(scheme, host, target), host) &&
         !port_excluded?(scheme, host, target, port)
     end
 

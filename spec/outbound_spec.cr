@@ -560,6 +560,32 @@ describe Gori::Outbound do
     it "reduces a target with no path at all to the root" do
       Gori::Outbound.scope_url("https", "acme.test", "http://acme.test").should eq("https://acme.test/")
     end
+
+    # A slash-less request-target used to be spliced onto the dial host: `GET 0/` to 127.0.0.1
+    # was judged as `http://127.0.0.10/`, so an include anchored on that other host admitted it.
+    it "never lets a slash-less request-target re-spell the dial host" do
+      Gori::Outbound.scope_url("http", "127.0.0.1", "0/").should eq("http://127.0.0.1/0/")
+      Gori::Outbound.scope_url("https", "acme.test", "*").should eq("https://acme.test/*")
+      with_scope do |scope, _store|
+        scope.add("include", "regex", "^http://127\\.0\\.0\\.10/").should be_true
+        agent = Gori::Outbound.agent(scope, false)
+        agent.check_request("http", "127.0.0.1", "/", 80).blocked?.should be_true
+        agent.check_request("http", "127.0.0.1", "0/", 80).blocked?.should be_true
+        scope.enable_sandbox
+        ob = Gori::Outbound.interactive(scope)
+        ob.send_block("http", "127.0.0.1", "0/", 80).should eq(Gori::Outbound::SANDBOX_ERROR)
+        ob.sweep_block("http", "127.0.0.1", "0/", 80).should eq(Gori::Outbound::SANDBOX_SWEEP_ERROR)
+      end
+    end
+
+    it "holds an exclude for the dial host against a slash-less request-target" do
+      with_scope do |scope, _store|
+        scope.add("include", "host", "app.example.co").should be_true
+        scope.add("exclude", "regex", "^https://app\\.example\\.co/").should be_true
+        Gori::Outbound.agent(scope, false).check_request("https", "app.example.co", "m/", 443)
+          .blocked?.should be_true
+      end
+    end
   end
 
   describe ".request_target" do

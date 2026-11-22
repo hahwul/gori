@@ -257,6 +257,24 @@ describe Gori::Url do
     end
   end
 
+  # The gate's spelling: a target with no leading slash must never extend the dialled host.
+  describe ".gate_url" do
+    it "puts a slash between the host and a slash-less target, with or without a port" do
+      Gori::Url.gate_url("http", "127.0.0.1", "0/").should eq("http://127.0.0.1/0/")
+      Gori::Url.gate_url("https", "app.example.co", "m/x").should eq("https://app.example.co/m/x")
+      Gori::Url.gate_url("https", "app.example.co", "m/x", 8443).should eq("https://app.example.co:8443/m/x")
+      Gori::Url.gate_url("https", "acme.test", "*").should eq("https://acme.test/*")
+      Gori::Url.gate_url("https", "acme.test", "evil.test:443").should eq("https://acme.test/evil.test:443")
+      Gori::Url.gate_url("https", "acme.test", "").should eq("https://acme.test/")
+    end
+
+    it "leaves an origin-form or absolute-form target as request_url spells it" do
+      Gori::Url.gate_url("https", "acme.test", "/x?y=1").should eq("https://acme.test/x?y=1")
+      Gori::Url.gate_url("https", "::1", "/x", 8443).should eq("https://[::1]:8443/x")
+      Gori::Url.gate_url("http", "acme.test", "http://other.test/x").should eq("http://other.test/x")
+    end
+  end
+
   # One predicate for both ends of the curl round trip (#1244).
   describe ".dot_segments?" do
     it "finds . and .. segments in the path only" do

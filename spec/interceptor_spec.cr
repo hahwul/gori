@@ -471,6 +471,27 @@ describe "Interceptor scope gates over an ABSOLUTE-FORM target" do
     end
   end
 
+  # A tunnelled client's slash-less target (`GET 0/`) used to be spliced onto the host, so the
+  # gate judged `http://127.0.0.10/` for a request bound for 127.0.0.1.
+  it "never lets a slash-less target re-spell the host the sandbox and hold judge" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      ic = Gori::Interceptor.new(scope)
+      ic.toggle
+      scope.add("include", "regex", "^http://127\\.0\\.0\\.10/")
+      scope.enable
+      scope.enable_sandbox
+
+      ic.sandbox_blocks?("http", "127.0.0.1", "0/", 80).should be_true
+      ic.sandbox_blocks?("http", "127.0.0.1", "0/", 8080).should be_true
+      ic.intercepts_request?(method: "GET", host: "127.0.0.1", target: "0/", scheme: "http", port: 80)
+        .should be_false
+      # The asterisk-form keeps its host too.
+      ic.sandbox_blocks?("http", "127.0.0.1", "*", 80).should be_true
+      ic.sandbox_blocks?("http", "127.0.0.10", "0/", 80).should be_false
+    end
+  end
+
   it "Scope.request_url recognises an absolute-form target regardless of scheme case" do
     # RFC 3986 §3.1: URI schemes are case-insensitive. A case-sensitive check here would
     # double an uppercase-scheme absolute-form target into "http://acmeHTTP://acme/x".

@@ -908,9 +908,10 @@ module Gori
     # scheme://host onto an already-absolute target doubles it into
     # `http://hosthttp://host/path`, which silently breaks any anchored or exact-match
     # string/regex scope rule for such requests (unanchored patterns still match — the
-    # real target survives as a suffix — which is how this went unnoticed). Shared by
-    # every caller that builds this URL from a live request's parts (Interceptor,
-    # send_request); the absolute-form check itself is Store::FlowRow.absolute_form?
+    # real target survives as a suffix — which is how this went unnoticed). This is the
+    # in-memory twin of `QL::URL_EXPR_NO_PORT`; a live GATE (Interceptor, `Outbound`) asks
+    # `Gori::Url.gate_url` instead, which keeps a slash-less target from running into the
+    # host. The absolute-form check itself is Store::FlowRow.absolute_form?
     # (models.cr), also used by QL::URL_EXPR below, so a case-sensitivity fix only
     # needs to land in one place. Deliberately does NOT add the port the way FlowRow#url
     # does, so an origin-form target still builds the exact same URL every existing
