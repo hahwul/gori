@@ -163,24 +163,6 @@ private class UnwritableImportTagsRegistry < Gori::ProjectRegistry
 end
 
 describe Gori::ProjectArchive do
-  # TEMPORARY (diagnosis of the Windows-only death of this file): reports, as a failure the
-  # summary prints, what the three predicates do with a name Windows cannot spell.
-  it "DIAG windows" do
-    seen = [] of String
-    { {"exists?", -> { File.exists?("  ").to_s }}, {"directory?", -> { File.directory?("  ").to_s }},
-     {"file?", -> { File.file?("  ").to_s }}, {"info?", -> { File.info?("  ").nil?.to_s }},
-     {"children", -> { Dir.children(".").includes?("  ").to_s }} }.each do |(name, probe)|
-      seen << begin
-        "#{name}=#{probe.call}"
-      rescue ex
-        "#{name} RAISED #{ex.class}: #{ex.message}"
-      end
-    end
-    {% if flag?(:win32) %}
-      fail seen.join(" | ")
-    {% end %}
-  end
-
   it "exports the requested database when its path contains URI syntax" do
     with_archive_project do |_registry, project, store, root|
       store.set_setting("marker", "requested").should be_true
@@ -419,8 +401,10 @@ describe Gori::ProjectArchive do
       Dir.cd(root) do
         before = Dir.children(".").sort!
         expect_raises(Gori::Error, /destination is blank/) { export_archive(project, "  ") }
-        # The directory, not `File.exists?("  ")`: Windows cannot spell that name, and asking
-        # for it raises there instead of answering false. This also sees a temp file left behind.
+        # The directory, not `File.exists?("  ")`: Windows cannot spell that name, and there
+        # `File.exists?` raises File::NotFoundError ("Error resolving real path … syntax is
+        # incorrect") instead of answering false — from inside this block that took the whole
+        # process down, summary and all. This also sees a temp file left behind.
         Dir.children(".").sort!.should eq(before)
       end
     end
