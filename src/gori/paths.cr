@@ -34,6 +34,13 @@ module Gori
       File.join(home_dir, "themes")
     end
 
+    # What `gori mcp` records about its own use when `mcp.usage_log` is on (`MCP::UsageLog`):
+    # one global file rather than one beside each project database, so no archive, delete or
+    # prune path has to learn about it, and so it never has to name a project.
+    def self.mcp_usage_log : String
+      File.join(home_dir, "mcp-usage.jsonl")
+    end
+
     def self.default_ca_dir : String
       File.join(home_dir, "ca")
     end

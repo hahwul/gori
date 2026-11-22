@@ -11,6 +11,7 @@ private def with_mcp_home(&)
   prev_home = ENV["GORI_HOME"]?
   prev_cfg = ENV["GORI_CONFIG"]?
   prev_channels = Gori::Settings.mcp_channels?
+  prev_usage_log = Gori::Settings.mcp_usage_log?
   prev_denied = Gori::Settings.mcp_denied_permissions
   prev_asked = Gori::Settings.mcp_asked_permissions
   begin
@@ -18,6 +19,7 @@ private def with_mcp_home(&)
     ENV.delete("GORI_CONFIG")
     Gori::Settings.path_override = nil
     Gori::Settings.mcp_channels = Gori::Settings::DEFAULT_MCP_CHANNELS
+    Gori::Settings.mcp_usage_log = Gori::Settings::DEFAULT_MCP_USAGE_LOG
     Gori::Settings.mcp_denied_permissions = Set(String).new
     Gori::Settings.mcp_asked_permissions = Set(String).new
     yield dir
@@ -26,6 +28,7 @@ private def with_mcp_home(&)
     prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
     prev_cfg ? (ENV["GORI_CONFIG"] = prev_cfg) : ENV.delete("GORI_CONFIG")
     Gori::Settings.mcp_channels = prev_channels
+    Gori::Settings.mcp_usage_log = prev_usage_log
     Gori::Settings.mcp_denied_permissions = prev_denied
     Gori::Settings.mcp_asked_permissions = prev_asked
     FileUtils.rm_rf(dir)
@@ -131,6 +134,59 @@ describe "Settings mcp section" do
 
   # Preferences › AI › MCP permissions. Every group is allowed by default and the file records
   # only the denials, in a section of its own, so a default install writes nothing.
+  # `mcp.usage_log` — whether `gori mcp` keeps `MCP::UsageLog`. Opt-in: a default install
+  # writes neither the key nor the file.
+  describe "usage_log" do
+    it "is off by default and absent from a default document" do
+      with_mcp_home do
+        Gori::Settings.mcp_usage_log?.should be_false
+        Gori::Settings.save.should be_true
+        Gori::Settings.document_keys.should_not contain("mcp")
+      end
+    end
+
+    it "is switched on by the stored key, and a stored false is not resurrected" do
+      with_mcp_home do
+        Gori::Settings.import_document(%({"mcp":{"usage_log":true}}))
+        Gori::Settings.mcp_usage_log?.should be_true
+        Gori::Settings.import_document(%({"mcp":{"usage_log":false}}))
+        Gori::Settings.mcp_usage_log?.should be_false
+      end
+    end
+
+    it "keeps the current value for a non-bool, and leaves channels alone" do
+      with_mcp_home do
+        Gori::Settings.mcp_usage_log = true
+        Gori::Settings.import_document(%({"mcp":{"usage_log":"yes"}}))
+        Gori::Settings.mcp_usage_log?.should be_true
+        Gori::Settings.mcp_channels?.should be_false
+      end
+    end
+
+    it "round-trips through save/load beside channels" do
+      with_mcp_home do
+        Gori::Settings.mcp_usage_log = true
+        Gori::Settings.save.should be_true
+        section = JSON.parse(Gori::Settings.export_document(["mcp"])).as_h["mcp"].as_h
+        section["usage_log"].as_bool.should be_true
+        section["channels"].as_bool.should be_false
+        Gori::Settings.mcp_usage_log = false
+        Gori::Settings.load
+        Gori::Settings.mcp_usage_log?.should be_true
+      end
+    end
+
+    it "goes back to off on a factory reset" do
+      with_mcp_home do
+        Gori::Settings.mcp_usage_log = true
+        Gori::Settings.save.should be_true
+        Gori::Settings.reset_to_factory.should eq(Gori::Settings::ResetResult::Saved)
+        Gori::Settings.mcp_usage_log?.should be_false
+        Gori::Settings.document_keys.should_not contain("mcp")
+      end
+    end
+  end
+
   describe "permissions" do
     it "allows every group by default and writes nothing for it" do
       with_mcp_home do

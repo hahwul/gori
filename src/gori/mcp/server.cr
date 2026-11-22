@@ -5,6 +5,7 @@ require "./protocol"
 require "./tools"
 require "./courier"
 require "./prompts"
+require "./usage_log"
 require "../settings"
 
 module Gori
@@ -46,6 +47,7 @@ module Gori
                      workspace_root : String? = nil, project_id : String? = nil,
                      bind_error : String? = nil, tool_filter : ToolFilter? = nil,
                      denied_permissions : Set(String)? = nil, asked_permissions : Set(String)? = nil,
+                     @usage_log : UsageLog? = nil,
                      @input : IO = STDIN, @output : IO = STDOUT)
         @allow_actions = allow_actions
         @tools = Tools.new(store, allow_actions, verify_upstream,
@@ -1024,6 +1026,8 @@ module Gori
             j.field "cacheScope", Protocol::CACHE_SCOPE
           end
         end
+        # After the answer, never before it: measuring the catalogue builds it a second time.
+        note_usage_list
       end
 
       # The docs playbooks (#1596, `Prompts`). One page and no `nextCursor`, so a cursor is
@@ -1101,7 +1105,9 @@ module Gori
         args = tool_arguments(params)
         return write_error(id, -32602,
           "tools/call: 'arguments' must be an object (or a JSON-encoded one)") unless args
+        started = Time.instant
         result = @tools.call(name, args, cancelled: cancel_probe(id))
+        elapsed = Time.instant - started
         # "Protocol Errors indicate issues with the request structure itself that models are
         # less likely to be able to fix: Unknown tool …" — the spec names this one and gives
         # the code. A name that is not in `tools/list` is not a tool that ran and failed, and
@@ -1111,6 +1117,7 @@ module Gori
         # stops being is a tool RESULT. Read before the operator note, so a message the
         # operator sent is not spent on a call that never reached a tool.
         if result.is_error && result.error_code == "UNKNOWN_TOOL"
+          usage(&.refused(name, Tools::TOOL_NAMES.includes?(name)))
           return write_error(id, -32602, result.text)
         end
         # #1090: anything the operator said that no route has carried rides back HERE, beside
@@ -1126,9 +1133,51 @@ module Gori
         # emit, as every guard in this codebase follows its refusal (#724).
         pending = @tools.pending_operator_note(name)
         begin
-          emit_tool_result(id, era, result, pending)
+          delivered = emit_tool_result(id, era, result, pending)
+          note_usage_call(name, args, result, elapsed, delivered)
         ensure
           @tools.release_operator_note(pending) if pending
+        end
+      end
+
+      # The one door to the usage log (`Settings.mcp_usage_log?`, off by default; nil here
+      # when it is off). Its session line is written on the first event that comes through —
+      # late enough that the client has been named by a handshake or by the modern revision's
+      # per-request `_meta`, and lazy enough that a server nobody talks to writes nothing.
+      #
+      # Nothing raised in here leaves: every caller has either answered already or is about
+      # to, and `handle_request`'s rescue would turn an exception into a SECOND response for
+      # an id that has one. The log's own writes are best effort already (`UsageLog#write`);
+      # this is the same promise for the arithmetic around them.
+      private def usage(& : UsageLog ->) : Nil
+        return unless log = @usage_log
+        unless log.started?
+          log.session(UsageLog::Session.new(@tools.client_name, @tools.client_version,
+            @tools.tool_filter.try(&.spec), @tools.served_count, !@allow_actions,
+            @tools.denied_groups.map(&.key)))
+        end
+        yield log
+      rescue ex
+        Log.warn { "usage log: #{ex.class}: #{ex.message}" }
+      end
+
+      # What the catalogue cost. Built a second time to be measured, and only with the log on:
+      # the frame `write_result` sends is not kept, and a client lists tools once a session.
+      private def note_usage_list : Nil
+        usage(&.list(JSON.build { |j| @tools.list(j) }.bytesize, @tools.served_count))
+      end
+
+      # One line for a call that reached a tool: its name, the declared arguments it named,
+      # the code it was answered with and the size of that answer — `result.text`, which is
+      # what the model reads, not the frame around it. See `UsageLog` for what is never written.
+      private def note_usage_call(name : String, args : JSON::Any, result : Tools::Result,
+                                  elapsed : Time::Span, delivered : Bool) : Nil
+        usage do |log|
+          named, extra = @tools.usage_args(name, args)
+          field = result.field.try { |f| f if @tools.declares_arg?(name, f) }
+          outcome = UsageLog.outcome(result.is_error, result.error_code, result.text)
+          log.call(name, named, extra, outcome, field, result.text.bytesize,
+            elapsed.total_milliseconds.to_i64, delivered)
         end
       end
 
@@ -1136,7 +1185,7 @@ module Gori
       # `handle_tools_call` so the claim those pending ids hold has one `ensure` to be given
       # back from, whatever this does.
       private def emit_tool_result(id : JSON::Any, era : String?, result : Tools::Result,
-                                   pending : Tools::PendingNote?) : Nil
+                                   pending : Tools::PendingNote?) : Bool
         emitted = write_result(id, era) do |j|
           j.field("content") do
             j.array do
@@ -1156,6 +1205,7 @@ module Gori
           j.field "isError", result.is_error
         end
         @tools.commit_operator_note(pending) if pending && emitted
+        emitted
       end
 
       # `params.arguments` as the object the tools layer reads, or nil when it is a shape that

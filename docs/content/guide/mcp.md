@@ -402,6 +402,40 @@ Tools run one at a time, in the order they arrive. A fuzz or a slow `send_reques
 
 `race_requests`, `timing_requests` and `minimize_repeater` also take `background:true`. The call is refused or gated exactly as without it, then returns a `bg_*` `job_id` at once, and the run goes on while the next calls are served. `get_job` returns the same result the synchronous call would have (`wait_ms` holds the read until the run ends), and `stop_job` cancels it at its next check. A stopped run's result also carries `incomplete_reason:"stopped"`. A race already on the wire finishes.
 
+## Usage Log {#usage-log}
+
+`gori mcp` can keep a local record of how it is used: which tools an agent calls, which fail, and how large the answers are. It is **off by default**. Turn it on by setting `usage_log` under `mcp` in `settings.json` (`gori settings --edit`), then restart the agent's server, which says on stderr that the log is on.
+
+```json
+{ "mcp": { "usage_log": true } }
+```
+
+Each tool call appends one line to `~/.gori/mcp-usage.jsonl` (under `$GORI_HOME`):
+
+- the tool's name, and the **names** of the declared arguments that were passed
+- the outcome (`ok` or the error code) and the declared argument an error blamed
+- the size of the reply, how long the call took, and whether the answer reached the client
+
+An argument's value, a reply, a host, a URL and a project's name are never written. An argument name the tool does not declare is counted, not recorded, and a tool name that does not exist is reduced to its letters, digits and underscores. A session also records gori's version, the client's name and version, what decided its catalogue (the `--tools` spec, `--read-only`, the [permission groups](#permissions-from-preferences) switched off, and the resulting tool count) and the size of the `tools/list` answer. The file is not sent anywhere. It is rotated to `mcp-usage.jsonl.1` once it passes 4 MB, replacing the previous one.
+
+`gori mcp --usage` prints the summary and starts no server:
+
+```
+gori mcp usage · last 7d · 14 sessions (9 made no calls) · 78 calls
+clients    claude-code 12 · codex 2
+profile    @recon 11 · * 3
+catalogue  45.5kB per tools/list
+
+TOOL          CALLS  ERR  TOP ERROR                  REPLY p50 / max  p50 ms  ARGS
+list_history     41    3  INVALID_ARGUMENT:query ×3  6.1kB / 39.8kB       12  query×38 limit×20 sort×4
+get_flow         28    0                             2.4kB / 31.0kB        4  id×28
+
+never called: 31 of 39 advertised tools (--json lists them)
+unknown tool names: search_history ×2
+```
+
+`--since=24h`, `--since=7d` (the default) or `--since=all` sets how far back it reads, and `--json` prints every tally, including the tools no session called. A call for a real tool the server was started without (`--tools`) is listed apart, as **not served, but asked for**.
+
 ## Why an MCP Seam
 
 gori has no built-in AI chat. Agents reach it through MCP, so you choose the model, your traffic goes nowhere you did not send it, and the same interface serves scripts and agents. [`gori run`](/guide/scripting/) covers the non-interactive path, and MCP covers the interactive-agent path.

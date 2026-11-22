@@ -511,6 +511,38 @@ module Gori
         @client_name
       end
 
+      # …and its self-declared version. Read by the usage log's session line.
+      def client_version : String?
+        @client_version
+      end
+
+      # What `MCP::UsageLog` may say about a call's arguments: the NAMES of the declared ones
+      # that were passed, sorted, and how many undeclared ones came with them. An undeclared
+      # key is the model's free text, so it is counted and never returned; `_`-prefixed keys
+      # are JSON-RPC's own envelope (`unknown_args`) and are neither. A tool this server does
+      # not list has no declared set and answers with nothing.
+      def usage_args(name : String, args : JSON::Any) : {Array(String), Int32}
+        named = [] of String
+        extra = 0
+        if (allowed = declared_args[name]?) && (h = args.as_h?)
+          h.each_key do |key|
+            if allowed.includes?(key)
+              named << key
+            elsif !key.starts_with?('_')
+              extra += 1
+            end
+          end
+        end
+        {named.sort!, extra}
+      end
+
+      # Whether `arg` is an argument `name` declares — the gate on the one other argument
+      # name the usage log writes, the `field` an error blames, which for an unknown-argument
+      # refusal is the caller's own spelling.
+      def declares_arg?(name : String, arg : String) : Bool
+        declared_args[name]?.try(&.includes?(arg)) || false
+      end
+
       # The active `--tools` filter, or nil when the whole catalogue is served. Read by
       # `Server#filter_note`, which has to say that the surface was narrowed on purpose.
       getter tool_filter : ToolFilter?

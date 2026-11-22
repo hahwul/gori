@@ -29,6 +29,18 @@ module Gori::Settings
   # to find out.
   class_property? mcp_channels : Bool = DEFAULT_MCP_CHANNELS
 
+  # OFF by default, and opt-in on purpose: a security tool that starts keeping a file about
+  # how it is used, unasked, has changed what it is. On, `gori mcp` appends one line per tool
+  # call to `Paths.mcp_usage_log` — the tool's name, WHICH of its declared arguments were
+  # passed (never a value), the outcome code, the reply's size and how long it took — and
+  # `gori mcp --usage` reads it back. No host, URL, body or project name is written, and
+  # nothing is sent anywhere (`MCP::UsageLog`).
+  #
+  # Read once per `gori mcp` process like `mcp_channels`, so a change reaches an agent whose
+  # server is started after it.
+  DEFAULT_MCP_USAGE_LOG = false
+  class_property? mcp_usage_log : Bool = DEFAULT_MCP_USAGE_LOG
+
   # One coarse on/off switch over a group of `gori mcp` tools. Reading the capture is not a
   # group: it is what an attached agent is FOR, and a server with nothing to read is not a
   # narrower server but a broken one.
@@ -160,6 +172,7 @@ module Gori::Settings
     return unless o = node.try(&.as_h?)
     # load_bool, not `|| mcp_channels?` — a plain `||` resurrects a stored `false`.
     self.mcp_channels = load_bool(o, "channels", mcp_channels?)
+    self.mcp_usage_log = load_bool(o, "usage_log", mcp_usage_log?)
   end
 
   # An object replaces the whole set: the file records only denials, so a key it no longer
@@ -182,7 +195,8 @@ module Gori::Settings
   # Omitted entirely while every field is at its factory default, so a default install's
   # settings.json stays quiet and the 3-way merge has nothing to reconcile.
   defaulted_section mcp, "mcp",
-    {"channels", mcp_channels?, DEFAULT_MCP_CHANNELS}
+    {"channels", mcp_channels?, DEFAULT_MCP_CHANNELS},
+    {"usage_log", mcp_usage_log?, DEFAULT_MCP_USAGE_LOG}
 
   private def self.serialize_mcp_permissions(j : JSON::Builder) : Nil
     return if mcp_denied_permissions.empty? && mcp_asked_permissions.empty?
