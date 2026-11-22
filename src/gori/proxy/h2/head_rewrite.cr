@@ -62,6 +62,12 @@ module Gori::Proxy::H2
     # (`Assembler#feed` returns at `stream_id == 0`).
     MAX_FRAME_PAYLOAD = 16384
 
+    # Why a stream carrying an `unsendable` block was reset.
+    OVERSIZED_REASON = "a header block on this stream decoded to more than " \
+                       "#{Codec::Http1::MAX_HEAD_BYTES // 1024} KiB of header list, the h1 head limit, " \
+                       "and this direction re-encodes every head, so gori would have had to write all of " \
+                       "it out as literals; the stream was reset instead"
+
     # One complete header block, rules already applied, on its way out. `frames`/`pre` are
     # what the relay forwards when nothing holds it back.
     #
@@ -73,6 +79,9 @@ module Gori::Proxy::H2
     #
     # `size_updates` is the peer's own leading §6.3 instructions, which every re-encode of the
     # block carries over (`reencoded`).
+    #
+    # `unsendable` marks a block on an ENGAGED direction whose decoded list is past the h1 head
+    # limit: it has no frames, and the deferrer must refuse its stream (`StreamGate#defer?`).
     record Block,
       frames : Array(Frame::Header),
       pre : Assembler::HeadBlock,
@@ -81,7 +90,8 @@ module Gori::Proxy::H2
       first : Frame::Header,
       prefix : Bytes,
       request : Bool,
-      size_updates : Bytes = Bytes.empty do
+      size_updates : Bytes = Bytes.empty,
+      unsendable : Bool = false do
       def stream_id : UInt32
         first.stream_id
       end
@@ -395,9 +405,11 @@ module Gori::Proxy::H2
       # client acts on an `Alt-Svc` in. Stripping one would spend the connection's HPACK
       # passthrough (the latch below is one-way) on a field nothing reads — and a hostile
       # origin could close that latch at will by putting `alt-svc` in a trailer.
+      # Neither strip runs on an oversized list: a strip forces a re-encode, which is the cost
+      # `oversized` exists to avoid.
       stripped = false
       peer_fields = fields # what the peer sent, for a rule's record (#1589), as h1 keeps it
-      if !request && final_response_head?(fields) && (pruned = strip_alt_svc(fields, stream_id))
+      if !oversized && !request && final_response_head?(fields) && (pruned = strip_alt_svc(fields, stream_id))
         fields = pruned
         stripped = true
       end
@@ -407,7 +419,7 @@ module Gori::Proxy::H2
       # latch on a field nothing reads. Production relays always build this pipeline: `Session`
       # wires an Interceptor, so `Relay#gates` runs every request block through here.
       dictionary_removed = nil.as(Array(String)?)
-      if request && message_head?(fields, request) && (dict = strip_dictionary(fields))
+      if !oversized && request && message_head?(fields, request) && (dict = strip_dictionary(fields))
         fields, dictionary_removed = dict
         stripped = true
       end
@@ -452,6 +464,12 @@ module Gori::Proxy::H2
                 # `snapshot`, not `@buf` — `@buf` was cleared above.
                 Block.new(snapshot, Assembler::HeadBlock.new(pairs(fields)), fields, head, first, prefix,
                   request, updates)
+              elsif oversized
+                # Engaged, so the far decoder follows gori's encoder and the peer's frames cannot
+                # go out; re-encoding writes the whole decoded list out as literals (megabytes per
+                # block, on the pump fiber). Nothing is encoded: the gate refuses the stream.
+                Block.new([] of Frame::Header, Assembler::HeadBlock.new(pairs(fields)), fields, nil, first,
+                  prefix, request, updates, unsendable: true)
               else
                 @engaged = true
                 # A rule changed the head, so the TEXT the gate would show a human is the
@@ -465,6 +483,9 @@ module Gori::Proxy::H2
       # `@buf` was already cleared at the top, so `defer?` raising here (StreamGate ends the
       # connection past MAX_REFUSED_STREAMS) leaves `close`'s drain nothing to write.
       return {[] of Frame::Header, built.pre} if @deferrer.try(&.defer?(built))
+      # With no gate to reset one stream (a relay built without an Interceptor), the connection
+      # ends instead; nothing of the block was written.
+      raise Gori::Error.new("h2 #{@direction}: #{OVERSIZED_REASON}") if built.unsendable
       {built.frames, built.pre}
     end
 

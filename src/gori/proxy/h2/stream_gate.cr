@@ -357,7 +357,7 @@ module Gori::Proxy::H2
     # block's frames.
     def defer?(block : HeadRewrite::Block) : Bool
       opener = note_opener(block)
-      promise = promise_deferred_locked(block)
+      promise = decided_first_locked(block, opener)
       return promise unless promise.nil?
       return true if follow_locked(block)
       # The blocking gate runs before the holding one, and before anything is written. A
@@ -456,6 +456,13 @@ module Gori::Proxy::H2
       opener = @ordered && block.first.frame_type == Frame::Type::Headers && block.stream_id > @highest_opened
       @highest_opened = block.stream_id if opener
       opener
+    end
+
+    # `defer?`'s answer before any per-stream gate, or nil to go on: a block `HeadRewrite` would
+    # not re-encode (`unsendable_locked`), then a PUSH_PROMISE.
+    private def decided_first_locked(block : HeadRewrite::Block, opener : Bool) : Bool?
+      return unsendable_locked(block, opener) if block.unsendable
+      promise_deferred_locked(block)
     end
 
     # `defer?`'s answer for a PUSH_PROMISE, or nil for any other block. A promise rides its
@@ -1129,6 +1136,43 @@ module Gori::Proxy::H2
       charge_swallowed(slot)
       remember_refused(slot.stream_id)
       [{slot.stream_id, CANCEL}]
+    end
+
+    # A block `HeadRewrite` would not re-encode (`Block#unsendable`): its stream is refused the
+    # way the sandbox refuses one (`refuse_locked`: projected, the flow finalized with the reason,
+    # `@refused`, RST_STREAM to the sender's leg), and the receiver's leg is reset too whenever it
+    # already has the stream open — everything but a request whose head has not gone out, which
+    # the origin never saw (RFC 9113 §6.4), as `drop_locked` decides. Whatever this gate held for
+    # the stream is discarded first, as `abandon_locked` discards it. A PUSH_PROMISE is refused as
+    # `push_refuses_locked` refuses one: the promise never reaches the client and the origin is
+    # told to cancel the promised stream; the stream it rode on carries on.
+    private def unsendable_locked(block : HeadRewrite::Block, opener : Bool) : Bool
+      reason = HeadRewrite::OVERSIZED_REASON
+      if block.first.frame_type == Frame::Type::PushPromise
+        project(block)
+        promised = promised_stream_id(block)
+        return true if promised == 0 || promised.odd?
+        @assembler.drop_stream(promised, reason)
+        remember_refused(promised)
+        @deferred_cross << {promised, CANCEL}
+        return true
+      end
+      return true if @refused.includes?(block.stream_id)
+      return stub_trailers_locked(block) if @stubbed.includes?(block.stream_id)
+      slot = @slots[block.stream_id]?
+      if slot
+        slot.item.try { |it| @interceptor.forward(it.id) }
+        slot.item = nil
+        slot.pending.try { |b| project(b) }
+        charge_swallowed(slot)
+        remove(slot)
+      end
+      @flow.try { |fc| fc.owned[block.stream_id]?.try { |own| forget_owned(fc, own) } }
+      far_open = !@ordered || (!opener && slot.nil?)
+      refuse_locked(block, reason)
+      write(rst_frame(block.stream_id), nil) if far_open
+      @deferred_cross.concat(drain_locked) if slot
+      true
     end
 
     # --- writing -------------------------------------------------------------

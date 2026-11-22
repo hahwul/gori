@@ -205,6 +205,26 @@ private def settle : Nil
   3.times { Fiber.yield }
 end
 
+# `:status 200`, one 4000-byte literal inserted into the dynamic table, then `n` one-byte
+# references to it: a few KB of HPACK that decodes to n × 4 KB.
+private def amplified_response(n : Int32) : Bytes
+  io = IO::Memory.new
+  io.write_byte(0x88_u8) # :status 200
+  io.write_byte(0x40_u8) # literal with incremental indexing, new name
+  io.write_byte(3_u8)
+  io << "x-a"
+  io.write_byte(0x7f_u8) # value length 4000, raw: 127 + varint(3873)
+  rest = 4000 - 127
+  while rest >= 128
+    io.write_byte(((rest & 0x7f) | 0x80).to_u8)
+    rest >>= 7
+  end
+  io.write_byte(rest.to_u8)
+  io << "a" * 4000
+  n.times { io.write_byte(0xbe_u8) } # dynamic index 62
+  io.to_slice
+end
+
 private def head_of(frames : Array(Frame::Header), stream : UInt32) : Array({String, String})?
   f = frames.find { |x| x.stream_id == stream && x.frame_type == Frame::Type::Headers }
   f ? HPACK::Decoder.new.decode(f.payload) : nil
@@ -1233,6 +1253,44 @@ describe Gori::Proxy::H2::StreamGate do
         IO::ByteFormat::BigEndian.decode(UInt32, reset.payload).should eq(Gate::PROTOCOL_ERROR)
       end
       rig.sink.responses.map(&.error).should eq(Array.new(cases.size, Gate::SANDBOX_PROTOCOL_ERROR_REASON))
+    end
+  end
+
+  # Once a direction re-encodes, the receiver's decoder follows gori's encoder, so an oversized
+  # block can neither go out as it arrived nor be re-encoded without writing its whole decoded
+  # list as literals (~16 MB from ~4 KB here). Its stream is refused instead.
+  describe "an oversized response block on a direction that re-encodes" do
+    it "resets its stream on both legs, writes none of it, and the next stream still works" do
+      with_ic(intercept: false) do |ic, _|
+        rig = Rig.new(ic)
+        rig.heads_in.latch # as an earlier rule change, hold or strip would have
+        rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/big"))))
+        rig.c2s.accept(headers(3_u32, rig.enc_out.encode(request("/next"))))
+        GC.collect
+        before = GC.stats.total_bytes
+        rig.s2c.accept(headers(1_u32, amplified_response(4000), Frame::END_HEADERS))
+        allocated = GC.stats.total_bytes - before
+
+        to_client = rig.to_client
+        to_client.none? { |f| f.frame_type == Frame::Type::Headers }.should be_true
+        to_client.map { |f| {f.frame_type, f.stream_id} }.should eq([{Frame::Type::RstStream, 1_u32}])
+        rig.to_origin.select { |f| f.frame_type == Frame::Type::RstStream }.map(&.stream_id).should eq([1_u32])
+        rig.sink.responses.first.error.should eq(Gori::Proxy::H2::HeadRewrite::OVERSIZED_REASON)
+        allocated.should be < 4 * 1024 * 1024
+
+        rig.s2c.accept(headers(3_u32, rig.enc_in.encode(response("200"))))
+        head_of(rig.to_client, 3_u32).should eq(response("200"))
+      end
+    end
+
+    it "is forwarded as it arrived while the direction has not re-encoded" do
+      with_ic(intercept: false) do |ic, _|
+        rig = Rig.new(ic)
+        rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/big"))))
+        block = amplified_response(4000)
+        rig.s2c.accept(headers(1_u32, block, Frame::END_HEADERS))
+        rig.to_client.map(&.payload).should eq([block])
+      end
     end
   end
 

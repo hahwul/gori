@@ -1299,6 +1299,20 @@ describe Gori::Proxy::H2::HeadRewrite do
       pipe.engaged?.should be_false
     end
 
+    it "is never re-encoded once the direction is engaged, and with no gate ends the connection" do
+      pipe, assembler, _ = pipeline(SubRewriter.new("nothing", "matches", on: false), direction: "in")
+      pipe.latch
+      block = IO::Memory.new
+      block.write(Bytes[0x3f, 0xe1, 0xff, 0x03])
+      block.write(HPACK::Encoder.new(65536, indexing: true).encode([{":status", "200"}, {"x-big", "A" * 65000}]))
+      250.times { block.write_byte(0xbe_u8) }
+      written = 0
+      expect_raises(Gori::Error, /stream was reset/) do
+        pipe.accept(headers(1_u32, block.to_slice)) { |f, pre| written += f.payload.size; assembler.feed("in", f, pre) }
+      end
+      written.should eq(0)
+    end
+
     it "says so on the flow" do
       pipe, assembler, sink = pipeline(SubRewriter.new("x", "y"), direction: "out")
       pipe.deferrer = HeadRecorder.new
