@@ -399,8 +399,13 @@ describe Gori::ProjectArchive do
   it "rejects a blank archive destination before expanding the path" do
     with_archive_project do |_registry, project, _store, root|
       Dir.cd(root) do
+        before = Dir.children(".").sort!
         expect_raises(Gori::Error, /destination is blank/) { export_archive(project, "  ") }
-        File.exists?("  ").should be_false
+        # The directory, not `File.exists?("  ")`: Windows cannot spell that name, and there
+        # `File.exists?` raises File::NotFoundError ("Error resolving real path … syntax is
+        # incorrect") instead of answering false — from inside this block that took the whole
+        # process down, summary and all. This also sees a temp file left behind.
+        Dir.children(".").sort!.should eq(before)
       end
     end
   end
