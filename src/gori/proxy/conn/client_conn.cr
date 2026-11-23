@@ -719,7 +719,8 @@ module Gori::Proxy
       end
       keep = handle_response(upstream, req, flow_id, started, host, port, scheme,
         reused: reused, sent_head: sent_head, can_retry: retryable, sent_req: sent_req,
-        pre_read_head: early_head, pre_read_failure: early_head_failure, pre_interims: early_interims)
+        pre_read_head: early_head, pre_read_failure: early_head_failure, pre_interims: early_interims,
+        client_owes_body: !send_body)
       # The expectation was settled without the body being pumped, so neither leg is reusable:
       # the client still owes those bytes, and gori sent the origin a head declaring a body it
       # never got — either socket's next bytes are ambiguous, which is where a desync starts.
@@ -1218,7 +1219,8 @@ module Gori::Proxy
                                 *, reused : Bool, sent_head : Bytes, can_retry : Bool,
                                 sent_req : Codec::RawRequest, pre_read_head : Bytes? = nil,
                                 pre_read_failure : Codec::Http1::HeadReadResult? = nil,
-                                pre_interims : Store::Interims? = nil) : Bool
+                                pre_interims : Store::Interims? = nil,
+                                client_owes_body : Bool = false) : Bool
       @interims = pre_interims.try { |i| i unless i.empty? }
       if pre_read_failure
         record_response_head_failure(flow_id, pre_read_failure)
@@ -1341,7 +1343,8 @@ module Gori::Proxy
       resp_capture = response_capture(sent_resp, resp, resp_framing, resp_len, flow_id, ttfb)
       completed = stream_nonhold_response(upstream, sent_resp, sent_resp_head,
         resp_framing, resp_len, resp_capture, flow_id, ttfb, started, relaxed: relaxed,
-        extract_ref: extract_ref, advisory: stream_rule_note(resp, resp_framing, host))
+        extract_ref: extract_ref, advisory: stream_rule_note(resp, resp_framing, host),
+        client_owes_body: client_owes_body)
 
       if completed && resp.status == 101
         # A 101 Switching Protocols turns the connection into a bidirectional tunnel of the
@@ -1716,11 +1719,16 @@ module Gori::Proxy
                                         flow_id : Int64, ttfb : Int64, started : Time::Instant,
                                         relaxed : Bool = false,
                                         extract_ref : ExtractRef? = nil,
-                                        advisory : String? = nil) : Bool
+                                        advisory : String? = nil,
+                                        client_owes_body : Bool = false) : Bool
       # Asked BEFORE the head goes out: bytes the client sent before it could have seen this
       # response are a pipelined request, not a reaction to it (`watch_client_abort`). After the
-      # write, a loopback client can answer within microseconds and look the same.
-      backstop = relaxed && resp_framing.close_delimited? && !SocketResidue.pending?(@io)
+      # write, a loopback client can answer within microseconds and look the same. A client
+      # whose request body gori never pumped (`settle_expectation` relayed an early final
+      # head) may still send that body, as curl does after an early 2xx: those bytes are owed,
+      # not a next request, so nothing is read into them.
+      backstop = relaxed && resp_framing.close_delimited? && !client_owes_body &&
+                 !SocketResidue.pending?(@io)
       begin
         @io.write(sent_resp_head)
         @io.flush
@@ -1806,7 +1814,9 @@ module Gori::Proxy
     # body, and tearing a close-delimited page down for one would cut it short. Nor is a request
     # the client PIPELINED (RFC 9112 §9.3.2): `backstop` is false when client bytes were already
     # waiting before the head was written (`stream_nonhold_response`), and then the watcher only
-    # watches for the client leaving, as it does for a chunked or Content-Length stream.
+    # watches for the client leaving, as it does for a chunked or Content-Length stream. That
+    # check narrows the case, it does not close it: a pipelining client whose next request
+    # lands after the head went out is read as a disagreement and its response ends there.
     private def watch_client_abort(upstream : IO, latch : TeardownLatch, backstop : Bool) : Nil
       buf = Bytes.new(1)
       while @io.read(buf) > 0

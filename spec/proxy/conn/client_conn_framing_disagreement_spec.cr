@@ -261,6 +261,56 @@ describe "Gori::Proxy::ClientConn response framing disagreement" do
     end
   end
 
+  it "delivers a close-delimited response whole to a client still sending the body it owed" do
+    # `Expect: 100-continue`, and the origin answers a final response before the body: gori
+    # relays that head without pumping the body. A client that then sends the body anyway (curl
+    # does after an early 2xx) is not sending a next request.
+    srv = TCPServer.new("127.0.0.1", 0)
+    origin_port = srv.local_address.port
+    spawn do
+      if conn = srv.accept?
+        Gori::Proxy::Codec::Http1.read_head(conn)
+        conn << "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\npart1-"
+        conn.flush
+        sleep 300.milliseconds
+        conn << "part2" rescue nil
+        conn.flush rescue nil
+        conn.close rescue nil
+      end
+    rescue
+    end
+    done = Channel(Nil).new(4)
+    sink = DisagreementSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+    begin
+      client = TCPSocket.new("127.0.0.1", proxy.port)
+      client.read_timeout = 3.seconds
+      client << "POST http://127.0.0.1:#{origin_port}/a HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n" \
+                "Expect: 100-continue\r\nContent-Length: 5\r\n\r\n"
+      client.flush
+      got = IO::Memory.new
+      buf = Bytes.new(256)
+      until got.to_s.includes?("part1-")
+        n = client.read(buf)
+        break if n == 0
+        got.write(buf[0, n])
+      end
+      begin
+        client << "hello"
+        client.flush
+      rescue IO::Error
+      end
+      (got.to_s + drain(client)).should end_with("part1-part2")
+      client.close rescue nil
+      received_within?(done, 3.seconds).should be_true
+      sink.responses.first.state.should eq(Gori::Store::FlowState::Complete)
+    ensure
+      proxy.stop
+      srv.close rescue nil
+    end
+  end
+
   it "keeps a close-delimited stream flowing past a stray CRLF from the client" do
     # RFC 9112 §2.2: some clients send a CRLF after a request. That is not a next request.
     release = Channel(Nil).new(1)
