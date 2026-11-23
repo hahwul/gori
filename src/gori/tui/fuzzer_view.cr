@@ -2898,6 +2898,14 @@ module Gori::Tui
       end
     end
 
+    # A stored pattern that does not compile is shown as stored, so the Advanced overlay edits
+    # what the row holds: left as is it stays refused (`regex_error` and the unread entry both
+    # say so), and clearing or correcting it is the "set it again" the refusal asks for.
+    private def show_unread_regexes : Nil
+      @session_unread["match_regex"]?.try(&.as_s?).try { |src| @s_m_regex = src }
+      @session_unread["filter_regex"]?.try(&.as_s?).try { |src| @s_f_regex = src }
+    end
+
     def config_json : String
       commit_buffers # fold edited buffers into @config/@matcher before serializing
       session_config.to_json
@@ -2925,6 +2933,7 @@ module Gori::Tui
       @s_macro_expect = state.macro_expect
       @s_macro_on_failure = state.macro_on_failure
       sync_buffers if applied
+      show_unread_regexes
     end
 
     # --- rendering -----------------------------------------------------------

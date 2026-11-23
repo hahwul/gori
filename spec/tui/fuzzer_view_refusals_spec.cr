@@ -103,3 +103,32 @@ describe "FuzzerView#build_engine refusals" do
     view.config.timeout.should be_nil
   end
 end
+
+describe "FuzzerView with an unreadable saved regex" do
+  # A row saved with a pattern that does not compile is refused. The Advanced overlay has to
+  # show that pattern, or the operator sees an empty field and cannot tell what to set again.
+  it "shows the stored pattern in Advanced and runs once it is cleared" do
+    saved = fuzzer_with(->(s : AdvancedSnapshot) { s })
+    stored = JSON.parse(saved.config_json).as_h
+    stored["match_regex"] = JSON::Any.new("(")
+    rec = Gori::Store::FuzzSessionRecord.new(
+      1_i64, saved.target, saved.template_text, false, nil, stored.to_json, nil, 0, saved.name)
+
+    view = FuzzerView.new
+    view.restore(rec)
+    refusal(view).not_nil!.should contain("match_regex")
+    view.advanced_snapshot.m_regex.should eq("(")
+
+    # Applied as shown, the row still holds a pattern nobody can run.
+    view.apply_advanced(view.advanced_snapshot)
+    refusal(view).not_nil!.should contain("match_regex")
+    JSON.parse(view.config_json)["match_regex"].as_s.should eq("(") # and it stays stored
+
+    view.apply_advanced(view.advanced_snapshot.copy_with(m_regex: ""))
+    with_scope do |scope|
+      engine, err = view.build_engine(false, scope, nil)
+      err.should be_nil
+      engine.should_not be_nil
+    end
+  end
+end
