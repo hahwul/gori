@@ -6,9 +6,9 @@
 
 - Proxy: a request preceded by a blank line is read by its real request-line, so a `HEAD` no longer stalls waiting for a body, and `https://gori.proxy` reached through the SOCKS5 or transparent listener shows the setup page instead of being dialled by name (#2018).
 
-- HTTP/2: a header block that decodes past 256 KiB (a few hundred bytes of HPACK can) is no longer turned into an HTTP/1.1 head for rules, intercept or extraction, and where gori re-encodes heads its stream is reset, so an origin can no longer stall the proxy with such blocks. A peer that overruns flow control on a connection with a body rule has the connection closed instead of buffered (#2018).
+- HTTP/2: a header block that decodes past 256 KiB (a few hundred bytes of HPACK can) is no longer turned into an HTTP/1.1 head for rules, intercept or extraction, and where gori re-encodes heads its stream is reset, trailers included, so an origin can no longer stall the proxy with such blocks. A peer that overruns flow control on a connection with a body rule has the connection closed instead of buffered (#2018).
 
-- Scope: the Sandbox, the scope gate and intercept judge a request under the origin gori actually dials and the connection's own scheme, so a target without a leading slash, an absolute target naming another authority or a spoofed `:scheme` can no longer pass an include or dodge an exclude. A url-level exclude also holds when the origin is spelled differently (`ACME.test`, `HTTP://`, `:80`, `u@`, or with a port the rule did not write) (#2018).
+- Scope: the Sandbox, the scope gate, intercept and HTTP/2 extract rules judge a request under the origin gori actually dials and the connection's own scheme, so a target without a leading slash, an absolute target naming another authority or a spoofed `:scheme` can no longer pass an include or dodge an exclude. A url-level exclude also holds when the origin is spelled differently (`ACME.test`, `HTTP://`, `:80`, `u@`, or with a port the rule did not write) (#2018).
 
 - WebSocket: a hold can no longer be stalled by a flood of tiny messages queued behind it; it releases past 4096 queued messages and holds at most 256 per direction. A continuation frame with no message in progress is recorded as opcode 0 and forwarded byte-exact (#2018).
 

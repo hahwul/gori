@@ -6337,7 +6337,21 @@ the block is forwarded as a rules-less connection forwards it, with an advisory 
 With the sandbox on, such an opening request is refused, since its URL cannot be judged; h1
 refuses a head that size outright. On a direction that already re-encodes (a rule, a hold or a
 strip engaged it) the block cannot go out verbatim, and writing 16 MiB of literals is the same
-stall, so its stream is reset toward both peers and the connection carries on.
+stall, so its stream is reset toward both peers and the connection carries on. The same holds
+for a block the gate engages late (trailers behind an owned body, a block overtaking a head
+held verbatim, a head held verbatim and re-encoded behind a rewritten one): `engage` and
+`reencode` withhold it as unsendable.
+
+A peer's HPACK table size update is owed per direction, not per block. The shared decoder has
+applied it, so once the block that carried it stops going out as it arrived (re-encoded, held,
+refused, stubbed or reset), it leads the next header block gori encodes on that direction
+(`HeadRewrite#owe`, `#lead`), kept as its smallest and last value. It waits while a head held
+verbatim is still to go out, because a shrink ahead of that head would evict entries its
+indexed references name. Known limit, as before this change: a strict peer that requires the
+update on the first block after its SETTINGS ACK can still fail when that block is a
+verbatim-held head or one overtaking it.
+
+Session-binding extract rules take the transport's scheme like the other h2 gates.
 
 On the body-rule path nothing blocks the way TCP backpressure blocks the plain relay, so DATA
 a sender pushed past its receiver's window was parked without bound. Parked bytes are held to
