@@ -377,8 +377,6 @@ module Gori::Repeater
       # of becoming the next send's response. Same rule as the proxy's `origin_keep_alive?`, and
       # an interim 1xx head counts too (`Result#lf_framed?`).
       return false if result.lf_framed? || Proxy::Codec::Http1.lf_terminated_head?(resp.raw_head)
-      # A length only a lenient reading gave (`Body.lenient_framing?`): the socket goes with it.
-      return false if Proxy::Codec::Body.lenient_framing?(resp)
       return false if connection_close?(resp.headers)
       case resp.version
       when "HTTP/1.1" then true
@@ -388,10 +386,13 @@ module Gori::Repeater
         # A close-delimited body ended WITH the connection: there is nothing to park.
         # `response_framing` re-derives what `exchange` already framed by — with the SAME
         # method — so this cannot disagree with how many bytes were actually consumed.
-        !close_delimited?(resp, request_method)
+        !ends_with_socket?(resp, request_method)
     end
 
-    private def self.close_delimited?(resp : Proxy::Codec::RawResponse, request_method : String) : Bool
+    # A close-delimited body, or one framed by a length only a lenient reading gave
+    # (`Body.lenient_framing?`): what the origin sends past it must go with the socket.
+    private def self.ends_with_socket?(resp : Proxy::Codec::RawResponse, request_method : String) : Bool
+      return true if Proxy::Codec::Body.lenient_framing?(resp)
       framing, _ = Proxy::Codec::Body.response_framing(resp, request_method)
       framing.close_delimited?
     rescue
