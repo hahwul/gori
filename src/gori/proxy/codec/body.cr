@@ -239,11 +239,18 @@ module Gori::Proxy::Codec
         # A status line the strict parse cannot read is framed as bodied below, to the close
         # when nothing declares a length. A browser reads `HTTP/1.1  204` or `http/1.1 204` as
         # a bodyless 204 (`Http1.lenient_status`), takes the response as over at its head and
-        # sends its next request on this connection, while gori is still forwarding the
-        # origin's bytes as this body: the origin then answers a request it never saw, for any
-        # host on a forward-proxy connection. Refused like the ambiguous headers above.
-        if (lenient = Http1.lenient_status(resp.raw_head)) && bodyless_status?(lenient)
-          raise Gori::Error.new("ambiguous status line (a lenient recipient reads status #{lenient}, which has no body)")
+        # sends its next request on this connection. Framed to the close, gori would still be
+        # forwarding the origin's bytes as this body: the origin then answers a request it
+        # never saw, for any host on a forward-proxy connection. So it is framed the way that
+        # client frames it, over at its head, and `lenient_framing?` has both connections
+        # closed behind it: a reader that takes it to the close sees the same end.
+        if lenient = Http1.lenient_status(resp.raw_head)
+          return {BodyFraming::None, 0_i64} if lenient == 204 || lenient == 304
+          # A lenient 1xx is not over at its head: that client waits for ANOTHER head on this
+          # exchange, and gori cannot follow one it reads off a line it cannot parse. Refused.
+          if lenient >= 100 && lenient < 200
+            raise Gori::Error.new("ambiguous status line (a lenient recipient reads interim status #{lenient} and waits for another response)")
+          end
         end
       elsif bodyless_status?(s)
         return {BodyFraming::None, 0_i64}
@@ -258,15 +265,41 @@ module Gori::Proxy::Codec
         # `identity`/`gzip`) is close-delimited, and TE takes precedence over a Content-Length.
         # Alone that is unambiguous. WITH a Content-Length it is not: browsers and curl frame
         # `Transfer-Encoding: gzip` + `Content-Length` by the length and reuse the connection,
-        # so the bytes gori forwards after it as this body reach that client as the response
-        # to its NEXT request. Refused, as chunked + Content-Length is.
-        reject_te_with_cl(resp.headers)
-        {BodyFraming::CloseDelimited, 0_i64}
+        # so bytes forwarded after it as this body would reach that client as the response to
+        # its NEXT request. gori frames it by the length as they do, and `lenient_framing?`
+        # has both connections closed behind it, so a reader that takes it to the close sees
+        # the body end at the same byte. An unreadable Content-Length is refused as anywhere.
+        if cl = content_length(resp.headers)
+          {BodyFraming::Length, cl}
+        else
+          {BodyFraming::CloseDelimited, 0_i64}
+        end
       elsif cl = content_length(resp.headers)
         {BodyFraming::Length, cl}
       else
         {BodyFraming::CloseDelimited, 0_i64}
       end
+    end
+
+    # Whether `response_framing` frames this head by a LENIENT client's reading where RFC
+    # 9112 §6.3 reads it to the close: a non-chunked Transfer-Encoding beside a Content-Length,
+    # or a malformed status line a browser takes for a bodyless 204/304. The two readings end
+    # at the same byte only if the connection ends there, so whoever keeps connections closes
+    # them behind such a response: the client's (`ClientConn#keep_alive?`), the origin's
+    # (`origin_keep_alive?`) and a scripted send's (`ConnPool.reusable_response?`). It does not
+    # ask the method or the strict status, so it also answers true for a head those already
+    # made bodyless; closing after a complete response is always valid.
+    def self.lenient_framing?(resp : RawResponse) : Bool
+      if resp.malformed?
+        lenient = Http1.lenient_status(resp.raw_head)
+        lenient == 204 || lenient == 304
+      else
+        return false unless resp.headers.has?("Transfer-Encoding") && resp.headers.has?("Content-Length")
+        te = resp.headers.get_all("Transfer-Encoding")
+        te_present?(te) && !chunked?(te)
+      end
+    rescue Gori::Error
+      false # a non-final `chunked`, which `response_framing` refuses
     end
 
     # Stream the body src->dst, teeing wire bytes to `tee`. Tolerant of premature

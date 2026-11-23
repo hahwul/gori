@@ -6236,20 +6236,28 @@ one is the smaller. The old name covered only the first row once the second join
 stays a palette keyword. The row's hint says what is never written before it says how to read the
 file. A call count in the Agents card is still not built.
 
-### 2026-11-23: a response a lenient client frames shorter than gori is refused
+### 2026-11-23: a response a lenient client frames shorter than gori is framed as that client frames it
 
 Refines Invariant 1's response rule (`framing_ambiguous?`): still narrower than the request
-rule, and widened only where a measured client disagrees with gori's reading. Chrome and curl
+rule, and changed only where a measured client disagrees with gori's reading. Chrome and curl
 frame a non-chunked `Transfer-Encoding` with `Content-Length` by the length, and Chrome reads
 `HTTP/1.1  204`, `http/1.1 204`, `HTTP/1.1 204<TAB>…` and `HTTP/1.1 0204` as a bodyless 204,
 while gori read all of them to the connection's close. The client then reuses the socket, and
 on a forward-proxy connection the origin's later bytes answered a request for another host.
-Both shapes are refused (`Body.response_framing`, `Http1.lenient_status`); a non-chunked
-`Transfer-Encoding` alone stays close-delimited. The lenient reading follows what Chrome was
-measured to accept and errs toward refusing: `http` in any case within the first 8 bytes of the
-line (Chrome's slop is 4, so a leading SP, HTAB or `XXXX` reads as a status line), then the
-leading digit run, so `204x` is a 204. The capture keeps the origin's head, and the
-Repeater still shows such a response.
+
+Refusing such a response would hide from the operator a page their browser renders without
+the proxy, so gori takes the client's reading instead (`Body.response_framing`): the length
+for the first shape, no body for a status line read as 204 or 304. Nothing is rewritten.
+`Body.lenient_framing?` then closes the client and the origin connection behind the response,
+which is what makes a strict reader agree: read to the close, the body ends at the same byte.
+What the origin sends past that point is not forwarded and not captured, and the flow carries
+a note saying so. The Repeater reads the same way and does not reuse the socket. A non-chunked
+`Transfer-Encoding` alone stays close-delimited. A status line read as an interim 1xx is still
+refused: that client waits for another head, and gori cannot follow one off a line it cannot
+parse. The lenient reading (`Http1.lenient_status`) follows what Chrome was measured to accept
+and errs wide: `http` in any case within the first 8 bytes of the line (Chrome's slop is 4, so
+a leading SP, HTAB or `XXXX` reads as a status line), then the leading digit run, so `204x` is
+a 204.
 
 The backstop covers the shapes nobody has measured yet: during a CLOSE-DELIMITED response, a
 client byte other than CR/LF means the client took the response as complete, so the exchange

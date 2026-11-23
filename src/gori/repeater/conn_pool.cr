@@ -377,6 +377,8 @@ module Gori::Repeater
       # of becoming the next send's response. Same rule as the proxy's `origin_keep_alive?`, and
       # an interim 1xx head counts too (`Result#lf_framed?`).
       return false if result.lf_framed? || Proxy::Codec::Http1.lf_terminated_head?(resp.raw_head)
+      # A length only a lenient reading gave (`Body.lenient_framing?`): the socket goes with it.
+      return false if Proxy::Codec::Body.lenient_framing?(resp)
       return false if connection_close?(resp.headers)
       case resp.version
       when "HTTP/1.1" then true

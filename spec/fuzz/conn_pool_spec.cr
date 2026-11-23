@@ -326,6 +326,13 @@ describe F::ConnPool do
         result_from("HTTP/1.1 101 Switching Protocols\r\nContent-Length: 0\r\n\r\n")).should be_false
     end
 
+    it "refuses a response framed by a length only a lenient reading gives" do
+      # A non-chunked Transfer-Encoding beside a Content-Length: read by the length as a
+      # browser reads it, so whatever the origin sends past it must go with the socket.
+      F::ConnPool.reusable_response?(result_from(
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\nContent-Length: 4\r\n\r\n", "pong")).should be_false
+    end
+
     it "refuses a response whose head ended on a bare-LF blank line" do
       # Framed off the lenient LF reading, so its socket serves this one response only.
       F::ConnPool.reusable_response?(result_from("HTTP/1.1 200 OK\nContent-Length: 4\n\n", "pong")).should be_false

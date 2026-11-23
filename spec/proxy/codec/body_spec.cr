@@ -248,30 +248,44 @@ describe Gori::Proxy::Codec::Body do
       Body.response_framing(no_code, "GET").should eq({BodyFraming::Length, 4_i64})
     end
 
-    it "refuses a malformed status line a lenient client reads as a bodyless status" do
-      # Each is a 1xx/204/304 to a browser (leading digits after any SP/HTAB run, version token
-      # in any case) and a malformed, bodied response to the strict parse: framed to the close,
-      # the origin's later bytes would answer the client's next request.
+    it "frames a malformed status line a lenient client reads as a 204 or 304 as that client does" do
+      # Each is a 204/304 to a browser (leading digits after any SP/HTAB run, version token in
+      # any case) and a malformed, bodied response to the strict parse. Framed to the close, the
+      # origin's later bytes would answer the client's next request, so it ends at its head and
+      # `lenient_framing?` has the connections closed behind it.
       ["HTTP/1.1  204 No Content\r\n\r\n", "http/1.1 204 No Content\r\n\r\n",
        "HTTP/1.1 204\tNo Content\r\n\r\n", "HTTP/1.1 0204 No Content\r\n\r\n",
        "HTTP/1.1\t204 No Content\r\n\r\n", "HTTP/1.1 204x Odd\r\nContent-Length: 4\r\n\r\n",
-       "HTTP/1.1  304 Not Modified\r\n\r\n", "HTTP/1.1  100 Continue\r\n\r\n",
-       "\r\nHTTP/1.1 204 No Content\r\n\r\n"].each do |head|
+       "HTTP/1.1  304 Not Modified\r\n\r\n", "\r\nHTTP/1.1 204 No Content\r\n\r\n"].each do |head|
+        resp = Http1.parse_response_head(head.to_slice)
+        resp.malformed?.should be_true
+        Body.response_framing(resp, "GET").should eq({BodyFraming::None, 0_i64})
+        Body.lenient_framing?(resp).should be_true
+      end
+    end
+
+    it "refuses a malformed status line a lenient client reads as an interim 1xx" do
+      # That client waits for another head on the same exchange; nothing ends at this one.
+      ["HTTP/1.1  100 Continue\r\n\r\n", "http/1.1 103 Early Hints\r\n\r\n",
+       "HTTP/1.1  101 Switching Protocols\r\n\r\n"].each do |head|
         resp = Http1.parse_response_head(head.to_slice)
         resp.malformed?.should be_true
         expect_raises(Gori::Error, /ambiguous status line/) { Body.response_framing(resp, "GET") }
       end
     end
 
-    it "refuses the junk-before-version spellings Chrome reads as a bodyless 204" do
+    it "frames the junk-before-version spellings Chrome reads as a bodyless 204 as bodyless" do
       # Measured with headless Chrome: it reused the socket after each of these.
       [" HTTP/1.1 ", "\tHTTP/1.1 ", "X HTTP/1.1 ", "XXXXHTTP/1.1 ", "\r\nHTTP/1.1 "].each do |prefix|
         resp = Http1.parse_response_head("#{prefix}204 No Content\r\n\r\n".to_slice)
         resp.malformed?.should be_true
-        expect_raises(Gori::Error, /ambiguous status line/) { Body.response_framing(resp, "GET") }
-        # The same spelling with a bodied status is framed by its length, as Chrome frames it.
+        Body.response_framing(resp, "GET").should eq({BodyFraming::None, 0_i64})
+        Body.lenient_framing?(resp).should be_true
+        # The same spelling with a bodied status is framed by its length, as Chrome frames it,
+        # and nobody reads that one differently.
         bodied = Http1.parse_response_head("#{prefix}200 OK\r\nContent-Length: 4\r\n\r\n".to_slice)
         Body.response_framing(bodied, "GET").should eq({BodyFraming::Length, 4_i64})
+        Body.lenient_framing?(bodied).should be_false
       end
       bodied = Http1.parse_response_head("HTTP/1.1 200x Odd\r\nContent-Length: 4\r\n\r\n".to_slice)
       Body.response_framing(bodied, "GET").should eq({BodyFraming::Length, 4_i64})
@@ -533,14 +547,44 @@ describe Gori::Proxy::Codec::Body do
       Body.response_framing(resp, "GET").should eq({BodyFraming::CloseDelimited, 0_i64})
     end
 
-    it "refuses a response with a non-chunked TE AND a Content-Length, as chunked + CL is" do
-      # gori would read it to the close (TE outranks CL), while browsers and curl frame it by
-      # the length and reuse the connection: the bytes after it answer their next request.
-      ["identity", "gzip"].each do |coding|
+    it "frames a response with a non-chunked TE AND a Content-Length by the length" do
+      # RFC 9112 §6.3 reads it to the close (TE outranks CL), while browsers and curl frame it
+      # by the length and reuse the connection: read to the close, the bytes after it would
+      # answer their next request. So it is framed as they frame it, and flagged so that both
+      # connections close behind it.
+      ["identity", "gzip", "gzip, deflate"].each do |coding|
         resp = Http1.parse_response_head(
           "HTTP/1.1 200 OK\r\nTransfer-Encoding: #{coding}\r\nContent-Length: 3\r\n\r\n".to_slice)
-        expect_raises(Gori::Error, /Transfer-Encoding and Content-Length/) { Body.response_framing(resp, "GET") }
+        Body.response_framing(resp, "GET").should eq({BodyFraming::Length, 3_i64})
+        Body.lenient_framing?(resp).should be_true
       end
+    end
+
+    it "still refuses a non-chunked TE beside a Content-Length it cannot read" do
+      resp = Http1.parse_response_head(
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\nContent-Length: 3\r\nContent-Length: 4\r\n\r\n".to_slice)
+      expect_raises(Gori::Error) { Body.response_framing(resp, "GET") }
+    end
+  end
+
+  describe ".lenient_framing?" do
+    it "is false for every head both readings frame alike" do
+      ["HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n",
+       "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n",
+       "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\n\r\n",
+       "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip, chunked\r\nContent-Length: 3\r\n\r\n",
+       "HTTP/1.1 200 OK\r\nTransfer-Encoding: \r\nContent-Length: 3\r\n\r\n",
+       "HTTP/1.1 204 No Content\r\n\r\n",
+       "HTTP/1.1  200 OK\r\nContent-Length: 3\r\n\r\n",
+       "HTTP/1.1 OK\r\nContent-Length: 3\r\n\r\n"].each do |head|
+        Body.lenient_framing?(Http1.parse_response_head(head.to_slice)).should be_false
+      end
+    end
+
+    it "is false, not a raise, for a chunked coding that is not final" do
+      resp = Http1.parse_response_head(
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked, gzip\r\nContent-Length: 3\r\n\r\n".to_slice)
+      Body.lenient_framing?(resp).should be_false
     end
   end
 

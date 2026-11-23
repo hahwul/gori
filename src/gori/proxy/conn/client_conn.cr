@@ -245,6 +245,7 @@ module Gori::Proxy
       # retired that connection (`lf_residue_note`). Per response, reset with the notes above.
       @lf_rules_note = nil.as(String?)
       @lf_residue_note = nil.as(String?)
+      @framing_note = nil.as(String?)
       # The interim 1xx responses the origin sent before THIS response's final head
       # (`Store::Interims`), carried to whichever record site the response takes. Assigned
       # unconditionally at the top of `handle_response` — seeded with what the Expect
@@ -1246,6 +1247,7 @@ module Gori::Proxy
       @withheld_offer_note = withheld_offer_note(resp, host, port)
       @lf_rules_note = nil
       @lf_residue_note = nil
+      @framing_note = nil
       ttfb = (Time.instant - started).total_microseconds.to_i64
 
       # The h3 `Alt-Svc` strip (settings `network.strip_alt_svc`), before the rules so a rule
@@ -1293,6 +1295,7 @@ module Gori::Proxy
       framing = response_framing_or_close(resp, sent_req.method, flow_id)
       return false unless framing
       resp_framing, resp_len = framing
+      @framing_note = lenient_framing_note(resp, resp_framing, resp_len)
 
       # Intercept (response): hold only in-scope, non-streaming responses. SSE /
       # close-delimited / WebSocket bodies would buffer forever, so they bypass.
@@ -2587,9 +2590,29 @@ module Gori::Proxy
     private def response_advisory(body : String?) : String?
       # Almost every response has nothing to say: skip the two Arrays that answer nil.
       return nil if body.nil? && @alt_svc_note.nil? && @status_line_note.nil? &&
-                    @lf_rules_note.nil? && @lf_residue_note.nil? && @withheld_offer_note.nil?
-      [body, @alt_svc_note, @status_line_note, @lf_rules_note, @lf_residue_note,
+                    @lf_rules_note.nil? && @lf_residue_note.nil? && @withheld_offer_note.nil? &&
+                    @framing_note.nil?
+      [body, @alt_svc_note, @status_line_note, @framing_note, @lf_rules_note, @lf_residue_note,
        @withheld_offer_note].compact.join("\n")
+    end
+
+    # The sentence for a response gori framed by a lenient client's reading
+    # (`Body.lenient_framing?`), or nil. The record shows a head whose own rules say the body
+    # runs to the close and a body that stops short of it; this says who chose that and why.
+    private def lenient_framing_note(resp : Codec::RawResponse, framing : Codec::BodyFraming,
+                                     length : Int64) : String?
+      return nil if framing.close_delimited? || framing.chunked?
+      return nil unless Codec::Body.lenient_framing?(resp)
+      if resp.malformed?
+        return nil unless framing.none?
+        "a browser reads this status line as a response with no body, so gori ended the " \
+        "response at its head and closed the connection; nothing the origin sent after the " \
+        "head was forwarded"
+      elsif framing.length?
+        "this response has a Transfer-Encoding without chunked and a Content-Length. Browsers " \
+        "and curl frame it by the length, so gori forwarded #{length} body bytes and closed " \
+        "the connection; nothing the origin sent after them was forwarded"
+      end
     end
 
     # A WebSocket 101 from an origin whose HTTP/2 extended CONNECT offer the h2 relay withheld
@@ -3982,6 +4005,8 @@ module Gori::Proxy
     private def keep_alive?(req : Codec::RawRequest, resp : Codec::RawResponse,
                             resp_framing : Codec::BodyFraming) : Bool
       return false if resp_framing.close_delimited? # body ends at close
+      # Framed as a lenient client frames it: only the close makes a strict reader agree.
+      return false if Codec::Body.lenient_framing?(resp)
       return false if req.headers.lists?("Connection", "close")
       return false if resp.headers.lists?("Connection", "close")
       req.version == "HTTP/1.1" || req.headers.lists?("Connection", "keep-alive")
@@ -4022,6 +4047,8 @@ module Gori::Proxy
       # `ConnPool.reusable_response?`). Any head of the exchange counts, an interim 1xx too.
       return false if @upstream_lf_framed
       return false if resp_framing.close_delimited?
+      # Whatever the origin sends past a length only a lenient reading gave goes with the socket.
+      return false if Codec::Body.lenient_framing?(resp)
       return false if sent_req.headers.lists?("Connection", "close")
       return false if resp.headers.lists?("Connection", "close")
       resp.version == "HTTP/1.1" || resp.headers.lists?("Connection", "keep-alive")

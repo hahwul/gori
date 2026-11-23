@@ -95,9 +95,9 @@ private def received_within?(done : Channel(Nil), within : Time::Span) : Bool
 end
 
 # Sends a request for the disagreeing origin, reads its response as a browser frames it, then
-# reuses the proxy connection for a second request, as that browser would. Returns what the
-# client got after the second request and the flows recorded.
-private def reuse_after(first : String, bodyless : Bool) : {String, Array(Gori::Store::CapturedResponse)}
+# reuses the proxy connection for a second request, as that browser would. Returns the first
+# response as the client framed it, what it got after the second request, and the flows.
+private def reuse_after(first : String, bodyless : Bool) : {String, String, Array(Gori::Store::CapturedResponse)}
   origin_port, origin = disagreeing_origin(first, nil)
   done = Channel(Nil).new(4)
   sink = DisagreementSink.new(done)
@@ -108,7 +108,7 @@ private def reuse_after(first : String, bodyless : Bool) : {String, Array(Gori::
     client.read_timeout = 3.seconds
     client << "GET http://127.0.0.1:#{origin_port}/a HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
     client.flush
-    read_framed_response(client, bodyless)
+    got = read_framed_response(client, bodyless)
     begin
       client << "GET http://127.0.0.1:1/b HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n"
       client.flush
@@ -117,7 +117,7 @@ private def reuse_after(first : String, bodyless : Bool) : {String, Array(Gori::
     rest = drain(client)
     client.close rescue nil
     received_within?(done, 3.seconds)
-    {rest, sink.responses}
+    {got, rest, sink.responses}
   ensure
     proxy.stop
     origin.close rescue nil
@@ -125,14 +125,61 @@ private def reuse_after(first : String, bodyless : Bool) : {String, Array(Gori::
 end
 
 describe "Gori::Proxy::ClientConn response framing disagreement" do
-  it "does not let a TE + Content-Length response answer the client's next request" do
-    rest, flows = reuse_after("HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\nContent-Length: 5\r\n\r\nhello", false)
-    rest.should_not contain("FORGED")
-    flows.first.error.to_s.should contain("Transfer-Encoding and Content-Length")
+  it "delivers a TE + Content-Length response by its length and closes, so nothing answers the next request" do
+    first = "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\nContent-Length: 5\r\n\r\nhello"
+    got, rest, flows = reuse_after(first, false)
+    got.should eq(first) # the head byte-exact and the five bytes a browser reads
+    rest.should eq("")   # the connection closed behind it: FORGED never reaches the client
+    flow = flows.first
+    flow.state.should eq(Gori::Store::FlowState::Complete)
+    flow.error.should be_nil
+    String.new(flow.body.not_nil!).should eq("hello")
+    flow.advisory.to_s.should contain("frame it by the length")
   end
 
-  it "does not let a double-spaced 204 answer the client's next request" do
-    rest, flows = reuse_after("HTTP/1.1  204 No Content\r\n\r\n", true)
+  it "delivers a double-spaced 204 as bodyless and closes, so nothing answers the next request" do
+    first = "HTTP/1.1  204 No Content\r\n\r\n"
+    got, rest, flows = reuse_after(first, true)
+    got.should eq(first)
+    rest.should eq("")
+    flow = flows.first
+    flow.state.should eq(Gori::Store::FlowState::Complete)
+    flow.error.should be_nil
+    flow.advisory.to_s.should contain("ended the response at its head")
+  end
+
+  it "does not park the origin connection behind a TE + Content-Length response" do
+    # Two requests for the same origin on one client connection would reuse the upstream; here
+    # the first response ends both, so the second request is never answered by FORGED.
+    origin_port, origin = disagreeing_origin(
+      "HTTP/1.1 200 OK\r\nTransfer-Encoding: identity\r\nContent-Length: 5\r\n\r\nhello", nil, 50.milliseconds)
+    done = Channel(Nil).new(4)
+    sink = DisagreementSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+    begin
+      client = TCPSocket.new("127.0.0.1", proxy.port)
+      client.read_timeout = 3.seconds
+      client << "GET http://127.0.0.1:#{origin_port}/a HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+      client.flush
+      read_framed_response(client, false).should end_with("hello")
+      sleep 150.milliseconds # the origin has sent FORGED on its side by now
+      begin
+        client << "GET http://127.0.0.1:#{origin_port}/b HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+        client.flush
+      rescue IO::Error
+      end
+      drain(client).should eq("")
+      client.close rescue nil
+      sink.responses.size.should eq(1)
+    ensure
+      proxy.stop
+      origin.close rescue nil
+    end
+  end
+
+  it "refuses a malformed status line a browser reads as an interim response" do
+    _, rest, flows = reuse_after("HTTP/1.1  100 Continue\r\n\r\n", true)
     rest.should_not contain("FORGED")
     flows.first.error.to_s.should contain("ambiguous status line")
   end

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Proxy: a response a browser frames differently from gori (a non-chunked `Transfer-Encoding` with `Content-Length`, or a malformed status line such as `HTTP/1.1  204`, `http/1.1 204` or ` HTTP/1.1 204` that it reads as bodyless) is refused, and a close-delimited response ends when a client that was not pipelining sends its next request mid-stream, so an origin can no longer answer a request it never received.
+- Proxy: a response a browser frames differently from gori (a non-chunked `Transfer-Encoding` with `Content-Length`, or a malformed status line such as `HTTP/1.1  204` or `http/1.1 204` that it reads as bodyless) is framed the way the browser frames it and the connection closes behind it, and a close-delimited response ends when a client that was not pipelining sends its next request mid-stream, so an origin can no longer answer a request it never received.
 
 - Proxy: a `101 Switching Protocols` answering a request that carried no `Upgrade` header is refused with a 502 instead of opening an uncaptured tunnel, and a Match & Replace rule or intercept edit that changes the method (HEAD↔GET) closes the client connection after the response instead of keeping it alive out of step.
 
