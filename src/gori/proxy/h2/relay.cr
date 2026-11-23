@@ -120,7 +120,7 @@ module Gori::Proxy::H2
     # connection because it carries a once-per-connection warning latch.
     private def extract_for(assembler : Assembler) : Extract?
       ex = @extractor
-      ex ? Extract.new(ex, assembler, @host, @port) : nil
+      ex ? Extract.new(ex, assembler, @host, @port, @scheme) : nil
     end
 
     private def pump_plain(src : IO, dst : IO, conn_id : Int64, direction : String,

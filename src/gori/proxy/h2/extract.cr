@@ -45,8 +45,11 @@ module Gori::Proxy::H2
     private record Pending, head : Bytes, ref : Assembler::RequestRef, status : Int32,
       body : IO::Memory
 
+    # `@scheme` is the connection's TRANSPORT scheme, as the gates judge a stream on it
+    # (`StreamGate#initialize`): a rule's `scheme:`/`url:` condition must not read whatever the
+    # client spelled in `:scheme` on the same connection.
     def initialize(@extractor : Proxy::ResponseExtract, @assembler : Assembler,
-                   @host : String, @port : Int32)
+                   @host : String, @port : Int32, @scheme : String = "https")
       @warned_unscopable = false
       @pending = {} of UInt32 => Pending
       @buffered = 0
@@ -155,7 +158,7 @@ module Gori::Proxy::H2
                       body : Bytes?) : Nil
       host, port = Upstream.split_host_port(ref.authority, @port)
       @extractor.observe_response(head, body,
-        method: ref.method, host: host, target: ref.target, scheme: ref.scheme,
+        method: ref.method, host: host, target: ref.target, scheme: @scheme,
         status: status, flow_id: @assembler.flow_id_of(stream_id), port: port)
     end
 
