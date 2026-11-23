@@ -103,7 +103,17 @@ class Gori::Proxy::H2::StreamGate
     # Bytes held in rule buffers across this direction's streams (`MAX_RULE_BUFFERED`): every
     # byte its sender was credited for before gori wrote it, arriving or waiting in `sends`.
     property buffered = 0_i64
+    # DATA bytes in `waiting`, and the credit every owned stream still owes the sender for DATA
+    # waiting in its `sends` (`Owned#owed`, summed): the sender's bytes that are charged to its
+    # connection window and not yet written. `check_overrun_locked` bounds the two together.
+    property waiting_bytes = 0_i64
+    property owed = 0_i64
   end
+
+  # What a sender may have parked here beyond what the receiver let it send, before it is taken
+  # to have ignored flow control. The accounting is exact for a conformant sender; this only
+  # keeps a model gap from ending a connection that did nothing wrong.
+  OVERRUN_SLACK = DEFAULT_WINDOW
 
   # One stream whose DATA this gate sends itself.
   private class Owned
@@ -489,6 +499,7 @@ class Gori::Proxy::H2::StreamGate
     return false unless fc
     if own = fc.owned[block.stream_id]?
       block = @heads.engage(block)
+      return unsendable_locked(block, false) if block.unsendable
       last = block.frames.size - 1
       block.frames.each_with_index { |f, i| own.after << {f, i == last ? block.pre : nil} }
       if block.first.end_stream?
@@ -499,6 +510,7 @@ class Gori::Proxy::H2::StreamGate
     end
     return false unless fc.waiting_on.has_key?(block.stream_id)
     block = @heads.engage(block)
+    return unsendable_locked(block, false) if block.unsendable
     last = block.frames.size - 1
     block.frames.each_with_index { |f, i| queue_waiting(fc, f, i == last ? block.pre : nil) }
     true
@@ -517,18 +529,27 @@ class Gori::Proxy::H2::StreamGate
         @deferred_cross.concat(abandon_owned_locked(fc, own, f))
         return true
       end
-    elsif f.frame_type == Frame::Type::RstStream && fc.waiting_on.delete(f.stream_id)
-      # The stream is gone; its waiting DATA would only spend the receiver's window on a closed
-      # stream. The sender was charged for it all the same, so it is owed back.
-      fc.waiting.reject! do |(w, _)|
-        next false unless w.stream_id == f.stream_id
-        @swallowed += w.payload.size if w.frame_type == Frame::Type::Data
-        true
-      end
+    elsif f.frame_type == Frame::Type::RstStream && drop_waiting_locked(fc, f.stream_id)
       write(f, nil)
       return true
     end
     false
+  end
+
+  # The stream is gone; its DATA waiting for the connection window would only spend the
+  # receiver's window on a closed stream. The sender was charged for it all the same, so it is
+  # owed back. false when nothing of the stream was waiting.
+  private def drop_waiting_locked(fc : Flow, stream_id : UInt32) : Bool
+    return false unless fc.waiting_on.delete(stream_id)
+    fc.waiting.reject! do |(w, _)|
+      next false unless w.stream_id == stream_id
+      if w.frame_type == Frame::Type::Data
+        @swallowed += w.payload.size
+        fc.waiting_bytes -= w.payload.size
+      end
+      true
+    end
+    true
   end
 
   private def own_data_locked(fc : Flow, own : Owned, f : Frame::Header) : Nil
@@ -536,6 +557,7 @@ class Gori::Proxy::H2::StreamGate
     if own.spilled?
       own.sends << {f, f.payload.size}
       own.owed += f.payload.size
+      fc.owed += f.payload.size
       own.complete = true if f.end_stream?
       pump_owned_locked(fc, own)
       return
@@ -709,6 +731,7 @@ class Gori::Proxy::H2::StreamGate
       fc.debt += f.payload.size
       fc.buffered -= f.payload.size if credit == 0
       own.owed -= credit
+      fc.owed -= credit
       refund_locked(fc, own, credit, f.end_stream?) if credit > 0
     end
     return unless own.sends.empty? && own.complete?
@@ -747,6 +770,7 @@ class Gori::Proxy::H2::StreamGate
       credit > 0 ? (@swallowed += credit) : (fc.buffered -= f.payload.size)
     end
     fc.buffered -= own.arrived.sum(&.payload.size)
+    fc.owed -= own.owed
     own.arrived.clear
     fc.owned.delete(own.stream_id)
   end
@@ -766,6 +790,28 @@ class Gori::Proxy::H2::StreamGate
   private def queue_waiting(fc : Flow, f : Frame::Header, pre : Assembler::HeadBlock?) : Nil
     fc.waiting << {f, pre}
     fc.waiting_on[f.stream_id] += 1
+    fc.waiting_bytes += f.payload.size if f.frame_type == Frame::Type::Data
+  end
+
+  # A sender that ignores flow control would have every DATA frame parked here, since nothing on
+  # this path blocks the way TCP backpressure blocks the plain relay. Asked once per arriving
+  # DATA frame, after it was delivered, owned or parked. The sender's connection window, as gori
+  # keeps it, is the receiver's window plus the receiver's debt to gori less what is parked
+  # (`Flow`), and a conformant sender never takes it below zero. Past that (and `OVERRUN_SLACK`)
+  # it is the sender's FLOW_CONTROL_ERROR (RFC 9113 §6.9.1), and the connection ends the way
+  # `remember_refused` ends it: raised to `pump_gated`, which closes the gate. Nothing parked is
+  # written.
+  private def check_overrun_locked(frame : Frame::Header) : Nil
+    fc = @flow
+    return unless fc && frame.frame_type == Frame::Type::Data
+    parked = fc.waiting_bytes + fc.owed
+    allowed = fc.window + fc.debt + OVERRUN_SLACK
+    return if parked <= allowed
+    ::Log.warn do
+      "h2 #{@direction}: the sender has #{parked} bytes of DATA parked past the #{allowed - OVERRUN_SLACK} " \
+      "its receiver allowed (RFC 9113 §6.9.1 FLOW_CONTROL_ERROR) — closing the connection"
+    end
+    raise Gori::Error.new("h2: flow-control window exceeded by the sender")
   end
 
   private def pump_all_locked(fc : Flow) : Nil
@@ -773,6 +819,7 @@ class Gori::Proxy::H2::StreamGate
       f, pre = entry
       break if f.frame_type == Frame::Type::Data && f.payload.size > fc.window
       fc.waiting.shift
+      fc.waiting_bytes -= f.payload.size if f.frame_type == Frame::Type::Data
       left = fc.waiting_on[f.stream_id] - 1
       left > 0 ? (fc.waiting_on[f.stream_id] = left) : fc.waiting_on.delete(f.stream_id)
       write(f, pre)

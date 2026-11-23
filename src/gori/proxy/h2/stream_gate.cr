@@ -264,7 +264,12 @@ module Gori::Proxy::H2
     def initialize(@direction : String, @dst : IO, @conn_id : Int64, @sink : FlowSink,
                    @assembler : Assembler, @host : String, @port : Int32,
                    @interceptor : Gori::Interceptor, @heads : HeadRewrite,
-                   @extract : Extract? = nil, @body_rewriter : Proxy::HeadRewriter? = nil)
+                   @extract : Extract? = nil, @body_rewriter : Proxy::HeadRewriter? = nil,
+                   @scheme : String = "https")
+      # `@scheme` is the connection's TRANSPORT scheme, never a stream's `:scheme`. The bytes go
+      # over this one connection whatever the peer spells there, so a gate that judged the
+      # pseudo-header let `HTTPS`, `http` or a string carrying an in-scope URL prefix pick the
+      # URL it tested. h1 judges on the tunnel's own scheme (`ClientConn#@scheme`) the same way.
       @mutex = Mutex.new
       @slots = {} of UInt32 => Slot
       # Deferred stream-OPENING ids in arrival order (= increasing id order), request direction
@@ -352,7 +357,7 @@ module Gori::Proxy::H2
     # block's frames.
     def defer?(block : HeadRewrite::Block) : Bool
       opener = note_opener(block)
-      promise = promise_deferred_locked(block)
+      promise = decided_first_locked(block, opener)
       return promise unless promise.nil?
       return true if follow_locked(block)
       # The blocking gate runs before the holding one, and before anything is written. A
@@ -371,7 +376,7 @@ module Gori::Proxy::H2
       waits = waits_for_body?(own, held)
       unless held || queued || waits
         adopt_locked(own, nil)
-        return overtakes_verbatim_locked(block)
+        return overtakes_verbatim_locked(block, opener)
       end
 
       slot, block = new_slot_locked(block, ordered, !held.nil?)
@@ -412,7 +417,9 @@ module Gori::Proxy::H2
       return false unless slot
       # h2 trailers behind a held head. Engaged here for a verbatim head's: parked, they go out
       # ahead of any head queued after them. A latch already engaged returns the block as it is.
-      park_block(slot, @heads.engage(block))
+      block = @heads.engage(block)
+      return unsendable_locked(block, false) if block.unsendable
+      park_block(slot, block)
       true
     end
 
@@ -420,19 +427,22 @@ module Gori::Proxy::H2
     # about, so the latch engages on it and it is written re-encoded here; every later block
     # comes out of `finish` re-encoded. The heads it passed stay verbatim: they read only from
     # blocks that arrived before them, and those reach the far end first.
-    private def overtakes_verbatim_locked(block : HeadRewrite::Block) : Bool
+    private def overtakes_verbatim_locked(block : HeadRewrite::Block, opener : Bool) : Bool
       return false if @slots.empty? || @heads.engaged? || !@slots.each_value.any?(&.verbatim?)
-      write_block(@heads.engage(block))
+      block = @heads.engage(block)
+      return unsendable_locked(block, opener) if block.unsendable
+      write_block(block)
       true
     end
 
     # A verbatim head that will not go out as it arrived — suppressed, or re-encoded with a new
     # length — leaves the far decoder short of its insertions, so every head queued verbatim
-    # behind it is re-encoded now, and the latch engages for whatever arrives next.
+    # behind it is re-encoded now, and the latch engages for whatever arrives next. One past the
+    # h1 head limit comes back `unsendable` and is refused when its turn comes (`release_locked`).
     private def unverbatim_after_locked(slot : Slot) : Nil
       return unless slot.verbatim?
       slot.verbatim = false
-      @heads.latch
+      @heads.latch(slot.pending) # whatever replaces it, its own frames carry nothing now
       after = false
       @opens.each do |id|
         if id == slot.stream_id
@@ -451,6 +461,13 @@ module Gori::Proxy::H2
       opener = @ordered && block.first.frame_type == Frame::Type::Headers && block.stream_id > @highest_opened
       @highest_opened = block.stream_id if opener
       opener
+    end
+
+    # `defer?`'s answer before any per-stream gate, or nil to go on: a block `HeadRewrite` would
+    # not re-encode (`unsendable_locked`), then a PUSH_PROMISE.
+    private def decided_first_locked(block : HeadRewrite::Block, opener : Bool) : Bool?
+      return unsendable_locked(block, opener) if block.unsendable
+      promise_deferred_locked(block)
     end
 
     # `defer?`'s answer for a PUSH_PROMISE, or nil for any other block. A promise rides its
@@ -603,6 +620,7 @@ module Gori::Proxy::H2
           after_park(slot)
         end
       end
+      check_overrun_locked(frame)
       take_deferred_cross(cross)
     end
 
@@ -843,7 +861,7 @@ module Gori::Proxy::H2
       host, port = Upstream.split_host_port(authority, @port)
       method = HeadCodec.pseudo_of(fields, ":method") || "GET"
       target = HeadCodec.pseudo_of(fields, ":path") || "/"
-      scheme = HeadCodec.pseudo_of(fields, ":scheme") || "https"
+      scheme = @scheme # the transport's, as the sandbox judges it (`sandbox_blocked_url`)
       # `head` is the encoded h1-shaped head this block projects to, which is what the operator
       # sees when the message is held — so a `header:` term reads the same bytes on h2 as on h1.
       # The gate reads the HEAD even when the hold will carry a body: a `header:` term is a
@@ -873,10 +891,10 @@ module Gori::Proxy::H2
       host, port = Upstream.split_host_port(ref.authority, @port)
       return nil unless @interceptor.intercepts_response?(
                           method: ref.method, host: host, target: ref.target,
-                          scheme: ref.scheme, port: port, status: status, head: head)
+                          scheme: @scheme, port: port, status: status, head: head)
       # h1's response Item carries "<status> <reason>"; h2 has no reason phrase (§8.3.2).
       Held.new(request: false, stream_id: block.stream_id, method: ref.method,
-        target: status.to_s, host: host, port: port, scheme: ref.scheme,
+        target: status.to_s, host: host, port: port, scheme: @scheme,
         refusal: edit_refusal(block), request_target: ref.target)
     end
 
@@ -1074,6 +1092,7 @@ module Gori::Proxy::H2
 
     private def release_locked(slot : Slot) : Array(CrossRst)
       return drop_locked(slot) if slot.dropped?
+      return drop_unsendable_locked(slot) if (slot.decided || slot.pending).try(&.unsendable)
       body = slot.rebuilt
       if b = slot.decided || slot.pending
         # An edit that gives a bodiless message a body has to take END_STREAM off the head:
@@ -1082,7 +1101,8 @@ module Gori::Proxy::H2
         moved = !body.nil? && !body.empty? && b.first.end_stream?
         frames = moved ? b.frames.map { |f| without_end_stream(f) } : b.frames
         last = frames.size - 1
-        frames.each_with_index { |f, i| write(f, i == last ? b.pre : nil) }
+        verbatim = slot.verbatim?
+        frames.each_with_index { |f, i| write(f, i == last ? b.pre : nil, verbatim: verbatim) }
       end
       if body
         write_rebuilt(slot, body)
@@ -1102,7 +1122,8 @@ module Gori::Proxy::H2
     # an RST for it (RFC 9113 §6.4); only the client is told. A dropped RESPONSE is open on both
     # legs, so both are told: the client stops waiting and the origin stops sending a body we
     # are discarding.
-    private def drop_locked(slot : Slot) : Array(CrossRst)
+    private def drop_locked(slot : Slot,
+                            reason : String = @ordered ? DROP_REQUEST_REASON : DROP_RESPONSE_REASON) : Array(CrossRst)
       if b = slot.pending
         project(b)
         # A dropped REQUEST carries its buffered body into History the way h1's
@@ -1111,7 +1132,7 @@ module Gori::Proxy::H2
         # the abort marker below would then find nothing to mark.
         slot.frames.each { |(f, pre)| @assembler.feed(@direction, f, pre) } if @ordered
       end
-      @assembler.drop_stream(slot.stream_id, @ordered ? DROP_REQUEST_REASON : DROP_RESPONSE_REASON)
+      @assembler.drop_stream(slot.stream_id, reason)
       write(rst_frame(slot.stream_id), nil) unless @ordered
       # A drop is a refusal too, and it leaves the same opening: the slot is gone from `@slots`,
       # so a client that keeps sending on a dropped REQUEST would have its DATA written to an
@@ -1125,11 +1146,63 @@ module Gori::Proxy::H2
       [{slot.stream_id, CANCEL}]
     end
 
+    # A slot whose block `HeadRewrite` would not re-encode once it had to stop going out as it
+    # arrived (`HeadRewrite#reencode`): refused as an operator drop refuses one, its body rule
+    # forgotten, with the size as the reason.
+    private def drop_unsendable_locked(slot : Slot) : Array(CrossRst)
+      @flow.try { |fc| fc.owned[slot.stream_id]?.try { |own| forget_owned(fc, own) } }
+      drop_locked(slot, HeadRewrite::OVERSIZED_REASON)
+    end
+
+    # A block `HeadRewrite` would not re-encode (`Block#unsendable`): its stream is refused the
+    # way the sandbox refuses one (`refuse_locked`: projected, the flow finalized with the reason,
+    # `@refused`, RST_STREAM to the sender's leg), and the receiver's leg is reset too whenever it
+    # already has the stream open — everything but a request whose head has not gone out, which
+    # the origin never saw (RFC 9113 §6.4), as `drop_locked` decides. Whatever this gate held for
+    # the stream is discarded first, as `abandon_locked` discards it. A PUSH_PROMISE is refused as
+    # `push_refuses_locked` refuses one: the promise never reaches the client and the origin is
+    # told to cancel the promised stream; the stream it rode on carries on.
+    private def unsendable_locked(block : HeadRewrite::Block, opener : Bool) : Bool
+      reason = HeadRewrite::OVERSIZED_REASON
+      if block.first.frame_type == Frame::Type::PushPromise
+        project(block)
+        promised = promised_stream_id(block)
+        return true if promised == 0 || promised.odd?
+        @assembler.drop_stream(promised, reason)
+        remember_refused(promised)
+        @deferred_cross << {promised, CANCEL}
+        return true
+      end
+      return true if @refused.includes?(block.stream_id)
+      return stub_trailers_locked(block) if @stubbed.includes?(block.stream_id)
+      slot = @slots[block.stream_id]?
+      if slot
+        slot.item.try { |it| @interceptor.forward(it.id) }
+        slot.item = nil
+        slot.pending.try { |b| project(b) }
+        charge_swallowed(slot)
+        remove(slot)
+      end
+      @flow.try do |fc|
+        fc.owned[block.stream_id]?.try { |own| forget_owned(fc, own) }
+        drop_waiting_locked(fc, block.stream_id)
+      end
+      far_open = !@ordered || (!opener && slot.nil?)
+      refuse_locked(block, reason)
+      write(rst_frame(block.stream_id), nil) if far_open
+      @deferred_cross.concat(drain_locked) if slot
+      true
+    end
+
     # --- writing -------------------------------------------------------------
 
     # Forward one frame, then capture it, then project it — `Relay#emit`'s order, moved here so
-    # a released hold and the pump write through the same lock and the same code.
-    private def write(frame : Frame::Header, pre : Assembler::HeadBlock?, observe : Bool = true) : Nil
+    # a released hold and the pump write through the same lock and the same code. `verbatim` is a
+    # head held verbatim going out as the client sent it (`Slot#verbatim?`), which no owed table
+    # size update may lead.
+    private def write(frame : Frame::Header, pre : Assembler::HeadBlock?, observe : Bool = true,
+                      verbatim : Bool = false) : Nil
+      frame = lead_locked(frame) unless verbatim
       @dst.write(frame.wire_bytes)
       @dst.flush
       @flow.try { |fc| note_written(fc, frame) }
@@ -1143,6 +1216,19 @@ module Gori::Proxy::H2
       # exchange inside `feed`, which deletes the stream the extractor needs to scope on.
       @extract.try(&.observe(frame, pre)) if observe
       @assembler.feed(@direction, frame, pre)
+    end
+
+    # The frame about to be written, led by the peer's table size updates the far decoder is still
+    # owed (`HeadRewrite#lead`) when it opens a header block. Owing implies the direction is
+    # engaged, so every such block gori writes is one it encoded, except a head held verbatim
+    # (`write`'s `verbatim`). While one of those is still to go out, the updates wait: they arrived
+    # after it, and a shrink would evict entries its indexed references still name. One ivar test
+    # on every frame of a connection that owes nothing.
+    private def lead_locked(frame : Frame::Header) : Frame::Header
+      return frame unless @heads.owes? && frame.stream_id != 0
+      return frame unless frame.frame_type == Frame::Type::Headers || frame.frame_type == Frame::Type::PushPromise
+      return frame if @slots.each_value.any?(&.verbatim?)
+      @heads.lead(frame)
     end
 
     # One header block's frames, its projection riding the last.

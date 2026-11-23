@@ -62,6 +62,17 @@ module Gori::Proxy::H2
     # (`Assembler#feed` returns at `stream_id == 0`).
     MAX_FRAME_PAYLOAD = 16384
 
+    # Room left in the first frame of every block gori encodes for the size updates it may owe the
+    # far decoder when the block is written (`lead`): two updates (`owe` keeps the smallest and the
+    # last), each at most 4 bytes, since the decoder refuses a table over 1 MiB (`HPACK::Decoder`).
+    LEAD_RESERVE = 8
+
+    # Why a stream carrying an `unsendable` block was reset.
+    OVERSIZED_REASON = "a header block on this stream decoded to more than " \
+                       "#{Codec::Http1::MAX_HEAD_BYTES // 1024} KiB of header list, the h1 head limit, " \
+                       "and this direction re-encodes every head, so gori would have had to write all of " \
+                       "it out as literals; the stream was reset instead"
+
     # One complete header block, rules already applied, on its way out. `frames`/`pre` are
     # what the relay forwards when nothing holds it back.
     #
@@ -70,6 +81,15 @@ module Gori::Proxy::H2
     # `first`/`prefix` are what re-framing the result needs. `head` is nil for a block that is
     # not a message head — trailers, PUSH_PROMISE, or a block that could not be decoded — and
     # those are exactly the blocks that are never rule-applied and never held.
+    #
+    # `size_update` is the smallest and the last of the peer's leading §6.3 table size updates
+    # (nil when there were none). It rides the peer's own frames, and is owed to the far decoder
+    # once the block stops going out as it arrived (`owe`). `seq` is the block's place in this
+    # direction's arrival order, which is the order owed updates apply in.
+    #
+    # `unsendable` marks a block on an ENGAGED direction whose decoded list is past the h1 head
+    # limit — engaged when it arrived, or later by `engage`/`reencode`: it has no frames, and the
+    # deferrer must refuse its stream (`StreamGate#defer?`, `StreamGate#unsendable_locked`).
     record Block,
       frames : Array(Frame::Header),
       pre : Assembler::HeadBlock,
@@ -77,7 +97,10 @@ module Gori::Proxy::H2
       head : Bytes?,
       first : Frame::Header,
       prefix : Bytes,
-      request : Bool do
+      request : Bool,
+      size_update : {Int32, Int32}? = nil,
+      seq : Int64 = 0_i64,
+      unsendable : Bool = false do
       def stream_id : UInt32
         first.stream_id
       end
@@ -123,6 +146,14 @@ module Gori::Proxy::H2
       # The rules that changed the head in hand (#1589), reused per block so a head no rule
       # changes allocates nothing.
       @hits = [] of Store::RuleRef
+      # This direction's arrival counter (`Block#seq`), and the peer's table size updates owed to
+      # the far decoder (`owe`, `lead`): the smallest, and the last with its block's seq. Nothing is
+      # owed while `@owed_min` is nil. `@led_seq` is the newest block whose updates went out.
+      @seq = 0_i64
+      @owed_min = nil.as(Int32?)
+      @owed_last = 0
+      @owed_seq = 0_i64
+      @led_seq = 0_i64
     end
 
     # Whether this direction has begun re-encoding (see the class comment).
@@ -143,9 +174,14 @@ module Gori::Proxy::H2
     # others legal at all — so this is a correctness precondition of the hold, not a tidy-up.
     # A block produced while already engaged came out of `finish` re-encoded, so it is returned
     # untouched.
+    #
+    # A block whose decoded list is past the h1 head limit comes back `unsendable` instead, as
+    # `finish` makes one on a direction already engaged: re-encoding it writes the whole list out
+    # as literals, megabytes from a few KB of indexed references. The caller refuses its stream.
     def engage(block : Block) : Block
       return block if @engaged
-      latch
+      latch(block)
+      return withheld(block) if HeadCodec.h1_head_too_large?(block.fields)
       block.copy_with(frames: reframe(block.first, block.prefix, @encoder.encode(block.fields)))
     end
 
@@ -154,9 +190,48 @@ module Gori::Proxy::H2
     # comment describes, reached a third way: dropping a block leaves the far decoder short of
     # its insertions while the original encoder's table has already grown, so every later
     # passthrough block in this direction resolves its dynamic indices against the wrong table.
-    # There is nothing to re-encode here, so this is `engage` minus the block.
-    def latch : Nil
+    # There is nothing to re-encode here, so this is `engage` minus the block — and that block's
+    # table size updates are owed to the far decoder, since its frames will never carry them.
+    def latch(block : Block? = nil) : Nil
+      owe(block) if block
       @engaged = true
+    end
+
+    # Whether the far decoder is owed table size updates (`lead`). Only ever true once engaged.
+    def owes? : Bool
+      !@owed_min.nil?
+    end
+
+    # The first frame of a header block gori ENCODED, led by the peer's table size updates the far
+    # decoder is still owed, which are then paid. The caller writes this frame next, so the far
+    # decoder gets them at the start of the first block it receives after they arrived (RFC 7541
+    # §4.2) — whichever block that is, not the one they arrived in, which may be held, refused or
+    # never written. Called only for a block gori encoded: a peer block going out as it arrived
+    # still reads the table as it stood before them. Owed updates are kept as the smallest and the
+    # last, which leaves the same table and the same limit as the run they stand for, since no
+    # gori-encoded block inserts in between; so this adds at most `LEAD_RESERVE` bytes, which
+    # `reframe` left room for.
+    #
+    # The peer's values, not gori's own update to 0, though this encoder never reads or writes the
+    # dynamic table: a head held verbatim still reads the far decoder's table, and a request
+    # direction can hold one after it engaged (`StreamGate#lead_locked` waits for it).
+    def lead(frame : Frame::Header) : Frame::Header
+      min = @owed_min
+      # A frame read off the wire is the peer's bytes (an abandoned or undecodable block forwarded
+      # as it arrived): never spliced into (P7), and those updates wait for one gori built.
+      return frame unless min && frame.raw.nil? && !frame.padded?
+      at = frame.frame_type == Frame::Type::PushPromise ? 4 : (frame.priority? ? 5 : 0)
+      return frame if frame.payload.size < at
+      updates = IO::Memory.new(LEAD_RESERVE)
+      HPACK::Encoder.size_update(updates, min)
+      HPACK::Encoder.size_update(updates, @owed_last) unless @owed_last == min
+      @owed_min = nil
+      @led_seq = @owed_seq
+      payload = Bytes.new(frame.payload.size + updates.size)
+      frame.payload[0, at].copy_to(payload)
+      updates.to_slice.copy_to(payload + at)
+      frame.payload[at..].copy_to(payload + at + updates.size)
+      Frame::Header.new(frame.type, frame.flags, frame.stream_id, payload)
     end
 
     # Re-encode a held head the operator EDITED (#492 step 3, D3). Same decoder (the block was
@@ -195,18 +270,22 @@ module Gori::Proxy::H2
       if block.request && message_head?(fields, true)
         @assembler.remember_request_authority(block.stream_id, HeadCodec.pseudo_of(fields, ":authority"))
       end
-      @engaged = true
+      latch(block)
       Block.new(reframe(block.first, block.prefix, @encoder.encode(fields)),
-        Assembler::HeadBlock.new(pairs(fields)), fields, head, block.first, block.prefix, block.request)
+        Assembler::HeadBlock.new(pairs(fields)), fields, head, block.first, block.prefix, block.request,
+        block.size_update, block.seq)
     end
 
     # Re-encode a held block with `fields` in place of its own, and latch — `StreamGate` making a
-    # held head's `content-length` describe the body a rule rewrote (#1628).
+    # held head's `content-length` describe the body a rule rewrote (#1628), or a head held
+    # verbatim that has to stop being verbatim. `unsendable` past the h1 head limit, as `engage`.
     def reencode(block : Block, fields : Array(HPACK::Field)) : Block
-      latch
+      latch(block)
+      return withheld(block) if HeadCodec.h1_head_too_large?(fields)
       head = block.head && head_text(fields, block.first, block.request)
       Block.new(reframe(block.first, block.prefix, @encoder.encode(fields)),
-        Assembler::HeadBlock.new(pairs(fields)), fields, head, block.first, block.prefix, block.request)
+        Assembler::HeadBlock.new(pairs(fields)), fields, head, block.first, block.prefix, block.request,
+        block.size_update, block.seq)
     end
 
     # The frames of a head gori AUTHORS on this direction — a short-circuit stub's answer
@@ -216,6 +295,11 @@ module Gori::Proxy::H2
     def authored(stream_id : UInt32, fields : Array(HPACK::Field), end_stream : Bool) : Array(Frame::Header)
       first = Frame::Header.new(Frame::Type::Headers.value, end_stream ? Frame::END_STREAM : 0_u8, stream_id, Bytes.empty)
       reframe(first, Bytes.empty, @encoder.encode(fields))
+    end
+
+    # `block` as one that cannot go out at all (`Block#unsendable`): no frames, no head text.
+    private def withheld(block : Block) : Block
+      block.copy_with(frames: [] of Frame::Header, head: nil, unsendable: true)
     end
 
     # The bare host a rule's glob is matched against for this block's stream.
@@ -364,8 +448,14 @@ module Gori::Proxy::H2
       # Malformed/hostile HPACK. Same disposition, and the nil projection is what stops the
       # assembler from running a second (differently-positioned) decode over the same bytes.
       return unreadable(first, snapshot) if fields.nil?
+      update = leading_size_update(block)
+      seq = (@seq += 1)
 
       request = @direction == "out"
+      # Judged on the PEER's list, before any strip, so no synth below (the rule record's
+      # `synth(peer_fields)` included) ever sees a list past the h1 head limit. Such a block gets
+      # no `head`: no rule, no hold, forwarded as a rules-less connection forwards it.
+      oversized = HeadCodec.h1_head_too_large?(fields)
       # `first.stream_id`, NOT `@block_stream`: `reset` above zeroed it (deliberately — it
       # closes the buffered-block leak class), so every warning below `finish` named "stream 0",
       # a stream that cannot exist. `encode_edited` was never affected because it reads
@@ -384,9 +474,11 @@ module Gori::Proxy::H2
       # client acts on an `Alt-Svc` in. Stripping one would spend the connection's HPACK
       # passthrough (the latch below is one-way) on a field nothing reads — and a hostile
       # origin could close that latch at will by putting `alt-svc` in a trailer.
+      # Neither strip runs on an oversized list: a strip forces a re-encode, which is the cost
+      # `oversized` exists to avoid.
       stripped = false
       peer_fields = fields # what the peer sent, for a rule's record (#1589), as h1 keeps it
-      if !request && final_response_head?(fields) && (pruned = strip_alt_svc(fields, stream_id))
+      if !oversized && !request && final_response_head?(fields) && (pruned = strip_alt_svc(fields, stream_id))
         fields = pruned
         stripped = true
       end
@@ -396,7 +488,7 @@ module Gori::Proxy::H2
       # latch on a field nothing reads. Production relays always build this pipeline: `Session`
       # wires an Interceptor, so `Relay#gates` runs every request block through here.
       dictionary_removed = nil.as(Array(String)?)
-      if request && message_head?(fields, request) && (dict = strip_dictionary(fields))
+      if !oversized && request && message_head?(fields, request) && (dict = strip_dictionary(fields))
         fields, dictionary_removed = dict
         stripped = true
       end
@@ -405,9 +497,11 @@ module Gori::Proxy::H2
       # edits. Gated because the response pipeline is now built even with no rewriter (see
       # `Relay#pump_plain`), and a rules-less connection must not pay a synthesis per response
       # for a value with no consumer.
-      head = if @rewriter || @deferrer
+      consumer = @rewriter || @deferrer
+      head = if consumer && !oversized
                head_text(fields, first, request)
              end
+      note_oversized(stream_id, request) if consumer && oversized && head_text_shape?(fields, first, request)
       # Before the rewrite, and NOT from inside it: what this announces is a seam the relay
       # cannot reach at all, which is true whether or not a head rule is live. Running it from
       # `rewrite` put it behind `rw.active?`, so an operator whose only rule is a body or stub rule
@@ -437,7 +531,14 @@ module Gori::Proxy::H2
                 # Unchanged, and this direction has never re-encoded: byte-exact passthrough,
                 # which is also what keeps the peer's HPACK table driven by the original encoder.
                 # `snapshot`, not `@buf` — `@buf` was cleared above.
-                Block.new(snapshot, Assembler::HeadBlock.new(pairs(fields)), fields, head, first, prefix, request)
+                Block.new(snapshot, Assembler::HeadBlock.new(pairs(fields)), fields, head, first, prefix,
+                  request, update, seq)
+              elsif oversized
+                # Engaged, so the far decoder follows gori's encoder and the peer's frames cannot
+                # go out; re-encoding writes the whole decoded list out as literals (megabytes per
+                # block, on the pump fiber). Nothing is encoded: the gate refuses the stream.
+                withheld(Block.new([] of Frame::Header, Assembler::HeadBlock.new(pairs(fields)), fields, nil,
+                  first, prefix, request, update, seq)).tap { |b| owe(b) }
               else
                 @engaged = true
                 # A rule changed the head, so the TEXT the gate would show a human is the
@@ -445,12 +546,23 @@ module Gori::Proxy::H2
                 # operator edits is what would have been sent.
                 shown = rewritten ? head_text(emit_fields, first, request) : head
                 Block.new(reframe(first, prefix, @encoder.encode(emit_fields)),
-                  Assembler::HeadBlock.new(pairs(emit_fields)), emit_fields, shown, first, prefix, request)
+                  Assembler::HeadBlock.new(pairs(emit_fields)), emit_fields, shown, first, prefix, request,
+                  update, seq).tap { |b| owe(b) }
               end
       # `@buf` was already cleared at the top, so `defer?` raising here (StreamGate ends the
       # connection past MAX_REFUSED_STREAMS) leaves `close`'s drain nothing to write.
       return {[] of Frame::Header, built.pre} if @deferrer.try(&.defer?(built))
-      {built.frames, built.pre}
+      # With no gate to reset one stream (a relay built without an Interceptor), the connection
+      # ends instead; nothing of the block was written.
+      raise Gori::Error.new("h2 #{@direction}: #{OVERSIZED_REASON}") if built.unsendable
+      frames = built.frames
+      # With no gate nothing is held, so the block goes out now and leads with what is owed.
+      # Owing implies engaged, so `frames` are gori's.
+      if @deferrer.nil? && owes?
+        frames = frames.dup
+        frames[0] = lead(frames[0])
+      end
+      {frames, built.pre}
     end
 
     # A block this direction could not read. The frames go out exactly as they arrived (from the
@@ -472,9 +584,12 @@ module Gori::Proxy::H2
     # trailer rather than help. Both are re-encoded once engaged, never rule-applied and never
     # held — which also keeps h1 and h2 equivalent, since h1 sees neither.
     private def head_text(fields : Array(HPACK::Field), first : Frame::Header, request : Bool) : Bytes?
-      return nil if first.frame_type == Frame::Type::PushPromise
-      return nil unless message_head?(fields, request)
+      return nil unless head_text_shape?(fields, first, request)
       synth(fields, request)
+    end
+
+    private def head_text_shape?(fields : Array(HPACK::Field), first : Frame::Header, request : Bool) : Bool
+      first.frame_type != Frame::Type::PushPromise && message_head?(fields, request)
     end
 
     private def synth(fields : Array(HPACK::Field), request : Bool) : Bytes
@@ -727,6 +842,17 @@ module Gori::Proxy::H2
         "arrived, and an intercept edit to it would be refused for the same reason (#517)")
     end
 
+    # The flow's record of a message head `finish` gave no h1 text form because its decoded list
+    # is past the h1 head limit (`HeadCodec.h1_head_too_large?`). h1 refuses such a head outright;
+    # here it is forwarded as a rules-less connection forwards it, and the flow says what did not
+    # run on it.
+    private def note_oversized(stream_id : UInt32, request : Bool) : Nil
+      @assembler.note_advisory(stream_id,
+        "A #{request ? "request" : "response"} header block on this stream decoded to more than " \
+        "#{Codec::Http1::MAX_HEAD_BYTES // 1024} KiB of header list, the h1 head limit, so it has " \
+        "no HTTP/1.1 text form: Match&Replace and intercept were not applied to it")
+    end
+
     # The mirror of `warn_unparseable` for a head the PEER sent that the h1 text cannot carry
     # (#517). Not a rule's doing and not the operator's, so it gets its own line — and its own
     # flag, or whichever of the two happened first would silence the other. Always nil, so
@@ -894,12 +1020,55 @@ module Gori::Proxy::H2
       {prefix, io.to_slice}
     end
 
+    # The smallest and the last of the peer's §6.3 dynamic table size updates at the start of
+    # `block`, or nil when there are none. The shared decoder has already applied them, so a block
+    # that does not go out as it arrived leaves the far decoder without them, and a receiver that
+    # lowered SETTINGS_HEADER_TABLE_SIZE may require one at the start of the first block after its
+    # SETTINGS was acknowledged (RFC 7541 §4.2) and fail the connection with COMPRESSION_ERROR
+    # without it. Only the leading run: §4.2 allows them nowhere else. The decode succeeded, so
+    # every integer here is complete and within the decoder's 1 MiB table limit.
+    private def leading_size_update(block : Bytes) : {Int32, Int32}?
+      pos = 0
+      min = nil.as(Int32?)
+      last = 0
+      while pos < block.size && block[pos] & 0xe0 == 0x20
+        value = (block[pos] & 0x1f).to_i
+        pos += 1
+        if value == 0x1f
+          shift = 0
+          loop do
+            byte = block[pos]
+            pos += 1
+            value += (byte & 0x7f).to_i << shift
+            shift += 7
+            break if byte & 0x80 == 0
+          end
+        end
+        min = min ? Math.min(min, value) : value
+        last = value
+      end
+      min ? {min, last} : nil
+    end
+
+    # `block`'s size updates are owed to the far decoder: its own frames will not go out. Safe to
+    # call more than once for a block, and a no-op for one whose updates have already been led.
+    private def owe(block : Block) : Nil
+      min, last = block.size_update || return
+      return if block.seq <= @led_seq
+      owed = @owed_min
+      @owed_min = owed ? Math.min(owed, min) : min
+      return if block.seq < @owed_seq
+      @owed_seq = block.seq
+      @owed_last = last
+    end
+
     # HEADERS/PUSH_PROMISE + CONTINUATION for a re-encoded block, split at
     # MAX_FRAME_PAYLOAD. END_STREAM and the PRIORITY prefix are preserved; PADDED is
-    # cleared (the padding is gone); END_HEADERS lands on the last frame only.
+    # cleared (the padding is gone); END_HEADERS lands on the last frame only. The first frame
+    # keeps `LEAD_RESERVE` free for `lead`.
     private def reframe(first : Frame::Header, prefix : Bytes, block : Bytes) : Array(Frame::Header)
       frames = [] of Frame::Header
-      head_len = {block.size, MAX_FRAME_PAYLOAD - prefix.size}.min
+      head_len = {block.size, MAX_FRAME_PAYLOAD - prefix.size - LEAD_RESERVE}.min
       payload = Bytes.new(prefix.size + head_len)
       prefix.copy_to(payload) unless prefix.empty?
       block[0, head_len].copy_to(payload + prefix.size) if head_len > 0

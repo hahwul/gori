@@ -108,3 +108,34 @@ describe "Prepared wordlist paths" do
     end
   end
 end
+
+describe "Prepared exec chains" do
+  # Preparing validates and sends nothing, so a `¦exec:` step must not run either; the run the
+  # operator starts later still renders its baseline through the chain, once.
+  it "runs no command while preparing, and the run's build still does" do
+    posix_only!("a #!/bin/sh hook script")
+    dir = File.tempname("gori-prep-hook")
+    Dir.mkdir_p(dir)
+    hook = File.join(dir, "h.sh")
+    tally = File.join(dir, "tally")
+    File.write(hook, "#!/bin/sh\necho ran >> '#{tally}'\ncat\n")
+    File.chmod(hook, 0o755)
+    runs = -> { File.exists?(tally) ? File.read(tally).lines.size : 0 }
+    begin
+      with_store do |store|
+        options = Gori::Fuzz::PlanOptions.new("GET /?q=§abc¦exec:#{hook}§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+          target: "http://127.0.0.1:9",
+          sources: [Gori::Fuzz::InlineList.new(["a", "b"])].map(&.as(Gori::Fuzz::PayloadSource)))
+        prepared = Gori::Fuzz::PreparedSession.build(options, ungated_outbound)
+        prepared.insert(store, "p", nil)
+        prepared.plan.total.should eq(2_i64)
+        runs.call.should eq(0)
+        options.run_hooks?.should be_true
+        String.new(Gori::Fuzz::Plan.build(options, ungated_outbound).generator.baseline_raw).should contain("?q=abc ")
+        runs.call.should eq(1)
+      end
+    ensure
+      FileUtils.rm_rf(dir)
+    end
+  end
+end

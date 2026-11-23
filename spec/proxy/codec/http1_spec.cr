@@ -130,6 +130,61 @@ describe Gori::Proxy::Codec::Http1 do
       req.malformed?.should be_false
       Http1.h2_preface?(req).should be_false
     end
+
+    it "projects the request-line from the first non-blank line, keeping the head malformed" do
+      # RFC 9112 §2.2: a server may ignore blank lines before the request-line, so the origin
+      # reads a HEAD here; a method of "" framed its response by Content-Length.
+      ["\r\nHEAD /x HTTP/1.1\r\nHost: h\r\n\r\n", "\r\n\r\nHEAD /x HTTP/1.1\r\nHost: h\r\n\r\n",
+       "\nHEAD /x HTTP/1.1\r\nHost: h\r\n\r\n"].each do |head|
+        raw = bytes(head)
+        req = Http1.parse_request_head(raw)
+        {req.method, req.target, req.version}.should eq({"HEAD", "/x", "HTTP/1.1"})
+        req.host?.should eq("h")
+        req.malformed?.should be_true
+        req.raw_head.should eq(raw) # the blank lines stay on the record and the wire (P7)
+        req.request_line.should eq("HEAD /x HTTP/1.1")
+        Http1.parse_request_line(raw).should eq({"HEAD", "/x", true})
+      end
+    end
+
+    it "keeps an absolute-form target behind a blank line on the client's own bytes" do
+      # The forward path cuts an absolute-form target to origin form only where it can splice
+      # the request-line in place; behind a blank line it forwards the client's head unchanged.
+      # The target's colon comes after the SP that ends the method, so this is a request-line.
+      req = Http1.parse_request_head(bytes("\r\nGET http://h.test/p HTTP/1.1\r\nHost: h.test\r\n\r\n"))
+      {req.method, req.target, req.version}.should eq({"GET", "http://h.test/p", "HTTP/1.1"})
+      req.host?.should eq("h.test")
+      Http1.origin_form_head(req).should eq(req.raw_head)
+    end
+
+    it "reads a header field behind a blank line as an EMPTY request-line and keeps its header" do
+      # `\r\nHost: h` is an empty request-line, a shape a tester sends on purpose: reading
+      # `Host: h` as the request-line would take the Host a forward proxy routes it by.
+      {"\r\nHost: h\r\nX-A: 1\r\n\r\n" => "h", "\r\nHost:h\r\nX-A: 1\r\n\r\n" => "/"}.each do |head, gated|
+        raw = bytes(head)
+        req = Http1.parse_request_head(raw)
+        {req.method, req.target, req.version}.should eq({"", "", ""})
+        req.host?.should eq("h")
+        req.headers.get?("X-A").should eq("1")
+        req.malformed?.should be_true
+        req.raw_head.should eq(raw)
+        req.request_line.should eq("")
+        Http1.parse_request_line(raw).should eq({"", "", true})
+        Http1.authored_projection(raw).should eq({"", "", ""})
+        # The gate reads the line's own second token, not the parse's empty request-line.
+        Http1.gate_target(req).should eq(gated)
+      end
+    end
+
+    it "gates a header-shaped line behind a blank line on that line's own target" do
+      # The parse calls `X:y /admin HTTP/1.1` a header under an empty request-line. An origin
+      # that skips the blank line reads a request for /admin, so that is what the gate judges.
+      raw = bytes("\r\nX:y /admin HTTP/1.1\r\nHost: h.test\r\n\r\n")
+      req = Http1.parse_request_head(raw)
+      req.target.should eq("")
+      Http1.gate_target(req).should eq("/admin")
+      Http1.request_target_line(raw).should eq("/admin")
+    end
   end
 
   describe ".parse_request_line" do
@@ -170,7 +225,8 @@ describe Gori::Proxy::Codec::Http1 do
       [
         "GET /a HTTP/1.1", "GET  /echo?x=1   HTTP/1.1", "POST /a b HTTP/1.1", "GET /p",
         "PRI * HTTP/2.0", " GET / HTTP/1.1", "GET\t/a HTTP/1.1", "GET /a\tb HTTP/1.1",
-        "GET http://h/x HTTP/1.0", "GET", "",
+        "GET http://h/x HTTP/1.0", "GET", "", "\r\nHEAD /x HTTP/1.1", "\r\nHost: x",
+        "\r\nGET http://h/x HTTP/1.1",
       ].each do |line|
         raw = bytes("#{line}\r\nHost: h\r\n\r\n")
         stored = Gori::FlowMapper.request(Http1.parse_request_head(raw),
@@ -273,6 +329,44 @@ describe Gori::Proxy::Codec::Http1 do
       resp = Http1.parse_response_head(bytes("HTTP/1.1 200 OK\r\nX-Foo: a\nX-Bar: b\r\n\r\n"))
       resp.headers.get?("X-Bar").should be_nil
       resp.headers.get?("X-Foo").should eq("a\nX-Bar: b")
+    end
+  end
+
+  describe ".lenient_status" do
+    it "reads the code a lenient browser reads off a status line the strict parse rejects" do
+      {
+        "HTTP/1.1 204 No Content\r\n\r\n"       => 204,
+        "HTTP/1.1  204 No Content\r\n\r\n"      => 204, # a doubled separator
+        "http/1.1 204 No Content\r\n\r\n"       => 204, # the version in lower case
+        "HTTP/1.1 204\tNo Content\r\n\r\n"      => 204, # a tab after the code
+        "HTTP/1.1\t204 No Content\r\n\r\n"      => 204, # a tab after the version
+        "HTTP/1.1 0204 No Content\r\n\r\n"      => 204, # leading zero
+        "HTTP/1.1 204x\r\n\r\n"                 => 204, # digits, then junk
+        "\r\nHTTP/1.1 304 Not Modified\r\n\r\n" => 304, # a blank line before it
+        "HTTP/1.1 2x04 Odd\r\n\r\n"             => 2,
+        " HTTP/1.1 204 No Content\r\n\r\n"      => 204, # a leading SP
+        "\tHTTP/1.1 204 No Content\r\n\r\n"     => 204, # a leading HTAB
+        "X HTTP/1.1 204 No Content\r\n\r\n"     => 204, # a junk byte and a space
+        "XXXXHTTP/1.1 204 No Content\r\n\r\n"   => 204, # four junk bytes
+        "XXXXXHTTP/1.1 204\r\n\r\n"             => 204, # five: Chrome reads none, refusing errs safe
+        "HTTP 204 No Content\r\n\r\n"           => 204, # no slash, likewise
+        "HTTPS/1.1 204 No Content\r\n\r\n"      => 204, # likewise
+      }.each do |head, code|
+        Http1.lenient_status(bytes(head)).should eq(code)
+      end
+    end
+
+    it "finds no code where there is no version token or no digit" do
+      ["HTTP/1.1 OK\r\n\r\n", "HTTP/1.1\r\n\r\n", "XXXXXXXXHTTP/1.1 204\r\n\r\n", "FOO/1.1 204\r\n\r\n",
+       "X\r\nHTTP/1.1 204\r\n\r\n", "", "HTTP/1.1", "HTT"].each do |head|
+        Http1.lenient_status(bytes(head)).should be_nil
+      end
+    end
+
+    it "leaves the strict projection the capture records untouched" do
+      resp = Http1.parse_response_head(bytes("HTTP/1.1  204 No Content\r\n\r\n"))
+      resp.status.should eq(0)
+      resp.malformed?.should be_true
     end
   end
 
@@ -745,7 +839,7 @@ describe Gori::Proxy::Codec::Http1 do
       # RFC 9112 §2.2 tells a recipient to ignore an empty line before the request-line, so the
       # real target reaches the origin while the first line the strict parse read was "".
       req = Http1.parse_request_head(bytes("\r\n\r\nGET /admin HTTP/1.1\r\nHost: h\r\n\r\n"))
-      req.target.should eq("")
+      req.target.should eq("/admin")
       Http1.gate_target(req).should eq("/admin")
     end
 
@@ -766,6 +860,8 @@ describe Gori::Proxy::Codec::Http1 do
         "GET\t/a HTTP/1.1\r\nHost: h\r\n\r\n",
         "\r\nGET /a HTTP/1.1\r\nHost: h\r\n\r\n",
         "GET\r\nHost: h\r\n\r\n",
+        "\r\nHost: h\r\n\r\n",
+        "\r\nGET http://h/a HTTP/1.1\r\nHost: h\r\n\r\n",
       }.each do |raw|
         Http1.gate_target(Http1.parse_request_head(bytes(raw)))
           .should eq(Gori::Outbound.request_target(raw))

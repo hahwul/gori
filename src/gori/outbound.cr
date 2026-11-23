@@ -524,9 +524,12 @@ module Gori
     # the ACTIVE tools to be the lenient one. `origin_path` cannot raise, so it does not
     # degrade at all: it keeps path+query verbatim, fragment included — one more thing for
     # an exclude to match, never one fewer.
+    #
+    # Built by `Url.gate_url`, so a target without a leading slash (`GET 0/`) cannot run into the
+    # dial host and be judged as a different one.
     def self.scope_url(scheme : String, host : String, target : String, port : Int32? = nil) : String
       target = Url.origin_path(target) if Store::FlowRow.absolute_form?(target)
-      Gori::Url.request_url(scheme, host, target, port)
+      Gori::Url.gate_url(scheme, host, target, port)
     end
 
     # The EXCLUDE spelling of `scope_url` — the same url WITH its port — or nil when there is

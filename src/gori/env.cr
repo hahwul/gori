@@ -1664,6 +1664,8 @@ module Gori
     # resolves ENV and GEN in this one pass over a buffer seeded from a held message, and the
     # names that message arrived with are the client's bytes (#1416). `vars_without` cannot
     # say that for GEN, which has no table to subtract from.
+    #
+    # `splice` is `expand`'s, passed through.
     def self.expand_wire(text : String, vars : Hash(String, String) = effective_vars,
                          prefix : String = Settings.env_prefix,
                          escape : Escape = Escape::Preserve, *,
@@ -1671,10 +1673,11 @@ module Gori
                          resolve : Owns = Owns::Env,
                          unescape : Owns? = nil,
                          generation : Generation? = nil,
-                         literal : Set(String)? = nil) : Bytes
+                         literal : Set(String)? = nil,
+                         splice : (String, Int32 -> String)? = nil) : Bytes
       bytes = expand(text, vars, prefix, escape: escape,
         syntax: syntax, resolve: resolve, unescape: unescape, generation: generation,
-        literal: literal).to_slice
+        literal: literal, splice: splice).to_slice
       boundary = head_body_boundary(bytes)
       head = normalize_crlf(bytes[0...boundary])
       return head if boundary >= bytes.size
@@ -1749,6 +1752,11 @@ module Gori
     # because a BIND table is read live at the seam. Keys are spelled the way `literal_keys`
     # writes them, which is the way a token is looked up here: qualified (`BIND.id`) under the
     # namespaced grammar, bare (`id`) under the bare one.
+    #
+    # `splice` respells each substituted value before it is written, given the value and the
+    # byte offset in `text` of the token it replaces. For a caller whose output is parsed as a
+    # grammar of its own (a `§…§` template): a value is data there, so it must be escaped for
+    # the spot it lands in or it becomes syntax (`Fuzz::Template.literal_splice`).
     def self.expand(text : String, vars : Hash(String, String) = effective_vars,
                     prefix : String = Settings.env_prefix,
                     verbatim : Array({Int32, Int32})? = nil,
@@ -1758,7 +1766,8 @@ module Gori
                     unescape : Owns? = nil,
                     bind_vars : Hash(String, String)? = nil,
                     generation : Generation? = nil,
-                    literal : Set(String)? = nil) : String
+                    literal : Set(String)? = nil,
+                    splice : (String, Int32 -> String)? = nil) : String
       return text if prefix.empty?
       return text unless text.byte_index(prefix) # fast, lossless no-op when the prefix never occurs
 
@@ -1817,7 +1826,7 @@ module Gori
                   table_for(found.ns, vars, bind_vars)[found.name]?
                 end
           if val
-            buf << val
+            buf << (splice ? splice.call(val, i) : val)
           else
             w = found.miss_width(plen, syntax)
             buf.write(bytes[i, w])

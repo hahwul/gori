@@ -47,8 +47,8 @@ module Gori
         Result.new(ex.message || "invalid fuzz arguments", is_error: true)
       rescue ex : File::Error
         Result.new("wordlist error: #{ex.message}", is_error: true)
-      rescue Fuzz::CommandsRefused
-        exec_refusal || permission_denied("create_fuzzer", "exec")
+      rescue ex : Fuzz::CommandsRefused
+        fuzz_commands_refused(ex, "create_fuzzer")
       end
 
       private def mask_fuzzer_receipt(value : JSON::Any) : JSON::Any
@@ -145,9 +145,16 @@ module Gori
         Result.new(fuzz_start_echo(id, total, fjob, sc, ws_frames, ws_ignored, warn, marks_warn, sets_warn, grpc, payload_reports))
       rescue ex : FuzzArgError
         Result.new(ex.message || "invalid fuzz arguments", is_error: true)
-      rescue Fuzz::CommandsRefused
-        # Raised only when `exec` is denied or still asks (`commands_allowed`, below).
-        exec_refusal || permission_denied("fuzz_start", "exec")
+      rescue ex : Fuzz::CommandsRefused
+        fuzz_commands_refused(ex, "fuzz_start")
+      end
+
+      # `exec` denied or still asking (`commands_allowed`, below) answers with the permission
+      # refusal. An env value that supplied the command step is refused whatever `exec` says,
+      # and in the builder's own words: approving `exec` would not make the template name it.
+      private def fuzz_commands_refused(ex : Fuzz::CommandsRefused, tool : String) : Result
+        return err(ex.message || Fuzz::Plan::ENV_COMMAND_REFUSAL, "INVALID_ARGUMENT") if ex.from_env?
+        exec_refusal || permission_denied(tool, "exec")
       end
 
       # `fuzz_start`'s reply object.
@@ -255,7 +262,10 @@ module Gori
         # fuzz_config already set Config/Matcher.auto_calibrate from the arg, but nothing
         # here ever sampled — so auto_calibrate:true was a documented silent no-op.
         engine.calibrate_baseline if engine.auto_calibrate?
-        engine.run { |ev| drain_fuzz_event(fjob, ev, history) }
+        # When the next event is not queued yet, a due History chunk commits now rather than on
+        # the next result, so `fuzz_results` shows a finished row while a slow one is in flight.
+        idle = -> { flush_due_fuzz_history(fjob, history) }
+        engine.run(idle) { |ev| drain_fuzz_event(fjob, ev, history) }
       rescue ex
         Log.error(exception: ex) { "fuzz job #{fjob.id} crashed" }
         fjob.error_msg ||= ex.message || "internal fuzz job error"
@@ -354,6 +364,17 @@ module Gori
       end
 
       # Commit the queued History rows and store each with the flow id it landed as.
+      # `Engine#run`'s idle hook: the chunk commits once due, else how long until it is. Contained
+      # like `drain_fuzz_event`, so a failure cannot unwind out of the drain.
+      private def flush_due_fuzz_history(fjob : FuzzJob,
+                                         history : Fuzz::HistoryRecord::Batch({Fuzz::Result, String})) : Time::Span?
+        history.idle { flush_fuzz_history(fjob, history) }
+      rescue ex
+        fjob.drain_errors += 1
+        Log.error(exception: ex) { "fuzz job #{fjob.id} history flush error" } if fjob.drain_errors <= DRAIN_LOG_CAP
+        nil
+      end
+
       private def flush_fuzz_history(fjob : FuzzJob,
                                      history : Fuzz::HistoryRecord::Batch({Fuzz::Result, String})) : Nil
         history.flush do |(r, flow_ref), fid|
@@ -721,6 +742,8 @@ module Gori
         raise FuzzArgError.new("wordlist error: #{ex.message}")
       rescue ex : RequestMacro::Runner::ApprovalPending
         raise ex # `fuzz_start` raises the card for it
+      rescue ex : Fuzz::CommandsRefused
+        raise ex # `launch_fuzz` answers it (`fuzz_commands_refused`)
       rescue ex : Gori::Error
         # A payload set's own clean error (a bad wordlist/preset path, an unknown preset
         # reached via size()) — surfaced as a clean arg error, not an internal crash.

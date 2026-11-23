@@ -51,6 +51,34 @@ describe Gori::Repeater::Engine do
     seen.receive.should eq("GET /ping HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Test: 1\r\n\r\n") # exact bytes
   end
 
+  it "reads a non-chunked Transfer-Encoding + Content-Length response by its length" do
+    # RFC 9112 §6.3 reads it to the close; browsers and curl read the length. The origin keeps
+    # its socket open, so reading to the close would hold the send to its timeout.
+    origin = TCPServer.new("127.0.0.1", 0)
+    hold = Channel(Nil).new
+    spawn do
+      if conn = origin.accept?
+        Gori::Proxy::Codec::Http1.read_head(conn)
+        conn << "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\nContent-Length: 5\r\n\r\nhello"
+        conn.flush
+        hold.receive?
+        conn.close rescue nil
+      end
+    end
+    begin
+      started = Time.instant
+      result = Gori::Repeater::Engine.send("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+        scheme: "http", host: "127.0.0.1", port: origin.local_address.port, verify_upstream: false)
+      (Time.instant - started).should be < 5.seconds
+      result.ok?.should be_true
+      result.incomplete?.should be_false
+      String.new(result.body.not_nil!).should eq("hello")
+    ensure
+      hold.close
+      origin.close
+    end
+  end
+
   it "reports an error when the origin is unreachable" do
     result = Gori::Repeater::Engine.send("GET / HTTP/1.1\r\n\r\n".to_slice,
       scheme: "http", host: "127.0.0.1", port: 1, verify_upstream: false)
@@ -132,6 +160,33 @@ describe Gori::Repeater::Engine do
     results.all?(&.ok?).should be_true
     String.new(results[0].body.not_nil!).should eq("c1/a")
     String.new(results[1].body.not_nil!).should eq("c1/b") # SAME c1 → one connection
+  end
+
+  it "send_pipeline ends the group behind a response framed by a lenient reading's length" do
+    # What the origin writes after a non-chunked TE + Content-Length body is not the next
+    # member's answer: the socket is retired and the rest of the group is marked skipped.
+    origin = TCPServer.new("127.0.0.1", 0)
+    spawn do
+      if conn = origin.accept?
+        Gori::Proxy::Codec::Http1.read_head(conn)
+        conn << "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\nContent-Length: 5\r\n\r\nhello" \
+                "HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nFORGED"
+        conn.flush
+        sleep 0.5.seconds
+        conn.close rescue nil
+      end
+    end
+    begin
+      reqs = ["GET /one HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+              "GET /two HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice]
+      results = Gori::Repeater::Engine.send_pipeline(reqs, scheme: "http", host: "127.0.0.1",
+        port: origin.local_address.port, verify_upstream: false, timeout: 3.seconds)
+      String.new(results[0].body.not_nil!).should eq("hello")
+      results[1].error.should eq(Gori::Repeater::Engine::PIPELINE_SKIPPED)
+      results[1].body.should be_nil
+    ensure
+      origin.close rescue nil
+    end
   end
 
   it "send_pipeline marks the remaining requests when the origin closes mid-group" do

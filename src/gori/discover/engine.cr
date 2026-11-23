@@ -1250,7 +1250,12 @@ module Gori::Discover
           oc.links.each { |lnk| consider_link(task.depth, base, lnk) }
         end
       end
-      if @config.follow_redirects? && (loc = fetched.redirect_to)
+      # A `Location` is REMOTE-chosen, so a request-line breaker in it (SP, TAB, DEL, any C0) is
+      # refused here, not repaired by `Url.parse`'s `encode_unsafe` the way a page-authored
+      # `<a href="/my file">` is: gori cannot know which URL the origin meant, and the run keeps
+      # the 3xx it got. Dropped like any other link `bounded_url` refuses, and the same rule the
+      # Fuzzer's redirect follower applies (`Fuzz::Engine#redirect_request`).
+      if @config.follow_redirects? && (loc = fetched.redirect_to) && Proxy::Codec::Http1.request_token_safe?(loc)
         if base = Url.parse(task.url)
           consider_link(task.depth, base, RawLink.new(loc, Source::Redirect))
         end

@@ -172,6 +172,10 @@ module Gori
         property frames = 0
         # The status line an h1-only origin answered the preface with (`h1_answer`).
         property h1_answer : String? = nil
+        # Why the connection's HPACK table stopped matching the peer's (`ForeignBlock`): the
+        # read ends there, the response is reported incomplete with this reason, and the
+        # connection is never reused.
+        property hpack_lost : String? = nil
 
         # Bytes the peer will accept on this exchange's stream right now. Never negative: §6.9.2 lets a
         # SETTINGS shrink drive a window below zero, and that simply means "send nothing".
@@ -299,6 +303,105 @@ module Gori
         def close : Nil
           @io.close rescue nil
         end
+      end
+
+      # The header blocks on a connection whose fields nobody will read: a stream already done
+      # (cut at the body cap, failed locally for an oversized header list), a stream gori never
+      # opened, or a PUSH_PROMISE. The fields are dropped, but the block itself still has to go
+      # through the connection's decoder: §2.3.2 makes the dynamic table connection state built
+      # up across EVERY block, so a skipped block that inserted an entry leaves gori resolving
+      # later indexes against the wrong table, and a sibling's or the next pooled response's
+      # headers come back WRONG with no error at all.
+      #
+      # Assembled to END_HEADERS first, for the reason `H2WsStream#absorb_trailers` gives (a
+      # CONTINUATION may split one HPACK instruction anywhere), under the same
+      # `MAX_HEADER_BLOCK` cap. A block past it, one that fails to decode, or a fragment with no
+      # block to continue means the table can no longer be trusted: `feed` raises a
+      # `Gori::Error` naming that, and the reader fails what is left on the connection. A list
+      # that decoded but is too large is not that: the decoder applied every table instruction
+      # before refusing the projection, and nothing here wanted the projection.
+      class ForeignBlock
+        @buf = IO::Memory.new
+        @stream : UInt32? = nil
+
+        # Is a block open on `stream_id`, waiting for its CONTINUATION?
+        def open_on?(stream_id : UInt32) : Bool
+          @stream == stream_id
+        end
+
+        # Feed one HEADERS, PUSH_PROMISE or CONTINUATION frame of a block nobody reads.
+        def feed(frame : Frame::Header, decoder : HPACK::Decoder) : Nil
+          chunk = case frame.frame_type
+                  when Frame::Type::Continuation
+                    unless open_on?(frame.stream_id)
+                      raise H2Engine.hpack_lost("a CONTINUATION on stream #{frame.stream_id} continues no header block")
+                    end
+                    frame.payload
+                  when Frame::Type::Headers, Frame::Type::PushPromise
+                    if open = @stream
+                      reset
+                      raise H2Engine.hpack_lost("the header block on stream #{open} was interrupted before END_HEADERS")
+                    end
+                    @stream = frame.stream_id
+                    frame.frame_type == Frame::Type::Headers ? H2Engine.header_block(frame) : H2Engine.push_promise_block(frame)
+                  else
+                    return
+                  end
+          if @buf.bytesize + chunk.size > MAX_HEADER_BLOCK
+            reset
+            raise H2Engine.hpack_lost("h2 header block exceeds #{MAX_HEADER_BLOCK} bytes")
+          end
+          @buf.write(chunk)
+          return unless frame.end_headers?
+          block = @buf.to_slice
+          sid = @stream
+          begin
+            decoder.decode(block)
+          rescue HPACK::HeaderListTooLarge
+            # Every table instruction was applied; only the unread projection was refused.
+          rescue ex
+            raise H2Engine.hpack_lost("the header block on stream #{sid} could not be decoded (#{ex.message || ex.class.name})")
+          ensure
+            reset
+          end
+        end
+
+        private def reset : Nil
+          @buf.clear
+          @stream = nil
+        end
+      end
+
+      # RFC 9113 §6.10 for one connection's reader: while a header block is open (a HEADERS or
+      # PUSH_PROMISE without END_HEADERS, on any stream, ours or not), the ONLY frame the peer may
+      # send is a CONTINUATION on that same stream, and a CONTINUATION with no block open is no
+      # frame at all. Anything else is a connection error, and it is the HPACK one: the open
+      # block was never decoded, so a block decoded after it would resolve against a table the
+      # peer has not built yet (or one that never gets the open block's entries). Every frame
+      # the reader takes off the socket is passed through `check` before it is acted on.
+      class HeaderBlockGate
+        @open : UInt32? = nil
+
+        def check(frame : Frame::Header) : Nil
+          type = frame.frame_type
+          if open = @open
+            unless type == Frame::Type::Continuation && frame.stream_id == open
+              raise H2Engine.hpack_lost("a #{type} frame on stream #{frame.stream_id} arrived inside the " \
+                                        "header block still open on stream #{open} (RFC 9113 §6.10)")
+            end
+            @open = nil if frame.end_headers?
+          elsif type == Frame::Type::Continuation
+            raise H2Engine.hpack_lost("a CONTINUATION on stream #{frame.stream_id} continues no header block")
+          elsif (type == Frame::Type::Headers || type == Frame::Type::PushPromise) && !frame.end_headers?
+            @open = frame.stream_id
+          end
+        end
+      end
+
+      # The error a reader fails a connection with once its HPACK table no longer matches the
+      # peer's. One spelling, so every reader and the MCP error kinds name it the same way.
+      def self.hpack_lost(what : String) : Gori::Error
+        Gori::Error.new("#{what} — HPACK state lost")
       end
 
       # Open one h2 connection, or say why there isn't one — the seam `H2Pool` dials through.
@@ -515,7 +618,7 @@ module Gori
       # The `poisoned?` verdict `carry_over` records — see there.
       private def self.spent_socket?(conn : Conn, flow : SendFlow, reply : Reply) : Bool
         conn.spent? || flow.eof? || !flow.goaway.nil? || !flow.rst.nil? || !flow.stall.nil? ||
-          reply.timed_out || !reply.clean_eos || flow.draining?
+          reply.timed_out || !reply.clean_eos || flow.draining? || !flow.hpack_lost.nil?
       end
 
       # Everything gori has to say about how an exchange went, or nil when it went cleanly:
@@ -529,7 +632,8 @@ module Gori
       # completed anyway) must not have its 200 turned into a failure.
       private def self.send_side_reason(reply : Reply, flow : SendFlow,
                                         host : String, port : Int32) : String?
-        parts = [] of String
+        # A lost HPACK table leads: nothing decoded after it can be trusted.
+        parts = [flow.hpack_lost].compact
         if reason = reply.rst || reply.goaway
           parts << attribute(reason, host, port, flow)
         end
@@ -1043,6 +1147,8 @@ module Gori
             !flow.eof?, false)
         end
         header_buf = IO::Memory.new
+        foreign = ForeignBlock.new # blocks of other streams, decoded and dropped
+        blocks = HeaderBlockGate.new
         body = IO::Memory.new
         headers = [] of {String, String}
         status = 0
@@ -1153,6 +1259,7 @@ module Gori
             flow.frames += 1
             break if flow.frames > MAX_FRAMES
           end
+          break unless in_block_order(blocks, frame, flow)
           case frame.frame_type
           when Frame::Type::Settings
             unless frame.ack?
@@ -1198,7 +1305,10 @@ module Gori
               done = true
             end
           when Frame::Type::Headers
-            next unless frame.stream_id == flow.id
+            unless frame.stream_id == flow.id
+              break unless keep_table(foreign, frame, decoder, flow)
+              next
+            end
             progress = Time.instant
             chunk = header_block(frame)
             break if header_buf.bytesize + chunk.size > MAX_HEADER_BLOCK # flood — abort
@@ -1216,7 +1326,11 @@ module Gori
               done = clean_eos = true if end_stream_pending
             end
           when Frame::Type::Continuation
-            next unless frame.stream_id == flow.id
+            # A PUSH_PROMISE's block continues on the stream it was sent on, which may be ours.
+            if frame.stream_id != flow.id || foreign.open_on?(frame.stream_id)
+              break unless keep_table(foreign, frame, decoder, flow)
+              next
+            end
             progress = Time.instant
             break if header_buf.bytesize + frame.payload.size > MAX_HEADER_BLOCK # flood — abort
             header_buf.write(frame.payload)
@@ -1270,8 +1384,11 @@ module Gori
             # the one misattribution `attribute` exists to prevent. (GET sweeps never write
             # DATA, which is why nothing caught it.)
             credit(frame, flow)
+          when Frame::Type::PushPromise
+            # Refused by SETTINGS_ENABLE_PUSH=0, but its header block still moved the table.
+            break unless keep_table(foreign, frame, decoder, flow)
           else
-            # PUSH_PROMISE / PRIORITY — nothing this exchange needs.
+            # PRIORITY — nothing this exchange needs.
           end
         end
 
@@ -1282,6 +1399,27 @@ module Gori
           run.try(&.reason), run.try(&.times))
       ensure
         sock.try(&.read_timeout = idle) if run
+      end
+
+      # `HeaderBlockGate#check`, with a violation recorded on `flow` as the lost table it is:
+      # false ends the read.
+      private def self.in_block_order(blocks : HeaderBlockGate, frame : Frame::Header, flow : SendFlow) : Bool
+        blocks.check(frame)
+        true
+      rescue ex : Gori::Error
+        flow.hpack_lost = ex.message
+        false
+      end
+
+      # Run a block this exchange does not read through the connection's decoder (`ForeignBlock`).
+      # False once the table is lost, with the reason on `flow`: the read ends there.
+      private def self.keep_table(foreign : ForeignBlock, frame : Frame::Header,
+                                  decoder : HPACK::Decoder, flow : SendFlow) : Bool
+        foreign.feed(frame, decoder)
+        true
+      rescue ex : Gori::Error
+        flow.hpack_lost = ex.message
+        false
       end
 
       # The bound for this stream, read off the final head's fields (h2 names are lowercase).
@@ -1804,6 +1942,22 @@ module Gori
           offset = 1
         end
         offset += 5 if frame.priority?
+        finish = payload.size - pad
+        finish <= offset ? Bytes.empty : payload[offset...finish]
+      end
+
+      # A PUSH_PROMISE's header block fragment (RFC 9113 §6.6): the payload past its optional
+      # pad length and the 4-byte promised stream id, padding dropped. No priority field.
+      def self.push_promise_block(frame : Frame::Header) : Bytes
+        payload = frame.payload
+        offset = 0
+        pad = 0
+        if frame.padded?
+          return Bytes.empty if payload.empty?
+          pad = payload[0].to_i
+          offset = 1
+        end
+        offset += 4
         finish = payload.size - pad
         finish <= offset ? Bytes.empty : payload[offset...finish]
       end

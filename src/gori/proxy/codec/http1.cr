@@ -532,11 +532,17 @@ module Gori::Proxy::Codec::Http1
   # callers can reject the connection cleanly instead of accepting a fake request.
   H2_PREFACE_LINE = "PRI * HTTP/2.0"
 
+  # The method/target/version projection reads the first NON-BLANK line, as `request_target_line`
+  # does for the gate: RFC 9112 §2.2 lets a server ignore blank lines before the request-line,
+  # so an origin reads `\r\nHEAD / HTTP/1.1` as a HEAD, and a method of `""` framed its
+  # response by Content-Length. Such a head stays `malformed?` (an origin may not skip them) and
+  # `raw_head` keeps the blank lines (P7).
   def self.parse_request_head(raw : Bytes) : RawRequest
-    first_crlf = index_crlf(raw, 0)
-    start = String.new(raw[0, first_crlf || raw.size])
+    from = request_line_start(raw)
+    first_crlf = index_crlf(raw, from)
+    start = String.new(raw[from, (first_crlf || raw.size) - from])
     parts = start.split(' ')
-    malformed = start_line_malformed?(start, parts)
+    malformed = from > 0 || start_line_malformed?(start, parts)
     RawRequest.new(
       raw_head: raw,
       method: parts[0]? || "",
@@ -581,18 +587,21 @@ module Gori::Proxy::Codec::Http1
   # scan would call a bare-LF `verbatim` head malformed, which is the misreading
   # `authored_start_line` exists to avoid. The flip side is deliberate: a bare LF INSIDE a
   # CRLF line ends it here, where the proxy reads on to the CRLF. The wire bytes are
-  # untouched either way (P7).
+  # untouched either way (P7). Blank lines in front of the request-line are skipped and make
+  # the line malformed, as in the proxy's parse.
   def self.authored_projection(raw : Bytes) : {String, String, String}
-    line = authored_line(raw)
+    from = request_line_start(raw)
+    line = authored_line(raw, from)
     parts = line.split(' ')
     method = parts[0]? || ""
-    return {method, line, ""} if start_line_malformed?(line, parts)
+    return {method, line, ""} if from > 0 || start_line_malformed?(line, parts)
     {method, parts[1], parts[2]}
   end
 
-  # The first line of a hand-authored head, ended by a bare LF or a CRLF (a lone CR is kept).
-  private def self.authored_line(raw : Bytes) : String
-    i = 0
+  # The line of a hand-authored head that starts at `from`, ended by a bare LF or a CRLF (a
+  # lone CR is kept).
+  private def self.authored_line(raw : Bytes, from : Int32 = 0) : String
+    i = from
     n = raw.size
     eol = n
     while i < n
@@ -603,7 +612,7 @@ module Gori::Proxy::Codec::Http1
       end
       i += 1
     end
-    String.new(raw[0, eol])
+    String.new(raw[from, eol - from])
   end
 
   # Whether a request start-line `split(' ')` cannot frame: anything but exactly three tokens
@@ -668,16 +677,54 @@ module Gori::Proxy::Codec::Http1
   end
 
   # The request start-line's {method, target, malformed} WITHOUT parsing/allocating the header
-  # block. Mirrors parse_request_head's start-line parse EXACTLY (same index_crlf + String.new
-  # over the first line + split(' ') + `parts.size != 3 || start == H2_PREFACE_LINE` malformed
-  # rule), so a caller that only needs method+target (the active-probe dedup_key gate) keys
-  # byte-identically to a full parse. The dedup_key ⇔ plan equivalence spec guards against any
+  # block. Mirrors parse_request_head's start-line parse EXACTLY (same blank-line skip +
+  # index_crlf + String.new over the request-line + split(' ') + malformed rule), so a caller
+  # that only needs method+target (the active-probe dedup_key gate) keys byte-identically to a
+  # full parse. The dedup_key ⇔ plan equivalence spec guards against any
   # drift from parse_request_head.
   def self.parse_request_line(raw : Bytes) : {String, String, Bool}
-    first_crlf = index_crlf(raw, 0)
-    start = String.new(raw[0, first_crlf || raw.size])
+    from = request_line_start(raw)
+    first_crlf = index_crlf(raw, from)
+    start = String.new(raw[from, (first_crlf || raw.size) - from])
     parts = start.split(' ')
-    {parts[0]? || "", parts[1]? || "", start_line_malformed?(start, parts)}
+    {parts[0]? || "", parts[1]? || "", from > 0 || start_line_malformed?(start, parts)}
+  end
+
+  # Where the request-line starts: past any blank lines (CRLF, or a bare LF) in front of it,
+  # when the line after them is shaped like a request-line. 0 for every ordinary head, and 0
+  # when that line is a header field (`header_field_line?`): `\r\nHost: h` is an EMPTY
+  # request-line followed by its headers, a shape a tester sends on purpose, and reading
+  # `Host: h` as the request-line would take the Host the forward proxy routes it by.
+  def self.request_line_start(raw : Bytes) : Int32
+    i = 0
+    n = raw.size
+    loop do
+      if i < n && raw.unsafe_fetch(i) == 0x0a_u8
+        i += 1
+      elsif i + 1 < n && raw.unsafe_fetch(i) == 0x0d_u8 && raw.unsafe_fetch(i + 1) == 0x0a_u8
+        i += 2
+      else
+        return header_field_line?(raw, i) ? 0 : i
+      end
+    end
+  end
+
+  # Whether the line at `from` is shaped like a header field rather than a request-line,
+  # decided lexically: a field is `token ":"` with the colon before any SP/HTAB, while a
+  # request-line has SP after its method before any colon (an absolute-form target's colon
+  # comes after that SP). The one home for that test, so the request projections cannot read
+  # a line behind a blank line differently. The gate's `request_target_line` does not ask it:
+  # it judges the line's own target either way.
+  private def self.header_field_line?(raw : Bytes, from : Int32) : Bool
+    i = from
+    while i < raw.size
+      case raw.unsafe_fetch(i)
+      when 0x3a_u8                            then return i > from
+      when 0x20_u8, 0x09_u8, 0x0d_u8, 0x0a_u8 then return false
+      end
+      i += 1
+    end
+    false
   end
 
   # The request-target the SCOPE GATE reads — NOT what goes on the wire.
@@ -772,7 +819,14 @@ module Gori::Proxy::Codec::Http1
       # no-arg `split` (the tokenizer) treat that CR as whitespace either way. The corpus in
       # spec/outbound_spec.cr covers the CR-bearing shapes for exactly this reason.
       line = String.new(raw[pos, stop - pos])
-      return line.split[1]? || "/" unless line.strip.empty?
+      unless line.strip.empty?
+        # The line's own second token, whatever the line is shaped like. The PARSE reads a
+        # header-shaped line behind blank lines as a header under an empty request-line
+        # (`request_line_start`); the gate does not follow it there, because an origin that
+        # skips the blank lines reads `X:y /admin HTTP/1.1` as a request for `/admin`, and no
+        # origin reads the `/` an empty request-line would stand for.
+        return line.split[1]? || "/"
+      end
       break unless nl
       pos = nl + 1
     end
@@ -844,6 +898,76 @@ module Gori::Proxy::Codec::Http1
       headers: headers,
       malformed: malformed,
     )
+  end
+
+  # The status code a LENIENT client reads off a response head's status line, or nil when it
+  # finds none. `build_response` above is strict on purpose and stays the record; this is the
+  # other reading, the one `Body.response_framing` compares against it.
+  #
+  # Measured against headless Chrome (a reused socket means it read a bodyless 204): it took
+  # `HTTP/1.1  204`, `http/1.1 204`, `HTTP/1.1 204\tNo Content`, `HTTP/1.1 0204`,
+  # `HTTP/1.1 204x`, a leading CRLF, a leading SP or HTAB, `X HTTP/1.1 204` and
+  # `XXXXHTTP/1.1 204` as a 204. It did not for five junk bytes before `HTTP`, `HTTP 204`,
+  # `HTTPS/1.1 204` or `HTTP/1.1 2x04`. So it looks for `http`, any case, within a small slop
+  # of the start of the line. This reading is at least that lenient and errs toward refusing:
+  # past leading CR/LF it finds `http` starting within the first `LENIENT_STATUS_SLOP` bytes
+  # of the line, does not require the `/`, takes the version token up to the first SP or
+  # HTAB, skips the separator run, and reads the leading run of digits as the code, leading
+  # zeros included. Allocation-free: it walks the bytes and never builds the line.
+  def self.lenient_status(raw : Bytes) : Int32?
+    line = skip_bytes(raw, 0) { |b| b == 0x0d_u8 || b == 0x0a_u8 }
+    return nil unless at = lenient_http_at(raw, line)
+    return nil unless sep = lenient_version_end(raw, at + 4)
+    lenient_code(raw, skip_bytes(raw, sep) { |b| status_separator?(b) })
+  end
+
+  # How far into the status line `lenient_status` looks for `http` (Chrome allows four bytes).
+  LENIENT_STATUS_SLOP = 8
+
+  # Where `http` (any case) starts within the slop of the line at `line`, or nil.
+  private def self.lenient_http_at(raw : Bytes, line : Int32) : Int32?
+    (line...line + LENIENT_STATUS_SLOP).each do |at|
+      return nil if at + 4 > raw.size
+      b = raw.unsafe_fetch(at)
+      return nil if b == 0x0d_u8 || b == 0x0a_u8 # the line ended first
+      return at if lenient_http_prefix?(raw, at)
+    end
+    nil
+  end
+
+  # The index of the separator that ends the version token, or nil when the line (or the head)
+  # ends inside it.
+  private def self.lenient_version_end(raw : Bytes, from : Int32) : Int32?
+    i = skip_bytes(raw, from) { |b| !status_separator?(b) && b != 0x0d_u8 && b != 0x0a_u8 }
+    i < raw.size && status_separator?(raw.unsafe_fetch(i)) ? i : nil
+  end
+
+  # The leading run of digits at `from` as a code, or nil when there is none. Past three digits
+  # the value stops growing: it is no bodyless code either way, and it cannot overflow.
+  private def self.lenient_code(raw : Bytes, from : Int32) : Int32?
+    stop = skip_bytes(raw, from) { |b| b >= 0x30_u8 && b <= 0x39_u8 }
+    return nil if stop == from
+    code = 0
+    (from...stop).each { |j| code = code * 10 + (raw.unsafe_fetch(j) - 0x30_u8) if code < 1000 }
+    code
+  end
+
+  # The first index at or after `from` whose byte the block rejects, or `raw.size`.
+  private def self.skip_bytes(raw : Bytes, from : Int32, & : UInt8 -> Bool) : Int32
+    i = from
+    while i < raw.size && yield raw.unsafe_fetch(i)
+      i += 1
+    end
+    i
+  end
+
+  private def self.lenient_http_prefix?(raw : Bytes, at : Int32) : Bool
+    raw.unsafe_fetch(at) | 0x20_u8 == 'h'.ord && raw.unsafe_fetch(at + 1) | 0x20_u8 == 't'.ord &&
+      raw.unsafe_fetch(at + 2) | 0x20_u8 == 't'.ord && raw.unsafe_fetch(at + 3) | 0x20_u8 == 'p'.ord
+  end
+
+  private def self.status_separator?(b : UInt8) : Bool
+    b == 0x20_u8 || b == 0x09_u8
   end
 
   # Forwarding/serialization is byte-exact: emit the captured head as-is (P7).

@@ -11,7 +11,10 @@ module Gori::Fuzz
     getter state : SessionConfig
 
     def self.build(options : PlanOptions, outbound : Gori::Outbound) : PreparedSession
-      plan = Plan.build(options, outbound)
+      # Validation only: a chain's `exec:` step is withheld from the plan's baseline render.
+      validate = options
+      validate.run_hooks = false
+      plan = Plan.build(validate, outbound)
       state = SessionConfig.new(options.config, options.matcher, options.http2?, options.sni || "",
         options.sources.map { |source| SetSpec.from_source(source) })
       state.options = SessionOptions.capture(options)

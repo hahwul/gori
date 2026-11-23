@@ -97,6 +97,11 @@ class Gori::Tui::RepeaterView
     expanded_text_to_bytes(@editor.wire_text)
   end
 
+  # The same bytes for a buffer `render_marked` parses as a §…§ template.
+  private def marked_editor_bytes : Bytes
+    expanded_text_to_bytes(@editor.wire_text, marked: true)
+  end
+
   # Head terminator + auto-Content-Length: the last two steps every plain-text send
   # shares. Kept in one place so the single send and `pipeline_requests` cannot disagree
   # about the bytes they put on the wire.
@@ -159,13 +164,17 @@ class Gori::Tui::RepeaterView
   # done explicitly because `TextArea#insert_newline` gives a typed line a bare LF and
   # names `expand_wire` as what promotes it — shipping one inside a head is itself a
   # front-end/back-end desync primitive, i.e. a different test than the one on screen.
-  private def expanded_text_to_bytes(text : String) : Bytes
+  #
+  # `marked`: the result is parsed as a §…§ template, so each env value is spliced as a literal
+  # (`Fuzz::Template.literal_splice`) and cannot add a position or a `¦chain` of its own.
+  private def expanded_text_to_bytes(text : String, marked : Bool = false) : Bytes
     # `unescape: Owns::None` on the evidence branch, and it is not belt-and-braces. `Escape::Preserve`
     # is a BARE-mode knob: under the namespaced grammar `unescape_set` ignores it and returns the
     # pass's own `resolve` set, so this call consumed `$$ENV.X` — and a replay of captured bytes
     # holding `$$ENV.PATH` shipped `$ENV.PATH`. An evidence path expands nothing the capture brought
     # and unescapes nothing either: a `$$` in captured bytes is two bytes the origin sent.
-    wire = @evidence ? Env.expand_wire(text, operator_env_vars, unescape: Env::Owns::None) : Env.expand_wire(text)
+    splice = marked ? Fuzz::Template.literal_splice(text) : nil
+    wire = @evidence ? Env.expand_wire(text, operator_env_vars, unescape: Env::Owns::None, splice: splice) : Env.expand_wire(text, splice: splice)
     Repeater::FlowRequest.normalize_multipart_body(wire)
   end
 
@@ -212,8 +221,28 @@ class Gori::Tui::RepeaterView
   # that cannot run is REFUSED here (`Fuzz::Plan.refuse_unrunnable_chains` for a chain that
   # could never run, `refuse_failed_chains` for one that failed on this value) rather than let
   # `Template#apply_chains` drop the raw, untransformed value onto the socket.
+  #
+  # Refused, too, when the expanded markers are not the ones the editor wrote, or an env value
+  # supplied a chain step that runs a local command (`Fuzz::Plan.env_splice_refusal`).
   private def marked_request_bytes : Bytes
-    finalize_wire(render_marked(expanded_editor_bytes, refuse: true))
+    bytes = marked_editor_bytes
+    if refusal = marker_env_refusal(bytes)
+      raise Fuzz::ChainError.new(Fuzz::Plan.env_splice_message(refusal))
+    end
+    finalize_wire(render_marked(bytes, refuse: true))
+  end
+
+  # `Fuzz::Plan.env_splice_refusal` for this editor: `expanded` is `marked_editor_bytes`, and the
+  # fragment pass is the one `expanded_text_to_bytes` ran, without the splice.
+  private def marker_env_refusal(expanded : Bytes) : Symbol?
+    fragment =
+      if @evidence
+        vars = operator_env_vars
+        ->(frag : String) { Env.expand(frag, vars, unescape: Env::Owns::None) }
+      else
+        ->(frag : String) { Env.expand(frag) }
+      end
+    Fuzz::Plan.env_splice_refusal(@editor.wire_text, String.new(expanded), fragment)
   end
 
   # Render the §…§ template in `raw` (each marked default through its inline Decoder

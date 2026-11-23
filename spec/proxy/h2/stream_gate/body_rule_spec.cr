@@ -1280,6 +1280,35 @@ describe "H2::StreamGate body rules: the HPACK latch" do
     end
   end
 
+  # A block that overtakes a head held verbatim may carry a size update that SHRINKS the table,
+  # evicting entries the held head's indexed references still name. The far decoder gets that
+  # update only once no head held verbatim is left to go out, on the next block gori encodes.
+  it "keeps a table shrink on an overtaking block until the verbatim head behind it is out" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "absent", "x", host: API)
+      g = GatePair.new(rules, ic, 5.seconds, indexing: true)
+      first = post("/stream", authority: API) + [{"x-tag", "t1"}]
+      g.request(1_u32, first)                                             # no length: never held, stays open
+      held = post("/held", 3, authority: API) + [{"x-tag", "t1"}]         # indexed against stream 1's
+      g.request(3_u32, held)                                              # held verbatim for its body
+      shrink = Bytes[0x20] + HPACK::Encoder.new.encode([{"x-done", "1"}]) # table to 0, then literals
+      g.out_gate.accept(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS | Frame::END_STREAM,
+        1_u32, shrink))
+      g.data(g.out_gate, 3_u32, "one", true)
+      g.out_gate.accept(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS | Frame::END_STREAM,
+        5_u32, HPACK::Encoder.new.encode(get("/next", API))))
+
+      heads = g.frames(g.up).select(&.frame_type.==(Frame::Type::Headers))
+      heads.map(&.stream_id).should eq([1_u32, 1_u32, 3_u32, 5_u32])
+      far = HPACK::Decoder.new # the origin's decoder, strict about every index
+      heads.map { |f| far.decode(f.payload) }.should eq([first, [{"x-done", "1"}], held, get("/next", API)])
+      heads[1].payload[0].should_not eq(0x20_u8)
+      heads[3].payload[0].should eq(0x20_u8)
+      far.max_size.should eq(0)
+      g.close
+    end
+  end
+
   it "re-encodes a head queued behind a held head the client reset" do
     with_rules do |rules, ic|
       rules.add(REQ, BODY, "absent", "x", host: API)
@@ -1293,6 +1322,112 @@ describe "H2::StreamGate body rules: the HPACK latch" do
       shape(frames).should eq([{Frame::Type::Headers, 3_u32}, {Frame::Type::Data, 3_u32}])
       frames.first.payload.should_not eq(sent)
       heads_of(frames, 3_u32).first.should eq(second)
+      g.close
+    end
+  end
+end
+
+# One 4000-byte literal inserted into the dynamic table, then `n` one-byte references to it: a
+# few KB of HPACK that decodes to n × 4 KB, with no pseudo-header (a trailer block).
+private def amplified_trailers(n : Int32) : Bytes
+  io = IO::Memory.new
+  io.write_byte(0x40_u8) # literal with incremental indexing, new name
+  io.write_byte(3_u8)
+  io << "x-a"
+  io.write_byte(0x7f_u8) # value length 4000, raw: 127 + varint(3873)
+  rest = 4000 - 127
+  while rest >= 128
+    io.write_byte(((rest & 0x7f) | 0x80).to_u8)
+    rest >>= 7
+  end
+  io.write_byte(rest.to_u8)
+  io << "a" * 4000
+  n.times { io.write_byte(0xbe_u8) } # dynamic index 62
+  io.to_slice
+end
+
+# The frames without gori's WINDOW_UPDATEs, which credit an owned body back to its sender.
+private def no_credit(frames : Array(Frame::Header)) : Array(Frame::Header)
+  frames.reject(&.frame_type.==(Frame::Type::WindowUpdate))
+end
+
+# A block the gate re-encodes only when it engages the direction LATE — trailers behind an owned
+# body, or a block overtaking a head held verbatim — reached that re-encode with no size check,
+# so ~20 KB of HPACK became ~16 MB of literals written on the pump fiber. Such a block is refused
+# as `finish` refuses one on a direction already engaged.
+describe "H2::StreamGate body rules: an oversized block engaged late" do
+  it "resets a stream whose trailers behind an owned response body decode past the h1 head limit" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "a", "b", host: API)
+      g = GatePair.new(rules, ic, 5.seconds)
+      g.request(1_u32, get("/big", API), true)
+      g.response(1_u32, ok) # no length: the head goes out, the body is owned
+      g.data(g.in_gate, 1_u32, "aaa")
+      g.in_gate.@heads.engaged?.should be_false
+      GC.collect
+      before = GC.stats.total_bytes
+      g.in_gate.accept(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS | Frame::END_STREAM,
+        1_u32, amplified_trailers(4000)))
+      allocated = GC.stats.total_bytes - before
+
+      shape(no_credit(g.frames(g.down))).should eq([{Frame::Type::Headers, 1_u32}, {Frame::Type::RstStream, 1_u32}])
+      shape(no_credit(g.frames(g.up))).should eq([{Frame::Type::Headers, 1_u32}, {Frame::Type::RstStream, 1_u32}])
+      g.sink.responses.first.error.should eq(Gori::Proxy::H2::HeadRewrite::OVERSIZED_REASON)
+      allocated.should be < 4 * 1024 * 1024
+
+      g.request(3_u32, get("/next", API), true)
+      g.response(3_u32, ok(2))
+      g.data(g.in_gate, 3_u32, "aa", true)
+      frames = g.frames(g.down)
+      heads_of(frames, 3_u32).first.should eq(ok(2))
+      data_of(frames, 3_u32).should eq("bb")
+      g.close
+    end
+  end
+
+  it "resets a stream whose block overtaking a verbatim head decodes past the h1 head limit" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "absent", "x", host: API)
+      g = GatePair.new(rules, ic, 5.seconds)
+      g.request(1_u32, post("/stream", authority: API)) # no length: never held, stays open
+      g.request(3_u32, post("/held", 3, authority: API))
+      GC.collect
+      before = GC.stats.total_bytes
+      g.out_gate.accept(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS | Frame::END_STREAM,
+        1_u32, amplified_trailers(4000)))
+      allocated = GC.stats.total_bytes - before
+      allocated.should be < 4 * 1024 * 1024
+      g.data(g.out_gate, 3_u32, "one", true)
+
+      up = g.frames(g.up)
+      shape(up).should eq([{Frame::Type::Headers, 1_u32}, {Frame::Type::RstStream, 1_u32},
+                           {Frame::Type::Headers, 3_u32}, {Frame::Type::Data, 3_u32}])
+      heads_of(up, 3_u32).first.should eq(post("/held", 3, authority: API))
+      shape(no_credit(g.frames(g.down))).should eq([{Frame::Type::RstStream, 1_u32}])
+      g.close
+    end
+  end
+
+  it "refuses an oversized request queued verbatim behind a head whose rewrite changed its length" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "one", "ONE!", host: API)
+      g = GatePair.new(rules, ic, 5.seconds)
+      g.request(1_u32, post("/grown", 3, authority: API))
+      big = IO::Memory.new
+      big.write(HPACK::Encoder.new.encode(get("/big", API)))
+      big.write(amplified_trailers(4000))
+      g.out_gate.accept(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS | Frame::END_STREAM,
+        3_u32, big.to_slice))
+      GC.collect
+      before = GC.stats.total_bytes
+      g.data(g.out_gate, 1_u32, "one", true) # the rewrite re-encodes every head queued behind it
+      allocated = GC.stats.total_bytes - before
+      allocated.should be < 4 * 1024 * 1024
+
+      up = g.frames(g.up)
+      shape(up).should eq([{Frame::Type::Headers, 1_u32}, {Frame::Type::Data, 1_u32}])
+      field(heads_of(up, 1_u32).first, "content-length").should eq("4")
+      shape(no_credit(g.frames(g.down))).should eq([{Frame::Type::RstStream, 3_u32}])
       g.close
     end
   end
@@ -1395,6 +1530,97 @@ describe "H2::Relay body-rule path" do
           rewriter: rules, interceptor: ic)
         relay.spec_gates.each { |gate| gate.not_nil!.@flow.nil?.should eq(!built) }
       end
+    end
+  end
+end
+
+# The two gates of a body-rule connection over in-memory legs, driven frame by frame, so a spec
+# can play a sender that ignores flow control (the peers in `H2FlowRig` never do).
+private class MemRig
+  getter c2s : Gori::Proxy::H2::StreamGate
+  getter s2c : Gori::Proxy::H2::StreamGate
+  getter client = IO::Memory.new
+  getter enc_out = HPACK::Encoder.new
+  getter enc_in = HPACK::Encoder.new
+
+  def initialize(rules : Gori::Rules, ic : Gori::Interceptor)
+    sink = BodySink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "api.example.com", 443)
+    @c2s = Gori::Proxy::H2::StreamGate.new("out", IO::Memory.new, 1_i64, sink, assembler, "api.example.com", 443, ic,
+      Gori::Proxy::H2::HeadRewrite.new("out", rules, assembler, "api.example.com", true), body_rewriter: rules)
+    @s2c = Gori::Proxy::H2::StreamGate.new("in", @client, 1_i64, sink, assembler, "api.example.com", 443, ic,
+      Gori::Proxy::H2::HeadRewrite.new("in", rules, assembler, "api.example.com", true), nil, rules)
+    @c2s.peer = @s2c
+    @s2c.peer = @c2s
+  end
+
+  def open(response : Array({String, String})) : Nil
+    @c2s.accept(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS | Frame::END_STREAM, 1_u32,
+      @enc_out.encode(get("/big", "api.example.com"))))
+    @s2c.accept(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS, 1_u32, @enc_in.encode(response)))
+  end
+
+  def written_data : Int32
+    frames = [] of Frame::Header
+    reader = IO::Memory.new(@client.to_slice)
+    while frame = (Frame.read(reader) rescue nil)
+      frames << frame
+    end
+    frames.select { |f| f.frame_type == Frame::Type::Data }.sum(&.payload.size)
+  end
+end
+
+# How many of `count` 16 KiB DATA frames the origin got to send before the gate ended the
+# connection, or nil when it took them all. `padded` pads the first one (pad length 0).
+private def blast_until_refused(rig : MemRig, count : Int32, padded = false) : Int32?
+  count.times do |i|
+    flags = padded && i == 0 ? Frame::PADDED : 0_u8
+    payload = Bytes.new(16384) { |j| flags != 0 && j == 0 ? 0_u8 : 0x41_u8 }
+    rig.s2c.accept(Frame::Header.new(Frame::Type::Data.value, flags, 1_u32, payload))
+  rescue Gori::Error
+    return i
+  end
+  nil
+end
+
+private BLAST_BOUND = 65_535 + Gori::Proxy::H2::StreamGate::OVERRUN_SLACK + 16384
+
+# A conformant sender never sends past the window its receiver advertised; on the plain relay TCP
+# backpressure is what stops one that does. Nothing blocks on the body-rule path, so every frame
+# such a sender sent past the window used to be parked here, without bound.
+describe "H2::StreamGate body rules against a sender that ignores flow control" do
+  it "ends the connection instead of parking passthrough DATA past the receiver's window" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "secret", "x", host: "api.example.com")
+      rig = MemRig.new(rules, ic)
+      # gzip: the rule cannot read it, so this is a passthrough stream on a rule connection.
+      rig.open(ok + [{"content-encoding", "gzip"}])
+      refused_at = blast_until_refused(rig, 256).not_nil!
+      (refused_at * 16384).should be <= BLAST_BOUND
+      rig.written_data.should be <= 65_535 # nothing past the receiver's window was written
+    end
+  end
+
+  it "ends the connection instead of queueing an owned stream's DATA past the windows" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "secret", "x", host: "api.example.com")
+      rig = MemRig.new(rules, ic)
+      rig.open(ok) # owned: the rule can read it, and the padded first frame spills it at once
+      refused_at = blast_until_refused(rig, 256, padded: true).not_nil!
+      # gori credits the sender for every owned byte it writes, so the window it may legitimately
+      # fill is the receiver's twice over: what gori wrote, and what that credit allowed after it.
+      (refused_at * 16384).should be <= BLAST_BOUND + 65_535
+    end
+  end
+
+  it "takes everything a sender that keeps to the window sends" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "secret", "x", host: "api.example.com")
+      rig = MemRig.new(rules, ic)
+      rig.open(ok + [{"content-encoding", "gzip"}])
+      blast_until_refused(rig, 3).should be_nil
+      rig.s2c.accept(Frame::Header.new(Frame::Type::Data.value, 0_u8, 1_u32, Bytes.new(16383, 0x41_u8)))
+      rig.written_data.should eq(65_535)
     end
   end
 end

@@ -288,6 +288,8 @@ module Gori
                                    host : String, port : Int32, note : String?) : Opened
         io = conn.io
         block = IO::Memory.new
+        foreign = H2Engine::ForeignBlock.new # other streams' blocks, decoded and dropped
+        blocks = H2Engine::HeaderBlockGate.new
         seen = 0
         loop do
           seen += 1
@@ -306,6 +308,12 @@ module Gori
           end
           return refused("the origin at #{host}:#{port} closed the HTTP/2 connection before " \
                          "answering the extended CONNECT") if frame.nil?
+          begin
+            blocks.check(frame)
+          rescue ex : Gori::Error
+            return refused("the origin at #{host}:#{port} broke the HTTP/2 connection's header " \
+                           "state before answering the extended CONNECT (#{ex.message})")
+          end
           case frame.frame_type
           when Frame::Type::Settings
             unless frame.ack?
@@ -328,8 +336,19 @@ module Gori
             next unless frame.stream_id == flow.id
             return refused("#{H2Engine.rst_reason(frame)} from #{host}:#{port} — the origin " \
                            "refused the RFC 8441 extended CONNECT")
-          when Frame::Type::Headers, Frame::Type::Continuation
-            next unless frame.stream_id == flow.id
+          when Frame::Type::Headers, Frame::Type::Continuation, Frame::Type::PushPromise
+            # Another stream's block, or a PUSH_PROMISE's (which continues on the stream it was
+            # sent on), still moves the connection's table that this answer is decoded against.
+            if frame.stream_id != flow.id || frame.frame_type == Frame::Type::PushPromise ||
+               (frame.frame_type == Frame::Type::Continuation && foreign.open_on?(frame.stream_id))
+              begin
+                foreign.feed(frame, conn.decoder)
+              rescue ex : Gori::Error
+                return refused("the origin at #{host}:#{port} broke the HTTP/2 connection's header " \
+                               "state before answering the extended CONNECT (#{ex.message})")
+              end
+              next
+            end
             chunk = frame.frame_type == Frame::Type::Headers ? H2Engine.header_block(frame) : frame.payload
             if block.bytesize + chunk.size > MAX_HEADER_BLOCK
               return refused("the origin at #{host}:#{port} sent a header block over " \
@@ -364,7 +383,7 @@ module Gori
             end
             return Opened.new(new(conn, flow, status, host, port), head, status, nil, note)
           else
-            # PRIORITY / PUSH_PROMISE / DATA before the answer — nothing the handshake needs.
+            # PRIORITY / DATA before the answer — nothing the handshake needs.
           end
         end
       end

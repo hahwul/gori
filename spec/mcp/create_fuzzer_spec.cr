@@ -117,6 +117,29 @@ describe "MCP create_fuzzer" do
   end
 end
 
+describe "MCP fuzz exec steps supplied by an env value" do
+  # `§x¦$P§` passes the exec gate while P is benign; once P names a command the builder refuses
+  # whatever `exec` says, in its own words rather than as a permission refusal.
+  it "refuses create_fuzzer and fuzz_start with exec allowed, and stores nothing" do
+    with_store_env do |store|
+      Gori::Env.set_project_var(store, "P", "exec:/usr/bin/true")
+      Gori::Settings.project_env_vars = [{"P", "exec:/usr/bin/true"}]
+      args = prepared_fuzz_args
+      args.as_h["template"] = JSON::Any.new("GET /?q=§x¦$P§ HTTP/1.1\r\nHost: h\r\n\r\n")
+      tools = tools_for(store)
+      created = tools.call("create_fuzzer", args)
+      created.error_code.should eq("INVALID_ARGUMENT")
+      created.text.should contain(Gori::Fuzz::Plan::ENV_COMMAND_REFUSAL)
+      store.fuzz_sessions.should be_empty
+      args.as_h.delete("name")
+      args.as_h["allow_unscoped"] = JSON::Any.new(true)
+      started = tools.call("fuzz_start", args)
+      started.error_code.should eq("INVALID_ARGUMENT")
+      started.text.should contain(Gori::Fuzz::Plan::ENV_COMMAND_REFUSAL)
+    end
+  end
+end
+
 describe "MCP prepared Fuzzer execution" do
   it "advertises every run input except the three run-only options, plus name" do
     tools = Gori::MCP::Tools.catalogue_json(nil, true)

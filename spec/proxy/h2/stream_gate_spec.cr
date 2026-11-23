@@ -75,7 +75,7 @@ private class Rig
   # insert into its dynamic table, i.e. behave like a browser rather than like gori's own
   # literal-only encoder.
   def initialize(@ic : Gori::Interceptor, host : String = "api.example.com", indexing : Bool = false,
-                 port : Int32 = 443, rewriter : Gori::Proxy::HeadRewriter? = nil)
+                 port : Int32 = 443, rewriter : Gori::Proxy::HeadRewriter? = nil, scheme : String = "https")
     @sink = RecSink.new
     @upstream = IO::Memory.new
     @client = IO::Memory.new
@@ -83,8 +83,8 @@ private class Rig
     @assembler = Gori::Proxy::H2::Assembler.new(@sink, host, port)
     @heads_out = Gori::Proxy::H2::HeadRewrite.new("out", rewriter, @assembler, host)
     @heads_in = Gori::Proxy::H2::HeadRewrite.new("in", nil, @assembler, host)
-    @c2s = Gate.new("out", @upstream, 1_i64, @sink, @assembler, host, port, @ic, @heads_out)
-    @s2c = Gate.new("in", @client, 1_i64, @sink, @assembler, host, port, @ic, @heads_in)
+    @c2s = Gate.new("out", @upstream, 1_i64, @sink, @assembler, host, port, @ic, @heads_out, scheme: scheme)
+    @s2c = Gate.new("in", @client, 1_i64, @sink, @assembler, host, port, @ic, @heads_in, scheme: scheme)
     @c2s.peer = @s2c
     @s2c.peer = @c2s
   end
@@ -203,6 +203,26 @@ end
 # decision, let it run the release).
 private def settle : Nil
   3.times { Fiber.yield }
+end
+
+# `:status 200`, one 4000-byte literal inserted into the dynamic table, then `n` one-byte
+# references to it: a few KB of HPACK that decodes to n × 4 KB.
+private def amplified_response(n : Int32) : Bytes
+  io = IO::Memory.new
+  io.write_byte(0x88_u8) # :status 200
+  io.write_byte(0x40_u8) # literal with incremental indexing, new name
+  io.write_byte(3_u8)
+  io << "x-a"
+  io.write_byte(0x7f_u8) # value length 4000, raw: 127 + varint(3873)
+  rest = 4000 - 127
+  while rest >= 128
+    io.write_byte(((rest & 0x7f) | 0x80).to_u8)
+    rest >>= 7
+  end
+  io.write_byte(rest.to_u8)
+  io << "a" * 4000
+  n.times { io.write_byte(0xbe_u8) } # dynamic index 62
+  io.to_slice
 end
 
 private def head_of(frames : Array(Frame::Header), stream : UInt32) : Array({String, String})?
@@ -1139,6 +1159,73 @@ describe Gori::Proxy::H2::StreamGate do
     end
   end
 
+  # The bytes go over this one connection whatever the client spells in `:scheme`, so the gate
+  # judges the TRANSPORT's scheme, as h1 judges the tunnel's (`ClientConn#@scheme`).
+  describe "the URL the sandbox tests takes the transport's scheme, not the peer's :scheme" do
+    it "does not let a :scheme carrying an in-scope URL prefix pass a path-scoped include" do
+      with_ic(intercept: false) do |ic, scope|
+        scope.add("include", "string", "https://api.example.com/public/")
+        scope.enable_sandbox
+        rig = Rig.new(ic)
+        spoof = [{":method", "GET"}, {":scheme", "https://api.example.com/public/?"},
+                 {":authority", "api.example.com"}, {":path", "/admin"}]
+        rig.c2s.accept(headers(1_u32, rig.enc_out.encode(spoof)))
+        rig.to_origin.should be_empty
+        rig.c2s.accept(headers(3_u32, rig.enc_out.encode(request("/public/x"))))
+        rig.to_origin.map(&.stream_id).should eq([3_u32]) # control: an in-scope path still goes
+      end
+    end
+
+    it "does not let HTTPS or http dodge a scheme-anchored exclude" do
+      with_ic(intercept: false) do |ic, scope|
+        scope.add("include", "host", "api.example.com")
+        scope.add("exclude", "regex", "^https://api\\.example\\.com/admin")
+        scope.enable_sandbox
+        rig = Rig.new(ic)
+        ["HTTPS", "http"].each_with_index do |spelling, i|
+          spoof = [{":method", "GET"}, {":scheme", spelling}, {":authority", "api.example.com"}, {":path", "/admin"}]
+          rig.c2s.accept(headers((2 * i + 1).to_u32, rig.enc_out.encode(spoof)))
+        end
+        rig.to_origin.should be_empty
+      end
+    end
+
+    it "judges an h2c connection as http, whatever :scheme says" do
+      with_ic(intercept: false) do |ic, scope|
+        scope.add("include", "host", "api.example.com")
+        scope.add("exclude", "regex", "^http://")
+        scope.enable_sandbox
+        rig = Rig.new(ic, scheme: "http")
+        rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/x")))) # `:scheme: https`
+        rig.to_origin.should be_empty
+      end
+    end
+
+    it "anchors a :path with no leading slash, so it is not glued onto the host" do
+      with_ic(intercept: false) do |ic, scope|
+        scope.add("include", "host", "api.example.com")
+        scope.add("exclude", "string", "https://api.example.com/admin")
+        scope.enable_sandbox
+        rig = Rig.new(ic)
+        rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("admin"))))
+        rig.to_origin.should be_empty
+      end
+    end
+
+    it "holds an in-scope request at intercept whatever :scheme says" do
+      with_ic do |ic, scope|
+        scope.add("include", "string", "https://api.example.com/")
+        rig = Rig.new(ic)
+        spoof = [{":method", "GET"}, {":scheme", "http"}, {":authority", "api.example.com"}, {":path", "/x"}]
+        rig.c2s.accept(headers(1_u32, rig.enc_out.encode(spoof)))
+        settle
+        ic.pending.size.should eq(1)
+        ic.pending.first.scheme.should eq("https")
+        rig.to_origin.should be_empty
+      end
+    end
+  end
+
   it "resets malformed sandboxed request headers with PROTOCOL_ERROR" do
     with_ic(intercept: false) do |ic, scope|
       scope.add("include", "host", "api.example.com")
@@ -1166,6 +1253,115 @@ describe Gori::Proxy::H2::StreamGate do
         IO::ByteFormat::BigEndian.decode(UInt32, reset.payload).should eq(Gate::PROTOCOL_ERROR)
       end
       rig.sink.responses.map(&.error).should eq(Array.new(cases.size, Gate::SANDBOX_PROTOCOL_ERROR_REASON))
+    end
+  end
+
+  # Once a direction re-encodes, the receiver's decoder follows gori's encoder, so an oversized
+  # block can neither go out as it arrived nor be re-encoded without writing its whole decoded
+  # list as literals (~16 MB from ~4 KB here). Its stream is refused instead.
+  # RFC 7541 §4.2: a receiver that lowered SETTINGS_HEADER_TABLE_SIZE may require a dynamic table
+  # size update at the start of the first header block it receives after acknowledging it. gori's
+  # decoder applies the peer's update on arrival, so the far decoder gets it only if gori writes
+  # it, at the start of the next block it actually writes on that direction — not on the block it
+  # arrived in, which may be held, refused or never written.
+  describe "a dynamic table size update on a block that does not go out next" do
+    it "leads the next block written when the block that carried it was refused" do
+      with_ic(intercept: false) do |ic, scope|
+        scope.add("include", "string", "https://api.example.com/api/")
+        scope.enable_sandbox
+        rig = Rig.new(ic)
+        rig.c2s.accept(headers(1_u32, Bytes[0x20] + rig.enc_out.encode(request("/admin"))))
+        rig.c2s.accept(headers(3_u32, rig.enc_out.encode(request("/api/x"))))
+
+        heads = rig.to_origin.select(&.frame_type.==(Frame::Type::Headers))
+        heads.map(&.stream_id).should eq([3_u32])
+        heads.first.payload[0].should eq(0x20_u8)
+        far = HPACK::Decoder.new
+        far.decode(heads.first.payload).should eq(request("/api/x"))
+        far.max_size.should eq(0)
+      end
+    end
+
+    it "leads the block that overtakes a held one, and is not sent twice" do
+      with_ic do |ic|
+        ic.set_direction(Gori::Interceptor::Direction::ResponseOnly)
+        ic.set_filter("path:/held")
+        rig = Rig.new(ic)
+        rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/held")), Frame::END_HEADERS))
+        rig.c2s.accept(headers(3_u32, rig.enc_out.encode(request("/free")), Frame::END_HEADERS))
+        rig.s2c.accept(headers(1_u32, Bytes[0x20] + rig.enc_in.encode(response("200")), Frame::END_HEADERS))
+        settle
+        ic.pending_count.should eq(1)
+        rig.s2c.accept(headers(3_u32, rig.enc_in.encode(response("204")), Frame::END_HEADERS))
+        ic.forward(ic.pending.first.id)
+        settle
+
+        heads = rig.to_client.select(&.frame_type.==(Frame::Type::Headers))
+        heads.map(&.stream_id).should eq([3_u32, 1_u32])
+        heads.map(&.payload.[0]).should eq([0x20_u8, rig.enc_in.encode(response("200"))[0]])
+        far = HPACK::Decoder.new
+        heads.map { |f| far.decode(f.payload) }.should eq([response("204"), response("200")])
+        far.max_size.should eq(0)
+      end
+    end
+  end
+
+  describe "an oversized response block on a direction that re-encodes" do
+    it "resets its stream on both legs, writes none of it, and the next stream still works" do
+      with_ic(intercept: false) do |ic, _|
+        rig = Rig.new(ic)
+        rig.heads_in.latch # as an earlier rule change, hold or strip would have
+        rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/big"))))
+        rig.c2s.accept(headers(3_u32, rig.enc_out.encode(request("/next"))))
+        GC.collect
+        before = GC.stats.total_bytes
+        rig.s2c.accept(headers(1_u32, amplified_response(4000), Frame::END_HEADERS))
+        allocated = GC.stats.total_bytes - before
+
+        to_client = rig.to_client
+        to_client.none? { |f| f.frame_type == Frame::Type::Headers }.should be_true
+        to_client.map { |f| {f.frame_type, f.stream_id} }.should eq([{Frame::Type::RstStream, 1_u32}])
+        rig.to_origin.select { |f| f.frame_type == Frame::Type::RstStream }.map(&.stream_id).should eq([1_u32])
+        rig.sink.responses.first.error.should eq(Gori::Proxy::H2::HeadRewrite::OVERSIZED_REASON)
+        allocated.should be < 4 * 1024 * 1024
+
+        rig.s2c.accept(headers(3_u32, rig.enc_in.encode(response("200"))))
+        head_of(rig.to_client, 3_u32).should eq(response("200"))
+      end
+    end
+
+    it "is forwarded as it arrived while the direction has not re-encoded" do
+      with_ic(intercept: false) do |ic, _|
+        rig = Rig.new(ic)
+        rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/big"))))
+        block = amplified_response(4000)
+        rig.s2c.accept(headers(1_u32, block, Frame::END_HEADERS))
+        rig.to_client.map(&.payload).should eq([block])
+      end
+    end
+  end
+
+  # A head past the h1 head limit has no h1 text form, so it reaches the sandbox with no `head`,
+  # the shape a methodless one has. Both are refused; the flow names which one it was.
+  it "names an oversized request head's refusal for its size, not as malformed" do
+    with_ic(intercept: false) do |ic, scope|
+      scope.add("include", "host", "api.example.com")
+      scope.enable_sandbox
+      rig = Rig.new(ic)
+      big = IO::Memory.new
+      big.write(Bytes[0x3f, 0xe1, 0xff, 0x03]) # §6.3 size update to 65536
+      big.write(HPACK::Encoder.new(65536, indexing: true).encode(request("/x") + [{"x-big", "A" * 65000}]))
+      5.times { big.write_byte(0xbe_u8) } # five more references to the 65 KB entry
+      rig.c2s.accept(headers(1_u32, big.to_slice))
+      methodless = request("/x").reject { |(n, _)| n == ":method" }
+      rig.c2s.accept(headers(3_u32, rig.enc_out.encode(methodless)))
+
+      rig.to_origin.should be_empty
+      resets = rig.to_client
+      resets.map(&.stream_id).should eq([1_u32, 3_u32])
+      resets.each { |r| IO::ByteFormat::BigEndian.decode(UInt32, r.payload).should eq(Gate::PROTOCOL_ERROR) }
+      rig.sink.responses.map(&.error).should eq([Gate::SANDBOX_OVERSIZED_REASON, Gate::SANDBOX_PROTOCOL_ERROR_REASON])
+      Gate::SANDBOX_OVERSIZED_REASON.should contain("h1 head limit")
     end
   end
 

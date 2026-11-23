@@ -245,6 +245,7 @@ module Gori::Proxy
       # retired that connection (`lf_residue_note`). Per response, reset with the notes above.
       @lf_rules_note = nil.as(String?)
       @lf_residue_note = nil.as(String?)
+      @framing_note = nil.as(String?)
       # The interim 1xx responses the origin sent before THIS response's final head
       # (`Store::Interims`), carried to whichever record site the response takes. Assigned
       # unconditionally at the top of `handle_response` — seeded with what the Expect
@@ -319,6 +320,21 @@ module Gori::Proxy
       # single proxy thread a claim never interleaves with the other fiber's.
       def claim? : Bool
         @claimed.compare_and_set(0, 1)[1]
+      end
+
+      # Set by the watcher before it claims, when the CLIENT sent bytes during a close-delimited
+      # stream, so the copy that then loses the claim records why (`FramingDisagreement`).
+      property? client_spoke = false
+    end
+
+    # A close-delimited response the client stopped reading as one: it sent bytes mid-stream
+    # (see `watch_client_abort`). The message is the flow's error.
+    private class FramingDisagreement < IO::Error
+      def initialize
+        super("the client sent its next request while this close-delimited response was still " \
+              "streaming: it had framed the response as complete where gori reads it to the " \
+              "connection's close (a response framing disagreement), so gori closed the " \
+              "connection instead of forwarding more of the origin's bytes as the answer to it")
       end
     end
 
@@ -703,7 +719,8 @@ module Gori::Proxy
       end
       keep = handle_response(upstream, req, flow_id, started, host, port, scheme,
         reused: reused, sent_head: sent_head, can_retry: retryable, sent_req: sent_req,
-        pre_read_head: early_head, pre_read_failure: early_head_failure, pre_interims: early_interims)
+        pre_read_head: early_head, pre_read_failure: early_head_failure, pre_interims: early_interims,
+        client_owes_body: !send_body)
       # The expectation was settled without the body being pumped, so neither leg is reusable:
       # the client still owes those bytes, and gori sent the origin a head declaring a body it
       # never got — either socket's next bytes are ambiguous, which is where a desync starts.
@@ -1202,7 +1219,8 @@ module Gori::Proxy
                                 *, reused : Bool, sent_head : Bytes, can_retry : Bool,
                                 sent_req : Codec::RawRequest, pre_read_head : Bytes? = nil,
                                 pre_read_failure : Codec::Http1::HeadReadResult? = nil,
-                                pre_interims : Store::Interims? = nil) : Bool
+                                pre_interims : Store::Interims? = nil,
+                                client_owes_body : Bool = false) : Bool
       @interims = pre_interims.try { |i| i unless i.empty? }
       if pre_read_failure
         record_response_head_failure(flow_id, pre_read_failure)
@@ -1224,12 +1242,14 @@ module Gori::Proxy
       return false unless final
       resp_head, resp = final
       @resp_orig_head = resp_head # the origin's own head, for a rule's record (#1589)
+      return false if refused_unsolicited_upgrade?(resp, sent_req, flow_id)
       # Judged HERE — on the peer's final head, before Match&Replace or the Alt-Svc seam get
       # to it — because it is a fact about what the ORIGIN sent, not about what a rule made.
       @status_line_note = status_line_note(resp)
       @withheld_offer_note = withheld_offer_note(resp, host, port)
       @lf_rules_note = nil
       @lf_residue_note = nil
+      @framing_note = nil
       ttfb = (Time.instant - started).total_microseconds.to_i64
 
       # The h3 `Alt-Svc` strip (settings `network.strip_alt_svc`), before the rules so a rule
@@ -1277,6 +1297,7 @@ module Gori::Proxy
       framing = response_framing_or_close(resp, sent_req.method, flow_id)
       return false unless framing
       resp_framing, resp_len = framing
+      @framing_note = lenient_framing_note(resp, resp_framing, resp_len)
 
       # Intercept (response): hold only in-scope, non-streaming responses. SSE /
       # close-delimited / WebSocket bodies would buffer forever, so they bypass.
@@ -1322,7 +1343,8 @@ module Gori::Proxy
       resp_capture = response_capture(sent_resp, resp, resp_framing, resp_len, flow_id, ttfb)
       completed = stream_nonhold_response(upstream, sent_resp, sent_resp_head,
         resp_framing, resp_len, resp_capture, flow_id, ttfb, started, relaxed: relaxed,
-        extract_ref: extract_ref, advisory: stream_rule_note(resp, resp_framing, host))
+        extract_ref: extract_ref, advisory: stream_rule_note(resp, resp_framing, host),
+        client_owes_body: client_owes_body)
 
       if completed && resp.status == 101
         # A 101 Switching Protocols turns the connection into a bidirectional tunnel of the
@@ -1394,7 +1416,7 @@ module Gori::Proxy
       # open; the return value is the CLIENT keep-alive decision (separate sides).
       # The origin side keys on sent_req (what it received); the client side on req.
       update_upstream_reuse(origin_keep_alive?(sent_req, resp, resp_framing))
-      keep_alive?(req, resp, resp_framing)
+      client_keep_alive?(req, sent_req, resp, resp_framing)
     end
 
     # Interim 1xx (RFC 9110 §15.2): an informational response (100 Continue,
@@ -1666,6 +1688,22 @@ module Gori::Proxy
       nil
     end
 
+    # A 101 answering a request that asked for no upgrade (the request gori SENT carried no
+    # `Upgrade` field) opens nothing the client agreed to. A browser reads such a 101 as an
+    # interim response and keeps waiting on the socket, so tunnelling it would pass everything
+    # after it through uncaptured. Refused like an unframeable response: recorded with the
+    # origin's head, a 502 to the client, both sides closed. True when it refused.
+    private def refused_unsolicited_upgrade?(resp : Codec::RawResponse, sent_req : Codec::RawRequest,
+                                             flow_id : Int64) : Bool
+      return false unless resp.status == 101 && !sent_req.headers.has?("Upgrade")
+      capture_response(FlowMapper.error_response(flow_id,
+        "unsolicited 101 Switching Protocols (the request carried no Upgrade header)",
+        head: resp.raw_head, interims: @interims))
+      write_gateway_error
+      release_upstream
+      true
+    end
+
     # Streams the non-held response to the client while capturing it, then records
     # the flow. Returns true only if the whole body was delivered:
     #   - a raised write (the CLIENT aborted its read mid-response, e.g. an
@@ -1681,7 +1719,16 @@ module Gori::Proxy
                                         flow_id : Int64, ttfb : Int64, started : Time::Instant,
                                         relaxed : Bool = false,
                                         extract_ref : ExtractRef? = nil,
-                                        advisory : String? = nil) : Bool
+                                        advisory : String? = nil,
+                                        client_owes_body : Bool = false) : Bool
+      # Asked BEFORE the head goes out: bytes the client sent before it could have seen this
+      # response are a pipelined request, not a reaction to it (`watch_client_abort`). After the
+      # write, a loopback client can answer within microseconds and look the same. A client
+      # whose request body gori never pumped (`settle_expectation` relayed an early final
+      # head) may still send that body, as curl does after an early 2xx: those bytes are owed,
+      # not a next request, so nothing is read into them.
+      backstop = relaxed && resp_framing.close_delimited? && !client_owes_body &&
+                 !SocketResidue.pending?(@io)
       begin
         @io.write(sent_resp_head)
         @io.flush
@@ -1689,11 +1736,12 @@ module Gori::Proxy
         # it — this is the streaming path, and P6 keeps it that way: no body is buffered here,
         # so a body-scoped rule is told it had nothing to read rather than silently missing.
         observe_delivered(extract_ref, sent_resp_head, nil)
-        resp_complete = stream_response_body(upstream, resp_framing, resp_len, resp_capture, relaxed)
+        resp_complete = stream_response_body(upstream, resp_framing, resp_len, resp_capture, relaxed, backstop)
         @lf_residue_note = lf_residue_note(upstream) if resp_complete
-      rescue
+      rescue ex
         record_streamed_response(sent_resp, resp_framing, resp_capture, flow_id, ttfb, started,
-          state: Store::FlowState::Aborted, error: "connection closed mid-response", advisory: advisory)
+          state: Store::FlowState::Aborted, advisory: advisory,
+          error: ex.is_a?(FramingDisagreement) ? ex.message : "connection closed mid-response")
         return false
       end
       record_streamed_response(sent_resp, resp_framing, resp_capture, flow_id, ttfb, started,
@@ -1731,29 +1779,51 @@ module Gori::Proxy
     # risk of colliding with a next reused request on this connection.
     private def stream_response_body(upstream : IO, resp_framing : Codec::BodyFraming,
                                      resp_len : Int64, resp_capture : Codec::CaptureBuffer,
-                                     relaxed : Bool) : Bool
+                                     relaxed : Bool, backstop : Bool) : Bool
       return stream_body(upstream, @io, resp_framing, resp_len, resp_capture) unless relaxed
       latch = TeardownLatch.new
-      spawn watch_client_abort(upstream, latch)
+      spawn watch_client_abort(upstream, latch, backstop)
       begin
         stream_body(upstream, @io, resp_framing, resp_len, resp_capture)
       ensure
         # Claim teardown so a still-parked watcher can't close `upstream` after we hand it back.
-        # Losing the claim means the watcher already fired (client gone, upstream closed under the
-        # copy) — surface that as an abort so the caller records Aborted, not a clean/half read.
+        # Losing the claim means the watcher already fired (client gone, or it spoke during a
+        # close-delimited stream; upstream closed under the copy) — surface that as an abort so
+        # the caller records Aborted, not a clean/half read.
         # (claim? is non-blocking, so it can't interleave with the watcher's on the single thread.)
-        raise IO::Error.new("client disconnected mid-stream") unless latch.claim?
+        unless latch.claim?
+          raise FramingDisagreement.new if latch.client_spoke?
+          raise IO::Error.new("client disconnected mid-stream")
+        end
       end
     end
 
     # The client-leg watcher for a relaxed streaming response (see stream_response_body). Blocks
     # reading @io: a 0-byte read (clean FIN) or any read error (reset) means the client closed
     # its side, so — if it wins the one-shot `latch` — it closes `upstream` to unblock the copy
-    # loop. Bytes arriving from the client mid-stream are unusual for SSE/close-delimited (no
-    # keep-alive follows) and are NOT proof the client left, so it just keeps watching.
-    private def watch_client_abort(upstream : IO, latch : TeardownLatch) : Nil
+    # loop.
+    #
+    # Bytes arriving from the client mid-stream are not proof it left. On a chunked or
+    # Content-Length stream (SSE) the framing is unambiguous, so it just keeps watching. During a
+    # CLOSE-DELIMITED response they are proof of something else: the client believes the response
+    # is over, because it framed the head differently than gori did, and what it sent is its next
+    # request. Nothing can answer that request on this connection, since the response ends with
+    # it, and every further origin byte would reach the client as that answer. So the watcher
+    # tears the exchange down at once and marks the latch, and the copy records why. A CR or LF
+    # is not such a byte: RFC 9112 §2.2 documents clients that send a stray CRLF after a request
+    # body, and tearing a close-delimited page down for one would cut it short. Nor is a request
+    # the client PIPELINED (RFC 9112 §9.3.2): `backstop` is false when client bytes were already
+    # waiting before the head was written (`stream_nonhold_response`), and then the watcher only
+    # watches for the client leaving, as it does for a chunked or Content-Length stream. That
+    # check narrows the case, it does not close it: a pipelining client whose next request
+    # lands after the head went out is read as a disagreement and its response ends there.
+    private def watch_client_abort(upstream : IO, latch : TeardownLatch, backstop : Bool) : Nil
       buf = Bytes.new(1)
       while @io.read(buf) > 0
+        next unless backstop
+        next if buf[0] == 0x0d_u8 || buf[0] == 0x0a_u8
+        latch.client_spoke = true
+        break
       end
     rescue
       # client reset / read error → treat as gone (fall through to teardown)
@@ -1974,7 +2044,7 @@ module Gori::Proxy
         error: error, advisory: advisory)
       update_upstream_reuse(complete && origin_keep_alive?(sent_req, resp, framing))
       return false unless complete
-      keep_alive?(req, resp, framing)
+      client_keep_alive?(req, sent_req, resp, framing)
     end
 
     # The buffered response-body path (no intercept): buffer the whole body, rewrite the entity,
@@ -2048,7 +2118,7 @@ module Gori::Proxy
       # block its next keep-alive request on the missing bytes.
       update_upstream_reuse(resp_complete && origin_keep_alive?(sent_req, resp, resp_framing))
       return false unless resp_complete
-      keep_alive?(req, resp, resp_framing)
+      client_keep_alive?(req, sent_req, resp, resp_framing)
     end
 
     # Reads the response head, transparently redialing + resending ONCE if a
@@ -2239,6 +2309,12 @@ module Gori::Proxy
         rescue Gori::Error
           Codec::BodyFraming::CloseDelimited # unknowable framing → don't keep-alive
         end
+      # As `client_keep_alive?`: the body forwarded above was framed by the method that went
+      # upstream, and a client that sent another method frames the same head its own way.
+      if req.method != sent_req.method
+        sent_framing = (Codec::Body.response_framing(sent_resp, sent_req.method)[0] rescue nil)
+        return false unless sent_framing == client_framing
+      end
       keep_alive?(req, sent_resp, client_framing)
     end
 
@@ -2423,7 +2499,7 @@ module Gori::Proxy
         # a decision (the surrounding comments enumerate the sandbox and `http2_disabled?`
         # gates and say nothing about rules or intercept).
         H2::Relay.run(client, upstream, host, port, @sink,
-          rewriter: @rewriter, interceptor: @interceptor, extractor: @extractor)
+          rewriter: @rewriter, interceptor: @interceptor, extractor: @extractor, scheme: "http")
       ensure
         upstream.close rescue nil
       end
@@ -2530,9 +2606,29 @@ module Gori::Proxy
     private def response_advisory(body : String?) : String?
       # Almost every response has nothing to say: skip the two Arrays that answer nil.
       return nil if body.nil? && @alt_svc_note.nil? && @status_line_note.nil? &&
-                    @lf_rules_note.nil? && @lf_residue_note.nil? && @withheld_offer_note.nil?
-      [body, @alt_svc_note, @status_line_note, @lf_rules_note, @lf_residue_note,
+                    @lf_rules_note.nil? && @lf_residue_note.nil? && @withheld_offer_note.nil? &&
+                    @framing_note.nil?
+      [body, @alt_svc_note, @status_line_note, @framing_note, @lf_rules_note, @lf_residue_note,
        @withheld_offer_note].compact.join("\n")
+    end
+
+    # The sentence for a response gori framed by a lenient client's reading
+    # (`Body.lenient_framing?`), or nil. The record shows a head whose own rules say the body
+    # runs to the close and a body that stops short of it; this says who chose that and why.
+    private def lenient_framing_note(resp : Codec::RawResponse, framing : Codec::BodyFraming,
+                                     length : Int64) : String?
+      return nil if framing.close_delimited? || framing.chunked?
+      return nil unless Codec::Body.lenient_framing?(resp)
+      if resp.malformed?
+        return nil unless framing.none?
+        "a browser reads this status line as a response with no body, so gori ended the " \
+        "response at its head and closed the connection; nothing the origin sent after the " \
+        "head was forwarded"
+      elsif framing.length?
+        "this response has a Transfer-Encoding without chunked and a Content-Length. Browsers " \
+        "and curl frame it by the length, so gori forwarded #{length} body bytes and closed " \
+        "the connection; nothing the origin sent after them was forwarded"
+      end
     end
 
     # A WebSocket 101 from an origin whose HTTP/2 extended CONNECT offer the h2 relay withheld
@@ -2892,7 +2988,7 @@ module Gori::Proxy
     # stayed reserved no matter what the operator wrote. Both spellings ended at the 502 in
     # `handle_reserved_host` with no way out.
     private def reserved_self_host?(host : String) : Bool
-      SelfPage.magic_host?(host) && Upstream.override_address(host, @host_overrides).nil?
+      Upstream.reserved_self_host?(host, @host_overrides)
     end
 
     # The plaintext half of the reserved-host route. Returns true when the request was
@@ -3925,9 +4021,26 @@ module Gori::Proxy
     private def keep_alive?(req : Codec::RawRequest, resp : Codec::RawResponse,
                             resp_framing : Codec::BodyFraming) : Bool
       return false if resp_framing.close_delimited? # body ends at close
+      # Framed as a lenient client frames it: only the close makes a strict reader agree.
+      return false if Codec::Body.lenient_framing?(resp)
       return false if req.headers.lists?("Connection", "close")
       return false if resp.headers.lists?("Connection", "close")
       req.version == "HTTP/1.1" || req.headers.lists?("Connection", "keep-alive")
+    end
+
+    # `keep_alive?` for a response framed by `framing`, which the method that went UPSTREAM
+    # decided (`sent_req`). The client frames the same head by its OWN method, and a
+    # Match&Replace rule or an intercept edit can change the method in between: HEAD rewritten
+    # to GET forwards a body the HEAD client reads as its next response, GET rewritten to HEAD
+    # leaves a GET client waiting for a body that never comes. Where the two framings differ
+    # the connection closes after this response; nothing is added to it or stripped from it.
+    private def client_keep_alive?(req : Codec::RawRequest, sent_req : Codec::RawRequest,
+                                   resp : Codec::RawResponse, framing : Codec::BodyFraming) : Bool
+      if req.method != sent_req.method
+        client_framing = (Codec::Body.response_framing(resp, req.method)[0] rescue nil)
+        return false unless client_framing == framing
+      end
+      keep_alive?(req, resp, framing)
     end
 
     # Whether the ORIGIN will keep its connection open after this response, so its
@@ -3950,6 +4063,8 @@ module Gori::Proxy
       # `ConnPool.reusable_response?`). Any head of the exchange counts, an interim 1xx too.
       return false if @upstream_lf_framed
       return false if resp_framing.close_delimited?
+      # Whatever the origin sends past a length only a lenient reading gave goes with the socket.
+      return false if Codec::Body.lenient_framing?(resp)
       return false if sent_req.headers.lists?("Connection", "close")
       return false if resp.headers.lists?("Connection", "close")
       resp.version == "HTTP/1.1" || resp.headers.lists?("Connection", "keep-alive")

@@ -30,15 +30,17 @@ module Gori::Proxy::H2
   # One connection-level frame is not relayed as read when the operator asks: the origin's
   # SETTINGS frame, minus its extended CONNECT offer (`next_frame`, #1896).
   class Relay
+    # `scheme` is the TRANSPORT's ("https" over the TLS tunnel, "http" for h2c), which is what
+    # the gates judge a stream's URL on (`StreamGate#@scheme`).
     def self.run(client : IO, upstream : IO, host : String, port : Int32, sink : FlowSink,
                  rewriter : Proxy::HeadRewriter? = nil, interceptor : Gori::Interceptor? = nil,
-                 extractor : Proxy::ResponseExtract? = nil) : Nil
-      new(client, upstream, host, port, sink, rewriter, interceptor, extractor).run
+                 extractor : Proxy::ResponseExtract? = nil, scheme : String = "https") : Nil
+      new(client, upstream, host, port, sink, rewriter, interceptor, extractor, scheme).run
     end
 
     def initialize(@client : IO, @upstream : IO, @host : String, @port : Int32, @sink : FlowSink,
                    @rewriter : Proxy::HeadRewriter? = nil, @interceptor : Gori::Interceptor? = nil,
-                   @extractor : Proxy::ResponseExtract? = nil)
+                   @extractor : Proxy::ResponseExtract? = nil, @scheme : String = "https")
     end
 
     def run : Nil
@@ -80,9 +82,9 @@ module Gori::Proxy::H2
       return {nil, nil} unless ic
       body = @rewriter if @rewriter.try { |rw| rw.rewrites_body_for_host?(@host) || rw.short_circuits_for_host?(@host) }
       out_gate = StreamGate.new("out", @upstream, conn_id, @sink, assembler, @host, @port, ic,
-        HeadRewrite.new("out", @rewriter, assembler, @host, !body.nil?), body_rewriter: body)
+        HeadRewrite.new("out", @rewriter, assembler, @host, !body.nil?), body_rewriter: body, scheme: @scheme)
       in_gate = StreamGate.new("in", @client, conn_id, @sink, assembler, @host, @port, ic,
-        HeadRewrite.new("in", @rewriter, assembler, @host, !body.nil?), extract_for(assembler), body)
+        HeadRewrite.new("in", @rewriter, assembler, @host, !body.nil?), extract_for(assembler), body, @scheme)
       out_gate.peer = in_gate
       in_gate.peer = out_gate
       {out_gate, in_gate}
@@ -118,7 +120,7 @@ module Gori::Proxy::H2
     # connection because it carries a once-per-connection warning latch.
     private def extract_for(assembler : Assembler) : Extract?
       ex = @extractor
-      ex ? Extract.new(ex, assembler, @host, @port) : nil
+      ex ? Extract.new(ex, assembler, @host, @port, @scheme) : nil
     end
 
     private def pump_plain(src : IO, dst : IO, conn_id : Int64, direction : String,

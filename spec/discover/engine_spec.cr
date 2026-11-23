@@ -26,6 +26,19 @@ private class HostRecordingBackend < D::Backend
   end
 end
 
+# Records the request TARGET of every fetch, in order.
+private class TargetRecordingBackend < D::Backend
+  getter targets = [] of String
+
+  def initialize(@route : String -> R)
+  end
+
+  def fetch(scheme : String, host : String, port : Int32, target : String) : R
+    @targets << target
+    @route.call(target)
+  end
+end
+
 # Drive an engine to completion and return {terminal event kinds, error messages}. The KINDS
 # list is what distinguishes a terminal error from an error followed by a success Done.
 private def terminal_of(engine : D::Engine) : {Array(Symbol), Array(String)}
@@ -308,6 +321,30 @@ describe Gori::Discover::Engine do
     kinds, messages = terminal_of(D::Engine.new("http://t/", [] of String, backend, cfg))
     messages.should be_empty
     kinds.last.should eq(:done)
+  end
+
+  # A redirect `Location` is chosen by the target, so a SP/TAB/DEL/C0 in it is refused rather
+  # than percent-encoded and fetched; a page-authored href with a space is still repaired.
+  it "refuses a redirect Location carrying a request-line breaker, and still follows a clean one" do
+    cfg = D::Config.new(spider: true, bruteforce: false, max_depth: 3, concurrency: 1, retries: 0)
+    ["/zz a", "/zz\ty", "http://t/zz q", "/zz\u007Fe"].each do |loc|
+      backend = TargetRecordingBackend.new(->(t : String) { t == "/" ? make(302, "", location: loc) : html("an ordinary page") })
+      _, messages = terminal_of(D::Engine.new("http://t/", [] of String, backend, cfg))
+      messages.should be_empty
+      # Neither repaired (`%20`, `%09`, `%7F`) nor sent raw: only the seed and its well-known probes.
+      backend.targets.select { |t| t.includes?('%') || !Gori::Proxy::Codec::Http1.request_token_safe?(t) }.should be_empty
+      backend.targets.select(&.starts_with?("/zz")).should be_empty
+    end
+    backend = TargetRecordingBackend.new(->(t : String) do
+      case t
+      when "/"     then make(302, "", location: "/next")
+      when "/next" then html(%(<a href="/my file.pdf">f</a>))
+      else              html("an ordinary page")
+      end
+    end)
+    terminal_of(D::Engine.new("http://t/", [] of String, backend, cfg))
+    backend.targets.should contain("/next")
+    backend.targets.should contain("/my%20file.pdf")
   end
 
   # A retry the request budget refuses sent nothing, so its answer is the failure it was

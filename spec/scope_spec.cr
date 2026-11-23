@@ -946,6 +946,83 @@ describe Gori::Scope do
   end
 end
 
+# A `host` rule folds the host (case, root dot); a `string`/`regex` rule reads the url, which
+# carries the host as typed. The EXCLUDE side is asked of the folded spelling too, so a
+# carve-out cannot be dodged by re-spelling the host a host include still admits.
+describe "Gori::Scope url-level excludes and the host's spelling" do
+  it "holds a string and a regex exclude against a re-cased or root-dotted host" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test").should be_true
+      scope.add("exclude", "string", "acme.test/admin").should be_true
+      scope.add("exclude", "regex", "^https://acme\\.test/internal").should be_true
+      scope.enable
+      scope.enable_sandbox
+      ["https://acme.test./admin", "https://ACME.test/admin", "https://acme.test/internal",
+       "https://ACME.test/internal", "https://acme.test./internal", "https://Acme.Test../admin",
+       "http://u@ACME.test./admin"].each do |url|
+        host = url.split("://")[1].split('/')[0].split('@').last.split(':')[0]
+        scope.excluded?(url, host).should be_true
+        scope.in_scope_url?(url, host).should be_false
+        scope.matches_url?(url, host).should be_false
+        scope.sandbox_blocks?(url, host).should be_true
+      end
+      scope.in_scope_url?("https://ACME.test./public", "ACME.test.").should be_true
+      scope.sandbox_blocks?("https://ACME.test./public", "ACME.test.").should be_false
+    end
+  end
+
+  it "keeps an include matching the raw spelling only" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "regex", "^https://acme\\.test/").should be_true
+      scope.matches_url?("https://acme.test/x", "acme.test").should be_true
+      scope.matches_url?("https://ACME.test/x", "ACME.test").should be_false
+      scope.matches_url?("https://acme.test./x", "acme.test.").should be_false
+    end
+  end
+
+  it "canonicalises only the authority, and answers nil when it already is canonical" do
+    Gori::Scope.canonical_url("https://ACME.test./A?B#C").should eq("https://acme.test/A?B#C")
+    Gori::Scope.canonical_url("https://ACME.test.:8443/x").should eq("https://acme.test:8443/x")
+    Gori::Scope.canonical_url("https://[::1]:8443/X").should be_nil
+    Gori::Scope.canonical_url("https://[FE80::A]/x").should eq("https://[fe80::a]/x")
+    Gori::Scope.canonical_url("https://acme.test/ADMIN").should be_nil
+    Gori::Scope.canonical_url("not a url").should be_nil
+    Gori::Scope.canonical_url("HTTP://acme.test/x").should eq("http://acme.test/x")
+    Gori::Scope.canonical_url("http://acme.test:80/x").should eq("http://acme.test/x")
+    Gori::Scope.canonical_url("https://acme.test:0443/x").should eq("https://acme.test/x")
+    Gori::Scope.canonical_url("http://acme.test:/x").should eq("http://acme.test/x")
+    Gori::Scope.canonical_url("http://acme.test:443/x").should be_nil
+    Gori::Scope.canonical_url("http://acme.test:0/x").should be_nil
+    Gori::Scope.canonical_url("http://u:p@ACME.test:80/x?y@z").should eq("http://acme.test/x?y@z")
+    Gori::Scope.canonical_url("http://[::1]:80/x").should eq("http://[::1]/x")
+    # A digits-only port is the decimal `URI.parse` dials; anything else is left as written.
+    Gori::Scope.canonical_url("http://h.test:08080/admin").should eq("http://h.test:8080/admin")
+    Gori::Scope.canonical_url("http://h.test:00/x").should eq("http://h.test:0/x")
+    Gori::Scope.canonical_url("http://h.test:8080/admin").should be_nil
+    Gori::Scope.canonical_url("https://h.test:8443/x").should be_nil
+    Gori::Scope.canonical_url("http://h.test:+80/x").should be_nil
+  end
+
+  # A forward-proxy request's absolute-form target is the url the gate reads, so its scheme
+  # case, a default port and a userinfo dodged a url-level exclude a host include admitted.
+  it "holds a regex exclude against a re-spelled scheme, default port or userinfo" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test").should be_true
+      scope.add("exclude", "regex", "^http://acme\\.test/internal").should be_true
+      scope.enable_sandbox
+      {"HTTP://acme.test/internal", "http://acme.test:80/internal", "http://u@acme.test/internal",
+       "Http://u:p@ACME.test.:080/internal"}.each do |url|
+        scope.excluded?(url, "acme.test").should be_true
+        scope.sandbox_blocks?(url, "acme.test").should be_true
+      end
+      scope.sandbox_blocks?("http://acme.test:8080/internal", "acme.test").should be_false
+    end
+  end
+end
+
 # The per-request evaluators reduce the url and the host ONCE for a whole rule walk instead of
 # once per rule — `url_down` only when a `string` rule can read it (nothing else does), and the
 # host through `HostPattern.normalize`. Both are allocation changes and neither may move a

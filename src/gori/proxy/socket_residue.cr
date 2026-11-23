@@ -186,6 +186,27 @@ module Gori::Proxy
       State::Residue
     end
 
+    # Whether the CLIENT has bytes waiting on `io`, asked without blocking and without consuming
+    # one: a byte in a user-space buffer (Crystal's `IO::Buffered`, OpenSSL's decrypted
+    # `SSL_pending`, a `PrefixIO`'s unread prefix), or anything readable on the socket under
+    # them (`peek`, which also reports a FIN or an error as something). Unlike `state` it never
+    # falls back to a read: on a TLS leg a record waiting on the socket may be a TLS message
+    # rather than application data, and it is reported as pending all the same, as is any
+    # transport it cannot look inside. `ClientConn` asks this before it writes a close-delimited
+    # head, and "pending" there means "do not read client bytes as proof", so erring toward true
+    # is the safe direction.
+    def self.pending?(io : IO) : Bool
+      return true if io.is_a?(IO::Buffered) && io.gori_buffered_residue?
+      case io
+      when TCPSocket            then !peek(io).nil?
+      when OpenSSL::SSL::Socket then io.gori_ssl_pending? || pending?(io.gori_underlying_io)
+      when PrefixIO             then io.prefix_pending? || pending?(io.inner)
+      else                           true
+      end
+    rescue
+      true
+    end
+
     # The TLS half of `state`, in its own method because it is four ordered questions
     # rather than one, and the ORDER is the whole design.
     #

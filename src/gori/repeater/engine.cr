@@ -235,8 +235,11 @@ module Gori
             # A failed OR incomplete exchange leaves the socket unusable for the rest: an
             # error is self-evident; an incomplete body (origin cut it short, or we hit the
             # CAPTURE_READ_MAX ceiling) leaves unread bytes on the wire, so reusing the
-            # connection would misframe the next request (response desync).
-            dead = true if r.error || r.incomplete?
+            # connection would misframe the next request (response desync). A response framed
+            # by a length only a lenient reading gives (`Body.lenient_framing?`) ends the
+            # group the same way: what follows it on this socket is not the next answer.
+            dead = true if r.error || r.incomplete? ||
+                           r.response.try { |resp| Proxy::Codec::Body.lenient_framing?(resp) }
           end
         ensure
           upstream.close rescue nil
@@ -457,9 +460,12 @@ module Gori
       def self.read_response(upstream : IO, request : Bytes, host : String, port : Int32,
                              started : Time::Instant, *, origin_scheme : String = "http",
                              sse : StreamBound? = nil, cancel : Proc(Bool)? = nil) : Result
-        head_result = read_response_head(upstream)
+        head_budget = head_phase_budget(Proxy::SocketTuning.underlying_socket(upstream).try(&.read_timeout))
+        head_until = Time.instant + head_budget
+        per_head = head_read_deadline(head_budget)
+        head_result = read_response_head(upstream, per_head)
         head = head_result.head?
-        return response_head_error(head_result, host, port, started, origin_scheme) unless head
+        return response_head_error(head_result, host, port, started, origin_scheme, deadline: per_head) unless head
 
         resp = Proxy::Codec::Http1.parse_response_head(head)
         lf_framed = Proxy::Codec::Http1.lf_terminated_head?(head)
@@ -479,14 +485,24 @@ module Gori
             return error("malformed interim 1xx response (declared a body) from #{host}:#{port}", started, delivered: true)
           end
           # Cap the run so an origin streaming endless body-less 103s can't hang the
-          # repeater/fuzz worker fiber indefinitely (there is no whole-request deadline).
+          # repeater/fuzz worker fiber indefinitely. The count alone is no time bound: each
+          # interim restarted every per-head clock, so 64 heads dripped inside the idle gap held
+          # one send for 64 head deadlines. `head_until` is the phase's single deadline.
           interim_seen += 1
           interim_status = resp.status
           return error("too many interim 1xx responses from #{host}:#{port}", started, delivered: true) if interim_seen > MAX_INTERIM
-          head_result = read_response_head(upstream)
+          left = head_until - Time.instant
+          if left <= Time::Span.zero
+            return error("no final response from #{host}:#{port} — the origin sent #{interim_seen} interim 1xx " \
+                         "responses (the last a #{interim_status}) and the #{span_text(head_budget)} " \
+                         "response head phase deadline timed out before a final one (RFC 9110 §15.2: a 1xx " \
+                         "precedes the final response, it is not one)", started, delivered: true, timed_out: true)
+          end
+          per_head = head_read_deadline(left)
+          head_result = read_response_head(upstream, per_head)
           head = head_result.head?
           return response_head_error(head_result, host, port, started, origin_scheme,
-            interim: interim_status) unless head
+            interim: interim_status, deadline: per_head) unless head
           resp = Proxy::Codec::Http1.parse_response_head(head)
           lf_framed ||= Proxy::Codec::Http1.lf_terminated_head?(head)
         end
@@ -601,7 +617,8 @@ module Gori
 
       private def self.response_head_error(result : Proxy::Codec::Http1::HeadReadResult,
                                            host : String, port : Int32, started : Time::Instant,
-                                           origin_scheme : String, interim : Int32? = nil) : Result
+                                           origin_scheme : String, interim : Int32? = nil,
+                                           deadline : Time::Span = Proxy::SocketTuning::HEAD_DEADLINE) : Result
         message = if interim && result.timed_out? && result.bytes.empty?
                     # Keep the established origin-facing wording for an interim response
                     # followed by silence. The detailed head reader reports this timeout as
@@ -616,8 +633,9 @@ module Gori
                       no_response_error(host, port, origin_scheme)
                     end
                   else
-                    detail = result.failure_message("response head",
-                      deadline: Proxy::SocketTuning::HEAD_DEADLINE)
+                    detail = result.failure_message("response head", deadline: deadline)
+                    # `failure_message` prints whole seconds, which reads "0 s" for a sub-second bound.
+                    detail = detail.sub("head deadline #{deadline.total_seconds.to_i} s", "head deadline #{span_text(deadline)}")
                     interim ? "#{detail} after interim #{interim} from #{host}:#{port}" : "#{detail} from #{host}:#{port}"
                   end
         Result.new(result.bytes, nil, nil, elapsed(started), message,
@@ -629,16 +647,41 @@ module Gori
       # client read, client_conn.cr:111). The per-operation io_timeout only bounds the gap
       # BETWEEN reads, so a slowloris origin dripping the head one byte at a time (each byte
       # inside io_timeout) would pin this read — and, since the MCP server is single-threaded,
-      # freeze every other tool. HEAD_DEADLINE caps the whole head. underlying_socket returns
+      # freeze every other tool. `deadline` caps the whole head, counted from its first byte
+      # (the wait for that byte is the idle timeout, as before). underlying_socket returns
       # nil for an IO with no settable socket, in which case read_head simply skips the
       # deadline (unchanged behaviour), so this is safe on every transport.
       #
       # `read_response_head_result` also ends a head on a bare-LF blank line, as the proxy does;
       # a pool never reuses the socket behind one (`ConnPool.reusable_response?`).
-      private def self.read_response_head(upstream : IO) : Proxy::Codec::Http1::HeadReadResult
+      private def self.read_response_head(upstream : IO, deadline : Time::Span) : Proxy::Codec::Http1::HeadReadResult
         Proxy::Codec::Http1.read_response_head_result(upstream,
-          deadline: Proxy::SocketTuning::HEAD_DEADLINE,
+          deadline: deadline,
           timeout_sock: Proxy::SocketTuning.underlying_socket(upstream))
+      end
+
+      # The ONE deadline for the whole response-head phase, interim 1xx heads included: the
+      # caller's timeout (the socket's idle bound) times the body's `DEFAULT_BUDGET_FACTOR` —
+      # 90 s at the default 30 s, the ceiling the h2 engine gives a whole exchange. Not capped at
+      # `HEAD_DEADLINE`: an origin that sends `102 Processing` or a late `100 Continue` while it
+      # works may legitimately take longer than one head deadline to reach its final head. What
+      # this replaces was a fresh fixed deadline per head, which MAX_INTERIM multiplied into
+      # half an hour per send and which ignored a short caller timeout entirely. With no socket
+      # timeout to derive from, `HEAD_DEADLINE`.
+      def self.head_phase_budget(idle : Time::Span?) : Time::Span
+        idle ? idle * H2Engine::DEFAULT_BUDGET_FACTOR : Proxy::SocketTuning::HEAD_DEADLINE
+      end
+
+      # What one head read gets, counted from that head's first byte: what is left of the phase,
+      # but never more than `HEAD_DEADLINE`, so a single dripped head is still cut where it was.
+      def self.head_read_deadline(remaining : Time::Span) : Time::Span
+        cap = Proxy::SocketTuning::HEAD_DEADLINE
+        remaining < cap ? remaining : cap
+      end
+
+      private def self.span_text(span : Time::Span) : String
+        secs = span.total_seconds
+        secs == secs.to_i ? "#{secs.to_i} s" : "#{secs.round(3)} s"
       end
 
       # An error Result with no head/body, timed from `started` (shared with the pool, which

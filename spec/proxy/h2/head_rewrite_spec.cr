@@ -106,6 +106,52 @@ private class RefusingDeferrer
   end
 end
 
+private class CountingRewriter < Gori::Proxy::HeadRewriter
+  getter calls = 0
+
+  def active? : Bool
+    true
+  end
+
+  def rewrite_request(head : Bytes, host : String) : Bytes
+    @calls += 1
+    head
+  end
+
+  def rewrite_response(head : Bytes, host : String) : Bytes
+    @calls += 1
+    head
+  end
+end
+
+# Records the `head` of every block it is offered, and never defers one.
+private class HeadRecorder
+  include Gori::Proxy::H2::HeadRewrite::Deferrer
+  getter heads = [] of Bytes?
+
+  def defer?(block : Gori::Proxy::H2::HeadRewrite::Block) : Bool
+    @heads << block.head
+    false
+  end
+
+  def undecodable(stream_id : UInt32) : Nil
+  end
+end
+
+# Records every block it is offered, and never defers one.
+private class BlockRecorder
+  include Gori::Proxy::H2::HeadRewrite::Deferrer
+  getter blocks = [] of Gori::Proxy::H2::HeadRewrite::Block
+
+  def defer?(block : Gori::Proxy::H2::HeadRewrite::Block) : Bool
+    @blocks << block
+    false
+  end
+
+  def undecodable(stream_id : UInt32) : Nil
+  end
+end
+
 private def pipeline(rewriter : Gori::Proxy::HeadRewriter, direction = "out",
                      sink = RecSink.new) : {Gori::Proxy::H2::HeadRewrite, Gori::Proxy::H2::Assembler, RecSink}
   assembler = Gori::Proxy::H2::Assembler.new(sink, "api.example.com", 443)
@@ -1164,6 +1210,167 @@ describe Gori::Proxy::H2::HeadRewrite do
       pipe.accept(headers(1_u32, block)) { |f, pre| emitted << f; assembler.feed("in", f, pre) }
       HPACK::Decoder.new.decode(emitted.first.payload)
         .should eq([{":status", "200"}, {"x-tag", "b"}, {"x-added", "1"}])
+    end
+  end
+
+  # RFC 7541 §4.2: a receiver that lowered SETTINGS_HEADER_TABLE_SIZE may require a dynamic table
+  # size update at the start of the next block, and the shared decoder has already consumed the
+  # peer's. A re-encode must carry it over, at the start, as the peer sent it.
+  describe "a dynamic table size update at the start of a re-encoded block" do
+    it "is carried over once the direction re-encodes" do
+      pipe, assembler, _ = pipeline(SubRewriter.new("nothing", "matches", on: false))
+      pipe.latch
+      updates = Bytes[0x20, 0x3f, 0xe1, 0x1f] # §6.3: to 0, then to 4096 (a multi-byte integer)
+      block = IO::Memory.new
+      block.write(updates)
+      block.write(HPACK::Encoder.new.encode(req("/x")))
+      sent = push(pipe, assembler, headers(1_u32, block.to_slice))
+
+      sent.first.payload[0, 4].should eq(updates)
+      receiver = HPACK::Decoder.new
+      receiver.decode(sent.first.payload).should eq(req("/x"))
+      receiver.max_size.should eq(4096)
+    end
+
+    # A hold engages a passthrough block and writes it later, so the update leads whichever block
+    # the gate writes first (`lead`), not this one.
+    it "is owed when a passthrough block is engaged later, and leads the next block written, once" do
+      pipe, assembler, _ = pipeline(SubRewriter.new("nothing", "matches", on: false))
+      recorder = BlockRecorder.new
+      pipe.deferrer = recorder
+      block = IO::Memory.new
+      block.write_byte(0x20_u8)
+      block.write(HPACK::Encoder.new.encode(req("/x")))
+      push(pipe, assembler, headers(1_u32, block.to_slice)).first.payload.should eq(block.to_slice)
+      pipe.owes?.should be_false
+
+      engaged = pipe.engage(recorder.blocks.first)
+      engaged.frames.first.payload.should eq(HPACK::Encoder.new.encode(req("/x")))
+      pipe.owes?.should be_true
+      led = pipe.lead(engaged.frames.first)
+      led.payload[0].should eq(0x20_u8)
+      receiver = HPACK::Decoder.new
+      receiver.decode(led.payload).should eq(req("/x"))
+      receiver.max_size.should eq(0)
+      pipe.owes?.should be_false
+      pipe.lead(engaged.frames.first).should eq(engaged.frames.first)
+      pipe.engage(recorder.blocks.first) # owing it again once led is a no-op
+      pipe.owes?.should be_false
+    end
+
+    # A run of updates leaves the same table and limit as its smallest followed by its last, and
+    # the far decoder is never sent more than `LEAD_RESERVE` bytes of them.
+    it "keeps a run of updates as its smallest and its last, behind a PRIORITY prefix" do
+      pipe, assembler, _ = pipeline(SubRewriter.new("nothing", "matches", on: false))
+      pipe.latch
+      block = IO::Memory.new
+      block.write(Bytes[0x3f, 0xe1, 0x1f, 0x3f, 0x45, 0x3f, 0xe1, 0x3f]) # 4096, 100, 8192
+      block.write(HPACK::Encoder.new.encode(req("/x")))
+      priority = Bytes[0x80, 0, 0, 3, 15] # exclusive, depends on stream 3, weight 16
+      frame = Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS | Frame::PRIORITY, 1_u32,
+        priority + block.to_slice)
+      sent = push(pipe, assembler, frame)
+
+      sent.first.payload[0, 5].should eq(priority)
+      sent.first.payload[5, 5].should eq(Bytes[0x3f, 0x45, 0x3f, 0xe1, 0x3f]) # 100, then 8192
+      receiver = HPACK::Decoder.new
+      receiver.decode(sent.first.payload[5..]).should eq(req("/x"))
+      receiver.max_size.should eq(8192)
+    end
+
+    it "adds none to a block that carried none" do
+      pipe, assembler, _ = pipeline(SubRewriter.new("nothing", "matches", on: false))
+      pipe.latch
+      sent = push(pipe, assembler, headers(1_u32, HPACK::Encoder.new.encode(req("/x"))))
+      sent.first.payload.should eq(HPACK::Encoder.new.encode(req("/x")))
+    end
+  end
+
+  # HPACK indexing amplifies: one ~64 KB dynamic-table entry referenced by 250 one-byte `0xBE`s
+  # is a 263-byte block that decodes to a ~16 MiB list. Such a block has no h1 text form (h1
+  # refuses a head past `MAX_HEAD_BYTES`), so the pipeline must not synthesize one, on the pump
+  # fiber, for every interim 103 an origin cares to send.
+  describe "a decoded header list past the h1 head limit" do
+    it "gives the block no head, runs no rule, forwards it as it arrived, and stays cheap" do
+      rewriter = CountingRewriter.new
+      deferrer = HeadRecorder.new
+      pipe, assembler, _ = pipeline(rewriter, direction: "in")
+      pipe.deferrer = deferrer
+      assembler.feed("out", headers(1_u32, HPACK::Encoder.new.encode(req("/x"))))
+      seed = IO::Memory.new
+      seed.write(Bytes[0x3f, 0xe1, 0xff, 0x03]) # §6.3 size update to 65536
+      seed.write(HPACK::Encoder.new(65536, indexing: true).encode([{":status", "103"}, {"x-big", "A" * 65000}]))
+      pipe.accept(headers(1_u32, seed.to_slice, Frame::END_HEADERS)) { |f, pre| assembler.feed("in", f, pre) }
+      deferrer.heads.last.should_not be_nil # a 65 KB head is still an ordinary head
+
+      flood = IO::Memory.new
+      flood.write(HPACK::Encoder.new.encode([{":status", "103"}]))
+      250.times { flood.write_byte(0xbe_u8) } # dynamic index 62, the 65 KB entry
+      wire = flood.to_slice
+      emitted = [] of Frame::Header
+      GC.collect
+      before = GC.stats.total_bytes
+      20.times do
+        pipe.accept(headers(1_u32, wire, Frame::END_HEADERS)) { |f, pre| emitted << f; assembler.feed("in", f, pre) }
+      end
+      allocated = GC.stats.total_bytes - before
+
+      deferrer.heads.size.should eq(21)
+      deferrer.heads[1..].all?(Nil).should be_true
+      emitted.all? { |f| f.payload == wire }.should be_true # verbatim, as with no rule
+      # 20 synthesized heads cost ~640 MiB; the decode itself shares the table's Strings.
+      allocated.should be < 8 * 1024 * 1024
+
+      # A FINAL head of the same shape reaches no rule either.
+      final = IO::Memory.new
+      final.write(HPACK::Encoder.new.encode([{":status", "200"}]))
+      250.times { final.write_byte(0xbe_u8) }
+      pipe.accept(headers(1_u32, final.to_slice)) { |f, pre| assembler.feed("in", f, pre) }
+      deferrer.heads.last.should be_nil
+      rewriter.calls.should eq(0)
+      pipe.engaged?.should be_false
+    end
+
+    it "is never re-encoded once the direction is engaged, and with no gate ends the connection" do
+      pipe, assembler, _ = pipeline(SubRewriter.new("nothing", "matches", on: false), direction: "in")
+      pipe.latch
+      block = IO::Memory.new
+      block.write(Bytes[0x3f, 0xe1, 0xff, 0x03])
+      block.write(HPACK::Encoder.new(65536, indexing: true).encode([{":status", "200"}, {"x-big", "A" * 65000}]))
+      250.times { block.write_byte(0xbe_u8) }
+      written = 0
+      expect_raises(Gori::Error, /stream was reset/) do
+        pipe.accept(headers(1_u32, block.to_slice)) { |f, pre| written += f.payload.size; assembler.feed("in", f, pre) }
+      end
+      written.should eq(0)
+    end
+
+    it "comes back unsendable, not re-encoded, when the gate engages the direction on it late" do
+      pipe, assembler, _ = pipeline(SubRewriter.new("nothing", "matches", on: false))
+      recorder = BlockRecorder.new
+      pipe.deferrer = recorder
+      block = IO::Memory.new
+      block.write(Bytes[0x3f, 0xe1, 0xff, 0x03])
+      block.write(HPACK::Encoder.new(65536, indexing: true).encode([{"x-big", "A" * 65000}]))
+      250.times { block.write_byte(0xbe_u8) }
+      push(pipe, assembler, headers(1_u32, block.to_slice)).first.payload.should eq(block.to_slice)
+
+      engaged = pipe.engage(recorder.blocks.first)
+      engaged.unsendable.should be_true
+      engaged.frames.should be_empty
+      pipe.engaged?.should be_true
+      pipe.reencode(recorder.blocks.first, recorder.blocks.first.fields).unsendable.should be_true
+    end
+
+    it "says so on the flow" do
+      pipe, assembler, sink = pipeline(SubRewriter.new("x", "y"), direction: "out")
+      pipe.deferrer = HeadRecorder.new
+      block = IO::Memory.new
+      block.write(Bytes[0x3f, 0xe1, 0xff, 0x03])
+      block.write(HPACK::Encoder.new(65536, indexing: true).encode(req("/x") + [{"x-big", "A" * 65000}]))
+      5.times { block.write_byte(0xbe_u8) }
+      pipe.accept(headers(1_u32, block.to_slice)) { |f, pre| assembler.feed("out", f, pre) }
+      sink.requests.first.advisory.not_nil!.should contain("no HTTP/1.1 text form")
     end
   end
 end

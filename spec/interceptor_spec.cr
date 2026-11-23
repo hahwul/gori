@@ -422,6 +422,36 @@ describe "Interceptor scope gates over an ABSOLUTE-FORM target" do
     end
   end
 
+  it "sandbox_blocks? holds a port-free exclude against an absolute target on a non-default port" do
+    # `http://acme.test:8080/admin` is the same request as origin-form `/admin` on :8080, and
+    # an exclude written without a port has to stop both.
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      ic = Gori::Interceptor.new(scope)
+      scope.add("include", "host", "acme.test")
+      scope.add("exclude", "string", "acme.test/admin")
+      scope.enable_sandbox
+      ic.sandbox_blocks?("http", "acme.test", "/admin", 8080).should be_true
+      ic.sandbox_blocks?("http", "acme.test", "http://acme.test:8080/admin", 8080).should be_true
+      ic.sandbox_blocks?("http", "acme.test", "http://acme.test:8080/ok", 8080).should be_false
+      ic.sandbox_blocks?("http", "acme.test", "http://acme.test/admin", 80).should be_true
+    end
+  end
+
+  it "sandbox_blocks? judges a header-shaped line behind a blank line by its own target" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      ic = Gori::Interceptor.new(scope)
+      scope.add("include", "host", "acme.test")
+      scope.add("exclude", "string", "/admin")
+      scope.enable_sandbox
+      req = Gori::Proxy::Codec::Http1.parse_request_head(
+        "\r\nX:Y /admin HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice)
+      target = Gori::Proxy::Codec::Http1.gate_target(req)
+      ic.sandbox_blocks?("http", "acme.test", target, 80).should be_true
+    end
+  end
+
   # #884 — the P1, and it failed OPEN. `curl -x` a plaintext origin and the request arrives
   # ABSOLUTE-form, so its target carries `127.0.0.1:19316` and an exclude `string ":19316"`
   # matched it (403). `curl -kx` the TLS origin on the SAME port and the request arrives
@@ -468,6 +498,133 @@ describe "Interceptor scope gates over an ABSOLUTE-FORM target" do
         scheme: "https", port: 8443).should be_false
       ic.intercepts_request?(method: "GET", host: "acme.test", target: "/x",
         scheme: "https", port: 443).should be_true
+    end
+  end
+
+  # A tunnelled client's slash-less target (`GET 0/`) used to be spliced onto the host, so the
+  # gate judged `http://127.0.0.10/` for a request bound for 127.0.0.1.
+  # An absolute target naming another origin than the one gori dials (a pinned listener, or a
+  # request line whose dial followed `Host`) was judged under ITS authority.
+  it "judges an absolute target that names another origin under the resolved one" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      ic = Gori::Interceptor.new(scope)
+      ic.toggle
+      scope.add("include", "host", "127.0.0.1")
+      scope.add("exclude", "regex", "^http://127\\.0\\.0\\.1/admin")
+      scope.enable
+      scope.enable_sandbox
+      ic.sandbox_blocks?("http", "127.0.0.1", "/admin", 80).should be_true
+      ic.sandbox_blocks?("http", "127.0.0.1", "http://other.test/admin", 80).should be_true
+      ic.intercepts_request?(method: "GET", host: "127.0.0.1", target: "http://other.test/admin",
+        scheme: "http", port: 80).should be_false
+      # Port and scheme are part of the origin: a pinned :8080 or https listener is not :80.
+      ic.sandbox_blocks?("http", "127.0.0.1", "http://127.0.0.1/admin", 8080).should be_true
+      ic.sandbox_blocks?("https", "127.0.0.1", "http://127.0.0.1:443/admin", 443).should be_false
+      ic.sandbox_blocks?("http", "127.0.0.1", "http://other.test/public", 80).should be_false
+    end
+  end
+
+  it "does not let an include for the named authority admit the resolved host" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      ic = Gori::Interceptor.new(scope)
+      scope.add("include", "string", "ok.test")
+      scope.enable_sandbox
+      # The tolerant gate parse recovers `http://ok.test/x` while the dial follows `Host`.
+      ic.sandbox_blocks?("http", "127.0.0.1", "http://ok.test/x", 19316).should be_true
+      ic.sandbox_blocks?("http", "ok.test", "http://ok.test/x", 80).should be_false
+      ic.sandbox_blocks?("http", "OK.test.", "HTTP://u@ok.test:80/x", 80).should be_false
+    end
+  end
+
+  # The resolved origin's own absolute target keeps its verbatim spelling for the include side,
+  # so an include written with the port (#884) still matches plaintext forward-proxy traffic.
+  it "keeps the verbatim spelling when the absolute target names the resolved origin" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      ic = Gori::Interceptor.new(scope)
+      scope.add("include", "regex", "^http://acme\\.test:8080/")
+      scope.enable_sandbox
+      ic.sandbox_blocks?("http", "acme.test", "http://acme.test:8080/x", 8080).should be_false
+      ic.sandbox_blocks?("http", "acme.test", "/x", 8080).should be_true
+    end
+  end
+
+  it "Interceptor.same_origin? compares scheme, folded host and effective port" do
+    Gori::Interceptor.same_origin?("http://ACME.test./x", "http", "acme.test", 80).should be_true
+    Gori::Interceptor.same_origin?("HTTP://u:p@acme.test:080/x", "http", "acme.test", 80).should be_true
+    Gori::Interceptor.same_origin?("https://acme.test/x", "https", "acme.test", 443).should be_true
+    Gori::Interceptor.same_origin?("http://[::1]:8080/x", "http", "::1", 8080).should be_true
+    Gori::Interceptor.same_origin?("http://acme.test/x", "https", "acme.test", 80).should be_false
+    Gori::Interceptor.same_origin?("http://acme.test/x", "http", "acme.test", 8080).should be_false
+    Gori::Interceptor.same_origin?("http://acme.test:abc/x", "http", "acme.test", 80).should be_false
+    # Digits only, as the forward dial (`URI.parse`) reads a port: no sign, space or `_`.
+    Gori::Interceptor.same_origin?("http://acme.test:08080/x", "http", "acme.test", 8080).should be_true
+    Gori::Interceptor.same_origin?("http://acme.test:+80/x", "http", "acme.test", 80).should be_false
+    Gori::Interceptor.same_origin?("http://acme.test: 80/x", "http", "acme.test", 80).should be_false
+    Gori::Interceptor.same_origin?("http://acme.test:8_0/x", "http", "acme.test", 80).should be_false
+  end
+
+  # A port spelled with leading zeros, or with a sign the dial would never read, dodged a
+  # url-level exclude that origin-form traffic to the same place hit.
+  it "holds url-level excludes against a zero-padded or signed port" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      ic = Gori::Interceptor.new(scope)
+      scope.add("include", "host", "h.test")
+      scope.add("exclude", "string", "h.test:8080/admin")
+      scope.add("exclude", "regex", "^http://h\\.test/secret")
+      scope.enable
+      scope.enable_sandbox
+      ic.sandbox_blocks?("http", "h.test", "/admin", 8080).should be_true
+      ic.sandbox_blocks?("http", "h.test", "http://h.test:8080/admin", 8080).should be_true
+      ic.sandbox_blocks?("http", "h.test", "http://h.test:08080/admin", 8080).should be_true
+      ic.sandbox_blocks?("http", "h.test", "http://h.test:0080/secret", 80).should be_true
+      ic.sandbox_blocks?("http", "h.test", "http://h.test:+80/secret", 80).should be_true
+      ic.sandbox_blocks?("http", "h.test", "http://h.test:08080/public", 8080).should be_false
+      ic.toggle
+      ic.intercepts_request?(method: "GET", host: "h.test", target: "http://h.test:08080/admin",
+        scheme: "http", port: 8080).should be_false
+      ic.intercepts_request?(method: "GET", host: "h.test", target: "/admin", scheme: "http", port: 8080)
+        .should be_false
+    end
+    Gori::Interceptor.same_origin?("http://other.test/x", "http", "acme.test", 80).should be_false
+  end
+
+  # R3: a forward-proxy re-spelling of the same origin dodged a url-level exclude.
+  it "holds a url-level exclude against a re-spelled absolute-form target" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test")
+      scope.add("exclude", "regex", "^http://acme\\.test/internal")
+      scope.enable
+      scope.enable_sandbox
+      ic = Gori::Interceptor.new(scope)
+      ic.sandbox_blocks?("http", "acme.test", "/internal", 80).should be_true
+      {"HTTP://acme.test/internal", "http://acme.test:80/internal", "http://u@acme.test/internal",
+       "http://ACME.test/internal"}.each do |t|
+        ic.sandbox_blocks?("http", "acme.test", t, 80).should be_true
+      end
+    end
+  end
+
+  it "never lets a slash-less target re-spell the host the sandbox and hold judge" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      ic = Gori::Interceptor.new(scope)
+      ic.toggle
+      scope.add("include", "regex", "^http://127\\.0\\.0\\.10/")
+      scope.enable
+      scope.enable_sandbox
+
+      ic.sandbox_blocks?("http", "127.0.0.1", "0/", 80).should be_true
+      ic.sandbox_blocks?("http", "127.0.0.1", "0/", 8080).should be_true
+      ic.intercepts_request?(method: "GET", host: "127.0.0.1", target: "0/", scheme: "http", port: 80)
+        .should be_false
+      # The asterisk-form keeps its host too.
+      ic.sandbox_blocks?("http", "127.0.0.1", "*", 80).should be_true
+      ic.sandbox_blocks?("http", "127.0.0.10", "0/", 80).should be_false
     end
   end
 

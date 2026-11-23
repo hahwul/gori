@@ -6235,3 +6235,156 @@ Nothing forced it — a section resets and saves only its own rows, so either sh
 one is the smaller. The old name covered only the first row once the second joined it; it
 stays a palette keyword. The row's hint says what is never written before it says how to read the
 file. A call count in the Agents card is still not built.
+
+### 2026-11-23: a response a lenient client frames shorter than gori is framed as that client frames it
+
+Refines Invariant 1's response rule (`framing_ambiguous?`): still narrower than the request
+rule, and changed only where a measured client disagrees with gori's reading. Chrome and curl
+frame a non-chunked `Transfer-Encoding` with `Content-Length` by the length, and Chrome reads
+`HTTP/1.1  204`, `http/1.1 204`, `HTTP/1.1 204<TAB>…` and `HTTP/1.1 0204` as a bodyless 204,
+while gori read all of them to the connection's close. The client then reuses the socket, and
+on a forward-proxy connection the origin's later bytes answered a request for another host.
+
+Refusing such a response would hide from the operator a page their browser renders without
+the proxy, so gori takes the client's reading instead (`Body.response_framing`): the length
+for the first shape, no body for a status line read as 204 or 304. Nothing is rewritten.
+`Body.lenient_framing?` then closes the client and the origin connection behind the response,
+which is what makes a strict reader agree: read to the close, the body ends at the same byte.
+What the origin sends past that point is not forwarded and not captured, and the flow carries
+a note saying so. A scripted send reads the same way and retires the socket, so a Repeater
+group ends at such a response instead of reading what follows as its next answer. A non-chunked
+`Transfer-Encoding` alone stays close-delimited. A status line read as an interim 1xx is still
+refused: that client waits for another head, and gori cannot follow one off a line it cannot
+parse. The lenient reading (`Http1.lenient_status`) follows what Chrome was measured to accept
+and errs wide: `http` in any case within the first 8 bytes of the line (Chrome's slop is 4, so
+a leading SP, HTAB or `XXXX` reads as a status line), then the leading digit run, so `204x` is
+a 204.
+
+The backstop covers the shapes nobody has measured yet: during a CLOSE-DELIMITED response, a
+client byte other than CR/LF means the client took the response as complete, so the exchange
+ends there and the flow says why. A chunked or Content-Length stream keeps being watched as
+before, and so does a PIPELINED exchange: client bytes already pending before the response head
+is written (`SocketResidue.pending?`) were not sent in answer to it, and ending the stream for
+them would hand that client a truncated body it reads as complete. Nor is it armed for a
+client that still owes its request body (an `Expect: 100-continue` the origin answered with a
+final head before the body was pumped): those bytes are the body, not a next request. The
+pending check narrows the pipelining case without closing it; a client whose pipelined request
+lands after the head went out is read as a disagreement.
+
+A `101` answering a request that carried no `Upgrade` is refused for the same reason: the
+client did not ask to leave HTTP, so what follows would pass uncaptured. When a rule or an
+intercept edit changes the method, the upstream hop is framed by the sent method and the
+client connection is closed after the response, held at intercept or not, since the client
+frames by its own.
+
+### 2026-11-23: live gates judge the dialled host, not a spelling the peer chose
+
+Refines §3. Three ways a peer or an author picked the string a containment gate evaluated:
+a request-target without a leading slash was glued onto the host (`127.0.0.1` + `0/` read as
+`127.0.0.10`), an h2 client's `:scheme` was used as the URL's scheme, and a host spelled
+`ACME.test` or `acme.test.` passed a `host` include while dodging a url-level exclude.
+
+- `Url.gate_url` is what every live gate builds (`Outbound.scope_url`, the Interceptor's
+  sandbox, scope and port-exclude tests): the target always follows a `/`.
+- The h2 gates take the TRANSPORT's scheme (`https` in the TLS tunnel, `http` for h2c).
+- An absolute-form target that does not name the resolved origin (`Interceptor.same_origin?`:
+  scheme, folded host, port defaulted by the target's scheme) is reduced to its path and judged
+  under that origin. A pinned listener dials its pin whatever the target says, and a request
+  line the strict parse cannot read is dialled by `Host` while the tolerant gate reading still
+  recovers the URL. One that does name the resolved origin keeps its verbatim spelling, so an
+  include that names a port on plaintext forward-proxy traffic keeps matching.
+- A string or regex EXCLUDE is also asked of the URL in canonical spelling (`Scope.canonical_url`:
+  scheme lowercased, userinfo and a default port dropped, a zero-padded port rewritten to
+  plain decimal, host folded as a `host` rule folds it). A port is ASCII digits only, as the
+  forward dial's `URI.parse` reads it; `:+80` names no port, so that target is not same-origin.
+  Includes keep matching the raw spelling, so no include changes meaning.
+- An exclude is asked of both port spellings on a non-default port: origin form adds the
+  port-bearing URL, and a same-origin absolute target, which already carries the port, adds
+  the port-free one.
+- The gate reads the first non-blank line's own target even where the parse calls that line a
+  header under an empty request-line (`X:y /admin HTTP/1.1` behind a blank line): an origin
+  that skips the blank line serves `/admin`, and none serves the `/` of an empty line.
+
+`Url.request_url` and its SQL twin `QL::URL_EXPR_NO_PORT` are unchanged: History shows and
+filters the stored spelling. So for these shapes a live gate refuses more than the lens hides,
+on purpose; the lens is a view, the gate is containment.
+
+### 2026-11-23: an env value is data in a `§…§` template; it may supply a step's argument, never the step
+
+Refines P7's provenance axis and 2026-10-11 (an agent may author commands, not arm them).
+Env expansion ran before the marker parse, so a value holding `§…§` added a position and one
+holding a chain armed an `exec:` step after the exec gate had judged the template; `set_env_var`
+needs only `write`. Values are now spliced as literals (`Fuzz::Template.literal_splice`, through
+`Env.expand(splice:)`): the wire carries exactly the value. Env inside a chain stays a feature
+for arguments (a key for a step the template names), so the second half is a comparison, not a
+ban: a chain STEP that runs a command after expansion while its raw step does not is refused
+(raised as `CommandsRefused`, which is now a `Gori::Error`).
+The escape cannot win every case: the parser pairs `§§§` greedily, so a value that begins or
+ends with `§` beside a delimiter merges with it. So the expanded parse is VERIFIED against the
+raw one (`Plan.env_splice_refusal`): same positions, the same literal runs and defaults once
+each raw fragment is expanded on its own, and a chain equal to its raw steps each expanded and
+split in place, so a value may name a converter list (`base64|base64`) but no derived step may
+run a command unless its raw step does. Anything else is refused before a byte is sent. `set_env_var` stays ungated. The same decision closes two neighbours: MCP `create_repeater`,
+`update_repeater` and `create_repeaters` ask `exec` before storing a command-running chain,
+and preparing a Fuzzer tab builds its plan with hooks off.
+
+### 2026-11-23: an h2 head past the h1 head limit has no h1 text form
+
+Refines P6. HPACK indexing decodes a few hundred wire bytes into a list of up to 16 MiB, and
+the head pipeline synthesized its h1 text per block on the pump fiber, rules or not. A decoded
+list past `Codec::Http1::MAX_HEAD_BYTES` now gets no `head`: no rule, no hold, no extract, and
+the block is forwarded as a rules-less connection forwards it, with an advisory on the flow.
+With the sandbox on, such an opening request is refused, since its URL cannot be judged; h1
+refuses a head that size outright. On a direction that already re-encodes (a rule, a hold or a
+strip engaged it) the block cannot go out verbatim, and writing 16 MiB of literals is the same
+stall, so its stream is reset toward both peers and the connection carries on. The same holds
+for a block the gate engages late (trailers behind an owned body, a block overtaking a head
+held verbatim, a head held verbatim and re-encoded behind a rewritten one): `engage` and
+`reencode` withhold it as unsendable.
+
+A peer's HPACK table size update is owed per direction, not per block. The shared decoder has
+applied it, so once the block that carried it stops going out as it arrived (re-encoded, held,
+refused, stubbed or reset), it leads the next header block gori encodes on that direction
+(`HeadRewrite#owe`, `#lead`), kept as its smallest and last value. It waits while a head held
+verbatim is still to go out, because a shrink ahead of that head would evict entries its
+indexed references name. Known limit, as before this change: a strict peer that requires the
+update on the first block after its SETTINGS ACK can still fail when that block is a
+verbatim-held head or one overtaking it.
+
+Session-binding extract rules take the transport's scheme like the other h2 gates.
+
+On the body-rule path nothing blocks the way TCP backpressure blocks the plain relay, so DATA
+a sender pushed past its receiver's window was parked without bound. Parked bytes are held to
+the receiver's window plus gori's debt plus one default window of slack; past that it is the
+sender's FLOW_CONTROL_ERROR and the connection ends.
+
+### 2026-11-23: a WebSocket hold bounds what queues behind it by count and by retained bytes
+
+Refines P6 for the WebSocket message hold (`WS::MessageGate`). `MAX_DEFERRED_BYTES` summed payload sizes by walking the
+queue on every message: zero-byte frames never reached it, and the walk was quadratic on a
+fiber that never yields. Each queued message is now charged its retained bytes plus a fixed
+overhead, kept as a running total; past 4096 messages the hold fails open as it does past
+1 MiB. One direction of one socket holds at most 256 messages at once; a further match queues
+behind them unheld, in order, with one note. A continuation frame with no message in progress
+is its own opcode-0 message in all three reassemblers and is never rewritten, re-framed or
+held: gori must not turn a frame the peer has to reject into one it accepts.
+
+### 2026-11-23: scripted sends keep the connection's HPACK table, and bound the h1 head phase once
+
+Every complete header block on a scripted h2 connection is decoded, whatever stream it rides
+(a finished stream's trailers, PUSH_PROMISE); only the result is dropped. A block that cannot
+be decoded means the table is lost: the exchange fails naming it and the connection is not
+pooled. The same holds for a frame that arrives inside an open header block (RFC 9113 §6.10,
+`H2Engine::HeaderBlockGate`): the blocks would decode out of order. The h1 response head phase has one deadline, interim 1xx heads included: the idle
+timeout times `DEFAULT_BUDGET_FACTOR` (90 s at the defaults, what h2 gives an exchange), with
+`HEAD_DEADLINE` still bounding a single head. Capping the phase at one `HEAD_DEADLINE` was
+tried and dropped: an origin that sends `102 Processing` while it works would fail.
+
+### 2026-11-23: unreadable top-level Fuzzer knobs stay stored and refuse the run
+
+Widens 2026-11-17 ("A prepared Fuzzer tab is data, not permission to send", #1910), which said
+this of `plan_options`. An unknown `mode`, a
+`match_regex`/`filter_regex` that does not compile and a payload set of unknown kind were
+dropped, so the tab ran as Sniper, matched everything or shifted its sets, and a re-save erased
+them. `SessionConfig#unread` keeps them raw, `to_json` writes them back, and the TUI refuses to
+run until the operator sets that knob again.

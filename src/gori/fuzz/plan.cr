@@ -228,6 +228,11 @@ module Gori::Fuzz
     # Whether a `¦chain` may run an `exec:` step (false: MCP's `exec` denied, see
     # `MCP::Tools#exec_refusal`). Checked before the seed rendering, which already runs a chain.
     property? commands_allowed : Bool
+    # Whether a `¦chain`'s `exec:` step may run while the plan is BUILT. False for a build that
+    # only validates and is never run (`PreparedSession`): the baseline render the builder reads
+    # for the gRPC and Content-Length checks replays every chain, and preparing a tab sends
+    # nothing, so it must not fork the operator's command either. A run keeps the default.
+    property? run_hooks : Bool
 
     def initialize(@template : String = "",
                    *,
@@ -251,12 +256,21 @@ module Gori::Fuzz
                    @ws_messages : Array(WsMessageSource)? = nil,
                    @project : Gori::Store? = nil,
                    @project_drain_fts : Bool = true,
-                   @commands_allowed : Bool = true)
+                   @commands_allowed : Bool = true,
+                   @run_hooks : Bool = true)
     end
   end
 
-  # `Plan.build`'s refusal under `commands_allowed? == false`; not a `PlanError::Reason`.
-  class CommandsRefused < Exception
+  # `Plan.build`'s refusal of a chain step that runs a local command: under
+  # `commands_allowed? == false`, or (`from_env?`) on any surface when an env value supplied
+  # that step (`Plan.env_splice_refusal`). Not a `PlanError::Reason`. A `Gori::Error`, so
+  # the TUI and `gori run fuzz` print the message as they print every other builder refusal.
+  class CommandsRefused < Gori::Error
+    getter? from_env : Bool
+
+    def initialize(message : String, @from_env : Bool = false)
+      super(message)
+    end
   end
 
   # A ready-to-run fuzz job: THE only place a `Fuzz::Engine` is constructed.
@@ -472,6 +486,8 @@ module Gori::Fuzz
       # WHICH names the capture brought (the TUI template editor) hands over the rest, so an
       # operator-typed `$TOKEN` in a seeded template expands and the capture's `$filter` does
       # not. nil — every other evidence caller — keeps the blanket skip.
+      # The plain pass the splice rode on, for `refuse_env_splice` to expand one raw fragment with.
+      fragment = ->(frag : String) { Env.expand(frag) }
       text =
         if options.evidence?
           # `unescape: Owns::None`: `Escape::Preserve` is a BARE-mode knob, and under the namespaced
@@ -479,7 +495,13 @@ module Gori::Fuzz
           # narrowed evidence expansion CONSUMED `$$ENV.X` and replayed `$ENV.X`. The narrowing is
           # about the var TABLE; the escape belongs to the capture either way.
           # Evidence framing is already wire data; an editor owns any newline promotion.
-          (vars = options.env_vars) ? Env.expand(options.template, vars, unescape: Env::Owns::None) : options.template
+          if vars = options.env_vars
+            fragment = ->(frag : String) { Env.expand(frag, vars, unescape: Env::Owns::None) }
+            Env.expand(options.template, vars, unescape: Env::Owns::None,
+              splice: Template.literal_splice(options.template))
+          else
+            options.template
+          end
         elsif options.verbatim?
           # `PlanOptions#verbatim?`: the operator's bytes, no pass at all — and so no
           # unresolved-env refusal either, as for the Repeater's `--verbatim`.
@@ -489,8 +511,13 @@ module Gori::Fuzz
           if detail = Env.unresolved_env(options.template)
             raise PlanError.new(PlanError::Reason::UnresolvedEnv, "unresolved env #{detail}", detail)
           end
-          String.new(Env.expand_wire(options.template))
+          # Each value is spliced as a LITERAL (`Template.literal_splice`): a project value is
+          # data, and the `§…§` parse below must not read a position or a `¦chain` out of it.
+          String.new(Env.expand_wire(options.template, splice: Template.literal_splice(options.template)))
         end
+      # The expanded parse must match the raw one, and an env value may supply a chain step's
+      # argument, never the command step itself (`env_splice_refusal`).
+      refuse_env_splice(options.template, text, fragment)
       # The FRAME payloads, expanded on the same provenance axis as the head one line up: a
       # frame the operator typed (`--message`, MCP `messages`) resolves its `$KEY`, a CAPTURED
       # frame does not. `Env.expand`, not `expand_wire` — a frame has no head, so there is no
@@ -503,7 +530,9 @@ module Gori::Fuzz
         if detail = Env.unresolved_env(m.payload)
           raise PlanError.new(PlanError::Reason::UnresolvedEnv, "unresolved env #{detail}", detail)
         end
-        Env.expand(m.payload)
+        Env.expand(m.payload, splice: Template.literal_splice(m.payload)).tap do |frame|
+          refuse_env_splice(m.payload, frame, ->(frag : String) { Env.expand(frag) })
+        end
       end)
 
       text, mark_matches, shadowed_marks = mark_text(text, options.auto_mark?, options.marks)
@@ -641,7 +670,7 @@ module Gori::Fuzz
       # The shared decoder registry applies each position's inline `¦chain` at render time.
       # Wired here so a new surface cannot forget it and silently send un-transformed payloads.
       generator = Generator.new(marked, gen_sets, config, registry: Decoder.shared_registry,
-        auto_encode: auto_encode)
+        auto_encode: auto_encode, run_hooks: options.run_hooks?)
       # gRPC framing, decided ONCE off the seed rendering: a template that declares
       # `content-type: application/grpc` and whose body frames cleanly has a 5-byte length
       # prefix that a payload of a different length will INVALIDATE. gori keeps the operator's
@@ -958,6 +987,99 @@ module Gori::Fuzz
         raise PlanError.new(PlanError::Reason::TlsPreset, err, name.try(&.strip))
       end
       Settings.tls_preset_normalize(name)
+    end
+
+    ENV_COMMAND_REFUSAL = "an env value supplied a §…§ chain step that runs a local command — " \
+                          "name the exec: step in the template itself (an env value may only supply its argument)"
+    ENV_SPLICE_REFUSAL = "an env value holding § or ¦ sits next to a §…§ marker and cannot be placed " \
+                         "unambiguously — move the token away from the marker, or change the value"
+    ENV_EMPTY_DEFAULT_REFUSAL = "an env value is empty and cannot be a §…§ position's whole default " \
+                                "(§§ is a literal §) — give the variable a value, or put other text in the marker"
+    ENV_CHAIN_REFUSAL = "an env value changed the steps of a §…§ chain — name the steps in the template, or check the value"
+
+    # Why the env expansion of `raw` into `expanded` must not be parsed as a template: nil when it
+    # may, else `:misplaced`, `:empty_default`, `:chain` or `:command` (`env_splice_message` words
+    # each). `expand` is the SAME pass the caller ran, minus the splice, applied to one raw fragment.
+    #
+    # `Template.literal_splice` escapes each value for the spot it lands in, but `parse` pairs `§§`
+    # greedily from the left, so a value that begins or ends with `§` beside a delimiter still
+    # merges with it (`§d§$M`, M=`§x`, made the default `d§`) and no escaping wins that pairing;
+    # an EMPTY value as a marker's whole default leaves `§§`, the literal-§ escape. So the parse
+    # is CHECKED against the raw template's: the same positions, and every literal run and every
+    # default equal to the plain expansion of its raw fragment.
+    #
+    # A chain is checked step by step: each RAW step (split on the raw chain) expands into the
+    # steps its value names, so `§v¦$ENC§` with ENC=`base64|base64` is two steps, as it always was.
+    # `:command` when a derived step runs a local command and its raw step does not. An env value
+    # may supply a step's ARGUMENT (`exec:$TOOL`, `hmac:$KEY`) or steps that run nothing, never a
+    # command step itself: the exec gate (`commands_allowed`, MCP `exec`) judged the template when
+    # it was authored, and a value set later (`set_env_var`) would otherwise arm `§v¦$P§` — or add a
+    # second command to `§v¦exec:a|$P§`. A literal `exec:$ARG` stays allowed whatever ARG holds.
+    # Runs nothing.
+    def self.env_splice_refusal(raw : String, expanded : String, expand : String -> String) : Symbol?
+      return nil if raw == expanded
+      before = Template.parse(raw)
+      after = Template.parse(expanded)
+      unless same_structure?(before, after, expand)
+        return before.positions.any? { |pos| empty_default?(pos, expand) } ? :empty_default : :misplaced
+      end
+      registry = Decoder.shared_registry
+      before.positions.each_with_index do |pos, i|
+        steps = expected_steps(pos.chain, expand)
+        return :chain unless Decoder.parse_spec(after.positions[i].chain) == steps.map(&.[1])
+        steps.each do |(raw_step, step)|
+          return :command if Decoder.chain_runs_commands?(registry, step) && !Decoder.chain_runs_commands?(registry, raw_step)
+        end
+      end
+      nil
+    end
+
+    # The sentence for a refusal `env_splice_refusal` named.
+    def self.env_splice_message(refusal : Symbol) : String
+      case refusal
+      when :command       then ENV_COMMAND_REFUSAL
+      when :empty_default then ENV_EMPTY_DEFAULT_REFUSAL
+      when :chain         then ENV_CHAIN_REFUSAL
+      else                     ENV_SPLICE_REFUSAL
+      end
+    end
+
+    # Positions, literal runs and defaults as the raw template spelled them, after expansion.
+    private def self.same_structure?(before : Template, after : Template, expand : String -> String) : Bool
+      return false unless before.positions.size == after.positions.size
+      before.segments.each_with_index do |seg, i|
+        return false unless wire_equal?(expand.call(seg), after.segments[i])
+      end
+      before.positions.each_with_index do |pos, i|
+        return false unless wire_equal?(expand.call(pos.default), after.positions[i].default)
+      end
+      true
+    end
+
+    # A position whose whole interior is a default that expands to nothing: `§§` after expansion.
+    private def self.empty_default?(pos : Template::Position, expand : String -> String) : Bool
+      pos.chain.empty? && !pos.default.empty? && expand.call(pos.default).empty?
+    end
+
+    # The steps the expanded chain must hold, each with the RAW step it came from: the raw chain
+    # is split first, so its boundaries are the template's, and each raw step then expands into
+    # the steps its value names (none for an empty one).
+    private def self.expected_steps(chain : String, expand : String -> String) : Array({String, String})
+      Decoder.parse_spec(chain).flat_map do |step|
+        Decoder.parse_spec(expand.call(step)).map { |derived| {step, derived} }
+      end
+    end
+
+    # Equal up to the head's LF→CRLF promotion (and the editor's multipart one), which the whole
+    # pass applies and a fragment's expansion does not. CR and LF are not template syntax.
+    private def self.wire_equal?(want : String, got : String) : Bool
+      want == got || want.gsub("\r\n", "\n") == got.gsub("\r\n", "\n")
+    end
+
+    private def self.refuse_env_splice(raw : String, expanded : String, expand : String -> String) : Nil
+      return unless refusal = env_splice_refusal(raw, expanded, expand)
+      raise CommandsRefused.new(ENV_COMMAND_REFUSAL, from_env: true) if refusal == :command
+      raise ChainError.new(env_splice_message(refusal))
     end
 
     # The TEMPLATE-level chain guard, and it is PUBLIC and SHARED (§2.1). It used to have a

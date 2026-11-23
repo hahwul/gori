@@ -964,6 +964,11 @@ module Gori::Proxy
         return close_client(client)
       end
       port = dst.try(&.[1]) || Settings.listener_target_port(@target_port, tls: true)
+      # A RESERVED name is never dialled, as on the CONNECT path: ahead of the sandbox for the
+      # reason `ClientConn#connect_answered_locally?` gives.
+      if Upstream.reserved_self_host?(host, @host_overrides)
+        return serve_pinned_self_page(client, host, stream, tls)
+      end
       # The sandbox refuses a host that CANNOT be in scope before any handshake, matching the
       # CONNECT path's gate (ClientConn#connect_answered_locally?). There is no way to answer
       # with a 403 here — the client expects TLS, not HTTP — so the connection is dropped.
@@ -975,6 +980,20 @@ module Gori::Proxy
         # the handshake failure they then see names the real problem.
       end
       tls.intercept(host, port, stream, @sink, dial_addr: dst.try(&.[0]))
+    end
+
+    # A pinned TLS connection for a reserved host, answered the way the CONNECT path answers it
+    # (`ClientConn#serve_self_page_connect`): the setup page under gori's own leaf when the
+    # landing page is served, the connection dropped otherwise (the client expects TLS, so there
+    # is no 502 to send). Either way nothing is dialled.
+    private def serve_pinned_self_page(client : TCPSocket, host : String, stream : IO,
+                                       tls : Tls::Tunnel) : Nil
+      return unless tls.serve_landing?
+      # The address the client reached, not a wildcard bind (`ClientConn#listen_display`).
+      local = (client.local_address.address rescue nil)
+      tls.intercept_self_page(host, stream, {local || @host, @port})
+    ensure
+      close_client(client)
     end
 
     # A passthrough host on a listener that derives or is handed its destination: dial the origin

@@ -168,11 +168,16 @@ module Gori
     # partition and read under the SAME @mutex, so the flag can never describe a rule list
     # other than the one being walked.
     @string_rules : Bool
+    # Is any EXCLUDE a `string` or `regex` rule? Only those read the url's HOST spelling, so
+    # only they need the host-folded second url (`exclude_match_unlocked`); a scope whose
+    # excludes are all host rules never builds it. Swapped with @excludes in `assign_rules`.
+    @url_excludes : Bool
 
     def initialize(@store : Store, @rules : Array(Rule), @enabled : Bool, @sandbox : Bool = false)
       @includes = @rules.select(&.include?)
       @excludes = @rules.select(&.exclude?)
       @string_rules = @rules.any? { |r| r.match_type == "string" }
+      @url_excludes = @excludes.any? { |r| !r.host_type? }
       # @rules/@enabled are read on the PROXY hot path (in_scope_url?/may_match_host?/
       # filter/active?) while the TUI fiber mutates them (add/remove/update/toggle).
       # Guard every cross-fiber access with a mutex — only the TUI mutates, so its own
@@ -307,8 +312,81 @@ module Gori
         # the single-threaded scheduler (no -Dpreview_mt) nothing else can run inside it.
         url_down = url_down_unlocked(url)
         bare = HostPattern.normalize(host)
-        @excludes.find { |r| r.matches?(url, host, url_down, bare) }
+        exclude_match_unlocked(url, host, url_down, bare)
       end
+    end
+
+    # The first EXCLUDE that matches (callers hold @mutex), asked of the url as spelled AND of
+    # its canonical spelling (`Scope.canonical_url`).
+    #
+    # A `host` rule compares `HostPattern.normalize(host)`, but a `string`/`regex` rule reads the
+    # url, which carries the authority exactly as the client or operator typed it. So
+    # `acme.test./admin` dodged `exclude string acme.test/admin`, and `ACME.test/internal`,
+    # `HTTP://acme.test/internal`, `http://acme.test:80/internal` or `http://u@acme.test/internal`
+    # dodged `exclude regex ^http://acme\.test/internal`, while a host include still admitted
+    # each: the same origin, a carve-out that did not hold. Only the EXCLUDE side is widened, so
+    # it only ever refuses more; an include keeps matching the raw spelling, and no include rule
+    # changes meaning. The SQL lens (`filter_sql`) is not widened: History still filters the
+    # stored spelling, and this is a containment gate.
+    #
+    # The second url is built only when a url-level exclude exists, no exclude matched as
+    # spelled, and the url is not already canonical, which is the ordinary case.
+    private def exclude_match_unlocked(url : String, host : String, url_down : String, bare : String) : Rule?
+      if rule = @excludes.find(&.matches?(url, host, url_down, bare))
+        return rule
+      end
+      return nil unless @url_excludes
+      return nil unless canonical = Scope.canonical_url(url)
+      canonical_down = url_down_unlocked(canonical)
+      @excludes.find { |r| !r.host_type? && r.matches?(canonical, host, canonical_down, bare) }
+    end
+
+    # `url` in canonical form, or nil when it already is: the scheme lowercased, a userinfo
+    # dropped, the host folded the way `HostPattern.normalize` folds it (lowercased, trailing
+    # root dots stripped; brackets kept so an IPv6 url still reads as one), and a digits-only
+    # port written as plain decimal (`:08080` is `:8080`, the port `URI.parse` dials) and
+    # dropped when it is the scheme's default (an empty one too, RFC 3986 §3.2.3). A port that
+    # is not digits only stays as written. Path, query and fragment are kept as written.
+    # Lexical (`Url.authority_span`), so a port or byte `URI.parse` refuses cannot skip it; an
+    # already-canonical url is answered from its bytes, with nothing allocated.
+    def self.canonical_url(url : String) : String?
+      return nil unless span = Url.authority_span(url)
+      bytes = url.to_slice
+      scheme = bytes[0, span.scheme_end]
+      hs = span.host_start
+      he = span.host_end
+      port = Scope.canonical_port(bytes, span)
+      return nil unless port || span.userinfo? || scheme.any? { |b| 0x41_u8 <= b <= 0x5a_u8 } ||
+                        (he > hs && (bytes[he - 1] == '.'.ord ||
+                        (hs...he).any? { |i| (0x41_u8 <= bytes[i] <= 0x5a_u8) || bytes[i] >= 0x80_u8 }))
+      host = HostPattern.down(String.new(bytes[hs, he - hs])).rstrip('.')
+      rest = port ? span.auth_end : he
+      canonical = String.build do |io|
+        scheme.each { |b| io.write_byte(AsciiBytes.downcase(b)) }
+        io << "://" << host
+        io << ':' << port unless port.nil? || port.empty?
+        io.write(bytes[rest, bytes.size - rest])
+      end
+      canonical == url ? nil : canonical
+    end
+
+    # The port `canonical_url` writes in place of the one `bytes` spells, or nil to keep that one
+    # as it is: "" to drop a default (or empty) port, the decimal without its leading zeros for
+    # any other digits-only port that had them. Answered on the bytes; a String is built only
+    # when the port is rewritten.
+    protected def self.canonical_port(bytes : Bytes, span : Url::AuthoritySpan) : String?
+      return nil unless start = span.port_start
+      return "" if start == span.auth_end
+      digits = bytes[start, span.auth_end - start]
+      return nil unless Url.digits?(digits)
+      zeros = 0
+      while zeros < digits.size - 1 && digits[zeros] == '0'.ord
+        zeros += 1
+      end
+      plain = digits[zeros, digits.size - zeros]
+      default = Url.default_port(bytes[0, span.scheme_end])
+      return "" if default && plain == (default == 80 ? "80" : "443").to_slice
+      zeros == 0 ? nil : String.new(plain)
     end
 
     # The id of the first INCLUDE rule that matches — the audit trail the active-sender gate
@@ -338,7 +416,7 @@ module Gori
       url_down = url_down_unlocked(url)
       bare = HostPattern.normalize(host)
       @includes.any? { |r| r.matches?(url, host, url_down, bare) } &&
-        @excludes.none? { |r| r.matches?(url, host, url_down, bare) }
+        exclude_match_unlocked(url, host, url_down, bare).nil?
     end
 
     # Pure Burp evaluation (includes empty ⇒ match all; then carve excludes). Shared by
@@ -349,7 +427,7 @@ module Gori
       url_down = url_down_unlocked(url)
       bare = HostPattern.normalize(host)
       inc_ok = @includes.empty? || @includes.any? { |r| r.matches?(url, host, url_down, bare) }
-      inc_ok && @excludes.none? { |r| r.matches?(url, host, url_down, bare) }
+      inc_ok && exclude_match_unlocked(url, host, url_down, bare).nil?
     end
 
     # Conservative HOST-level check behind `Interceptor#intercepts_host?`, made BEFORE any
@@ -851,6 +929,7 @@ module Gori
       @includes = fresh.select(&.include?)
       @excludes = fresh.select(&.exclude?)
       @string_rules = fresh.any? { |r| r.match_type == "string" }
+      @url_excludes = @excludes.any? { |r| !r.host_type? }
     end
 
     # The `url_down` the rule walk should be handed (callers hold @mutex). `url` itself when
@@ -908,9 +987,10 @@ module Gori
     # scheme://host onto an already-absolute target doubles it into
     # `http://hosthttp://host/path`, which silently breaks any anchored or exact-match
     # string/regex scope rule for such requests (unanchored patterns still match — the
-    # real target survives as a suffix — which is how this went unnoticed). Shared by
-    # every caller that builds this URL from a live request's parts (Interceptor,
-    # send_request); the absolute-form check itself is Store::FlowRow.absolute_form?
+    # real target survives as a suffix — which is how this went unnoticed). This is the
+    # in-memory twin of `QL::URL_EXPR_NO_PORT`; a live GATE (Interceptor, `Outbound`) asks
+    # `Gori::Url.gate_url` instead, which keeps a slash-less target from running into the
+    # host. The absolute-form check itself is Store::FlowRow.absolute_form?
     # (models.cr), also used by QL::URL_EXPR below, so a case-sensitivity fix only
     # needs to land in one place. Deliberately does NOT add the port the way FlowRow#url
     # does, so an origin-form target still builds the exact same URL every existing

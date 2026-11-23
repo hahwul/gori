@@ -16,6 +16,8 @@ class Gori::Proxy::H2::StreamGate
   # one connection, i.e. a client that has ignored thousands of RST_STREAMs.
   MAX_REFUSED_STREAMS           = 4096
   SANDBOX_PROTOCOL_ERROR_REASON = "h2 sandbox: malformed request headers (missing :method, duplicate pseudo-header or conflicting authority)"
+  SANDBOX_OVERSIZED_REASON      = "h2 sandbox: the request's decoded header list is past the " \
+                                  "#{Codec::Http1::MAX_HEAD_BYTES // 1024} KiB h1 head limit, so its URL cannot be judged"
 
   # The URL test both refusal gates below make, and the only place the stream's own
   # `:authority` and the connection's host are reconciled. Returns the blocked request's
@@ -47,7 +49,7 @@ class Gori::Proxy::H2::StreamGate
   # the two are equal and the second test is skipped, so the common path costs one evaluation.
   private def sandbox_blocked_url(block : HeadRewrite::Block) : {String, String, String}?
     fields = block.fields
-    scheme = HeadCodec.pseudo_of(fields, ":scheme") || "https"
+    scheme = @scheme # the transport's, never the peer's `:scheme` (see `StreamGate#initialize`)
     host_header = fields.find { |field| field.name.compare("host", case_insensitive: true) == 0 }.try(&.value)
     authority = HeadCodec.pseudo_of(fields, ":authority") || host_header || @host
     host, port = Upstream.split_host_port(authority, @port)
@@ -64,6 +66,10 @@ class Gori::Proxy::H2::StreamGate
     # bullet of `pinned_origin_head`, which is this same finding on the other protocol. The wire
     # bytes are untouched (P7); only the url the decision is made on changes.
     target = Gori::Url.origin_path(HeadCodec.pseudo_of(fields, ":path") || "/")
+    # Nothing rejects a `:path` with no leading slash either (`admin`, `?x`), and the URL the
+    # scope tests is the host with the target appended, so `admin` read as the host
+    # `api.example.comadmin`. Anchored for the gate URL only; the wire keeps the peer's bytes.
+    target = "/#{target}" unless target.starts_with?('/') || target == "*"
     blocked = @interceptor.sandbox_blocks?(scheme, host, target, port) ||
               ((host != @host || port != @port) && @interceptor.sandbox_blocks?(scheme, @host, target, @port))
     blocked ? {scheme, host, target} : nil
@@ -81,13 +87,24 @@ class Gori::Proxy::H2::StreamGate
     return false unless @ordered             # a response exists only for a request already allowed
     return false unless block.head || opener # trailers carry no request URL to test
     return false unless @interceptor.sandbox_enabled?
-    if block.head.nil? || sandbox_request_malformed?(block.fields)
-      refuse_locked(block, SANDBOX_PROTOCOL_ERROR_REASON, PROTOCOL_ERROR)
+    if reason = sandbox_unjudgeable_reason(block)
+      refuse_locked(block, reason, PROTOCOL_ERROR)
       return true
     end
     return false unless sandbox_blocked_url(block)
     refuse_locked(block)
     true
+  end
+
+  # Why this request head has no URL the sandbox can judge, or nil when it has one. A head past
+  # the h1 head limit is given no `head` (`HeadRewrite#finish`) for a different reason than a
+  # methodless one, and the flow is told which.
+  private def sandbox_unjudgeable_reason(block : HeadRewrite::Block) : String?
+    if block.head.nil?
+      HeadCodec.h1_head_too_large?(block.fields) ? SANDBOX_OVERSIZED_REASON : SANDBOX_PROTOCOL_ERROR_REASON
+    elsif sandbox_request_malformed?(block.fields)
+      SANDBOX_PROTOCOL_ERROR_REASON
+    end
   end
 
   private def sandbox_request_malformed?(fields : Array(HPACK::Field)) : Bool
@@ -205,7 +222,7 @@ class Gori::Proxy::H2::StreamGate
       "stream #{promised}, promised on stream #{block.stream_id}) — the sandbox does not " \
       "allow that URL, and a promise is the origin's request, not the client's"
     end
-    @heads.latch
+    @heads.latch(block)
     project(block)
     @assembler.drop_stream(promised, SANDBOX_REASON)
     remember_refused(promised)
@@ -239,7 +256,7 @@ class Gori::Proxy::H2::StreamGate
   # that, since it would be spent on every out-of-scope subresource of every page.
   private def refuse_locked(block : HeadRewrite::Block, reason : String = SANDBOX_REASON,
                             reset_code : UInt32 = CANCEL) : Nil
-    @heads.latch # suppressing a block desyncs HPACK exactly as reordering one does
+    @heads.latch(block) # suppressing a block desyncs HPACK exactly as reordering one does
     project(block)
     @assembler.drop_stream(block.stream_id, reason)
     remember_refused(block.stream_id)

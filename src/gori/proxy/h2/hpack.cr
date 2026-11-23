@@ -662,9 +662,20 @@ module Gori::Proxy::H2
         end
       end
 
+      # A §6.3 dynamic table size update to `value`. Not this encoder's own — its table never
+      # resizes — but the PEER's, which an intermediary that re-encodes the peer's blocks still
+      # owes the far decoder (`HeadRewrite#lead`).
+      def self.size_update(io : IO::Memory, value : Int32) : Nil
+        write_int(io, value, 5, 0x20_u8)
+      end
+
+      private def encode_int(io : IO::Memory, value : Int32, prefix_bits : Int32, high : UInt8) : Nil
+        Encoder.write_int(io, value, prefix_bits, high)
+      end
+
       # N-bit prefix integer (§5.1); `high` carries the representation bits above
       # the prefix.
-      private def encode_int(io : IO::Memory, value : Int32, prefix_bits : Int32, high : UInt8) : Nil
+      protected def self.write_int(io : IO::Memory, value : Int32, prefix_bits : Int32, high : UInt8) : Nil
         mask = (1 << prefix_bits) - 1
         if value < mask
           io.write_byte(high | value.to_u8)

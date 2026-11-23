@@ -508,7 +508,8 @@ module Gori::Proxy::Tls
       # (keepalive on both underlying sockets reaps a dead peer). Resolves through the TLS wrap.
       Proxy::SocketTuning.relax(client_tls)
       Proxy::SocketTuning.relax(upstream)
-      Proxy::H2::Relay.run(client_tls, upstream, host, port, sink, @rewriter, @interceptor, @extractor)
+      Proxy::H2::Relay.run(client_tls, upstream, host, port, sink, @rewriter, @interceptor, @extractor,
+        scheme: "https")
     ensure
       upstream.close rescue nil
     end
