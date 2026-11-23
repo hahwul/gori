@@ -593,14 +593,18 @@ module Gori
     # widening it only ever blocks more. `QL::URL_EXPR` / `URL_EXPR_NO_PORT` split the SQL lens
     # the same way, so History still describes exactly what this gate did.
     #
-    # Skipped where the two urls are the SAME string and the allowlist test above already
-    # covered it: a default port (nothing to add), and an absolute-form target, which is
-    # returned verbatim by both builders because it already carries its own authority. Only
-    # the resolved origin's own absolute target reaches here: `gate_target` has reduced any
-    # other one to origin form.
+    # Skipped on a default port, where the two urls are the SAME string and the allowlist test
+    # above already covered it. An absolute-form target is the mirror case: both builders
+    # return it verbatim, port included, so the spelling the test above has NOT seen is the
+    # port-free one, and an exclude written without a port (`acme.test/admin`) has to hold
+    # against `http://acme.test:8080/admin` as it does against the same request in origin
+    # form. Only the resolved origin's own absolute target reaches here: `gate_target` has
+    # reduced any other one to origin form.
     private def port_excluded?(scheme : String, host : String, target : String, port : Int32) : Bool
       return false if port == (scheme == "https" ? 443 : 80)
-      return false if Gori::Url.absolute_form?(target)
+      if Gori::Url.absolute_form?(target)
+        return @scope.excluded?(Gori::Url.gate_url(scheme, host, Gori::Url.origin_path(target)), host)
+      end
       @scope.excluded?(Gori::Url.gate_url(scheme, host, target, port), host)
     end
 
