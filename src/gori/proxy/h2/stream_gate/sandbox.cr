@@ -222,7 +222,7 @@ class Gori::Proxy::H2::StreamGate
       "stream #{promised}, promised on stream #{block.stream_id}) — the sandbox does not " \
       "allow that URL, and a promise is the origin's request, not the client's"
     end
-    @heads.latch
+    @heads.latch(block)
     project(block)
     @assembler.drop_stream(promised, SANDBOX_REASON)
     remember_refused(promised)
@@ -256,7 +256,7 @@ class Gori::Proxy::H2::StreamGate
   # that, since it would be spent on every out-of-scope subresource of every page.
   private def refuse_locked(block : HeadRewrite::Block, reason : String = SANDBOX_REASON,
                             reset_code : UInt32 = CANCEL) : Nil
-    @heads.latch # suppressing a block desyncs HPACK exactly as reordering one does
+    @heads.latch(block) # suppressing a block desyncs HPACK exactly as reordering one does
     project(block)
     @assembler.drop_stream(block.stream_id, reason)
     remember_refused(block.stream_id)

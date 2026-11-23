@@ -442,7 +442,7 @@ module Gori::Proxy::H2
     private def unverbatim_after_locked(slot : Slot) : Nil
       return unless slot.verbatim?
       slot.verbatim = false
-      @heads.latch
+      @heads.latch(slot.pending) # whatever replaces it, its own frames carry nothing now
       after = false
       @opens.each do |id|
         if id == slot.stream_id
@@ -1101,7 +1101,8 @@ module Gori::Proxy::H2
         moved = !body.nil? && !body.empty? && b.first.end_stream?
         frames = moved ? b.frames.map { |f| without_end_stream(f) } : b.frames
         last = frames.size - 1
-        frames.each_with_index { |f, i| write(f, i == last ? b.pre : nil) }
+        verbatim = slot.verbatim?
+        frames.each_with_index { |f, i| write(f, i == last ? b.pre : nil, verbatim: verbatim) }
       end
       if body
         write_rebuilt(slot, body)
@@ -1196,8 +1197,12 @@ module Gori::Proxy::H2
     # --- writing -------------------------------------------------------------
 
     # Forward one frame, then capture it, then project it — `Relay#emit`'s order, moved here so
-    # a released hold and the pump write through the same lock and the same code.
-    private def write(frame : Frame::Header, pre : Assembler::HeadBlock?, observe : Bool = true) : Nil
+    # a released hold and the pump write through the same lock and the same code. `verbatim` is a
+    # head held verbatim going out as the client sent it (`Slot#verbatim?`), which no owed table
+    # size update may lead.
+    private def write(frame : Frame::Header, pre : Assembler::HeadBlock?, observe : Bool = true,
+                      verbatim : Bool = false) : Nil
+      frame = lead_locked(frame) unless verbatim
       @dst.write(frame.wire_bytes)
       @dst.flush
       @flow.try { |fc| note_written(fc, frame) }
@@ -1211,6 +1216,19 @@ module Gori::Proxy::H2
       # exchange inside `feed`, which deletes the stream the extractor needs to scope on.
       @extract.try(&.observe(frame, pre)) if observe
       @assembler.feed(@direction, frame, pre)
+    end
+
+    # The frame about to be written, led by the peer's table size updates the far decoder is still
+    # owed (`HeadRewrite#lead`) when it opens a header block. Owing implies the direction is
+    # engaged, so every such block gori writes is one it encoded, except a head held verbatim
+    # (`write`'s `verbatim`). While one of those is still to go out, the updates wait: they arrived
+    # after it, and a shrink would evict entries its indexed references still name. One ivar test
+    # on every frame of a connection that owes nothing.
+    private def lead_locked(frame : Frame::Header) : Frame::Header
+      return frame unless @heads.owes? && frame.stream_id != 0
+      return frame unless frame.frame_type == Frame::Type::Headers || frame.frame_type == Frame::Type::PushPromise
+      return frame if @slots.each_value.any?(&.verbatim?)
+      @heads.lead(frame)
     end
 
     # One header block's frames, its projection riding the last.

@@ -56,7 +56,7 @@ class Gori::Proxy::H2::StreamGate
     return false if method == "CONNECT"
     stub = rw.short_circuit(head, @heads.host_of(block))
     return false unless stub
-    @heads.latch # suppressing a block desyncs HPACK exactly as reordering one does
+    @heads.latch(block) # suppressing a block desyncs HPACK exactly as reordering one does
     @assembler.note_short_circuit(block.stream_id, stub.ref, stub.error)
     project(block)
     @stubbed << block.stream_id

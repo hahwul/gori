@@ -1280,6 +1280,35 @@ describe "H2::StreamGate body rules: the HPACK latch" do
     end
   end
 
+  # A block that overtakes a head held verbatim may carry a size update that SHRINKS the table,
+  # evicting entries the held head's indexed references still name. The far decoder gets that
+  # update only once no head held verbatim is left to go out, on the next block gori encodes.
+  it "keeps a table shrink on an overtaking block until the verbatim head behind it is out" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "absent", "x", host: API)
+      g = GatePair.new(rules, ic, 5.seconds, indexing: true)
+      first = post("/stream", authority: API) + [{"x-tag", "t1"}]
+      g.request(1_u32, first)                                             # no length: never held, stays open
+      held = post("/held", 3, authority: API) + [{"x-tag", "t1"}]         # indexed against stream 1's
+      g.request(3_u32, held)                                              # held verbatim for its body
+      shrink = Bytes[0x20] + HPACK::Encoder.new.encode([{"x-done", "1"}]) # table to 0, then literals
+      g.out_gate.accept(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS | Frame::END_STREAM,
+        1_u32, shrink))
+      g.data(g.out_gate, 3_u32, "one", true)
+      g.out_gate.accept(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS | Frame::END_STREAM,
+        5_u32, HPACK::Encoder.new.encode(get("/next", API))))
+
+      heads = g.frames(g.up).select(&.frame_type.==(Frame::Type::Headers))
+      heads.map(&.stream_id).should eq([1_u32, 1_u32, 3_u32, 5_u32])
+      far = HPACK::Decoder.new # the origin's decoder, strict about every index
+      heads.map { |f| far.decode(f.payload) }.should eq([first, [{"x-done", "1"}], held, get("/next", API)])
+      heads[1].payload[0].should_not eq(0x20_u8)
+      heads[3].payload[0].should eq(0x20_u8)
+      far.max_size.should eq(0)
+      g.close
+    end
+  end
+
   it "re-encodes a head queued behind a held head the client reset" do
     with_rules do |rules, ic|
       rules.add(REQ, BODY, "absent", "x", host: API)

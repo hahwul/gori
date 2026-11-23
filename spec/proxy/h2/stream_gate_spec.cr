@@ -1259,6 +1259,53 @@ describe Gori::Proxy::H2::StreamGate do
   # Once a direction re-encodes, the receiver's decoder follows gori's encoder, so an oversized
   # block can neither go out as it arrived nor be re-encoded without writing its whole decoded
   # list as literals (~16 MB from ~4 KB here). Its stream is refused instead.
+  # RFC 7541 §4.2: a receiver that lowered SETTINGS_HEADER_TABLE_SIZE may require a dynamic table
+  # size update at the start of the first header block it receives after acknowledging it. gori's
+  # decoder applies the peer's update on arrival, so the far decoder gets it only if gori writes
+  # it, at the start of the next block it actually writes on that direction — not on the block it
+  # arrived in, which may be held, refused or never written.
+  describe "a dynamic table size update on a block that does not go out next" do
+    it "leads the next block written when the block that carried it was refused" do
+      with_ic(intercept: false) do |ic, scope|
+        scope.add("include", "string", "https://api.example.com/api/")
+        scope.enable_sandbox
+        rig = Rig.new(ic)
+        rig.c2s.accept(headers(1_u32, Bytes[0x20] + rig.enc_out.encode(request("/admin"))))
+        rig.c2s.accept(headers(3_u32, rig.enc_out.encode(request("/api/x"))))
+
+        heads = rig.to_origin.select(&.frame_type.==(Frame::Type::Headers))
+        heads.map(&.stream_id).should eq([3_u32])
+        heads.first.payload[0].should eq(0x20_u8)
+        far = HPACK::Decoder.new
+        far.decode(heads.first.payload).should eq(request("/api/x"))
+        far.max_size.should eq(0)
+      end
+    end
+
+    it "leads the block that overtakes a held one, and is not sent twice" do
+      with_ic do |ic|
+        ic.set_direction(Gori::Interceptor::Direction::ResponseOnly)
+        ic.set_filter("path:/held")
+        rig = Rig.new(ic)
+        rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/held")), Frame::END_HEADERS))
+        rig.c2s.accept(headers(3_u32, rig.enc_out.encode(request("/free")), Frame::END_HEADERS))
+        rig.s2c.accept(headers(1_u32, Bytes[0x20] + rig.enc_in.encode(response("200")), Frame::END_HEADERS))
+        settle
+        ic.pending_count.should eq(1)
+        rig.s2c.accept(headers(3_u32, rig.enc_in.encode(response("204")), Frame::END_HEADERS))
+        ic.forward(ic.pending.first.id)
+        settle
+
+        heads = rig.to_client.select(&.frame_type.==(Frame::Type::Headers))
+        heads.map(&.stream_id).should eq([3_u32, 1_u32])
+        heads.map(&.payload.[0]).should eq([0x20_u8, rig.enc_in.encode(response("200"))[0]])
+        far = HPACK::Decoder.new
+        heads.map { |f| far.decode(f.payload) }.should eq([response("204"), response("200")])
+        far.max_size.should eq(0)
+      end
+    end
+  end
+
   describe "an oversized response block on a direction that re-encodes" do
     it "resets its stream on both legs, writes none of it, and the next stream still works" do
       with_ic(intercept: false) do |ic, _|

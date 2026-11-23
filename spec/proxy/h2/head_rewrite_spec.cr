@@ -1232,7 +1232,9 @@ describe Gori::Proxy::H2::HeadRewrite do
       receiver.max_size.should eq(4096)
     end
 
-    it "is carried over when a passthrough block is engaged later, as a hold engages it" do
+    # A hold engages a passthrough block and writes it later, so the update leads whichever block
+    # the gate writes first (`lead`), not this one.
+    it "is owed when a passthrough block is engaged later, and leads the next block written, once" do
       pipe, assembler, _ = pipeline(SubRewriter.new("nothing", "matches", on: false))
       recorder = BlockRecorder.new
       pipe.deferrer = recorder
@@ -1240,10 +1242,40 @@ describe Gori::Proxy::H2::HeadRewrite do
       block.write_byte(0x20_u8)
       block.write(HPACK::Encoder.new.encode(req("/x")))
       push(pipe, assembler, headers(1_u32, block.to_slice)).first.payload.should eq(block.to_slice)
+      pipe.owes?.should be_false
 
       engaged = pipe.engage(recorder.blocks.first)
-      engaged.frames.first.payload[0].should eq(0x20_u8)
-      HPACK::Decoder.new.decode(engaged.frames.first.payload).should eq(req("/x"))
+      engaged.frames.first.payload.should eq(HPACK::Encoder.new.encode(req("/x")))
+      pipe.owes?.should be_true
+      led = pipe.lead(engaged.frames.first)
+      led.payload[0].should eq(0x20_u8)
+      receiver = HPACK::Decoder.new
+      receiver.decode(led.payload).should eq(req("/x"))
+      receiver.max_size.should eq(0)
+      pipe.owes?.should be_false
+      pipe.lead(engaged.frames.first).should eq(engaged.frames.first)
+      pipe.engage(recorder.blocks.first) # owing it again once led is a no-op
+      pipe.owes?.should be_false
+    end
+
+    # A run of updates leaves the same table and limit as its smallest followed by its last, and
+    # the far decoder is never sent more than `LEAD_RESERVE` bytes of them.
+    it "keeps a run of updates as its smallest and its last, behind a PRIORITY prefix" do
+      pipe, assembler, _ = pipeline(SubRewriter.new("nothing", "matches", on: false))
+      pipe.latch
+      block = IO::Memory.new
+      block.write(Bytes[0x3f, 0xe1, 0x1f, 0x3f, 0x45, 0x3f, 0xe1, 0x3f]) # 4096, 100, 8192
+      block.write(HPACK::Encoder.new.encode(req("/x")))
+      priority = Bytes[0x80, 0, 0, 3, 15] # exclusive, depends on stream 3, weight 16
+      frame = Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS | Frame::PRIORITY, 1_u32,
+        priority + block.to_slice)
+      sent = push(pipe, assembler, frame)
+
+      sent.first.payload[0, 5].should eq(priority)
+      sent.first.payload[5, 5].should eq(Bytes[0x3f, 0x45, 0x3f, 0xe1, 0x3f]) # 100, then 8192
+      receiver = HPACK::Decoder.new
+      receiver.decode(sent.first.payload[5..]).should eq(req("/x"))
+      receiver.max_size.should eq(8192)
     end
 
     it "adds none to a block that carried none" do
