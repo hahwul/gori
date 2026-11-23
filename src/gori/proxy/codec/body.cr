@@ -292,12 +292,12 @@ module Gori::Proxy::Codec
     def self.lenient_framing?(resp : RawResponse) : Bool
       if resp.malformed?
         lenient = Http1.lenient_status(resp.raw_head)
-        lenient == 204 || lenient == 304
-      else
-        return false unless resp.headers.has?("Transfer-Encoding") && resp.headers.has?("Content-Length")
-        te = resp.headers.get_all("Transfer-Encoding")
-        te_present?(te) && !chunked?(te)
+        return true if lenient == 204 || lenient == 304
       end
+      # Asked of a malformed head too: the length is applied to it just the same.
+      return false unless resp.headers.has?("Transfer-Encoding") && resp.headers.has?("Content-Length")
+      te = resp.headers.get_all("Transfer-Encoding")
+      te_present?(te) && !chunked?(te)
     rescue Gori::Error
       false # a non-final `chunked`, which `response_framing` refuses
     end

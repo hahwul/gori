@@ -162,6 +162,33 @@ describe Gori::Repeater::Engine do
     String.new(results[1].body.not_nil!).should eq("c1/b") # SAME c1 → one connection
   end
 
+  it "send_pipeline ends the group behind a response framed by a lenient reading's length" do
+    # What the origin writes after a non-chunked TE + Content-Length body is not the next
+    # member's answer: the socket is retired and the rest of the group is marked skipped.
+    origin = TCPServer.new("127.0.0.1", 0)
+    spawn do
+      if conn = origin.accept?
+        Gori::Proxy::Codec::Http1.read_head(conn)
+        conn << "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\nContent-Length: 5\r\n\r\nhello" \
+                "HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nFORGED"
+        conn.flush
+        sleep 0.5.seconds
+        conn.close rescue nil
+      end
+    end
+    begin
+      reqs = ["GET /one HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+              "GET /two HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice]
+      results = Gori::Repeater::Engine.send_pipeline(reqs, scheme: "http", host: "127.0.0.1",
+        port: origin.local_address.port, verify_upstream: false, timeout: 3.seconds)
+      String.new(results[0].body.not_nil!).should eq("hello")
+      results[1].error.should eq(Gori::Repeater::Engine::PIPELINE_SKIPPED)
+      results[1].body.should be_nil
+    ensure
+      origin.close rescue nil
+    end
+  end
+
   it "send_pipeline marks the remaining requests when the origin closes mid-group" do
     origin = TCPServer.new("127.0.0.1", 0)
     port = origin.local_address.port

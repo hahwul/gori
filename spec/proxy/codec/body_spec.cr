@@ -581,6 +581,15 @@ describe Gori::Proxy::Codec::Body do
       end
     end
 
+    it "is true for a malformed status line beside a non-chunked TE and a Content-Length" do
+      # The length frames this one too, so the connections have to close behind it as well.
+      resp = Http1.parse_response_head(
+        "HTTP/1.1  200 OK\r\nTransfer-Encoding: gzip\r\nContent-Length: 5\r\n\r\n".to_slice)
+      resp.malformed?.should be_true
+      Body.response_framing(resp, "GET").should eq({BodyFraming::Length, 5_i64})
+      Body.lenient_framing?(resp).should be_true
+    end
+
     it "is false, not a raise, for a chunked coding that is not final" do
       resp = Http1.parse_response_head(
         "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked, gzip\r\nContent-Length: 3\r\n\r\n".to_slice)

@@ -235,8 +235,11 @@ module Gori
             # A failed OR incomplete exchange leaves the socket unusable for the rest: an
             # error is self-evident; an incomplete body (origin cut it short, or we hit the
             # CAPTURE_READ_MAX ceiling) leaves unread bytes on the wire, so reusing the
-            # connection would misframe the next request (response desync).
-            dead = true if r.error || r.incomplete?
+            # connection would misframe the next request (response desync). A response framed
+            # by a length only a lenient reading gives (`Body.lenient_framing?`) ends the
+            # group the same way: what follows it on this socket is not the next answer.
+            dead = true if r.error || r.incomplete? ||
+                           r.response.try { |resp| Proxy::Codec::Body.lenient_framing?(resp) }
           end
         ensure
           upstream.close rescue nil
