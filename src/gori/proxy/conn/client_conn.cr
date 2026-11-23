@@ -2309,6 +2309,12 @@ module Gori::Proxy
         rescue Gori::Error
           Codec::BodyFraming::CloseDelimited # unknowable framing → don't keep-alive
         end
+      # As `client_keep_alive?`: the body forwarded above was framed by the method that went
+      # upstream, and a client that sent another method frames the same head its own way.
+      if req.method != sent_req.method
+        sent_framing = (Codec::Body.response_framing(sent_resp, sent_req.method)[0] rescue nil)
+        return false unless sent_framing == client_framing
+      end
       keep_alive?(req, sent_resp, client_framing)
     end
 

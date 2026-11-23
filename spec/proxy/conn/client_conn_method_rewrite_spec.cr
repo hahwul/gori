@@ -71,9 +71,10 @@ rescue IO::TimeoutError
   :timeout
 end
 
-private def exchange(method : String, rewriter : Gori::Proxy::HeadRewriter) : String | Symbol
+private def exchange(method : String, rewriter : Gori::Proxy::HeadRewriter,
+                     interceptor : Gori::Interceptor? = nil) : String | Symbol
   port, origin = method_origin
-  proxy = Gori::Proxy::Server.new("127.0.0.1", 0, MethodSink.new, rewriter: rewriter)
+  proxy = Gori::Proxy::Server.new("127.0.0.1", 0, MethodSink.new, rewriter: rewriter, interceptor: interceptor)
   proxy.start
   begin
     client = TCPSocket.new("127.0.0.1", proxy.port)
@@ -106,6 +107,28 @@ describe "Gori::Proxy::ClientConn method rewritten upstream" do
     got = exchange("HEAD", MethodRewriter.new("HEAD", "GET", body_rule: true))
     got.should be_a(String)
     got.as(String).should contain("hello")
+  end
+
+  it "closes the connection when the response was held at intercept on the way" do
+    with_store do |store|
+      ic = Gori::Interceptor.new(Gori::Scope.load(store))
+      ic.toggle
+      ic.set_direction(Gori::Interceptor::Direction::ResponseOnly)
+      stop = false
+      spawn do
+        until stop
+          ic.pending.each { |item| ic.forward(item.id) }
+          sleep 10.milliseconds
+        end
+      end
+      begin
+        got = exchange("HEAD", MethodRewriter.new("HEAD", "GET"), interceptor: ic)
+        got.should be_a(String)
+        got.as(String).should contain("hello")
+      ensure
+        stop = true
+      end
+    end
   end
 
   it "keeps the connection alive when the rule leaves the method alone" do
