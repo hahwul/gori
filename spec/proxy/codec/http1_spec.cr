@@ -160,7 +160,7 @@ describe Gori::Proxy::Codec::Http1 do
     it "reads a header field behind a blank line as an EMPTY request-line and keeps its header" do
       # `\r\nHost: h` is an empty request-line, a shape a tester sends on purpose: reading
       # `Host: h` as the request-line would take the Host a forward proxy routes it by.
-      ["\r\nHost: h\r\nX-A: 1\r\n\r\n", "\r\nHost:h\r\nX-A: 1\r\n\r\n"].each do |head|
+      {"\r\nHost: h\r\nX-A: 1\r\n\r\n" => "h", "\r\nHost:h\r\nX-A: 1\r\n\r\n" => "/"}.each do |head, gated|
         raw = bytes(head)
         req = Http1.parse_request_head(raw)
         {req.method, req.target, req.version}.should eq({"", "", ""})
@@ -171,8 +171,19 @@ describe Gori::Proxy::Codec::Http1 do
         req.request_line.should eq("")
         Http1.parse_request_line(raw).should eq({"", "", true})
         Http1.authored_projection(raw).should eq({"", "", ""})
-        Http1.gate_target(req).should eq("/") # no request-line, so no target
+        # The gate reads the line's own second token, not the parse's empty request-line.
+        Http1.gate_target(req).should eq(gated)
       end
+    end
+
+    it "gates a header-shaped line behind a blank line on that line's own target" do
+      # The parse calls `X:y /admin HTTP/1.1` a header under an empty request-line. An origin
+      # that skips the blank line reads a request for /admin, so that is what the gate judges.
+      raw = bytes("\r\nX:y /admin HTTP/1.1\r\nHost: h.test\r\n\r\n")
+      req = Http1.parse_request_head(raw)
+      req.target.should eq("")
+      Http1.gate_target(req).should eq("/admin")
+      Http1.request_target_line(raw).should eq("/admin")
     end
   end
 

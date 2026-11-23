@@ -422,6 +422,36 @@ describe "Interceptor scope gates over an ABSOLUTE-FORM target" do
     end
   end
 
+  it "sandbox_blocks? holds a port-free exclude against an absolute target on a non-default port" do
+    # `http://acme.test:8080/admin` is the same request as origin-form `/admin` on :8080, and
+    # an exclude written without a port has to stop both.
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      ic = Gori::Interceptor.new(scope)
+      scope.add("include", "host", "acme.test")
+      scope.add("exclude", "string", "acme.test/admin")
+      scope.enable_sandbox
+      ic.sandbox_blocks?("http", "acme.test", "/admin", 8080).should be_true
+      ic.sandbox_blocks?("http", "acme.test", "http://acme.test:8080/admin", 8080).should be_true
+      ic.sandbox_blocks?("http", "acme.test", "http://acme.test:8080/ok", 8080).should be_false
+      ic.sandbox_blocks?("http", "acme.test", "http://acme.test/admin", 80).should be_true
+    end
+  end
+
+  it "sandbox_blocks? judges a header-shaped line behind a blank line by its own target" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      ic = Gori::Interceptor.new(scope)
+      scope.add("include", "host", "acme.test")
+      scope.add("exclude", "string", "/admin")
+      scope.enable_sandbox
+      req = Gori::Proxy::Codec::Http1.parse_request_head(
+        "\r\nX:Y /admin HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice)
+      target = Gori::Proxy::Codec::Http1.gate_target(req)
+      ic.sandbox_blocks?("http", "acme.test", target, 80).should be_true
+    end
+  end
+
   # #884 — the P1, and it failed OPEN. `curl -x` a plaintext origin and the request arrives
   # ABSOLUTE-form, so its target carries `127.0.0.1:19316` and an exclude `string ":19316"`
   # matched it (403). `curl -kx` the TLS origin on the SAME port and the request arrives

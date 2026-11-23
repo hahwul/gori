@@ -712,8 +712,9 @@ module Gori::Proxy::Codec::Http1
   # Whether the line at `from` is shaped like a header field rather than a request-line,
   # decided lexically: a field is `token ":"` with the colon before any SP/HTAB, while a
   # request-line has SP after its method before any colon (an absolute-form target's colon
-  # comes after that SP). The one home for that test, so the request projections and the
-  # gate's `request_target_line` cannot read a line behind a blank line differently.
+  # comes after that SP). The one home for that test, so the request projections cannot read
+  # a line behind a blank line differently. The gate's `request_target_line` does not ask it:
+  # it judges the line's own target either way.
   private def self.header_field_line?(raw : Bytes, from : Int32) : Bool
     i = from
     while i < raw.size
@@ -819,9 +820,11 @@ module Gori::Proxy::Codec::Http1
       # spec/outbound_spec.cr covers the CR-bearing shapes for exactly this reason.
       line = String.new(raw[pos, stop - pos])
       unless line.strip.empty?
-        # A header field behind blank lines is no request-line: the request-line was the empty
-        # one, which has no target (`request_line_start`).
-        return "/" if pos > 0 && header_field_line?(raw, pos)
+        # The line's own second token, whatever the line is shaped like. The PARSE reads a
+        # header-shaped line behind blank lines as a header under an empty request-line
+        # (`request_line_start`); the gate does not follow it there, because an origin that
+        # skips the blank lines reads `X:y /admin HTTP/1.1` as a request for `/admin`, and no
+        # origin reads the `/` an empty request-line would stand for.
         return line.split[1]? || "/"
       end
       break unless nl
