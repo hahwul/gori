@@ -1298,6 +1298,112 @@ describe "H2::StreamGate body rules: the HPACK latch" do
   end
 end
 
+# One 4000-byte literal inserted into the dynamic table, then `n` one-byte references to it: a
+# few KB of HPACK that decodes to n × 4 KB, with no pseudo-header (a trailer block).
+private def amplified_trailers(n : Int32) : Bytes
+  io = IO::Memory.new
+  io.write_byte(0x40_u8) # literal with incremental indexing, new name
+  io.write_byte(3_u8)
+  io << "x-a"
+  io.write_byte(0x7f_u8) # value length 4000, raw: 127 + varint(3873)
+  rest = 4000 - 127
+  while rest >= 128
+    io.write_byte(((rest & 0x7f) | 0x80).to_u8)
+    rest >>= 7
+  end
+  io.write_byte(rest.to_u8)
+  io << "a" * 4000
+  n.times { io.write_byte(0xbe_u8) } # dynamic index 62
+  io.to_slice
+end
+
+# The frames without gori's WINDOW_UPDATEs, which credit an owned body back to its sender.
+private def no_credit(frames : Array(Frame::Header)) : Array(Frame::Header)
+  frames.reject(&.frame_type.==(Frame::Type::WindowUpdate))
+end
+
+# A block the gate re-encodes only when it engages the direction LATE — trailers behind an owned
+# body, or a block overtaking a head held verbatim — reached that re-encode with no size check,
+# so ~20 KB of HPACK became ~16 MB of literals written on the pump fiber. Such a block is refused
+# as `finish` refuses one on a direction already engaged.
+describe "H2::StreamGate body rules: an oversized block engaged late" do
+  it "resets a stream whose trailers behind an owned response body decode past the h1 head limit" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "a", "b", host: API)
+      g = GatePair.new(rules, ic, 5.seconds)
+      g.request(1_u32, get("/big", API), true)
+      g.response(1_u32, ok) # no length: the head goes out, the body is owned
+      g.data(g.in_gate, 1_u32, "aaa")
+      g.in_gate.@heads.engaged?.should be_false
+      GC.collect
+      before = GC.stats.total_bytes
+      g.in_gate.accept(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS | Frame::END_STREAM,
+        1_u32, amplified_trailers(4000)))
+      allocated = GC.stats.total_bytes - before
+
+      shape(no_credit(g.frames(g.down))).should eq([{Frame::Type::Headers, 1_u32}, {Frame::Type::RstStream, 1_u32}])
+      shape(no_credit(g.frames(g.up))).should eq([{Frame::Type::Headers, 1_u32}, {Frame::Type::RstStream, 1_u32}])
+      g.sink.responses.first.error.should eq(Gori::Proxy::H2::HeadRewrite::OVERSIZED_REASON)
+      allocated.should be < 4 * 1024 * 1024
+
+      g.request(3_u32, get("/next", API), true)
+      g.response(3_u32, ok(2))
+      g.data(g.in_gate, 3_u32, "aa", true)
+      frames = g.frames(g.down)
+      heads_of(frames, 3_u32).first.should eq(ok(2))
+      data_of(frames, 3_u32).should eq("bb")
+      g.close
+    end
+  end
+
+  it "resets a stream whose block overtaking a verbatim head decodes past the h1 head limit" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "absent", "x", host: API)
+      g = GatePair.new(rules, ic, 5.seconds)
+      g.request(1_u32, post("/stream", authority: API)) # no length: never held, stays open
+      g.request(3_u32, post("/held", 3, authority: API))
+      GC.collect
+      before = GC.stats.total_bytes
+      g.out_gate.accept(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS | Frame::END_STREAM,
+        1_u32, amplified_trailers(4000)))
+      allocated = GC.stats.total_bytes - before
+      allocated.should be < 4 * 1024 * 1024
+      g.data(g.out_gate, 3_u32, "one", true)
+
+      up = g.frames(g.up)
+      shape(up).should eq([{Frame::Type::Headers, 1_u32}, {Frame::Type::RstStream, 1_u32},
+                           {Frame::Type::Headers, 3_u32}, {Frame::Type::Data, 3_u32}])
+      heads_of(up, 3_u32).first.should eq(post("/held", 3, authority: API))
+      shape(no_credit(g.frames(g.down))).should eq([{Frame::Type::RstStream, 1_u32}])
+      g.close
+    end
+  end
+
+  it "refuses an oversized request queued verbatim behind a head whose rewrite changed its length" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "one", "ONE!", host: API)
+      g = GatePair.new(rules, ic, 5.seconds)
+      g.request(1_u32, post("/grown", 3, authority: API))
+      big = IO::Memory.new
+      big.write(HPACK::Encoder.new.encode(get("/big", API)))
+      big.write(amplified_trailers(4000))
+      g.out_gate.accept(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS | Frame::END_STREAM,
+        3_u32, big.to_slice))
+      GC.collect
+      before = GC.stats.total_bytes
+      g.data(g.out_gate, 1_u32, "one", true) # the rewrite re-encodes every head queued behind it
+      allocated = GC.stats.total_bytes - before
+      allocated.should be < 4 * 1024 * 1024
+
+      up = g.frames(g.up)
+      shape(up).should eq([{Frame::Type::Headers, 1_u32}, {Frame::Type::Data, 1_u32}])
+      field(heads_of(up, 1_u32).first, "content-length").should eq("4")
+      shape(no_credit(g.frames(g.down))).should eq([{Frame::Type::RstStream, 3_u32}])
+      g.close
+    end
+  end
+end
+
 # Every header block in `frames` for `stream`, decoded in wire order (one HPACK context).
 private def heads_of(frames : Array(Frame::Header), stream : UInt32) : Array(Array({String, String}))
   dec = HPACK::Decoder.new

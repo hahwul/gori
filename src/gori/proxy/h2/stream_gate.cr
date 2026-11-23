@@ -376,7 +376,7 @@ module Gori::Proxy::H2
       waits = waits_for_body?(own, held)
       unless held || queued || waits
         adopt_locked(own, nil)
-        return overtakes_verbatim_locked(block)
+        return overtakes_verbatim_locked(block, opener)
       end
 
       slot, block = new_slot_locked(block, ordered, !held.nil?)
@@ -417,7 +417,9 @@ module Gori::Proxy::H2
       return false unless slot
       # h2 trailers behind a held head. Engaged here for a verbatim head's: parked, they go out
       # ahead of any head queued after them. A latch already engaged returns the block as it is.
-      park_block(slot, @heads.engage(block))
+      block = @heads.engage(block)
+      return unsendable_locked(block, false) if block.unsendable
+      park_block(slot, block)
       true
     end
 
@@ -425,15 +427,18 @@ module Gori::Proxy::H2
     # about, so the latch engages on it and it is written re-encoded here; every later block
     # comes out of `finish` re-encoded. The heads it passed stay verbatim: they read only from
     # blocks that arrived before them, and those reach the far end first.
-    private def overtakes_verbatim_locked(block : HeadRewrite::Block) : Bool
+    private def overtakes_verbatim_locked(block : HeadRewrite::Block, opener : Bool) : Bool
       return false if @slots.empty? || @heads.engaged? || !@slots.each_value.any?(&.verbatim?)
-      write_block(@heads.engage(block))
+      block = @heads.engage(block)
+      return unsendable_locked(block, opener) if block.unsendable
+      write_block(block)
       true
     end
 
     # A verbatim head that will not go out as it arrived — suppressed, or re-encoded with a new
     # length — leaves the far decoder short of its insertions, so every head queued verbatim
-    # behind it is re-encoded now, and the latch engages for whatever arrives next.
+    # behind it is re-encoded now, and the latch engages for whatever arrives next. One past the
+    # h1 head limit comes back `unsendable` and is refused when its turn comes (`release_locked`).
     private def unverbatim_after_locked(slot : Slot) : Nil
       return unless slot.verbatim?
       slot.verbatim = false
@@ -1087,6 +1092,7 @@ module Gori::Proxy::H2
 
     private def release_locked(slot : Slot) : Array(CrossRst)
       return drop_locked(slot) if slot.dropped?
+      return drop_unsendable_locked(slot) if (slot.decided || slot.pending).try(&.unsendable)
       body = slot.rebuilt
       if b = slot.decided || slot.pending
         # An edit that gives a bodiless message a body has to take END_STREAM off the head:
@@ -1115,7 +1121,8 @@ module Gori::Proxy::H2
     # an RST for it (RFC 9113 §6.4); only the client is told. A dropped RESPONSE is open on both
     # legs, so both are told: the client stops waiting and the origin stops sending a body we
     # are discarding.
-    private def drop_locked(slot : Slot) : Array(CrossRst)
+    private def drop_locked(slot : Slot,
+                            reason : String = @ordered ? DROP_REQUEST_REASON : DROP_RESPONSE_REASON) : Array(CrossRst)
       if b = slot.pending
         project(b)
         # A dropped REQUEST carries its buffered body into History the way h1's
@@ -1124,7 +1131,7 @@ module Gori::Proxy::H2
         # the abort marker below would then find nothing to mark.
         slot.frames.each { |(f, pre)| @assembler.feed(@direction, f, pre) } if @ordered
       end
-      @assembler.drop_stream(slot.stream_id, @ordered ? DROP_REQUEST_REASON : DROP_RESPONSE_REASON)
+      @assembler.drop_stream(slot.stream_id, reason)
       write(rst_frame(slot.stream_id), nil) unless @ordered
       # A drop is a refusal too, and it leaves the same opening: the slot is gone from `@slots`,
       # so a client that keeps sending on a dropped REQUEST would have its DATA written to an
@@ -1136,6 +1143,14 @@ module Gori::Proxy::H2
       charge_swallowed(slot)
       remember_refused(slot.stream_id)
       [{slot.stream_id, CANCEL}]
+    end
+
+    # A slot whose block `HeadRewrite` would not re-encode once it had to stop going out as it
+    # arrived (`HeadRewrite#reencode`): refused as an operator drop refuses one, its body rule
+    # forgotten, with the size as the reason.
+    private def drop_unsendable_locked(slot : Slot) : Array(CrossRst)
+      @flow.try { |fc| fc.owned[slot.stream_id]?.try { |own| forget_owned(fc, own) } }
+      drop_locked(slot, HeadRewrite::OVERSIZED_REASON)
     end
 
     # A block `HeadRewrite` would not re-encode (`Block#unsendable`): its stream is refused the
@@ -1167,7 +1182,10 @@ module Gori::Proxy::H2
         charge_swallowed(slot)
         remove(slot)
       end
-      @flow.try { |fc| fc.owned[block.stream_id]?.try { |own| forget_owned(fc, own) } }
+      @flow.try do |fc|
+        fc.owned[block.stream_id]?.try { |own| forget_owned(fc, own) }
+        drop_waiting_locked(fc, block.stream_id)
+      end
       far_open = !@ordered || (!opener && slot.nil?)
       refuse_locked(block, reason)
       write(rst_frame(block.stream_id), nil) if far_open

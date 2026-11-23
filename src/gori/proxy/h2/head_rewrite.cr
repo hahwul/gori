@@ -81,7 +81,8 @@ module Gori::Proxy::H2
     # block carries over (`reencoded`).
     #
     # `unsendable` marks a block on an ENGAGED direction whose decoded list is past the h1 head
-    # limit: it has no frames, and the deferrer must refuse its stream (`StreamGate#defer?`).
+    # limit — engaged when it arrived, or later by `engage`/`reencode`: it has no frames, and the
+    # deferrer must refuse its stream (`StreamGate#defer?`, `StreamGate#unsendable_locked`).
     record Block,
       frames : Array(Frame::Header),
       pre : Assembler::HeadBlock,
@@ -157,9 +158,14 @@ module Gori::Proxy::H2
     # others legal at all — so this is a correctness precondition of the hold, not a tidy-up.
     # A block produced while already engaged came out of `finish` re-encoded, so it is returned
     # untouched.
+    #
+    # A block whose decoded list is past the h1 head limit comes back `unsendable` instead, as
+    # `finish` makes one on a direction already engaged: re-encoding it writes the whole list out
+    # as literals, megabytes from a few KB of indexed references. The caller refuses its stream.
     def engage(block : Block) : Block
       return block if @engaged
       latch
+      return withheld(block) if HeadCodec.h1_head_too_large?(block.fields)
       block.copy_with(frames: reframe(block.first, block.prefix, reencoded(block.size_updates, block.fields)))
     end
 
@@ -216,9 +222,11 @@ module Gori::Proxy::H2
     end
 
     # Re-encode a held block with `fields` in place of its own, and latch — `StreamGate` making a
-    # held head's `content-length` describe the body a rule rewrote (#1628).
+    # held head's `content-length` describe the body a rule rewrote (#1628), or a head held
+    # verbatim that has to stop being verbatim. `unsendable` past the h1 head limit, as `engage`.
     def reencode(block : Block, fields : Array(HPACK::Field)) : Block
       latch
+      return withheld(block) if HeadCodec.h1_head_too_large?(fields)
       head = block.head && head_text(fields, block.first, block.request)
       Block.new(reframe(block.first, block.prefix, reencoded(block.size_updates, fields)),
         Assembler::HeadBlock.new(pairs(fields)), fields, head, block.first, block.prefix, block.request,
@@ -232,6 +240,11 @@ module Gori::Proxy::H2
     def authored(stream_id : UInt32, fields : Array(HPACK::Field), end_stream : Bool) : Array(Frame::Header)
       first = Frame::Header.new(Frame::Type::Headers.value, end_stream ? Frame::END_STREAM : 0_u8, stream_id, Bytes.empty)
       reframe(first, Bytes.empty, @encoder.encode(fields))
+    end
+
+    # `block` as one that cannot go out at all (`Block#unsendable`): no frames, no head text.
+    private def withheld(block : Block) : Block
+      block.copy_with(frames: [] of Frame::Header, head: nil, unsendable: true)
     end
 
     # The bare host a rule's glob is matched against for this block's stream.

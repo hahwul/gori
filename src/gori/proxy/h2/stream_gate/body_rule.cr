@@ -499,6 +499,7 @@ class Gori::Proxy::H2::StreamGate
     return false unless fc
     if own = fc.owned[block.stream_id]?
       block = @heads.engage(block)
+      return unsendable_locked(block, false) if block.unsendable
       last = block.frames.size - 1
       block.frames.each_with_index { |f, i| own.after << {f, i == last ? block.pre : nil} }
       if block.first.end_stream?
@@ -509,6 +510,7 @@ class Gori::Proxy::H2::StreamGate
     end
     return false unless fc.waiting_on.has_key?(block.stream_id)
     block = @heads.engage(block)
+    return unsendable_locked(block, false) if block.unsendable
     last = block.frames.size - 1
     block.frames.each_with_index { |f, i| queue_waiting(fc, f, i == last ? block.pre : nil) }
     true
@@ -527,21 +529,27 @@ class Gori::Proxy::H2::StreamGate
         @deferred_cross.concat(abandon_owned_locked(fc, own, f))
         return true
       end
-    elsif f.frame_type == Frame::Type::RstStream && fc.waiting_on.delete(f.stream_id)
-      # The stream is gone; its waiting DATA would only spend the receiver's window on a closed
-      # stream. The sender was charged for it all the same, so it is owed back.
-      fc.waiting.reject! do |(w, _)|
-        next false unless w.stream_id == f.stream_id
-        if w.frame_type == Frame::Type::Data
-          @swallowed += w.payload.size
-          fc.waiting_bytes -= w.payload.size
-        end
-        true
-      end
+    elsif f.frame_type == Frame::Type::RstStream && drop_waiting_locked(fc, f.stream_id)
       write(f, nil)
       return true
     end
     false
+  end
+
+  # The stream is gone; its DATA waiting for the connection window would only spend the
+  # receiver's window on a closed stream. The sender was charged for it all the same, so it is
+  # owed back. false when nothing of the stream was waiting.
+  private def drop_waiting_locked(fc : Flow, stream_id : UInt32) : Bool
+    return false unless fc.waiting_on.delete(stream_id)
+    fc.waiting.reject! do |(w, _)|
+      next false unless w.stream_id == stream_id
+      if w.frame_type == Frame::Type::Data
+        @swallowed += w.payload.size
+        fc.waiting_bytes -= w.payload.size
+      end
+      true
+    end
+    true
   end
 
   private def own_data_locked(fc : Flow, own : Owned, f : Frame::Header) : Nil
