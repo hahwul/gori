@@ -6251,7 +6251,8 @@ for the first shape, no body for a status line read as 204 or 304. Nothing is re
 `Body.lenient_framing?` then closes the client and the origin connection behind the response,
 which is what makes a strict reader agree: read to the close, the body ends at the same byte.
 What the origin sends past that point is not forwarded and not captured, and the flow carries
-a note saying so. The Repeater reads the same way and does not reuse the socket. A non-chunked
+a note saying so. A scripted send reads the same way and retires the socket, so a Repeater
+group ends at such a response instead of reading what follows as its next answer. A non-chunked
 `Transfer-Encoding` alone stays close-delimited. A status line read as an interim 1xx is still
 refused: that client waits for another head, and gori cannot follow one off a line it cannot
 parse. The lenient reading (`Http1.lenient_status`) follows what Chrome was measured to accept
@@ -6264,10 +6265,17 @@ client byte other than CR/LF means the client took the response as complete, so 
 ends there and the flow says why. A chunked or Content-Length stream keeps being watched as
 before, and so does a PIPELINED exchange: client bytes already pending before the response head
 is written (`SocketResidue.pending?`) were not sent in answer to it, and ending the stream for
-them would hand that client a truncated body it reads as complete. A `101` answering a request that carried no `Upgrade` is refused for the same reason:
-the client did not ask to leave HTTP, so what follows would pass uncaptured. When a rule or an
+them would hand that client a truncated body it reads as complete. Nor is it armed for a
+client that still owes its request body (an `Expect: 100-continue` the origin answered with a
+final head before the body was pumped): those bytes are the body, not a next request. The
+pending check narrows the pipelining case without closing it; a client whose pipelined request
+lands after the head went out is read as a disagreement.
+
+A `101` answering a request that carried no `Upgrade` is refused for the same reason: the
+client did not ask to leave HTTP, so what follows would pass uncaptured. When a rule or an
 intercept edit changes the method, the upstream hop is framed by the sent method and the
-client connection is closed after the response, since the client frames by its own.
+client connection is closed after the response, held at intercept or not, since the client
+frames by its own.
 
 ### 2026-11-23: live gates judge the dialled host, not a spelling the peer chose
 
@@ -6288,7 +6296,14 @@ a request-target without a leading slash was glued onto the host (`127.0.0.1` + 
 - A string or regex EXCLUDE is also asked of the URL in canonical spelling (`Scope.canonical_url`:
   scheme lowercased, userinfo and a default port dropped, a zero-padded port rewritten to
   plain decimal, host folded as a `host` rule folds it). A port is ASCII digits only, as the
-  forward dial's `URI.parse` reads it; `:+80` names no port, so that target is not same-origin. Includes keep matching the raw spelling, so no include changes meaning.
+  forward dial's `URI.parse` reads it; `:+80` names no port, so that target is not same-origin.
+  Includes keep matching the raw spelling, so no include changes meaning.
+- An exclude is asked of both port spellings on a non-default port: origin form adds the
+  port-bearing URL, and a same-origin absolute target, which already carries the port, adds
+  the port-free one.
+- The gate reads the first non-blank line's own target even where the parse calls that line a
+  header under an empty request-line (`X:y /admin HTTP/1.1` behind a blank line): an origin
+  that skips the blank line serves `/admin`, and none serves the `/` of an empty line.
 
 `Url.request_url` and its SQL twin `QL::URL_EXPR_NO_PORT` are unchanged: History shows and
 filters the stored spelling. So for these shapes a live gate refuses more than the lens hides,
