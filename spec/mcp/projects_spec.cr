@@ -72,6 +72,55 @@ describe "Gori::MCP::Tools project lifecycle" do
 end
 
 describe "Gori::MCP::Tools project description receipts" do
+  # #2021: `db_size` cannot say which projects hold traffic, so each row of the PAGE is counted.
+  it "counts flows and issues on each listed row, null where the read failed" do
+    root = File.tempname("gori-projhome")
+    Dir.mkdir_p(root)
+    prev = ENV["GORI_HOME"]?
+    ENV["GORI_HOME"] = root
+    cur_db = File.join(root, "current.db")
+    store = Gori::Store.open(cur_db)
+    tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false, db_path: cur_db)
+    begin
+      busy = JSON.parse(tools.call("create_project", JSON.parse(%({"name":"Busy"}))).text)
+      empty = JSON.parse(tools.call("create_project", JSON.parse(%({"name":"Empty"}))).text)
+      broken = JSON.parse(tools.call("create_project", JSON.parse(%({"name":"Broken"}))).text)
+      other = Gori::Store.open(busy["db_path"].as_s)
+      begin
+        id = mcp_seed_flow(other, "a.test", "GET", "/a", 200)
+        mcp_seed_flow(other, "a.test", "GET", "/b", 200)
+        other.insert_issue("t", Gori::Store::Severity::Low, "a.test", id)
+        other.flush
+      ensure
+        other.close
+      end
+      File.write(broken["db_path"].as_s, "not a database, but a file")
+
+      rows = -> do
+        JSON.parse(tools.call("list_projects", JSON.parse("{}")).text)["projects"].as_a
+          .to_h { |r| {r["slug"].as_s, r} }
+      end
+      listed = rows.call
+      listed[busy["slug"].as_s]["flows"].as_i.should eq(2)
+      listed[busy["slug"].as_s]["issues"].as_i.should eq(1)
+      listed[empty["slug"].as_s]["flows"].as_i.should eq(0)
+      # Not 0: a project gori could not read is not an empty one.
+      listed[broken["slug"].as_s]["flows"].raw.should be_nil
+      listed[broken["slug"].as_s]["issues"].raw.should be_nil
+
+      # The bound project is counted through its own store, and still listed when empty.
+      tools.call("switch_project", JSON.parse(%({"project":#{empty["slug"].to_json}}))).is_error.should be_false
+      mcp_seed_flow(tools.current_store.not_nil!, "b.test", "GET", "/", 200)
+      bound = rows.call[empty["slug"].as_s]
+      bound["current"].as_bool.should be_true
+      bound["flows"].as_i.should eq(1)
+    ensure
+      store.close rescue nil
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(root)
+    end
+  end
+
   it "reports prolonged project creation contention as retryable" do
     with_isolated_projects do |tools|
       mcp_ok_json(tools, "create_project", %({"name":"Other"}))

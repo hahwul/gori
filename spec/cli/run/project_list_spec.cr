@@ -146,6 +146,18 @@ describe Gori::Store do
       end
     end
 
+    it "counts the issues in the same read, for MCP list_projects and the JSON listing" do
+      with_project_root do |registry|
+        project = registry.create("spec proj")
+        Gori::Store.project_census(project.db_path).issues.should eq(0)
+        with_project_store(project) do |store|
+          store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
+          store.flush
+        end
+        Gori::Store.project_census(project.db_path).issues.should eq(1)
+      end
+    end
+
     it "leaves the db's mtime alone, so a census cannot re-order the projects" do
       with_project_root do |registry|
         project = registry.create("spec proj")

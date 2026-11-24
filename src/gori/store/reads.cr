@@ -1103,11 +1103,16 @@ module Gori
     # just host/method/target — so the same path over http vs https vs h2 stays
     # separate instead of collapsing into one row. Carries the observed status set +
     # success/error counts + first/last-seen so the transport's health is visible.
+    #
+    # `sample_id` is ONE flow of the group, picked the way `representative_flow_id` picks the
+    # flow a TUI node opens: the newest that has a response, else the newest. It is read in the
+    # same aggregate, so it is a flow the filter matched and has this exact transport key, and
+    # a caller can open it by id instead of re-querying by host and path (#2022).
     record SitemapEntry,
       scheme : String, host : String, port : Int32, http_version : String,
       method : String, target : String,
       statuses : String?, count : Int64, ok : Int64, errors : Int64,
-      first_seen : Int64, last_seen : Int64
+      first_seen : Int64, last_seen : Int64, sample_id : Int64
 
     # ORDER BY names every GROUP BY column, so the ordering is TOTAL and the `LIMIT` cut is
     # deterministic. Six columns key a group and only two ordered it, so `GET /x` and
@@ -1140,7 +1145,8 @@ module Gori
             "GROUP_CONCAT(DISTINCT status), COUNT(*), " \
             "SUM(CASE WHEN status BETWEEN 100 AND 399 THEN 1 ELSE 0 END), " \
             "SUM(CASE WHEN status = 0 OR status >= 400 THEN 1 ELSE 0 END), " \
-            "MIN(created_at), MAX(created_at) " \
+            "MIN(created_at), MAX(created_at), " \
+            "COALESCE(MAX(CASE WHEN status IS NOT NULL THEN id END), MAX(id)) " \
             "FROM flows WHERE #{filter.sql} " \
             "GROUP BY host, target, method, scheme, port, http_version " \
             "ORDER BY host, target, method, scheme, port, http_version LIMIT ? OFFSET ?"
@@ -1150,7 +1156,7 @@ module Gori
             rs.read(String), rs.read(String), rs.read(Int32), rs.read(String),
             rs.read(String), rs.read(String),
             rs.read(String?), rs.read(Int64), rs.read(Int64), rs.read(Int64),
-            rs.read(Int64), rs.read(Int64))
+            rs.read(Int64), rs.read(Int64), rs.read(Int64))
         end
       end
       rows

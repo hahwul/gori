@@ -61,14 +61,35 @@ module Gori
         matched = needle ? entries.select(&.matches?(needle)) : entries
         page = pg.offset < matched.size ? matched[pg.offset, Math.min(pg.limit, matched.size - pg.offset)] : matched[0, 0]
         current = @db_path
+        # The PAGE, not the registry (#2021): `db_size` cannot say which projects hold traffic
+        # (an empty database is larger than one with a few flows), and an agent on an empty
+        # bound project needs to find the one that has some. Counting every database on the
+        # host is the cost #1085 removed; one read-only aggregate per row about to be returned
+        # is the cost `gori run project list` already pays (`Store.project_census`, which
+        # migrates nothing and puts the mtimes back, so listing does not reorder the registry).
+        #
+        # The project this server serves is counted through its own open store instead: a census
+        # restores the file's mtimes afterwards, and on the one database being written right now
+        # that could set its activity time back past a write that landed during the read.
+        #
+        # Inside the row, so only a row that is serialized is counted: the reply budget can cut
+        # the page short, and a database opened for a row then dropped is a wasted open on the
+        # one fiber this server has. Paths compared canonical, so a `--db` spelled relative or
+        # through a symlink (`/tmp` vs `/private/tmp`) still finds the bound row.
+        bound = unbound? ? nil : current.try { |c| Paths.canonical_file(c) }
         parts = fit_rows(page) do |rj, e, _|
           p = e.project
+          census = bound && Paths.canonical_file(p.db_path) == bound ? bound_census : Store.project_census(p.db_path)
           rj.object do
             rj.field "name", p.name
             rj.field "id", e.id
             rj.field "slug", e.slug
             rj.field "db_path", p.db_path
             rj.field "db_size", p.db_size
+            # null = the read failed (locked, unreadable, half-created), NOT an empty project:
+            # the same rule the CLI listing keeps, which never hides a project it could not count.
+            rj.field "flows", census.flows
+            rj.field "issues", census.issues
             rj.field "current", !current.nil? && p.db_path == current
             rj.field "workspace", e.workspace
             rj.field "tags", e.tags
@@ -108,6 +129,18 @@ module Gori
             j.field("projects") { raw_rows(j, parts) }
           end
         end)
+      end
+
+      # The bound project's row counts, from the store already open. nil on a failed read, as
+      # the census reports one, and each half on its own: `count?`, not `count`, which answers
+      # a failed read with 0, and an issues read that fails leaves the flow count standing.
+      private def bound_census : Store::ProjectCensus
+        issues = begin
+          store.count_issues.to_i64
+        rescue
+          nil
+        end
+        Store::ProjectCensus.new(store.count?, nil, issues)
       end
 
       # The one sentence a shortened listing owes its caller, or nil when the page IS the whole
@@ -500,8 +533,8 @@ module Gori
       # wrong side of it by landing in the wrong place in a 1,300-line method.
       private def list_projects_tools(j : JSON::Builder) : Nil
         tool j, "list_projects",
-          "List gori projects on this host (name, slug, short id, db path/size, last_modified, " \
-          "workspace binding, tags), MOST-RECENTLY-ACTIVE FIRST, plus current_project (current:true on " \
+          "List gori projects on this host (name, slug, short id, db path/size, flows/issues counts " \
+          "(null = could not read, not empty), last_modified, workspace binding, tags), MOST-RECENTLY-ACTIVE FIRST, plus current_project (current:true on " \
           "its row). Paged: pass 'query' to locate one before switch_project, read 'total' / " \
           "'has_more'. When the server started unbound, #{project_recovery}." do |s|
           s.field "query", strprop("keep only projects whose display name, slug, short id, bound workspace path or a tag CONTAINS this text (case-insensitive); '#TAG' keeps the projects with a tag starting with TAG")
