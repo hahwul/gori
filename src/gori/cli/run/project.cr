@@ -148,7 +148,8 @@ module Gori
         flows : Int64?,
         description : String?,
         current : Bool,
-        tui_active : Bool do
+        tui_active : Bool,
+        issues : Int64? = nil do
         def project : Project
           entry.project
         end
@@ -190,7 +191,8 @@ module Gori
         rows = counted.map do |entry, census|
           ProjectListRow.new(entry, census.flows, census.description,
             current: !default_db.nil? && entry.project.db_path == default_db,
-            tui_active: !wanted.nil? && Paths.canonical_file(entry.project.db_path) == wanted)
+            tui_active: !wanted.nil? && Paths.canonical_file(entry.project.db_path) == wanted,
+            issues: census.issues)
         end
         all ? rows : rows.select { |row| row.pinned? || !row.empty? }
       end
@@ -253,6 +255,8 @@ module Gori
                   j.field "last_modified", pr.last_modified.try(&.to_unix)
                   j.field "time", pr.last_modified.try { |t| LocalTime.of(t).to_s("%Y-%m-%dT%H:%M:%S%:z") }
                   j.field "flows", row.flows
+                  # From the same census read, as MCP `list_projects` reports it (#2021).
+                  j.field "issues", row.issues
                   # What the project is FOR, as `project create --description` and MCP
                   # `create_project` store it. Written by this very command and readable
                   # nowhere headless until now — MCP `project_info` is its other reader.

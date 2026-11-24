@@ -517,8 +517,10 @@ module Gori
     #
     # The description read has its own rescue, deliberately: it is the OPTIONAL half, and a
     # database old enough to have no `settings` table must still yield its flow count rather
-    # than have the outer rescue turn the whole census into "could not measure".
-    record ProjectCensus, flows : Int64?, description : String?
+    # than have the outer rescue turn the whole census into "could not measure". The issue
+    # count is optional the same way, for a database from before the `issues` table: MCP
+    # `list_projects` reports it beside `flows`, as the `switch_project` receipt does.
+    record ProjectCensus, flows : Int64?, description : String?, issues : Int64? = nil
 
     # How many flows a project database holds (`.flows`), WITHOUT opening it as a Store.
     #
@@ -552,7 +554,12 @@ module Gori
         rescue
           nil
         end
-        ProjectCensus.new(flows, desc)
+        issues = begin
+          db.scalar("SELECT COUNT(*) FROM issues").as(Int64)
+        rescue
+          nil
+        end
+        ProjectCensus.new(flows, desc, issues)
       end || ProjectCensus.new(nil, nil)
     end
 
@@ -583,10 +590,17 @@ module Gori
       db_before, wal_before = mtime_of(path), mtime_of(wal)
       activity = newer(db_before, wal_before)
       db = DB.open(sqlite_url(path, "busy_timeout=2000"))
+      # Both stamps once this connection is open, and again before it closes. This read writes
+      # neither file, so a change between the two is ANOTHER process writing the project right
+      # now (a capturing TUI, a second `gori mcp`), and putting the old time back would set its
+      # activity back past that write: the listing would reorder the registry it was asked to
+      # read. Taken after the open, because the open itself can touch the WAL (see below).
+      opened = {mtime_of(path), mtime_of(wal)}
       begin
         db.exec("PRAGMA query_only = ON")
         yield db
       ensure
+        peer_wrote = {mtime_of(path), mtime_of(wal)} != opened
         db.close
         # Both files, each to what a reader must still get. The db file goes to the ACTIVITY
         # time, not its own old stamp, and it goes there whenever the WAL is GONE, moved or
@@ -597,8 +611,10 @@ module Gori
         # open created did not exist before; a WAL stamped "now" is exactly the "just active
         # for having been listed" this whole restore exists to prevent, one file over, so the
         # WAL is put back to what it had.
-        put_back(path, db_before, activity, force: !wal_before.nil? && mtime_of(wal).nil?)
-        put_back(wal, wal_before, wal_before || activity)
+        unless peer_wrote
+          put_back(path, db_before, activity, force: !wal_before.nil? && mtime_of(wal).nil?)
+          put_back(wal, wal_before, wal_before || activity)
+        end
       end
     rescue
       nil
