@@ -118,12 +118,25 @@ module Gori
           # Present only on a FOLDED row: how many distinct query strings it stands
           # for, and up to QUERY_SAMPLE_MAX of the raw targets, so a replay still has
           # a concrete one to send (`target` alone dropped the query).
+          # A flow `get_flow` can open (#2022), so the follow-up is by id rather than a second
+          # query by host and path, which can land on another variant and retypes a host whose
+          # bytes may not be what they look like. The newest answered flow of this exact key:
+          # ONE sample of `count`, which its name says. A folded row stands for several targets,
+          # so it carries no single id; each `query_targets` entry gets its own instead.
           if e.query_variants > 0
             j.field "query_variants", e.query_variants
             j.field "query_targets" do
               j.array { e.query_targets.first(QUERY_SAMPLE_MAX).each { |t| j.string Serialize.text(t) } }
             end
+            j.field "query_target_flow_ids" do
+              j.array { e.query_flow_ids.first(QUERY_SAMPLE_MAX).each { |id| j.number id } }
+            end
+            if bare = e.bare_id
+              j.field "bare_target_flow_id", bare
+            end
             emit_variant_tags(j, e, tags)
+          else
+            j.field "sample_flow_id", e.sample_id
           end
           j.field "statuses", e.statuses
           j.field "count", e.count
@@ -234,6 +247,14 @@ module Gori
         # whole list is what the operator's pinned tags are looked up against, so a memo on
         # /search?q=1 still surfaces on the folded row.
         getter query_targets : Array(String)
+        # One sample flow per `query_targets` entry, same order, and this row's own while nothing
+        # is folded onto it (`Store::SitemapEntry#sample_id`).
+        getter query_flow_ids : Array(Int64)
+        getter sample_id : Int64
+        # The row's own sample while its own target carries no query string. When variants fold
+        # onto it, that target (`/search` itself) is counted in the row but is not one of
+        # `query_targets`, so this is the only id it has.
+        getter bare_id : Int64?
 
         def initialize(e : Store::SitemapEntry)
           @scheme = e.scheme
@@ -249,6 +270,9 @@ module Gori
           @first_seen = e.first_seen
           @last_seen = e.last_seen
           @query_targets = [] of String
+          @query_flow_ids = [] of Int64
+          @sample_id = e.sample_id
+          @bare_id = Sitemap.tag_path(e.target).includes?('?') ? nil : e.sample_id
         end
 
         # Merge another transport-identical entry whose path matches, differing only by its
@@ -263,11 +287,13 @@ module Gori
           @first_seen = e.first_seen if e.first_seen < @first_seen
           @last_seen = e.last_seen if e.last_seen > @last_seen
           @query_targets << e.target
+          @query_flow_ids << e.sample_id
         end
 
         # This row itself carried the query (it was the first of its group seen).
         def claim_own_query!(path : String) : Nil
           @query_targets << @target
+          @query_flow_ids << @sample_id
           @target = path
         end
 
@@ -767,6 +793,9 @@ module Gori
           "(active tool -> recorded flows or saved fuzz results, per path sans query). Query-string " \
           "variants fold by default: `target` = path, `query_variants` = count, " \
           "`query_targets` = up to #{QUERY_SAMPLE_MAX} raw ones, memos in `variant_tags`. " \
+          "`sample_flow_id` = one flow of the entry (newest answered) for get_flow; a folded entry " \
+          "has `query_target_flow_ids` instead, one per query_targets (`bare_target_flow_id` = the " \
+          "path itself, captured with no query). " \
           "Returns {entries, returned, scanned, offset, limit, has_more, next_offset}, not a bare array. " \
           "`has_more:true` = more endpoints: pass `next_offset` as `offset` until false, or you map only a " \
           "fraction. Paging counts raw rows BEFORE folding (`scanned`), so a folded entry can " \

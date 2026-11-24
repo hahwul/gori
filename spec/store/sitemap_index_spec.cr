@@ -20,7 +20,8 @@ private DETAILED_COLS = "scheme, host, port, http_version, method, target, " \
                         "GROUP_CONCAT(DISTINCT status), COUNT(*), " \
                         "SUM(CASE WHEN status BETWEEN 100 AND 399 THEN 1 ELSE 0 END), " \
                         "SUM(CASE WHEN status = 0 OR status >= 400 THEN 1 ELSE 0 END), " \
-                        "MIN(created_at), MAX(created_at)"
+                        "MIN(created_at), MAX(created_at), " \
+                        "COALESCE(MAX(CASE WHEN status IS NOT NULL THEN id END), MAX(id))"
 private DETAILED_ORDER = "ORDER BY host, target, method, scheme, port, http_version"
 private OBS_COLS       = "host, method, target, status, content_type, COUNT(*), " \
                          "MIN(response_size), MAX(response_size), MIN(created_at), MAX(created_at), MAX(id)"
@@ -132,13 +133,13 @@ describe "Sitemap covering index (schema V38)" do
       120.times { |i| seed_flow(store, i) }
       store.flush
       ["1", "(1) AND (#{Gori::QL.hide_static.sql})"].each do |where|
-        old = rows_of(store, detailed_sql(where, "scheme, host, port, http_version, method, target"), 12, 6)
+        old = rows_of(store, detailed_sql(where, "scheme, host, port, http_version, method, target"), 13, 6)
         old.should_not be_empty
         filter = Gori::QL::Filter.new(where, [] of DB::Any)
         now = store.sitemap_entries_detailed(filter, 201, raise_on_error: true).map do |e|
           [e.scheme, e.host, e.port.to_s, e.http_version, e.method, e.target,
            (e.statuses || "").split(',').sort!.join(','), e.count.to_s, e.ok.to_s, e.errors.to_s,
-           e.first_seen.to_s, e.last_seen.to_s]
+           e.first_seen.to_s, e.last_seen.to_s, e.sample_id.to_s]
         end
         now.should eq(old)
 

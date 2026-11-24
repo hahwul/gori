@@ -4,6 +4,8 @@
 
 - MCP: `list_projects` rows carry each project's `flows` and `issues` counts, read for the returned page only, with `null` where the database could not be read (#2021).
 
+- MCP: `list_sitemap` entries carry `sample_flow_id`, the flow the TUI opens for that endpoint, and a query-folded entry carries `query_target_flow_ids`, one per `query_targets` entry, so `get_flow` can open it without a second query (#2022).
+
 - MCP: `list_history` with `count_only` refuses a query with a dropped term, since the count would be of a broader query; pass `strict:false` to count it anyway (#2019).
 
 - MCP: `ql_explain` no longer lists terms the query tools refuse as applied, and notes the exact `~` form of a `host:`, `path:` or `url:` substring term. A field whose value was typed after whitespace (`path~` then `^/login`) is named as the free-text term it became, not a broadening drop, in `ql_explain`, MCP replies, `gori run` and the History and Sitemap empty states (#2020, #2024).
