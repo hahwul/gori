@@ -6388,3 +6388,12 @@ this of `plan_options`. An unknown `mode`, a
 dropped, so the tab ran as Sniper, matched everything or shifted its sets, and a re-save erased
 them. `SessionConfig#unread` keeps them raw, `to_json` writes them back, and the TUI refuses to
 run until the operator sets that knob again.
+
+### 2026-11-24: a QL count refuses a dropped term; rows keep drop-and-warn
+
+Refines §4's rule that a dropped term widens the query and is named. On MCP `list_history`,
+`count_only` defaults `strict` on: a query with a dropped term is `QUERY_SYNTAX`, and
+`strict:false` counts it anyway (#2019). A widened page is still rows the caller can read, and
+the reply names the drop beside them. A count is the one number the caller asked for, and it
+scopes what an agent sends next. The TUI and `gori run history --count` keep the published
+rule: a person reads the warning beside the number, and a script asks with `--strict`.

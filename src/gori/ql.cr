@@ -227,7 +227,8 @@ module Gori
       Errors: a term with an invalid value (status:>=foo) or unknown value is DROPPED and the rest
       applies — a dropped term BROADENS the result, and inside NOT/OR it can shift what matches
       (NOT (host:x AND size:>bogus) = NOT host:x). An all-invalid query is rejected, not match-all.
-      An invalid `~` regex is a HARD ERROR. strict:true or ql_explain names dropped terms.
+      An invalid `~` regex is a HARD ERROR. strict:true or ql_explain names dropped terms;
+      list_history count_only refuses a dropped term unless strict:false.
       DOC
 
     # A non-blank user query must compile to at least one clause. EMPTY means every

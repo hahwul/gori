@@ -17,7 +17,14 @@ module Gori
       # printed "ignored … result is BROADER" for the same query — and this transport's caller
       # is the one with no stderr to read. A required argument, not an optional one, so a new
       # read tool cannot call this and forget to pass the warning on.
-      private def ql_filter_or_error(h, query : String?, dropped : Array(String)) : QL::Filter | Result
+      #
+      # `count_only` refuses a dropped term unless the caller says `strict:false` (#2019). A list
+      # widened by a dropped term is still rows the caller can read and see the filter moved in; a
+      # count is the one number it asked for, and "24 flows with status >= 500" is what scopes its
+      # next send. `strict` defaults on there and off everywhere else, so the published rule (a
+      # dropped term widens and is named) still holds for every reply that has rows.
+      private def ql_filter_or_error(h, query : String?, dropped : Array(String),
+                                     *, count_only : Bool = false) : QL::Filter | Result
         return QL::EMPTY if query.nil? || query.strip.empty?
         # The project's scope, so a `scope:in`/`scope:out` term compiles instead of being
         # dropped. Read per call rather than cached: an agent (or a peer process) can add a
@@ -38,7 +45,9 @@ module Gori
         # The same lens the query compiled with, or the diagnosis disagrees with it about a
         # `scope:` term (see `QL.analyze`).
         analysis = QL.analyze(query, scope: lens)
-        return ql_strict_error(analysis) if bool_arg(h, "strict", false) && !analysis.clean?
+        if bool_arg(h, "strict", count_only) && !analysis.clean?
+          return count_only ? ql_count_dropped_error(query, analysis) : ql_strict_error(analysis)
+        end
         dropped.concat(analysis.ignored)
         filter
       end
@@ -117,6 +126,16 @@ module Gori
             "(call ql_reference; omit strict to run leniently and drop them)",
           "QUERY_SYNTAX", field: "query",
           details: JSON.parse({"ignored" => a.ignored, "invalid_regex" => a.invalid_regex, "applied" => a.applied}.to_json))
+      end
+
+      # A count refuses the widened number by default (see `ql_filter_or_error`). It names the
+      # opt-in rather than leave `strict:false` for the caller to find.
+      private def ql_count_dropped_error(query : String, a : QL::TermAnalysis) : Result
+        err("count_only refused: query term(s) #{a.ignored.join(", ")} are unrecognized or invalid " \
+            "and would be DROPPED, so the count would be of a BROADER query than the one asked " \
+            "— fix them (ql_explain shows why), or pass strict:false to count with them dropped",
+          "QUERY_SYNTAX", field: "query",
+          details: JSON.parse({"ignored" => a.ignored, "applied" => a.applied}.to_json))
       end
 
       # Diagnose a QL query WITHOUT running it: applied vs ignored (dropped) vs
@@ -202,6 +221,11 @@ module Gori
                   j.string hint
                 end
                 j.string "dropped (broadens results): #{a.ignored.join(", ")}" unless a.ignored.empty?
+                unless a.ignored.empty? || refused
+                  j.string "list_history with count_only REFUSES a query with a dropped term " \
+                           "(QUERY_SYNTAX) rather than count a query other than the one written; pass " \
+                           "strict:false to count anyway"
+                end
                 unless a.invalid_regex.empty?
                   j.string "invalid regex, matches nothing: #{a.invalid_regex.join(", ")} — " \
                            "list_history / list_sitemap / probe_scan REFUSE it (QUERY_SYNTAX); " \

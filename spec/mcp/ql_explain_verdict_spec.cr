@@ -153,4 +153,12 @@ describe "MCP ql_explain verdict" do
       explain(store, "host:a")["refused_by"].as_a.should be_empty
     end
   end
+
+  it "warns that count_only refuses a query with a dropped term" do
+    with_store do |store|
+      w = explain(store, "status:>=bogus host~^a$")["warnings"].as_a.map(&.as_s)
+      w.find!(&.includes?("count_only")).should contain("strict:false")
+      explain(store, "host~^a$")["warnings"].as_a.should be_empty
+    end
+  end
 end
