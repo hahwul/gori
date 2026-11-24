@@ -227,7 +227,8 @@ module Gori
       Errors: a term with an invalid value (status:>=foo) or unknown value is DROPPED and the rest
       applies — a dropped term BROADENS the result, and inside NOT/OR it can shift what matches
       (NOT (host:x AND size:>bogus) = NOT host:x). An all-invalid query is rejected, not match-all.
-      An invalid `~` regex is a HARD ERROR. strict:true or ql_explain names dropped terms.
+      An invalid `~` regex is a HARD ERROR. strict:true or ql_explain names dropped terms;
+      list_history count_only refuses a dropped term unless strict:false.
       DOC
 
     # A non-blank user query must compile to at least one clause. EMPTY means every
@@ -658,6 +659,90 @@ module Gori
       end
       nil
     end
+
+    # A known field written with its separator and then whitespace before the value (`path~` on
+    # one line, `^/login` on the next). Whitespace is AND, so that is two terms: the empty
+    # `path~` is DROPPED and `^/login` survives as FREE TEXT, a literal substring search of
+    # method/host/target. The answer is therefore not a broader version of the regex the
+    # operator wrote: it is a different, usually empty, one, and "dropped (broadens results)"
+    # tells them the opposite of what happened. Each pair is {empty term, the term after it}, the
+    # second only when it is a bare word: a `field:` beside the empty term is a term of its own,
+    # and a quoted or negated word was typed on purpose. Pairs only where the operator typed
+    # the two as one run, since `terms` flattens OR and parentheses (as `missing_colon_hint`).
+    def self.split_value_terms(query : String) : Array({String, String})
+      terms = FilterAst.terms(FilterAst.parse(query))
+      typed = query.split.join(' ')
+      pairs = [] of {String, String}
+      terms.each_cons_pair do |t, nxt|
+        # With its operator: `status~` is a field QL knows and drops under `~`, so the joined
+        # `status~5..` would be dropped too and the hint would recommend a second dead query.
+        next unless (s = split_field(t.text)) && s[1].empty? && known_field?(s[0], regex: s[2] == :regex)
+        next if t.source.includes?('"') || nxt.negate? || nxt.source.includes?('"')
+        next if (ns = split_field(nxt.text)) && field_shaped?(ns[0], ns[1])
+        next unless typed.includes?("#{t.source} #{nxt.source}")
+        pairs << {t.source, nxt.source}
+      end
+      pairs
+    end
+
+    # The sentence for one `split_value_terms` pair, and the first one for a query: the hint an
+    # empty answer carries beside `missing_colon_hint`'s.
+    def self.split_value_message(empty : String, rest : String) : String
+      "`#{empty}` has no value: whitespace (a space or a newline) ends a term, so `#{rest}` is a " \
+      "separate FREE-TEXT term, a literal substring search of method/host/target. The result is " \
+      "that search, not a broader `#{empty}#{rest}`: write `#{empty}#{rest}` with no whitespace " \
+      "(quote a value that has spaces)"
+    end
+
+    def self.split_value_hint(query : String) : String?
+      split_value_terms(query).first?.try { |(empty, rest)| split_value_message(empty, rest) }
+    end
+
+    # The terms whose field QL does not implement (`fields_used`' reading, so a pasted URL names
+    # none), as they were written. Such a term free-texts and so COMPILES, which puts it in
+    # `analyze`'s `applied`; the MCP read tools refuse it, and a caller told it was applied would
+    # read a refused query as one that runs.
+    def self.unknown_field_terms(query : String) : Array(String)
+      FilterAst.terms(FilterAst.parse(query)).compact_map do |term|
+        next nil unless (s = split_field(term.text)) && field_shaped?(s[0], s[1])
+        known_field?(s[0]) ? nil : term.source
+      end
+    end
+
+    # The fields whose `:` is a SUBSTRING test an operator reads as an exact match: `host:shop.test`
+    # also hits `cdn.shop.test`, `path:/login` also hits `/api/login`. `header:` and `body:` are
+    # substrings too, but nobody reads those as equality. The anchor that says "exactly" is a `~`
+    # term, which only the regex grammar can spell.
+    SUBSTRING_FIELDS = %w[host path url]
+
+    # Each `host:`/`path:`/`url:` term in `query` that names a WHOLE value, with the `~` term that
+    # matches exactly that value: `host~(?i)^shop\.test$`, `path~(?i)^/login(\?|$)` (the path
+    # column carries the query string, and the url one the whole target). `(?i)` because `:` is
+    # case-insensitive and `~` is not, so the exact form must not also start comparing case.
+    #
+    # Only a value that starts where the column does: a path is always `/…` and a url always
+    # `scheme://…`, so `path:login` or `url:a.test/x` is a FRAGMENT, a search that is meant to be
+    # a substring, and no `^` form of it can match anything. Negation is kept (`-host:cdn` pairs
+    # with `-host~(?i)^cdn$`). A value with whitespace is quoted, or the anchor would split the
+    # same way the term would.
+    def self.substring_terms(query : String) : Array({String, String})
+      FilterAst.terms(FilterAst.parse(query)).compact_map do |term|
+        next nil unless (s = split_field(term.text)) && s[2] == :field && s[0].in?(SUBSTRING_FIELDS)
+        field, value = s[0], s[1]
+        next nil if value.empty?
+        next nil if field == "path" && !value.starts_with?('/')
+        next nil if field == "url" && !value.matches?(%r{\A[a-z][a-z0-9+.-]*://}i)
+        tail = field == "host" ? "$" : "(\\?|$)"
+        pattern = "(?i)^#{value.gsub(REGEX_META) { |c| "\\#{c}" }}#{tail}"
+        pattern = %("#{pattern}") if pattern.matches?(/\s/)
+        {term.source, "#{term.negate? ? "-" : ""}#{field}~#{pattern}"}
+      end
+    end
+
+    # The characters a literal needs escaped to stand for itself in a PCRE pattern. Narrower than
+    # `Regex.escape`, which also escapes `/`, `-` and `#` and so spells `path~^/login` as
+    # `path~^\/login`: valid, and not what anyone would type.
+    REGEX_META = /[\\.+*?\[\](){}|^$]/
 
     # One line per field, for the surfaces that TEACH this language rather than parse it — the
     # completion row's description column and Help's Query page. Both used to be prose written

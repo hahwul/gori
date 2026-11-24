@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- MCP: `list_history` with `count_only` refuses a query with a dropped term, since the count would be of a broader query; pass `strict:false` to count it anyway (#2019).
+
+- MCP: `ql_explain` no longer lists terms the query tools refuse as applied, notes the exact `~` form of a `host:`, `path:` or `url:` substring term, and names a value typed after whitespace as the free-text term it became instead of a broadening drop (#2020).
+
 - Proxy: a response a browser frames shorter than gori did (a non-chunked `Transfer-Encoding` with `Content-Length`, or a status line such as `HTTP/1.1  204` it reads as bodyless) is framed the browser's way and the connection closes behind it, so an origin can no longer answer a request it never received. A `101` nobody asked for gets a 502, and a rule or intercept edit that changes the method closes the client connection after the response (#2018).
 
 - Proxy: a request preceded by a blank line is read by its real request-line, so a `HEAD` no longer stalls waiting for a body, and `https://gori.proxy` reached through the SOCKS5 or transparent listener shows the setup page instead of being dialled by name (#2018).

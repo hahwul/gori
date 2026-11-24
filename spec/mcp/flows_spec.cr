@@ -277,6 +277,47 @@ describe Gori::MCP::Server do
       end
     end
 
+    # #2019: a count is the one number the caller asked for, so a dropped term refuses it unless
+    # the caller opts into the widened count. Rows keep drop-and-warn.
+    it "count_only refuses a query with a dropped term unless strict:false" do
+      with_store do |store|
+        mcp_seed_flow(store, "a.test", "GET", "/x", 200)
+        mcp_seed_flow(store, "a.test", "GET", "/y", 500)
+        args = ->(extra : String) do
+          %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"status:>=bogus host:a.test","count_only":true#{extra}}}})
+        end
+        resp = mcp_drive(store, args.call(""))[0]
+        resp["result"]["isError"].as_bool.should be_true
+        resp["result"]["structuredContent"]["error_code"].as_s.should eq("QUERY_SYNTAX")
+        text = resp["result"]["content"][0]["text"].as_s
+        text.should contain("status:>=bogus")
+        text.should contain("strict:false")
+
+        widened = mcp_tool_payload(mcp_drive(store, args.call(%(,"strict":false)))[0])
+        widened["count"].as_i64.should eq(2)
+        widened["ignored_terms"].as_a.map(&.as_s).should eq(["status:>=bogus"])
+
+        mcp_drive(store, args.call(%(,"strict":true)))[0]["result"]["isError"].as_bool.should be_true
+        clean = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"status:>=500 host:a.test","count_only":true}}})
+        mcp_tool_payload(mcp_drive(store, clean)[0])["count"].as_i64.should eq(1)
+      end
+    end
+
+    it "names a value split onto the next line, on a count refusal and an empty page" do
+      with_store do |store|
+        mcp_seed_flow(store, "a.test", "GET", "/login", 200)
+        count = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"path~\\n^/login","count_only":true}}})
+        refusal = mcp_drive(store, count)[0]["result"]["content"][0]["text"].as_s
+        refusal.should contain("`path~^/login`")
+        refusal.should contain("DIFFERENT query")
+        refusal.should_not contain("BROADER")
+        rows = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"path~\\n^/login"}}})
+        page = mcp_tool_payload(mcp_drive(store, rows)[0])
+        page["flows"].as_a.should be_empty
+        page["query_hint"].as_s.should contain("`path~^/login`")
+      end
+    end
+
     it "sort ranks the top matches with no cursor, and refuses paging arguments" do
       with_store do |store|
         mcp_seed_flow(store, "a.test", "GET", "/s", 200, resp_body: Bytes.new(10))

@@ -1749,3 +1749,54 @@ describe "QL per-row expressions keep their values" do
     end
   end
 end
+
+# #2020: `path~` on one line and `^/login` on the next is two terms, and the second is free text.
+describe "Gori::QL.split_value_terms" do
+  it "pairs a known field's empty term with the bare word typed after it" do
+    Gori::QL.split_value_terms("path~\n^/login").should eq([{"path~", "^/login"}])
+    Gori::QL.split_value_terms("host: example.com").should eq([{"host:", "example.com"}])
+    Gori::QL.split_value_hint("path~\n^/login").not_nil!.should contain("`path~^/login`")
+  end
+
+  it "leaves a field term, a quoted or negated word, an unknown field and a closed term alone" do
+    # `status~` is dropped under `~` whatever follows, so joining it would be dropped too.
+    {"path~ host:a", "path~ \"^/x\"", "path~ -x", "xyzzy: foo", "path~^/login", "path~",
+     "(path~) OR x", "status~ 5.."}.each do |q|
+      Gori::QL.split_value_terms(q).should be_empty, q
+    end
+  end
+end
+
+describe "Gori::QL.substring_terms" do
+  it "spells a whole host/path/url value as its case-insensitive anchored regex, negation kept" do
+    Gori::QL.substring_terms("host:demo.test").should eq([{"host:demo.test", "host~(?i)^demo\\.test$"}])
+    Gori::QL.substring_terms("path:/login").should eq([{"path:/login", "path~(?i)^/login(\\?|$)"}])
+    Gori::QL.substring_terms("-host:cdn").should eq([{"-host:cdn", "-host~(?i)^cdn$"}])
+    Gori::QL.substring_terms("url:https://a.test/x?y=1").should eq(
+      [{"url:https://a.test/x?y=1", "url~(?i)^https://a\\.test/x\\?y=1(\\?|$)"}])
+  end
+
+  it "names no regex term, no fragment, no other field and no empty value" do
+    {"host~^demo\\.test$", "path:login", "url:a.test/x", "header:x", "body:x", "host:", "status:200",
+     "demo.test"}.each do |q|
+      Gori::QL.substring_terms(q).should be_empty, q
+    end
+  end
+
+  it "suggests a form that matches the same whole value, whatever its case" do
+    with_store do |store|
+      mcp_seed_flow(store, "Demo.Test", "GET", "/Login?next=1", 200)
+      {"host:demo.test", "path:/login", "url:https://demo.test/login"}.each do |q|
+        anchored = Gori::QL.substring_terms(q).first[1]
+        store.count_matching(Gori::QL.parse(anchored)).should eq(1), anchored
+      end
+    end
+  end
+end
+
+describe "Gori::QL.unknown_field_terms" do
+  it "names the terms whose field QL lacks, as written, and no URL or authority" do
+    Gori::QL.unknown_field_terms("stauts:500 AND -methd:GET host:a").should eq(["stauts:500", "-methd:GET"])
+    Gori::QL.unknown_field_terms("http://acme.test/x acme.test:8443 host:a").should be_empty
+  end
+end
