@@ -154,6 +154,50 @@ describe "MCP ql_explain verdict" do
     end
   end
 
+  # #2020: the preflight reported refused terms as applied, gave `host:` no word about being a
+  # substring, and called a value on the next line a broadening drop.
+  it "lists only the terms the query tools would apply" do
+    with_store do |store|
+      j = explain(store, "stauts:500 AND body~[ AND host:example.com")
+      j["applied_terms"].as_a.map(&.as_s).should eq(["host:example.com"])
+      j["invalid_regex_terms"].as_a.map(&.as_s).should eq(["body~["])
+      j["unknown_fields"][0]["name"].as_s.should eq("stauts")
+    end
+  end
+
+  it "notes that host:/path:/url: are substrings and names the anchored form, outside warnings" do
+    with_store do |store|
+      j = explain(store, "host:demo.test")
+      j["warnings"].as_a.should be_empty
+      n = j["notes"].as_a.map(&.as_s)
+      n.size.should eq(1)
+      n[0].should contain("SUBSTRING")
+      n[0].should contain("`host~(?i)^demo\\.test$`")
+      explain(store, "path:/a url:x")["notes"][0].as_s.should contain("`path~(?i)^/a(\\?|$)`")
+      explain(store, "host~^demo\\.test$").as_h.has_key?("notes").should be_false
+      explain(store, "status:200 path:login").as_h.has_key?("notes").should be_false
+    end
+  end
+
+  it "keeps a tag: term applied, since list_sitemap applies it" do
+    with_store do |store|
+      explain(store, "tag:admin host~^a$")["applied_terms"].as_a.map(&.as_s).should eq(["tag:admin", "host~^a$"])
+    end
+  end
+
+  it "names a value split onto the next line instead of calling it a broadening drop" do
+    with_store do |store|
+      j = explain(store, "path~\n^/login")
+      j["ignored_terms"].as_a.map(&.as_s).should eq(["path~"])
+      w = j["warnings"].as_a.map(&.as_s)
+      w.any?(&.starts_with?("dropped (broadens results)")).should be_false
+      w.find!(&.includes?("has no value")).should contain("`path~^/login`")
+      # The same empty term dropped a second time, with nothing after it, still broadens.
+      again = explain(store, "path~ ^/a method:GET path~")["warnings"].as_a.map(&.as_s)
+      again.find!(&.starts_with?("dropped (broadens results)")).should contain("path~")
+    end
+  end
+
   it "warns that count_only refuses a query with a dropped term" do
     with_store do |store|
       w = explain(store, "status:>=bogus host~^a$")["warnings"].as_a.map(&.as_s)

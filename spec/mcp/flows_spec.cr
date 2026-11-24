@@ -303,6 +303,21 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "names a value split onto the next line, on a count refusal and an empty page" do
+      with_store do |store|
+        mcp_seed_flow(store, "a.test", "GET", "/login", 200)
+        count = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"path~\\n^/login","count_only":true}}})
+        refusal = mcp_drive(store, count)[0]["result"]["content"][0]["text"].as_s
+        refusal.should contain("`path~^/login`")
+        refusal.should contain("DIFFERENT query")
+        refusal.should_not contain("BROADER")
+        rows = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"path~\\n^/login"}}})
+        page = mcp_tool_payload(mcp_drive(store, rows)[0])
+        page["flows"].as_a.should be_empty
+        page["query_hint"].as_s.should contain("`path~^/login`")
+      end
+    end
+
     it "sort ranks the top matches with no cursor, and refuses paging arguments" do
       with_store do |store|
         mcp_seed_flow(store, "a.test", "GET", "/s", 200, resp_body: Bytes.new(10))

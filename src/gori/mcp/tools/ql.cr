@@ -129,10 +129,15 @@ module Gori
       end
 
       # A count refuses the widened number by default (see `ql_filter_or_error`). It names the
-      # opt-in rather than leave `strict:false` for the caller to find.
+      # opt-in rather than leave `strict:false` for the caller to find, and carries the split-value
+      # hint, since the one case where a dropped term NARROWS is the one a count hides best.
       private def ql_count_dropped_error(query : String, a : QL::TermAnalysis) : Result
+        # "Broader" only when it is: a value split onto the next token leaves free text behind,
+        # which narrows as often as it widens.
+        hint = QL.split_value_hint(query)
+        what = hint ? "a DIFFERENT query than the one asked (#{hint})" : "a BROADER query than the one asked"
         err("count_only refused: query term(s) #{a.ignored.join(", ")} are unrecognized or invalid " \
-            "and would be DROPPED, so the count would be of a BROADER query than the one asked " \
+            "and would be DROPPED, so the count would be of #{what} " \
             "— fix them (ql_explain shows why), or pass strict:false to count with them dropped",
           "QUERY_SYNTAX", field: "query",
           details: JSON.parse({"ignored" => a.ignored, "applied" => a.applied}.to_json))
@@ -181,10 +186,23 @@ module Gori
         refused_by = {"list_history", "list_sitemap", "probe_scan"}.select do |t|
           t == "list_sitemap" ? sitemap_refused : refused
         end
+        # `QL.analyze` files a term under `applied` when it COMPILES, and both of these do: an
+        # unknown field free-texts and a bad regex becomes a never-match clause. The query tools
+        # refuse both, so `applied_terms` naming them described a query that never runs (#2020).
+        # They stay where they are reported: `unknown_fields` and `invalid_regex_terms`. A `tag:`
+        # term stays applied: list_sitemap runs it, and `unknown_fields` says only it does.
+        not_applied = QL.unknown_field_terms(query).reject { |t| tag_term?(t) } + a.invalid_regex
+        applied = a.applied.reject { |t| not_applied.includes?(t) }
+        # A field written with its value on the next token: the empty term is dropped, but the
+        # value survives as free text, so the result is not the broader query a drop promises.
+        # One occurrence out per pair, so the same empty term dropped elsewhere still broadens.
+        splits = QL.split_value_terms(query)
+        broadening = a.ignored.dup
+        splits.each { |(empty, _)| broadening.index(empty).try { |i| broadening.delete_at(i) } }
         Result.new(JSON.build do |j|
           j.object do
             j.field "query", query
-            j.field("applied_terms") { j.array { a.applied.each { |t| j.string t } } }
+            j.field("applied_terms") { j.array { applied.each { |t| j.string t } } }
             j.field("ignored_terms") { j.array { a.ignored.each { |t| j.string t } } }
             j.field("invalid_regex_terms") { j.array { a.invalid_regex.each { |t| j.string t } } }
             j.field("unknown_fields") do
@@ -220,7 +238,8 @@ module Gori
                 if hint = QL.missing_colon_hint(query)
                   j.string hint
                 end
-                j.string "dropped (broadens results): #{a.ignored.join(", ")}" unless a.ignored.empty?
+                splits.each { |(empty, rest)| j.string QL.split_value_message(empty, rest) }
+                j.string "dropped (broadens results): #{broadening.join(", ")}" unless broadening.empty?
                 unless a.ignored.empty? || refused
                   j.string "list_history with count_only REFUSES a query with a dropped term " \
                            "(QUERY_SYNTAX) rather than count a query other than the one written; pass " \
@@ -243,6 +262,11 @@ module Gori
                 end
               end
             end
+            # Not a warning: `host:example.com` is a correct query, and a `warnings` array that is
+            # never empty is one a caller learns to skip. Written only when there is a term to name.
+            unless (subs = QL.substring_terms(query)).empty?
+              j.field("notes") { j.array { j.string substring_note(subs) } }
+            end
           end
         end)
       end
@@ -253,6 +277,22 @@ module Gori
       private def ql_refused?(query : String, lens) : Bool
         QL.reject_empty?(query, QL.parse(query, scope: lens)) || !QL.invalid_regex_terms(query).empty? ||
           QL.fields_used(query).any? { |u| !QL.known_field?(u.name) }
+      end
+
+      # `host:`, `path:` and `url:` read as equality and are substrings (`ql_reference` says so,
+      # in a reference the caller may not have open): `host:demo.test` also counts
+      # `api.demo.test`. Named on the query in front of the caller, with the anchored spelling of
+      # each term, because the one-term answer it needs is a `~` it would otherwise have to derive.
+      private def substring_note(subs : Array({String, String})) : String
+        named = subs.map { |(term, anchored)| "`#{term}` (exact: `#{anchored}`)" }
+        "#{named.join(", ")} #{subs.size == 1 ? "is a" : "are"} case-insensitive SUBSTRING match" \
+        "#{subs.size == 1 ? "" : "es"}, not exact: `host:shop.test` also matches `cdn.shop.test`, " \
+        "`path:/login` also matches `/login-old`. Use the anchored `~` form for an exact value"
+      end
+
+      # A `tag:` term as `Sitemap.split_tag_terms` takes it: list_sitemap's own field.
+      private def tag_term?(source : String) : Bool
+        source.lchop('-').downcase.starts_with?("tag:")
       end
 
       private def unknown_fields_warning(unknown : Array(String), refused_by : Array(String)) : String
@@ -302,7 +342,8 @@ module Gori
           "invalid-regex (match-nothing) terms, compiled SQL, warnings. `matches_everything` = " \
           "nothing narrowed; `unknown_fields` = `field:`s QL lacks (they match nothing); " \
           "`refused_by` = which of list_history / list_sitemap / probe_scan would answer " \
-          "QUERY_SYNTAX (list_sitemap takes its own `tag:`)." do |s|
+          "QUERY_SYNTAX (list_sitemap takes its own `tag:`); `notes` = host:/path:/url: substring " \
+          "terms with their exact form." do |s|
           s.field "query", strprop("the gori QL query to analyze"), required: true
         end
       end
