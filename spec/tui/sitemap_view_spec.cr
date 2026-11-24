@@ -207,6 +207,26 @@ describe Gori::Tui::SitemapView do
     end
   end
 
+  # The note reads the bar as typed: the tag-stripped residual rejoins the words either side of a
+  # `tag:` with a space, and they would read as `path~ ^/v1` typed back to back.
+  it "names a value split off by whitespace, and not across a tag: term" do
+    with_store do |store|
+      capture(store, "api.acme.test", "GET", "/v1/users")
+      note = ->(q : String) do
+        view = SitemapView.new
+        view.reload(store)
+        view.start_query
+        q.each_char { |c| view.query_insert(c) }
+        view.reload(store)
+        b = MemoryBackend.new(100, 20)
+        view.render(Screen.new(b), Rect.new(0, 0, 100, 20))
+        (0...20).map { |y| b.row(y) }.join("\n")
+      end
+      note.call("path~ ^/v2").should contain("did you mean `path~^/v2`?")
+      note.call("path~ tag:x ^/v2").should_not contain("did you mean `path~^/v2`?")
+    end
+  end
+
   # `tag:` is this bar's own field and QL knows nothing about it, so a pool taken from QL alone
   # left the one field this surface adds as the one field it could never diagnose a typo of.
   it "suggests its own tag: field, which QL has never heard of" do

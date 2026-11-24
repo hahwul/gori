@@ -2073,13 +2073,24 @@ module Gori
         # assume the caller COMPILES with a lens — every one of them does; a surface that parses
         # without one would drop a `scope:` term and this warning would be the thing that named
         # it, so thread a lens there rather than relaxing this.
+        if warning = query_terms_warning(q)
+          STDERR.puts "gori run #{cmd}: warning: #{warning}"
+        end
+      end
+
+      # `warn_query_terms`' warning, or nil for a query that drops nothing — split out so a spec
+      # can read it. With no term left the caller refuses the query, so nothing broader is ever
+      # listed. A value split off by whitespace is not broader either (`QL.broadening_drops`): it
+      # left a free-text term, which this names. It is the ONE place the CLI says so, since every
+      # command that prints an empty-listing note has printed this first.
+      def self.query_terms_warning(q : String) : String?
         analysis = QL.analyze(q, scope: QL::SCOPE_SHAPE_ONLY)
         ignored = analysis.ignored
-        return if ignored.empty?
-        # With no term left the caller refuses the query, so nothing broader is ever listed.
-        broader = analysis.applied.empty? ? "" : ", so the result is BROADER than the query asks for"
-        STDERR.puts "gori run #{cmd}: warning: ignored #{ignored.map(&.inspect).join(", ")} " \
-                    "— unrecognized or invalid#{broader}"
+        return nil if ignored.empty?
+        broadens = !analysis.applied.empty? && !QL.broadening_drops(ignored, q).empty?
+        broader = broadens ? ", so the result is BROADER than the query asks for" : ""
+        hint = QL.split_value_hint(q).try { |h| " (#{h})" }
+        "ignored #{ignored.map(&.inspect).join(", ")} — unrecognized or invalid#{broader}#{hint}"
       end
 
       # `warn_query_terms`' refusal, or nil to run — split out because `abort` is not spec-able.
@@ -2091,8 +2102,9 @@ module Gori
         return nil unless strict
         ignored = QL.analyze(q, scope: QL::SCOPE_SHAPE_ONLY).ignored
         return nil if ignored.empty?
+        hint = QL.split_value_hint(q).try { |h| " (#{h})" }
         "--strict refuses #{ignored.map(&.inspect).join(", ")} — unrecognized or invalid, " \
-        "so QL would drop it (omit --strict to run leniently)"
+        "so QL would drop it#{hint} (omit --strict to run leniently)"
       end
 
       # QL negation terms ("-field:value" / "-field~rx") begin with '-', so OptionParser

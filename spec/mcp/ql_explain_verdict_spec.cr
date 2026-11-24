@@ -191,7 +191,7 @@ describe "MCP ql_explain verdict" do
       j["ignored_terms"].as_a.map(&.as_s).should eq(["path~"])
       w = j["warnings"].as_a.map(&.as_s)
       w.any?(&.starts_with?("dropped (broadens results)")).should be_false
-      w.find!(&.includes?("has no value")).should contain("`path~^/login`")
+      w.find!(&.includes?("is two terms")).should contain("`path~^/login`")
       # The same empty term dropped a second time, with nothing after it, still broadens.
       again = explain(store, "path~ ^/a method:GET path~")["warnings"].as_a.map(&.as_s)
       again.find!(&.starts_with?("dropped (broadens results)")).should contain("path~")

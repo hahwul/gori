@@ -823,6 +823,8 @@ module Gori
         scoped = "#{cursor.try { |c| " #{c}" }}#{in_scope ? " in scope" : ""}"
         viewed = view ? " in the #{view.inspect} view" : ""
         static = hide_static ? " (static assets hidden)" : ""
+        # Not `QL.query_hint`: a split value is a DROPPED term, and `Run.query_terms_warning`
+        # already named it on the way in.
         hint = query.try { |q| QL.missing_colon_hint(q) }.try { |h| " (#{h})" }
         "no flows#{query ? " match #{query.inspect}" : ""}#{scoped}#{viewed}#{static}#{hint}"
       end

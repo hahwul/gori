@@ -315,6 +315,11 @@ describe Gori::MCP::Server do
         page = mcp_tool_payload(mcp_drive(store, rows)[0])
         page["flows"].as_a.should be_empty
         page["query_hint"].as_s.should contain("`path~^/login`")
+        page["ignored_terms_note"].as_s.should contain("DIFFERENT query")
+        strict = %({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"path~\\n^/login","strict":true}}})
+        mcp_drive(store, strict)[0]["result"]["content"][0]["text"].as_s.should contain("`path~^/login`")
+        broad = %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"status:>=bogus host:a.test"}}})
+        mcp_tool_payload(mcp_drive(store, broad)[0])["ignored_terms_note"].as_s.should_not contain("DIFFERENT")
       end
     end
 

@@ -46,11 +46,15 @@ module Gori
         # `scope:` term (see `QL.analyze`).
         analysis = QL.analyze(query, scope: lens)
         if bool_arg(h, "strict", count_only) && !analysis.clean?
-          return count_only ? ql_count_dropped_error(query, analysis) : ql_strict_error(analysis)
+          return count_only ? ql_count_dropped_error(query, analysis) : ql_strict_error(query, analysis)
         end
         dropped.concat(analysis.ignored)
         filter
       end
+
+      EMPTY_TERM_NOTE = ". A field with no value (`path~`) may be one whose value was typed after " \
+                        "whitespace: then that value is a separate free-text term and the result is a " \
+                        "DIFFERENT query, not a broader one (ql_explain says which)"
 
       # The terms `ql_filter_or_error` dropped, as two fields on a read tool's reply — the list,
       # and the sentence that says what it means. Written only when there is something to say,
@@ -58,10 +62,14 @@ module Gori
       private def emit_ignored_terms(j : JSON::Builder, dropped : Array(String)) : Nil
         return if dropped.empty?
         j.field("ignored_terms") { j.array { dropped.each { |t| j.string t } } }
+        # This has the dropped terms and not the query (several callers build the reply far from
+        # it), so an empty `path~` is named by shape and the note says MAY: it is a split value
+        # only when a word followed it, and `ql_explain` is the call that can tell.
+        split = dropped.any? { |t| QL.empty_field_term?(t) }
         j.field "ignored_terms_note",
           "these query terms were unrecognized or invalid and were DROPPED, so the result is " \
           "BROADER than the query asks for — fix them (ql_explain shows why), or pass strict:true " \
-          "to refuse such a query instead"
+          "to refuse such a query instead#{split ? EMPTY_TERM_NOTE : ""}"
       end
 
       # Refuse a query naming a `field:`/`field~` QL does not implement, instead of running the
@@ -120,9 +128,10 @@ module Gori
           details: JSON.parse({"invalid_regex_terms" => bad}.to_json))
       end
 
-      private def ql_strict_error(a : QL::TermAnalysis) : Result
+      private def ql_strict_error(query : String, a : QL::TermAnalysis) : Result
         bad = (a.ignored + a.invalid_regex).uniq
-        err("strict query rejected — unrecognized/invalid term(s): #{bad.join(", ")} " \
+        hint = QL.split_value_hint(query).try { |t| " (#{t})" }
+        err("strict query rejected — unrecognized/invalid term(s): #{bad.join(", ")}#{hint} " \
             "(call ql_reference; omit strict to run leniently and drop them)",
           "QUERY_SYNTAX", field: "query",
           details: JSON.parse({"ignored" => a.ignored, "invalid_regex" => a.invalid_regex, "applied" => a.applied}.to_json))
@@ -197,8 +206,7 @@ module Gori
         # value survives as free text, so the result is not the broader query a drop promises.
         # One occurrence out per pair, so the same empty term dropped elsewhere still broadens.
         splits = QL.split_value_terms(query)
-        broadening = a.ignored.dup
-        splits.each { |(empty, _)| broadening.index(empty).try { |i| broadening.delete_at(i) } }
+        broadening = QL.broadening_drops(a.ignored, query)
         Result.new(JSON.build do |j|
           j.object do
             j.field "query", query

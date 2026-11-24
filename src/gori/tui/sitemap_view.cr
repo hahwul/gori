@@ -450,7 +450,9 @@ module Gori::Tui
            QL::SIDE_PREFIXES, CANDIDATE_FIELDS)
         return FilterAst.unknown_field_note(u)
       end
-      if hint = QL.missing_colon_hint(residual)
+      # The bar as typed, not the residual: `FilterAst.partition` rejoins what is left with
+      # spaces, so the words either side of a `tag:` would read as one run.
+      if hint = QL.query_hint(@query)
         return hint
       end
       # Same note History carries, for the same reason: an empty tree cannot say WHY it is empty.

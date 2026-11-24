@@ -127,6 +127,18 @@ describe "gori run history — the empty-listing sentence" do
       .should eq(%(no flows match "status>=400" (`status>=400` is searched as text — did you mean `status:>=400`?)))
   end
 
+  # A split value is a dropped term, and `query_terms_warning` named it on the way in.
+  it "does not repeat the split-value hint the warning already gave" do
+    Gori::CLI::Run.empty_listing_note("path~ ^/login", nil, false).should eq(%(no flows match "path~ ^/login"))
+    w = Gori::CLI::Run.query_terms_warning("path~ ^/login").not_nil!
+    w.should contain("did you mean `path~^/login`?")
+    w.should_not contain("BROADER")
+    Gori::CLI::Run.query_terms_warning("path~ ^/a method:GET path~").not_nil!.should contain("BROADER")
+    Gori::CLI::Run.query_terms_warning("status:>=x host:a").not_nil!.should contain("BROADER")
+    Gori::CLI::Run.query_terms_warning("host:a").should be_nil
+    Gori::CLI::Run.query_terms_error("path~ ^/login", strict: true).not_nil!.should contain("`path~^/login`")
+  end
+
   it "stays quiet about All, which excluded nothing" do
     # The caller passes nil for a non-narrowing view. Naming it would send an operator looking
     # at a lens that had no part in the answer.
