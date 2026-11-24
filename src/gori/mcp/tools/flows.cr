@@ -346,7 +346,7 @@ module Gori
 
       # The CLI's empty listing names this too; an empty answer alone reads as "no such traffic".
       private def emit_query_hint(j : JSON::Builder, query : String?) : Nil
-        if hint = query.try { |q| QL.missing_colon_hint(q) || QL.split_value_hint(q) }
+        if hint = query.try { |q| QL.query_hint(q) }
           j.field "query_hint", hint
         end
       end

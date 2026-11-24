@@ -253,6 +253,7 @@ The LLM pane in History's detail view reads the reply as well and leaves that on
 - Parentheses group. Precedence is `NOT` then `AND` then `OR`.
 - A bare word (no `field:`) is free text over method, host, and target.
 - A bare word shaped like a comparison typed without its colon (`status>=400`, `host=api`) stays free text, so it usually matches nothing. The History and Sitemap empty states, `gori run history` and MCP `ql_explain` then name the colon form (`status:>=400`). A quoted or negated word is taken as intended.
+- A field whose value is typed after whitespace (`path~` on one line, `^/login` on the next) is two terms: the empty `path~` is dropped and `^/login` is searched as free text. The same surfaces name the joined form (`path~^/login`).
 - An unknown `field:` name is read as a typo, not as free text: `gori run history`, `gori run sitemap` (and its `params`, `js` and `export` verbs), `gori run probe`, `gori run diff` and `gori run authorize` **refuse** it, name the nearest real field, and exit non-zero. The MCP query tools refuse it as `QUERY_SYNTAX`. `--lenient` (MCP `lenient:true`) searches the token as text instead, as every surface used to do silently (`methd:GET` then matches nothing and looks like an empty project). The TUI filter bar still accepts a half-typed name as you type it.
 
 ```text

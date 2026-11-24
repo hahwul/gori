@@ -28,6 +28,20 @@ private def not_nodes(node : Gori::FilterAst::Node?) : Int32
 end
 
 describe Gori::FilterAst do
+  it "groups terms typed back to back, cut by operators and parens, a quote kept whole" do
+    runs = ->(q : String) { Gori::FilterAst.adjacent_runs(q).map(&.map(&.source)) }
+    runs.call("a b OR c (d e) NOT f -g h").should eq([["a", "b"], ["c"], ["d", "e"], ["f", "-g", "h"]])
+    # Negation is the parser's: an even run of NOTs is plain, a NOT over a group leaves its leaves.
+    neg = ->(q : String) { Gori::FilterAst.adjacent_runs(q).flatten.map(&.negate?) }
+    neg.call("NOT f g").should eq([true, false])
+    neg.call("NOT NOT f").should eq([false])
+    neg.call("NOT (a b)").should eq([false, false])
+    neg.call("NOT (a)").should eq([true])
+    runs.call(%("path~ x" OR path~ OR x)).should eq([[%("path~ x")], ["path~"], ["x"]])
+    runs.call("path~\n^/login").should eq([["path~", "^/login"]])
+    runs.call("").should be_empty
+  end
+
   it "ANDs adjacent terms and accepts the AND keyword for the same thing" do
     parse("host:acme status:>=500").should eq(%((and host:acme status:>=500)))
     parse("host:a AND host:b").should eq("(and host:a host:b)")

@@ -400,6 +400,39 @@ module Gori
       acc
     end
 
+    # The terms in the runs the operator typed back to back: a run is a stretch of words with only
+    # whitespace between them, so an operator (`OR`, `AND`, `NOT`) or a paren ends it, and a quoted
+    # chunk is one word however much whitespace it holds. For the hints that read several words as
+    # ONE thing typed apart (`status >= 400`, `path~` then `^/login`): `terms` flattens the tree, so
+    # it cannot say which words were adjacent, and a substring test against the query text paired
+    # words that only sat together inside a quote.
+    #
+    # The lexer says which words are adjacent; the PARSER says what each one is. A lexed word does
+    # not know about a `NOT` in front of it (`NOT NOT x` is plain, `NOT (a b)` negates the group and
+    # leaves its leaves alone, `NOT (a)` flips the leaf), so each word is replaced by the parse
+    # tree's term at the same position, which is how `terms` reports it. The two line up one for
+    # one, since the parser keeps every word in order; if a depth-capped parse ever dropped one,
+    # the lexed terms are used as they are rather than misaligned.
+    def self.adjacent_runs(query : String) : Array(Array(Term))
+      lexemes = lex(query)
+      parsed = terms(parse(query))
+      words = lexemes.count { |lx| lx.tok.word? && lx.term }
+      runs = [] of Array(Term)
+      run = [] of Term
+      i = 0
+      lexemes.each do |lx|
+        if lx.tok.word? && (t = lx.term)
+          run << (parsed.size == words ? parsed[i] : t)
+          i += 1
+        else
+          runs << run unless run.empty?
+          run = [] of Term
+        end
+      end
+      runs << run unless run.empty?
+      runs
+    end
+
     # NOTE: `out` is a Crystal keyword and cannot be passed as an argument — hence `acc`.
     private def self.collect(node : Node?, acc : Array(Term)) : Nil
       case node

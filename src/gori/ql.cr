@@ -636,16 +636,21 @@ module Gori
     MISSING_COLON = /\A([a-z][a-z0-9_.]*)(>=|<=|!=|>|<|=)([^<>=!].*)\z/i
 
     def self.missing_colon_hint(query : String) : String?
-      terms = FilterAst.terms(FilterAst.parse(query))
-      typed = query.split.join(' ')
+      # `status >= 400` parses as three bare words, so a run of up to three is read back as the
+      # one comparison it was typed as — only when the operator typed it as one run
+      # (`FilterAst.adjacent_runs`): `status OR >= 400` is not that comparison.
+      FilterAst.adjacent_runs(query).each do |terms|
+        hint = missing_colon_in(terms)
+        return hint if hint
+      end
+      nil
+    end
+
+    private def self.missing_colon_in(terms : Array(FilterAst::Term)) : String?
       terms.each_index do |i|
-        # `status >= 400` parses as three bare words, so a run of up to three is read back
-        # as the one comparison it was typed as — only when the operator typed it as one run:
-        # `terms` flattens OR and parentheses, and `status OR >= 400` is not that comparison.
         (1..3).each do |n|
           run = terms[i, n]
           break if run.size < n || run.any? { |t| t.negate? || t.source.includes?('"') }
-          next if n > 1 && !typed.includes?(run.join(' ', &.source))
           next unless m = MISSING_COLON.match(run.join(&.text))
           name, op, value = m[1].downcase, m[2], m[3]
           next unless known_field?(name)
@@ -667,35 +672,63 @@ module Gori
     # operator wrote: it is a different, usually empty, one, and "dropped (broadens results)"
     # tells them the opposite of what happened. Each pair is {empty term, the term after it}, the
     # second only when it is a bare word: a `field:` beside the empty term is a term of its own,
-    # and a quoted or negated word was typed on purpose. Pairs only where the operator typed
-    # the two as one run, since `terms` flattens OR and parentheses (as `missing_colon_hint`).
+    # and a quoted or negated word was typed on purpose. Pairs only words the operator typed as
+    # one run (`FilterAst.adjacent_runs`), so `path~ OR x` and a quoted `"path~ x"` pair nothing.
     def self.split_value_terms(query : String) : Array({String, String})
-      terms = FilterAst.terms(FilterAst.parse(query))
-      typed = query.split.join(' ')
       pairs = [] of {String, String}
-      terms.each_cons_pair do |t, nxt|
+      FilterAst.adjacent_runs(query).each { |run| split_value_pairs(run, pairs) }
+      pairs
+    end
+
+    private def self.split_value_pairs(run : Array(FilterAst::Term), pairs : Array({String, String})) : Nil
+      run.each_cons_pair do |t, nxt|
         # With its operator: `status~` is a field QL knows and drops under `~`, so the joined
         # `status~5..` would be dropped too and the hint would recommend a second dead query.
         next unless (s = split_field(t.text)) && s[1].empty? && known_field?(s[0], regex: s[2] == :regex)
         next if t.source.includes?('"') || nxt.negate? || nxt.source.includes?('"')
         next if (ns = split_field(nxt.text)) && field_shaped?(ns[0], ns[1])
-        next unless typed.includes?("#{t.source} #{nxt.source}")
+        # The joined spelling has to be a term QL keeps, or the hint recommends a second dead
+        # query: `status: >= 400` joins to `status:>=`, which is dropped too.
+        joined = "#{t.text}#{nxt.text}"
+        next unless term_to_sql(FilterAst::Term.new(joined, joined), scope: SCOPE_SHAPE_ONLY)
         pairs << {t.source, nxt.source}
       end
-      pairs
     end
 
-    # The sentence for one `split_value_terms` pair, and the first one for a query: the hint an
-    # empty answer carries beside `missing_colon_hint`'s.
+    # The sentence for one `split_value_terms` pair, and the first one for a query. Spelled like
+    # `missing_colon_hint`'s, because it is the same trap (text typed as a field, searched as
+    # text) and the History and Sitemap empty states have one line to say it in.
     def self.split_value_message(empty : String, rest : String) : String
-      "`#{empty}` has no value: whitespace (a space or a newline) ends a term, so `#{rest}` is a " \
-      "separate FREE-TEXT term, a literal substring search of method/host/target. The result is " \
-      "that search, not a broader `#{empty}#{rest}`: write `#{empty}#{rest}` with no whitespace " \
-      "(quote a value that has spaces)"
+      "`#{empty} #{rest}` is two terms and `#{rest}` is searched as text — did you mean `#{empty}#{rest}`?"
     end
 
     def self.split_value_hint(query : String) : String?
       split_value_terms(query).first?.try { |(empty, rest)| split_value_message(empty, rest) }
+    end
+
+    # The dropped terms that really broaden `query`: `ignored` with one occurrence taken out per
+    # `split_value_terms` pair, so the same empty term dropped again elsewhere still counts. The
+    # one rule `ql_explain` and `gori run`'s warning both read, so they cannot disagree about it.
+    def self.broadening_drops(ignored : Array(String), query : String) : Array(String)
+      left = ignored.dup
+      split_value_terms(query).each { |(empty, _)| left.index(empty).try { |i| left.delete_at(i) } }
+      left
+    end
+
+    # Why a query that RAN might have come back empty for the way it was typed: a comparison
+    # missing its colon, or a field whose value whitespace split off. Every surface that explains
+    # an empty answer asks this, so a new trap is named on all of them at once.
+    def self.query_hint(query : String) : String?
+      missing_colon_hint(query) || split_value_hint(query)
+    end
+
+    # Is this dropped term a known field written with no value (`path~`, `-host:`)? Such a term
+    # may be the front half of a split value, the one drop that does not broaden. For a surface
+    # that has the dropped terms but not the query (`emit_ignored_terms`).
+    def self.empty_field_term?(source : String) : Bool
+      term = FilterAst.terms(FilterAst.parse(source)).first? || return false
+      return false unless s = split_field(term.text)
+      s[1].empty? && known_field?(s[0], regex: s[2] == :regex)
     end
 
     # The terms whose field QL does not implement (`fields_used`' reading, so a pasted URL names

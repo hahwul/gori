@@ -1065,7 +1065,7 @@ module Gori::Tui
            QL::SIDE_PREFIXES, QL::CANDIDATE_FIELDS)
         return FilterAst.unknown_field_note(u)
       end
-      QL.missing_colon_hint(@query)
+      QL.query_hint(@query)
     end
 
     # The view and the hide-static lens — the standing modes that AND over the bar. Both named

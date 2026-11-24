@@ -1761,7 +1761,7 @@ describe "Gori::QL.split_value_terms" do
   it "leaves a field term, a quoted or negated word, an unknown field and a closed term alone" do
     # `status~` is dropped under `~` whatever follows, so joining it would be dropped too.
     {"path~ host:a", "path~ \"^/x\"", "path~ -x", "xyzzy: foo", "path~^/login", "path~",
-     "(path~) OR x", "status~ 5.."}.each do |q|
+     "(path~) OR x", "status~ 5..", %("path~ x" OR path~ OR x), "status: >= 400"}.each do |q|
       Gori::QL.split_value_terms(q).should be_empty, q
     end
   end
@@ -1798,5 +1798,37 @@ describe "Gori::QL.unknown_field_terms" do
   it "names the terms whose field QL lacks, as written, and no URL or authority" do
     Gori::QL.unknown_field_terms("stauts:500 AND -methd:GET host:a").should eq(["stauts:500", "-methd:GET"])
     Gori::QL.unknown_field_terms("http://acme.test/x acme.test:8443 host:a").should be_empty
+  end
+end
+
+describe "Gori::QL.query_hint" do
+  it "names a comparison missing its colon, then a value split off by whitespace" do
+    Gori::QL.query_hint("status>=400").not_nil!.should contain("`status:>=400`")
+    Gori::QL.query_hint("path~\n^/login").should eq(
+      "`path~ ^/login` is two terms and `^/login` is searched as text — did you mean `path~^/login`?")
+    Gori::QL.query_hint("path~^/login").should be_nil
+  end
+
+  # The run used to be found by a substring test on the query text, which a quote could satisfy.
+  it "pairs only words typed as one run, not text inside a quote" do
+    Gori::QL.missing_colon_hint(%(x "status >= 400" OR status OR >= OR 400)).should be_nil
+    Gori::QL.missing_colon_hint("x status >= 400").not_nil!.should contain("`status:>=400`")
+    Gori::QL.missing_colon_hint("NOT NOT status>=400").not_nil!.should contain("`status:>=400`")
+    Gori::QL.missing_colon_hint("NOT status>=400").should be_nil
+  end
+end
+
+describe "Gori::QL.empty_field_term?" do
+  it "is a known field with no value, under the operator it was written with" do
+    {"path~", "-host:", "status:"}.each { |t| Gori::QL.empty_field_term?(t).should be_true, t }
+    {"path~^/a", "status~", "xyzzy:", "login", ""}.each { |t| Gori::QL.empty_field_term?(t).should be_false, t }
+  end
+end
+
+describe "Gori::QL.broadening_drops" do
+  it "takes one occurrence out per split pair, so a second empty term still broadens" do
+    Gori::QL.broadening_drops(["path~"], "path~ ^/a").should be_empty
+    Gori::QL.broadening_drops(["path~", "path~"], "path~ ^/a method:GET path~").should eq(["path~"])
+    Gori::QL.broadening_drops(["status:>=x"], "status:>=x host:a").should eq(["status:>=x"])
   end
 end

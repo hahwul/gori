@@ -214,6 +214,17 @@ describe "HistoryView — view mode" do
     end
   end
 
+  it "names a value split off by whitespace on an empty list" do
+    with_store do |store|
+      add_flow(store, Gori::FlowSource::Kind::Proxy, "keep.test", 200)
+      view = HistoryView.new
+      view.set_query("path~ ^/login")
+      view.reload(store)
+      view.rows.should be_empty
+      screen_text(view).should contain("did you mean `path~^/login`?")
+    end
+  end
+
   it "names the colon form of a comparison typed without one, ahead of the view note" do
     with_store do |store|
       add_flow(store, Gori::FlowSource::Kind::Proxy, "keep.test", 500)
