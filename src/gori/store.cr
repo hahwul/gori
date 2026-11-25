@@ -1855,6 +1855,7 @@ module Gori
       conn.exec("DELETE FROM js_refs WHERE flow_id <= ?", cutoff)
       conn.exec("DELETE FROM js_ref_scans WHERE flow_id <= ?", cutoff)
       conn.exec("DELETE FROM intercept_originals WHERE flow_id <= ?", cutoff)
+      conn.exec("DELETE FROM intercept_response_originals WHERE flow_id <= ?", cutoff)
       conn.exec("DELETE FROM flow_interims WHERE flow_id <= ?", cutoff)
       conn.exec("DELETE FROM flow_live_chunks WHERE flow_id <= ?", cutoff)
       conn.exec("DELETE FROM flow_event_times WHERE flow_id <= ?", cutoff)
@@ -2262,6 +2263,18 @@ module Gori
       id
     end
 
+    # An Intercept edit's pre-edit response (V54), in the response's own transaction as V44's
+    # request is in the request's, so the row never reads as edited without its original. True
+    # when one was written. Never an empty one: it would bind as NULL, and one NOT NULL failure
+    # fails the writer's whole batch.
+    private def write_intercept_response_original(conn : DB::Connection, resp : CapturedResponse) : Bool
+      orig = resp.intercept_original
+      return false unless orig && !orig.empty?
+      conn.exec("INSERT OR REPLACE INTO intercept_response_originals (flow_id, response) VALUES (?, ?)",
+        resp.flow_id, orig)
+      true
+    end
+
     # What Match&Replace did to one side of a flow (V49), in that side's own transaction so a
     # flow never reads as rewritten without its original, nor the other way round. Nothing at
     # all for the flow no rule changed.
@@ -2353,7 +2366,9 @@ module Gori
         conn.exec("INSERT INTO flow_event_times (flow_id, first, times) VALUES (?, 0, ?)", resp.flow_id, times)
       end
       write_interims(conn, resp.flow_id, resp.interims)
-      write_rewrite(conn, resp.flow_id, RuleTarget::Response, resp.rewrite)
+      # An Intercept edit already keeps the origin's response (V54): the rules' hits only.
+      write_rewrite(conn, resp.flow_id, RuleTarget::Response, resp.rewrite,
+        original: !write_intercept_response_original(conn, resp))
       # `fts_dirty = 1` again: the response side just appeared (or changed), so whatever the
       # indexer wrote for this row is stale. Re-dirtying an already-dirty row is a no-op, so
       # the common case — response landing before the indexer ever reached the row — is
@@ -2709,12 +2724,13 @@ module Gori
       source = rs.read(String?).try { |t| FlowSource::Kind.parse?(t) }
       source_surface = rs.read(String?).try { |t| FlowSource::Surface.parse?(t) }
       source_ref = rs.read(String?)
-      intercept_edited = rs.read(Int64) != 0
+      edited = rs.read(Int64) # `INTERCEPT_EDITED`: bit 0 the request, bit 1 the response
       rewritten_by = rs.read(String?).try(&.split(',').compact_map { |h| RuleRef.parse?(h) }.uniq!)
       FlowRow.new(id, created_at, scheme, method, host, port, target,
         status, total_size(req_size, resp_size), state, resp_size, duration_us, content_type,
         short_circuited, advisory, request_content_type, connect_protocol,
-        source, source_surface, source_ref, intercept_edited, rewritten_by)
+        source, source_surface, source_ref, edited & 1 != 0, rewritten_by,
+        intercept_edited_response: edited & 2 != 0)
     end
 
     # A row's request + response size. Each column fits Int64 but a foreign or hand-edited row

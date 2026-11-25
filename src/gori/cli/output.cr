@@ -124,7 +124,8 @@ module Gori
           # the two key sets against each other): a consumer of either feed has no other way
           # to tell a gori-authored stub response from one the origin actually sent (#511).
           j.field "short_circuited", row.short_circuited?
-          # Edited at Intercept (#1378) — the stored request is the operator's, not the client's.
+          # Edited at Intercept (#1378) — the stored request is the operator's, not the client's,
+          # or the stored response is, not the origin's.
           j.field "intercept_edited", row.intercept_edited?
           # The Match&Replace rules that changed this flow (#1589), `[]` when none did.
           j.field "rewritten", row.rewritten? # an imported global rule is unnamed: [] then

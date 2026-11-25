@@ -290,8 +290,10 @@ module Gori
           # feed has no other way to tell a fabricated response from a real one, and an absent
           # field reads as "not applicable" rather than "false".
           j.field "short_circuited", row.short_circuited?
-          # The operator edited this request at Intercept (#1378): the stored request is what
-          # went upstream, not what the client sent. Every row, for `short_circuited`'s reason.
+          # The operator edited this flow at Intercept (#1378): the stored request is what went
+          # upstream, not what the client sent, or the stored response is what the client got, not
+          # what the origin sent — `get_flow`'s `*_original_*` fields name the side. Every row, for
+          # `short_circuited`'s reason.
           j.field "intercept_edited", row.intercept_edited?
           # The Match&Replace rules that changed this flow (#1589), `[]` when none did. Every
           # row, for `short_circuited`'s reason.

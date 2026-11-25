@@ -1491,6 +1491,101 @@ describe "H2::StreamGate body rules: an intercept hold" do
     end
   end
 
+  # The response leg's twin (V54): the origin's own response, before the rule, is kept beside
+  # the operator's edit, and the rule's record keeps its hits only.
+  it "keeps the origin's own response beside an edit of the rewrite" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "a", "b", host: API)
+      ic.toggle
+      ic.set_direction(Gori::Interceptor::Direction::ResponseOnly)
+      g = GatePair.new(rules, ic, 5.seconds)
+      g.request(1_u32, get("/x", API), true)
+      g.response(1_u32, ok(3))
+      g.data(g.in_gate, 1_u32, "aaa", true)
+      item = ic.pending.first
+      String.new(item.raw).should end_with("bbb")
+      ic.forward(item.id, String.new(item.raw).sub("bbb", "ccc").to_slice)
+      sleep 50.milliseconds
+
+      data_of(g.frames(g.down), 1_u32).should eq("ccc")
+      captured = g.sink.responses.first
+      String.new(captured.body.not_nil!).should eq("ccc")
+      String.new(captured.intercept_original.not_nil!).should end_with("aaa")
+      captured.rewrite.not_nil!.hits.size.should eq(1)
+      g.close
+    end
+  end
+
+  it "keeps no response original when the held rewrite is forwarded as shown" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "a", "b", host: API)
+      ic.toggle
+      ic.set_direction(Gori::Interceptor::Direction::ResponseOnly)
+      g = GatePair.new(rules, ic, 5.seconds)
+      g.request(1_u32, get("/x", API), true)
+      g.response(1_u32, ok(3))
+      g.data(g.in_gate, 1_u32, "aaa", true)
+      ic.forward(ic.pending.first.id)
+      sleep 50.milliseconds
+
+      captured = g.sink.responses.first
+      captured.intercept_original.should be_nil
+      String.new(captured.rewrite.not_nil!.body.not_nil!).should eq("aaa")
+      g.close
+    end
+  end
+
+  # A HEAD-ONLY hold (no content-length) lets DATA past the gate untouched, so the origin's body
+  # is the one the flow stores: the original carries it, not an empty body the origin never sent.
+  it "keeps the passed-through body in the original of an edited head-only response hold" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "a", "b", host: API)
+      ic.toggle
+      ic.set_direction(Gori::Interceptor::Direction::ResponseOnly)
+      g = GatePair.new(rules, ic, 5.seconds)
+      g.request(1_u32, get("/x", API), true)
+      g.response(1_u32, ok)
+      sleep 20.milliseconds
+      item = ic.pending.first
+      item.head_only?.should be_true
+      ic.forward(item.id, String.new(item.raw).sub("text/plain", "text/html").to_slice)
+      sleep 30.milliseconds
+      g.data(g.in_gate, 1_u32, "aaa", true)
+      sleep 50.milliseconds
+
+      captured = g.sink.responses.first
+      String.new(captured.body.not_nil!).should eq("aaa")
+      original = String.new(captured.intercept_original.not_nil!)
+      original.should contain("text/plain")
+      original.should end_with("\r\n\r\naaa")
+      g.close
+    end
+  end
+
+  it "keeps the passed-through body in the original of an edited head-only request hold" do
+    with_rules do |rules, ic|
+      ic.toggle
+      g = GatePair.new(rules, ic, 5.seconds)
+      g.request(1_u32, [{":method", "POST"}, {":scheme", "https"}, {":authority", API}, {":path", "/up"}])
+      sleep 20.milliseconds
+      item = ic.pending.first
+      item.head_only?.should be_true
+      ic.forward(item.id, String.new(item.raw).sub("/up", "/edited").to_slice)
+      sleep 30.milliseconds
+      g.data(g.out_gate, 1_u32, "upload", true)
+      g.response(1_u32, ok(0))
+      g.data(g.in_gate, 1_u32, "", true)
+      sleep 50.milliseconds
+
+      captured = g.sink.requests.first
+      captured.target.should eq("/edited")
+      original = String.new(captured.intercept_original.not_nil!)
+      original.should contain("/up")
+      original.should end_with("\r\n\r\nupload")
+      g.close
+    end
+  end
+
   # A held response's receiver window is known only as far as its sender was granted it.
   it "does not grow a held response past what its sender was allowed" do
     with_rules do |rules, ic|

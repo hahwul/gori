@@ -40,7 +40,7 @@ Reading a held message needs no marks and no editor. The preview soft-wraps, so 
 
 Each row shows how long its message has been waiting. Each hold is a real client blocked on your decision. The catch bar above the queue shows the armed condition, including one an agent set through MCP or `gori run intercept filter`. When a gate cannot hold a message it was armed for, such as a body over the buffer ceiling, it forwards the message untruncated and says so in the notification centre, so you are not left waiting for a row that will never appear.
 
-History keeps what you decided. A request you **edited** before forwarding reads `EDIT` in the SRC column, and its detail adds an **ORIGINAL** pane holding the request as the client sent it, next to REQUEST, which is what went upstream (`intercept_edited` in `gori run history --format json` and MCP). A **dropped** message says it was dropped at Intercept, not that the upstream failed.
+History keeps what you decided. A message you **edited** before forwarding reads `EDIT` in the SRC column. An edited request's detail adds an **ORIGINAL** pane holding the request as the client sent it, next to REQUEST, which is what went upstream; an edited response's adds **ORIGINAL RESP**, holding the response as the origin sent it, next to RESPONSE, which is what the client received (`intercept_edited` in `gori run history --format json` and MCP). A **dropped** message says it was dropped at Intercept, not that the upstream failed.
 
 ### What gets held
 

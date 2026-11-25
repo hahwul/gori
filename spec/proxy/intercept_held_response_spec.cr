@@ -8,11 +8,14 @@ require "socket"
 # that had gone out as DELETE (#1433). h2 holds both from the same projection already.
 
 private class HeldResponseSink < Gori::Proxy::FlowSink
+  getter responses = Channel(Gori::Store::CapturedResponse).new(4)
+
   def on_request(req : Gori::Store::CapturedRequest) : Int64
     1_i64
   end
 
   def on_response(resp : Gori::Store::CapturedResponse) : Nil
+    @responses.send(resp)
   end
 
   def on_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes,
@@ -47,7 +50,64 @@ private def next_pending(ic : Gori::Interceptor, kind : Gori::Interceptor::Kind)
   receive_within(found, what: "the held #{kind}")
 end
 
+# One response held and forwarded as `edit` gives (nil = unedited): what the client read and what
+# the sink was handed for the flow.
+private def held_response_round(edit : String?) : {String, Gori::Store::CapturedResponse}
+  with_held_response_store do |store|
+    ic = Gori::Interceptor.new(Gori::Scope.load(store))
+    ic.toggle
+    ic.set_direction(Gori::Interceptor::Direction::ResponseOnly)
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    spawn do
+      if conn = origin.accept?
+        conn.read_timeout = 10.seconds
+        Gori::Proxy::Codec::Http1.read_head(conn)
+        conn << "HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\norigin"
+        conn.flush
+        sleep 3.seconds
+        conn.close rescue nil
+      end
+    rescue
+    end
+    sink = HeldResponseSink.new
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, interceptor: ic)
+    proxy.start
+    begin
+      client = TCPSocket.new("127.0.0.1", proxy.port)
+      client.read_timeout = 10.seconds
+      client << "GET /r HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\nConnection: close\r\n\r\n"
+      client.flush
+      item = next_pending(ic, Gori::Interceptor::Kind::Response)
+      ic.forward(item.id, edit ? edit.to_slice : item.raw)
+      got = client.gets_to_end
+      client.close
+      {got, receive_within(sink.responses, what: "the recorded response")}
+    ensure
+      proxy.stop
+      origin.close rescue nil
+    end
+  end
+end
+
 describe "intercept held response" do
+  # The client gets the operator's bytes, the flow records them, and the origin's own response is
+  # kept beside it as the original (V54) — the request edit's twin (#1378).
+  it "keeps the origin's response as the original of an edited one" do
+    edit = "HTTP/1.1 100 Edited\r\nContent-Length: 6\r\nConnection: close\r\n\r\nedited"
+    got, resp = held_response_round(edit)
+    got.should eq(edit)
+    resp.status.should eq(100)
+    String.new(resp.body.not_nil!).should eq("edited")
+    String.new(resp.intercept_original.not_nil!).should eq("HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\norigin")
+  end
+
+  it "keeps no original when the held response is forwarded unedited" do
+    got, resp = held_response_round(nil)
+    got.should end_with("origin")
+    resp.intercept_original.should be_nil
+  end
+
   it "labels the response with the EDITED request's method" do
     with_held_response_store do |store|
       ic = Gori::Interceptor.new(Gori::Scope.load(store))

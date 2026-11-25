@@ -2230,7 +2230,7 @@ module Gori::Proxy
       # `buf` is filled once and never written again, and build_message copies head+body into
       # a fresh buffer, so `buf.to_slice` is a stable view — no defensive dup (which would hold
       # the whole body a second time). Mirrors the non-hold M&R path above.
-      body = resp_framing.none? ? nil : buf.to_slice
+      body = origin_body = resp_framing.none? ? nil : buf.to_slice
       # Match&Replace (response body) BEFORE the human sees it, like the head. A body rule
       # re-frames the head to Content-Length; `resp` (status/version/Connection) is
       # untouched by that, so keep it as the origin's framing/keep-alive truth.
@@ -2246,8 +2246,6 @@ module Gori::Proxy
       decision = ic.hold_response(held,
         flow_id: flow_id, method: sent_req.method, target: "#{resp.status} #{resp.reason}",
         host: host, port: port, scheme: scheme, request_target: sent_req.target)
-      # An edit makes the stored body the operator's, so a rule's original keeps the origin's (#1589).
-      @resp_orig_body ||= buf.to_slice unless decision.bytes == held
       duration = (Time.instant - started).total_microseconds.to_i64
       if decision.action.drop?
         capture_response(FlowMapper.aborted_response(flow_id, Gori::Interceptor::DROP_RESPONSE_REASON,
@@ -2262,6 +2260,12 @@ module Gori::Proxy
       # forwarded unedited (whose Content-Length describes the entity, not the bytes).
       out_head, out_body = split_message(decision.bytes, response: true)
       sent_resp = Codec::Http1.parse_response_head(out_head)
+      # An edit replaces what the origin sent, so History keeps the ORIGIN'S own bytes beside the
+      # flow (V54) — its head before Match&Replace and the Alt-Svc strip, and the body as it
+      # arrived — and marks it edited, as a request edit is (#1378). A rule's record then keeps
+      # its hits only. A forward that changed nothing keeps nothing: the flow is the original.
+      # The body is cut to `capture_max` like every other stored body.
+      original = decision.bytes == held ? nil : build_message(@resp_orig_head || sent_resp_head, capped(origin_body)[0])
       delivered = true
       begin
         @io.write(out_head)
@@ -2283,17 +2287,19 @@ module Gori::Proxy
         # gori withheld, hence `Bytes.empty` rather than nil.
         observe_delivered(extract_ref_for(sent_req, host, port, scheme, sent_resp.status, flow_id),
           out_head, out_body || Bytes.empty)
-        capture_response(FlowMapper.response(sent_resp,
+        captured = FlowMapper.response(sent_resp,
           flow_id: flow_id, body: stored, ttfb_us: ttfb, duration_us: duration,
           body_truncated: trunc, body_size: size, advisory: response_advisory(advisory),
-          interims: @interims))
+          interims: @interims)
       else
-        capture_response(FlowMapper.response(sent_resp,
+        captured = FlowMapper.response(sent_resp,
           flow_id: flow_id, body: stored, ttfb_us: ttfb, duration_us: duration,
           body_truncated: trunc, body_size: size, advisory: response_advisory(advisory),
           state: Store::FlowState::Aborted, error: "connection closed while forwarding held response",
-          interims: @interims))
+          interims: @interims)
       end
+      captured.intercept_original = original
+      capture_response(captured)
       # Reuse the upstream iff we read the WHOLE body cleanly AND the origin kept its
       # side alive. Origin side keys on sent_req (what the origin received); the CLIENT
       # keep-alive (return value) uses the edited resp.

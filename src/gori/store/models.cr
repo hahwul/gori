@@ -129,6 +129,11 @@ module Gori
       # What Match&Replace changed on this response (#1589): `head`/`body` above are what the
       # client got. Set by the proxy after the DTO is built, like `CapturedRequest#rewrite`.
       property rewrite : Rewrite? = nil
+      # The response as the origin sent it, when the operator EDITED it at Intercept before
+      # forwarding: `head`/`body` above are the edited bytes the client got, this is what they
+      # replaced (head + body, before any rule). nil for every response nobody edited. Set by the
+      # proxy after the DTO is built, like `rewrite`. See the V54 migration.
+      property intercept_original : Bytes? = nil
       # The proxy appended this body to `flow_live_chunks` while it streamed (#1631), so the
       # write that finalizes the flow also deletes those chunks. False on every other response,
       # which then never runs the extra statement.
@@ -312,7 +317,9 @@ module Gori
       getter source_ref : String?
       # The operator edited this request at Intercept, and the client's original is kept
       # (`Store#intercept_original`, V44). Read off the side table, not a `flows` column.
-      getter? intercept_edited : Bool
+      getter? intercept_edited_request : Bool
+      # The operator edited this RESPONSE at Intercept, and the origin's original is kept (V54).
+      getter? intercept_edited_response : Bool
       # The Match&Replace rules that changed this flow's bytes (V49), or nil when none did — or
       # when the flow predates the record, which is "not recorded", not "untouched".
       getter rewritten_by : Array(RuleRef)?
@@ -326,7 +333,19 @@ module Gori
                      @content_type = nil, @short_circuited = false, @advisory = nil,
                      @request_content_type = nil, @connect_protocol = nil,
                      @source = nil, @source_surface = nil, @source_ref = nil,
-                     @intercept_edited = false, @rewritten_by = nil, @error = nil)
+                     @intercept_edited_request = false, @rewritten_by = nil, @error = nil,
+                     *, @intercept_edited_response = false)
+      end
+
+      # Either side holds the operator's bytes rather than its peer's: SRC's `EDIT`, the
+      # `intercept_edited` field of every machine row.
+      def intercept_edited? : Bool
+        @intercept_edited_request || @intercept_edited_response
+      end
+
+      # Whether `side` was edited at Intercept, so its original is `Store#intercept_original`.
+      def intercept_edited?(side : RuleTarget) : Bool
+        side.request? ? @intercept_edited_request : @intercept_edited_response
       end
 
       def rewritten? : Bool

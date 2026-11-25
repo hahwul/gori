@@ -47,11 +47,15 @@ describe "Gori::Store.compact" do
         head = "POST / HTTP/1.1\nHost: example.test\n\r\n"
         body = Bytes[0x00, 0xff, 0x01]
         response_head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n".to_slice
+        resp_original_head = "HTTP/1.1 200 OK\n\r\n"
         store = Gori::Store.open(path)
         id = store.insert_flow(req_for("/stream"))
         begin
           original = head.to_slice + body
           store.@db.exec("INSERT INTO intercept_originals (flow_id, request) VALUES (?, ?)", id, original)
+          # The origin's response before an Intercept edit (V54) goes with the response bodies.
+          store.@db.exec("INSERT INTO intercept_response_originals (flow_id, response) VALUES (?, ?)",
+            id, resp_original_head.to_slice + body)
           response = Gori::Store::CapturedResponse.new(flow_id: id, status: 200, head: response_head,
             body: Bytes.empty, content_type: "text/event-stream")
           store.append_live(id, 0_i64, body, response).should be_true
@@ -64,7 +68,7 @@ describe "Gori::Store.compact" do
 
         stats = Gori::Store.measure(path)
         stats.request_body_bytes.should eq(120_000 + body.size)
-        stats.response_body_bytes.should eq(body.size * 2)
+        stats.response_body_bytes.should eq(body.size * 3)
         plan = Gori::Store::CompactPlan.new(request_bodies: strip_request, response_bodies: !strip_request)
         Gori::Store.compact(path, plan).not_nil!
 
@@ -75,10 +79,12 @@ describe "Gori::Store.compact" do
           detail.row.response_size.should eq(response_head.size + body.size)
           if strip_request
             store.intercept_original(id).should eq(head.to_slice)
+            store.intercept_original(id, Gori::Store::RuleTarget::Response).should eq(resp_original_head.to_slice + body)
             detail.request_body.should eq(Bytes.empty)
             detail.response_body.should eq(body)
           else
             store.intercept_original(id).should eq(head.to_slice + body)
+            store.intercept_original(id, Gori::Store::RuleTarget::Response).should eq(resp_original_head.to_slice)
             detail.request_body.try(&.size).should eq(120_000)
             detail.response_body.should eq(Bytes.empty)
             detail.response_body_truncated?.should be_true

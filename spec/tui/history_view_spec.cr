@@ -4063,6 +4063,75 @@ describe "HistoryView — Intercept edits and drops" do
     end
   end
 
+  # A response edited at Intercept is the operator's, not the origin's: the row says EDIT (not
+  # PROXY, and not RULE when a rule also touched it), the footer names the side, and ORIGINAL
+  # RESP holds what the origin sent.
+  it "marks an edited response EDIT and shows the origin's response in ORIGINAL RESP" do
+    with_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "GET", target: "/resp", http_version: "HTTP/1.1",
+        head: "GET /resp HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil,
+        source: Gori::FlowSource::Kind::Proxy))
+      resp = Gori::Store::CapturedResponse.new(flow_id: id, status: 100,
+        head: "HTTP/1.1 100 Edited\r\nContent-Length: 6\r\n\r\n".to_slice, body: "edited".to_slice)
+      resp.intercept_original = "HTTP/1.1 200 FromOrigin\r\nContent-Length: 6\r\n\r\norigin".to_slice
+      hits = [Gori::Store::RuleRef.new(Gori::Store::RuleScope::Project, 9_i64)]
+      resp.rewrite = Gori::Store::Rewrite.new(hits, "HTTP/1.1 200 FromOrigin\r\n\r\n".to_slice)
+      store.update_response(resp)
+      store.flush
+      view = Gori::Tui::HistoryView.new
+      view.reload(store)
+
+      list = MemoryBackend.new(120, 8)
+      view.render_list(Gori::Tui::Screen.new(list), Gori::Tui::Rect.new(0, 0, 120, 8))
+      row = (0...8).map { |y| list.row(y) }.find!(&.includes?("/resp"))
+      row.should contain(" EDIT ")
+      row.should_not contain(" RULE ")
+
+      view.open_detail(store).should be_true
+      detail = MemoryBackend.new(140, 16)
+      view.render_detail(Gori::Tui::Screen.new(detail), Gori::Tui::Rect.new(0, 0, 140, 16))
+      detail.contains?("response edited at Intercept — the origin's original response is in ORIGINAL RESP").should be_true
+      detail.contains?("the bytes before are in ORIGINAL RESP").should be_true
+
+      view.set_detail_pane_public(:original)
+      view.detail_pane.should eq(:request) # the request was not edited: no ORIGINAL
+      view.set_detail_pane_public(:original_resp)
+      view.detail_pane.should eq(:original_resp)
+      detail = MemoryBackend.new(140, 16)
+      view.render_detail(Gori::Tui::Screen.new(detail), Gori::Tui::Rect.new(0, 0, 140, 16))
+      detail.contains?("200 FromOrigin").should be_true
+      detail.contains?("origin").should be_true
+    end
+  end
+
+  # Loop #7: an edited request beside a response rule. ORIGINAL holds the client's request, so the
+  # rule's sentence points at ORIGINAL RESP, where the pre-rule response is.
+  it "points a response rule's note at ORIGINAL RESP when the request was edited" do
+    with_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "GET", target: "/?id=2", http_version: "HTTP/1.1",
+        head: "GET /?id=2 HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil,
+        source: Gori::FlowSource::Kind::Proxy, intercept_original: original))
+      resp = Gori::Store::CapturedResponse.new(flow_id: id, status: 200,
+        head: "HTTP/1.1 200 OK\r\nX-Frame-Options: DENY\r\n\r\n".to_slice)
+      resp.rewrite = Gori::Store::Rewrite.new([Gori::Store::RuleRef.new(Gori::Store::RuleScope::Project, 4_i64)],
+        "HTTP/1.1 200 OK\r\n\r\n".to_slice)
+      store.update_response(resp)
+      store.flush
+      view = Gori::Tui::HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      detail = MemoryBackend.new(160, 16)
+      view.render_detail(Gori::Tui::Screen.new(detail), Gori::Tui::Rect.new(0, 0, 160, 16))
+      note = (0...16).map { |y| detail.row(y) }.find!(&.includes?("rewritten by Match&Replace")).strip
+      note.should end_with("— the bytes before are in ORIGINAL RESP")
+      detail.contains?("! edited at Intercept — the client's original request is in ORIGINAL").should be_true
+    end
+  end
+
   it "offers no ORIGINAL pane on a flow nobody edited" do
     with_store do |store|
       add_flow(store, "GET", "/plain", 200)

@@ -889,12 +889,13 @@ module Gori
             "oast_providers"     => %w[id created_at updated_at name kind host token enabled position],
             "oast_sessions"      => %w[id created_at provider_id kind server_url correlation_id secret private_key_pem token last_poll_at provider_key],
             # Flow reads, deletes and clears touch these: one missing raises "no such table" there.
-            "intercept_originals" => %w[flow_id request],
-            "flow_interims"       => %w[flow_id seq status head relayed omitted],
-            "flow_live_chunks"    => %w[flow_id off bytes],
-            "flow_event_times"    => %w[flow_id first times],
-            "flow_rule_hits"      => %w[flow_id side scope rule_id],
-            "rewrite_originals"   => %w[flow_id side head body],
+            "intercept_originals"          => %w[flow_id request],
+            "intercept_response_originals" => %w[flow_id response],
+            "flow_interims"                => %w[flow_id seq status head relayed omitted],
+            "flow_live_chunks"             => %w[flow_id off bytes],
+            "flow_event_times"             => %w[flow_id first times],
+            "flow_rule_hits"               => %w[flow_id side scope rule_id],
+            "rewrite_originals"            => %w[flow_id side head body],
           })
       end
 

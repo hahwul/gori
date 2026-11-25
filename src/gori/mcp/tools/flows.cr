@@ -667,8 +667,8 @@ module Gori
       end
 
       # What Match&Replace or an Intercept edit replaced on each side (#1589), under the flow's own
-      # body redaction — the original of a redacted body carries the same secret. An edited request
-      # keeps the client's whole message (`Interceptor.original`), which a rule's record then
+      # body redaction — the original of a redacted body carries the same secret. An edited side
+      # keeps its peer's whole message (`Interceptor.original`), which a rule's record then
       # lacks, as History and `gori run show --original` read it.
       private def rewrite_originals(detail : Store::FlowDetail, include_sensitive : Bool) : Array(Serialize::Original)
         found = [] of Serialize::Original
@@ -676,7 +676,7 @@ module Gori
         return found unless row.rewritten? || row.intercept_edited?
         matcher = include_sensitive ? nil : Redact::Policy.ambient(store)
         Store::RuleTarget.each do |side|
-          orig = if side.request? && row.intercept_edited?
+          orig = if row.intercept_edited?(side)
                    Gori::Interceptor.original(store, detail, side)
                  elsif row.rewritten?
                    store.rewrite_original(row.id, side)
