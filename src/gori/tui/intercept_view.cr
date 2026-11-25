@@ -303,11 +303,28 @@ module Gori::Tui
       @marks.to_a.sort!
     end
 
-    # The effective target set every batch verb acts on: the marks if any are set, else the
-    # cursor row. One rule, so forward/drop need no notion of "batch mode".
+    # The effective target set every batch verb acts on: the message the editor holds while
+    # the editor is open, else the marks if any are set, else the cursor row. One rule, so
+    # forward/drop need no notion of "batch mode".
+    #
+    # The editor comes first because it is the drill-in of this tab (DESIGN.md §7, 2026-09-18:
+    # "where a detail overlay is open, the flow it pins"). Marks stay set and on screen while a
+    # held message is being edited, and with them first `^R` from INS or READ forwarded the
+    # MARKED holds while the message just rewritten stayed held, its edit unsent. A forward or
+    # drop reached from inside the editor is about the bytes in front of the operator.
     def target_ids : Array(Int64)
+      if id = editor_target_id
+        return [id]
+      end
       return marked_ids unless @marks.empty?
       [selected_id].compact
+    end
+
+    # The held message an OPEN editor (text or hex) pins, or nil on the queue. `@loaded_id` and
+    # not the cursor: they agree while the editor is open (`move` refuses to step under it),
+    # but the loaded id is the one `pending_edit` keys its bytes on.
+    def editor_target_id : Int64?
+      @editing ? @loaded_id : nil
     end
 
     # `t` — flip the cursor row's mark, then step DOWN one, so a run of `t` marks consecutive

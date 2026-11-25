@@ -6520,11 +6520,12 @@ module Gori::Tui
       end
     end
 
-    # How many marks the Intercept QUEUE menu should speak for; 0 on any other tab. The
-    # held-bytes editor keeps the same target set (marks don't belong to the cursor row), so
-    # unlike History's detail there is no sub-state to exclude here.
+    # How many marks the Intercept QUEUE menu should speak for; 0 on any other tab, and 0 while
+    # the held-message editor is open: forward/drop there act on the message being edited
+    # (`InterceptView#target_ids`), so a "Forward 3 held messages" title or a "3 MARKED"
+    # banner over the editor would promise the batch the keys no longer send.
     private def intercept_mark_menu_count : Int32
-      @active_tab == :intercept ? intercept_controller.marked_intercept_count : 0
+      @active_tab == :intercept ? intercept_controller.intercept_batch_count : 0
     end
 
     # Retitle the Intercept queue's menu entries while marks are set, so the menu says what

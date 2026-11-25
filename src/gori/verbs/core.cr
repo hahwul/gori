@@ -270,11 +270,11 @@ module Gori
       # left the queue, so a non-empty mark set implies a non-empty queue implies a cursor row.
       intercept_selected = ->(ctx : Verb::ExecContext) { !ctx.selected_intercept_id.nil? }
       r.register Verb::Definition.new(
-        "intercept.forward", "Forward held", "Forward the marked held messages — or the selected one (with edits)",
+        "intercept.forward", "Forward held", "Forward the message being edited, else the marked held messages, else the selected one",
         Verb::Scope::Intercept, [Verb::Chord.new("f")],
         available: intercept_selected, mnemonic: 'f') { |ctx| ctx.intercept_forward; nil }
       r.register Verb::Definition.new(
-        "intercept.drop", "Drop held", "Drop the marked held messages — or the selected one",
+        "intercept.drop", "Drop held", "Drop the message being edited, else the marked held messages, else the selected one",
         Verb::Scope::Intercept, [Verb::Chord.new("d")],
         available: intercept_selected, intent: :delete) { |ctx| ctx.intercept_drop; nil }
       # Deliberately NOT mark-aware: ⇧F stays "the whole queue, marks or not", so the pair

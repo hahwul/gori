@@ -41,21 +41,36 @@ module Gori::Tui
         # The same sentence the Repeater's `^X` footer uses, because they are the same editor
         # and the same gestures. No `⇧arrows select` / `^Y copy` band: the byte editor has a
         # nibble cursor and no selection, and `^Y` copies the whole payload.
-        "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^R forward · esc queue"
+        "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^R #{editor_forward_word} · esc queue#{marks_wait_segment}"
       elsif @intercept.text_insert?
         # `^Y copy`: `intercept.copy` carries `^Y` on the wider `intercept_copyable?` gate
         # precisely for this pane. Bare `y` IS bound on the queue, but it is a literal character
         # while typing (and `text_input_active?` stands the keymap down here), so `^Y` is the
         # only copy there is in this strip, and the strip has to say so.
-        "type · ^Y copy · ^R forward · esc read · ⇧↹ queue"
+        "type · ^Y copy · ^R #{editor_forward_word} · esc read · ⇧↹ queue#{marks_wait_segment}"
       elsif @intercept.text_read?
         f = Hotkeys.binding_label(reg, "intercept.forward", "f")
-        keys("{editor.insert}/↵ edit · #{f}/^R forward · space cmds · esc queue")
+        keys("{editor.insert}/↵ edit · #{f}/^R #{editor_forward_word}#{marks_wait_segment} · space cmds · esc queue")
       elsif @intercept.querying?
         "type condition · ↹ complete · ↵ apply · esc clear"
       else
         queue_hint(reg)
       end
+    end
+
+    # What the editor's forward key does, in its hint. Over a mark set it says the marks are
+    # NOT what goes: the queue hint names them as the batch, and the editor forwards the one
+    # message it holds (`InterceptView#target_ids`), so a bare "forward" next to a `2 marked`
+    # chip read as the batch. "this" rides the forward segment itself and the count is its own
+    # segment, placed where `Chrome.fit_hints` drops it first: at 80 columns a single long
+    # segment was dropped whole, and the line lost its forward key altogether.
+    private def editor_forward_word : String
+      @intercept.mark_count > 0 ? "forward this" : "forward"
+    end
+
+    private def marks_wait_segment : String
+      n = @intercept.mark_count
+      n > 0 ? " · #{n} marked stay held" : ""
     end
 
     # The queue hint. Over a mark set it says so and names the batch keys — forward/drop then
@@ -738,7 +753,8 @@ module Gori::Tui
       edited ? "#{msg} (an open editor's changes were NOT applied — ⇧F forwards all WITH them)" : msg
     end
 
-    # Forward the effective target set: every marked hold, else the cursor row. The editor
+    # Forward the effective target set: the message the open editor holds, else every marked
+    # hold, else the cursor row (`InterceptView#target_ids`). The editor
     # holds at most ONE item's in-progress edit, so that item forwards its edited bytes and
     # every other target its original ones (nil ⇒ Interceptor#forward sends item.raw) — the
     # same `overrides` reasoning intercept_forward_all uses, so a batch can never send stale
@@ -750,19 +766,20 @@ module Gori::Tui
       ic = @host.session.interceptor
       edit = @intercept.pending_edit
       label = batch_label(ids) # built BEFORE the decisions go out — the items are gone after
+      from_editor = !@intercept.editor_target_id.nil?
       # Count what actually went out: an item another surface (MCP, the reaper) settled first
       # is not this operator's forward, and reporting the whole batch would be a silent no-op
       # for the difference.
       sent = ids.count { |id| ic.forward(id, (edit && edit[0] == id) ? edit[1] : nil) }
       @intercept.reload(ic)
       if sent == ids.size
-        @host.status("forwarded #{label}")
+        @host.status("forwarded #{label}#{marks_left_note(from_editor)}")
       else
         @host.status("forwarded #{sent} of #{ids.size} — the rest were already decided elsewhere")
       end
     end
 
-    # Drop the effective target set. No confirm even in batch: a dropped hold answers the
+    # Drop the effective target set — the open editor's message first, as forward does. No confirm even in batch: a dropped hold answers the
     # client with a canned 502 it can retry, which is not the irreversible data loss
     # history.delete guards — and gating only the batch path would be inconsistent with the
     # single drop right next to it. The toast carries the count instead.
@@ -771,6 +788,7 @@ module Gori::Tui
       return if ids.empty?
       ic = @host.session.interceptor
       label = batch_label(ids) # built BEFORE the decisions go out — the items are gone after
+      from_editor = !@intercept.editor_target_id.nil?
       # Count what actually got dropped, exactly as the forward above does. `Interceptor#drop`
       # is a no-op on an item somebody else already settled — the h2/WS gates fail a hold OPEN
       # from a proxy fiber when a stream resets or the buffer ceiling is hit — and "dropped GET
@@ -779,10 +797,18 @@ module Gori::Tui
       dropped = ids.count { |id| ic.drop(id) }
       @intercept.reload(ic)
       if dropped == ids.size
-        @host.status("dropped #{label}")
+        @host.status("dropped #{label}#{marks_left_note(from_editor)}")
       else
         @host.status("dropped #{dropped} of #{ids.size} — the rest were already decided elsewhere")
       end
+    end
+
+    # A decision made from the editor left the mark set alone; say so, or the toast names one
+    # message while the `2 marked` chip the operator was looking at seems to have gone with it.
+    # Read after the reload, so a mark on the decided message itself is already pruned.
+    private def marks_left_note(from_editor : Bool) : String
+      n = @intercept.mark_count
+      from_editor && n > 0 ? " — #{n} marked still held" : ""
     end
 
     # How a forward/drop toast names its targets: the one held message when the verb ran on
@@ -905,6 +931,12 @@ module Gori::Tui
       @intercept.mark_count
     end
 
+    # The marks forward/drop would act on right now: none while the editor is open, where they
+    # act on the edited message instead. What the space menu's batch titles and banner speak for.
+    def intercept_batch_count : Int32
+      @intercept.editor_target_id ? 0 : @intercept.mark_count
+    end
+
     # --- the MCP selection snapshot (#1091) -----------------------------------
 
     def selection_kind : String?
@@ -916,15 +948,21 @@ module Gori::Tui
         marks: @intercept.mark_count,
         cursor: @intercept.selected_index,
         cursor_id: @intercept.selected_id || 0_i64,
-        rows: @intercept.row_count)
+        rows: @intercept.row_count,
+        # Opening the editor flips `target_source` to "detail" and moves nothing else here.
+        pinned: @intercept.editor_target_id || 0_i64)
     end
 
     def write_selection_fields(j : JSON::Builder) : Nil
       # `hidden: 0` is structural, not a shortcut: the queue renders every pending item and
       # each refresh prunes marks whose hold is gone (`InterceptView#prune_marks`), so a mark
       # is never off-window the way it can be in History / Issues / Sitemap.
+      #
+      # `target_ids` already puts an open editor's message first; the source says so, as an
+      # open Issues detail does.
       TabController.write_id_targets(j, @intercept.target_ids,
-        marked: @intercept.mark_count, hidden: 0)
+        marked: @intercept.mark_count, hidden: 0,
+        source: @intercept.editor_target_id ? "detail" : nil)
       j.field "visible_rows", @intercept.row_count
       # NOT `query`. This tab's `/` is the INTERCEPTOR's filter — it decides what gets held,
       # not which of the held rows the list shows — so publishing it under the name the other

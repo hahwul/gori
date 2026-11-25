@@ -620,6 +620,24 @@ describe "Intercept marks (multi-select)" do
     end
   end
 
+  # The editor is this tab's drill-in: while it is open the target is the message it holds,
+  # whatever is marked, and closing it hands the marks back as the target.
+  it "targets the open editor's message ahead of the marks" do
+    tmp_interceptor do |ic|
+      view = three_holds(ic)
+      view.select_index(2)
+      view.toggle_mark # /three marked
+      view.select_index(1)
+      edited = view.selected_id.not_nil!
+      view.toggle_edit
+      view.editor_target_id.should eq(edited)
+      view.target_ids.should eq([edited])
+      view.stop_edit
+      view.editor_target_id.should be_nil
+      view.target_ids.should eq(view.marked_ids)
+    end
+  end
+
   it "extends a contiguous range from the anchor, and gives rows back as it shrinks" do
     tmp_interceptor do |ic|
       view = three_holds(ic)

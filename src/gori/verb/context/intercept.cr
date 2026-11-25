@@ -3,8 +3,8 @@
 abstract class Gori::Verb::ExecContext
   # intercept (hold-and-decide; P4)
   abstract def intercept_toggle : Nil          # toggle the hold queue on/off
-  abstract def intercept_forward : Nil         # forward the marked holds, else the cursor row (edited bytes)
-  abstract def intercept_drop : Nil            # drop the marked holds, else the cursor row
+  abstract def intercept_forward : Nil         # forward the open editor's hold, else the marks, else the cursor row
+  abstract def intercept_drop : Nil            # drop the open editor's hold, else the marks, else the cursor row
   abstract def intercept_forward_all : Nil     # forward every held message (marks or not)
   abstract def intercept_query : Nil           # focus the catch-condition filter bar
   abstract def intercept_cycle_direction : Nil # cycle catch direction (req/res/all)
