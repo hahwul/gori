@@ -10,7 +10,7 @@ require "../spec_helper"
 private RUNNER_DIR = File.join(__DIR__, "..", "..", "src", "gori", "tui")
 
 private def runner_sources : Array(String)
-  [File.join(RUNNER_DIR, "runner.cr")] + Dir.glob(File.join(RUNNER_DIR, "runner", "*.cr")).sort
+  [File.join(RUNNER_DIR, "runner.cr")] + glob_files(RUNNER_DIR, "runner", "*.cr").sort
 end
 
 # {method name => body (comment lines dropped)} for every `def` in the Runner's files. A body
