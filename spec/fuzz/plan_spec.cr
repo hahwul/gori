@@ -217,7 +217,59 @@ describe Gori::Fuzz::Plan do
       sources: [F::InlineList.new(["1"])] of F::PayloadSource, matcher: m,
       config: F::Config.new(auto_calibrate: true, keep_bodies: :none), verify: false), ungated_outbound)
     plan.matcher.auto_calibrate?.should be_true
-    m.auto_calibrate?.should be_true # the caller's live instance, not a copy
+    m.auto_calibrate?.should be_false # synced on the run's own copy, not the caller's form
+  end
+
+  describe "the run owns a snapshot of the caller's objects" do
+    marked = "GET /?a=§x§&b=§y§ HTTP/1.1\r\nHost: t.test\r\n\r\n"
+
+    it "keeps the Mode, knobs and matcher it was built with when the caller edits them after" do
+      config = F::Config.new(mode: F::Mode::Sniper, concurrency: 3, keep_bodies: :none)
+      m = matcher("200")
+      m.extractors = [F::Extractor.legacy("tok=(\\w+)")]
+      plan = F::Plan.build(F::PlanOptions.new(marked, target: "http://t.test",
+        sources: [F::InlineList.new(["AA", "BB", "CC"])] of F::PayloadSource,
+        config: config, matcher: m, verify: false), ungated_outbound)
+      before = plan.total
+      before.should eq(6)
+
+      # What the TUI's CONFIG card does while the run is calibrating: cycle Mode, retype rows.
+      config.mode = F::Mode::ClusterBomb
+      config.concurrency = 50
+      config.max_requests = 1_i64
+      config.update_content_length = false
+      m.match_status = "500"
+      m.extractors = [] of F::Extractor
+
+      plan.config.mode.sniper?.should be_true
+      plan.config.concurrency.should eq(3)
+      plan.config.max_requests.should be_nil
+      plan.config.update_content_length?.should be_true
+      plan.matcher.match_status.should eq("200")
+      plan.matcher.extractors.size.should eq(1)
+      jobs = [] of Array(String)
+      plan.generator.each { |j| jobs << j.payloads }
+      jobs.size.should eq(before) # a sniper sweep, not the 9-request cluster bomb
+      jobs.should eq([["AA", "y"], ["BB", "y"], ["CC", "y"], ["x", "AA"], ["x", "BB"], ["x", "CC"]])
+    end
+
+    it "keeps what the run writes off the caller's instances" do
+      config = F::Config.new(keep_bodies: :none)
+      m = matcher(nil)
+      F::Plan.build(F::PlanOptions.new(marked, target: "http://t.test", verbatim: true,
+        sources: [F::InlineList.new(["1"])] of F::PayloadSource,
+        config: config, matcher: m, verify: false), ungated_outbound)
+        .config.update_content_length?.should be_false # --verbatim, on the run's copy
+      config.update_content_length?.should be_true
+    end
+
+    it "keeps a copy of the race warm-up bytes" do
+      warm = "GET / HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice.dup
+      config = F::Config.new(race_warmup: warm)
+      snap = config.snapshot
+      warm[0] = 'X'.ord.to_u8
+      String.new(snap.race_warmup.not_nil!).should start_with("GET ")
+    end
   end
 
   describe "refusals" do
@@ -778,9 +830,10 @@ describe "Fuzz::Plan.build — verbatim" do
   it "skips expand_wire and the Content-Length resync, and the draft control still runs both" do
     with_env_syntax(Gori::Env::Syntax::Namespaced) do
       cfg = F::Config.new(keep_bodies: :none)
-      base = String.new(build.call(true, cfg).generator.baseline_raw)
+      plan = build.call(true, cfg)
+      base = String.new(plan.generator.baseline_raw)
       base.should eq("GET /?q=a&u=$GEN.UUID&e=$$ENV.X HTTP/1.1\r\nHost: t.test\r\nX-A: 1\nX-B: 2\r\n\r\n")
-      cfg.update_content_length?.should be_false
+      plan.config.update_content_length?.should be_false # the run's copy; the caller's is untouched
 
       draft = String.new(build.call(false, F::Config.new(keep_bodies: :none)).generator.baseline_raw)
       draft.should contain("X-A: 1\r\nX-B: 2")

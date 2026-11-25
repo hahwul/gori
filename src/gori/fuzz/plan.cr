@@ -108,9 +108,11 @@ module Gori::Fuzz
   # sender, engine, and the `Env.expand` / host-override / decoder-registry wiring that used
   # to drift between the three copies) belongs to `Plan.build`.
   #
-  # `config` and `matcher` are the live mutable objects the caller owns — the TUI's config
-  # overlay edits its `Config` in place while a tab is open, so the plan must read that
-  # instance, not a copy of it.
+  # `config` and `matcher` are the live mutable objects the caller owns. The TUI's cards edit
+  # its `Config` and `Matcher` in place while a tab is open, so the caller hands over that
+  # instance (a copy taken earlier would miss the latest edit). `Plan.build` then takes its own
+  # `snapshot` at build time: the run sweeps what was confirmed, and an edit made while it runs
+  # reaches only the next build.
   struct PlanOptions
     # Raw template text, BEFORE `Env.expand` — the builder owns the expansion so it happens
     # exactly once (see `Plan.build`).
@@ -258,6 +260,26 @@ module Gori::Fuzz
                    @project_drain_fts : Bool = true,
                    @commands_allowed : Bool = true,
                    @run_hooks : Bool = true)
+    end
+
+    # The options a run owns: the caller's mutable objects copied, so that nothing the form
+    # edits after `Plan.build` reaches the engine, generator or matcher. The `Config` is
+    # what `Generator`/`Engine` read per request, and a TUI Mode change during calibration
+    # turned a confirmed sniper run into a cluster bomb. The arrays are copied too, because
+    # `PayloadSet` keeps `processors` and the generator draws from `sources`. Left shared on
+    # purpose: `overrides` (the session's live, mutex-guarded routing table, which the proxy
+    # reads too) and `project` (a store).
+    def snapshot : PlanOptions
+      copy = self
+      copy.config = config.snapshot
+      copy.matcher = matcher.snapshot
+      copy.marks = marks.dup
+      copy.sources = sources.dup
+      copy.processors = processors.dup
+      copy.grpc_fields = grpc_fields.dup
+      copy.ws_messages = ws_messages.try(&.dup)
+      copy.env_vars = env_vars.try(&.dup)
+      copy
     end
   end
 
@@ -459,6 +481,10 @@ module Gori::Fuzz
     end
 
     def self.build(options : PlanOptions, outbound : Gori::Outbound) : Plan
+      # FIRST, before anything reads or writes them: the run owns its config and matcher (see
+      # `PlanOptions#snapshot`). The `--verbatim` write below and the matcher syncs further down
+      # land on this copy, not the caller's. `Plan#config` / `#matcher` are what the run used.
+      options = options.snapshot
       options.config.update_content_length = false if options.verbatim?
       # ONE `Env.expand_wire` over the template, before anything reads it.
       #

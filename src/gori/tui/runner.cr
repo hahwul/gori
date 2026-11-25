@@ -6069,11 +6069,9 @@ module Gori::Tui
 
     def open_fuzz_advanced_editor : Nil
       return unless v = fuzzer_controller.current_view
-      # `Config` is shared by reference with the live engine (`Fuzz::PlanOptions#config`),
-      # which reads `retries`, `follow_redirects?`, `max_requests` and the Content-Length knobs
-      # PER REQUEST — so a mid-run edit changed the rest of the sweep while the reconstruction
-      # of its rows kept the policy the run started with. The Sets editor is different: sets
-      # are read once at build time.
+      # A running sweep reads its own `Config` copy (`Fuzz::PlanOptions#snapshot`), so an edit
+      # here can no longer change it. The block stays because the card would show knobs the run
+      # in flight is not using, and only Mode, sets, target and template carry the `next run` badge.
       return status("fuzz running — ^X to stop before editing Advanced", :busy) if v.running?
       ov = FuzzAdvancedOverlay.new(v.advanced_snapshot)
       ov.on_commit = -> {

@@ -515,7 +515,7 @@ module Gori
     alias Event = ProgressEvent | ResultEvent | DoneEvent | ErrorEvent
 
     # All knobs for a run. A mutable class (not a record) because the TUI config
-    # overlay binds and edits one instance live; the engine only reads it.
+    # overlay binds and edits one instance live; a run reads its own `snapshot` of it.
     class Config
       property mode : Mode
       property concurrency : Int32
@@ -667,6 +667,17 @@ module Gori
                      @tls_preset : String? = nil,
                      @request_macro : Gori::RequestMacro::Spec? = nil,
                      @sse : Repeater::StreamBound? = Repeater::StreamBound::SWEEP)
+      end
+
+      # The copy a run owns (`Fuzz::Plan.build`). The TUI edits its `Config` in place while a
+      # run is in flight (Mode, the CONFIG rows, a session save), and `Generator` and `Engine`
+      # read the config per request. A run that shared the instance therefore swept a Mode it
+      # was never confirmed for. `dup` is shallow: every field is a value or an immutable
+      # record, and the warm-up bytes are copied below because a `Slice` shares its memory.
+      def snapshot : Config
+        copy = dup
+        copy.race_warmup = @race_warmup.try(&.dup)
+        copy
       end
     end
   end

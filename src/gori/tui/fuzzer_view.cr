@@ -281,6 +281,9 @@ module Gori::Tui
       @run_grpc_fields = nil.as(Fuzz::GrpcFieldTemplate?)
       @pending_grpc_fields = nil.as(Fuzz::GrpcFieldTemplate?)
       @pending_websocket = false
+      # …and the labels the run is counted, saved and judged under, off the PLAN's own copy
+      # (see `RunLabels`). nil until a build, and spent by the `begin_run` that reads it.
+      @pending_labels = nil.as(RunLabels?)
       # `Fuzz::Plan#rewrites_content_length?` as of the last plan build, plus the
       # `@editor.edits` revision it was computed at — an edit to the template invalidates
       # the answer, and a stale "your CL is being rewritten" is worse than none.
@@ -1042,19 +1045,21 @@ module Gori::Tui
       @scroll = 0
       @running = true
       @stop_requested = false
-      @run_selective = @matcher.constrained? || @matcher.auto_calibrate?
+      labels = @pending_labels || form_run_labels
+      @pending_labels = nil
+      @run_selective = labels.selective
       @run_total = total
       @run_started_at = Time.utc.to_unix_ms * 1000_i64
       @run_status = "running"
-      @run_target = target_origin
-      @run_http2 = @http2
-      @run_sni = sni_override
-      @run_mode = @config.race_count.try { |n| "race ×#{n.clamp(2, Fuzz::Engine::MAX_RACE_SIZE)}" } || @config.mode.label
-      @run_tls_preset = @config.tls_preset
+      @run_target = labels.target
+      @run_http2 = labels.http2
+      @run_sni = labels.sni
+      @run_mode = labels.mode
+      @run_tls_preset = labels.tls_preset
       @run_websocket = @pending_websocket
-      @run_max_requests = @config.max_requests
-      @run_keep = @config.keep
-      @run_extractors = @matcher.extractors
+      @run_max_requests = labels.max_requests
+      @run_keep = labels.keep
+      @run_extractors = labels.extractors
       @run_stop_idx = nil
       @run_edit_mark = edit_mark(@sets.dup)
       @next_run_noticed = false
@@ -1063,6 +1068,28 @@ module Gori::Tui
       @loaded_saved_run = false
       @progress = Fuzz::Progress.new(0_i64, total, 0_i64, 0_i64)
       clear_detail_decode # a new run reuses request indices → drop the old decode cache
+    end
+
+    # What a run is labelled, counted and saved under. Frozen in `build_engine` from the plan's
+    # own `Config`/`Matcher` copies, NOT read off the form in `begin_run`: the RUN FUZZ confirm
+    # sits between the two, and the peer reconcile keeps applying rows under it, so a form read
+    # there could save a run as `cluster-bomb` while the engine swept the confirmed sniper.
+    record RunLabels, mode : String, tls_preset : String?, max_requests : Int64?,
+      keep : Fuzz::Keep, selective : Bool, extractors : Array(Fuzz::Extractor),
+      target : String, http2 : Bool, sni : String?
+
+    private def run_labels(config : Fuzz::Config, matcher : Fuzz::Matcher) : RunLabels
+      mode = config.race_count.try { |n| "race ×#{n.clamp(2, Fuzz::Engine::MAX_RACE_SIZE)}" } || config.mode.label
+      RunLabels.new(mode, config.tls_preset, config.max_requests, config.keep,
+        matcher.constrained? || matcher.auto_calibrate?, matcher.extractors,
+        target_origin, @http2, sni_override)
+    end
+
+    # The fallback for a `begin_run` no build preceded (a focused spec). The form's matcher
+    # flag OR its config's, since `Plan.build` syncs the two only on the run's copy.
+    private def form_run_labels : RunLabels
+      labels = run_labels(@config, @matcher)
+      labels.copy_with(selective: labels.selective || @config.auto_calibrate?)
     end
 
     # TARGET, TEMPLATE text, payload sets and Mode stay editable mid-run, but the run snapshotted
@@ -1838,8 +1865,10 @@ module Gori::Tui
       # Freeze the CL knobs + retention policy the same way: the reconstruction in
       # `result_request` has to reproduce what THIS run's generator did, and its note has to
       # name the retention THIS run used — not what the CONFIG pane says after a post-run edit.
-      @pending_policy = {@config.update_content_length?, true,
-                         @matcher.keep_bodies}
+      # Off the PLAN's copy: a verbatim session turns auto Content-Length off on the run's
+      # config only (`Plan.build` snapshots it), so `@config` would name the wrong framing.
+      @pending_policy = {plan.config.update_content_length?, true,
+                         plan.matcher.keep_bodies}
       @pending_auto_encode = plan.auto_encode
       # The generator's OWN answer, not `@config.reframe_grpc?`: the knob is only half of it —
       # `Generator` also requires a template `GrpcVerdict.reframable_template?` accepts, and a
@@ -1850,6 +1879,7 @@ module Gori::Tui
       # position for it. nil for every run that named no field, which is every run there was.
       @pending_grpc_fields = plan.grpc_fields
       @pending_websocket = plan.websocket?
+      @pending_labels = run_labels(plan.config, plan.matcher)
       # The template declares a Content-Length that disagrees with its own body BEFORE any
       # payload is substituted — so the auto-resync is about to rewrite framing the operator
       # authored deliberately, on every variation, and the sweep would report a clean

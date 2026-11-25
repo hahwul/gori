@@ -411,8 +411,8 @@ module Gori::Tui
 
     # The Runner calls these when an overlay applies (esc / ↵-on-last-field), with the view the
     # card was opened on. Reconcile keeps running under the modal, so a peer closing that session
-    # re-anchors `current_view` on a neighbour: writing there replaced ITS set, or — Advanced —
-    # flipped a running sweep's live `Config` (the engine reads it per request).
+    # re-anchors `current_view` on a neighbour: writing there replaced ITS set or rewrote ITS
+    # Advanced knobs. (A running sweep reads its own `Config` copy, `Fuzz::Plan.build`.)
     def apply_fuzz_set(v : FuzzerView, edit_index : Int32?, spec : SetSpec?) : Nil
       return unless tab = tab_for_edit(v)
       v.apply_set(edit_index, spec)
@@ -1322,7 +1322,7 @@ module Gori::Tui
       events = @fuzz_events
       io_events = @fuzz_io_events
       generation = v.run_generation
-      calibrate = v.config.auto_calibrate?
+      calibrate = engine.auto_calibrate? # the run's own config, not the form the operator keeps editing
       done_sent = false
       error_sent = false
       spool_lost = false
