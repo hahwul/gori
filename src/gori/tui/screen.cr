@@ -687,7 +687,7 @@ module Gori::Tui
     # (`paint_char_span_bg`) that takes a `row_start` and measures with `Wrap.row_col` instead;
     # this is the plain one.
     def char_span_bg(x : Int32, y : Int32, line : String, x0 : Int32, x1 : Int32, bg : Color,
-                     width : Int32 = @width - x) : Nil
+                     width : Int32 = @width - x, fg : Color = Theme.text) : Nil
       return if x0 >= x1
       a = Screen.cluster_start(line, {x0, line.size}.min)
       b = Screen.cluster_end(line, {x1, line.size}.min)
@@ -699,7 +699,7 @@ module Gori::Tui
         seg = line[i...e]
         cols = Screen.draw_width(seg)
         break if px + cols > right
-        text(px, y, seg, Theme.text, bg)
+        text(px, y, seg, fg, bg)
         px += cols
         i = e
       end
@@ -719,14 +719,24 @@ module Gori::Tui
     # past it, so the operator typed blind. Returns the first visible CHARACTER index, which a
     # caller that maps clicks back to a caret keeps and hands to `Screen.input_click` — the
     # offset is the last frame's, not something the click re-derives.
+    #
+    # `prev_start` is that same return from the field's LAST frame, for a caller that keeps it:
+    # the window then holds still while the caret stays inside it (`Screen.input_window`), so a
+    # drag does not move the text out from under the pointer. Without it the window is
+    # recomputed from the caret alone, which is the old, stateless behaviour.
     def input_line(x : Int32, y : Int32, value : String, cx : Int32, preedit : String,
                    fg : Color, bg : Color = Theme.bg, width : Int32? = nil,
-                   colors : Array(Color)? = nil, sel : {Int32, Int32}? = nil) : Int32
+                   colors : Array(Color)? = nil, sel : {Int32, Int32}? = nil,
+                   prev_start : Int32? = nil) : Int32
       cx = cx.clamp(0, value.size)
       right = x + (width || (@width - x))
       # Everything below indexes the visible slice; `colors` and `sel` index the whole value,
       # so they are shifted by `start` where they are read. `value[0..]` is `value` itself.
-      start = Screen.input_start(value, cx, preedit, right - x)
+      start = if prev = prev_start
+                Screen.input_window(value, cx, preedit, right - x, prev)
+              else
+                Screen.input_start(value, cx, preedit, right - x)
+              end
       value = value[start..]
       cx -= start
       prefix = value[0, cx]
@@ -738,8 +748,9 @@ module Gori::Tui
       # Only meaningful with no preedit in flight: composing text shifts every column right
       # of the caret, and a band measured against `value` would sit under the wrong glyphs.
       if sel && preedit.empty?
+        band_bg, band_fg = Screen.selection_band(bg)
         char_span_bg(x, y, value, (sel[0] - start).clamp(0, value.size),
-          (sel[1] - start).clamp(0, value.size), Theme.accent_bg, width: right - x)
+          (sel[1] - start).clamp(0, value.size), band_bg, width: right - x, fg: band_fg)
       end
       # Block caret sits just after prefix+preedit, over the suffix's first cell
       # (or a space). The terminal's own IME UI anchors at the hardware cursor.
@@ -772,8 +783,9 @@ module Gori::Tui
         # A wide caret glyph CLAIMS caret_x + 1 as a continuation cell during its own
         # write, so one landing on the field's last column would cross the right edge onto
         # whatever borders it. Draw a space there instead — same guard, and same reason, as
-        # the TextArea block caret.
-        caret_ch = ' ' if Screen.grapheme_cols(caret_ch.to_s) == 2 && caret_x + 1 >= right
+        # the TextArea block caret. Measured, not tested for 2: a zero-width or control char
+        # is drawn as its named badge (`⟨ZWSP⟩`, six columns), which crossed the edge the same way.
+        caret_ch = ' ' if caret_x + Screen.grapheme_cols(caret_ch.to_s) > right
         cell(caret_x, y, caret_ch, Theme.bg, Theme.accent)
         cursor(caret_x, y)
       end
@@ -803,6 +815,41 @@ module Gori::Tui
         start = prev
       end
       start
+    end
+
+    # `input_start` with memory. `prev` is the start the field's last frame drew from, and the
+    # window keeps it while the caret is still inside: it moves only when the caret leaves,
+    # past the right edge by just enough (`input_start`), past the left edge onto the caret.
+    # It never hides more on the left than filling the field to the value's end needs, so a
+    # deletion at the end pulls the text back in rather than leaving blank columns behind it.
+    #
+    # Stateless `input_start` re-derived the window from the caret every frame, so a press in
+    # a scrolled field moved the caret, the next frame snapped the window to the caret's new
+    # minimum, and every drag event after it was rebased on text that had just jumped: the
+    # caret ran left while the pointer moved right, and the band took text it never touched.
+    def self.input_window(value : String, cx : Int32, preedit : String, width : Int32, prev : Int32) : Int32
+      c = cx.clamp(0, value.size)
+      prev = prev.clamp(0, value.size)
+      return cluster_start(value, c) if c < prev
+      fresh = input_start(value, c, preedit, width)
+      return fresh if fresh > prev # the caret ran past the right edge
+      fill = input_start(value, value.size, preedit, width)
+      {prev, {fill, fresh}.max}.min
+    end
+
+    # The selection band over a field drawn on `bg`, as {band, ink}. The accent band is what
+    # every pane selects with, and also what `Frame.row_band` fills a SELECTED form row with:
+    # a field on that row painted its selection in its own background, so the band only
+    # dimmed the text it covered and the next key replaced a selection nobody could see. On
+    # that row the band steps one more notch (`border_focus`, the hairline a focused card is
+    # drawn in, which every palette sets apart from `accent_bg`) and its text takes whichever
+    # pole of the palette stands farther from it, so it reads on dark and light themes alike.
+    def self.selection_band(bg : Color) : {Color, Color}
+      return {Theme.accent_bg, Theme.text} unless bg == Theme.accent_bg
+      band = Theme.border_focus
+      l = Theme.luma(band)
+      ink = Theme.luma(Theme.paper) - l > l - Theme.luma(Theme.soot) ? Theme.paper : Theme.soot
+      {band, ink}
     end
 
     # The character index a click `dx` columns into an `input_line` field lands on, given the

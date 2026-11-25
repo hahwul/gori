@@ -210,9 +210,9 @@ module Gori::Tui
       area.card?(RULE_FORM_W, natural, RULE_FORM_MIN_W, {RULE_FORM_MIN_H, natural}.min)
     end
 
-    # One `label: value` row of such a form: the label in muted, the field's text (or its
-    # live IME composition spliced in at the caret) clipped to the card, and — when the row
-    # is selected and nothing is composing — the block caret plus the terminal cursor.
+    # One `label: value` row of such a form: the label in muted, then the field, clipped to the
+    # card. A selected row is the live field — `TextField#render`, so it scrolls with its caret
+    # and shows its IME composition and its ⇧arrow selection like every other TextField.
     #
     # It lives on the base class for the same reason `rule_form_box` does. The six forms had
     # each carried a byte-identical private copy of this, caret arithmetic and all: five
@@ -220,26 +220,18 @@ module Gori::Tui
     # one caret calculation is six chances for the forms to disagree about where the cursor
     # sits, and the drift is invisible until an operator opens two of them in a row.
     #
-    # `vw`'s floor of 3 and the `px < box.right - 2` guard are what keep a long label or a
-    # narrow card from drawing the value — or the cursor — past the card's right border.
+    # It drew the value from its first character and the caret only while it fit, so a
+    # pattern or a `when:` filter longer than the card was typed blind past the border, and
+    # a ⇧arrow selection (which the next keystroke replaces) was never painted at all.
+    #
+    # `vw`'s floor of 3 is what keeps a long label or a narrow card from drawing the value
+    # past the card's right border.
     def draw_field(screen : Screen, box : Rect, py : Int32, bg : Color, fg : Color,
                    sel : Bool, label : String, field : TextField) : Nil
       x = box.x + 3
       vx = screen.text(x, py, label, Theme.muted, bg) + 1
       vw = {box.right - 2 - vx, 3}.max
-      val = field.value
-      pre = field.preedit
-      shown = pre.empty? ? val : "#{val[0, field.caret]}#{pre}#{val[field.caret..]}"
-      screen.text(vx, py, shown, fg, bg, width: vw)
-      if sel && pre.empty?
-        cx = field.caret.clamp(0, val.size)
-        px = vx + Screen.draw_width(val[0, cx])
-        if px < box.right - 2
-          ch = cx < val.size ? val[cx] : ' '
-          screen.cell(px, py, ch, Theme.bg, Theme.accent_bg)
-          screen.cursor(px, py)
-        end
-      end
+      field.render(screen, vx, py, vw, sel, fg, bg)
     end
 
     # Whether a keystroke that arrived INSIDE A BRACKETED PASTE may reach `handle_key`.

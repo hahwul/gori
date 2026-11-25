@@ -37,8 +37,11 @@ module Gori::Tui
       end
     end
 
-    def click_to_cursor(line : String, cx : Int32, column : Int32, width : Int32, selecting : Bool) : Int32
-      hit = Screen.pointer_hit(line, column, width: width)
+    # `start` is the first character the field's last frame drew (`Screen.input_start`'s
+    # window), and `column`/`width` are measured from where that visible text began.
+    def click_to_cursor(line : String, cx : Int32, column : Int32, width : Int32, selecting : Bool,
+                        start : Int32 = 0) : Int32
+      hit = Screen.input_pointer(line, start, column, width)
       @word_press = selecting ? nil : {line, hit.character}
       move_cx(cx, hit.caret - cx, line.size, selecting: selecting)
     end

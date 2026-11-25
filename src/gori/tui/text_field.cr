@@ -359,7 +359,10 @@ module Gori::Tui
         first, last = sel || {cx, cx}
         @last_painted = first..{last - 1, cx}.max
       end
-      @last_start = screen.input_line(x, y, @value, cx, @preedit, fg, bg, width: width, sel: sel)
+      # Sticky (`Screen.input_window`): the window this field drew last frame holds while the
+      # caret stays inside it, so a drag across a scrolled value selects what it swept.
+      @last_start = screen.input_line(x, y, @value, cx, @preedit, fg, bg, width: width, sel: sel,
+        prev_start: @last_start)
     end
 
     private def push_undo : Nil

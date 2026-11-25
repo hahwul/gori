@@ -112,3 +112,51 @@ describe Gori::Tui::DiscardGuard do
     IssueForm.new.takes_pasted?(esc_key).should be_false
   end
 end
+
+# `draw_field`, the `label: value` row of every rule form, drew the value from its first
+# character and the caret only while it fit: a pattern or a `when:` filter longer than the card
+# was typed blind past the border, and a ⇧arrow selection (which the next key replaces) was
+# never painted. It is the TextField's own render now, windowed, band and caret included.
+describe "Gori::Tui::Overlay#draw_field" do
+  it "scrolls a long value with its caret and paints its selection" do
+    ov = ColormarkerRuleOverlay.adding
+    ov.set_selected(ColormarkerRuleOverlay::ROW_NAME)
+    ("n" * 120 + "XYZEND").each_char do |c|
+      ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c))
+    end
+    b = MemoryBackend.new(100, 30)
+    s = Screen.new(b)
+    ov.render(s, Rect.new(0, 0, 100, 30))
+    y = (0...30).find { |r| b.row(r).includes?("XYZEND") }
+    y.should_not be_nil # the typed tail is on screen
+    y = y.not_nil!
+    col = b.row(y).index("XYZEND").not_nil!
+    s.desired_cursor.should eq({col + 6, y}) # …and so is the caret, right after it
+
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Home, Termisu::Input::Modifier::Shift))
+    b = MemoryBackend.new(100, 30)
+    s = Screen.new(b)
+    ov.render(s, Rect.new(0, 0, 100, 30))
+    vx = b.row(y).index("nnn").not_nil!
+    s.desired_cursor.should eq({vx, y}) # back at the start, the window with it
+  end
+
+  # The selected form row is filled with `accent_bg` (`Frame.row_band`), the same colour the
+  # field painted its selection band in, so a selection on that row only dimmed its text and
+  # the next key replaced a band the operator could not see. Compared against a cell of the
+  # SAME row that is not selected, so the check cannot pass on the row fill alone.
+  it "paints a selection that differs from the selected row it sits on" do
+    ov = ColormarkerRuleOverlay.adding
+    ov.set_selected(ColormarkerRuleOverlay::ROW_NAME)
+    "abcdefgh".each_char { |c| ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+    3.times { ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Left, Termisu::Input::Modifier::Shift)) }
+    b = MemoryBackend.new(100, 30)
+    ov.render(Screen.new(b), Rect.new(0, 0, 100, 30))
+    y = (0...30).find { |r| b.row(r).includes?("abcdefgh") }.not_nil!
+    x = b.row(y).index("abcdefgh").not_nil!
+    b.bg_at(x + 1, y).should eq(Theme.accent_bg)       # `b`: the row's own fill
+    b.bg_at(x + 6, y).should_not eq(b.bg_at(x + 1, y)) # `g`: inside the band
+    b.bg_at(x + 7, y).should eq(b.bg_at(x + 6, y))
+    b.fg_at(x + 6, y).should_not eq(b.bg_at(x + 6, y))
+  end
+end

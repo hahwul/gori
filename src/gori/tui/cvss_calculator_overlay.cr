@@ -558,12 +558,10 @@ module Gori::Tui
 
       case
       when i == ROW_VECTOR
-        # `TextField#render`, NOT the base class's `draw_field`: a v4.0 base vector is 63
-        # columns against the ~59 this field gets on an 80-column terminal, and `draw_field`
-        # has no horizontal window — it clips at the width and then declines to draw the block
-        # caret or sync the terminal cursor at all past the edge, so an operator editing the
-        # tail of the vector the card itself just generated is typing blind. `render` scrolls
-        # with the caret (and remembers its own geometry for `click_text_field`).
+        # `TextField#render` directly rather than the base class's `draw_field`, because this
+        # row lays its label out itself. A v4.0 base vector is 63 columns against the ~59 this
+        # field gets on an 80-column terminal, and `render` scrolls with the caret (and
+        # remembers its own geometry for `click_text_field`), so the tail stays editable.
         screen.text(x, py, "vector:", Theme.muted, bg)
         vx = x + "vector:".size + 1
         @vector.render(screen, vx, py, {box.right - 2 - vx, 1}.max, sel,

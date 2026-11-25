@@ -3155,12 +3155,6 @@ module Gori::Tui
       @template_read.paint_chrome(screen, inner, @editor, read_active)
     end
 
-    # `TargetField`'s selection band (Repeater answers with its wrap-aware variant).
-    private def paint_char_span_bg(screen : Screen, x : Int32, y : Int32, line : String,
-                                   x0 : Int32, x1 : Int32, bg : Color) : Nil
-      screen.char_span_bg(x, y, line, x0, x1, bg)
-    end
-
     # The calm CONFIG summary: a header, the payload-set rows + an Add row, then the
     # Mode / Advanced rows + a passive run-size read-out anchored at the bottom. One row
     # cursor (@cfg_row), no text field, no caret — so ←/→ can only cycle Mode. All editing
