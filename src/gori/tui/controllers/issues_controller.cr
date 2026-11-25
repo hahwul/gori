@@ -20,7 +20,13 @@ module Gori::Tui
   # are shell mediators. Detail notes use READ/INS (like Notes): the shell routes
   # detail keys here before the focus ring when an issue is open.
   class IssuesController < TabController
-    private NOTES_ISSUE_DELETED = "issue was deleted — draft kept in the notes editor"
+    # The notes toasts, held to the 59-column status budget and shared word for word with the
+    # Project description's (`ProjectController::DESC_*`).
+    NOTES_ISSUE_DELETED = "issue was deleted — draft kept · ^W discards it"
+    NOTES_PEER_CHANGED  = "notes changed elsewhere — esc checks first"
+    NOTES_REFUSED       = "notes NOT saved — changed elsewhere (esc in it)"
+    NOTES_CONFLICT      = "NOT saved — changed elsewhere · esc overwrites, ^W theirs"
+    NOTES_BUSY          = "notes NOT saved — project busy · esc retries"
 
     def initialize(host : Host)
       super(host)
@@ -28,6 +34,8 @@ module Gori::Tui
       @issues.menu_registry = host.session.registry
       # The issue id and exact peer notes an `esc` overwrite can replace.
       @notes_overwrite_armed = nil.as({Int64, String}?)
+      # The issue whose draft a refused save found DELETED: `^W` discards it, as nothing else can.
+      @notes_discard_armed = nil.as(Int64?)
     end
 
     # Would `commit` REFUSE the open Issues writeup right now? Asked by the quit and
@@ -296,7 +304,7 @@ module Gori::Tui
         # Dropped whole when there is nowhere to step — see DrillIn::Host's `step_available?`.
         step = @issues.step_available? ? "{issue.next-item}/{issue.prev-item} issue · " : ""
         if @issues.notes_insert_mode?
-          "type · ^Y copy · esc save · ^W discard"
+          notes_insert_hint
         elsif @issues.notes_focused?
           keys("↑/↓ move · {editor.insert}/↵ edit · #{step}space cmds · ↹/←/esc related")
         else
@@ -583,15 +591,15 @@ module Gori::Tui
     end
 
     # Replacing the detail would discard a READ draft. Return to the editor so the
-    # operator can save or discard it with the usual keys.
+    # operator can save it with the usual keys (esc saves; ^W only answers a refused save).
     def prepare_detail_departure : Bool
       return leave_notes_editor if @issues.notes_insert_mode?
       return true unless read_draft?
       if @host.active_tab == :issues
         @issues.enter_notes_insert!
-        @host.status("unsaved issue notes — esc saves, ^W discards")
+        @host.status("unsaved issue notes — esc saves them")
       else
-        @host.status("unsaved issue notes — return to Issues to save or discard them")
+        @host.status("unsaved issue notes — return to Issues to save them")
       end
       false
     end
@@ -787,13 +795,8 @@ module Gori::Tui
 
     private def handle_notes_insert_key(ev : Termisu::Event::Key, key, c : Char?) : Bool
       case
-      when ev.ctrl? && key.lower_w?
-        # Disarmed on the way out: an arm granted for a refusal the operator then answered with
-        # `^W` must not still be sitting there for the NEXT edit of this issue, where a second
-        # `esc` would write over a peer without ever showing the refusal that earns it.
-        @notes_overwrite_armed = nil
-        @issues.cancel_notes_edit
-        @issues.refresh_detail(@host.session.store)
+      when ev.ctrl? && key.lower_w? && notes_w_armed?
+        notes_take_theirs
       when ev.ctrl_z? then @issues.notes_undo
       when (ev.ctrl? || ev.alt?) && !@issues.notes_word_delete_key?(ev) && !editing_motion?(ev)
         # Every other modified chord defers to the central keymap so it stays rebindable —
@@ -862,7 +865,7 @@ module Gori::Tui
       # Announce instead — the alternative is the operator finding out at `esc`, when the save
       # is refused for a reason nothing on screen had hinted at. Latched to once per distinct
       # peer value: this tick also fires on this session's OWN captures.
-      @host.status("notes changed by another session — esc checks for conflicts, ^W discards yours")
+      @host.status(NOTES_PEER_CHANGED)
     end
 
     def commit : Bool
@@ -895,15 +898,17 @@ module Gori::Tui
       case @issues.save_notes(@host.session.store).status
       in .committed?
         @notes_overwrite_armed = nil
+        @notes_discard_armed = nil
         true
       in .conflict?
-        @host.status("notes NOT saved — another session rewrote them, esc in the notes pane prompts before overwriting, ^W takes theirs")
+        @host.status(NOTES_REFUSED)
         allow_pending_conflict
       in .missing?
+        @notes_discard_armed = @issues.detail_issue.try(&.id)
         @host.status(NOTES_ISSUE_DELETED)
         false
       in .busy?
-        @host.status("notes NOT saved — project busy, esc to retry")
+        @host.status(NOTES_BUSY)
         false
       end
     end
@@ -914,6 +919,7 @@ module Gori::Tui
       return unless issue = @issues.detail_issue
       confirmation = @notes_overwrite_armed
       @notes_overwrite_armed = nil
+      @notes_discard_armed = nil
       overwrite = confirmation[1] if confirmation && confirmation[0] == issue.id
       result = @issues.save_notes(@host.session.store, overwrite: overwrite)
       case result.status
@@ -921,11 +927,55 @@ module Gori::Tui
         nil
       in .conflict?
         @notes_overwrite_armed = result.current.try { |current| {issue.id, current} }
-        @host.status("notes NOT saved — another session rewrote them; esc again overwrites theirs, ^W takes theirs, ^Y copies yours")
+        @host.status(NOTES_CONFLICT)
       in .missing?
+        @notes_discard_armed = issue.id
         @host.status(NOTES_ISSUE_DELETED)
       in .busy?
-        @host.status("notes NOT saved — project busy; your text is still here, esc to retry")
+        @host.status(NOTES_BUSY)
+      end
+    end
+
+    # `^W` answers only a refusal on screen: it is a delete-word reflex everywhere else, and
+    # one key must not throw a whole writeup away. Armed by an `esc` conflict (take theirs) or
+    # by a save that found the issue deleted (discard, the only way to let go of that draft).
+    private def notes_w_armed? : Bool
+      return true if notes_conflict_armed?
+      return false unless issue = @issues.detail_issue
+      @notes_discard_armed == issue.id
+    end
+
+    private def notes_conflict_armed? : Bool
+      return false unless issue = @issues.detail_issue
+      @notes_overwrite_armed.try(&.[0]) == issue.id
+    end
+
+    # Disarmed on the way out: an arm granted for a refusal the operator then answered with
+    # `^W` must not still be sitting there for the NEXT edit of this issue, where a second
+    # `esc` would write over a peer without ever showing the refusal that earns it. Taking
+    # theirs is one undoable edit (`IssuesView#take_stored_notes`), so `^Z` brings the draft
+    # back; a deleted issue's draft is discarded and the detail closes, as before.
+    private def notes_take_theirs : Nil
+      conflict = notes_conflict_armed?
+      @notes_overwrite_armed = nil
+      @notes_discard_armed = nil
+      store = @host.session.store
+      if conflict
+        @issues.take_stored_notes(store)
+      else
+        @issues.cancel_notes_edit
+        @issues.refresh_detail(store)
+      end
+    end
+
+    # The INS hint names `^W` only while it is armed, and names it for what it will do.
+    private def notes_insert_hint : String
+      if notes_conflict_armed?
+        "type · ^Y copy · esc overwrites · ^W theirs"
+      elsif notes_w_armed?
+        "type · ^Y copy · ^W discard"
+      else
+        "type · ^Y copy · esc save"
       end
     end
 

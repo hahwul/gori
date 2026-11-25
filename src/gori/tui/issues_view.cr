@@ -1111,6 +1111,23 @@ module Gori::Tui
       @notes_read.sync_from(@notes)
     end
 
+    # Take the stored notes over a refused draft (`^W` on an armed conflict) as ONE undoable
+    # edit: `replace_from_outside`, not `seed_notes`' `set_text`, which clears the undo stack and
+    # would make the draft unrecoverable. The baseline moves to the stored text, so a `^Z` back
+    # to the draft is an ordinary edit over the version the operator has now seen. Re-reads the
+    # row first, so "theirs" is what is stored now rather than what the detail last held.
+    def take_stored_notes(store : Store) : Nil
+      refresh_detail(store) # INS + dirty: updates `@detail` without touching the buffer
+      return unless issue = @detail
+      @notes.replace_from_outside(issue.notes)
+      @notes_read.clear_selection
+      @notes_base = notes_key(issue.notes)
+      @notes_stored = issue.notes
+      @notes_peer_seen = nil
+      exit_notes_insert!
+      @notes_read.sync_from(@notes)
+    end
+
     # --- rendering -----------------------------------------------------------
 
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil

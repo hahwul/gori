@@ -110,7 +110,7 @@ describe "an open Issues detail under a peer's edit" do
       # The typed text is still there, the caret and undo stack with it.
       ctrl.view.notes_copy_all.should eq("mine original")
       ctrl.view.notes_insert_mode?.should be_true
-      host.last_status.should contain("changed by another session")
+      host.last_status.should contain("notes changed elsewhere")
     end
   end
 
@@ -123,11 +123,11 @@ describe "an open Issues detail under a peer's edit" do
       type(ctrl, "!")
       store.update_issue(id, notes: "theirs")
       5.times { ctrl.on_external_change }
-      host.statuses.count(&.includes?("changed by another session")).should eq(1)
+      host.statuses.count(&.includes?("notes changed elsewhere")).should eq(1)
       # A SECOND distinct peer value is a new fact and is announced again.
       store.update_issue(id, notes: "theirs, revised")
       ctrl.on_external_change
-      host.statuses.count(&.includes?("changed by another session")).should eq(2)
+      host.statuses.count(&.includes?("notes changed elsewhere")).should eq(2)
     end
   end
 
@@ -147,7 +147,7 @@ describe "an open Issues detail under a peer's edit" do
       store.update_issue(id, notes: "THEIRS")
       3.times { ctrl.on_external_change }
       ctrl.view.notes_copy_all.should eq("mine original")
-      host.statuses.count(&.includes?("changed by another session")).should eq(1)
+      host.statuses.count(&.includes?("notes changed elsewhere")).should eq(1)
       # And re-entering the editor picks the text back up rather than re-seeding over it.
       ctrl.view.enter_notes_insert!
       ctrl.view.notes_copy_all.should eq("mine original")
@@ -181,7 +181,7 @@ describe "an open Issues detail under a peer's edit" do
       store.update_issue(id, notes: "THEIRS")
       ctrl.view.severity_delta(1, store).should be_true # a local re-read, no verdict wanted
       ctrl.on_external_change
-      host.statuses.count(&.includes?("changed by another session")).should eq(1)
+      host.statuses.count(&.includes?("notes changed elsewhere")).should eq(1)
     end
   end
 
@@ -242,7 +242,7 @@ describe "the Issues notes lost-update refusal" do
       store.update_issue(id, notes: "THEIRS")
       ctrl.handle_detail_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape)).should be_true
       store.get_issue(id).not_nil!.notes.should eq("THEIRS")
-      host.last_status.should contain("another session rewrote them")
+      host.last_status.should contain("changed elsewhere")
       ctrl.view.notes_insert_mode?.should be_true
     end
   end
@@ -255,7 +255,7 @@ describe "the Issues notes lost-update refusal" do
       store.update_issue(id, notes: "THEIRS")
       ctrl.commit # the tab-switch / quit flush takes the same refusal
       store.get_issue(id).not_nil!.notes.should eq("THEIRS")
-      host.last_status.should contain("another session rewrote them")
+      host.last_status.should contain("changed elsewhere")
       # Still in INS with the text on screen — the only copy of it that exists.
       ctrl.view.notes_insert_mode?.should be_true
       ctrl.view.notes_copy_all.should eq("mine original")
@@ -307,7 +307,7 @@ describe "the Issues notes lost-update refusal" do
       ctrl.commit
       store.get_issue(id).not_nil!.notes.should eq("mine THEIRS")
       # The tick's announce above is expected; what must NOT be here is a second refusal.
-      host.statuses.none?(&.includes?("rewrote them")).should be_true
+      host.statuses.none?(&.includes?("NOT saved")).should be_true
     end
   end
 
@@ -354,7 +354,7 @@ describe "the Issues notes refusal, once the operator has read it" do
       esc = -> { ctrl.handle_detail_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape)) }
       esc.call
       store.get_issue(id).not_nil!.notes.should eq("THEIRS") # first esc refuses, as before
-      host.last_status.should contain("esc again overwrites theirs")
+      host.last_status.should contain("esc overwrites, ^W theirs")
       esc.call
       store.get_issue(id).not_nil!.notes.should eq("mine original")
       ctrl.view.notes_insert_mode?.should be_false # a real save, so INS closes
@@ -375,7 +375,7 @@ describe "the Issues notes refusal, once the operator has read it" do
       store.update_issue(id, notes: "THEIRS, REVISED")
       esc.call
       store.get_issue(id).not_nil!.notes.should eq("THEIRS, REVISED") # refused again
-      host.statuses.count(&.includes?("esc again overwrites theirs")).should eq(2)
+      host.statuses.count(&.includes?("esc overwrites, ^W theirs")).should eq(2)
       esc.call # now armed against what is really there
       store.get_issue(id).not_nil!.notes.should eq("mine original")
     end
@@ -396,7 +396,7 @@ describe "the Issues notes refusal, once the operator has read it" do
       store.update_issue(id, notes: "THEIRS")
       esc.call
       store.get_issue(id).not_nil!.notes.should eq("THEIRS") # refused, not silently overwritten
-      host.last_status.should contain("esc again overwrites theirs")
+      host.last_status.should contain("esc overwrites, ^W theirs")
     end
   end
 
@@ -419,7 +419,7 @@ describe "the Issues notes refusal, once the operator has read it" do
       esc.call
       store.get_issue(id).not_nil!.notes.should eq("THEIRS")
       ctrl.view.notes_insert_mode?.should be_true
-      host.statuses.count(&.includes?("esc again overwrites theirs")).should eq(2)
+      host.statuses.count(&.includes?("esc overwrites, ^W theirs")).should eq(2)
     end
   end
 
@@ -441,7 +441,7 @@ describe "the Issues notes refusal, once the operator has read it" do
       store.update_issue(id, notes: "THEIRS AGAIN")
       ctrl.handle_detail_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape))
       store.get_issue(id).not_nil!.notes.should eq("THEIRS AGAIN")
-      host.statuses.count(&.includes?("esc again overwrites theirs")).should eq(2)
+      host.statuses.count(&.includes?("esc overwrites, ^W theirs")).should eq(2)
     end
   end
 
@@ -452,7 +452,7 @@ describe "the Issues notes refusal, once the operator has read it" do
       type(ctrl, "mine ")
       store.update_issue(id, notes: "THEIRS")
       ctrl.commit
-      host.last_status.should contain("esc in the notes pane prompts before overwriting")
+      host.last_status.should contain("changed elsewhere (esc in it)")
       # And a tab switch does NOT become a save by being repeated — only `esc` is the save key.
       ctrl.commit
       store.get_issue(id).not_nil!.notes.should eq("THEIRS")
@@ -780,5 +780,42 @@ describe "the auto-forward reaper and an in-progress edit" do
     fwd_at = reap.not_nil!.index("ic.forward(it.id)").not_nil!
     skip_at.should be > loop_at
     fwd_at.should be > skip_at
+  end
+end
+
+# ^W is a delete-word reflex (`LineEdit`, vim): one press used to throw the whole writeup away
+# with no undo, conflict or not. It answers only an armed refusal now, as one undoable edit.
+describe "Issues notes ^W" do
+  it "does nothing to the draft when no refusal is armed" do
+    with_issues_controller do |ctrl, _host, store|
+      id = open_issue(ctrl, store, notes: "original")
+      ctrl.view.enter_notes_insert!
+      type(ctrl, "mine ")
+      ctrl.body_hint(:body).should eq("type · ^Y copy · esc save")
+      store.update_issue(id, notes: "THEIRS")
+      ctrl.handle_detail_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerW, Termisu::Input::Modifier::Ctrl))
+      ctrl.view.notes_copy_all.should eq("mine original")
+      ctrl.view.notes_insert_mode?.should be_true
+    end
+  end
+
+  it "takes theirs as one undoable edit, so ^Z brings the draft back" do
+    with_issues_controller do |ctrl, _host, store|
+      id = open_issue(ctrl, store, notes: "original")
+      ctrl.view.enter_notes_insert!
+      type(ctrl, "mine ")
+      store.update_issue(id, notes: "THEIRS")
+      ctrl.handle_detail_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape)) # refuse + arm
+      ctrl.body_hint(:body).should eq("type · ^Y copy · esc overwrites · ^W theirs")
+      ctrl.handle_detail_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerW, Termisu::Input::Modifier::Ctrl))
+      ctrl.view.notes_copy_all.should eq("THEIRS")
+      ctrl.view.notes_insert_mode?.should be_false
+      ctrl.editor_undo.should be_true
+      ctrl.view.notes_copy_all.should eq("mine original")
+      # The draft is back over the version the operator has now seen: an ordinary save.
+      ctrl.view.enter_notes_insert!
+      ctrl.handle_detail_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape))
+      store.get_issue(id).not_nil!.notes.should eq("mine original")
+    end
   end
 end

@@ -296,7 +296,7 @@ describe "dragging out of the Issues detail" do
         store.update_issue(id, notes: "written by someone else").should be_true
         esc = Termisu::Event::Key.new(Termisu::Input::Key::Escape)
         ctl.handle_detail_key(esc).should be_true
-        host.statuses.last.should contain("esc again overwrites theirs")
+        host.statuses.last.should contain("esc overwrites, ^W theirs")
 
         body = related_body(ctl.view)
         ctl.handle_click(AREA, body.x + 1, body.y).should be_true
