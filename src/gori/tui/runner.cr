@@ -2862,12 +2862,18 @@ module Gori::Tui
       cvss_raw = form.cvss.strip
       cvss_val = cvss_raw.presence
       if id = form.edit_id
-        # editing an existing issue's title + severity + cvss (from its detail view)
+        # editing an existing issue's title / severity / cvss (from its detail view). Only
+        # the fields this form changed are written (`IssueForm#edit_fields`): the card was
+        # seeded at open, and a peer may have re-scored the issue since.
         # A rolled-back write (cross-process SQLite busy/lock) leaves the issue on its OLD
         # title/severity, and `resync` re-reads exactly that — so "issue updated" was a
         # phantom, and returning true dropped the form with the retyped title inside it.
         # FALSE keeps the card up, which is the only place that text still exists.
-        unless @session.store.update_issue(id, title: title, severity: form.severity, cvss: cvss_val, clear_cvss: cvss_val.nil?)
+        unless form.edited?
+          @toast = "issue unchanged"
+          return true
+        end
+        unless @session.store.update_issue(id, **form.edit_fields(title))
           @toast = "issue NOT updated — project busy; the form is still here, ↵ to retry"
           return false
         end

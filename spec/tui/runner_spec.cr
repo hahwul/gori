@@ -24,6 +24,10 @@ private class RunnerSpecShell < Gori::Tui::Runner
     repeater_controller
   end
 
+  def issues : Gori::Tui::IssuesController
+    issues_controller
+  end
+
   def feed(ev : Termisu::Event::Key) : Nil
     handle_key(ev)
   end
@@ -355,6 +359,49 @@ describe Gori::Tui::Runner do
       runner.feed(TuiContract.ctrl('w'))
       runner.overlay.should eq(:none)
       runner.fuzzer.current_view.should be(fv)
+    end
+  end
+  # The EDIT ISSUE form is seeded once, at open. A peer that re-scored the issue while it was
+  # up must keep that score when the operator saves only a new title (and vice versa).
+  it "writes only the fields EDIT ISSUE changed, keeping a peer's re-score" do
+    TuiContract.with_session("runner-issue-retitle") do |session|
+      store = session.store
+      id = store.insert_issue("Reflected XSS", Gori::Store::Severity::Low, "localhost", nil)
+      runner = RunnerSpecShell.new(session, RunnerSpecTerminal.allocate)
+      runner.focus_tab(:issues)
+      runner.issues.view.open_detail_id(id, store).should be_true
+      runner.issue_edit_title
+      runner.@active_overlay.should be_a(Gori::Tui::IssueForm)
+
+      peer = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+      store.update_issue(id, severity: Gori::Store::Severity::Critical, cvss: peer).should be_true
+      runner.type(" in search")
+      runner.press(Termisu::Input::Key::Enter)
+
+      issue = store.get_issue(id).not_nil!
+      issue.title.should eq("Reflected XSS in search")
+      issue.severity.should eq(Gori::Store::Severity::Critical)
+      issue.cvss.should eq(peer)
+      runner.toast.should eq("issue updated")
+
+      # The other way round: a severity changed here leaves a peer's new title alone.
+      runner.issue_edit_title
+      store.update_issue(id, title: "Peer title").should be_true
+      runner.press(Termisu::Input::Key::Tab) # cvss
+      runner.press(Termisu::Input::Key::Tab) # severity
+      runner.press(Termisu::Input::Key::Left)
+      runner.press(Termisu::Input::Key::Enter)
+      issue = store.get_issue(id).not_nil!
+      issue.title.should eq("Peer title")
+      issue.severity.should eq(Gori::Store::Severity::High)
+      issue.cvss.should eq(peer)
+
+      # And an untouched save writes nothing at all.
+      runner.issue_edit_title
+      store.update_issue(id, severity: Gori::Store::Severity::Low).should be_true
+      runner.press(Termisu::Input::Key::Enter)
+      store.get_issue(id).not_nil!.severity.should eq(Gori::Store::Severity::Low)
+      runner.toast.should eq("issue unchanged")
     end
   end
 end

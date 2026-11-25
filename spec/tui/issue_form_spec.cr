@@ -453,4 +453,42 @@ describe Gori::Tui::IssueForm do
     form.severity_cycle(-1)
     h.rendered?(IssueForm::SEV_SUFFIX_BLUR).should be_true
   end
+  # EDIT ISSUE is seeded at open; a peer may move the row while it is up. The save writes only
+  # what this form changed, so a re-title keeps a peer's new severity and vector.
+  it "reports only the fields an edit changed from its seed" do
+    vec = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+    form = IssueForm.new("old", nil, nil, Gori::Store::Severity::Critical, edit_id: 1_i64, cvss: vec)
+    form.edited?.should be_false
+    form.edit_fields("old").should eq({title: nil, severity: nil, cvss: nil, clear_cvss: false})
+
+    form.insert_title('!')
+    form.edited?.should be_true
+    form.edit_fields("old!").should eq({title: "old!", severity: nil, cvss: nil, clear_cvss: false})
+
+    form.severity_cycle(-1)
+    form.edit_fields("old!")[:severity].should eq(Gori::Store::Severity::High)
+    form.severity_cycle(1) # back to the seed: nothing to write for it
+    form.edit_fields("old!")[:severity].should be_nil
+
+    form.set_cvss_value("")
+    fields = form.edit_fields("old!")
+    fields[:cvss].should be_nil
+    fields[:clear_cvss].should be_true
+  end
+  # A vector scored here is one assessment with the severity it derives: written together even
+  # when that severity equals the seed, so a peer's re-rate cannot leave the new vector beside
+  # a severity it does not derive.
+  it "writes a cvss-derived severity with its vector even when it matches the seed" do
+    with_store do |store|
+      id = store.insert_issue("SQLi", Gori::Store::Severity::High, "h", nil)
+      form = IssueForm.new("SQLi", "h", nil, Gori::Store::Severity::High, edit_id: id, heading: "EDIT ISSUE")
+      store.update_issue(id, severity: Gori::Store::Severity::Low).should be_true # a peer re-rates
+      vec = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"                        # 7.5, High
+      form.set_cvss_value(vec)
+      store.update_issue(id, **form.edit_fields("SQLi")).should be_true
+      issue = store.get_issue(id).not_nil!
+      issue.cvss.should eq(vec)
+      issue.severity.should eq(Gori::Store::Severity::High)
+    end
+  end
 end
