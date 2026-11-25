@@ -2024,7 +2024,14 @@ module Gori::Tui
     private def dispatch_chord(ev : Termisu::Event::Key, chord : Verb::Chord? = nil) : Bool
       chord ||= Keybind.from_event(ev)
       return false unless chord
-      return false unless id = resolve_verb_id(chord, current_scope)
+      unless id = resolve_verb_id(chord, current_scope)
+        # The tab claims this key but cannot run it now: say so, rather than leave a key the
+        # footer labels "compare" looking dead — the Global verb on it is not the fallback.
+        return false unless held = @keymap.held_from_global(chord, current_scope, @session.registry, self)
+        status(Hotkeys.expand(@session.registry,
+          Runner.held_key_toast(@session.registry[held].title, chord, editor_read_mode?)))
+        return true
+      end
       verb = @session.registry[id]
       from_read = Runner.read_mode_global?(verb, chord, editor_read_mode?)
       before = @toast
@@ -2065,8 +2072,21 @@ module Gori::Tui
     # READ: the hand most likely thought it was typing. The key keeps its meaning (#1375); the
     # toast says where it came from and how to type, or the flip goes unnoticed.
     def self.read_mode_global?(verb : Verb::Definition, chord : Verb::Chord, read_mode : Bool) : Bool
-      read_mode && verb.scope.global? && !chord.ctrl && !chord.alt &&
-        chord.key.size == 1 && chord.key[0].letter?
+      read_mode && verb.scope.global? && bare_letter?(chord)
+    end
+
+    # The refusal for a key the tab holds from Global (`Verb::Keymap#held_from_global`). From
+    # an editor in READ it carries the same note a fired Global letter does (#1375): the hand
+    # that pressed a bare letter there most likely meant to type it. Unexpanded: the caller
+    # runs it through `Hotkeys.expand`, as `tag_read_mode_toast` does. The note drops " here"
+    # so the longest held title (Open original source) still fits the 59-column row.
+    def self.held_key_toast(title : String, chord : Verb::Chord, read_mode : Bool) : String
+      return not_available_toast(title) unless read_mode && bare_letter?(chord)
+      read_mode_note("#{title}: not available")
+    end
+
+    private def self.bare_letter?(chord : Verb::Chord) : Bool
+      !chord.ctrl && !chord.alt && chord.key.size == 1 && chord.key[0].letter?
     end
 
     def self.read_mode_note(toast : String) : String
@@ -2117,9 +2137,10 @@ module Gori::Tui
 
     # Keymap id for `chord` down the SCOPE CHAIN — Editor (only while a text editor pane
     # holds focus), then `scope`, then Global — taking the first link whose verb is currently
-    # available. A hit that fails available? does not block the links behind it, so e.g.
-    # Repeater's READ-only `y` does not shadow a future Global on the same letter when the
-    # user is in INS, and gated response tools never swallow breath keys.
+    # available. An unavailable Editor verb does not block the tab behind it, but an
+    # unavailable TAB verb does block Global: a letter the tab claims never reaches Global
+    # (`dispatch_chord` toasts the refusal; DESIGN.md §7, 2026-11-25), or Evidence's `c`
+    # compare on an empty list stopped capture.
     #
     # `Scope::Editor` at the head is the FOCUS DIMENSION the keymap did not have (KEY_AUDIT
     # §2d): eleven editor panes hand-rolled `i`/`↵`/`x` in `handle_body_key` because one
@@ -4164,13 +4185,20 @@ module Gori::Tui
       @palette_return = OverlayKind::None
     end
 
+    # The refusal for a tab verb that cannot run right now: a palette pick whose state changed
+    # under it (`any_more`), or a key the tab claims while its verb is unavailable
+    # (`Verb::Keymap#held_from_global`). One wording, so both read as the same refusal.
+    def self.not_available_toast(title : String, any_more : Bool = false) : String
+      "#{title}: not available here#{" any more" if any_more}"
+    end
+
     # Close the palette, then run its pick with the state restored. A tab row was listed
     # against the state ^P was pressed in, so it is re-checked here, in the state it will run
     # in, rather than trusted; a Global row keeps its own listing (same as before #1282).
     private def run_palette_verb(verb : Verb::Definition) : Nil
       close_overlay
       if @palette.tab_verb?(verb) && !verb.available?(self)
-        @toast = "#{verb.title}: not available here any more"
+        @toast = Runner.not_available_toast(verb.title, any_more: true)
         return
       end
       @toast = verb.call(self) || @toast

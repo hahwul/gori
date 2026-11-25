@@ -2598,7 +2598,8 @@ because the table could not.
 
 The fix is a **scope CHAIN** rather than a second key in the table. `Verb::Scope::Editor` is
 consulted first, then the active tab's scope, then Global, each link gated by `available?`
-(`Runner#resolve_verb_id`). Editor joins the chain only while a text-editor pane holds focus —
+(`Runner#resolve_verb_id`; an unavailable TAB link no longer hands its key to Global, see
+2026-11-25). Editor joins the chain only while a text-editor pane holds focus —
 `TabController#editor_pane?`, which every editing controller answers — and drops out the moment
 focus leaves. Two properties follow, and they are the whole argument for the chain over the
 alternatives:
@@ -3666,10 +3667,11 @@ the palette would have lost the row as well.
 - **`Definition#chord_sections`** names the sections (the controller's `command_section`) in
   which the verb's chords fire; nil means the whole scope. It gates the KEY only: the palette
   and the space menu still follow `available?` and `section`.
-- **Out of its sections the press walks on**, like an unavailable verb (`Keymap#resolve`, the
-  scope chain `Runner#resolve_verb_id` now calls). So a gate on a letter Global binds would reach
+- **Out of its sections the press walks on** (`Keymap#resolve`, the scope chain
+  `Runner#resolve_verb_id` now calls). So a gate on a letter Global binds would reach
   capture, intercept or the lens. The R1 guard models that walk, and a gated key is no clash
-  for a menu row drawn only in other sections.
+  for a menu row drawn only in other sections. (This said "like an unavailable verb". Since
+  2026-11-25 an unavailable tab verb holds its key instead; the pane gate still walks on.)
 - `ExecContext#focused_section` is the value it is checked against, and the same one the
   space menu renders for.
 
@@ -6397,3 +6399,32 @@ Refines §4's rule that a dropped term widens the query and is named. On MCP `li
 the reply names the drop beside them. A count is the one number the caller asked for, and it
 scopes what an agent sends next. The TUI and `gori run history --count` keep the published
 rule: a person reads the warning beside the number, and a script asks with `--strict`.
+
+### 2026-11-25: a letter the tab claims never reaches Global
+
+Refines the 2026-09-12 scope-chain entry and the 2026-09-26 "no level-1 `c` or `i`" entry. That
+entry said a tab binding the letter itself is safe "because the press never reaches Global".
+That held only while the tab's verb was available. `Keymap#resolve` skipped an unavailable link,
+so Evidence's `c` (compare) on an empty list stopped capture and its `i` (open linked issue) on
+an orphaned snapshot held every request, under a footer reading "c compare · i issue". Authorize's
+`i` (identities) did the same during a run. The R1 guard is static and cannot see an `available:`
+lambda.
+
+- **An unavailable tab verb holds its key.** If the tab scope binds the chord, the chord is live
+  in the focused section, and `available?` is false, the walk stops. When Global would have
+  fired something, `Keymap#held_from_global` names the verb and the Runner toasts
+  "<title>: not available here", the palette's refusal wording. Otherwise the press stays
+  unanswered, as before.
+- **The pane gate still walks on.** A verb out of its `chord_sections` is not a claim in that
+  pane: the declaration says the key belongs to another pane. The R1 guard already fails a pane
+  gate on a letter Global binds, so this fall-through never reaches capture, intercept or the
+  lens.
+- **The Editor link still yields to the tab.** An unavailable Editor verb does not stop the
+  walk. Its one Global overlap is `editor.insert` on `i`, which is unavailable only in INS,
+  where the editor takes printables before the keymap sees them.
+- **The strip and the tab bar are unchanged.** `resolve_global` (the strip) and Sidebar →
+  Global (the bar) never consult the tab's scope.
+- The scope lens is held too: Evidence's `s` with no source, and Issues' RELATED `s` with no row.
+  A lens flip that cannot be seen from the tab helps no one, and one rule is easier to read
+  than one rule with an exception. `spec/verb/keymap_spec.cr` sweeps every non-Global scope ×
+  Global overlap under every OS profile × keyset.

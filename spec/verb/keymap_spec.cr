@@ -153,6 +153,95 @@ describe Gori::Verb::Keymap do
       km.resolve(Chord.new("c"), Gori::Verb::Scope::Repeater, reg, ctx).should eq("t.global")
     end
 
+    # A letter the tab claims never reaches Global (DESIGN.md §7, 2026-11-25). Unlike the pane
+    # gate above, an `available:` lambda is state the R1 guard cannot see, so this is the check.
+    it "holds a tab chord whose verb is unavailable instead of firing Global's" do
+      gated = Definition.new("t.gated", "t.gated", "", Gori::Verb::Scope::Evidence, [Chord.new("c")],
+        available: ->(_ctx : ExecContext) { false }) { |_| nil }
+      reg = reg_with(gated, verb("t.global", Gori::Verb::Scope::Global, Chord.new("c")))
+      km = Keymap.build(reg)
+      ctx = FakeExecContext.new
+      km.resolve(Chord.new("c"), Gori::Verb::Scope::Evidence, reg, ctx).should be_nil
+      km.held_from_global(Chord.new("c"), Gori::Verb::Scope::Evidence, reg, ctx).should eq("t.gated")
+      # …in an editor pane too: the Editor link is walked first, the tab's claim still holds.
+      ctx.editor_pane = ctx.editor_read_mode = true
+      km.resolve(Chord.new("c"), Gori::Verb::Scope::Evidence, reg, ctx).should be_nil
+      # A tab that does not bind the letter leaves it to Global, as before.
+      km.resolve(Chord.new("c"), Gori::Verb::Scope::Probe, reg, ctx).should eq("t.global")
+      km.held_from_global(Chord.new("c"), Gori::Verb::Scope::Probe, reg, ctx).should be_nil
+    end
+
+    it "names no hold where nothing behind the tab would have fired" do
+      gated = Definition.new("t.gated", "t.gated", "", Gori::Verb::Scope::Evidence, [Chord.new("q")],
+        available: ->(_ctx : ExecContext) { false }) { |_| nil }
+      reg = reg_with(gated)
+      km = Keymap.build(reg)
+      km.held_from_global(Chord.new("q"), Gori::Verb::Scope::Evidence, reg, FakeExecContext.new).should be_nil
+    end
+
+    it "keeps an unavailable Editor verb from blocking the tab behind it" do
+      ed = Definition.new("e.x", "e.x", "", Gori::Verb::Scope::Editor, [Chord.new("x")],
+        available: ->(_ctx : ExecContext) { false }) { |_| nil }
+      reg = reg_with(ed, verb("t.x", Gori::Verb::Scope::Repeater, Chord.new("x")))
+      ctx = FakeExecContext.new
+      ctx.editor_pane = true
+      Keymap.build(reg).resolve(Chord.new("x"), Gori::Verb::Scope::Repeater, reg, ctx).should eq("t.x")
+    end
+
+    # The shipped keys, swept rather than listed: every non-Global scope's chord that Global
+    # also binds, under every OS profile × keyset, made unavailable. Evidence's `c` on an empty
+    # list stopped capture and its `i` on an unlinked snapshot held every request.
+    it "never resolves an unavailable tab verb's chord to the Global verb on it" do
+      reg = Gori::Verbs.registry
+      ctx = FakeExecContext.new
+      pairs = Set({String, String}).new
+      OsProfile::Os.each do |os|
+        Keyset::Kind.each do |ks|
+          km = Keymap.build(reg, os, Keymap::NO_OVERRIDES, ks)
+          where = "#{Keyset.name_of(ks)}/#{os}"
+          reg.each do |v|
+            next if v.scope.global? || v.scope.editor?
+            Keymap.effective_chords(v, os, Keymap::NO_OVERRIDES, ks).each do |chord|
+              next unless km.lookup_in(chord, v.scope) == v.id
+              next unless g = km.lookup_in(chord, Gori::Verb::Scope::Global)
+              pairs << {v.id, g}
+              # The tab verb as it is, but unavailable; the Global one forced live, so only the
+              # walk is under test. Out of its `chord_sections` the press still walks on (above).
+              off = Definition.new(v.id, v.title, "", v.scope, v.chords, available: ->(_c : ExecContext) { false },
+                chord_sections: v.chord_sections) { |_| nil }
+              gv = reg[g]
+              on = Definition.new(g, gv.title, "", gv.scope, gv.chords) { |_| nil }
+              two = reg_with(off, on)
+              sec = v.chord_sections.try(&.first?) || :common
+              ctx.focused_section = sec
+              km.resolve(chord, v.scope, two, ctx).should be_nil, "#{where}: #{chord.label} on #{v.id} fired #{g}"
+              km.held_from_global(chord, v.scope, two, ctx).should eq(v.id), "#{where}: #{chord.label} on #{v.id}"
+            end
+          end
+        end
+      end
+      # The overlaps the defect was found on, so an empty sweep cannot pass.
+      pairs.should contain({"evidence.compare", "capture.toggle"})
+      pairs.should contain({"evidence.issue", "intercept.toggle"})
+      pairs.should contain({"authorize.identities", "intercept.toggle"})
+    end
+
+    it "holds Evidence's c and i on an empty list and an unlinked snapshot" do
+      reg = Gori::Verbs.registry
+      km = Keymap.build(reg, OsProfile::Os::Linux, Keymap::NO_OVERRIDES, Keyset::Kind::Helix)
+      ctx = FakeExecContext.new
+      ctx.current_tab = :evidence
+      ev = Gori::Verb::Scope::Evidence
+      km.held_from_global(Chord.new("c"), ev, reg, ctx).should eq("evidence.compare")
+      km.held_from_global(Chord.new("i"), ev, reg, ctx).should eq("evidence.issue")
+      ctx.selected_evidence = 4_i64
+      km.resolve(Chord.new("c"), ev, reg, ctx).should eq("evidence.compare")
+      km.resolve(Chord.new("i"), ev, reg, ctx).should be_nil # orphaned: no linked issue
+      km.held_from_global(Chord.new("i"), ev, reg, ctx).should eq("evidence.issue")
+      ctx.evidence_has_links = true
+      km.resolve(Chord.new("i"), ev, reg, ctx).should eq("evidence.issue")
+    end
+
     it "leaves an ungated chord live in every section" do
       reg = reg_with(verb("t.a", Gori::Verb::Scope::Repeater, Chord.new("a")))
       ctx = FakeExecContext.new
