@@ -404,4 +404,49 @@ describe Gori::Tui::Runner do
       runner.toast.should eq("issue unchanged")
     end
   end
+
+  # Set CVSS on an issue with no vector opens on the least-severe placeholder. ↵ on it used to
+  # score the issue 0.0 and derive Info, so a Critical finding became Info on one key.
+  it "refuses Set CVSS on an untouched calculator and names a severity the vector moves" do
+    TuiContract.with_session("runner-issue-cvss") do |session|
+      store = session.store
+      id = store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "localhost", nil)
+      runner = RunnerSpecShell.new(session, RunnerSpecTerminal.allocate)
+      runner.focus_tab(:issues)
+      runner.issues.view.open_detail_id(id, store).should be_true
+      runner.issue_set_cvss
+      calc = runner.@active_overlay.as(Gori::Tui::CvssCalculatorOverlay)
+
+      runner.press(Termisu::Input::Key::Enter)
+      runner.@active_overlay.should be(calc) # still up
+      runner.toast.should eq(Gori::Tui::CvssCalculatorOverlay::UNTOUCHED_REFUSAL)
+      issue = store.get_issue(id).not_nil!
+      issue.severity.should eq(Gori::Store::Severity::Critical)
+      issue.cvss.should be_nil
+
+      # The refusal landed on the first metric; walk to C and pick High: 7.5, High.
+      calc.sel.should eq(Gori::Tui::CvssCalculatorOverlay::ROW_FIRST_M)
+      5.times { runner.press(Termisu::Input::Key::Down) }
+      runner.type("3")
+      runner.press(Termisu::Input::Key::Enter)
+      issue = store.get_issue(id).not_nil!
+      issue.cvss.should eq("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N")
+      issue.severity.should eq(Gori::Store::Severity::High)
+      runner.toast.should eq("severity critical → high")
+    end
+  end
+
+  it "words the Set CVSS toast for a batch and for a severity that did not move" do
+    Gori::Tui::Runner.cvss_applied_toast(false, 1, [Gori::Store::Severity::High], Gori::Store::Severity::High).should be_nil
+    Gori::Tui::Runner.cvss_applied_toast(false, 1, [Gori::Store::Severity::Critical], Gori::Store::Severity::Info)
+      .should eq("severity critical → info")
+    Gori::Tui::Runner.cvss_applied_toast(false, 3, [Gori::Store::Severity::Critical, Gori::Store::Severity::Critical, Gori::Store::Severity::Info], Gori::Store::Severity::Info)
+      .should eq("cvss set · 3 issues · severity critical → info on 2")
+    Gori::Tui::Runner.cvss_applied_toast(false, 3, [Gori::Store::Severity::Critical, Gori::Store::Severity::High, Gori::Store::Severity::Low], Gori::Store::Severity::Low)
+      .should eq("cvss set · 3 issues · severity → low on 2")
+    Gori::Tui::Runner.cvss_applied_toast(false, 2, [Gori::Store::Severity::Low, Gori::Store::Severity::Low], Gori::Store::Severity::Low)
+      .should eq("cvss set · 2 issues")
+    Gori::Tui::Runner.cvss_applied_toast(true, 2, [] of Gori::Store::Severity, nil)
+      .should eq("cvss cleared · 2 issues")
+  end
 end

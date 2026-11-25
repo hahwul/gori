@@ -126,6 +126,13 @@ module Gori::Tui
 
     getter sel : Int32 = ROW_VECTOR
     getter version_idx : Int32 = 0
+    # True from an empty start until the operator picks a metric or edits the field. The
+    # seeded least-severe vector is a placeholder the rows need something to spell, not an
+    # assessment: committing it scores the issue 0.0 and derives Info, which on Set CVSS
+    # demoted a Critical issue (and every marked one with it) on a single ↵. Cycling the
+    # version row does not clear it, for the reason `cycle_version` gives: looking is not
+    # an edit.
+    getter? untouched : Bool = false
     @selections : Array(Hash(String, Int32))
     @scroll : Int32 = 0
 
@@ -146,6 +153,7 @@ module Gori::Tui
       # operator's move.
       if initial.strip.empty?
         sync_to_field
+        @untouched = true
       else
         @vector.set(initial.strip)
         sync_from_field
@@ -319,6 +327,7 @@ module Gori::Tui
       return unless m = metric_at(@sel)
       sel = selections
       sel[m.code] = (sel[m.code] + d) % m.options.size
+      @untouched = false
       sync_to_field
     end
 
@@ -326,6 +335,7 @@ module Gori::Tui
       return unless m = metric_at(@sel)
       return unless 0 <= idx < m.options.size
       selections[m.code] = idx
+      @untouched = false
       sync_to_field
     end
 
@@ -341,7 +351,9 @@ module Gori::Tui
       return save_outcome if key.enter?
 
       if on_vector_row?
+        before = value
         @vector.handle_edit_key(ev)
+        @untouched = false if value != before
         sync_from_field
       elsif on_version_row?
         # Direction matters even though two versions make ± identical today: the metric rows
@@ -395,6 +407,18 @@ module Gori::Tui
       invalid? ? :stay : :commit
     end
 
+    UNTOUCHED_REFUSAL = "not saved — pick the metrics or paste a vector first"
+
+    # ↵ on the untouched placeholder (see `untouched?`) lands on the first metric and says what
+    # to do; esc still cancels. Kept as a refusal rather than a silent no-op so the operator
+    # learns why nothing happened, and rather than a clear, because the issue had no vector to
+    # clear in the first place.
+    def commit_blocker : String?
+      return nil unless untouched?
+      @sel = ROW_FIRST_M
+      UNTOUCHED_REFUSAL
+    end
+
     def set_preedit(text : String) : Nil
       @vector.set_preedit(text) if on_vector_row?
     end
@@ -408,7 +432,9 @@ module Gori::Tui
         # and only reserves room for it — on the focused row.
         was_focused = row == @sel
         set_selected(row)
-        return save_outcome if on_save_row?
+        # The save row draws the refusal itself while the card is untouched, so a click on it
+        # has its explanation under the pointer (the shell asks `commit_blocker` on ↵ only).
+        return (untouched? ? :stay : save_outcome) if on_save_row?
         if on_version_row?
           # Pick the pill that was clicked, not "the next one": clicking the label already
           # under the cursor must be a no-op, and it was switching away from it.
@@ -510,7 +536,7 @@ module Gori::Tui
     # on the commit row because the commit row SCROLLS on a short terminal, and "what does
     # this currently score as" is the one fact you must be able to see before pressing ↵.
     private def draw_readout(screen : Screen, box : Rect) : Nil
-      return if value.empty?
+      return if value.empty? || untouched? # nothing scored yet: 0.0 here would read as a verdict
       text = if r = resolved
                "#{sprintf("%.1f", r[0])} #{r[1].label}"
              else
@@ -558,7 +584,9 @@ module Gori::Tui
     private def draw_save(screen : Screen, box : Rect, py : Int32, bg : Color) : Nil
       x = box.x + 3
       w = {box.right - 2 - x, 0}.max
-      if value.empty?
+      if untouched?
+        screen.text(x, py, "[ pick the metrics or paste a vector ]", Theme.muted, bg, width: w)
+      elsif value.empty?
         screen.text(x, py, "[ clear cvss ]", Theme.accent, bg, Attribute::Bold, width: w)
       elsif r = resolved
         score, sev, _ = r

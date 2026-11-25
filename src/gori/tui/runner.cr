@@ -2482,21 +2482,39 @@ module Gori::Tui
       return true if ids.empty?
       store = @session.store
       raw = calc.value
+      derived = raw.empty? ? nil : Gori::Cvss.severity_for(raw)
+      # Read BEFORE the write, for the toast only: which targets the derivation moves.
+      before = derived ? ids.compact_map { |id| store.get_issue(id).try(&.severity) } : [] of Store::Severity
       ok = if raw.empty?
              store.update_issues(ids, cvss: nil, clear_cvss: true)
            else
-             store.update_issues(ids, cvss: raw, severity: Gori::Cvss.severity_for(raw))
+             store.update_issues(ids, cvss: raw, severity: derived)
            end
       unless ok
         @toast = "cvss NOT saved — project busy; try again"
         return false
       end
       issues_controller.view.resync(store)
-      # Only a BATCH needs saying — a single issue's chip and severity badge both change under
-      # the operator's eyes, and echoing a 44-character vector into the status strip just
-      # truncates it. Same rule apply_issue_choice follows.
-      @toast = "#{raw.empty? ? "cvss cleared" : "cvss set"} · #{Gori.plural(ids.size, "issue")}" if ids.size > 1
+      @toast = Runner.cvss_applied_toast(raw.empty?, ids.size, before, derived)
       true
+    end
+
+    # What Set CVSS says after it wrote, nil for nothing. A batch always says how many it
+    # touched (a single issue's chip changes under the operator's eyes, and echoing a
+    # 44-character vector into the status strip just truncates it — the rule
+    # apply_issue_choice follows). A SEVERITY the derivation moved is always said, single
+    # issue included, old → new: the re-sort it causes moves the issue out from under the
+    # cursor, and a Critical that became Info on one ↵ is exactly what must not pass quietly.
+    def self.cvss_applied_toast(cleared : Bool, count : Int32, before : Array(Store::Severity),
+                                derived : Store::Severity?) : String?
+      head = count > 1 ? "#{cleared ? "cvss cleared" : "cvss set"} · #{Gori.plural(count, "issue")}" : nil
+      moved = derived ? before.reject(derived) : [] of Store::Severity
+      return head if moved.empty? || derived.nil?
+      olds = moved.uniq
+      from = olds.size == 1 ? "#{olds.first.label} → " : "→ "
+      change = "severity #{from}#{derived.label}"
+      change += " on #{moved.size}" if count > 1
+      head ? "#{head} · #{change}" : change
     end
 
     # Apply the picked Probe scan MODE to the analyzer and re-read the findings list.
