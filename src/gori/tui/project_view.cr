@@ -975,8 +975,21 @@ module Gori::Tui
       load_network_values
     end
 
+    # Put ONE refused edit back to its load-time value and leave every other pending edit in
+    # place: the first of `groups` (field indices in `settings_values` order) holding a changed
+    # field is reverted whole. False when none of them differs from what was loaded, so the
+    # caller knows the refusal is not about anything the operator typed.
+    def revert_settings_fields(groups : Array(Array(Int32))) : Bool
+      current = settings_values
+      return false unless group = groups.find(&.any? { |i| current[i] != @set_baseline[i] })
+      group.each { |i| @set_values[i] = @set_baseline[i] }
+      @set_cursor = current_set_value.size
+      @set_preedit = ""
+      true
+    end
+
     # …and the mirror image, after a proto-schema apply. A network field may be holding a
-    # half-typed value that `settings_invalid(on_leave: false)` deliberately LEFT on screen for
+    # half-typed value that a refused ↵ (`commit_project_network(on_leave: false)`) deliberately LEFT on screen for
     # the operator to correct; resetting the six here would erase it mid-correction, under a
     # toast still naming it.
     def refresh_protos : Nil

@@ -1456,41 +1456,80 @@ module Gori::Tui
     # rebind). `on_leave` = the commit fired because the pane is being left (Tab/arrow/click;
     # esc cancels instead, see `cancel_settings_to_strip`) rather than an explicit ↵: a leave with an invalid field drops the bad edit, while
     # ↵ keeps it so the user can fix it. Dirty-guarded so an unchanged pane never re-applies.
+    #
+    # "Drops the bad edit" means THAT field, not the card. A leave applies (DESIGN.md §7
+    # 2026-11-19), so the operator's other edits in the same visit are applied without it, and
+    # the toast names each refusal it dropped. Reloading every field here (the old shape)
+    # threw away a valid connect timeout beside an invalid capture limit and said nothing.
+    # Each round reverts at least one changed field to its stored value, so the loop ends.
     private def commit_project_network(on_leave : Bool = false) : String?
       return nil unless @project_view.settings_dirty?
+      dropped = [] of String
+      loop do
+        checked = project_network_config
+        if checked.is_a?(Settings::ProjectNetworkConfig)
+          line = persist_project_network(checked)
+          return dropped.empty? ? line : "#{dropped.join(" · ")} · #{line}"
+        end
+        err, groups = checked
+        msg = settings_invalid(err)
+        return msg unless on_leave
+        unless @project_view.revert_settings_fields(groups)
+          # The refusal is about a value that is already the stored one (a broken inherited
+          # upstream, say), so no single edit can be blamed: drop them all and say so.
+          @project_view.refresh_settings
+          return (dropped << "#{msg} — every pending network edit dropped").join(" · ")
+        end
+        dropped << "#{msg} — that edit dropped"
+        return dropped.join(" · ") unless @project_view.settings_dirty?
+      end
+    end
+
+    # The pane's network fields as a config to apply, or the first refusal and the field groups
+    # to blame for it, in the order a leave should revert them. Grouped because three of the
+    # fields only mean something together (proxy kind + host + port, auth + its credentials).
+    private def project_network_config : Settings::ProjectNetworkConfig | {String, Array(Array(Int32))}
       host, port_s, _protocol, _proxy_host, _proxy_port, destination, auth_s, username, password, connect_s, idle_s, cap_s =
         @project_view.settings_values
       if err = bind_host_problem(host)
-        return settings_invalid(err, on_leave)
+        return {err, [[0]]}
       end
       port = port_s.to_i?
       unless port && 0 <= port <= 65535
-        return settings_invalid("invalid bind port #{port_s.inspect}", on_leave)
+        return {"invalid bind port #{port_s.inspect}", [[ProjectView::SETTINGS_BIND_PORT_INDEX]]}
       end
       upstream, proxy_error = @project_view.settings_upstream_proxy
       if proxy_error
-        return settings_invalid(proxy_error, on_leave)
+        return {proxy_error, [PROXY_FIELDS]}
       end
       if err = Settings.upstream_proxy_error(upstream)
-        return settings_invalid(err, on_leave)
+        return {err, [PROXY_FIELDS]}
       end
       if err = Settings.upstream_destination_error(destination)
-        return settings_invalid(err, on_leave)
+        return {err, [[ProjectView::SETTINGS_DESTINATION_INDEX]]}
       end
       auth, auth_error = Settings.build_project_proxy_auth(upstream, auth_s == "on", username, password)
       if auth_error
-        return settings_invalid(auth_error, on_leave)
+        # Auth first: it is the half the refusal names. The proxy change it depends on is the
+        # fallback, for an untouched auth row that a new proxy kind no longer satisfies.
+        return {auth_error, [AUTH_FIELDS, PROXY_FIELDS]}
       end
       connect = positive_secs(connect_s)
-      return settings_invalid("invalid connect timeout #{connect_s.inspect} (seconds, min 1)", on_leave) unless connect
+      return {"invalid connect timeout #{connect_s.inspect} (seconds, min 1)", [[CONNECT_FIELD]]} unless connect
       idle = positive_secs(idle_s)
-      return settings_invalid("invalid idle timeout #{idle_s.inspect} (seconds, min 1)", on_leave) unless idle
+      return {"invalid idle timeout #{idle_s.inspect} (seconds, min 1)", [[CONNECT_FIELD + 1]]} unless idle
       cap = positive_secs(cap_s)
-      return settings_invalid("invalid capture limit #{cap_s.inspect} (MiB, min 1)", on_leave) unless cap
+      return {"invalid capture limit #{cap_s.inspect} (MiB, min 1)", [[CONNECT_FIELD + 2]]} unless cap
       cap = cap.clamp(1, Settings::MAX_CAPTURE_MAX_MIB) # keep cap*1024*1024 inside Int32
-      config = Settings::ProjectNetworkConfig.new(host, port, upstream, auth, connect, idle, cap, destination)
-      persist_project_network(config)
+      Settings::ProjectNetworkConfig.new(host, port, upstream, auth, connect, idle, cap, destination)
     end
+
+    # Field indices (`ProjectView#settings_values` order) for the groups above.
+    private PROXY_FIELDS = [ProjectView::SETTINGS_PROTOCOL_INDEX, ProjectView::SETTINGS_PROXY_HOST_ROW - ProjectView::SETTINGS_FIELD_BASE,
+                            ProjectView::SETTINGS_PROXY_PORT_INDEX]
+    private AUTH_FIELDS = [ProjectView::SETTINGS_AUTH_INDEX, ProjectView::SETTINGS_USERNAME_INDEX,
+                           ProjectView::SETTINGS_PASSWORD_INDEX]
+    private CONNECT_FIELD = ProjectView::SETTINGS_PASSWORD_INDEX + 1 # then idle, then capture limit
 
     private def persist_project_network(config : Settings::ProjectNetworkConfig) : String
       line, saved = @host.apply_project_network(config)
@@ -1514,8 +1553,7 @@ module Gori::Tui
 
     # The refusal SENTENCE, handed back so `commit_project_settings` can place it beside the
     # proto half's rather than have one overwrite the other.
-    private def settings_invalid(msg : String, on_leave : Bool) : String
-      @project_view.refresh_settings if on_leave # leaving the pane drops the half-typed value
+    private def settings_invalid(msg : String) : String
       msg.starts_with?("settings:") ? msg : "project network: #{msg}"
     end
   end

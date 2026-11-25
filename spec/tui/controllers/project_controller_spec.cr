@@ -74,6 +74,73 @@ describe ProjectController do
     end
   end
 
+  # A leave applies (DESIGN.md §7 2026-11-19) and drops only the bad edit. It used to reload the
+  # whole card, so a valid connect timeout typed beside an invalid capture limit vanished while
+  # the toast named only the capture limit.
+  it "drops only the invalid field on leave, applies the rest and names what it dropped" do
+    TuiContract.with_session("project-settings-leave-invalid") do |session|
+      host = ApplySpyHost.new(session)
+      host.tab = :project
+      ctl = ProjectController.new(host)
+      ctl.on_enter
+      ctl.view.focus_pane(:settings)
+      stored_cap = ctl.view.settings_values[11]
+      ctl.view.select_setting(11) # Connect timeout (s)
+      6.times { settings_key(ctl, Termisu::Input::Key::Backspace) }
+      settings_type(ctl, "45")
+      ctl.view.select_setting(13) # Capture body limit (MiB)
+      6.times { settings_key(ctl, Termisu::Input::Key::Backspace) }
+      settings_type(ctl, "abc")
+      14.times { settings_key(ctl, Termisu::Input::Key::Up) } # ↑ off the top row leaves the card
+      host.focus_requests.last.should eq(:subtabs)
+      host.applied.size.should eq(1)
+      host.applied.last.connect_secs.should eq(45)
+      host.applied.last.capture_mib.should eq(stored_cap.to_i)
+      host.statuses.last.should contain(%(invalid capture limit "abc"))
+      host.statuses.last.should contain("that edit dropped")
+      host.statuses.last.should contain("project network saved")
+    end
+  end
+
+  it "applies nothing when the invalid field was the only edit, and still says it was dropped" do
+    TuiContract.with_session("project-settings-leave-only-invalid") do |session|
+      host = ApplySpyHost.new(session)
+      host.tab = :project
+      ctl = ProjectController.new(host)
+      ctl.on_enter
+      ctl.view.focus_pane(:settings)
+      before = ctl.view.settings_values
+      ctl.view.select_setting(12) # Idle timeout (s)
+      settings_type(ctl, "x")
+      14.times { settings_key(ctl, Termisu::Input::Key::Up) }
+      host.applied.should be_empty
+      ctl.view.settings_values.should eq(before)
+      ctl.view.settings_dirty?.should be_false
+      host.statuses.last.should contain("invalid idle timeout")
+      host.statuses.last.should contain("that edit dropped")
+    end
+  end
+
+  # ↵ is not a leave: the refused value stays on screen to be fixed, and so does the other edit.
+  it "keeps every pending edit when ↵ is refused" do
+    TuiContract.with_session("project-settings-enter-invalid") do |session|
+      host = ApplySpyHost.new(session)
+      host.tab = :project
+      ctl = ProjectController.new(host)
+      ctl.on_enter
+      ctl.view.focus_pane(:settings)
+      ctl.view.select_setting(11)
+      settings_type(ctl, "5")
+      ctl.view.select_setting(13)
+      settings_type(ctl, "z")
+      settings_key(ctl, Termisu::Input::Key::Enter)
+      host.applied.should be_empty
+      ctl.view.settings_values[9].should end_with("5")
+      ctl.view.settings_values[11].should end_with("z")
+      host.statuses.last.should_not contain("dropped")
+    end
+  end
+
   # With a pending edit the esc promise sits early in the text-row hint, where an 80-column
   # footer still shows it (`Chrome.fit_hints` drops this hint from the right).
   it "keeps `esc cancel` when an 80-column footer fits the hint" do
