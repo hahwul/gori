@@ -133,6 +133,14 @@ module Gori::Tui
     # Whether this process still relays the flow's WebSocket (#1630): `Proxy::WS::Live`, a hash
     # lookup, asked only for a WS row on screen and the open drill-in. Injected by the shell.
     property ws_open : Proc(Int64, Bool) = ->(_id : Int64) { false }
+    # True while the space menu, a family card, the palette, a picker or a modal floats over
+    # this list (`Host#list_cursor_held?`). Follow then stops moving the cursor: rows still
+    # land, but the highlight keeps its flow, because every verb resolves its target when it
+    # RUNS and the operator chose it when the card opened. A capture landing under an open
+    # `space` used to put `H`, `d`, `>` `r` and `^P` Send to Repeater on the new flow. `@follow`
+    # stays on, so the first capture after the card closes snaps back to the tail. Injected by
+    # the shell, like `ws_open`.
+    property cursor_hold : Proc(Bool) = -> { false }
     getter? searching : Bool = false
     # `searching?` is the controller's truth (it guards the capture flush and the deferred
     # click); `searching_shown?` is what the bar and the empty list PAINT. A search that
@@ -981,8 +989,11 @@ module Gori::Tui
       new_question = !@applied_question.nil? && asked != @applied_question # not the first load
       @applied_question = asked
       kept = prev_id ? index_of(prev_id) : nil
+      # A card over the list holds a following cursor on its flow too (`cursor_hold`): a
+      # filtered list under capture reloads here rather than in `on_event`.
+      following = @follow && !@cursor_hold.call
       @selected =
-        if @follow
+        if following
           follow_index
         elsif kept
           kept # keep the highlight on the same flow across a reload
@@ -991,6 +1002,8 @@ module Gori::Tui
         else
           @selected.clamp(0, {@rows.size - 1, 0}.max)
         end
+      # Held (following, under a card) leaves the viewport at the tail follow had it on, as
+      # `on_event` does: the arrivals show above the held row instead of scrolling off.
       return if @follow
       # render's ensure_visible brings an oldest-first list's newest row in from the top.
       if new_question && kept.nil?
@@ -1312,7 +1325,11 @@ module Gori::Tui
             # on an already-empty list), which leaves @follow off with @selected at 0.
             anchored = !@rows.empty?
             @rows.unshift(row)
-            if @follow
+            if @follow && @cursor_hold.call
+              # Held under a card: the highlight keeps its flow, the viewport stays at the
+              # tail follow had it on, so the arrival shows above the held row.
+              @selected += 1 if anchored
+            elsif @follow
               @selected = 0
             elsif anchored
               # Keep the highlight + viewport on the same flows the user is looking at.
@@ -1321,8 +1338,8 @@ module Gori::Tui
             end
           else
             @rows << row
-            @selected = @rows.size - 1 if @follow
-            # Not following: selection/scroll stay put (new row is past the end).
+            @selected = @rows.size - 1 if @follow && !@cursor_hold.call
+            # Not following (or held under a card): selection/scroll stay put (new row is past the end).
           end
           trim_window if @rows.size > @max_rows + @trim_slack
         end
@@ -4839,8 +4856,16 @@ module Gori::Tui
 
     # Drop the oldest rows so the window stays at MAX_ROWS. Newest-first: oldest
     # are at the END (pop). Oldest-first: oldest are at the START (shift).
+    #
+    # A cursor held under a card (`cursor_hold`) is never trimmed away: the card's verb will
+    # read it, and a clamp onto a neighbour would retarget that verb to a flow nobody chose.
+    # The window grows past MAX_ROWS instead, by the captures that land while the card is up,
+    # and the first un-held insert (which snaps the cursor back to the tail) trims it again.
     private def trim_window : Nil
       drop = @rows.size - @max_rows
+      if @follow && @cursor_hold.call
+        drop = {drop, newest_first? ? @rows.size - 1 - @selected : @selected}.min
+      end
       return if drop <= 0
       if newest_first?
         @rows.pop(drop)

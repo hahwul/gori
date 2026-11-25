@@ -74,6 +74,15 @@ private class RunnerSpecShell < Gori::Tui::Runner
   def notification_hint : String
     active_overlay.not_nil!.hint
   end
+
+  # Run a verb as the space menu runs its row: the menu closes, then the verb reads its target.
+  def run_from_space_menu(id : String) : Nil
+    run_space_verb(@session.registry[id])
+  end
+
+  def close_palette : Nil
+    close_overlay
+  end
 end
 
 private def runner_spec_request(path : String) : String
@@ -85,6 +94,18 @@ private def runner_spec_flow(store : Gori::Store, path : String) : Int64
     created_at: 1_i64, scheme: "http", host: "localhost", port: 80,
     method: "GET", target: path, http_version: "HTTP/1.1",
     head: runner_spec_request(path).to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+end
+
+# A capture tick as the Runner's drain runs it: the flow event, then the debounced flush a
+# filtered or lensed list takes instead, then whatever search that flush started.
+private def runner_spec_capture(history : Gori::Tui::HistoryController, store : Gori::Store,
+                                path : String) : Int64
+  id = runner_spec_flow(store, path)
+  history.view.on_event(Gori::Store::FlowEvent.new(id, :inserted), store)
+  sleep Gori::Tui::HistoryView::FILTER_FLUSH_INTERVAL
+  history.view.flush_filter(store)
+  settle_history(history, store)
+  id
 end
 
 describe Gori::Tui::Runner do
@@ -198,6 +219,49 @@ describe Gori::Tui::Runner do
       runner.resize_terminal(40, 8)
       runner.press(Termisu::Input::Key::Escape)
       runner.space_menu_open?.should be_false
+    end
+  end
+
+  # chrome.md #3 / loop.md #2: with follow on, a capture landing while `space` (or `^P`) was
+  # open moved the cursor to the new row, and the verb then ran on it. The card holds the
+  # cursor on the row it was opened over; with nothing open, follow behaves as before.
+  it "runs a space-menu verb on the row the menu was opened over, not a capture that landed under it" do
+    clipboard = Gori::Settings.clipboard_osc52?
+    Gori::Settings.clipboard_osc52 = false
+    begin
+      TuiContract.with_session("runner-follow-hold") do |session|
+        store = session.store
+        runner_spec_flow(store, "/old")
+        looked_at = runner_spec_flow(store, "/looked-at")
+        runner = RunnerSpecShell.new(session, RunnerSpecTerminal.allocate)
+        runner.focus_tab(:history)
+        history = runner.history
+        settle_history(history, store)
+        history.view.follow?.should be_true
+        history.view.selected_id.should eq(looked_at)
+
+        runner.open_space_menu
+        runner.space_menu_open?.should be_true
+        arrived = runner_spec_capture(history, store, "/arrived-under-menu")
+        history.view.rows.first.id.should eq(arrived)
+        history.view.selected_id.should eq(looked_at)
+        runner.run_from_space_menu("history.copy")
+        Gori::Tui::Register.text.should eq(runner_spec_request("/looked-at"))
+
+        # The palette holds it the same way.
+        runner.open_palette
+        palette_arrival = runner_spec_capture(history, store, "/arrived-under-palette")
+        history.view.rows.first.id.should eq(palette_arrival)
+        history.view.selected_id.should eq(looked_at)
+        runner.close_palette
+
+        # Nothing open: follow takes the next capture, as it always did.
+        newest = runner_spec_capture(history, store, "/after-close")
+        history.view.selected_id.should eq(newest)
+      end
+    ensure
+      Gori::Settings.clipboard_osc52 = clipboard
+      Gori::Tui::Register.clear
     end
   end
 

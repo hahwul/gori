@@ -1,6 +1,13 @@
 require "../spec_helper"
 require "../support/memory_backend"
 
+# The border's "↑N new" count, read directly: `activity_meta` formats it.
+class Gori::Tui::ProjectView
+  def new_above_for_spec : Int32
+    @act_new_above
+  end
+end
+
 include Gori::Tui
 
 # The Project tab's ACTIVITY pane (#864) — the human window over the #124 event feed.
@@ -279,6 +286,60 @@ describe "ProjectView ACTIVITY pane" do
       ids = view.activity_rows.map(&.id)
       ids.should eq(ids.sort.reverse!)
       (ids.first - ids.last + 1).should eq(ids.size)
+    end
+  end
+
+  # A card over the tab (`Host#list_cursor_held?`) holds a FOLLOWING cursor on its event: the
+  # `activity.open` / `activity.copy` it runs reads the row when it runs. The cursor still on
+  # that event is still following, so the first refresh after the card closes goes back to
+  # the head.
+  it "keeps a following cursor on its event while a card is open, then follows again" do
+    tmp_store do |store, project|
+      seed(store)
+      view = activity_view(store, project)
+      view.reload_activity(store)
+      looked_at = view.activity_selected_row.not_nil!
+      view.activity_rows.first.id.should eq(looked_at.id)
+
+      store.insert_event("agent", "agent_action", "info", "arrived under the menu")
+      store.flush
+      view.refresh_activity(store, hold: true)
+      view.activity_rows.first.message.should eq("arrived under the menu")
+      view.activity_selected_row.not_nil!.id.should eq(looked_at.id)
+
+      store.insert_event("agent", "agent_action", "info", "after the menu closed")
+      store.flush
+      view.refresh_activity(store)
+      view.activity_selected_row.not_nil!.message.should eq("after the menu closed")
+    end
+  end
+
+  # A burst bigger than the catch-up walk (ACT_CATCHUP_PAGES × ACT_PAGE) falls back to a full
+  # reload, which replaces the list, and the held event is not on page one. Under a card the
+  # list is kept instead; the first refresh after the card closes reloads and follows.
+  it "keeps the held event through a burst the catch-up walk cannot cover" do
+    tmp_store do |store, project|
+      5.times { |i| store.insert_event("agent", "agent_action", "info", "seed #{i}") }
+      store.flush
+      view = activity_view(store, project)
+      view.reload_activity(store)
+      looked_at = view.activity_selected_row.not_nil!
+
+      burst = ProjectView::ACT_CATCHUP_PAGES * ProjectView::ACT_PAGE + 100
+      burst.times { |i| store.insert_event("agent", "agent_action", "info", "burst #{i}") }
+      store.flush
+      view.refresh_activity(store, hold: true)
+      view.activity_selected_row.not_nil!.id.should eq(looked_at.id)
+      counted = view.new_above_for_spec
+      # The list is kept, so the next held tick walks the same pages from the same head: the
+      # burst it already announced is not new again.
+      2.times { view.refresh_activity(store, hold: true) }
+      view.new_above_for_spec.should eq(counted)
+
+      store.insert_event("agent", "agent_action", "info", "after the menu closed")
+      store.flush
+      view.refresh_activity(store)
+      view.activity_selected_row.not_nil!.message.should eq("after the menu closed")
     end
   end
 

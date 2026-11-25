@@ -621,7 +621,7 @@ module Gori::Tui
     # As `reload_activity`, but keeps the pages already loaded. Same rescue, same reason: the
     # rows ARE the answer, so a swallowed read error must not render as a quiet feed.
     def refresh_activity : Nil
-      @project_view.refresh_activity(@host.session.store)
+      @project_view.refresh_activity(@host.session.store, @host.list_cursor_held?)
     rescue ex : DB::Error | SQLite3::Exception
       Log.warn(exception: ex) { "activity: event feed refresh failed" }
       @host.status("could not read the event feed — see gori.log")

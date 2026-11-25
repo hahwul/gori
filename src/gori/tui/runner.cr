@@ -5576,6 +5576,19 @@ module Gori::Tui
       @overlay.detail? ? history_controller.view.detail_flow_id : nil
     end
 
+    # `Host#list_cursor_held?`: a card a verb runs from is up, so a following list keeps its
+    # cursor on the row the operator opened it over. The space menu (its family cards are a
+    # level of it), the two prompt-tier pickers, and every `@overlay` but the History drill-in,
+    # which is not a card: its verbs act on the flow it pins (`history_target_flow_ids`), and
+    # live capture advancing the list under it is the documented behaviour (`detail_row_index`).
+    # A card opened OVER the drill-in takes the drill-in's slot, so it holds. The palette is an
+    # `@overlay` too, and the confirm a verb raises is one, so the target the card was opened
+    # on stays the target through to the confirm's ↵.
+    def list_cursor_held? : Bool
+      return true if @space_menu_open || copy_as_shown? || send_to_shown?
+      !(@overlay.none? || @overlay.detail?)
+    end
+
     # Hard ceiling on batch verbs that spawn a sub-tab or a session per flow (Repeater,
     # Fuzzer, Miner). ⇧T over a filtered list can mark up to HistoryView::PAGE (1000) rows,
     # and "open 1000 sub-tabs?" is a question with no good answer — so refuse above this

@@ -592,7 +592,7 @@ module Gori::Tui
 
     private def apply_event(v : SequencerView, ev : Sequencer::Event) : Nil
       case ev
-      when Sequencer::SampleEvent then v.append_sample(ev.sample)
+      when Sequencer::SampleEvent then v.append_sample(ev.sample, @host.list_cursor_held?)
       when Sequencer::ProgressEvent
         v.apply_progress(ev.collected, ev.sent, ev.goal, ev.errors, ev.requests)
         denom = ev.goal <= 0 ? ev.collected : ev.goal

@@ -75,6 +75,16 @@ module Gori::Tui
       nil
     end
 
+    # Is something floating over the tab that a verb will run from — the space menu or a
+    # family card, the palette, a prompt-tier picker, a modal or a confirm? A live feed that
+    # follows its tail (History, Sequencer samples, Project activity) must not move its cursor
+    # then: the verb resolves its target when it runs, so a row landing under the card became
+    # the target of a menu opened over another one. A default, as above: spec hosts have no
+    # card to hold the cursor under.
+    def list_cursor_held? : Bool
+      false
+    end
+
     def diff_to_comparer : Nil
     end
 
