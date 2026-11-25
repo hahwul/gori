@@ -392,21 +392,29 @@ private class DecliningFuzzHost < FakeHost
   end
 end
 
-# A finished, never-saved run of `rows` results on a session that can run again.
-private def unsaved_fuzz_run(ctl : FuzzerController, payloads : Array(String), rows : Int32 = 2) : FuzzerView
+# A finished, never-saved run of `rows` results on a session that can run again. `hits` rows
+# match under a real match rule (status 200); with `hits: nil` the run has no rule at all.
+private def unsaved_fuzz_run(ctl : FuzzerController, payloads : Array(String), rows : Int32 = 2,
+                             hits : Int32? = 1) : FuzzerView
   ctl.fuzz_from_request("http://a.invalid", "GET /?x=§1§ HTTP/1.1\r\nHost: a.invalid\r\n\r\n", false, nil)
   view = ctl.current_view.not_nil!
   view.apply_set(nil, SetSpec.list(payloads))
+  view.matcher.match_status = "200" if hits
   view.begin_run(rows.to_i64)
-  rows.times { |i| view.append_result(fuzz_result(i)) }
+  rows.times do |i|
+    hit = !hits.nil? && i < hits
+    view.append_result(Gori::Fuzz::Result.new(i.to_i64, ["p#{i}"], nil, hit ? 200 : 404, 10_i64, 3, 1,
+      1000_i64, nil, hit, false, nil, shape: i.to_i64))
+  end
   view.finish_run("done")
   view
 end
 
 # ^R replaced RESULTS and deleted the run's private spool without a word, while loading a saved
-# run over the same rows asked first. The two now ask the same question.
+# run over the same rows asked first. It asks now, but only over a run that found something,
+# and ↵ runs: tweak-and-re-run is the loop, and `^R ↵` must always run.
 describe "FuzzerController#fuzz_run over unsaved results" do
-  it "asks before a re-run replaces them, and keeps them when the operator cancels" do
+  it "pauses on a run with hits, and keeps them when the operator cancels" do
     with_fuzzer_controller do |_, session|
       host = DecliningFuzzHost.new(session)
       ctl = FuzzerController.new(host)
@@ -416,8 +424,8 @@ describe "FuzzerController#fuzz_run over unsaved results" do
       host.asked.size.should eq(1)
       title, message, danger = host.asked.first
       title.should eq("REPLACE UNSAVED RESULTS")
-      message.should contain("2-row run has not been saved")
-      danger.should be_true # ↵ is cancel, as on the history-load card
+      message.should contain("2-row run (1 hit) has not been saved")
+      danger.should be_false # ↵ runs
       view.running?.should be_false
       view.result_count.should eq(2)
       view.results_saveable?.should be_true # ⇧E can still keep them
@@ -428,7 +436,22 @@ describe "FuzzerController#fuzz_run over unsaved results" do
     end
   end
 
-  it "folds the question into the large-run card instead of stacking a second one" do
+  it "re-runs a sweep that found nothing with no card" do
+    with_fuzzer_controller do |_, session|
+      [0, nil].each do |hits|
+        host = DecliningFuzzHost.new(session)
+        ctl = FuzzerController.new(host)
+        view = unsaved_fuzz_run(ctl, ["a", "b"], hits: hits) # no hit / no match rule at all
+        view.results_saveable?.should be_true
+        ctl.fuzz_run
+        host.asked.should be_empty
+        view.running?.should be_true
+        ctl.stop_all
+      end
+    end
+  end
+
+  it "folds the question into the large-run card, which ↵ still runs" do
     with_fuzzer_controller do |_, session|
       host = DecliningFuzzHost.new(session)
       ctl = FuzzerController.new(host)
@@ -438,8 +461,14 @@ describe "FuzzerController#fuzz_run over unsaved results" do
       title, message, danger = host.asked.first
       title.should eq("RUN FUZZ")
       message.should contain("has not been saved and will be replaced")
-      danger.should be_true
+      danger.should be_false
       view.running?.should be_false
+
+      quiet = DecliningFuzzHost.new(session)
+      ctl2 = FuzzerController.new(quiet)
+      unsaved_fuzz_run(ctl2, (1..1001).map(&.to_s), hits: 0)
+      ctl2.fuzz_run
+      quiet.asked.first[1].should_not contain("has not been saved")
     end
   end
 
@@ -465,7 +494,7 @@ describe "FuzzerController#fuzz_run over unsaved results" do
       ctl.save_all
       ctl.load_saved_run(1_i64)
       host.asked.first[0].should eq("REPLACE UNSAVED RESULTS")
-      host.asked.first[1].should contain("2-row run has not been saved and will be replaced")
+      host.asked.first[1].should contain("2-row run (1 hit) has not been saved and will be replaced")
     end
   end
 end

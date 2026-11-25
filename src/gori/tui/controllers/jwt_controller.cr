@@ -15,6 +15,13 @@ module Gori::Tui
     # time an operator is typing one in, which is exactly when a per-frame parse costs most.
     property? input_jwe : Bool = false
     property alg : String = "HS256"
+    # The HEADER's own top-level `alg` as of the last re-encode that could READ it (raw JSON, nil
+    # when a valid HEADER has none), so an edit that CHANGES it can move the badge while ^A,
+    # which leaves the header alone, does not get undone by the next keystroke. A HEADER that
+    # does not parse leaves it untouched. See `sync_alg_from_header`.
+    property header_alg_seen : String? = nil
+    # OUTPUT's line saying the signed header's alg is not the one HEADER shows, or nil.
+    property alg_note : String? = nil
     property attacks : Array(Jwt::Attack) = [] of Jwt::Attack
   end
 
@@ -84,6 +91,7 @@ module Gori::Tui
       dup.payload.set_text(src.payload.text)
       dup.secret = src.secret
       dup.alg = src.alg
+      dup.header_alg_seen = src.header_alg_seen # a ^A'd badge stays ^A'd in the copy
       recompute_output(dup)
       @sessions << dup
       @idx = @sessions.size - 1
@@ -105,7 +113,7 @@ module Gori::Tui
         s.view.render_encode(screen, body,
           header: s.header, payload: s.payload, secret: s.secret, secret_cx: s.secret_cx,
           secret_pre: s.secret_pre, alg: s.alg, output: s.output, output_ok: s.output_ok?,
-          pane: s.pane, focused: focused)
+          alg_note: s.alg_note, pane: s.pane, focused: focused)
       end
     end
 
@@ -491,6 +499,8 @@ module Gori::Tui
     end
 
     private def recompute_output(s : JwtSession) : Nil
+      sync_alg_from_header(s)
+      s.alg_note = nil
       if s.header.text.strip.empty? && s.payload.text.strip.empty?
         s.output = ""
         s.output_ok = true
@@ -498,12 +508,70 @@ module Gori::Tui
         begin
           s.output = Jwt.encode(s.header.text, s.payload.text, s.alg, s.secret)
           s.output_ok = true
+          s.alg_note = alg_note(s)
         rescue ex : Jwt::ForgeError
           s.output = ex.message || "invalid input"
           s.output_ok = false
         end
       end
       s.view.reset_output_scroll
+    end
+
+    # `Jwt.encode` FORCES the badge alg into the header (forge.cr: "so the wire header always
+    # matches the signature"), which is the engine's contract on every surface. The CLI and MCP
+    # name that alg as an argument; here it is a badge two cards away from the HEADER the
+    # operator is typing in, so `"alg": "none"` typed into HEADER went out as an HS256 token and
+    # nothing on screen said so. So the TUI keeps the two together instead of changing the
+    # engine: an edit that changes HEADER's alg to one gori signs moves the badge to it (with
+    # `set_alg`'s key boundary), and anything else it cannot carry is SAID on OUTPUT
+    # (`alg_note`), never replaced in silence. HEADER is the operator's text and is never
+    # rewritten: ^A changes the badge only, and OUTPUT then says the two differ.
+    #
+    # Two things a HEADER edit never does. It never reads a HEADER that does not parse as a
+    # change: nearly every typed edit passes through invalid JSON, and treating the return to
+    # valid as "the alg changed" snapped a ^A'd badge back. And it never clears SECRET: an alg
+    # across the HMAC/asymmetric boundary leaves the badge and the key alone and is left to the
+    # OUTPUT warning; only ^A (or loading a token) may make that crossing.
+    private def sync_alg_from_header(s : JwtSession) : Nil
+      parsed, written = header_alg(s.header.text)
+      return unless parsed                   # mid-edit: nothing was read, so nothing changed
+      return if written == s.header_alg_seen # HEADER's alg did not change: keep the badge (^A)
+      s.header_alg_seen = written
+      return unless (a = written.try { |w| alg_string(w) }) && Jwt::ALGS.includes?(a) && a != s.alg
+      return if Jwt::Asym.alg?(a) != Jwt::Asym.alg?(s.alg) # the key would change meaning
+      set_alg(s, a)
+      @host.status("alg = #{a} (from HEADER)")
+    end
+
+    # `{parsed, raw}`: whether HEADER reads as a JSON object (an empty one counts, as cleared),
+    # and the raw JSON of its last top-level `alg` member (the one `JSON.parse` would read), nil
+    # when it has none.
+    private def header_alg(text : String) : {Bool, String?}
+      return {true, nil} if text.strip.empty?
+      members = RawJson.members(text) || return {false, nil}
+      {true, members.reverse_each.find { |(k, _)| k == "alg" }.try(&.[1])}
+    rescue JSON::ParseException
+      {false, nil}
+    end
+
+    private def header_alg_raw(text : String) : String?
+      header_alg(text)[1]
+    end
+
+    private def alg_string(raw : String) : String?
+      JSON.parse(raw).as_s?
+    rescue JSON::ParseException
+      nil
+    end
+
+    # The line OUTPUT carries when the token it shows does not have HEADER's alg: an alg gori
+    # cannot sign (`nOnE`, `HS999`, a non-string), a missing one, or a badge ^A moved off it.
+    private def alg_note(s : JwtSession) : String?
+      written = header_alg_raw(s.header.text)
+      return nil if written && alg_string(written) == s.alg
+      cycle = Hotkeys.binding_label(@host.session.registry, "jwt.cycle-alg", "^A")
+      shown = written ? "alg #{written}" : "no alg"
+      "// WARNING: HEADER has #{shown}, signed as #{s.alg} (#{cycle} alg)"
     end
   end
 end

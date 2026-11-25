@@ -1205,6 +1205,13 @@ module Gori::Tui
       result_count > retained_result_count
     end
 
+    # A finished run whose rows say something a re-run would lose: hits under a real match rule
+    # (with no rule every row "matches", which is no finding), or the row its stop condition
+    # tripped on. `FuzzerController#fuzz_run` asks before replacing only these.
+    def results_have_findings? : Bool
+      (@run_selective && matched_count > 0) || !@run_stop_idx.nil?
+    end
+
     def results_saveable? : Bool
       !@running && @result_io_state == ResultIoState::Ready && @saved_run_id.nil? && result_count > 0
     end
@@ -3410,7 +3417,12 @@ module Gori::Tui
     # always published it (`Fuzz::Progress#requests`).
     # Public so a spec can assert on the exact string the border draws — the whole defect
     # was a header reporting a different number from the one on the wire.
-    def results_count_label : String
+    #
+    # `width` is the RESULTS card's: given it, the label sheds its own ending-state additions
+    # (the ending chip, then the `/total`) before it would push the DIST / MATCH badges off the
+    # border. A lit MATCH is the only sign that the matched-only lens hides rows, so it outranks
+    # them. `results_chrome_hit` passes the same width, so the hit boxes measure what was drawn.
+    def results_count_label(width : Int32? = nil) : String
       p = @progress
       req = p ? p.requests : 0_i64
       if @running
@@ -3430,8 +3442,22 @@ module Gori::Tui
         # The row the run ended on (issue #1270), standing — the row itself can be scrolled
         # away, windowed out, or hidden by the matched-only lens.
         stop = FuzzerView.stop_chip(@run_stop_idx)
-        "#{sent_of_total} sent#{extra} · #{hit_label}#{ending_chip}#{stop}#{window}#{archive}#{saved}#{shapes_chip}"
+        fit_count_label(width, "#{extra} · #{hit_label}", "#{stop}#{window}#{archive}#{saved}#{shapes_chip}")
       end
+    end
+
+    # Where the RESULTS count starts on the card's top border: past ` RESULTS `.
+    COUNT_LABEL_X = 11
+
+    # The finished label at its longest that still leaves the DIST and MATCH badges their room:
+    # whole, then without the ending chip, then without the `/total` as well.
+    private def fit_count_label(width : Int32?, mid : String, tail : String) : String
+      full = "#{sent_of_total} sent#{mid}#{ending_chip}#{tail}"
+      return full unless width
+      room = width - COUNT_LABEL_X - 2 - Frame.badge_text("DIST").size - Frame.badge_text("MATCH").size
+      return full if full.size <= room
+      no_ending = "#{sent_of_total} sent#{mid}#{tail}"
+      no_ending.size <= room ? no_ending : "#{result_count} sent#{mid}#{tail}"
     end
 
     # `5/12` for a run that ended short of its plan, `12` for one that sent it all (or had no
@@ -3460,7 +3486,7 @@ module Gori::Tui
       Frame.card(screen, rect, "RESULTS", bg: Theme.bg, border: Frame.pane_border(focused))
       # Left: the live count. Right: keyed toggle badges (sort value · matched · dist) so
       # each results toggle's shortcut rides the border, not just the bottom hint bar.
-      count = results_count_label
+      count = results_count_label(rect.w)
       # +11 clears the " RESULTS " title; the trailing space keeps the count off the hairline
       # that resumes after it (`╭─ RESULTS 0 sent · 0 hit────` read as one glued token).
       screen.text(rect.x + 11, rect.y, "#{count} ", Theme.muted, Theme.bg)
@@ -4307,7 +4333,7 @@ module Gori::Tui
     def results_chrome_hit(rect : Rect, mx : Int32, my : Int32) : Symbol?
       return nil unless pane = results_rect(rect)
       return nil if pane.w < 2 || my != pane.y
-      min_x = pane.x + 11 + results_count_label.size + 1
+      min_x = pane.x + 11 + results_count_label(pane.w).size + 1
       Frame.right_badge_hit(mx, my, pane.y, pane.right - 1, min_x, [
         {:dist, "DIST"},
         {:match, "MATCH"},

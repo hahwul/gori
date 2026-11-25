@@ -75,7 +75,8 @@ module Gori::Tui
     # ===================== ENCODE lens =====================
     def render_encode(screen : Screen, rect : Rect, *, header : TextArea, payload : TextArea,
                       secret : String, secret_cx : Int32, secret_pre : String, alg : String,
-                      output : String, output_ok : Bool, pane : Symbol, focused : Bool) : Nil
+                      output : String, output_ok : Bool, pane : Symbol, focused : Bool,
+                      alg_note : String? = nil) : Nil
       return if rect.empty?
       hdr_c, pay_c, sec_c, out_c = encode_layout(rect)
 
@@ -88,6 +89,9 @@ module Gori::Tui
       render_secret(screen, sec_c, secret, secret_cx, secret_pre, alg, focused && pane == :secret) unless sec_c.empty?
       unless out_c.empty?
         out_lines = output_ok ? output.split('\n') : ["✗ #{output}"]
+        # Under the token, not over it: the token is what `y` copies and the first line a short
+        # card keeps. A `// WARNING` line is drawn red by `draw_text_card`.
+        alg_note.try { |n| out_lines << n }
         @out_lines = out_lines.size
         # Just "OUTPUT". The failure is already the body's first line (`✗ <reason>`, in red,
         # two lines below) — the title said a shorter version of the same thing, and a card

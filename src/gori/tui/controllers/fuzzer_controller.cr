@@ -1283,24 +1283,24 @@ module Gori::Tui
       # Max requests caps the wire, so it bounds the prompt too (#1209).
       bound = Fuzz.request_bound(total, v.config.max_requests, engine.macro_requests(total))
       # A re-run replaces RESULTS and deletes the last run's private spool, so a finished run
-      # nobody saved is gone for good — the same loss `load_saved_run` asks about first. Asked
-      # off the predicate ⇧E itself is gated on, so the prompt appears exactly when saving was
-      # still possible; a saved or restored run, or one whose archive failed, has nothing ⇧E
-      # could keep and re-runs as before.
-      unsaved = v.results_saveable? ? replace_unsaved_line(v) : nil
+      # nobody saved is gone for good — the loss `load_saved_run` asks about first. Asked only
+      # when ⇧E could still keep it (`results_saveable?`) AND it found something
+      # (`results_have_findings?`): tweak-and-re-run is the Fuzzer's loop, and a card on every
+      # ^R over a sweep with no hits was friction with nothing to protect. It is NOT a danger
+      # card either — ↵ runs, so `^R ↵` always runs, and the card is a pause that names the hits.
+      unsaved = v.results_saveable? && v.results_have_findings? ? replace_unsaved_line(v) : nil
       if bound.nil? || bound > CONFIRM_THRESHOLD
         e = engine
         # Name the archive policy: `keep: interesting` spools only the interesting rows, so the
         # confirm should not promise "every result is spooled" (issue #1240).
         spooled = v.config.keep.interesting? ? "Only interesting results (matched + error/re-send/incomplete/stop) are spooled" : "Every result is privately spooled"
-        # One card, not two in a row: the large-run question gains the unsaved line, and turns
-        # into a danger card (↵ = cancel) like REPLACE UNSAVED RESULTS when it carries one.
+        # One card, not two in a row: the large-run question gains the unsaved line.
         @host.confirm("RUN FUZZ", "Send #{bound ? bound.to_s : "an unknown number of"} requests to #{v.target_origin}?\n#{spooled}; the pane keeps at most 5,000 rows / 64 MiB.#{payload_confirm(v)}#{unsaved.try { |u| "\n#{u}" }}",
-          confirm_label: "run", danger: !unsaved.nil?) { start_run(v, e, total) }
+          confirm_label: "run", danger: false) { start_run(v, e, total) }
       elsif unsaved
         e = engine
         @host.confirm("REPLACE UNSAVED RESULTS", "Start a new run?\n#{unsaved}",
-          confirm_label: "run", danger: true) { start_run(v, e, total) }
+          confirm_label: "run", danger: false) { start_run(v, e, total) }
       else
         start_run(v, engine, total)
       end
@@ -1310,7 +1310,8 @@ module Gori::Tui
     # `load_saved_run`), with the key that keeps the rows: cancel, save, then run or load.
     private def replace_unsaved_line(v : FuzzerView) : String
       save = Hotkeys.binding_label(@host.session.registry, "fuzz.save-results", "⇧E")
-      "The current #{v.result_count}-row run has not been saved and will be replaced (#{save} saves it)."
+      hits = v.results_have_findings? ? " (#{v.hit_label})" : ""
+      "The current #{v.result_count}-row run#{hits} has not been saved and will be replaced (#{save} saves it)."
     end
 
     private def start_run(v : FuzzerView, engine : Fuzz::Engine, total : Int64?) : Nil
