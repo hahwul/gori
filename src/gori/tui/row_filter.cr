@@ -118,6 +118,33 @@ module Gori::Tui
       "type to filter · ↵ keep · esc clear"
     end
 
+    # The status row's width at 80×24 — every toast a filtered list raises fits it whole, so
+    # the cut never lands on the half that says where the rule went.
+    TOAST_COLS = 59
+
+    # What a toast appends when the query hides the rule a write just saved: ` · hidden by /`,
+    # or ` · 2 hidden by /` for a write that saved several (`of`). Short on purpose — the
+    # remedy in words is `hidden_detail`, for the Notifications card. `key` is the filter
+    # verb's chord, already resolved through the keymap by the caller.
+    def self.hidden_suffix(key : String, hidden : Int32 = 1, of : Int32 = 1) : String
+      " · #{of > 1 ? "#{hidden} " : ""}hidden by #{key}"
+    end
+
+    # The long form of a `hidden_suffix` toast, for the Notifications card.
+    def hidden_detail(key : String) : String
+      "The filter “#{text.strip}” hides it; it is saved and in effect. #{key} then esc clears the filter."
+    end
+
+    # A filtered card's border count, every number read off the SAME list: `E/S enabled` over
+    # the rows on screen, plus `· T total` while a query hides some (`total` is the unfiltered
+    # size). The Rewriter and Colormarker cards used to put the engine's count of EVERY enabled
+    # rule over the filtered row count, so one query read `2/1 enabled` and, two adds later,
+    # `4/1` — a ratio of two different lists.
+    def self.count_meta(enabled : Int32, shown : Int32, total : Int32) : String
+      meta = "#{enabled}/#{shown} enabled"
+      total > shown ? "#{meta} · #{total} total" : meta
+    end
+
     # The empty-state line for a pane whose source has rows but none match. `remedy` is for a
     # pane whose `esc` at rest does something else.
     def no_match_line(noun : String, remedy : String = "esc to clear") : String

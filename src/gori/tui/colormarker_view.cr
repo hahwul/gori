@@ -1,5 +1,6 @@
 require "./frame"
 require "./theme"
+require "./row_filter"
 
 module Gori::Tui
   # The Colormarker tab body: one list of row-colour rules, and nothing else.
@@ -77,14 +78,15 @@ module Gori::Tui
     getter meta_x : Int32? = nil
 
     def render(screen : Screen, rect : Rect, rules : Array(Store::ColorRule),
-               sel : Int32, scroll : Int32, enabled_count : Int32, focused : Bool) : Nil
+               sel : Int32, scroll : Int32, total : Int32, focused : Bool) : Nil
       @meta_x = nil
       return if rect.w < 6 || rect.h < LIST_MIN_H
       # No border TITLE: this card IS the tab, and the tab bar two rows above already names it —
       # `COLORMARKER` inside the body frame printed the word a second time. The enabled/global
       # tally stays: that is the part of the border that carries information.
       Frame.card(screen, rect, bg: Theme.bg, border: Frame.pane_border(focused))
-      meta = "#{enabled_count}/#{rules.size} enabled"
+      # Every number off ONE list — see `RowFilter.count_meta`.
+      meta = RowFilter.count_meta(rules.count(&.enabled?), rules.size, total)
       # How many come from the global library, so the split stays legible when the list is
       # scrolled past the `G` rows. Only when there ARE any — a project with none should not
       # pay border width to be told "0 global".

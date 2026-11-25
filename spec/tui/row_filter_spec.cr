@@ -146,4 +146,22 @@ describe "Frame.filter_label" do
     RowFilter.label_limit(rect, 40).should eq(30) # a short meta past the three fifths
     RowFilter.label_limit(rect, 22).should eq(22) # a long one: the label yields
   end
+
+  # The Rewriter and Colormarker cards' count: every number off the list on screen, plus the
+  # whole list's size only while a query hides some of it.
+  it "counts the shown rows, and names the total only while some are hidden" do
+    RowFilter.count_meta(2, 3, 3).should eq("2/3 enabled")
+    RowFilter.count_meta(1, 1, 4).should eq("1/1 enabled · 4 total")
+    RowFilter.count_meta(0, 0, 4).should eq("0/0 enabled · 4 total")
+  end
+
+  # The toast half stays short for the 59-column status row; the remedy is the detail's.
+  it "says a saved rule is hidden in a few words, and how to clear the filter in the detail" do
+    RowFilter.hidden_suffix("/").should eq(" · hidden by /")
+    RowFilter.hidden_suffix("/", 2, 4).should eq(" · 2 hidden by /")
+    f = RowFilter.new
+    f.start
+    "crlf".each_char { |c| f.handle_key(key(Termisu::Input::Key::LowerA, c)) }
+    f.hidden_detail("/").should eq("The filter “crlf” hides it; it is saved and in effect. / then esc clears the filter.")
+  end
 end

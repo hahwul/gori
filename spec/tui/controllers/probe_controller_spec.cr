@@ -1,5 +1,6 @@
 require "../../spec_helper"
 require "../../support/fake_host"
+require "../../support/tui_contract"
 
 include Gori::Tui
 
@@ -50,6 +51,54 @@ describe ProbeController do
       ctl.apply_custom_rule(CustomRuleOverlay.new(title: "w3 needle", description: "d", scope: "project",
         side: "response", region: "body", kind: "string", severity: "low", pattern: "zzneedle")).should be_true
       ctl.rules.selected_row.try(&.title).should eq("w3 needle")
+    end
+  end
+end
+
+# A saved custom rule the RULES `/` query hides: "added custom rule" over a list that did not
+# change read as a write that never happened, while the rule was scanning every flow.
+describe "ProbeController custom rules under a `/` filter" do
+  it "says a new rule is hidden by the filter" do
+    with_probe_controller do |ctl, host, session|
+      ctl.rules.reload(session.store)
+      ctl.rules_filter
+      "zzqq".each_char { |c| ctl.handle_list_filter_key(TuiContract.plain(c)) }
+      ctl.handle_list_filter_key(TuiContract.key(Termisu::Input::Key::Enter))
+      ctl.apply_custom_rule(CustomRuleOverlay.new(title: "w3 needle", description: "d", scope: "project",
+        side: "response", region: "body", kind: "string", severity: "low", pattern: "zzneedle")).should be_true
+      host.statuses.last.should eq("custom rule added · hidden by /")
+    end
+  end
+
+  it "keeps the plain toast when the query shows the rule" do
+    with_probe_controller do |ctl, host, session|
+      ctl.rules.reload(session.store)
+      ctl.rules_filter
+      "needle".each_char { |c| ctl.handle_list_filter_key(TuiContract.plain(c)) }
+      ctl.handle_list_filter_key(TuiContract.key(Termisu::Input::Key::Enter))
+      ctl.apply_custom_rule(CustomRuleOverlay.new(title: "w3 needle", description: "d", scope: "project",
+        side: "response", region: "body", kind: "string", severity: "low", pattern: "zzneedle")).should be_true
+      host.statuses.last.should eq("added custom rule")
+      ctl.rules.selected_row.try(&.title).should eq("w3 needle")
+    end
+  end
+end
+
+describe "ProbeController custom-rule toasts" do
+  it "say an edit the query hides, inside the 80×24 status row" do
+    with_probe_controller do |ctl, host, session|
+      id = session.store.insert_probe_custom_rule("w3 needle", "d", "response", "body", "string",
+        "zzneedle", Gori::Store::Severity::Low)
+      ctl.rules.reload(session.store)
+      ctl.rules_filter
+      "needle".each_char { |c| ctl.handle_list_filter_key(TuiContract.plain(c)) }
+      ctl.handle_list_filter_key(TuiContract.key(Termisu::Input::Key::Enter))
+      ctl.apply_custom_rule(CustomRuleOverlay.new(title: "renamed", description: "d", scope: "project",
+        side: "response", region: "body", kind: "string", severity: "low", pattern: "zzpin",
+        edit_id: id.to_s, edit_scope: "project")).should be_true
+      host.statuses.last.should eq("custom rule updated · hidden by /")
+      host.statuses.each { |toast| Screen.display_width(toast).should be <= RowFilter::TOAST_COLS }
+      host.notifications.all.last.detail.not_nil!.should contain("“needle”")
     end
   end
 end

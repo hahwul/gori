@@ -868,6 +868,7 @@ module Gori::Tui
               return false
             end
           end
+          landed = "custom_#{from[0]}_#{id}"
         else
           # A scope change is a MOVE between the two libraries, and both halves answer. INSERT
           # FIRST: a refused insert after a committed delete loses the rule outright, while a
@@ -878,7 +879,7 @@ module Gori::Tui
           # the form carries no `enabled` field, so a rule the operator had turned off started
           # scanning again the moment its scope was cycled — a muted rule un-muting itself with
           # nothing on the strip to say so.
-          unless insert_custom_rule(ov, store, enabled: custom_rule_enabled?(id, from, store))
+          unless landed = insert_custom_rule(ov, store, enabled: custom_rule_enabled?(id, from, store))
             @host.status("rule \"#{ov.rule_title}\" NOT moved (#{write_cause(ov.scope)}) — " \
                          "it is still #{from}")
             return false
@@ -892,18 +893,32 @@ module Gori::Tui
             return true
           end
         end
-        @host.status("updated custom rule")
+        done = "updated custom rule"
       else
-        unless added = insert_custom_rule(ov, store)
+        unless landed = insert_custom_rule(ov, store)
           @host.status("rule \"#{ov.rule_title}\" NOT added (#{write_cause(ov.scope)}) — " \
                        "nothing is scanning for it")
           return false
         end
-        @host.status("added custom rule")
+        done = "added custom rule"
       end
       reload_rules
-      @rules.select_rule(added) if added # the new row is the one the operator is looking for
+      report_saved(landed, done, edited: !ov.edit_id.nil?)
       true
+    end
+
+    # Land on the saved rule's row (`landed`, its key), the one the operator is looking for.
+    # When the `/` query hides it the cursor stays where `reload` re-anchored it, and the toast
+    # says why the rule is not on screen: "added custom rule" over a list that did not change
+    # read as a write that never happened, while the rule was scanning every flow. Short, for
+    # the 59-column status row; the remedy in words goes to the Notifications card.
+    private def report_saved(landed : String, done : String, edited : Bool) : Nil
+      return @host.status(done) if @rules.select_rule(landed)
+      key = keys("{probe-rules.filter}")
+      head = edited ? "custom rule updated" : "custom rule added"
+      @host.status(head + RowFilter.hidden_suffix(key))
+      @host.notifications.push(:info, "Probe: #{head}, hidden by the filter", source: "probe",
+        detail: @rules.filter.hidden_detail(key))
     end
 
     # The new rule's row key (`CustomRule#code`), or nil when it did not reach its library.

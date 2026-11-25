@@ -1,6 +1,7 @@
 require "./screen"
 require "./fmt"
 require "./theme"
+require "./row_filter"
 require "./frame"
 require "./text_area"
 require "./read_pane"
@@ -75,7 +76,7 @@ module Gori::Tui
     # through the keymap (`TabController#keys`), because the view has no registry and the
     # line names a chord — the literal default here is for a registry-less render.
     def render(screen : Screen, rect : Rect, rules : Array(Store::MatchRule), sel : Int32,
-               scroll : Int32, enabled_count : Int32, focus : Symbol, body_focused : Bool,
+               scroll : Int32, total : Int32, focus : Symbol, body_focused : Bool,
                preview_input : TextArea, preview_out : ReadPane,
                target : Store::RuleTarget = Store::RuleTarget::Request, host : String = "",
                empty_hint : String = "no rules — a add · p preset") : Nil
@@ -83,7 +84,7 @@ module Gori::Tui
       return if rect.w < 6 || rect.h < 2
       render_sub_strip(screen, rect, :rules)
       list_r, pin_r, pout_r = layout(rect)
-      render_list(screen, list_r, rules, sel, scroll, enabled_count,
+      render_list(screen, list_r, rules, sel, scroll, total,
         body_focused && focus == :list, empty_hint)
       unless pin_r.empty?
         render_preview_input(screen, pin_r, preview_input, body_focused && focus == :preview_in, target)
@@ -267,11 +268,13 @@ module Gori::Tui
     getter meta_x : Int32? = nil
 
     private def render_list(screen : Screen, rect : Rect, rules : Array(Store::MatchRule),
-                            sel : Int32, scroll : Int32, enabled_count : Int32,
+                            sel : Int32, scroll : Int32, total : Int32,
                             focused : Bool, empty_hint : String) : Nil
       return if rect.w < 6 || rect.h < 2
       Frame.card(screen, rect, RULES_TITLE, bg: Theme.bg, border: Frame.pane_border(focused))
-      meta = "#{enabled_count}/#{rules.size} enabled"
+      # Every number off ONE list — see `RowFilter.count_meta`. `enabled` counts what rewrites
+      # (`active?`): an inert rule is listed, never applied.
+      meta = RowFilter.count_meta(rules.count(&.active?), rules.size, total)
       # How many of them come from the global library, so the split is legible even when the
       # list is scrolled past the `G` rows. Only when there ARE any — a project with none
       # should not pay border width to be told "0 global".
