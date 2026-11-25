@@ -66,7 +66,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # The cursor copies a raw request; marks copy URLs, even with a single mark.
   def copy_selection : Nil
     ids = history_target_flow_ids
-    if history_mark_menu_count > 0
+    return if !ids.empty? && history_hidden_marks_gate?("COPY", "Copy the URLs of") { copy_selection }
+    if history_mark_menu_count > 0 && !history_cursor_pick?
       history_controller.copy_urls(ids)
     else
       history_controller.copy_selection(ids.first?)

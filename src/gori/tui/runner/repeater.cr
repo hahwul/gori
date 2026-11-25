@@ -9,19 +9,28 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def repeater_selected : Nil
     ids = history_target_flow_ids
     return (@toast = "select a flow first") if ids.empty?
-    return repeater_controller.repeater_flow(ids.first) if ids.size == 1
     return unless ids = batch_within_cap(ids, "Repeater")
+    # Too many marks is refused BEFORE the hidden-marks card: its "all N" answer could only be
+    # refused. Its cursor-row answer would pass, but that is one press of clearing the marks.
+    return if history_hidden_marks_gate?("SEND TO REPEATER", "Open in Repeater") { repeater_selected }
+    return repeater_controller.repeater_flow(ids.first) if ids.size == 1
     targets = ids
+    # Already asked on the hidden-marks card, which named the same set.
+    return repeater_open_flows(targets) if history_marks_picked?
     confirm("SEND TO REPEATER", "Open #{targets.size} flows as #{targets.size} Repeater sub-tabs?",
       confirm_label: "open", danger: false) do
-      opened = 0
-      targets.each do |id|
-        next unless @session.store.flow_row(id) # a stale mark: skip, report in the summary
-        repeater_controller.repeater_flow(id)
-        opened += 1
-      end
-      @toast = batch_summary("opened", opened, targets.size)
+      repeater_open_flows(targets)
     end
+  end
+
+  private def repeater_open_flows(targets : Array(Int64)) : Nil
+    opened = 0
+    targets.each do |id|
+      next unless @session.store.flow_row(id) # a stale mark: skip, report in the summary
+      repeater_controller.repeater_flow(id)
+      opened += 1
+    end
+    @toast = batch_summary("opened", opened, targets.size)
   end
 
   forward repeater_new : Nil, to: repeater_controller

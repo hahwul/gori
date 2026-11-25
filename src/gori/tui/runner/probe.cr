@@ -118,6 +118,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # a whole page — so an uncapped run would freeze the render loop and then offer to send
     # thousands of requests.
     return unless targets = batch_within_cap(ids, "the active scan")
+    # Too many marks is refused BEFORE the hidden-marks card: its "all N" answer could only be
+    # refused. Its cursor-row answer would pass, but that is one press of clearing the marks.
+    return if history_hidden_marks_gate?("ACTIVE SCAN", "Scan") { probe_active_selected }
     # Through the store, not the view's rows — a mark can outlive the visible window.
     details = targets.compact_map { |id| @session.store.get_flow(id) }
     return (@toast = "flow no longer available") if details.empty?

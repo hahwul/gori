@@ -2380,6 +2380,22 @@ module Gori::Tui
                 danger : Bool = true, return_to : Symbol = :none, &action : -> Nil) : Nil
       ov = ConfirmDialog.new(title, message, confirm_label: confirm_label,
         cancel_label: cancel_label, danger: danger)
+      open_confirm(ov, return_to) { action.call }
+    end
+
+    # `confirm` with a third button (`Host#confirm_or_alt`): `action` gets true when the
+    # operator chose `alt_label` (`c`), false for `confirm_label` (`y`). Same restore-then-act
+    # order and the same cancel paths — esc, `n`, a click off the card, a card too small to
+    # draw — none of which runs `action` at all. A nil `alt_label` is the plain two-button card.
+    def confirm_or_alt(title : String, message : String, *, confirm_label : String,
+                       alt_label : String?, danger : Bool, return_to : Symbol = :none,
+                       &action : Bool -> Nil) : Nil
+      ov = ConfirmDialog.new(title, message, confirm_label: confirm_label,
+        danger: danger, alt_label: alt_label)
+      open_confirm(ov, return_to) { action.call(ov.alt_selected?) }
+    end
+
+    private def open_confirm(ov : ConfirmDialog, return_to : Symbol, &action : -> Nil) : Nil
       back = OverlayKind.from_sym(return_to)
       # Capture the parent BEFORE open_overlay: that call overwrites @active_overlay, and
       # this is the only reference to the modal the confirm was raised from.
@@ -2553,6 +2569,7 @@ module Gori::Tui
     # current focus. Falls back to the plain smart-copy when the context has no format
     # variants (a decoded/hex pane), so the verb never dead-ends.
     def copy_as_open : Nil
+      return if history_hidden_marks_gate?("COPY AS", "Copy") { copy_as_open }
       title, options = copy_as_menu
       if options.empty?
         # No format variants here — degrade to the existing "Copy" behaviour.
@@ -5555,11 +5572,50 @@ module Gori::Tui
     # trim_window, or a follow-mode reload. Ids that no longer resolve are skipped and
     # counted in the summary toast rather than aborting the batch.
     def history_target_flow_ids : Array(Int64)
+      if picked = @history_marks_pick
+        return picked[0]
+      end
       if pin = @detail_pin
         return [pin]
       end
       return [history_controller.view.detail_flow_id].compact if @overlay.detail?
       history_controller.target_flow_ids
+    end
+
+    # The hidden-marks card's answer (HistoryController#hidden_marks_card?), held for the one
+    # synchronous re-run of the verb that raised it — an intra-event carrier like `@detail_pin`,
+    # set and cleared by `history_hidden_marks_gate?` alone. {ids, cursor_only}: the marks the
+    # card was opened over, or `[cursor]` with `cursor_only` true so a verb that reads the
+    # mark count besides the ids (`y` copies URLs over marks, a raw request over the cursor;
+    # an issue's primary flow) answers as if nothing were marked.
+    @history_marks_pick : {Array(Int64), Bool}? = nil
+
+    # The gate every batch-capable History LIST verb runs first: when a mark is off the list,
+    # raise the hidden-marks card and return true (the caller stops); its answer re-runs
+    # `rerun` — the verb itself — with `history_target_flow_ids` pinned to the chosen set. No
+    # gate from the drill-in (it pins one flow, so marks never reach it), on another tab, or
+    # on the re-run itself. `question` leads the card ("Open in Repeater 3 marked flows?").
+    private def history_hidden_marks_gate?(heading : String, question : String, &rerun : -> Nil) : Bool
+      return false if @history_marks_pick || @detail_pin || @overlay.detail? || @active_tab != :history
+      history_controller.hidden_marks_card?(heading, question) do |ids, cursor_only|
+        @history_marks_pick = {ids, cursor_only}
+        begin
+          rerun.call
+        ensure
+          @history_marks_pick = nil
+        end
+      end
+    end
+
+    # The verb is the hidden-marks card's re-run and the operator chose the cursor row.
+    private def history_cursor_pick? : Bool
+      @history_marks_pick.try(&.[1]) || false
+    end
+
+    # The verb is the hidden-marks card's re-run: the set was already confirmed on that card,
+    # so a batch count confirm of its own would ask the same question twice.
+    private def history_marks_picked? : Bool
+      !@history_marks_pick.nil?
     end
 
     # `Host#detail_pinned_flow_id` — the flow an OPEN History detail pins, for the selection
@@ -5637,6 +5693,7 @@ module Gori::Tui
     # being asked about an implementation detail at the moment of filing. See
     # runner/evidence.cr for where the pick lands.
     def link_attach : Nil
+      return if history_hidden_marks_gate?("LINK", "Link") { link_attach }
       refs = current_link_refs
       return (@toast = "nothing to link") if refs.empty?
       # Persist the notes buffer before listing it: the rows are read off the store, so an
@@ -6408,10 +6465,22 @@ module Gori::Tui
     # mark-capable surface feeds it; only one can be active at a time (they are different tabs),
     # so the sum is always just the live one's count.
     # nil ⇒ the section label (or nothing at all), exactly as before.
+    #
+    # History and Issues add the hidden split their chip carries (`3 MARKED · 1 HIDDEN`): the
+    # card is where the operator reads what a verb below will act on, and the hidden-marks
+    # card a verb raises for it should not be the first place those marks are mentioned.
     private def space_menu_banner : String?
       n = history_mark_menu_count + intercept_mark_menu_count +
           sitemap_mark_menu_count + issues_mark_menu_count + subtab_mark_menu_count
-      n > 0 ? "#{n} MARKED" : nil
+      return nil unless n > 0
+      hidden = if history_mark_menu_count > 0
+                 history_controller.view.marked_hidden_count
+               elsif issues_mark_menu_count > 0
+                 issues_controller.view.marked_hidden_count
+               else
+                 0
+               end
+      hidden > 0 ? "#{n} MARKED · #{hidden} HIDDEN" : "#{n} MARKED"
     end
 
     # How many sub-tab marks the menu should speak for (#683); 0 anywhere but the STRIP. The

@@ -6464,3 +6464,37 @@ one to another tool: working a request in the Repeater meant letting it go first
   has watched for `max_hold`, and leaving for the Repeater is what starts that clock. While a
   tab seeded from a hold is open, the reaper treats that hold as it treats the one being edited
   (`Runner.reap_exempt?`), so the toast's "still held" stays true. Closing the tab ends it.
+
+### 2026-11-25: a mark the filter hides asks before a batch verb acts on it
+
+Refines #442's "marks win over the cursor row". The rule held, but nothing said when the marks
+were off screen. With one mark hidden by the filter (`1 marked ·1 hidden`), a bare `^R`, `y` or
+`Space H` acted on that hidden flow and ignored the visible cursor row. A single id needs no
+batch confirm, so nothing asked. Only a multi-flow delete named the split.
+
+- **Hidden marks raise one card.** Every batch-capable History or Issues list verb checks first.
+  If any mark is off the list, `TabController.hidden_marks_card?` asks "Open in Repeater
+  N marked flows?", says "N marked · M not on the list.", and names the cursor row. `y`
+  acts on the marks, `c` on the cursor row only, and esc/`n`/an outside click/a card too small
+  to draw do nothing. With every mark on screen, the verb runs as before.
+- **The answer re-runs the verb.** It does not thread new ids through each one.
+  `Runner#history_hidden_marks_gate?` pins `history_target_flow_ids` (and `issues_target_ids`) to
+  the chosen set for one synchronous re-run, as `@detail_pin` does for a detail close. A verb
+  that reads the mark count as well as the ids (`y` copies URLs over marks, a raw request over
+  the cursor; an issue's primary flow) checks `history_cursor_pick?`. Repeater and Fuzzer skip
+  their own count confirm on that re-run, because the card already named the set.
+- **"Not on the list", not "hidden by the filter".** `marked_hidden_count` also counts a mark
+  that a capped window trimmed or a peer deleted, so the card can come up with no filter set.
+- **Too many marks is refused first.** The 20-flow cap (`batch_within_cap`) and the Comparer's
+  "mark exactly 2" are checked before the card, because its "all N" answer could only be
+  refused. Its cursor-row answer would pass, but clearing the marks gets there in one press, and
+  a card offering one live answer out of two reads as a trap.
+- **Delete is the same card.** It is danger-styled, its default stays cancel, and it carries
+  "This can't be undone." So the hidden split is no longer spelled in the plain delete confirm.
+- **The third button is `c`, guarded on ctrl/alt** for the reason `y` is: a modal receives `^C`,
+  and quitting must not answer "cursor row".
+- **Not the Sitemap.** Its hidden count also covers marks folded under a collapsed ancestor, a
+  deliberate tree state, so the card would fire after every fold. It needs a filter-only count
+  first. Intercept's queue has no filter that can hide a mark.
+- `spec/tui/hidden_marks_gate_spec.cr` fails when a Runner method reads
+  `history_target_flow_ids` without the gate, unless it is named there with a reason.

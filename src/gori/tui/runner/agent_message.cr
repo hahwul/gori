@@ -51,6 +51,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # Resolved HERE, before any card is up, and carried into the commit closure. The marks are
     # what the operator was looking at when they reached for the verb; re-reading them two
     # overlays later would answer for a list the picker has been sitting on top of.
+    return if history_hidden_marks_gate?("TELL AGENT", "Attach") { tell_agent }
     ids = @active_tab == :history ? history_target_flow_ids : [] of Int64
     from = @active_tab.to_s
     # One agent is not a choice. The picker would be a card whose only content is the answer.

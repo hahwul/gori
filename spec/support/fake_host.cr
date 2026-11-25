@@ -177,6 +177,21 @@ class FakeHost
     action.call
   end
 
+  # The three-button card: recorded beside `confirms` (so a wording assertion reads one list)
+  # with its alt label, answered by `alt_answer` — false accepts the confirm button, true the
+  # alt one, nil declines (the action never runs, as on esc).
+  getter alt_confirms = [] of {String, String, String, String?}
+  property alt_answer : Bool? = false
+
+  def confirm_or_alt(title : String, message : String, *, confirm_label : String,
+                     alt_label : String?, danger : Bool, return_to : Symbol = :none,
+                     &action : Bool -> Nil) : Nil
+    @confirms << {title, message}
+    @alt_confirms << {title, message, confirm_label, alt_label}
+    answer = @alt_answer
+    action.call(answer) unless answer.nil?
+  end
+
   def overlay : Symbol
     :none
   end

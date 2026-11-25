@@ -1159,18 +1159,13 @@ module Gori::Tui
       from_detail = @issues.detail_open?
       ids = from_detail ? [@issues.detail_issue.try(&.id)].compact : @issues.target_ids
       return if ids.empty?
-      # Marks can outlive the visible list (a filter change, a peer delete), so a batch
-      # confirm spells out the split: this dialog — not the list chip — is the last thing
-      # read before data is destroyed.
+      return if !from_detail && hidden_marks_delete_card?
+      # Marks can outlive the visible list (a filter change, a peer delete): that split is
+      # the hidden-marks card's, above. Past it every mark is on the list, or the detail pins
+      # one issue.
       # Two labels — see HistoryController#delete_selected, which this mirrors: the confirm
       # body quotes the name, the toast reports it after a colon.
-      name =
-        if ids.size == 1
-          @issues.issue_summary(ids.first)
-        else
-          hidden = @issues.hidden_count(ids)
-          "#{ids.size} issues#{hidden > 0 ? " (#{hidden} not visible)" : ""}"
-        end
+      name = ids.size == 1 ? @issues.issue_summary(ids.first) : "#{ids.size} issues"
       label = ids.size == 1 ? "“#{name}”" : name
       # Frozen evidence is project-wide (#1039): deleting an Issue removes only these
       # memberships. Say that explicitly so the operator never reads the confirm as a byte
@@ -1185,6 +1180,38 @@ module Gori::Tui
         unless @issues.delete_ids(@host.session.store, ids)
           @host.status("issue NOT deleted (project busy) — the marks are kept, try again")
           next
+        end
+        @host.status("issue deleted: #{name}")
+      end
+    end
+
+    # The hidden-marks card (`TabController.hidden_marks_card?`) over Issues' marks: the gate
+    # `Runner#issues_hidden_marks_gate?` raises for every batch-capable list verb, and the
+    # delete raises with its own wording. False when every mark is on the list.
+    def hidden_marks_card?(heading : String, question : String, tail : String? = nil, *,
+                           confirm_verb : String? = nil, danger : Bool = false,
+                           &act : Array(Int64), Bool -> Nil) : Bool
+      return false if @issues.mark_count == 0
+      cursor = @issues.selected_id
+      TabController.hidden_marks_card?(@host, heading, question, noun: "issue",
+        marks: @issues.marked_ids, hidden: @issues.marked_hidden_count, cursor: cursor,
+        cursor_label: cursor.try { |c| @issues.issue_summary(c) }, tail: tail,
+        confirm_verb: confirm_verb, danger: danger) { |ids, cursor_only| act.call(ids, cursor_only) }
+    end
+
+    # The delete over marks the filter hides: ONE danger card that names the split and offers
+    # the cursor row, as History's does. Frozen evidence is disclosed without a count — the
+    # card answers for two different sets, and the reassurance (the copies stay) holds for both.
+    private def hidden_marks_delete_card? : Bool
+      store = @host.session.store
+      candidates = @issues.marked_ids + [@issues.selected_id].compact
+      frozen = candidates.any? { |id| !store.issue_evidence(id).empty? }
+      tail = frozen ? "Frozen evidence links are removed; the archived copies stay.\n" : ""
+      hidden_marks_card?("DELETE ISSUES", "Delete", "#{tail}This can't be undone.",
+        confirm_verb: "delete", danger: true) do |ids, _|
+        name = ids.size == 1 ? @issues.issue_summary(ids.first) : Gori.plural(ids.size, "issue")
+        unless @issues.delete_ids(store, ids)
+          next @host.status("issue NOT deleted (project busy) — the marks are kept, try again")
         end
         @host.status("issue deleted: #{name}")
       end
@@ -1273,6 +1300,10 @@ module Gori::Tui
     def issues_copy_all : Nil
       # With no issue open, `y` is the LIST's copy: every marked row, or the cursor row.
       unless @issues.detail_open?
+        # A mark the filter hides asks first, as every batch verb does (`hidden_marks_card?`).
+        return if hidden_marks_card?("COPY", "Copy") do |ids, _|
+                    copy_text(@issues.copy_rows_text(ids), ids.size > 1 ? "#{ids.size} issues" : nil)
+                  end
         n = @issues.mark_count
         return copy_text(@issues.copy_rows_text, n > 1 ? "#{n} issues" : nil)
       end

@@ -169,6 +169,9 @@ module Gori::Tui
     # overlay restored on cancel/accept (default :none) — pass the launching overlay (e.g.
     # :detail) when raising the confirm from inside another overlay so cancel returns there.
     abstract def confirm(title : String, message : String, *, confirm_label : String, danger : Bool, return_to : Symbol = :none, &action : -> Nil) : Nil
+    # `confirm` with a third button between the two (`ConfirmDialog#alt_label`, key `c`);
+    # `action` receives true when that one was chosen. A nil `alt_label` draws the plain card.
+    abstract def confirm_or_alt(title : String, message : String, *, confirm_label : String, alt_label : String?, danger : Bool, return_to : Symbol = :none, &action : Bool -> Nil) : Nil
     abstract def session : Session   # store / scope / proxy / registry / interceptor
     abstract def overlay : Symbol    # read the overlay state (e.g. History reads :detail)
     abstract def active_tab : Symbol # read the active tab (Repeater reconcile gates on it)
@@ -1102,6 +1105,48 @@ module Gori::Tui
       j.field "marked_subtab_count", idxs.size
       j.field "marked_subtab_hidden_count", hidden_marked_count
       j.field "marked_subtabs_truncated", true if shown.size < idxs.size
+    end
+
+    # The hidden-marks card (reports/loop #4), shared by History and Issues so the two read
+    # the same. Marks win over the cursor row (#442) — but a mark the current filter took off
+    # screen made a bare `^R`, `y` or `Space H` act on a row the operator could not see while
+    # the one under the cursor was ignored, and nothing said so; only a multi-row delete named
+    # the split. So every batch-capable list verb asks first, once, whenever any mark is off
+    # the list: the card names the counts the chip shows and offers the cursor row alone.
+    # With every mark on screen it returns false and the verb runs exactly as it did.
+    #
+    # `question` leads the card ("Open in Repeater" → "Open in Repeater 3 marked flows?");
+    # `tail` is an extra closing line (a delete's "This can't be undone."). The ids `act`
+    # receives are captured HERE — the marks, or `[cursor]` with `cursor_only` true — never
+    # re-read on the answer. True means a card is up and the caller must stop; `act` runs only
+    # on `y`/`c` (never on esc, `n`, an outside click or a card too small to draw: see
+    # ConfirmDialog). No cursor row (the filter shows nothing) means no `c` button.
+    def self.hidden_marks_card?(host : Host, heading : String, question : String, *,
+                                noun : String, marks : Array(Int64), hidden : Int32,
+                                cursor : Int64?, cursor_label : String?, tail : String? = nil,
+                                confirm_verb : String? = nil, danger : Bool = false,
+                                &act : Array(Int64), Bool -> Nil) : Bool
+      n = marks.size
+      return false if n == 0 || hidden <= 0
+      lines = ["#{question} #{Gori.plural(n, "marked #{noun}")}?", hidden_marks_line(n, hidden)]
+      lines << "Cursor row: “#{cursor_label}”." if cursor && cursor_label
+      lines << tail if tail
+      host.confirm_or_alt(heading, lines.join('\n'), confirm_label: "#{confirm_verb || "all"} #{n}",
+        alt_label: cursor ? "cursor row" : nil, danger: danger) do |alt|
+        if alt && (c = cursor)
+          act.call([c], true)
+        else
+          act.call(marks, false)
+        end
+      end
+      true
+    end
+
+    # The count line of that card — the mark chip's `3 marked ·1 hidden`, as a sentence. "Not
+    # on the list", never "hidden by the filter": `marked_hidden_count` also counts a mark a
+    # capped window trimmed or a peer deleted, and the card can come up with no filter set.
+    def self.hidden_marks_line(marked : Int32, hidden : Int32) : String
+      "#{marked} marked · #{hidden} not on the list."
     end
 
     # The integer-id target block, written IDENTICALLY by History, Issues and Intercept so

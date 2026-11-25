@@ -13,6 +13,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def scope_add_host : Nil
     ids = history_target_flow_ids
     return (@toast = "select a flow first") if ids.empty?
+    return if history_hidden_marks_gate?("ADD TO SCOPE", "Add the hosts of") { scope_add_host }
     # Resolved through the store, never the view's rows: a kept mark can outlive the
     # visible window (filter change, trim, follow reload).
     hosts = ids.compact_map { |id| @session.store.flow_row(id).try(&.host) }.uniq!

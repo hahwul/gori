@@ -342,3 +342,95 @@ describe "ConfirmDialog disclosure after resize" do
     dlg.handle_key(yes).should eq(:commit)
   end
 end
+
+# The third button (`alt_label`, key `c`) the hidden-marks card answers "only the cursor row"
+# with (reports/loop #4). Every way OUT of the card must still be a no-op: esc, `n`, a click
+# off the card, ^C (which a modal receives instead of the quit handler) and a window too
+# short to draw the card in.
+private def alt_dialog(danger = false) : ConfirmDialog
+  ConfirmDialog.new("SEND TO REPEATER", "Open in Repeater 1 marked flow?",
+    confirm_label: "all 1", danger: danger, alt_label: "cursor row")
+end
+
+private def cd_key(k : Termisu::Input::Key, ctrl = false) : Termisu::Event::Key
+  ctrl ? Termisu::Event::Key.new(k, Termisu::Input::Modifier::Ctrl) : Termisu::Event::Key.new(k)
+end
+
+describe "ConfirmDialog third button" do
+  it "draws all three buttons and names the third key in the hint" do
+    dlg = alt_dialog
+    backend = render_dialog(dlg)
+    backend.contains?("[y] all 1").should be_true
+    backend.contains?("[c] cursor row").should be_true
+    backend.contains?("[n] cancel").should be_true
+    dlg.hint.should contain("c cursor row")
+  end
+
+  it "commits the alt answer on `c`, and the confirm answer on `y`" do
+    dlg = alt_dialog
+    render_dialog(dlg)
+    dlg.handle_key(cd_key(Termisu::Input::Key::LowerC)).should eq(:commit)
+    dlg.alt_selected?.should be_true
+    dlg.handle_key(cd_key(Termisu::Input::Key::LowerY)).should eq(:commit)
+    dlg.alt_selected?.should be_false
+    dlg.confirm_selected?.should be_true
+  end
+
+  it "never reads ^C as the cursor-row answer" do
+    dlg = alt_dialog
+    render_dialog(dlg)
+    dlg.handle_key(cd_key(Termisu::Input::Key::LowerC, ctrl: true)).should eq(:stay)
+    dlg.alt_selected?.should be_false
+  end
+
+  it "cancels on esc, `n` and a click off the card" do
+    dlg = alt_dialog
+    render_dialog(dlg)
+    dlg.handle_key(cd_key(Termisu::Input::Key::Escape)).should eq(:cancel)
+    dlg.handle_key(cd_key(Termisu::Input::Key::LowerN)).should eq(:cancel)
+    dlg.handle_click(Rect.new(0, 0, 60, 20), 0, 0).should eq(:cancel)
+  end
+
+  it "refuses `c` on a window too short to draw the card" do
+    dlg = alt_dialog
+    render_dialog(dlg, 60, 3)
+    dlg.handle_key(cd_key(Termisu::Input::Key::LowerC)).should eq(:stay)
+    dlg.handle_key(cd_key(Termisu::Input::Key::Enter)).should eq(:cancel)
+  end
+
+  it "walks confirm → alt → cancel with the arrows, and ↵ answers what is lit" do
+    dlg = alt_dialog
+    render_dialog(dlg)
+    dlg.confirm_selected?.should be_true # non-danger: the verb is lit
+    dlg.handle_key(cd_key(Termisu::Input::Key::Right))
+    dlg.alt_selected?.should be_true
+    dlg.handle_key(cd_key(Termisu::Input::Key::Enter)).should eq(:commit)
+    dlg.alt_selected?.should be_true
+    dlg.handle_key(cd_key(Termisu::Input::Key::Right))
+    dlg.handle_key(cd_key(Termisu::Input::Key::Enter)).should eq(:cancel)
+    dlg.handle_key(cd_key(Termisu::Input::Key::Left))
+    dlg.alt_selected?.should be_true
+  end
+
+  it "keeps a danger card's ↵ on cancel" do
+    dlg = alt_dialog(danger: true)
+    render_dialog(dlg)
+    dlg.handle_key(cd_key(Termisu::Input::Key::Enter)).should eq(:cancel)
+  end
+
+  it "commits the alt answer on a click on its button" do
+    dlg = alt_dialog
+    area = Rect.new(0, 0, 60, 20)
+    render_dialog(dlg)
+    r = dlg.alt_rect(dlg.overlay_box(area)).not_nil!
+    dlg.handle_click(area, r.x, r.y).should eq(:commit)
+    dlg.alt_selected?.should be_true
+  end
+
+  it "is the two-button card, unchanged, without an alt label" do
+    dlg = ConfirmDialog.new("DELETE", "Sure?")
+    dlg.handle_key(cd_key(Termisu::Input::Key::LowerC)).should eq(:stay)
+    dlg.alt_rect(dlg.overlay_box(Rect.new(0, 0, 60, 20))).should be_nil
+    dlg.hint.should_not contain(" c ")
+  end
+end

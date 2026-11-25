@@ -1149,19 +1149,17 @@ module Gori::Tui
       # (see Runner#history_target_flow_ids for the same precedence).
       ids = from_detail ? [@history.detail_flow_id].compact : @history.target_ids
       return if ids.empty?
-      # Marks can outlive the visible window (a filter change, a trim), so a batch confirm
-      # spells out the split: this dialog — not the list chip — is the last thing read
-      # before data is destroyed.
+      # Marks the filter hides: the card every other batch verb raises (`hidden_marks_card?`),
+      # danger-styled and carrying the irreversibility line, so a delete over a set the
+      # operator cannot see reads exactly as a ^R over it does — and offers the cursor row.
+      # Past it, every mark is on the list (or the detail pins one flow), so the confirm below
+      # has no hidden split left to spell out.
+      return if !from_detail && hidden_marks_card?("DELETE FLOWS", "Delete", "This can't be undone.",
+                  confirm_verb: "delete", danger: true) { |targets, _| delete_now(targets) }
       # TWO labels, because the two surfaces read differently: the confirm body is a sentence
       # and quotes the name (curly, like every other confirm), the toast is a one-line report
       # where the `:` already marks what follows as the name.
-      name =
-        if ids.size == 1
-          @history.flow_summary(ids.first)
-        else
-          hidden = @history.marked_hidden_count
-          "#{ids.size} flows#{hidden > 0 ? " (#{hidden} not visible)" : ""}"
-        end
+      name = ids.size == 1 ? @history.flow_summary(ids.first) : "#{ids.size} flows"
       label = ids.size == 1 ? "“#{name}”" : name
       partial = ids.size > 1 && loaded_only?(ids.size, @history.marked_hidden_count)
       warning = partial ? "Only the loaded rows are marked; more may match the filter.\n" : ""
@@ -1170,16 +1168,37 @@ module Gori::Tui
       # (the flow is gone, so :detail → :none).
       @host.confirm(ids.size == 1 ? "DELETE FLOW" : "DELETE FLOWS", "Delete #{label}?\n#{warning}This can't be undone.",
         confirm_label: "delete", danger: true, return_to: from_detail ? :detail : :none) do
-        # A rolled-back write (cross-process SQLite busy/lock) leaves the flows AND the marks in
-        # place — say so instead of reporting a delete that didn't happen, so the set is still
-        # there to retry.
-        unless @history.delete_ids(@host.session.store, ids)
-          @host.status("flow NOT deleted (project busy) — the marks are kept, try again")
-          next
-        end
-        @host.request_overlay(:none) if @host.overlay == :detail
-        @host.status("flow deleted: #{name}")
+        delete_now(ids, name)
       end
+    end
+
+    # The accepted delete, run after its card closed — the plain confirm's, or the
+    # hidden-marks card's (the marks it was opened over, or only the cursor row). `name` is
+    # the toast's label; the hidden-marks card hands none and it is spelled from the ids.
+    private def delete_now(ids : Array(Int64), name : String? = nil) : Nil
+      name ||= ids.size == 1 ? @history.flow_summary(ids.first) : Gori.plural(ids.size, "flow")
+      # A rolled-back write (cross-process SQLite busy/lock) leaves the flows AND the marks in
+      # place — say so instead of reporting a delete that didn't happen, so the set is still
+      # there to retry.
+      unless @history.delete_ids(@host.session.store, ids)
+        return @host.status("flow NOT deleted (project busy) — the marks are kept, try again")
+      end
+      @host.request_overlay(:none) if @host.overlay == :detail
+      @host.status("flow deleted: #{name}")
+    end
+
+    # The hidden-marks card (`TabController.hidden_marks_card?`) over History's marks: the
+    # gate `Runner#history_hidden_marks_gate?` raises for every batch-capable list verb, and
+    # the delete above raises with its own wording. False when every mark is on the list.
+    def hidden_marks_card?(heading : String, question : String, tail : String? = nil, *,
+                           confirm_verb : String? = nil, danger : Bool = false,
+                           &act : Array(Int64), Bool -> Nil) : Bool
+      return false if @history.mark_count == 0
+      cursor = @history.selected_id
+      TabController.hidden_marks_card?(@host, heading, question, noun: "flow",
+        marks: @history.marked_ids, hidden: @history.marked_hidden_count, cursor: cursor,
+        cursor_label: cursor.try { |c| @history.flow_summary(c) }, tail: tail,
+        confirm_verb: confirm_verb, danger: danger) { |ids, cursor_only| act.call(ids, cursor_only) }
     end
 
     # Space-menu clear: wipe every History flow for this project after a confirm.

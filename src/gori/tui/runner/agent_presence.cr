@@ -81,9 +81,18 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # (same ordering as on_palette), then raise the one-line prompt for exactly that entry.
     ov.on_tell = ->(entry : Gori::AgentPresence::Entry) {
       leave_overlay
-      ids = @active_tab == :history ? history_target_flow_ids : [] of Int64
-      prompt_agent_message(entry, ids, @active_tab.to_s)
+      tell_agent_entry(entry)
+      nil
     }
     open_overlay(ov)
+  end
+
+  # The AGENTS card's tell, behind the same hidden-marks gate `tell_agent` runs: the flows
+  # attached to the message are the History marks, and one the filter hides must not ride
+  # along unannounced.
+  private def tell_agent_entry(entry : Gori::AgentPresence::Entry) : Nil
+    return if history_hidden_marks_gate?("TELL AGENT", "Attach") { tell_agent_entry(entry) }
+    ids = @active_tab == :history ? history_target_flow_ids : [] of Int64
+    prompt_agent_message(entry, ids, @active_tab.to_s)
   end
 end
