@@ -317,6 +317,7 @@ describe Gori::Proxy::H2::StreamGate do
       rig.s2c.accept(headers(1_u32, rig.enc_in.encode(response("200")), Frame::END_HEADERS))
       settle
       ic.pending_count.should eq(1)
+      ic.pending.first.http2?.should be_true
       rig.to_client.should be_empty
 
       # Stream 3's response overtakes the held one freely: response HEADERS open nothing.
@@ -455,6 +456,8 @@ describe Gori::Proxy::H2::StreamGate do
       ic.pending.first.method.should eq("GET")
       ic.pending.first.target.should eq("/p")
       ic.pending.first.host.should eq("api.example.com")
+      # The transport rides the Item, not that `HTTP/2` token: Send flow to… → Repeater reads it.
+      ic.pending.first.http2?.should be_true
     end
   end
 

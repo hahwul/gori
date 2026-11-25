@@ -283,3 +283,103 @@ describe "InterceptController editor decisions over a mark set" do
     end
   end
 end
+
+# loop.md #5: a held request is not in History until it is forwarded, so "hold it, then work it
+# in Repeater" meant forwarding first. Send flow to… → Repeater takes the hold as it stands now
+# and decides nothing.
+describe "InterceptController Send flow to… → Repeater seed" do
+  it "carries the unforwarded edit, keeps the held bytes as the baseline, and leaves the hold alone" do
+    with_held do |ctl, it, host|
+      ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter)) # ↵ → INS
+      ctl.view.edit_end
+      ctl.handle_body_key(char_key('Z'))
+
+      seed = ctl.repeater_seed(it.id).as(InterceptController::HeldSeed)
+      seed.text.should eq(RAW.sub(" HTTP/1.1", " HTTP/1.1Z")) # the edit, verbatim
+      seed.held.should eq(RAW)                                # what the client sent: the tab's literal baseline
+      seed.target.should eq("http://acme.test")
+      seed.http2.should be_false
+      seed.auto_cl.should be_true
+
+      decision_of(it).should be_nil # nothing forwarded, nothing dropped
+      host.session.interceptor.get(it.id).should_not be_nil
+      ctl.view.held_edit_id.should eq(it.id) # the edit is still there to forward
+      ctl.view.editing?.should be_true
+    end
+  end
+
+  it "takes an unedited hold byte-exact, and the editor's ^L state as the tab's auto Content-Length" do
+    with_held do |ctl, it, _host|
+      ctl.view.toggle_content_length_sync # ^L off: a CL the operator keeps wrong stays wrong
+      seed = ctl.repeater_seed(it.id).as(InterceptController::HeldSeed)
+      seed.text.should eq(RAW)
+      seed.auto_cl.should be_false
+    end
+  end
+
+  # The forward resolves a typed name (#1416); the seed must not, or the project value would be
+  # written into another tab's buffer instead of being resolved by that tab at its own send.
+  it "keeps an operator-typed $ reference unresolved, so no project value lands in the tab" do
+    with_env_syntax(Gori::Env::Syntax::Namespaced) do
+      prev = Gori::Settings.project_env_vars
+      prev_prefix = Gori::Settings.env_prefix
+      begin
+        with_held do |ctl, it, _host|
+          # Set after the session opened: opening a project loads its own (empty) vars.
+          Gori::Settings.env_prefix = "$"
+          Gori::Settings.project_env_vars = [{"TOKEN", "secretvalue"}]
+          Gori::Env.bump_highlight_rev
+          ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter))
+          ctl.view.edit_end
+          "?t=$ENV.TOKEN".each_char { |c| ctl.handle_body_key(char_key(c)) }
+          String.new(ctl.view.forward_bytes(it)).should contain("secretvalue") # the forward resolves it
+          text = ctl.repeater_seed(it.id).as(InterceptController::HeldSeed).text
+          text.should contain("?t=$ENV.TOKEN")
+          text.should_not contain("secretvalue")
+        end
+      ensure
+        Gori::Settings.project_env_vars = prev
+        Gori::Settings.env_prefix = prev_prefix
+        Gori::Env.bump_highlight_rev
+      end
+    end
+  end
+
+  it "reads the transport off the hold's provenance, not off the version token" do
+    TuiContract.with_session("intercept-seed-h2") do |session|
+      ic = session.interceptor
+      ic.toggle
+      h2 = ic.enqueue_request("GET /a HTTP/2\r\nHost: acme.test\r\n\r\n".to_slice, method: "GET",
+        target: "/a", host: "acme.test", port: 443, scheme: "https", http2: true).not_nil!
+      h1 = ic.enqueue_request("GET /b HTTP/2\r\nHost: acme.test\r\n\r\n".to_slice, method: "GET",
+        target: "/b", host: "acme.test", port: 8443, scheme: "https").not_nil!
+      host = TuiContract::Host.new(session)
+      ctl = InterceptController.new(host)
+      ctl.on_enter
+      ctl.repeater_seed(h2.id).as(InterceptController::HeldSeed).http2.should be_true
+      h1_seed = ctl.repeater_seed(h1.id).as(InterceptController::HeldSeed)
+      h1_seed.http2.should be_false # an h1 client's `HTTP/2` is its payload, not the transport
+      h1_seed.target.should eq("https://acme.test:8443")
+    end
+  end
+
+  it "sends a held response's recorded request, and refuses what a Repeater tab cannot hold" do
+    TuiContract.with_session("intercept-seed-kinds") do |session|
+      ic = session.interceptor
+      ic.toggle
+      res = ic.enqueue_response("HTTP/1.1 200 OK\r\n\r\n".to_slice, flow_id: 42_i64, method: "GET",
+        target: "200 OK", host: "acme.test", port: 80, scheme: "http", request_target: "/r").not_nil!
+      streaming = ic.enqueue_response("HTTP/2 200\r\n\r\n".to_slice, flow_id: nil, method: "GET",
+        target: "200", host: "acme.test", port: 443, scheme: "https", http2: true).not_nil!
+      ws = ic.enqueue_ws("hi".to_slice, to_server: true, method: "GET", target: "/ws",
+        host: "acme.test", port: 80, scheme: "http", flow_id: 7_i64, binary: false).not_nil!
+      ctl = InterceptController.new(TuiContract::Host.new(session))
+      ctl.on_enter
+      ctl.repeater_seed(res.id).should eq(42_i64)
+      ctl.repeater_seed(streaming.id).as(String).should contain("not recorded yet")
+      ctl.repeater_seed(ws.id).as(String).should contain("WebSocket message, not a request")
+      ctl.repeater_seed(999_i64).should eq("that message is no longer held")
+      [res, streaming, ws].each { |held| decision_of(held).should be_nil }
+    end
+  end
+end

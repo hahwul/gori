@@ -23,4 +23,7 @@ abstract class Gori::Verb::ExecContext
   # Copy's wider gate: also true while the held-bytes EDITOR is open, so an INS selection there
   # can be copied (`^Y`) instead of only destroyed by the next printable.
   abstract def intercept_copyable? : Bool
+  # Send flow to… → Repeater: open the held request (an unforwarded edit included) in a new
+  # Repeater tab without deciding the hold.
+  abstract def intercept_repeater : Nil
 end

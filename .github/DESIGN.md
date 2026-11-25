@@ -6428,3 +6428,39 @@ lambda.
   A lens flip that cannot be seen from the tab helps no one, and one rule is easier to read
   than one rule with an exception. `spec/verb/keymap_spec.cr` sweeps every non-Global scope ×
   Global overlap under every OS profile × keyset.
+
+### 2026-11-25: a held request can be sent to the Repeater without deciding the hold
+
+Refines the 2026-10-01 "a held message is evidence" entry and the 2026-09-25 Send flow to… entry.
+A held request is not in History until it is forwarded, so the Intercept queue had no way to hand
+one to another tool: working a request in the Repeater meant letting it go first.
+
+- **Repeater is the only member.** `intercept.repeater` joins Send flow to… (pinned, `r`) and
+  takes the editor's message, else the marks, else the cursor row, the target rule forward and
+  drop read. It decides nothing. It is untagged and registered after the catch controls, so
+  Forward held stays the card's first row and a reflex `space ↵` still forwards. The Fuzzer and Miner seed from that Repeater tab, the Comparer
+  needs a response, and Decoder is already Send selection to… over the held text.
+- **The text as it stands, references unresolved.** The tab gets `InterceptView#current_text`:
+  the unforwarded edit with its line terminators as typed, or the held bytes. Not
+  `pending_edit`, which resolves the operator's `$` names and would write a project value into
+  another tab's buffer.
+- **Evidence, with the held bytes as the baseline.** `RepeaterView#load_held` keeps a name the
+  client sent literal and a name the operator typed live, the #1416 rule carried across. A `§`
+  the client sent stays inert. The Intercept editor's `^L` becomes the tab's auto Content-Length.
+- **Session-only.** A restored Repeater row reads its provenance off `flow_id`, and a held
+  request has none, so a saved tab would reopen as a draft: live `§`, every `$` resolved. The
+  toast says the tab is not saved.
+- **The transport is provenance.** `Interceptor::Item#http2?` is set by the HTTP/2 gate, not
+  read off the `HTTP/2` token in the held bytes, which an HTTP/1.1 client can send.
+- **Only a hold whose bytes are the request is sent.** A head-only HTTP/2 hold has its head
+  alone in `raw` (the body streams past the gate), so the tab would send a bodyless request the
+  client never sent, and auto-CL would set its `content-length` to 0. A hold with an
+  `edit_refusal` has no exact HTTP/1.1 text form. Both are refused: forward them and send the
+  flow from History, which has what went out.
+- **A held response sends its recorded request** (`repeater_flow` on its `flow_id`). A response
+  with no flow yet (an HTTP/2 upload still streaming) and a WebSocket message are refused with a
+  toast. A batch confirms only the tabs that will open.
+- **A seeded tab watches its hold.** With an agent attached, the reaper forwards a hold nobody
+  has watched for `max_hold`, and leaving for the Repeater is what starts that clock. While a
+  tab seeded from a hold is open, the reaper treats that hold as it treats the one being edited
+  (`Runner.reap_exempt?`), so the toast's "still held" stays true. Closing the tab ends it.

@@ -776,10 +776,14 @@ describe "the auto-forward reaper and an in-progress edit" do
     # The skip is INSIDE the per-item loop and BEFORE the forward: reading the edit id and
     # then forwarding every item anyway is the shape this pins against.
     loop_at = reap.not_nil!.index("pending.each").not_nil!
-    skip_at = reap.not_nil!.index("next if it.id == editing").not_nil!
+    skip_at = reap.not_nil!.index("next if Runner.reap_exempt?(it.id, editing").not_nil!
     fwd_at = reap.not_nil!.index("ic.forward(it.id)").not_nil!
     skip_at.should be > loop_at
     fwd_at.should be > skip_at
+    # ...and the exemption that skip asks is the edited hold's (a seeded Repeater tab's hold
+    # is the other one, pinned in spec/tui/intercept_send_to_repeater_spec.cr).
+    Gori::Tui::Runner.reap_exempt?(7_i64, 7_i64, Set(Int64).new).should be_true
+    Gori::Tui::Runner.reap_exempt?(7_i64, nil, Set(Int64).new).should be_false
   end
 end
 

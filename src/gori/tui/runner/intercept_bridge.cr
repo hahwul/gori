@@ -227,8 +227,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     now_ms = Time.utc.to_unix_ms
     operator_ms = intercept_operator_watched_ms(now_ms)
     reaped = false
+    seeded = repeater_controller.held_source_ids
     pending.each do |it|
-      next if it.id == editing # the operator is mid-edit on this one
+      next if Runner.reap_exempt?(it.id, editing, seeded)
       next unless Runner.hold_reap_due?(now_ms, @intercept_max_hold_ms, it.held_at_ms,
                     viewed[it.id]? || 0_i64, operator_ms)
       # original bytes (fail-open), same as toggle-off / release_all. A false answer means
@@ -240,6 +241,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       reaped = true
     end
     reaped
+  end
+
+  # A hold the reaper leaves alone however long it has gone unwatched: the one the operator is
+  # mid-edit on, and one sent to a Repeater tab that is still open (Send flow to… → Repeater),
+  # since `goto_tab(:repeater)` is exactly what starts the unwatched clock, and the toast that
+  # sent them there said "still held". Closing the tab returns the hold to the ordinary rule.
+  def self.reap_exempt?(id : Int64, editing : Int64?, seeded : Set(Int64)) : Bool
+    id == editing || seeded.includes?(id)
   end
 
   # The operator's last tick on the Intercept tab, carried onto the wall clock the per-item

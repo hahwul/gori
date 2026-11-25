@@ -2048,6 +2048,26 @@ module Gori::Tui
       @host.goto_tab(:repeater)
     end
 
+    # Open a request still HELD at Intercept as a new tab, without deciding the hold. See
+    # `RepeaterView#load_held` for the provenance; session-only (db_id nil) like a gRPC or split
+    # tab, because the one column a reopened row reads provenance from is `flow_id`, and a held
+    # request has none yet.
+    def repeater_held(target : String, request : String, held : String, http2 : Bool,
+                      auto_cl : Bool, held_id : Int64? = nil) : Nil
+      view = new_view
+      view.load_held(target, request, held, http2, auto_cl, held_id)
+      @repeaters << RepeaterTab.new(view, nil, nil)
+      @current_repeater_idx = @repeaters.size - 1
+      reveal_active_subtab
+      @host.goto_tab(:repeater)
+    end
+
+    # The Intercept holds an open tab was seeded from (`repeater_held`): the reaper counts each
+    # as watched for as long as its tab is open.
+    def held_source_ids : Set(Int64)
+      @repeaters.compact_map(&.view.held_id).to_set
+    end
+
     # Content-only clone of the active sub-tab (Space → Duplicate). No flow_id / links.
     # gRPC and split-decode tabs stay session-only (db_id nil), matching open-from-History.
     # Duplicates the MARKED sub-tabs when the strip carries marks, the active one otherwise

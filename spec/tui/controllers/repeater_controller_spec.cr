@@ -690,3 +690,20 @@ describe "RepeaterController.cut_note" do
     RepeaterController.cut_note(whole, false).should eq("")
   end
 end
+
+# loop.md #5: Send flow to… → Repeater from the Intercept queue. The tab is session-only: a
+# reopened row reads provenance off `flow_id`, and a held request has none, so persisting it would
+# bring the evidence tab back as a draft (live `§`, every `$` resolved).
+describe "RepeaterController#repeater_held" do
+  it "opens a session-only evidence tab on the held text" do
+    with_repeater_controller do |ctl, host|
+      held = "GET /h HTTP/1.1\r\nHost: h.test\r\n\r\n"
+      ctl.repeater_held("http://h.test", held + "edited", held, false, true)
+      v = ctl.current_view.not_nil!
+      v.request_text.should eq(held + "edited")
+      v.evidence?.should be_true
+      ctl.current_session_db_id.should be_nil
+      host.session.store.repeaters.should be_empty
+    end
+  end
+end

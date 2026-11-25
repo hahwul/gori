@@ -891,6 +891,55 @@ module Gori::Tui
       @intercept.selected_id
     end
 
+    # One held REQUEST as Send flow to… → Repeater takes it: its dial and its text as they stand
+    # now (`InterceptView#current_text`), beside the held bytes that are the tab's literal
+    # baseline. Built at the gesture, so a batch confirm opens what was on screen when it was
+    # asked, not whatever an agent left in the queue by the time it was answered.
+    record HeldSeed, id : Int64, label : String, target : String, text : String, held : String,
+      http2 : Bool, auto_cl : Bool
+
+    # Why a held message cannot become a Repeater tab, one sentence each. Short enough for the
+    # 80-column status line (59 cells, `spec/tui/intercept_send_to_repeater_spec.cr`), so they
+    # name no label: the queue row the operator is looking at is the label.
+    SEED_GONE      = "that message is no longer held"
+    SEED_WS        = "that is a WebSocket message, not a request"
+    SEED_NO_FLOW   = "its request is not recorded yet"
+    SEED_HEAD_ONLY = "body not held (h2) — forward it, then use History"
+    SEED_INEXACT   = "head has no exact text form — forward, then History"
+
+    # What Send flow to… → Repeater takes from the held message `id`, which nothing here decides:
+    # a HeldSeed for a request; for a response, the id of the captured flow its request is
+    # already recorded under (a Repeater tab IS a request); else the sentence saying why not.
+    #
+    # Two h2 requests are refused, because their `raw` is not the request the client sent:
+    #   * HEAD-ONLY — the body streams past the gate and `raw` is the head alone, so the tab
+    #     would send a bodyless POST (and auto-CL rewrote `content-length: 5000` to 0), marked
+    #     as evidence. Its flow in History has the body.
+    #   * `edit_refusal` — the head has no faithful HTTP/1.1 text form (`line_safe` replaced
+    #     bytes in it), so the text the tab would parse into fields is not what arrived.
+    def repeater_seed(id : Int64) : HeldSeed | Int64 | String
+      it = @intercept.item_by_id(id) || return SEED_GONE
+      case it.kind
+      in .request?
+        return SEED_HEAD_ONLY if it.head_only?
+        return SEED_INEXACT if it.edit_refusal
+        # The Intercept editor's ^L carries over as the tab's auto Content-Length, so a held
+        # request whose CL the operator is deliberately keeping wrong is not resynced there.
+        HeldSeed.new(it.id, intercept_label(it), Repeater::FlowRequest.build_target(it.scheme, it.host, it.port),
+          @intercept.current_text(it), String.new(it.raw), it.http2?, @intercept.sync_content_length?)
+      in .response?
+        it.flow_id || SEED_NO_FLOW
+      in .ws_out?, .ws_in?
+        SEED_WS
+      end
+    end
+
+    # The held messages Send flow to… acts on: the open editor's, else the marks, else the
+    # cursor row — the one target rule forward and drop read.
+    def send_target_ids : Array(Int64)
+      @intercept.target_ids
+    end
+
     # The hold this window's editor has unsaved changes for — mirrored across the #123 bridge
     # so an agent can see the human is mid-edit before forwarding it. See
     # `InterceptView#held_edit_id`.

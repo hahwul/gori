@@ -192,6 +192,23 @@ describe "Gori::Verbs.register_core" do
       verb_intents(r, "intercept.forward-all").should eq([:intercept_forward_all])
     end
 
+    # A held request is not in History until it is forwarded, so the hold queue needs its own
+    # Send flow to… member, or working a request in Repeater meant forwarding it first.
+    it "joins Send flow to… with Send to Repeater, chordless and gated on a held message" do
+      v = r["intercept.repeater"]
+      v.scope.should eq(Gori::Verb::Scope::Intercept)
+      v.intent.should eq(:to_repeater)
+      v.family.should eq(:send_flow)
+      v.pinned?.should be_true
+      v.menu_key.should eq('r')
+      v.chords.should be_empty # ^R is forward inside the editor; no bare send key beside f/d
+      ctx = FakeExecContext.new
+      v.available?(ctx).should be_false
+      ctx.intercept_selected = 3_i64
+      v.available?(ctx).should be_true
+      verb_intents(r, "intercept.repeater").should eq([:intercept_repeater])
+    end
+
     it "leaves the catch controls ungated (they configure the queue, not a row)" do
       ctx = FakeExecContext.new
       r["intercept.direction"].available?(ctx).should be_true

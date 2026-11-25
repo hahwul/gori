@@ -305,6 +305,24 @@ class Gori::Tui::RepeaterView
     reflect_row_content_length(request)
   end
 
+  # A request still HELD at Intercept (Send flow to… → Repeater). The held bytes are a client's,
+  # so the tab is EVIDENCE exactly as a capture off History is, but its literal baseline is
+  # `held` (what the client sent) rather than `request` (what the editor holds now): a `$NAME`
+  # the client sent stays literal, and one the operator typed into the held message before
+  # sending it here is a reference — the Intercept editor's own per-name rule (#1416), carried
+  # across. There is no flow yet, so the caller keeps the tab session-only: a restored row
+  # reads its provenance off `flow_id` and would reopen this as a draft.
+  def load_held(target : String, request : String, held : String, http2 : Bool, auto_cl : Bool,
+                held_id : Int64? = nil) : Nil
+    restore(target, request, http2, auto_cl, evidence: true)
+    @held_id = held_id
+    seed_draft_baselines(held)
+    # Measured again under the held baseline: `restore`'s pass ran with the edited text as the
+    # baseline, which reads a typed `$NAME` as literal.
+    reflect_content_length_in_editor if @auto_content_length
+    focus_pane(:request)
+  end
+
   # Live request-side sync (reconcile poll). Updates target/request/flags from the
   # shared row WITHOUT wiping the session-local response, focus, scroll, or resp
   # mode. Full restore() was wrong here: it always set focus=:target and cleared

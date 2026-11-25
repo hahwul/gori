@@ -561,12 +561,12 @@ module Gori::Proxy::H2
       if held.request
         @interceptor.enqueue_request(raw, method: held.method, target: held.target,
           host: held.host, port: held.port, scheme: held.scheme,
-          edit_refusal: held.refusal, head_only: body.nil?)
+          edit_refusal: held.refusal, head_only: body.nil?, http2: true)
       else
         @interceptor.enqueue_response(raw, flow_id: @assembler.flow_id_of(held.stream_id),
           method: held.method, target: held.target, host: held.host, port: held.port,
           scheme: held.scheme, edit_refusal: held.refusal, head_only: body.nil?,
-          request_target: held.request_target)
+          request_target: held.request_target, http2: true)
       end
     end
 

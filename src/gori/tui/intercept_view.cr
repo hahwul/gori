@@ -761,6 +761,18 @@ module Gori::Tui
       it.edited_method_target(@editor.to_bytes)
     end
 
+    # A held message's text as it stands NOW, for a tool it is sent to without being forwarded
+    # (Send flow to… → Repeater): the editor's unforwarded edit when the editor holds this item,
+    # else the held bytes. `wire_text` and not `pending_edit`: the edit's line terminators are
+    # kept as typed and its `$` references stay UNRESOLVED, so the receiving tab applies the
+    # #1416 rule itself (the held bytes are its literal baseline) and a resolved project secret
+    # never lands in another tab's buffer. The hex buffer is never read here: only a WebSocket
+    # BINARY message opens one, and those are not requests.
+    def current_text(it : Interceptor::Item) : String
+      return String.new(it.raw) unless @loaded_id == it.id && @editor_dirty && @hex.nil?
+      @editor.wire_text
+    end
+
     # backspace/delete/undo are no-ops at buffer start / end-of-buffer / empty undo
     # stack (TextArea returns early without bumping @edits). A no-op here must NOT set
     # @editor_dirty: once dirty, pending_edit recomputes Content-Length and normalizes
