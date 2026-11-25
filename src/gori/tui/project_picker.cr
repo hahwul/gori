@@ -27,6 +27,8 @@ require "./export_overlay"
 require "./import_overlay"
 require "./name_prompt_overlay"
 require "./tag_input"
+require "./paste_gate"
+require "./line_edit"
 require "./viewport"
 require "../plural"
 
@@ -168,6 +170,9 @@ module Gori::Tui
       @new_field = :name # :name | :desc | :tags (only in :new mode)
       @resized = false   # set on a Resize event → next frame full-repaints
       @preedit = ""      # live IME composing text for the active field (search/name/desc)
+      # Bracketed pastes: which pasted keys reach the mode under them (see PasteGate).
+      @paste = PasteGate.new
+      @paste_note_mode = nil.as(Symbol?) # the mode a paste was refused in, while its note shows
       # Delete confirmation (project deletion is irreversible — wipes its dir).
       @confirm = nil.as(ConfirmDialog?)
       # The projects a confirmed delete will wipe — a LIST because the space menu's Delete
@@ -258,7 +263,9 @@ module Gori::Tui
         tick_companion
         tick_registry
         @search.try(&.tick) if @mode == :global_search
-        render
+        # Not while a refused paste is still arriving: nothing on screen changes until it
+        # ends, and a frame per drained burst made a 220 KB refused paste take ~10 s.
+        render unless @paste.refusing?
         # Drive the entrance animation off the idle poll cadence (~50 ms/frame):
         # the loop re-renders whenever poll_event times out, so bumping the clock
         # here plays the reveal once, then freezes at ART_ANIM_DONE (static after).
@@ -266,62 +273,134 @@ module Gori::Tui
         @star_frame &+= 1
         # Own event loop, so the Runner's ⌥-alias fold doesn't reach it — apply it here too
         # or ⌥N (new project) / ⌥, (preferences) would be dead on this screen.
-        case ev = Keybind.dealias_event(@term.poll_event(50))
-        when Termisu::Event::Resize
-          # termisu already resized its buffer to these dims; re-fit the backend grids in
-          # lockstep off the same event dims, and force a full repaint next frame.
-          @backend.resize(ev.width, ev.height)
-          @resized = true
-        when Termisu::Event::Key
-          @companion.wake_on_input # any key re-arms Miss Ring's idle clock (self-gated while off)
-          result = case @mode
-                   when :new                 then handle_new(ev)
-                   when :confirm             then handle_confirm(ev)
-                   when :settings            then handle_preferences(ev)
-                   when :theme               then handle_theme(ev)
-                   when :space               then handle_space(ev)
-                   when :rename              then handle_rename(ev)
-                   when :compress            then handle_compress(ev)
-                   when :archive_export_path then handle_archive_export_path(ev)
-                   when :archive_import_path then handle_archive_import_path(ev)
-                   when :archive_import_name then handle_archive_import_name(ev)
-                   when :global_search       then handle_global_search(ev)
-                   else                           handle_list(ev)
-                   end
+        if ev = Keybind.dealias_event(@term.poll_event(50))
+          result = handle_event(ev)
+          # A paste's queued keys are handled as one burst (see PasteGate#drain). The stop
+          # test runs after each event, so the drain never polls one it would then drop.
+          unless result
+            @paste.drain(@term) do |more|
+              result = handle_event(Keybind.dealias_event(more) || more)
+              !result.nil?
+            end
+          end
           case result
           when Project then return result
           when :quit   then return nil
-          end
-        when Termisu::Event::Mouse
-          @companion.wake_on_input
-          result = handle_picker_mouse(ev)
-          case result
-          when Project then return result
-          when :quit   then return nil
-          end
-        when Termisu::Event::Preedit
-          # Live IME composition for whichever field is active; the committed
-          # syllable arrives afterwards as a normal Key and clears this.
-          if @mode == :settings
-            @preferences.set_preedit(ev.text)
-          elsif @mode == :global_search
-            @search.try(&.set_preedit(ev.text))
-          elsif @mode == :archive_export_path
-            @archive_export_overlay.try(&.set_preedit(ev.text))
-          elsif @mode == :archive_import_path
-            @archive_import_overlay.try(&.set_preedit(ev.text))
-          elsif @mode == :archive_import_name
-            @archive_name_overlay.try(&.set_preedit(ev.text))
-          elsif @mode == :list
-            @project_query.set_preedit(ev.text) if @selected == 2
-          else
-            @preedit = ev.text
           end
         end
+        @term.leave_paste! if @paste.end_if_stalled
       end
     ensure
       @prepared_export.try(&.close)
       @prepared_import.try(&.close)
+    end
+
+    # One polled event, through the paste gate first (see PasteGate). Returns what `run` returns
+    # on: a Project to open, :quit, or nil to keep going.
+    private def handle_event(ev : Termisu::Event::Any) : Project | Symbol?
+      case @paste.filter(ev) { |key| takes_pasted?(key) }
+      in .absorb? then return nil
+      in .refuse?
+        set_flash(@paste.note, ok: false)
+        @paste_note_mode = @mode
+        return nil
+      in .deliver?
+      end
+      result = dispatch_event(ev)
+      drop_paste_note_on_leave
+      result
+    end
+
+    # The refusal is about the screen it was refused on. Only handle_list and the two forms
+    # clear `@flash` on a key, so leaving the space menu, a confirm or Settings by esc used to
+    # carry "paste stopped at the line break" onto the list. Only the paste's own note goes:
+    # a flash the new mode set on the way (a delete result, a too-small window) stays.
+    private def drop_paste_note_on_leave : Nil
+      return unless mode = @paste_note_mode
+      return if @mode == mode
+      @paste_note_mode = nil
+      @flash = nil if PasteGate.note?(@flash)
+    end
+
+    private def dispatch_event(ev : Termisu::Event::Any) : Project | Symbol?
+      case ev
+      when Termisu::Event::Resize
+        # termisu already resized its buffer to these dims; re-fit the backend grids in
+        # lockstep off the same event dims, and force a full repaint next frame.
+        @backend.resize(ev.width, ev.height)
+        @resized = true
+        nil
+      when Termisu::Event::Key
+        @companion.wake_on_input # any key re-arms Miss Ring's idle clock (self-gated while off)
+        return paste_into_query(ev) if @paste.pasting? && @mode == :list
+        case @mode
+        when :new                 then handle_new(ev)
+        when :confirm             then handle_confirm(ev)
+        when :settings            then handle_preferences(ev)
+        when :theme               then handle_theme(ev)
+        when :space               then handle_space(ev)
+        when :rename              then handle_rename(ev)
+        when :compress            then handle_compress(ev)
+        when :archive_export_path then handle_archive_export_path(ev)
+        when :archive_import_path then handle_archive_import_path(ev)
+        when :archive_import_name then handle_archive_import_name(ev)
+        when :global_search       then handle_global_search(ev)
+        else                           handle_list(ev)
+        end
+      when Termisu::Event::Mouse
+        @companion.wake_on_input
+        handle_picker_mouse(ev)
+      when Termisu::Event::Preedit
+        # Live IME composition for whichever field is active; the committed
+        # syllable arrives afterwards as a normal Key and clears this.
+        if @mode == :settings
+          @preferences.set_preedit(ev.text)
+        elsif @mode == :global_search
+          @search.try(&.set_preedit(ev.text))
+        elsif @mode == :archive_export_path
+          @archive_export_overlay.try(&.set_preedit(ev.text))
+        elsif @mode == :archive_import_path
+          @archive_import_overlay.try(&.set_preedit(ev.text))
+        elsif @mode == :archive_import_name
+          @archive_name_overlay.try(&.set_preedit(ev.text))
+        elsif @mode == :list
+          @project_query.set_preedit(ev.text) if @selected == 2
+        else
+          @preedit = ev.text
+        end
+        nil
+      end
+    end
+
+    # Whether a key that arrived inside a bracketed paste reaches the mode under it: this
+    # screen's `Overlay#takes_pasted?`. Text, and only where a text field has the keys: a
+    # printable character and nothing else, so a pasted ↵ cannot create, rename or open, and a
+    # pasted ↹ or control byte cannot move a field or run a chord (^D is delete on the list).
+    # The archive cards are Overlays and are asked as well, but their default answer lets esc
+    # and control bytes through, and around them this screen answers both: a pasted esc
+    # cancelled the path card and typed the rest into the search, a pasted 0x03 quit gori from
+    # the name prompt. Everywhere a bare key acts (the space menu, a confirm, the compress
+    # card, the theme list, a busy step) a paste is refused outright: a clipboard is not a
+    # menu pick, and a pasted `y` is not an answer.
+    private def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      return false if LineEdit.typed_char(ev).nil?
+      case @mode
+      when :list, :new, :rename, :global_search then true
+      when :settings                            then @preferences.takes_pasted?(ev)
+      when :archive_export_path                 then !!@archive_export_overlay.try(&.takes_pasted?(ev))
+      when :archive_import_path                 then !!@archive_import_overlay.try(&.takes_pasted?(ev))
+      when :archive_import_name                 then !!@archive_name_overlay.try(&.takes_pasted?(ev))
+      else                                           false
+      end
+    end
+
+    # A pasted character on the list goes into the search, from any row. `handle_list` would
+    # read a space on a project row as "open the action menu" and a comma on an empty query as
+    # "open Settings", which is how a paste with a leading space reached Delete.
+    private def paste_into_query(ev : Termisu::Event::Key) : Nil
+      @project_query.set_preedit("")
+      @flash = nil
+      edit_project_query(ev)
     end
 
     # --- update check --------------------------------------------------------

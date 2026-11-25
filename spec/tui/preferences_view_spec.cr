@@ -392,3 +392,38 @@ describe Gori::Tui::PreferencesView do
     picker.handle_key(pkey(Termisu::Input::Key::Enter)).kind.should_not eq(:open)
   end
 end
+
+# A paste is text, so it may only reach a text field. On the group strip, a toggle or a choice
+# a printable key is a command (space flips a bool, a letter cycles a choice), so a clipboard
+# pasted at the project picker's Settings screen or the in-app modal rewrote settings.
+describe "PreferencesView#takes_pasted?" do
+  it "refuses a paste on the strip and on a toggle, and takes one in a text field" do
+    v = PreferencesView.new
+    v.open_default
+    space = pkey(Termisu::Input::Key::Space, ' ')
+    letter = pkey(Termisu::Input::Key::LowerA, 'a')
+    v.takes_pasted?(space).should be_false # the group strip
+    into_fields(v)                         # General opens on a bool row
+    v.takes_pasted?(space).should be_false
+    v.takes_pasted?(letter).should be_false
+    v.dirty?.should be_false
+
+    found = false
+    40.times do
+      if v.takes_pasted?(letter)
+        found = true
+        v.handle_key(letter)
+        v.dirty?.should be_true # a text field took the character
+        break
+      end
+      v.handle_key(pkey(DOWN))
+    end
+    found.should be_true
+    v.takes_pasted?(pkey(Termisu::Input::Key::Enter)).should be_false
+  end
+
+  it "answers for the in-app modal too" do
+    ov = PreferencesOverlay.new
+    ov.takes_pasted?(pkey(Termisu::Input::Key::Space, ' ')).should be_false
+  end
+end

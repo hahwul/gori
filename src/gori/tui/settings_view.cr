@@ -756,6 +756,13 @@ module Gori::Tui
       @cursor = (@cursor + delta).clamp(0, @values[@focused].size)
     end
 
+    # Whether the focused row is a text field a pasted character is typed into. On a toggle, a
+    # choice, an opener, a read-only or a disabled row a printable key is a command (space flips
+    # a toggle, a letter cycles a choice), so a clipboard pasted there would change settings.
+    def text_field? : Bool
+      !(bool_field? || choice_field? || opener_field? || readonly_field? || disabled_field?)
+    end
+
     private def bool_field? : Bool
       fields[@focused].bool
     end

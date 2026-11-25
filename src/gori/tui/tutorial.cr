@@ -9,6 +9,7 @@ require "./mascot"
 require "./notifications"
 require "./companion"
 require "./palette"
+require "./paste_gate"
 require "../settings"
 require "../verb"
 
@@ -456,6 +457,8 @@ module Gori::Tui
 
       # Overlay / edit sandbox driven by the user (lessons + practice).
       @overlay = :none # :none | :palette | :space
+      # Bracketed pastes: which pasted keys reach the mock under them (see PasteGate).
+      @paste = PasteGate.new
       @pal_sel = 0
       @pal_query = "" # live filter string (palette lesson + practice)
       @space_sel = 0
@@ -505,17 +508,42 @@ module Gori::Tui
       loop do
         @practice_completed ||= @step.practice? && practice_done?
         tick_companion
-        render
+        render unless @paste.refusing? # a refused paste changes nothing until it ends
         # Own event loop — fold ⌥P onto ^P so the "try the palette" goal below can be
         # completed with whichever modifier the user configured.
-        case ev = Keybind.dealias_event(@term.poll_event(50))
-        when Termisu::Event::Resize then (@backend.resize(ev.width, ev.height); @resized = true)
-        when Termisu::Event::Key    then (@companion.wake_on_input; handle_key(ev))
-        when Termisu::Event::Mouse  then (@companion.wake_on_input; handle_mouse(ev))
+        if ev = Keybind.dealias_event(@term.poll_event(50))
+          handle_event(ev)
+          # A paste's queued keys are handled as one burst (see PasteGate#drain).
+          @paste.drain(@term) do |more|
+            handle_event(Keybind.dealias_event(more) || more)
+            !@running
+          end
         end
+        @term.leave_paste! if @paste.end_if_stalled
         @tick &+= 1
         break unless @running
       end
+    end
+
+    # One polled event, through the paste gate first (see PasteGate). The tour teaches the app,
+    # so it takes a paste the way the app does: as text where the mock has a text field (INS,
+    # the palette's filter), and not at all where a bare key acts. Otherwise a paste stepped
+    # the lessons on its own letters (`n` next, `b` back) and left the tour on its esc.
+    private def handle_event(ev : Termisu::Event::Any) : Nil
+      case @paste.filter(ev) { |key| takes_pasted?(key) }
+      in .absorb?, .refuse? then return
+      in .deliver?
+      end
+      case ev
+      when Termisu::Event::Resize then (@backend.resize(ev.width, ev.height); @resized = true)
+      when Termisu::Event::Key    then (@companion.wake_on_input; handle_key(ev))
+      when Termisu::Event::Mouse  then (@companion.wake_on_input; handle_mouse(ev))
+      end
+    end
+
+    private def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      return false if Tutorial.typed_char(ev).nil?
+      @overlay == :palette || (@overlay == :none && @edit_insert)
     end
 
     # --- Miss Ring -----------------------------------------------------------
