@@ -233,13 +233,12 @@ module Gori::Tui
 
     private CARET_LETTERS = {'k' => {-1, 0}, 'j' => {1, 0}, 'h' => {0, -1}, 'l' => {0, 1}}
 
-    # Home/End move the EDITOR's caret; the READ cursor follows, extending a ⇧ selection.
+    # Home/End, ⌃/⌥ jumping the buffer: Notes' own READ path (`TextReadState#handle_motion_key`),
+    # so the pad does not teach a line-edge ⌃End the Notes pane it stands in for does not have.
     private def line_edge(ev : Termisu::Event::Key) : Bool
       key = ev.key
       return false unless key.home? || key.end?
-      key.home? ? @area.home(ev.shift?) : @area.end_of_line(ev.shift?)
-      @read.sync_to(@area, selecting: ev.shift?)
-      true
+      @read.handle_motion_key(@area, ev)
     end
 
     # INSERT: what every editor's INS ladder does. Modified chords other than the editor's

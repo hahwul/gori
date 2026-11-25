@@ -589,8 +589,7 @@ module Gori::Tui
       when editor_read_sideways(ev) then nil # ←/→ h/l, ⌥ by word
       when key.page_up?             then v.template_read_page(-1, selecting: selecting)
       when key.page_down?           then v.template_read_page(1, selecting: selecting)
-      when key.home?                then v.template_home(selecting)
-      when key.end?                 then v.template_end(selecting)
+      when key.home?, key.end?      then v.template_read_motion_key(ev) # ⌃/⌥ jump the buffer
       when c && !ev.ctrl? && !ev.alt? && !c.control?
         return false # i INSERT, x/y + Global breath → keymap
       end

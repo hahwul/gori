@@ -88,3 +88,26 @@ describe "DecoderController#focus_resume" do
     end
   end
 end
+
+# The INPUT editor's READ Home/End ignored ⌃/⌥ and stopped at the line's edge, while INS
+# jumped the buffer.
+describe "DecoderController ⌃Home/⌃End on the READ input" do
+  it "jumps the buffer and extends the READ selection to its end, ⌥ alike" do
+    {Termisu::Input::Modifier::Ctrl, Termisu::Input::Modifier::Alt}.each do |mod|
+      with_decoder_controller do |ctl|
+        ctl.decoder_from_text("first\nmiddle\nlast")
+        s = ctl.@sessions[ctl.@idx]
+        s.pane.should eq(:input)
+        s.input_mode.should eq(InputMode::Read)
+        ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Down)).should be_true
+        2.times { ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Right)) }
+        ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::End, mod | Termisu::Input::Modifier::Shift)).should be_true
+        ctl.selection_text.should eq("ddle\nlast")
+
+        ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Home, mod)).should be_true
+        ctl.selection_active?.should be_false
+        {s.input.cy, s.input.cx}.should eq({0, 0})
+      end
+    end
+  end
+end

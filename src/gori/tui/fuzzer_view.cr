@@ -2785,6 +2785,14 @@ module Gori::Tui
       @template_read.sync_to(@editor, selecting: selecting) unless template_insert?
     end
 
+    # Home/End in READ, ⌃/⌥ included — see `RepeaterView#request_read_motion_key`: the READ
+    # arm called `template_home`/`template_end` whatever the modifier, so ⌃End landed on the
+    # line's end while INS (`buffer_jump?`) went to the buffer's.
+    def template_read_motion_key(ev : Termisu::Event::Key) : Bool
+      return false if template_insert?
+      @template_read.handle_motion_key(@editor, ev)
+    end
+
     # ⌃/⌥ + Home/End — the buffer's start/end rather than the line's.
     def template_buffer_start(selecting : Bool = false) : Nil
       @editor.to_buffer_start(selecting)

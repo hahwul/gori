@@ -498,3 +498,27 @@ describe "FuzzerController#fuzz_run over unsaved results" do
     end
   end
 end
+
+# The READ half of the TEMPLATE's ⌃Home/⌃End: INS honoured the modifier (`buffer_jump?`), the
+# READ arm did not and stopped at the line's edge. See the Repeater REQUEST's twin.
+describe "FuzzerController ⌃Home/⌃End on the READ template" do
+  it "jumps the buffer and extends the READ selection to its end, ⌥ alike" do
+    {Termisu::Input::Modifier::Ctrl, Termisu::Input::Modifier::Alt}.each do |mod|
+      with_fuzzer_controller do |ctl|
+        ctl.fuzz_new
+        v = ctl.current_view.not_nil!
+        v.load_request("https://h", "GET /?x=1 HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+        v.focus_pane(:template)
+        v.template_insert?.should be_false
+        ctl.handle_body_key(page_key(Termisu::Input::Key::Down)).should be_true
+        2.times { ctl.handle_body_key(page_key(Termisu::Input::Key::Right)) }
+        ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::End, mod | Termisu::Input::Modifier::Shift)).should be_true
+        v.template_copy_text.should start_with("st: h\n")
+
+        ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Home, mod)).should be_true
+        ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::End, Termisu::Input::Modifier::Shift))
+        v.template_copy_text.should eq("GET /?x=1 HTTP/1.1")
+      end
+    end
+  end
+end

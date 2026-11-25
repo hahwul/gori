@@ -474,3 +474,25 @@ describe "Cookie temporary salt" do
     end
   end
 end
+
+# The INPUT editor's READ Home/End ignored ⌃/⌥ and stopped at the line's edge, while INS
+# jumped the buffer.
+describe "Workbench ⌃Home/⌃End on the READ input" do
+  it "jumps the buffer and extends the READ selection to its end, ⌥ alike" do
+    {Termisu::Input::Modifier::Ctrl, Termisu::Input::Modifier::Alt}.each do |mod|
+      each_tool do |ctl, _host, _t|
+        ctl.session_from_text("first\nmiddle\nlast")
+        cur_of(ctl).pane.should eq(:input)
+        cur_of(ctl).input_mode.should eq(InputMode::Read)
+        ctl.handle_body_key(wkey(Termisu::Input::Key::Down)).should be_true
+        2.times { ctl.handle_body_key(wkey(Termisu::Input::Key::Right)) }
+        ctl.handle_body_key(wkey(Termisu::Input::Key::End, mod | Termisu::Input::Modifier::Shift)).should be_true
+        ctl.selection_text.should eq("ddle\nlast")
+
+        ctl.handle_body_key(wkey(Termisu::Input::Key::Home, mod)).should be_true
+        ctl.selection_active?.should be_false
+        {cur_of(ctl).input.cy, cur_of(ctl).input.cx}.should eq({0, 0})
+      end
+    end
+  end
+end

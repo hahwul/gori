@@ -834,13 +834,12 @@ module Gori::Tui
       when nav_down?(ev)
         s.input.at_bottom? && !growing ? focus_chain : s.input_read.move(s.input, 1, 0, selecting: selecting)
       when editor_read_sideways(ev) then nil # ←/→ h/l, ⌥ by word
-      # Home/End/Page over the READ caret: they move the EDITOR caret, so the read cursor —
-      # which is what this mode paints — is mirrored back onto it.
-      when key.home?, key.end?
-        key.home? ? s.input.home(selecting) : s.input.end_of_line(selecting)
-        s.input_read.sync_to(s.input, selecting: selecting)
-      when key.page_up?   then s.input_read.move(s.input, -s.input.page_rows, 0, selecting: selecting)
-      when key.page_down? then s.input_read.move(s.input, s.input.page_rows, 0, selecting: selecting)
+      # Home/End over the READ caret, ⌃/⌥ included: the editor's own keymap run over the read
+      # cursor (`TextReadState#handle_motion_key`, as Notes since #1963). A bare home/end here
+      # sent ⌃End to the line's end while INS sent it to the buffer's.
+      when key.home?, key.end? then s.input_read.handle_motion_key(s.input, ev)
+      when key.page_up?        then s.input_read.move(s.input, -s.input.page_rows, 0, selecting: selecting)
+      when key.page_down?      then s.input_read.move(s.input, s.input.page_rows, 0, selecting: selecting)
       when c && !ev.ctrl? && !ev.alt? && !c.control?
         return false # i INSERT, x/y + Global breath → keymap
       end

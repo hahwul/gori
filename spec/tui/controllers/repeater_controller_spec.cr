@@ -707,3 +707,27 @@ describe "RepeaterController#repeater_held" do
     end
   end
 end
+
+# ⌃Home/⌃End (⌥ on macOS) in READ on the REQUEST went to the LINE's edge: the READ arm called
+# `edit_home`/`edit_end` whatever the modifier, while the same chord in INS jumped the buffer,
+# and ⇧⌃End selected only to the line's end. Driven through `handle_body_key`, the key's route.
+describe "RepeaterController ⌃Home/⌃End on the READ request" do
+  it "jumps the buffer and extends the READ selection to its end, ⌥ alike" do
+    {false, true}.each do |alt|
+      with_repeater_controller do |ctl, _|
+        ctl.repeater_from_request("https://h.test", HTTP_REQ, false, nil)
+        v = ctl.current_view.not_nil!
+        v.request_insert?.should be_false
+        ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Down)).should be_true
+        2.times { ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Right)) }
+        ctl.handle_body_key(mod_key(Termisu::Input::Key::End, shift: true, alt: alt)).should be_true
+        v.request_copy_text.should start_with("st: h.test\n") # past the line, to the buffer's end
+
+        ctl.handle_body_key(mod_key(Termisu::Input::Key::Home, alt: alt)).should be_true
+        v.pane_selection?.should be_false
+        ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::End, Termisu::Input::Modifier::Shift))
+        v.request_copy_text.should eq("GET / HTTP/1.1") # the caret sat on the buffer's first cell
+      end
+    end
+  end
+end

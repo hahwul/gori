@@ -3837,8 +3837,7 @@ module Gori::Tui
       when key.right?, key.lower_l? then view.request_read_move(0, 1, selecting: selecting)
       when key.page_up?             then view.request_read_page(-1, selecting: selecting)
       when key.page_down?           then view.request_read_page(1, selecting: selecting)
-      when key.home?                then view.edit_home(selecting)
-      when key.end?                 then view.edit_end(selecting)
+      when key.home?, key.end?      then view.request_read_motion_key(ev) # ⌃/⌥ jump the buffer
       when c && !ev.ctrl? && !ev.alt? && !c.control?
         return false # i INSERT, x select-line, y copy, Global c/i/s, …
       end

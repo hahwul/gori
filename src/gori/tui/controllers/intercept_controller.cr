@@ -225,8 +225,7 @@ module Gori::Tui
       when editor_read_sideways(ev) then nil # ←/→ h/l, ⌥ by word
       when key.page_up?             then @intercept.read_page(-1, selecting)
       when key.page_down?           then @intercept.read_page(1, selecting)
-      when key.home?                then @intercept.read_line_edge(-1, selecting)
-      when key.end?                 then @intercept.read_line_edge(1, selecting)
+      when key.home?, key.end?      then @intercept.read_home_end(ev) # ⌃/⌥ jump the buffer
       else                               return false
       end
       true

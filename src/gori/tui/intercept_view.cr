@@ -520,10 +520,10 @@ module Gori::Tui
       read_move(dir * @editor.page_rows, 0, selecting)
     end
 
-    def read_line_edge(dir : Int32, selecting : Bool = false) : Nil
-      return unless text_read?
-      dir < 0 ? @editor.home(selecting) : @editor.end_of_line(selecting)
-      @read.sync_to(@editor, selecting: selecting)
+    # Home/End, ⌃/⌥ included — see `RepeaterView#request_read_motion_key`.
+    def read_home_end(ev : Termisu::Event::Key) : Bool
+      return false unless text_read?
+      @read.handle_motion_key(@editor, ev)
     end
 
     # Only reload from pristine bytes when switching to a DIFFERENT held item; re-entering
