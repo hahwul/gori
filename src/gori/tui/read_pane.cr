@@ -229,6 +229,10 @@ module Gori::Tui
     # means End lands on its LAST row and Home on its first, and the shared `ensure_visible`
     # below scrolls the anchor to whichever visual row the caret ended up on.
     #
+    # ⌃/⌥ + Home/End take the BUFFER's edges, as they do in every text editor's two modes
+    # (`TextArea#handle_motion_key`, `TextReadState#handle_motion_key`) and the Repeater's
+    # response (#1425). These arms ignored the modifier and stopped at the line's edge.
+    #
     # The two page arms `return true` early ON PURPOSE: they go through `move`, which already
     # ran `ensure_visible` (and, on a wrapping pane, paged by DRAWN rows rather than logical
     # lines — the reason ↑/↓ step visual rows too). Falling through would run it twice.
@@ -237,9 +241,10 @@ module Gori::Tui
       key = ev.key
       shift = ev.shift?
       page = {@last_h - 2, 1}.max
+      cy = (ev.ctrl? || ev.alt?) ? (key.home? ? 0 : @size - 1) : @cursor.cy.clamp(0, @size - 1)
       case
-      when key.home?      then @cursor.move_to(@cursor.cy, 0, selecting: shift)
-      when key.end?       then @cursor.move_to(@cursor.cy, line(@cursor.cy.clamp(0, @size - 1)).size, selecting: shift)
+      when key.home?      then @cursor.move_to(cy, 0, selecting: shift)
+      when key.end?       then @cursor.move_to(cy, line(cy).size, selecting: shift)
       when key.page_up?   then move(-page, 0, selecting: shift); return true
       when key.page_down? then move(page, 0, selecting: shift); return true
       else                     return false

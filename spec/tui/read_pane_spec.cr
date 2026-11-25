@@ -147,6 +147,23 @@ describe Gori::Tui::ReadPane do
       pane.motion_key(key(Termisu::Input::Key::LowerA)).should be_false # not a motion key
     end
 
+    # ⌃/⌥ + Home/End stopped at the line's edge, as in every READ editor before; the editors and
+    # the Repeater's response take the buffer's.
+    it "jumps the buffer on a modified Home / End, with ⇧ extending" do
+      {Termisu::Input::Modifier::Ctrl, Termisu::Input::Modifier::Alt}.each do |mod|
+        pane = ReadPane.new
+        pane.source(pane_source(5))
+        render_pane(pane, h: 6)
+        pane.cursor.move_to(1, 0)
+        pane.motion_key(Termisu::Event::Key.new(Termisu::Input::Key::End, mod | Termisu::Input::Modifier::Shift)).should be_true
+        {pane.cursor.cy, pane.cursor.cx}.should eq({4, "line4 word4".size})
+        pane.copy_text.should start_with("line1 word1\n")
+        pane.motion_key(Termisu::Event::Key.new(Termisu::Input::Key::Home, mod)).should be_true
+        {pane.cursor.cy, pane.cursor.cx}.should eq({0, 0})
+        pane.selection?.should be_false
+      end
+    end
+
     it "copies every line for the whole-pane fallback" do
       pane = ReadPane.new
       pane.source(["a", "b", "c"])
