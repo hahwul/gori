@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/memory_backend"
 
 # A store with an unconfigured Scope: `Outbound.interactive` waives Layer 1 anyway, and
 # with no rules Layer 2 (Sandbox / EXCLUDE) has nothing to block — the gate is not what
@@ -367,5 +368,30 @@ describe "Gori::Tui::MinerController Miner → Repeater seed" do
     seed.request_text.should contain("q=관리자")
     seed.request_text.should contain("debug=gq22fbb1be")
     seed.request_text.to_slice.to_a.should eq(view.request_with_finding(finding).to_a)
+  end
+end
+
+# The tally line said nothing of a ^X once the toast was gone; a partial bar beside findings
+# read as a mine still to finish.
+describe "Gori::Tui::MinerView after a stopped mine" do
+  it "says stopped on the tally line, and the next run forgets it" do
+    view = Gori::Tui::MinerView.new
+    view.load("http://t.test", "GET /?a=1 HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice, false, nil,
+      Gori::Miner::Config.new(locations: [Gori::Miner::Location::Query]))
+    view.begin_run
+    view.apply_progress(Gori::Miner::Progress.new(1300_i64, 817_i64, 900_i64, 0, 0_i64))
+    view.finish_run(stopped: true)
+    backend = MemoryBackend.new(120, 34)
+    view.render(Gori::Tui::Screen.new(backend), Gori::Tui::Rect.new(0, 0, 120, 34), true)
+    backend.contains?("817/1300 names").should be_true
+    backend.contains?("err · stopped").should be_true
+
+    view.begin_run
+    view.apply_progress(Gori::Miner::Progress.new(1300_i64, 1300_i64, 1400_i64, 0, 0_i64))
+    view.finish_run
+    backend = MemoryBackend.new(120, 34)
+    view.render(Gori::Tui::Screen.new(backend), Gori::Tui::Rect.new(0, 0, 120, 34), true)
+    backend.contains?("1300/1300 names").should be_true
+    backend.contains?("· stopped").should be_false
   end
 end

@@ -604,7 +604,7 @@ module Gori::Tui
         # `budget_exhausted?` compares against. NOT `config.goal`: that is the live-replay
         # half only, and reading it here relabelled a finished manual paste "30/500".
         v.apply_progress(ev.collected, ev.sent, v.progress_goal, v.errors_count, ev.requests)
-        v.finish_run
+        v.finish_run(stopped: ev.stopped)
         finish_job(v, ev)
       when Sequencer::ErrorEvent
         v.finish_run

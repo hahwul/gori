@@ -1358,6 +1358,7 @@ module Gori::Tui
         @progress = nil
         @run_total = nil
         @run_stop_idx = nil
+        @run_status = "" # the RESULTS border's ending chip belonged to the run just dropped
       end
       @saved_run_id = nil
       @loaded_saved_run = false
@@ -3429,7 +3430,28 @@ module Gori::Tui
         # The row the run ended on (issue #1270), standing — the row itself can be scrolled
         # away, windowed out, or hidden by the matched-only lens.
         stop = FuzzerView.stop_chip(@run_stop_idx)
-        "#{result_count} sent#{extra} · #{hit_label}#{stop}#{window}#{archive}#{saved}#{shapes_chip}"
+        "#{sent_of_total} sent#{extra} · #{hit_label}#{ending_chip}#{stop}#{window}#{archive}#{saved}#{shapes_chip}"
+      end
+    end
+
+    # `5/12` for a run that ended short of its plan, `12` for one that sent it all (or had no
+    # known total) — the running label's `5/12`, kept once it stops. Without it a ^X at 5 of 12
+    # read, once the toast was gone, exactly like a complete 5-payload run.
+    private def sent_of_total : String
+      sent = result_count
+      total = @run_total
+      total && sent < total ? "#{sent}/#{total}" : sent.to_s
+    end
+
+    # How the run ENDED, standing on the border for every ending but a clean one. The toast
+    # says `(stopped)` / `(request budget exhausted — partial run)` once and the next keypress
+    # replaces it; `condition_met` already has its `stop #N` chip, so it adds a word only for a
+    # saved run that carries no stop row. Spelled from `Fuzz::Terminal`'s durable labels.
+    private def ending_chip : String
+      case @run_status
+      when "", "done", "running" then ""
+      when "condition_met"       then @run_stop_idx ? "" : " · condition met"
+      else                            " · #{@run_status.tr("_", " ")}"
       end
     end
 

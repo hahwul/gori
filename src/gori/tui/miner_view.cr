@@ -523,7 +523,10 @@ module Gori::Tui
         screen.text(x, y, progress_bar(rect.w - 4), Theme.accent, Theme.bg) if y < rect.bottom - 1
         y += 1
         if y < rect.bottom - 1
-          line = "found #{@progress.found} · #{@progress.names_done}/#{@progress.names_total} names · #{@progress.sent} sent · #{@progress.errors} err"
+          # ` · stopped` standing, like the Fuzzer's RESULTS border: the ^X toast is gone by the
+          # next keypress, and a partial bar beside its findings read as a mine still to finish.
+          ending = stopped? ? " · stopped" : ""
+          line = "found #{@progress.found} · #{@progress.names_done}/#{@progress.names_total} names · #{@progress.sent} sent · #{@progress.errors} err#{ending}"
           screen.text(x, y, line, Theme.muted, Theme.bg, width: rect.w - 4)
         end
       end

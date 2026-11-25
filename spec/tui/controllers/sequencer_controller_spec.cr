@@ -250,4 +250,21 @@ describe SequencerController do
       end
     end
   end
+
+  # `DoneEvent#stopped` never reached the view, so a stopped collection's standing tally said
+  # nothing of the stop (and a capped one read `budget exhausted`).
+  it "hands a stop to the view" do
+    with_sequencer_controller do |ctl, _session|
+      ctl.sequence_from_text((1..50).map { |i| "token_#{i}" }.join("\n"))
+      view = ctl.current_view.not_nil!
+      ctl.sequence_stop # before the run fiber has sent anything
+      100.times do
+        Fiber.yield
+        ctl.drain_events
+        break unless view.running?
+      end
+      view.running?.should be_false
+      view.stopped?.should be_true
+    end
+  end
 end
