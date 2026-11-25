@@ -405,3 +405,23 @@ describe "InterceptController ⌃Home/⌃End in READ" do
     end
   end
 end
+
+# The byte editor's line has no `space cmds` anchor, so an 80-column row cuts it from the
+# right — and with the forward fourth it was the key cut while the arrows stayed.
+describe "InterceptController hex footer on an 80-column row" do
+  it "keeps the forward key" do
+    TuiContract.with_session("intercept-hex-hint") do |session|
+      ic = session.interceptor
+      ic.toggle
+      ic.enqueue_ws(Bytes[0x00, 0xFF, 0x10, 0x82], to_server: true, method: "GET", target: "/ws",
+        host: "echo.test", port: 80, scheme: "http", flow_id: 5_i64, binary: true).should_not be_nil
+      host = TuiContract::Host.new(session)
+      host.tab = :intercept
+      ctl = InterceptController.new(host)
+      ctl.on_enter
+      ctl.view.toggle_edit
+      ctl.view.hex_editing?.should be_true
+      Chrome.status_row(ctl.body_hint(:body), "MESSAGE · INS").should contain("^R forward")
+    end
+  end
+end

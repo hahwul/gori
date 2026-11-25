@@ -1,6 +1,7 @@
 require "../spec_helper"
 require "../support/memory_backend"
 require "../support/overlay_harness"
+require "../support/tui_probes"
 
 include Gori::Tui
 
@@ -289,5 +290,12 @@ describe "Gori::Tui::ImportOverlay — Overlay seam" do
     h = OverlayHarness.new(ImportOverlay.new(:har))
     h.preedit("preedithere")
     h.rendered?("preedithere").should be_true
+  end
+end
+
+describe "ImportOverlay hint on an 80-column row" do
+  it "keeps the key that imports, under the longest title" do
+    ov = ImportOverlay.new(:project_archive)
+    Chrome.status_row(ov.hint, ov.title).should contain("↵ import")
   end
 end

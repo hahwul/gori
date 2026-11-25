@@ -1,6 +1,7 @@
 require "../spec_helper"
 require "../support/memory_backend"
 require "../support/overlay_harness"
+require "../support/tui_probes"
 
 include Gori::Tui
 
@@ -160,5 +161,12 @@ describe "Gori::Tui::OastProviderOverlay — Overlay seam" do
     h = OverlayHarness.new(OastProviderOverlay.adding)
     h.preedit("preedithere")
     h.rendered?("preedithere").should be_true
+  end
+end
+
+describe "OastProviderOverlay hint on an 80-column row" do
+  it "keeps the key that saves" do
+    ov = OastProviderOverlay.new
+    Chrome.status_row(ov.hint, ov.title).should match(/↵ \w/)
   end
 end

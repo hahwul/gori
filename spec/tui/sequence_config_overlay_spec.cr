@@ -1,5 +1,6 @@
 require "../spec_helper"
 require "../support/memory_backend"
+require "../support/tui_probes"
 
 include Gori::Tui
 
@@ -177,5 +178,12 @@ describe "Sequence config on short terminals" do
     ov.set_selected(0)
     ov.render(Screen.new(mb), area)
     mb.contains?("token type:").should be_true
+  end
+end
+
+describe "SequenceConfigOverlay hint on an 80-column row" do
+  it "keeps the key that starts the collection" do
+    ov = SequenceConfigOverlay.new(seed)
+    Chrome.status_row(ov.hint, ov.title).should contain("↵ start")
   end
 end

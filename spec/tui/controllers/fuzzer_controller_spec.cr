@@ -2,6 +2,7 @@ require "../../spec_helper"
 require "../../support/fake_host"
 require "../../support/memory_backend"
 require "file_utils"
+require "../../support/tui_probes"
 
 include Gori::Tui
 
@@ -206,7 +207,7 @@ describe "FuzzerController — a card's commit after a peer closed its session" 
       4.times { v.form_move(1) unless v.config_row == :mode }
       v.config_row.should eq(:mode)
       hint = ctl.body_hint(:body)
-      hint.should contain("→/↵ next mode · ← template")
+      hint.should contain("→/↵ next mode · ^R run · ← template")
       hint.should_not contain("open editor")
     end
   end
@@ -519,6 +520,34 @@ describe "FuzzerController ⌃Home/⌃End on the READ template" do
         ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::End, Termisu::Input::Modifier::Shift))
         v.template_copy_text.should eq("GET /?x=1 HTTP/1.1")
       end
+    end
+  end
+end
+
+# The CONFIG column is where a run is set up, and `^R run` sat fourth on every row: an
+# 80-column row kept the row's own key and `↑/↓ row` and never named the key that starts it.
+describe "FuzzerController — the run key on an 80-column row" do
+  it "names ^R run on every CONFIG row" do
+    with_fuzzer_controller do |ctl, _session|
+      ctl.fuzz_new
+      v = ctl.current_view.not_nil!
+      v.apply_set(nil, SetSpec.new(:list, "aa"))
+      v.focus_pane(:config)
+      seen = [] of Symbol
+      6.times do
+        seen << v.config_row
+        row = Chrome.status_row(ctl.body_hint(:body), "BODY")
+        row.should contain("^R run"), "#{v.config_row}: #{row}"
+        v.form_move(1)
+      end
+      seen.uniq.size.should eq(4)
+    end
+  end
+
+  it "names the run key on RESULTS" do
+    with_fuzzer_controller do |ctl, _session|
+      finished_results(ctl, [fuzz_result(0), fuzz_result(1)])
+      Chrome.status_row(ctl.body_hint(:body), "BODY").should contain("^R run")
     end
   end
 end

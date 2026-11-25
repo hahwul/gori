@@ -1,6 +1,7 @@
 require "../../spec_helper"
 require "../../support/fake_host"
 require "file_utils"
+require "../../support/tui_probes"
 
 include Gori::Tui
 
@@ -30,6 +31,16 @@ describe "DiscoverController footer with no run" do
       hint = ctl.body_hint(:body)
       hint.should eq("#{DiscoverView::START_FROM} · #{route} · space cmds · esc sub-tabs")
       Chrome.fit_hints(hint, 59).should eq("#{DiscoverView::START_FROM} · space cmds · esc sub-tabs")
+    end
+  end
+end
+
+describe "DiscoverController footer on the runs list" do
+  it "names the run key at 80 columns" do
+    with_discover_controller do |ctl|
+      ctl.view.add(DiscoverRun.new("http://a.test/", Gori::Discover::Config.new))
+      ctl.view.focus_pane(:runs)
+      Chrome.status_row(ctl.body_hint(:body), "BODY").should contain("^R run")
     end
   end
 end

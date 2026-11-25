@@ -88,7 +88,7 @@ module Gori::Tui
     end
 
     def hint : String
-      @entering_endpoint ? "endpoint URL · ↵ import · esc back" : "type to complete · ↹ pick · ↑↓ browse · ↵ #{@kind == :graphql ? "continue" : "import"} · esc cancel"
+      @entering_endpoint ? "endpoint URL · ↵ import · esc back" : "type to complete · ↵ #{@kind == :graphql ? "continue" : "import"} · ↹ pick · ↑↓ browse · esc cancel"
     end
 
     # --- input ---------------------------------------------------------------

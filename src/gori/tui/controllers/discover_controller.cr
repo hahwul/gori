@@ -58,7 +58,9 @@ module Gori::Tui
       return "#{DiscoverView::START_FROM} · #{@view.start_route} · space cmds · esc sub-tabs" if @view.empty?
       return @view.filter.hint if querying?
       if @view.focus == :runs
-        keys("↑/↓ runs · ↵/tab findings · {discover.run} run · {discover.stop} stop · {discover.pause} pause · {discover.dismiss} dismiss · space cmds · esc sub-tabs")
+        # `run` second: the runs list is where a crawl is started, and at 80 columns the line
+        # keeps two tokens.
+        keys("↑/↓ runs · {discover.run} run · ↵/tab findings · {discover.stop} stop · {discover.pause} pause · {discover.dismiss} dismiss · space cmds · esc sub-tabs")
       else
         keys("↑/↓ nav · ↵/o request+response · {discover.filter} filter · {discover.copy} copy · tab runs · {discover.run} run · {discover.stop} stop · {discover.pause} pause · space cmds · esc sub-tabs")
       end

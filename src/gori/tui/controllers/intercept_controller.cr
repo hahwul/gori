@@ -40,8 +40,10 @@ module Gori::Tui
       if @intercept.hex_editing?
         # The same sentence the Repeater's `^X` footer uses, because they are the same editor
         # and the same gestures. No `⇧arrows select` / `^Y copy` band: the byte editor has a
-        # nibble cursor and no selection, and `^Y` copies the whole payload.
-        "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^R #{editor_forward_word} · esc queue#{marks_wait_segment}"
+        # nibble cursor and no selection, and `^Y` copies the whole payload. The forward comes
+        # second: the line has no `space cmds` anchor, so an 80-column row cuts from the right,
+        # and with forward fourth it was the key cut while the arrows stayed.
+        "HEX: 0-9a-f overtype · ^R #{editor_forward_word} · Ins/Del/⌫ bytes · ←/→/↑/↓ move · esc queue#{marks_wait_segment}"
       elsif @intercept.text_insert?
         # `^Y copy`: `intercept.copy` carries `^Y` on the wider `intercept_copyable?` gate
         # precisely for this pane. Bare `y` IS bound on the queue, but it is a literal character

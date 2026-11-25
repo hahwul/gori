@@ -3,6 +3,7 @@ require "../../support/fake_host"
 require "../../support/fake_context"
 require "../../support/memory_backend"
 require "../../support/sse_origin"
+require "../../support/tui_probes"
 
 include Gori::Tui
 
@@ -728,6 +729,33 @@ describe "RepeaterController ⌃Home/⌃End on the READ request" do
         ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::End, Termisu::Input::Modifier::Shift))
         v.request_copy_text.should eq("GET / HTTP/1.1") # the caret sat on the buffer's first cell
       end
+    end
+  end
+end
+
+# `Chrome.fit_hints` keeps the first segment and drops the rest right to left before the
+# `space cmds` tail, so an 80-column row keeps about two tokens. With `send` after SNI or
+# diff/hex/pretty, TARGET and RESPONSE kept the toggles and lost the key the tab is for.
+describe "RepeaterController footer on an 80-column row" do
+  it "keeps ^R send on every pane of an HTTP tab" do
+    with_repeater_controller do |ctl, _|
+      ctl.repeater_from_request("https://h.test", HTTP_REQ, false, nil)
+      v = ctl.current_view.not_nil!
+      {:target => "TARGET · READ", :request => "REQUEST · READ", :response => "RESPONSE"}.each do |pane, focus|
+        v.focus_pane(pane)
+        row = Chrome.status_row(ctl.body_hint(:body), focus)
+        row.should contain("^R send"), "#{pane}: #{row}"
+        row.should contain("esc sub-tabs"), "#{pane}: #{row}"
+      end
+    end
+  end
+
+  it "keeps ^R send on a WebSocket transcript" do
+    with_repeater_controller do |ctl, _|
+      ctl.repeater_from_request("https://ws.test", WS_REQ, false, nil)
+      v = ctl.current_view.not_nil!
+      v.focus_pane(:response)
+      Chrome.status_row(ctl.body_hint(:body), "RESPONSE").should contain("^R send")
     end
   end
 end

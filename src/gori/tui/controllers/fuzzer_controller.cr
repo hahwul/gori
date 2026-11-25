@@ -191,44 +191,57 @@ module Gori::Tui
           # now the one place the key is named.
           keys("{editor.insert}/↵ edit · #{run} run · #{pretty} pretty · #{point} mark · ^O config · space cmds · esc sub-tabs")
         end
-      when :config then config_hint(v, run)
-      when :results
-        # ⇧E only while the verb would actually fire. `fuzz.save-results` is gated on
-        # `fuzzer_results_saveable?` (verbs/history.cr), which is false while a run is going,
-        # while a save/load is in flight, with no results, and once the run has been saved or
-        # restored — and an unavailable verb is never dispatched, so the key did NOTHING and
-        # said nothing while this line kept promising it. That also made the controller's own
-        # "fuzz results already saved as run #N" refusal unreachable through the binding.
-        # Named off the same predicate the gate reads, not a second copy of its conditions.
-        save = v.results_saveable? ? " · #{save_key} save" : ""
-        # `{space:fuzz.sort} sort`, not `{fuzz.sort} sort`. `fuzz.sort` is MENU-ONLY by
-        # decision (verbs/history.cr, key audit F2: a sort order is set once and read for the
-        # rest of the run, which is not worth a bare letter), so it carries a `mnemonic:` and
-        # no chord — and `Hotkeys.expand` leaves a token it cannot resolve ALONE. This line
-        # printed the literal `{fuzz.sort} sort` into the footer, braces and all, and the one
-        # key it named answered "nothing bound here". The `space:` form spells the menu path
-        # from the registry, as the Rewriter does for its own menu-only action.
-        #
-        # Direct keys first, menu paths last: `space → o sort · m matched` read as if `m` were
-        # behind `space` too. The paths sit just before `space cmds`, so a narrow row drops
-        # them before any direct key.
-        fold = v.grouped? ? " · ←/→ fold" : ""
-        "↑/↓ select · ↵ detail#{fold} · #{keys("{fuzz.matched} matched · {fuzz.dist} dist")}#{save} · " \
-        "#{run} run · #{stop} stop · #{keys("{space:fuzz.sort} sort · {space:fuzz.group} shapes")} · space cmds · esc sub-tabs"
-      when :detail then "↑/↓ move · ←/→ pane · ^F find · space cmds · esc back"
-      else              "↹/esc sub-tabs"
+      when :config  then config_hint(v, run)
+      when :results then results_hint(v, run, stop, save_key)
+      when :detail  then "↑/↓ move · ←/→ pane · ^F find · space cmds · esc back"
+      else               "↹/esc sub-tabs"
       end
+    end
+
+    # The RESULTS footer — its own method so `body_hint` stays one decision per pane.
+    private def results_hint(v : FuzzerView, run : String, stop : String, save_key : String) : String
+      # ⇧E only while the verb would actually fire. `fuzz.save-results` is gated on
+      # `fuzzer_results_saveable?` (verbs/history.cr), which is false while a run is going,
+      # while a save/load is in flight, with no results, and once the run has been saved or
+      # restored — and an unavailable verb is never dispatched, so the key did NOTHING and
+      # said nothing while this line kept promising it. That also made the controller's own
+      # "fuzz results already saved as run #N" refusal unreachable through the binding.
+      # Named off the same predicate the gate reads, not a second copy of its conditions.
+      save = v.results_saveable? ? " · #{save_key} save" : ""
+      # `{space:fuzz.sort} sort`, not `{fuzz.sort} sort`. `fuzz.sort` is MENU-ONLY by
+      # decision (verbs/history.cr, key audit F2: a sort order is set once and read for the
+      # rest of the run, which is not worth a bare letter), so it carries a `mnemonic:` and
+      # no chord — and `Hotkeys.expand` leaves a token it cannot resolve ALONE. This line
+      # printed the literal `{fuzz.sort} sort` into the footer, braces and all, and the one
+      # key it named answered "nothing bound here". The `space:` form spells the menu path
+      # from the registry, as the Rewriter does for its own menu-only action.
+      #
+      # Direct keys first, menu paths last: `space → o sort · m matched` read as if `m` were
+      # behind `space` too. The paths sit just before `space cmds`, so a narrow row drops
+      # them before any direct key.
+      fold = v.grouped? ? " · ←/→ fold" : ""
+      #
+      # RUN or STOP, whichever is live, and straight after `↵ detail`: at 80 columns the line
+      # keeps about three tokens, and the key that starts or stops the run outranks the view
+      # toggles. Both together pushed each other off; the Miner's footer makes the same pick.
+      go = v.running? ? "#{stop} stop" : "#{run} run"
+      "↑/↓ select · ↵ detail · #{go}#{fold} · #{keys("{fuzz.matched} matched · {fuzz.dist} dist")}#{save} · " \
+      "#{keys("{space:fuzz.sort} sort · {space:fuzz.group} shapes")} · space cmds · esc sub-tabs"
     end
 
     # `esc sub-tabs` on all four, for the same reason the pane strips above carry it:
     # `handle_escape`'s final arm answers escape here too, and the CONFIG column was the one
     # part of the tab that never said where it goes.
+    #
+    # Each row leads with what ↵ does on it and then `run`: at 80 columns only the first two
+    # tokens survive, and `^R run` sat fourth on every row, so the column the operator sets a
+    # run up in never named the key that starts it.
     private def config_hint(v : FuzzerView, run : String) : String
       case v.config_row
-      when :set  then "↑/↓ row · ↵ edit set · Del remove · #{run} run · ↹ pane · space cmds · esc sub-tabs"
-      when :add  then keys("↵ add a payload set · {fuzz.list-paste} quick List · ↑/↓ row · #{run} run · ↹ pane · space cmds · esc sub-tabs")
-      when :mode then "→/↵ next mode · ← template · ↑/↓ row · #{run} run · ↹ pane · space cmds · esc sub-tabs"
-      else            "↵ open Advanced · ↑/↓ row · #{run} run · ↹ pane · space cmds · esc sub-tabs"
+      when :set  then "↵ edit set · #{run} run · ↑/↓ row · Del remove · ↹ pane · space cmds · esc sub-tabs"
+      when :add  then keys("↵ add a payload set · #{run} run · {fuzz.list-paste} quick List · ↑/↓ row · ↹ pane · space cmds · esc sub-tabs")
+      when :mode then "→/↵ next mode · #{run} run · ← template · ↑/↓ row · ↹ pane · space cmds · esc sub-tabs"
+      else            "↵ open Advanced · #{run} run · ↑/↓ row · ↹ pane · space cmds · esc sub-tabs"
       end
     end
 

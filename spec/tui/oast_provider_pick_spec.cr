@@ -3,6 +3,7 @@ require "../support/fake_host"
 require "../support/memory_backend"
 require "../support/overlay_harness"
 require "file_utils"
+require "../support/tui_probes"
 
 include Gori::Tui
 
@@ -307,6 +308,16 @@ describe "OastController's payload row before a URL exists" do
       backend = MemoryBackend.new(100, 24)
       ctl.render_body(Screen.new(backend), Rect.new(0, 0, 100, 24), :body)
       backend.contains?("press g to get an OAST payload URL").should be_true
+    end
+  end
+end
+
+describe "OastController callbacks footer on an 80-column row" do
+  # `^R` starts the listener, as it starts every other tab's job; `←/→ provider` stayed while
+  # it was cut.
+  it "keeps the listen key" do
+    with_providers(2) do |c, _|
+      Chrome.status_row(c.body_hint(:body), "BODY").should contain("^R listen")
     end
   end
 end

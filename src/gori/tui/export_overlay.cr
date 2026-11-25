@@ -115,7 +115,9 @@ module Gori::Tui
       # write is why that press reads as "nothing happened". The notice lives inside the card;
       # this is the same fact on the line the eye is already on.
       verb = @destination.try(&.info) ? "overwrite" : "write"
-      "type to complete · ↹ pick · ↑↓ browse · ↵ #{verb} · esc cancel"
+      # ↵ second, ahead of the completion keys: an 80-column row cuts this line from the right,
+      # and it was cutting the write while `↹ pick · ↑↓ browse` stayed.
+      "type to complete · ↵ #{verb} · ↹ pick · ↑↓ browse · esc cancel"
     end
 
     # --- input ---------------------------------------------------------------

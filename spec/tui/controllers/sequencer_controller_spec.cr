@@ -2,6 +2,7 @@ require "../../spec_helper"
 require "../../support/fake_host"
 require "../../support/memory_backend"
 require "file_utils"
+require "../../support/tui_probes"
 
 include Gori::Tui
 
@@ -265,6 +266,18 @@ describe SequencerController do
       end
       view.running?.should be_false
       view.stopped?.should be_true
+    end
+  end
+end
+
+describe "SequencerController footer on SAMPLES" do
+  it "names run or stop, whichever is live, at 80 columns" do
+    with_sequencer_controller do |ctl, _session|
+      view = collected_samples(ctl)
+      view.running?.should be_false
+      row = Chrome.status_row(ctl.body_hint(:body), "BODY")
+      row.should contain("^R run")
+      row.should_not contain(" stop")
     end
   end
 end

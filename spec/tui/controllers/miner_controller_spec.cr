@@ -2,6 +2,7 @@ require "../../spec_helper"
 require "../../support/fake_host"
 require "../../support/memory_backend"
 require "file_utils"
+require "../../support/tui_probes"
 
 include Gori::Tui
 
@@ -372,6 +373,14 @@ describe MinerController do
         host.mine_reconfigures.should eq(1)
         store.miner_sessions.size.should eq(5)
       end
+    end
+  end
+end
+
+describe "MinerController footer on FINDINGS" do
+  it "names the run key at 80 columns" do
+    with_findings do |ctl, _view|
+      Chrome.status_row(ctl.body_hint(:body), "BODY").should contain("^R run")
     end
   end
 end

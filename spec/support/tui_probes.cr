@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "./memory_backend"
 
 # Spec-only probes over production paths, kept out of `src/` because nothing there calls them.
 module Gori::Tui
@@ -29,6 +30,19 @@ module Gori::Tui
       return nil unless idx
       name_x = rect.x + 1 + Screen.display_width(WORDMARK) + 1
       chip_layout(rect, chips, name_x + 1)[idx]?
+    end
+  end
+
+  module Chrome
+    # The status row exactly as a `width`-column terminal draws it: the focus badge, the hint
+    # cut by `fit_hints` to the room the chips leave, and Miss Ring's bar chip (on by default,
+    # and the widest chip that never yields). The question every "does `^R send` survive 80
+    # columns" spec asks, answered by the real render rather than a guessed width.
+    def self.status_row(hint : String, focus : String, width : Int32 = 80) : String
+      backend = MemoryBackend.new(width, 24)
+      row = Layout.compute(width, 24).status
+      render_status(Screen.new(backend), row, focus: focus, hints: hint, companion: Mascot::Frame.new)
+      backend.row(row.y)
     end
   end
 
