@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+- TUI: a paste at the project picker, the setup wizard or the tour is typed into their text fields and refused everywhere else, as it already was in the app; a paste on a picker project row could open the action menu and delete the project (#2026).
+
+- Intercept: forwarding or dropping from inside a held message's editor (`Ctrl-R`, `f` in READ, the space menu) acts on that message and its edits instead of the marked holds, and the hint and toast say the marks stay held (#2026).
+
+- Intercept: `Space` `>` `r` opens a held request in the Repeater, including an edit you have not forwarded, without forwarding or dropping it (#2026).
+
+- History: a response edited at Intercept is marked EDIT and keeps the origin's own response in ORIGINAL RESP, on HTTP/1.1 and HTTP/2, and the Match&Replace note points at the pane that holds the bytes a rule replaced (#2026).
+
+- TUI: with follow on, a verb run from the space menu, the palette or a confirm acts on the row it was opened over; a flow captured while the card was open no longer becomes the target (History, Sequencer samples, Project activity) (#2026).
+
+- History and Issues ask before a batch verb (`^R`, `y`, `Space H`, delete, Send to…, severity/status) acts on marks that are not on the list, naming the split and offering the cursor row alone (#2026).
+
+- TUI: a tab's own key no longer falls through to a global one when its action can't run, so Evidence `c` on an empty list, `i` on an unlinked snapshot and Authorize `i` during a run say "not available" instead of stopping capture or holding all traffic (#2026).
+
+- Fuzzer: changing Mode or settings while a run calibrates or runs no longer changes that run, so a sniper run can no longer turn into a much larger cluster bomb after its confirm (#2026).
+
+- Fuzzer: `^R` pauses before replacing an unsaved run that had hits, and ↵ on that card runs (#2026).
+
+- A stopped or budget-cut Fuzzer, Miner or Sequencer run keeps its ending and planned total on screen (#2026).
+
+- JWT: the ENCODE alg badge follows a same-family alg typed in HEADER, and OUTPUT warns whenever the signed alg differs (#2026).
+
+- Issues: EDIT ISSUE saves only the fields you changed, so a severity or CVSS another session set while the form was open is kept, and Set CVSS no longer applies the calculator's untouched 0.0 placeholder to an unscored issue and names a severity the vector changes (#2026).
+
+- Project tab: a description draft can be saved over another session's edit (a second esc overwrites theirs; while that refusal is armed, `^W` takes theirs as one undoable edit, as in Issues notes), and leaving Project settings with one invalid field drops only that field and says so (#2026).
+
+- Rewriter, Colormarker and Probe rule lists say when a rule you just saved is hidden by the `/` filter instead of moving the cursor onto an unrelated rule, and under a filter the Rewriter and Colormarker counts read `enabled/shown · N total` (#2026).
+
+- Editors: ⌃Home/⌃End (⌥ on macOS) jump to the start or end of the whole text in READ mode and in read-only panes (#2026).
+
+- The Repeater/Fuzzer TARGET row and form fields scroll with the caret, hold still under a drag and show their selection (#2026).
+
+- TUI: a double-click no longer falls through a card it just closed or opened (#2026).
+
+- The Tabs and Hotkeys editors and Preferences ask before esc, `^P`, `↑` or a click-away discards unsaved edits (#2026).
+
+- At 80 columns each pane's hint keeps its send or run key (#2026).
+
 - MCP: `list_projects` rows carry each project's `flows` and `issues` counts, read for the returned page only, with `null` where the database could not be read (#2021).
 
 - MCP: `list_sitemap` entries carry `sample_flow_id`, the flow the TUI opens for that endpoint, and a query-folded entry carries `query_target_flow_ids`, one per `query_targets` entry, so `get_flow` can open it without a second query (#2022).
