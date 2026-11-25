@@ -52,7 +52,9 @@ module Gori::Tui
 
     def hint : String
       verb = @mode == :history ? "import" : "open in Repeater"
-      "paste a curl command · ↵ #{verb} (a trailing \\ continues) · esc cancel"
+      # The continuation note is a segment of its own: glued to `↵ open in Repeater` it made one
+      # token too wide for an 80-column row, and the cut took the key along with the note.
+      "paste a curl command · ↵ #{verb} · a trailing \\ continues · esc cancel"
     end
 
     # A copied command routinely carries a large `--data-raw` body, which is the paste the

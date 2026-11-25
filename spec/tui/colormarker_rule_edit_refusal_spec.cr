@@ -215,7 +215,8 @@ describe "Gori::Tui::ColormarkerController#apply_color_rule" do
           ctl.apply_color_rule(ColormarkerRuleOverlay.new(name: "a", match_filter: "host:a",
             color: "blue", style: "full", scope: "global",
             edit_id: id, edit_scope: Gori::Store::RuleScope::Project)).should be_true
-          host.statuses.last.should eq("colour rule is now GLOBAL — it applies in every project")
+          # Blue no longer matches the `red` query, so the toast also says where the rule went.
+          host.statuses.last.should eq("colour rule now GLOBAL (all projects) · hidden by /")
           Gori::Settings.colormarker_rules.map { |r| {r.match_filter, r.color} }.should eq([{"host:a", "blue"}])
         end
       end

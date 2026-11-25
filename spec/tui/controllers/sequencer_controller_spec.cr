@@ -2,6 +2,7 @@ require "../../spec_helper"
 require "../../support/fake_host"
 require "../../support/memory_backend"
 require "file_utils"
+require "../../support/tui_probes"
 
 include Gori::Tui
 
@@ -248,6 +249,35 @@ describe SequencerController do
         hint.should contain("esc sub-tabs")
         hint.should_not match(/[^-]esc tabs/)
       end
+    end
+  end
+
+  # `DoneEvent#stopped` never reached the view, so a stopped collection's standing tally said
+  # nothing of the stop (and a capped one read `budget exhausted`).
+  it "hands a stop to the view" do
+    with_sequencer_controller do |ctl, _session|
+      ctl.sequence_from_text((1..50).map { |i| "token_#{i}" }.join("\n"))
+      view = ctl.current_view.not_nil!
+      ctl.sequence_stop # before the run fiber has sent anything
+      100.times do
+        Fiber.yield
+        ctl.drain_events
+        break unless view.running?
+      end
+      view.running?.should be_false
+      view.stopped?.should be_true
+    end
+  end
+end
+
+describe "SequencerController footer on SAMPLES" do
+  it "names run or stop, whichever is live, at 80 columns" do
+    with_sequencer_controller do |ctl, _session|
+      view = collected_samples(ctl)
+      view.running?.should be_false
+      row = Chrome.status_row(ctl.body_hint(:body), "BODY")
+      row.should contain("^R run")
+      row.should_not contain(" stop")
     end
   end
 end

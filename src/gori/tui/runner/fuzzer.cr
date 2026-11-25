@@ -9,18 +9,27 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def fuzz_selected : Nil
     ids = history_target_flow_ids
     return (@toast = "select a flow first") if ids.empty?
-    return fuzzer_controller.fuzz_flow(ids.first) if ids.size == 1
     return unless targets = batch_within_cap(ids, "Fuzzer")
+    # Too many marks is refused BEFORE the hidden-marks card: its "all N" answer could only be
+    # refused. Its cursor-row answer would pass, but that is one press of clearing the marks.
+    return if history_hidden_marks_gate?("SEND TO FUZZER", "Open in Fuzzer") { fuzz_selected }
+    return fuzzer_controller.fuzz_flow(ids.first) if ids.size == 1
+    # Already asked on the hidden-marks card, which named the same set.
+    return fuzz_open_flows(targets) if history_marks_picked?
     confirm("SEND TO FUZZER", "Open #{targets.size} flows as #{targets.size} fuzz sessions?",
       confirm_label: "open", danger: false) do
-      opened = 0
-      targets.each do |id|
-        next unless @session.store.flow_row(id) # a stale mark: skip, report in the summary
-        fuzzer_controller.fuzz_flow(id)
-        opened += 1
-      end
-      @toast = batch_summary("opened", opened, targets.size)
+      fuzz_open_flows(targets)
     end
+  end
+
+  private def fuzz_open_flows(targets : Array(Int64)) : Nil
+    opened = 0
+    targets.each do |id|
+      next unless @session.store.flow_row(id) # a stale mark: skip, report in the summary
+      fuzzer_controller.fuzz_flow(id)
+      opened += 1
+    end
+    @toast = batch_summary("opened", opened, targets.size)
   end
 
   # CROSS-TAB: turn the current Repeater request into a Fuzzer template.

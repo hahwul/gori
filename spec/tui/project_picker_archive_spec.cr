@@ -16,13 +16,14 @@ end
 describe "project archive modes in ProjectPicker" do
   it "routes key, preedit, click, wheel, rendering and shutdown through their own overlays" do
     source = picker_archive_code("tui", "project_picker.cr")
+    event = picker_archive_method(source, "dispatch_event")
+    event.should contain("when :archive_export_path then handle_archive_export_path(ev)")
+    event.should contain("when :archive_import_path then handle_archive_import_path(ev)")
+    event.should contain("when :archive_import_name then handle_archive_import_name(ev)")
+    event.should contain("@archive_export_overlay.try(&.set_preedit(ev.text))")
+    event.should contain("@archive_import_overlay.try(&.set_preedit(ev.text))")
+    event.should contain("@archive_name_overlay.try(&.set_preedit(ev.text))")
     run = picker_archive_method(source, "run")
-    run.should contain("when :archive_export_path then handle_archive_export_path(ev)")
-    run.should contain("when :archive_import_path then handle_archive_import_path(ev)")
-    run.should contain("when :archive_import_name then handle_archive_import_name(ev)")
-    run.should contain("@archive_export_overlay.try(&.set_preedit(ev.text))")
-    run.should contain("@archive_import_overlay.try(&.set_preedit(ev.text))")
-    run.should contain("@archive_name_overlay.try(&.set_preedit(ev.text))")
     run.should contain("@prepared_export.try(&.close)")
     run.should contain("@prepared_import.try(&.close)")
 

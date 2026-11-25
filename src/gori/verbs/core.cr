@@ -270,11 +270,11 @@ module Gori
       # left the queue, so a non-empty mark set implies a non-empty queue implies a cursor row.
       intercept_selected = ->(ctx : Verb::ExecContext) { !ctx.selected_intercept_id.nil? }
       r.register Verb::Definition.new(
-        "intercept.forward", "Forward held", "Forward the marked held messages — or the selected one (with edits)",
+        "intercept.forward", "Forward held", "Forward the message being edited, else the marked held messages, else the selected one",
         Verb::Scope::Intercept, [Verb::Chord.new("f")],
         available: intercept_selected, mnemonic: 'f') { |ctx| ctx.intercept_forward; nil }
       r.register Verb::Definition.new(
-        "intercept.drop", "Drop held", "Drop the marked held messages — or the selected one",
+        "intercept.drop", "Drop held", "Drop the message being edited, else the marked held messages, else the selected one",
         Verb::Scope::Intercept, [Verb::Chord.new("d")],
         available: intercept_selected, intent: :delete) { |ctx| ctx.intercept_drop; nil }
       # Deliberately NOT mark-aware: ⇧F stays "the whole queue, marks or not", so the pair
@@ -333,6 +333,23 @@ module Gori
       r.register Verb::Definition.new(
         "intercept.filter", "Catch condition", "Only hold messages matching a query (host: method: path: status: scheme:)",
         Verb::Scope::Intercept, [Verb::Chord.new("/")], intent: :filter) { |ctx| ctx.intercept_query; nil }
+
+      # Send flow to… → Repeater over a HOLD: a held request is not in History until it is
+      # forwarded, so without this the hold-then-work-it loop meant forwarding first. Decides
+      # nothing; the tab gets the held bytes with any unforwarded edit. The family's only member
+      # here: the Fuzzer and Miner seed from a Repeater tab one more `> f` / `> m` away, the
+      # Comparer needs a response, and Decoder is Send selection to… over the preview. Chordless
+      # (`^R` is forward inside the editor, `r` is free but a bare send key next to `f`/`d` is
+      # one slip from the wrong decision); pinned, so it is `r` at level 1 as on every tab.
+      #
+      # Untagged and registered after the catch controls, so it does NOT open a SEND band above
+      # COMMON: Forward held stays the card's first row, and a reflex `space ↵` forwards exactly
+      # as it did before this row existed.
+      r.register Verb::Definition.new(
+        "intercept.repeater", "Send to Repeater", "Open the held request — with any edit not yet forwarded — in a new Repeater tab; it stays held",
+        Verb::Scope::Intercept,
+        available: intercept_selected, mnemonic: 'r', intent: :to_repeater, pinned: true,
+        keywords: ["replay", "send to replay", "held"]) { |ctx| ctx.intercept_repeater; nil }
 
       # Tab/Shift-Tab are the focus ring (handled directly in the Runner); these
       # bracket chords remain a from-anywhere shortcut to cycle tabs.

@@ -88,8 +88,11 @@ class Gori::Store
       resp += sum_len(db, "SELECT COALESCE(SUM(LENGTH(body)), 0) FROM rewrite_originals WHERE side = 'response'")
       req += sum_len(db, "SELECT COALESCE(SUM(LENGTH(body)), 0) FROM rewrite_originals WHERE side = 'request'")
       resp += sum_len(db, "SELECT COALESCE(SUM(LENGTH(bytes)), 0) FROM flow_live_chunks")
-      if db.query_one?("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'intercept_originals'", as: Int32)
-        each_intercept_body(db) { |_, _, size| req += size }
+      if table?(db, "intercept_originals")
+        each_intercept_body(db, "intercept_originals", "request") { |_, _, size| req += size }
+      end
+      if table?(db, "intercept_response_originals")
+        each_intercept_body(db, "intercept_response_originals", "response") { |_, _, size| resp += size }
       end
       h2 = sum_len(db, "SELECT COALESCE(SUM(LENGTH(payload)), 0) FROM h2_frames")
       ws = sum_len(db, "SELECT COALESCE(SUM(LENGTH(payload)), 0) FROM ws_messages WHERE repeater_id IS NULL")
@@ -114,22 +117,28 @@ class Gori::Store
     0_i64
   end
 
-  # Intercept originals store the whole request as one BLOB. Split it at the same
-  # byte boundary as the ORIGINAL pane, including LF and mixed line endings.
-  private def self.each_intercept_body(db : DB::Database | DB::Connection, &) : Nil
-    db.query_each("SELECT flow_id, request FROM intercept_originals") do |row|
+  # Measure opens a project without migrating it, so an older one may lack a side table.
+  private def self.table?(db : DB::Database, name : String) : Bool
+    !db.query_one?("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", name, as: Int32).nil?
+  end
+
+  # Intercept originals store the whole message as one BLOB: the request (V44) or the response
+  # (V54). Split it at the same byte boundary as the ORIGINAL panes, including LF and mixed line
+  # endings. `table` and `column` are one of those two fixed pairs, never caller input.
+  private def self.each_intercept_body(db : DB::Database | DB::Connection, table : String, column : String, &) : Nil
+    db.query_each("SELECT flow_id, #{column} FROM #{table}") do |row|
       id, raw = row.read(Int64, Bytes)
       head_size = Env.head_body_boundary(raw)
       yield id, head_size, raw.size - head_size if head_size < raw.size
     end
   end
 
-  private def self.strip_intercept_bodies(conn : DB::Connection) : Nil
+  private def self.strip_intercept_bodies(conn : DB::Connection, table : String, column : String) : Nil
     # Finish the scan before updating its table. Retain only offsets until then.
     heads = [] of {Int64, Int32}
-    each_intercept_body(conn) { |id, size, _| heads << {id, size} }
+    each_intercept_body(conn, table, column) { |id, size, _| heads << {id, size} }
     heads.each do |(id, size)|
-      conn.exec("UPDATE intercept_originals SET request = substr(request, 1, ?) WHERE flow_id = ?", size, id)
+      conn.exec("UPDATE #{table} SET #{column} = substr(#{column}, 1, ?) WHERE flow_id = ?", size, id)
     end
   end
 
@@ -238,12 +247,13 @@ class Gori::Store
                 "WHERE LENGTH(response_body) > 0 OR id IN (SELECT flow_id FROM flow_live_chunks)")
       strip_live_chunks(conn)
       conn.exec("UPDATE rewrite_originals SET body = NULL WHERE side = 'response'")
+      strip_intercept_bodies(conn, "intercept_response_originals", "response")
     end
     if plan.request_bodies
       conn.exec("UPDATE flows SET request_body = X'', request_body_truncated = 1 " \
                 "WHERE request_body IS NOT NULL AND LENGTH(request_body) > 0")
       conn.exec("UPDATE rewrite_originals SET body = NULL WHERE side = 'request'")
-      strip_intercept_bodies(conn)
+      strip_intercept_bodies(conn, "intercept_originals", "request")
     end
     # Dropping a body drops what `body:` searches, so the FTS index has to go with it. Both
     # siblings already maintain it — `delete_flow_set` deletes the row's entry, `clear_flows`

@@ -190,6 +190,13 @@ module Gori::Proxy::H2
       # The request as held at Intercept, when the operator edited it before release (#1378).
       # nil on every stream nobody edited. See `Store::CapturedRequest#intercept_original`.
       property intercept_original : Bytes? = nil
+      # The response's twin (V54). See `Store::CapturedResponse#intercept_original`.
+      property resp_intercept_original : Bytes? = nil
+      # The edited hold covered the head only (`StreamGate::Slot#holds_body?` false): its DATA went
+      # past the gate untouched, so the original's body is the captured one, joined at emit time.
+      # Not set for a head that ended the stream, whose edit may ADD a body the original lacks.
+      property? intercept_head_only = false
+      property? resp_intercept_head_only = false
       # What Match&Replace changed on each side's head (#1589), nil on every stream no rule
       # changed. See `Store::Rewrite`.
       property req_rewrite : Store::Rewrite? = nil
@@ -341,21 +348,29 @@ module Gori::Proxy::H2
       end
     end
 
-    # The operator edited `stream_id`'s request at Intercept; `original` is the message as it was
-    # held. Recorded on the flow `emit_request` projects (V44). Opens the entry the way
-    # `note_advisory` does, since the edited head is released — and fed — right after this.
+    # The operator edited `stream_id`'s request (or, `request: false`, its response) at
+    # Intercept; `original` is the message as it was held. Recorded on the flow `emit_request`
+    # (V44) or `emit_response` (V54) projects. Opens the entry the way `note_advisory` does,
+    # since the edited head is released — and fed — right after this.
     #
     # A rule that rewrote the head or body ran BEFORE the hold (#1589), so the held message is the
-    # rule's output: the client's own head and body are the ones the rule replaced, and a body no
+    # rule's output: the peer's own head and body are the ones the rule replaced, and a body no
     # rule touched is the held one. Store keeps only the rule's hits beside an Intercept original.
-    def note_intercept_original(stream_id : UInt32, original : Bytes) : Nil
+    def note_intercept_original(stream_id : UInt32, original : Bytes, *, request : Bool = true,
+                                head_only : Bool = false) : Nil
       @mutex.synchronize do
         next unless stream = open_entry(stream_id)
-        if (rewrite = stream.req_rewrite) && (pre = rewrite.head)
+        if (rewrite = request ? stream.req_rewrite : stream.resp_rewrite) && (pre = rewrite.head)
           held_head, _ = Gori::Interceptor.split_edit(original)
           original = pre + (rewrite.body || original[held_head.size..])
         end
-        stream.intercept_original = original
+        if request
+          stream.intercept_original = original
+          stream.intercept_head_only = head_only
+        else
+          stream.resp_intercept_original = original
+          stream.resp_intercept_head_only = head_only
+        end
       end
     end
 
@@ -397,15 +412,6 @@ module Gori::Proxy::H2
         next unless stream = open_entry(stream_id)
         stream.stub_ref = ref
         stream.stub_error = error
-      end
-    end
-
-    # The operator edited `stream_id`'s held response, so the stored response is theirs: a rule's
-    # record keeps its hits only, never a head paired with the operator's body (#1589).
-    def note_response_edited(stream_id : UInt32) : Nil
-      @mutex.synchronize do
-        next unless stream = @streams[stream_id]?
-        stream.resp_rewrite = stream.resp_rewrite.try { |r| Store::Rewrite.new(r.hits) }
       end
     end
 
@@ -889,7 +895,8 @@ module Gori::Proxy::H2
         body_truncated: cap.truncated?, body_size: cap.total,
         h2_conn_id: @conn_id, h2_stream_id: stream_id.to_i64,
         advisory: advisory_of(stream), connect_protocol: protocol,
-        source: FlowSource::Kind::Proxy, intercept_original: stream.intercept_original,
+        source: FlowSource::Kind::Proxy,
+        intercept_original: with_passed_body(stream.intercept_original, stream.intercept_head_only?, body),
         short_circuited: !stream.stub_ref.nil?, source_ref: stream.stub_ref.try(&.presence))
       captured.rewrite = stream.req_rewrite
       stream.flow_id_future = @sink.on_request_deferred(captured)
@@ -924,11 +931,19 @@ module Gori::Proxy::H2
         ttfb_us: ttfb_us, duration_us: duration_us, advisory: advisory_of(stream),
         interims: stream.resp.interims)
       captured.rewrite = stream.resp_rewrite
+      captured.intercept_original = with_passed_body(stream.resp_intercept_original, stream.resp_intercept_head_only?, body)
       if cap.is_a?(LiveCapture)
         captured.live = true
         captured.event_times = cap.event_times
       end
       project_response(stream, captured)
+    end
+
+    # An Intercept original whose hold covered the head only, completed with the body that passed
+    # the gate untouched — the peer's own, as captured (cut to `capture_max`). Anything else as is.
+    private def with_passed_body(original : Bytes?, head_only : Bool, body : Bytes?) : Bytes?
+      return original unless original && head_only && body && !body.empty?
+      original + body
     end
 
     # The response update, queued without waiting for its commit (see `Stream#flow_id`), except

@@ -256,3 +256,20 @@ describe Gori::Tui::KeysetPad do
     vim.should contain("u undo")
   end
 end
+
+# The pad stands in for a Notes READ pane, and Notes jumps the BUFFER on ⌃/⌥ Home/End (#1963):
+# the pad's own line-edge arm stopped at the line's end, teaching a ⌃End Notes does not have.
+describe "Gori::Tui::KeysetPad ⌃Home/⌃End" do
+  it "jumps the buffer in READ and extends a ⇧ selection to its end, under both keysets" do
+    {Kind::Helix, Kind::Vim}.each do |kind|
+      p = pad(kind)
+      p.handle_key(TuiContract.key(Termisu::Input::Key::Down))
+      p.handle_key(TuiContract.key(Termisu::Input::Key::End,
+        Termisu::Input::Modifier::Ctrl | Termisu::Input::Modifier::Shift))
+      p.@read.copy_text(p.@area).should eq(LINES[1..].join("\n"))
+      p.handle_key(TuiContract.key(Termisu::Input::Key::Home, Termisu::Input::Modifier::Alt))
+      {p.@area.cy, p.@area.cx}.should eq({0, 0})
+      p.@read.selection?(p.@area).should be_false
+    end
+  end
+end

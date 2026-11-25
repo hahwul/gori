@@ -112,6 +112,39 @@ module Gori::Tui
       # form — so this only decides which of the two labels the severity row wears.
       @severity_from_cvss = !@cvss.empty? && Gori::Cvss.severity_for(@cvss) == @severity
       @opened_state = form_state
+      @seed_title = @issue_title
+      @seed_cvss = @cvss.strip
+      @seed_severity = @severity
+    end
+
+    # What an EDIT ISSUE save writes: only the fields this form changed from the values it
+    # was seeded with, as `Store#update_issue` arguments. `title` is the caller's normalized
+    # (stripped, masked) spelling, written only when the operator edited the raw one.
+    #
+    # The form is seeded once, at open, and stays up while a peer (`gori run issues update`,
+    # MCP `update_issue`, a second TUI) may move the same row. Writing all three back used to
+    # replace a peer's new severity and vector with the values this card was opened on, under
+    # an "issue updated" toast. An untouched field now leaves the stored one alone, so a
+    # re-title keeps a peer's re-score. The same rule the notes pane follows (#1980): a field
+    # nobody edited here has nothing to persist.
+    #
+    # A severity DERIVED from a vector scored here travels with that vector even when it equals
+    # the seed: the pair is one assessment (Set CVSS writes both for the same reason), and
+    # leaving the severity out would pin a new 7.5 High vector to whatever Low a peer set.
+    def edit_fields(title : String) : NamedTuple(title: String?, severity: Store::Severity?, cvss: String?, clear_cvss: Bool)
+      cvss = @cvss.strip
+      cvss_moved = cvss != @seed_cvss
+      {
+        title:      @issue_title != @seed_title ? title : nil,
+        severity:   @severity != @seed_severity || (cvss_moved && @severity_from_cvss) ? @severity : nil,
+        cvss:       cvss_moved ? cvss.presence : nil,
+        clear_cvss: cvss_moved && cvss.empty?,
+      }
+    end
+
+    # Whether an EDIT ISSUE save has anything to write.
+    def edited? : Bool
+      @issue_title != @seed_title || @severity != @seed_severity || @cvss.strip != @seed_cvss
     end
 
     private def form_state : String

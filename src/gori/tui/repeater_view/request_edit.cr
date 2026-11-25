@@ -182,6 +182,15 @@ class Gori::Tui::RepeaterView
     @req_read.sync_to(ed, selecting: selecting) unless request_insert?
   end
 
+  # Home/End in READ, ⌃/⌥ included: the editor's own keymap run over the read cursor
+  # (`TextReadState#handle_motion_key`), the path Notes has taken since #1963. The READ arms
+  # called `edit_home`/`edit_end` for every Home/End, so ⌃End went to the line's end here while
+  # the same chord in INS went to the buffer's, and ⇧⌃End selected only to the line's end.
+  def request_read_motion_key(ev : Termisu::Event::Key) : Bool
+    return false unless @focus == :request && !request_insert?
+    @req_read.handle_motion_key(req_editor, ev)
+  end
+
   # THE shared editor keymap over the request editor — see `TextArea#handle_motion_key`.
   # Dirties only on a real buffer change (⌥⌫ is the one mutation in the set).
   #

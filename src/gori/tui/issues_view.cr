@@ -763,14 +763,6 @@ module Gori::Tui
       @marks.size - visible
     end
 
-    # How many of `ids` the current filter does NOT show. Computed over the SET BEING ACTED
-    # ON rather than the whole mark set, so the number the delete confirm prints always
-    # refers to the rows that dialog names — the last thing read before data is destroyed.
-    def hidden_count(ids : Enumerable(Int64)) : Int32
-      visible = @issues.map(&.id).to_set
-      ids.count { |id| !visible.includes?(id) }
-    end
-
     # Marks in DISPLAY order. Unlike History (where flow ids are monotonic with the list
     # order, so sorting ids is enough), issues are ordered by severity DESC, created_at DESC
     # — so the order has to come from the list itself. @all, not @issues: the unfiltered
@@ -779,8 +771,17 @@ module Gori::Tui
     # "a stale mark simply fails to resolve" rule the batch handlers follow.
     # The rows `y` copies from the LIST: the marks if any, else the cursor row — each as
     # `[severity] title (host)`, one per line.
-    def copy_rows_text : String
-      rows = @marks.empty? ? [@issues[@selected]?].compact : @all.select { |f| @marks.marked?(f.id) }
+    #
+    # `ids` names the rows instead — the hidden-marks card's answer (the marks it was opened
+    # over, or the cursor row alone).
+    def copy_rows_text(ids : Array(Int64)? = nil) : String
+      rows = if ids
+               @all.select { |f| ids.includes?(f.id) }
+             elsif @marks.empty?
+               [@issues[@selected]?].compact
+             else
+               @all.select { |f| @marks.marked?(f.id) }
+             end
       rows.map { |f| "[#{f.severity.label}] #{f.title}#{(h = f.host.try(&.presence)) ? " (#{h})" : ""}" }.join("\n")
     end
 
@@ -1107,6 +1108,23 @@ module Gori::Tui
     def cancel_notes_edit : Nil
       return unless issue = @detail
       seed_notes(issue.notes)
+      exit_notes_insert!
+      @notes_read.sync_from(@notes)
+    end
+
+    # Take the stored notes over a refused draft (`^W` on an armed conflict) as ONE undoable
+    # edit: `replace_from_outside`, not `seed_notes`' `set_text`, which clears the undo stack and
+    # would make the draft unrecoverable. The baseline moves to the stored text, so a `^Z` back
+    # to the draft is an ordinary edit over the version the operator has now seen. Re-reads the
+    # row first, so "theirs" is what is stored now rather than what the detail last held.
+    def take_stored_notes(store : Store) : Nil
+      refresh_detail(store) # INS + dirty: updates `@detail` without touching the buffer
+      return unless issue = @detail
+      @notes.replace_from_outside(issue.notes)
+      @notes_read.clear_selection
+      @notes_base = notes_key(issue.notes)
+      @notes_stored = issue.notes
+      @notes_peer_seen = nil
       exit_notes_insert!
       @notes_read.sync_from(@notes)
     end

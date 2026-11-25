@@ -40,7 +40,8 @@ module Gori::Tui
   class TabsOverlay < Overlay
     # Injected at the open-site (Runner#open_settings): ^P leaves the modal stack for the
     # command palette, `r` raises the reset confirm, and a refused hide reports through the
-    # shell's toast. ↵ persists via the base `on_commit`; esc discards by closing.
+    # shell's toast. ↵ persists via the base `on_commit`; esc discards by closing, after asking
+    # once over unsaved changes (the question replaces the hint — see `hint`).
     property on_palette : Proc(Nil)?
     property on_reset : Proc(Nil)?
     property on_toast : Proc(String, Nil)?
@@ -50,6 +51,8 @@ module Gori::Tui
     def initialize(@evidence_available : Bool = true)
       @items = [] of {Symbol, String, Bool}
       @selected = 0
+      @saved = [] of {String, Bool}
+      @discard_armed = false
       reset
     end
 
@@ -69,6 +72,11 @@ module Gori::Tui
       # not ride here: the model ("the rows above the seam are the bar"), which is on the seam
       # itself in place; and `↑/↓ select`, which is what arrows do in every list in the app.
       # What is left is the four keys that are particular to this card.
+      #
+      # While the discard question is armed the line IS the question. Not a toast: the second
+      # press of a double-click outside the card clears the toast, so a toasted question was
+      # gone before the operator could read it.
+      return DISCARD_QUESTION if @discard_armed
       "⇧K/⇧J move · space across the seam · r reset · ↵ save · esc cancel"
     end
 
@@ -87,14 +95,45 @@ module Gori::Tui
       false
     end
 
+    # Whether the working copy differs from the arrangement the card opened on.
+    def unsaved? : Bool
+      to_prefs != @saved
+    end
+
+    # ↵ saves; esc discards the working copy. At 80 columns the hint loses its tail, and the
+    # tail is `↵ save · esc cancel`, so a reorder the operator could see vanished on the one
+    # key that leaves without a word. Esc over unsaved changes asks once, as Hotkeys and
+    # Preferences do; the second esc (or click-away) discards.
+    DISCARD_QUESTION = "not saved yet — ↵ saves · esc again discards"
+
+    private def escape_or_warn(armed : Bool) : Symbol
+      return :cancel if armed || !unsaved? # discard the working copy
+      @discard_armed = true
+      :stay
+    end
+
+    # A double-click's second press must not answer the question its first press just asked:
+    # the base hands a miss back as an ordinary click, and that one would discard unseen —
+    # the same hole `DiscardGuard#handle_double_click` closes for the forms.
+    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :stay if @discard_armed && (box.nil? || !box.contains?(mx, my))
+      super
+    end
+
     # ↑/↓ move the selection and ⇧↑/⇧↓ reorder the selected tab; ↵ saves+applies, esc
-    # discards; ^P jumps back to the palette.
+    # discards (asking first over unsaved changes); ^P jumps back to the palette.
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
+      # The warning survives exactly one keystroke: the esc that would confirm it.
+      armed = @discard_armed
+      @discard_armed = false
       if ev.ctrl? && key.lower_p?
-        on_palette.try(&.call)
+        # ^P leaves the card as surely as esc does, so it asks the same question first
+        # (Preferences does too); a second ^P, like a second esc, goes.
+        on_palette.try(&.call) if escape_or_warn(armed) == :cancel
       elsif key.escape?
-        return :cancel # discard the working copy
+        return escape_or_warn(armed)
       elsif key.enter?
         return :commit
       elsif nav_key(ev)
@@ -125,11 +164,13 @@ module Gori::Tui
       end
     end
 
-    # A click outside dismisses (discards the working copy, like esc); a row click selects
-    # it (toggle/reorder stay keyboard-driven).
+    # A click outside dismisses, which discards like esc and so asks like esc; a row click
+    # selects it (toggle/reorder stay keyboard-driven).
     def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
       box = overlay_box(area)
-      return :cancel if box.nil? || !box.contains?(mx, my)
+      armed = @discard_armed
+      @discard_armed = false
+      return escape_or_warn(armed) if box.nil? || !box.contains?(mx, my)
       if idx = row_at(box, mx, my)
         set_selected(idx)
       end
@@ -157,6 +198,8 @@ module Gori::Tui
       @items = Chrome.bar_partition(Chrome.reconcile(Settings.tab_prefs))
       remove_unavailable_evidence
       @selected = 0
+      @saved = to_prefs
+      @discard_armed = false
     end
 
     # Revert the working copy to the factory default order/visibility — the canonical

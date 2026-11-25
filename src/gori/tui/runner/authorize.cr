@@ -6,6 +6,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def authorize_seed_selected : Nil
     ids = history_target_flow_ids
     return (@toast = "select a flow first") if ids.empty?
+    return if history_hidden_marks_gate?("SEND TO AUTHORIZE", "Queue in Authorize") { authorize_seed_selected }
     added, skipped = authorize_controller.seed_flows(ids)
     goto_tab(:authorize) if added > 0
     @toast = authorize_seed_toast(added, skipped)

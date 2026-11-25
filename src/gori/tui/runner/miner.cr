@@ -11,8 +11,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def mine_selected : Nil
     ids = history_target_flow_ids
     return (@toast = "select a flow first") if ids.empty?
-    return seed_mine_names(open_mine_config(miner_controller.build_seed_from_flow(ids.first))) if ids.size == 1
     return unless targets = batch_within_cap(ids, "the Miner")
+    # Too many marks is refused BEFORE the hidden-marks card: its "all N" answer could only be
+    # refused. Its cursor-row answer would pass, but that is one press of clearing the marks.
+    return if history_hidden_marks_gate?("SEND TO MINER", "Mine") { mine_selected }
+    return seed_mine_names(open_mine_config(miner_controller.build_seed_from_flow(ids.first))) if ids.size == 1
     seeds = targets.compact_map { |id| miner_controller.build_seed_from_flow(id) }.reject(&.applicable.empty?)
     return (@toast = "no mineable locations in the marked flows") if seeds.empty?
     # The config popup's checkboxes come from ONE seed, and the Runner then narrows the committed

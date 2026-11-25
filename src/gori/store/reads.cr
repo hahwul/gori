@@ -4,9 +4,11 @@ module Gori
   class Store
     # --- read API (go straight through the pool; WAL allows concurrent reads) -
 
-    # Whether the operator edited this request at Intercept (V44): a primary-key probe into the
-    # side table, so the list still reads every other column from `idx_flows_list`.
-    INTERCEPT_EDITED = "EXISTS (SELECT 1 FROM intercept_originals o WHERE o.flow_id = flows.id)"
+    # Which sides the operator edited at Intercept, as one column: 1 = the request (V44), 2 = the
+    # response (V54), 3 = both. A primary-key probe into each side table, so the list still reads
+    # every other column from `idx_flows_list`. `Store#read_row` splits it.
+    INTERCEPT_EDITED = "(EXISTS (SELECT 1 FROM intercept_originals o WHERE o.flow_id = flows.id) + " \
+                       "2 * EXISTS (SELECT 1 FROM intercept_response_originals r WHERE r.flow_id = flows.id))"
     # The Match&Replace rules that changed this flow (V49), as `scope/id` joined by commas, or
     # NULL for the flow no rule touched. A primary-key range probe, like `INTERCEPT_EDITED`. Not
     # DISTINCT, which costs every list read a temp B-tree: `read_row` drops the rare repeat (a
@@ -569,11 +571,15 @@ module Gori
       nil
     end
 
-    # The request as the client sent it before the operator edited it at Intercept (#1378), or
-    # nil when this flow was not edited there (`FlowRow#intercept_edited?`). The flow's own
-    # `request_head`/`request_body` are what went upstream.
-    def intercept_original(flow_id : Int64) : Bytes?
-      @db.query_one?("SELECT request FROM intercept_originals WHERE flow_id = ?", flow_id, as: Bytes)
+    # `side` as its peer sent it before the operator edited it at Intercept — the client's request
+    # (#1378, V44) or the origin's response (V54), whole — or nil when that side was not edited
+    # there (`FlowRow#intercept_edited?(side)`). The flow's own head and body are what went on.
+    def intercept_original(flow_id : Int64, side : RuleTarget = RuleTarget::Request) : Bytes?
+      if side.request?
+        @db.query_one?("SELECT request FROM intercept_originals WHERE flow_id = ?", flow_id, as: Bytes)
+      else
+        @db.query_one?("SELECT response FROM intercept_response_originals WHERE flow_id = ?", flow_id, as: Bytes)
+      end
     end
 
     # What Match&Replace replaced on `side` of this flow (V49): the side's head as it arrived and,
@@ -582,6 +588,13 @@ module Gori
     def rewrite_original(flow_id : Int64, side : RuleTarget) : {Bytes, Bytes?}?
       @db.query_one?("SELECT head, body FROM rewrite_originals WHERE flow_id = ? AND side = ?",
         flow_id, side.label, as: {Bytes, Bytes?})
+    end
+
+    # The sides a Match&Replace rule changed on this flow (V49), request first; empty when none
+    # did. A primary-key range read, for the detail surfaces that point at a side's original.
+    def rule_hit_sides(flow_id : Int64) : Array(RuleTarget)
+      labels = @db.query_all("SELECT DISTINCT side FROM flow_rule_hits WHERE flow_id = ?", flow_id, as: String)
+      RuleTarget.values.select { |side| labels.includes?(side.label) }
     end
 
     # The interim 1xx responses the origin sent before this flow's final one (V45), in wire
@@ -833,6 +846,7 @@ module Gori
         c.exec("DELETE FROM js_refs")
         c.exec("DELETE FROM js_ref_scans")
         c.exec("DELETE FROM intercept_originals")
+        c.exec("DELETE FROM intercept_response_originals")
         c.exec("DELETE FROM flow_interims")
         c.exec("DELETE FROM flow_live_chunks")
         c.exec("DELETE FROM flow_event_times")
@@ -865,6 +879,7 @@ module Gori
       conn.exec("DELETE FROM js_refs WHERE flow_id IN (#{marks})", args: args)
       conn.exec("DELETE FROM js_ref_scans WHERE flow_id IN (#{marks})", args: args)
       conn.exec("DELETE FROM intercept_originals WHERE flow_id IN (#{marks})", args: args)
+      conn.exec("DELETE FROM intercept_response_originals WHERE flow_id IN (#{marks})", args: args)
       conn.exec("DELETE FROM flow_interims WHERE flow_id IN (#{marks})", args: args)
       conn.exec("DELETE FROM flow_live_chunks WHERE flow_id IN (#{marks})", args: args)
       conn.exec("DELETE FROM flow_event_times WHERE flow_id IN (#{marks})", args: args)

@@ -470,6 +470,7 @@ module Gori
         # raises needs the `ensure term.close` to cover it.
         term.enable_enhanced_keyboard       # Kitty disambiguation for IME/Unicode
         term.enable_mouse if Settings.mouse # SGR-1006 click + scroll-wheel nav
+        term.enable_bracketed_paste         # as App#run_tui: without it a paste is typing (Tui::PasteGate)
         Tui::SetupWizard.new(term).run
       end
       if err
@@ -504,6 +505,7 @@ module Gori
       finished = with_tui_terminal(term) do
         term.enable_enhanced_keyboard # Kitty disambiguation (mirrors the wizard)
         term.enable_mouse             # always on for the tour: Prev/Next buttons + mock clicks
+        term.enable_bracketed_paste   # as App#run_tui: without it a paste is typing (Tui::PasteGate)
         tour = Tui::Tutorial.new(term)
         tour.run
         tour.finished?

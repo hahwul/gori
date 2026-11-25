@@ -197,6 +197,50 @@ describe Gori::Tui::CvssCalculatorOverlay do
     applied.should eq("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
   end
 
+  # The least-severe start is a placeholder, not an assessment: ↵ on it scored an issue 0.0
+  # and derived Info, so Set CVSS on an unscored Critical issue demoted it on a single key.
+  it "refuses to commit the untouched placeholder and says what to do" do
+    h = calc_harness
+    calc = h.overlay.as(CvssCalculatorOverlay)
+    calc.untouched?.should be_true
+    h.press(Termisu::Input::Key::Enter).should eq(:open)
+    h.commits.should eq(0)
+    h.status.should eq(CvssCalculatorOverlay::UNTOUCHED_REFUSAL)
+    calc.sel.should eq(CvssCalculatorOverlay::ROW_FIRST_M) # landed where the work is
+    h.rendered?("pick the metrics or paste a vector").should be_true
+    h.rendered?("0.0").should be_false # no readout scoring a vector nobody chose
+
+    # A click on the save row is refused too; the row itself carries the reason.
+    area = Rect.new(0, 0, 80, 24)
+    box = calc.overlay_box(area).not_nil!
+    calc.handle_click(area, box.x + 4, box.y + 2 + calc.row_save).should eq(:stay)
+
+    # Looking at the other version is not an edit either.
+    calc.cycle_version(1)
+    calc.untouched?.should be_true
+  end
+
+  it "commits the least-severe vector once a metric was chosen, even back to none" do
+    h = calc_harness
+    calc = h.overlay.as(CvssCalculatorOverlay)
+    to_metric(h, 5) # confidentiality
+    h.type("1")     # none, explicitly
+    calc.untouched?.should be_false
+    calc.value.should eq("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N")
+    h.press(Termisu::Input::Key::Enter).should eq(:closed)
+    h.commits.should eq(1)
+  end
+
+  it "counts an edit of the vector field as touching the card" do
+    h = calc_harness
+    calc = h.overlay.as(CvssCalculatorOverlay)
+    h.press(Termisu::Input::Key::Left) # caret move: the value is unchanged
+    calc.untouched?.should be_true
+    h.press(Termisu::Input::Key::Backspace)
+    calc.untouched?.should be_false
+    CvssCalculatorOverlay.new("8.8").untouched?.should be_false
+  end
+
   it "cancels with escape without committing" do
     h = calc_harness
     h.press(Termisu::Input::Key::Escape).should eq(:closed)
@@ -428,8 +472,9 @@ describe Gori::Tui::CvssCalculatorOverlay do
   # simply not be drawn, and ↑/↓ would walk the cursor off the visible card.
   it "scrolls the rows so the focused one stays on the card when the card is too short" do
     area = Rect.new(0, 0, 80, 16) # a card shorter than v4.0's fourteen rows need
-    calc = CvssCalculatorOverlay.new
-    calc.cycle_version(1)
+    # A chosen vector, not the empty start: the untouched placeholder's commit row reads as a
+    # refusal rather than `[ use … ]` (see "refuses to commit the untouched placeholder").
+    calc = CvssCalculatorOverlay.new("CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N")
     calc.spec.label.should eq("4.0")
     h = OverlayHarness.new(calc, area: area)
     box = calc.overlay_box(area).not_nil!

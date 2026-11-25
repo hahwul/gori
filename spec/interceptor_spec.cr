@@ -1137,3 +1137,20 @@ describe "Gori::Interceptor::Item#edited_label (#1430)" do
     end
   end
 end
+
+# The transport a hold arrived on is provenance the Item carries (Send flow to… → Repeater picks
+# the tab's transport from it): the h2 gate says so, and a version token in the bytes does not.
+describe "Gori::Interceptor::Item#http2?" do
+  it "is false for an h1 hold whatever its request line claims, and true when the gate says h2" do
+    with_store do |store|
+      ic = Gori::Interceptor.new(Gori::Scope.load(store))
+      ic.toggle
+      h1 = ic.enqueue_request("GET / HTTP/2\r\n\r\n".to_slice,
+        method: "GET", target: "/", host: "acme.test", port: 80, scheme: "http").not_nil!
+      h2 = ic.enqueue_request("GET / HTTP/2\r\n\r\n".to_slice,
+        method: "GET", target: "/", host: "acme.test", port: 443, scheme: "https", http2: true).not_nil!
+      h1.http2?.should be_false
+      h2.http2?.should be_true
+    end
+  end
+end

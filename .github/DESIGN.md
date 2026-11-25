@@ -2598,7 +2598,8 @@ because the table could not.
 
 The fix is a **scope CHAIN** rather than a second key in the table. `Verb::Scope::Editor` is
 consulted first, then the active tab's scope, then Global, each link gated by `available?`
-(`Runner#resolve_verb_id`). Editor joins the chain only while a text-editor pane holds focus —
+(`Runner#resolve_verb_id`; an unavailable TAB link no longer hands its key to Global, see
+2026-11-25). Editor joins the chain only while a text-editor pane holds focus —
 `TabController#editor_pane?`, which every editing controller answers — and drops out the moment
 focus leaves. Two properties follow, and they are the whole argument for the chain over the
 alternatives:
@@ -3666,10 +3667,11 @@ the palette would have lost the row as well.
 - **`Definition#chord_sections`** names the sections (the controller's `command_section`) in
   which the verb's chords fire; nil means the whole scope. It gates the KEY only: the palette
   and the space menu still follow `available?` and `section`.
-- **Out of its sections the press walks on**, like an unavailable verb (`Keymap#resolve`, the
-  scope chain `Runner#resolve_verb_id` now calls). So a gate on a letter Global binds would reach
+- **Out of its sections the press walks on** (`Keymap#resolve`, the scope chain
+  `Runner#resolve_verb_id` now calls). So a gate on a letter Global binds would reach
   capture, intercept or the lens. The R1 guard models that walk, and a gated key is no clash
-  for a menu row drawn only in other sections.
+  for a menu row drawn only in other sections. (This said "like an unavailable verb". Since
+  2026-11-25 an unavailable tab verb holds its key instead; the pane gate still walks on.)
 - `ExecContext#focused_section` is the value it is checked against, and the same one the
   space menu renders for.
 
@@ -6397,3 +6399,102 @@ Refines §4's rule that a dropped term widens the query and is named. On MCP `li
 the reply names the drop beside them. A count is the one number the caller asked for, and it
 scopes what an agent sends next. The TUI and `gori run history --count` keep the published
 rule: a person reads the warning beside the number, and a script asks with `--strict`.
+
+### 2026-11-25: a letter the tab claims never reaches Global
+
+Refines the 2026-09-12 scope-chain entry and the 2026-09-26 "no level-1 `c` or `i`" entry. That
+entry said a tab binding the letter itself is safe "because the press never reaches Global".
+That held only while the tab's verb was available. `Keymap#resolve` skipped an unavailable link,
+so Evidence's `c` (compare) on an empty list stopped capture and its `i` (open linked issue) on
+an orphaned snapshot held every request, under a footer reading "c compare · i issue". Authorize's
+`i` (identities) did the same during a run. The R1 guard is static and cannot see an `available:`
+lambda.
+
+- **An unavailable tab verb holds its key.** If the tab scope binds the chord, the chord is live
+  in the focused section, and `available?` is false, the walk stops. When Global would have
+  fired something, `Keymap#held_from_global` names the verb and the Runner toasts
+  "<title>: not available here", the palette's refusal wording. Otherwise the press stays
+  unanswered, as before.
+- **The pane gate still walks on.** A verb out of its `chord_sections` is not a claim in that
+  pane: the declaration says the key belongs to another pane. The R1 guard already fails a pane
+  gate on a letter Global binds, so this fall-through never reaches capture, intercept or the
+  lens.
+- **The Editor link still yields to the tab.** An unavailable Editor verb does not stop the
+  walk. Its one Global overlap is `editor.insert` on `i`, which is unavailable only in INS,
+  where the editor takes printables before the keymap sees them.
+- **The strip and the tab bar are unchanged.** `resolve_global` (the strip) and Sidebar →
+  Global (the bar) never consult the tab's scope.
+- The scope lens is held too: Evidence's `s` with no source, and Issues' RELATED `s` with no row.
+  A lens flip that cannot be seen from the tab helps no one, and one rule is easier to read
+  than one rule with an exception. `spec/verb/keymap_spec.cr` sweeps every non-Global scope ×
+  Global overlap under every OS profile × keyset.
+
+### 2026-11-25: a held request can be sent to the Repeater without deciding the hold
+
+Refines the 2026-10-01 "a held message is evidence" entry and the 2026-09-25 Send flow to… entry.
+A held request is not in History until it is forwarded, so the Intercept queue had no way to hand
+one to another tool: working a request in the Repeater meant letting it go first.
+
+- **Repeater is the only member.** `intercept.repeater` joins Send flow to… (pinned, `r`) and
+  takes the editor's message, else the marks, else the cursor row, the target rule forward and
+  drop read. It decides nothing. It is untagged and registered after the catch controls, so
+  Forward held stays the card's first row and a reflex `space ↵` still forwards. The Fuzzer and Miner seed from that Repeater tab, the Comparer
+  needs a response, and Decoder is already Send selection to… over the held text.
+- **The text as it stands, references unresolved.** The tab gets `InterceptView#current_text`:
+  the unforwarded edit with its line terminators as typed, or the held bytes. Not
+  `pending_edit`, which resolves the operator's `$` names and would write a project value into
+  another tab's buffer.
+- **Evidence, with the held bytes as the baseline.** `RepeaterView#load_held` keeps a name the
+  client sent literal and a name the operator typed live, the #1416 rule carried across. A `§`
+  the client sent stays inert. The Intercept editor's `^L` becomes the tab's auto Content-Length.
+- **Session-only.** A restored Repeater row reads its provenance off `flow_id`, and a held
+  request has none, so a saved tab would reopen as a draft: live `§`, every `$` resolved. The
+  toast says the tab is not saved.
+- **The transport is provenance.** `Interceptor::Item#http2?` is set by the HTTP/2 gate, not
+  read off the `HTTP/2` token in the held bytes, which an HTTP/1.1 client can send.
+- **Only a hold whose bytes are the request is sent.** A head-only HTTP/2 hold has its head
+  alone in `raw` (the body streams past the gate), so the tab would send a bodyless request the
+  client never sent, and auto-CL would set its `content-length` to 0. A hold with an
+  `edit_refusal` has no exact HTTP/1.1 text form. Both are refused: forward them and send the
+  flow from History, which has what went out.
+- **A held response sends its recorded request** (`repeater_flow` on its `flow_id`). A response
+  with no flow yet (an HTTP/2 upload still streaming) and a WebSocket message are refused with a
+  toast. A batch confirms only the tabs that will open.
+- **A seeded tab watches its hold.** With an agent attached, the reaper forwards a hold nobody
+  has watched for `max_hold`, and leaving for the Repeater is what starts that clock. While a
+  tab seeded from a hold is open, the reaper treats that hold as it treats the one being edited
+  (`Runner.reap_exempt?`), so the toast's "still held" stays true. Closing the tab ends it.
+
+### 2026-11-25: a mark the filter hides asks before a batch verb acts on it
+
+Refines #442's "marks win over the cursor row". The rule held, but nothing said when the marks
+were off screen. With one mark hidden by the filter (`1 marked ·1 hidden`), a bare `^R`, `y` or
+`Space H` acted on that hidden flow and ignored the visible cursor row. A single id needs no
+batch confirm, so nothing asked. Only a multi-flow delete named the split.
+
+- **Hidden marks raise one card.** Every batch-capable History or Issues list verb checks first.
+  If any mark is off the list, `TabController.hidden_marks_card?` asks "Open in Repeater
+  N marked flows?", says "N marked · M not on the list.", and names the cursor row. `y`
+  acts on the marks, `c` on the cursor row only, and esc/`n`/an outside click/a card too small
+  to draw do nothing. With every mark on screen, the verb runs as before.
+- **The answer re-runs the verb.** It does not thread new ids through each one.
+  `Runner#history_hidden_marks_gate?` pins `history_target_flow_ids` (and `issues_target_ids`) to
+  the chosen set for one synchronous re-run, as `@detail_pin` does for a detail close. A verb
+  that reads the mark count as well as the ids (`y` copies URLs over marks, a raw request over
+  the cursor; an issue's primary flow) checks `history_cursor_pick?`. Repeater and Fuzzer skip
+  their own count confirm on that re-run, because the card already named the set.
+- **"Not on the list", not "hidden by the filter".** `marked_hidden_count` also counts a mark
+  that a capped window trimmed or a peer deleted, so the card can come up with no filter set.
+- **Too many marks is refused first.** The 20-flow cap (`batch_within_cap`) and the Comparer's
+  "mark exactly 2" are checked before the card, because its "all N" answer could only be
+  refused. Its cursor-row answer would pass, but clearing the marks gets there in one press, and
+  a card offering one live answer out of two reads as a trap.
+- **Delete is the same card.** It is danger-styled, its default stays cancel, and it carries
+  "This can't be undone." So the hidden split is no longer spelled in the plain delete confirm.
+- **The third button is `c`, guarded on ctrl/alt** for the reason `y` is: a modal receives `^C`,
+  and quitting must not answer "cursor row".
+- **Not the Sitemap.** Its hidden count also covers marks folded under a collapsed ancestor, a
+  deliberate tree state, so the card would fire after every fold. It needs a filter-only count
+  first. Intercept's queue has no filter that can hide a mark.
+- `spec/tui/hidden_marks_gate_spec.cr` fails when a Runner method reads
+  `history_target_flow_ids` without the gate, unless it is named there with a reason.

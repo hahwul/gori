@@ -136,7 +136,9 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ field · ←/→ options · type name/host/token · #{enter_hint} · esc cancel"
+      # ↵ second: a card's hint has no `space cmds` anchor, so an 80-column row cuts it from
+      # the right and keeps about three tokens — and the one that saves outranks the field help.
+      "↑/↓ field · #{enter_hint} · ←/→ options · type name/host/token · esc cancel"
     end
 
     def move(d : Int32) : Nil

@@ -389,21 +389,25 @@ module Gori::Tui
         return ws_hint(v)
       end
       if v.grpc_mode?
-        return v.focus == :response ? "↑/↓ move · #{find} find · #{send} send · ↹ pane · #{read_common} · esc sub-tabs" : grpc_hint(v)
+        return v.focus == :response ? "↑/↓ move · #{send} send · #{find} find · ↹ pane · #{read_common} · esc sub-tabs" : grpc_hint(v)
       end
       return decode_hint(v) if v.decode_mode? && v.focus == :request
+      # SEND SECOND on every pane. `Chrome.fit_hints` keeps the first segment and drops the rest
+      # right to left before the `space cmds` tail, so at 80 columns a pane keeps about two
+      # tokens: with `send` after SNI or diff/hex/pretty, TARGET and RESPONSE (the panes a tab
+      # opens on and comes back to) named the toggles and not the one key the tab is for.
       case v.focus
       when :target
         if v.target_insert?
           v.editing_sni? ? "type SNI · #{sni}/↵/esc URL · #{send} send" : "type URL · #{sni} SNI · ↵ request · #{send} send · ↹ pane · esc read"
         else
-          "#{ins}/↵ edit · #{sni} SNI · #{send} send · ↹ pane · #{read_common} · esc sub-tabs"
+          "#{ins}/↵ edit · #{send} send · #{sni} SNI · ↹ pane · #{read_common} · esc sub-tabs"
         end
       when :response
         nav = v.resp_navigable? ? "↑/↓ move" : "↑/↓ scroll"
         # diff/hex/pretty are named here and nowhere else now: the RESPONSE border states
         # which of them is ON, and no longer carries a keyed chip for each.
-        "#{nav} · #{diff} diff · #{hex} hex · #{pretty} pretty · #{send} send · #{read_common} · esc sub-tabs"
+        "#{nav} · #{send} send · #{diff} diff · #{hex} hex · #{pretty} pretty · #{read_common} · esc sub-tabs"
       when :request
         if v.request_insert?
           # `↹ text`, not `↹ pane`: in INSERT, Tab inserts a TAB CHARACTER (handle_editor_tab
@@ -436,9 +440,11 @@ module Gori::Tui
       if v.grpc_fields_editing?
         keys("type the value · ↵ apply · esc cancel · {repeater.send} send")
       elsif v.grpc_fields?
-        keys("↑/↓ pick a field · i/↵ edit · {space:repeater.grpc-json-edit} JSON · {space:repeater.grpc-add-field} add field · #{chip("repeater.toggle-grpc-fields")}/esc head · {repeater.toggle-hex} hex · {repeater.send} send")
+        # The two palette routes print their own titles (`^P → Edit gRPC message as JSON`), so a
+        # word after them read twice: `… as JSON JSON`, `… Add gRPC field add field`.
+        keys("↑/↓ pick a field · i/↵ edit · {repeater.send} send · {space:repeater.grpc-json-edit} · {space:repeater.grpc-add-field} · #{chip("repeater.toggle-grpc-fields")}/esc head · {repeater.toggle-hex} hex")
       elsif v.request_hex?
-        keys("gRPC payload hex — overtype 0-9a-f · Ins/Del length · {repeater.toggle-hex}/esc exit · {repeater.send} send")
+        keys("gRPC payload hex — overtype 0-9a-f · {repeater.send} send · Ins/Del length · {repeater.toggle-hex}/esc exit")
       elsif v.request_insert?
         # `⇧arrows select · ^Y copy` for the same reason the plain-HTTP request footer names
         # them (see #body_hint's `:request` arm): the band is buildable in INSERT and the `y` that
@@ -631,7 +637,9 @@ module Gori::Tui
     # reachable and nothing said so.
     private def ws_resp_hint(v : RepeaterView, read_common : String, send : String) : String
       card = v.resp_pane == :handshake ? "handshake response" : "transcript"
-      keys("↑/↓ move #{card} · {repeater.toggle-decoded} switch · ^F find · #{send} send · ↹ pane · #{read_common} · esc sub-tabs")
+      # `↑/↓ transcript`, not `↑/↓ move transcript`: the extra word was the column that pushed
+      # `send` off an 80-column row.
+      keys("↑/↓ #{card} · #{send} send · {repeater.toggle-decoded} switch · ^F find · ↹ pane · #{read_common} · esc sub-tabs")
     end
 
     # --- request-pane toggles (keymap-driven verbs; carry the pane-gating + status) ---
@@ -2046,6 +2054,26 @@ module Gori::Tui
       @current_repeater_idx = @repeaters.size - 1
       reveal_active_subtab
       @host.goto_tab(:repeater)
+    end
+
+    # Open a request still HELD at Intercept as a new tab, without deciding the hold. See
+    # `RepeaterView#load_held` for the provenance; session-only (db_id nil) like a gRPC or split
+    # tab, because the one column a reopened row reads provenance from is `flow_id`, and a held
+    # request has none yet.
+    def repeater_held(target : String, request : String, held : String, http2 : Bool,
+                      auto_cl : Bool, held_id : Int64? = nil) : Nil
+      view = new_view
+      view.load_held(target, request, held, http2, auto_cl, held_id)
+      @repeaters << RepeaterTab.new(view, nil, nil)
+      @current_repeater_idx = @repeaters.size - 1
+      reveal_active_subtab
+      @host.goto_tab(:repeater)
+    end
+
+    # The Intercept holds an open tab was seeded from (`repeater_held`): the reaper counts each
+    # as watched for as long as its tab is open.
+    def held_source_ids : Set(Int64)
+      @repeaters.compact_map(&.view.held_id).to_set
     end
 
     # Content-only clone of the active sub-tab (Space → Duplicate). No flow_id / links.
@@ -3817,8 +3845,7 @@ module Gori::Tui
       when key.right?, key.lower_l? then view.request_read_move(0, 1, selecting: selecting)
       when key.page_up?             then view.request_read_page(-1, selecting: selecting)
       when key.page_down?           then view.request_read_page(1, selecting: selecting)
-      when key.home?                then view.edit_home(selecting)
-      when key.end?                 then view.edit_end(selecting)
+      when key.home?, key.end?      then view.request_read_motion_key(ev) # ⌃/⌥ jump the buffer
       when c && !ev.ctrl? && !ev.alt? && !c.control?
         return false # i INSERT, x select-line, y copy, Global c/i/s, …
       end

@@ -82,6 +82,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     ids = history_target_flow_ids
     return (@toast = "select a flow first") if ids.empty?
     return (@toast = "mark exactly 2 flows to compare · esc clears marks") if ids.size > 2
+    # Too many marks is refused BEFORE the hidden-marks card: its "all N" answer could only be
+    # refused. Its cursor-row answer would pass, but that is one press of clearing the marks.
+    return if history_hidden_marks_gate?("SEND TO COMPARER", "Compare") { comparer_add_selected }
     return comparer_add_pair(ids) if ids.size == 2
     id = ids.first
     detail = @session.store.get_flow(id)

@@ -135,6 +135,9 @@ module Gori::Fuzz
       apply_stop_on_json(obj)
       @config.follow_redirects = obj["follow"]?.try(&.as_bool?) || false
       @config.auto_calibrate = obj["calibrate"]?.try(&.as_bool?) || false
+      # The matcher's copy of the flag too, as `FuzzerView#apply_advanced` keeps them: a peer
+      # sync that turned calibration off otherwise left the form's matcher reading on.
+      @matcher.auto_calibrate = @config.auto_calibrate?
       # A session persisted before this key existed reads as nil ⇒ keep the ctor default
       # (on). `|| false` here would silently turn keep-alive off for every saved tab.
       @config.keep_alive = obj["keep_alive"]?.try(&.as_bool?) != false

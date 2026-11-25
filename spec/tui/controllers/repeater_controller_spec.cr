@@ -3,6 +3,9 @@ require "../../support/fake_host"
 require "../../support/fake_context"
 require "../../support/memory_backend"
 require "../../support/sse_origin"
+require "../../support/tui_probes"
+require "../../support/demo_descriptor"
+require "base64"
 
 include Gori::Tui
 
@@ -688,5 +691,104 @@ describe "RepeaterController.cut_note" do
   it "is empty for a whole response" do
     whole = Gori::Repeater::Result.new(head, Bytes.new(3), nil, 1_i64, nil, false, delivered: true)
     RepeaterController.cut_note(whole, false).should eq("")
+  end
+end
+
+# loop.md #5: Send flow to… → Repeater from the Intercept queue. The tab is session-only: a
+# reopened row reads provenance off `flow_id`, and a held request has none, so persisting it would
+# bring the evidence tab back as a draft (live `§`, every `$` resolved).
+describe "RepeaterController#repeater_held" do
+  it "opens a session-only evidence tab on the held text" do
+    with_repeater_controller do |ctl, host|
+      held = "GET /h HTTP/1.1\r\nHost: h.test\r\n\r\n"
+      ctl.repeater_held("http://h.test", held + "edited", held, false, true)
+      v = ctl.current_view.not_nil!
+      v.request_text.should eq(held + "edited")
+      v.evidence?.should be_true
+      ctl.current_session_db_id.should be_nil
+      host.session.store.repeaters.should be_empty
+    end
+  end
+end
+
+# ⌃Home/⌃End (⌥ on macOS) in READ on the REQUEST went to the LINE's edge: the READ arm called
+# `edit_home`/`edit_end` whatever the modifier, while the same chord in INS jumped the buffer,
+# and ⇧⌃End selected only to the line's end. Driven through `handle_body_key`, the key's route.
+describe "RepeaterController ⌃Home/⌃End on the READ request" do
+  it "jumps the buffer and extends the READ selection to its end, ⌥ alike" do
+    {false, true}.each do |alt|
+      with_repeater_controller do |ctl, _|
+        ctl.repeater_from_request("https://h.test", HTTP_REQ, false, nil)
+        v = ctl.current_view.not_nil!
+        v.request_insert?.should be_false
+        ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Down)).should be_true
+        2.times { ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Right)) }
+        ctl.handle_body_key(mod_key(Termisu::Input::Key::End, shift: true, alt: alt)).should be_true
+        v.request_copy_text.should start_with("st: h.test\n") # past the line, to the buffer's end
+
+        ctl.handle_body_key(mod_key(Termisu::Input::Key::Home, alt: alt)).should be_true
+        v.pane_selection?.should be_false
+        ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::End, Termisu::Input::Modifier::Shift))
+        v.request_copy_text.should eq("GET / HTTP/1.1") # the caret sat on the buffer's first cell
+      end
+    end
+  end
+end
+
+# `Chrome.fit_hints` keeps the first segment and drops the rest right to left before the
+# `space cmds` tail, so an 80-column row keeps about two tokens. With `send` after SNI or
+# diff/hex/pretty, TARGET and RESPONSE kept the toggles and lost the key the tab is for.
+describe "RepeaterController footer on an 80-column row" do
+  it "keeps ^R send on every pane of an HTTP tab" do
+    with_repeater_controller do |ctl, _|
+      ctl.repeater_from_request("https://h.test", HTTP_REQ, false, nil)
+      v = ctl.current_view.not_nil!
+      {:target => "TARGET · READ", :request => "REQUEST · READ", :response => "RESPONSE"}.each do |pane, focus|
+        v.focus_pane(pane)
+        row = Chrome.status_row(ctl.body_hint(:body), focus)
+        row.should contain("^R send"), "#{pane}: #{row}"
+        row.should contain("esc sub-tabs"), "#{pane}: #{row}"
+      end
+    end
+  end
+
+  it "keeps ^R send on a WebSocket transcript" do
+    with_repeater_controller do |ctl, _|
+      ctl.repeater_from_request("https://ws.test", WS_REQ, false, nil)
+      v = ctl.current_view.not_nil!
+      v.focus_pane(:response)
+      Chrome.status_row(ctl.body_hint(:body), "RESPONSE").should contain("^R send")
+    end
+  end
+end
+
+# The gRPC FIELDS footer names two palette-only verbs by their routes, and a route already
+# spells the verb's title (`^P → Edit gRPC message as JSON`): the word after it read twice.
+describe "RepeaterController gRPC FIELDS footer" do
+  it "names each palette route once" do
+    dir = File.tempname("gori-protos-ctl")
+    Dir.mkdir_p(dir)
+    File.write(File.join(dir, "demo.desc"), Base64.decode(DEMO_DESC_B64))
+    with_repeater_controller do |ctl, host|
+      Gori::Protobuf::Schemas.apply(dir) # after Session.open, which applies the project's own
+      head = "POST /demo.Users/GetUser HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\n\r\n"
+      msg = Bytes[0x0A, 0x03, 0x62, 0x6F, 0x62] # demo.GetUserRequest{name: "bob"}
+      id = host.session.store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
+        method: "POST", target: "/demo.Users/GetUser", http_version: "HTTP/2",
+        head: head.to_slice, body: Gori::Proxy::H2::Grpc.frame(false, msg),
+        source: Gori::FlowSource::Kind::Proxy))
+      ctl.repeater_flow(id)
+      v = ctl.current_view.not_nil!
+      v.focus_pane(:request)
+      v.toggle_grpc_fields.should be_true
+      hint = ctl.body_hint(:body)
+      hint.should contain("Edit gRPC message as JSON · ")
+      hint.should_not contain("JSON JSON")
+      hint.should_not contain("field add field")
+    end
+  ensure
+    Gori::Protobuf::Schemas.clear
+    FileUtils.rm_rf(dir) if dir
   end
 end

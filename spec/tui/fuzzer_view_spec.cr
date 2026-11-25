@@ -2620,3 +2620,63 @@ describe "FuzzerView short CONFIG card" do
     view.config_row.should eq(:advanced)
   end
 end
+
+# A ^X'd run read as a complete one once its toast was gone: the RESULTS border said
+# `5 sent · no match rule`, with no ending and no planned total.
+describe "Gori::Tui::FuzzerView RESULTS border after a run ends" do
+  it "keeps the planned total and names a stopped or budget-exhausted ending" do
+    view = loaded_fuzzer
+    view.begin_run(12_i64)
+    5.times { |i| view.append_result(fuzz_result(i, 200, 10)) }
+    view.finish_run("stopped")
+    view.results_count_label.should start_with("5/12 sent · no match rule · stopped")
+
+    view.begin_run(12_i64)
+    3.times { |i| view.append_result(fuzz_result(i, 200, 10)) }
+    view.finish_run("budget_exhausted")
+    view.results_count_label.should start_with("3/12 sent · no match rule · budget exhausted")
+  end
+
+  it "adds nothing to a run that sent its whole plan" do
+    view = loaded_fuzzer
+    view.begin_run(2_i64)
+    2.times { |i| view.append_result(fuzz_result(i, 200, 10)) }
+    view.finish_run("done")
+    view.results_count_label.should eq("2 sent · no match rule")
+  end
+
+  it "lets the stop chip say a condition_met ending, as it did" do
+    view = loaded_fuzzer
+    view.begin_run(12_i64)
+    2.times { |i| view.append_result(fuzz_result(i, 200, 10)) }
+    view.finish_run("condition_met", stop_idx: 1_i64)
+    view.results_count_label.should eq("2/12 sent · no match rule · stop #1")
+  end
+end
+
+# At 80 columns the stopped-run label pushed the lit MATCH badge off the RESULTS border, the
+# only sign that the matched-only lens is hiding rows.
+describe "Gori::Tui::FuzzerView RESULTS border on a narrow card" do
+  it "sheds the ending chip, then the total, before the DIST / MATCH badges" do
+    view = loaded_fuzzer
+    view.begin_run(12_i64)
+    5.times { |i| view.append_result(fuzz_result(i, 200, 10)) }
+    view.finish_run("stopped")
+    view.results_count_label(200).should eq("5/12 sent · no match rule · stopped")
+    view.results_count_label(52).should eq("5/12 sent · no match rule")
+    view.results_count_label(48).should eq("5 sent · no match rule")
+  end
+
+  it "keeps a lit MATCH on screen at 80×24" do
+    view = loaded_fuzzer
+    view.begin_run(12_i64)
+    5.times { |i| view.append_result(fuzz_result(i, 200, 10)) }
+    view.finish_run("stopped")
+    view.toggle_matched_only
+    rect = Gori::Tui::Rect.new(0, 0, 80, 24)
+    b = MemoryBackend.new(rect.w, rect.h)
+    view.render(Screen.new(b), rect)
+    row = (0...rect.h).map { |y| b.row(y) }.find!(&.includes?("RESULTS"))
+    row.should contain("MATCH")
+  end
+end

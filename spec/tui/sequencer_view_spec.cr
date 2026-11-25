@@ -1,5 +1,6 @@
 require "../spec_helper"
 require "socket"
+require "../support/memory_backend"
 
 private alias Q = Gori::Sequencer
 
@@ -223,5 +224,29 @@ describe Gori::Tui::SequencerView do
       view.label(18).should eq("manual (3 tokens)")
       view.target_origin.should eq("manual")
     end
+  end
+end
+
+# The collection's tally line said nothing of a ^X once the toast was gone, and a stopped run
+# with a request cap set read as `budget exhausted` — the guard its comment promised was missing.
+describe "Gori::Tui::SequencerView after a stopped collection" do
+  it "says stopped, and does not call a capped stop a budget hit" do
+    cfg = Q::Config.new(mode: Q::Mode::LiveReplay, token_loc: Q::TokenLoc.cookie("SID"), goal: 500)
+    cfg.max_requests = 5000_i64
+    view = Gori::Tui::SequencerView.new
+    view.load("http://t.test", "GET / HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice, false, nil, cfg)
+    view.begin_run
+    view.apply_progress(40, 40, 500, 0, 40_i64)
+    view.finish_run(stopped: true)
+    view.stopped?.should be_true
+    view.budget_exhausted?.should be_false
+    backend = MemoryBackend.new(120, 34)
+    view.render(Gori::Tui::Screen.new(backend), Gori::Tui::Rect.new(0, 0, 120, 34), true)
+    backend.contains?("40/500 collected").should be_true
+    backend.contains?("err · stopped").should be_true
+    backend.contains?("budget exhausted").should be_false
+
+    view.begin_run
+    view.stopped?.should be_false
   end
 end

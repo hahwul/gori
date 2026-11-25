@@ -130,6 +130,17 @@ module Gori::Tui
       @forms.each_value.any?(&.dirty?)
     end
 
+    # Whether a key that arrived inside a bracketed paste may reach this card: only a printable
+    # character, and only while a text field in the body has the keys. A printable key on the
+    # group strip, a toggle or a choice is a command (space flips, a letter cycles), so a
+    # clipboard pasted there would rewrite settings. Shared by the in-app modal
+    # (`PreferencesOverlay#takes_pasted?`) and the project picker's Settings screen.
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      return false if @on_strip
+      return false if LineEdit.typed_char(ev).nil?
+      !!focused_form.try(&.text_field?)
+    end
+
     # --- input: returns an Outcome the host acts on ---
     def handle_key(ev : Termisu::Event::Key) : Outcome
       key = ev.key
@@ -191,9 +202,13 @@ module Gori::Tui
       NONE
     end
 
+    # ↑ off the top of the strip leaves the card like esc, but it never CONFIRMS a discard:
+    # the warning says "esc again discards", and an operator pressing ↑ to climb back to the
+    # strip presses it twice without reading anything. Over unsaved edits ↑ only warns.
     private def handle_strip_key(key : Termisu::Input::Key, confirming : Bool) : Outcome
       case
-      when key.escape?, key.up?  then return close_or_warn(confirming)
+      when key.escape?           then return close_or_warn(confirming)
+      when key.up?               then return close_or_warn(false)
       when key.left?             then set_group(@group - 1)
       when key.right?            then set_group(@group + 1)
       when key.down?, key.enter? then @on_strip = false
@@ -730,6 +745,10 @@ module Gori::Tui
 
     def set_preedit(text : String) : Nil
       @view.set_preedit(text)
+    end
+
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      @view.takes_pasted?(ev)
     end
 
     def move(step : Int32) : Nil

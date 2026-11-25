@@ -180,14 +180,35 @@ module Gori
       # The id a press of `chord` fires in `scope` right now: down the SCOPE CHAIN — Editor
       # (only while a text editor pane holds focus), then `scope`, then Global — taking the
       # first link whose verb is available AND whose chord is live in the focused section
-      # (`Definition#chord_live?`). A link that fails either does not block the links behind
-      # it. `Runner#resolve_verb_id` is this with the live context; it lives here, pure, so a
-      # spec can walk the chain without a terminal.
+      # (`Definition#chord_live?`). An Editor link that fails either does not block the tab
+      # behind it, and a tab link out of its `chord_sections` walks on to Global.
+      #
+      # A tab link that is live but UNAVAILABLE stops the walk instead (`#held_from_global`):
+      # a letter the tab claims never reaches Global. Evidence's `c` (compare) and `i` (open
+      # linked issue) on an empty list or an unlinked snapshot used to stop capture and hold
+      # every request, under a footer that read "c compare · i issue" (DESIGN.md §7,
+      # 2026-11-25). `Runner#resolve_verb_id` is this with the live context; it lives here,
+      # pure, so a spec can walk the chain without a terminal.
       def resolve(chord : Chord, scope : Scope, registry : Registry, ctx : ExecContext) : String?
         if ctx.editor_pane? && (id = live_in(chord, Scope::Editor, registry, ctx))
           return id
         end
-        live_in(chord, scope, registry, ctx) || live_in(chord, Scope::Global, registry, ctx)
+        if id = live_in(chord, scope, registry, ctx)
+          return id
+        end
+        return nil if held_in(chord, scope, registry, ctx)
+        live_in(chord, Scope::Global, registry, ctx)
+      end
+
+      # The tab verb that kept a press of `chord` from reaching Global: `scope` binds it, its
+      # chord is live in the focused section, but it is not available right now, and Global
+      # would have fired something on the same chord. Nil whenever `#resolve` fires a verb, or
+      # nothing would have fired anyway. What the Runner names in the refusal toast, so the
+      # held key is not mistaken for a dead one.
+      def held_from_global(chord : Chord, scope : Scope, registry : Registry, ctx : ExecContext) : String?
+        return nil if resolve(chord, scope, registry, ctx)
+        return nil unless live_in(chord, Scope::Global, registry, ctx)
+        held_in(chord, scope, registry, ctx)
       end
 
       # A context that owns its own keys (the sub-tab strip) may still allow truly Global
@@ -201,6 +222,15 @@ module Gori
         return nil unless id = lookup_in(chord, scope)
         verb = registry[id]
         verb.available?(ctx) && verb.chord_live?(ctx) ? id : nil
+      end
+
+      # `scope`'s verb on `chord` when it claims the press but cannot run: live in the focused
+      # section, not available. Global is never a claimant of itself.
+      private def held_in(chord : Chord, scope : Scope, registry : Registry, ctx : ExecContext) : String?
+        return nil if scope.global?
+        return nil unless id = lookup_in(chord, scope)
+        verb = registry[id]
+        verb.chord_live?(ctx) && !verb.available?(ctx) ? id : nil
       end
     end
   end

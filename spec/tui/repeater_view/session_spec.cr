@@ -95,3 +95,32 @@ describe "Gori::Tui::RepeaterView send history" do
     copy.result_stopped?.should be_true
   end
 end
+
+# loop.md #5: a request still held at Intercept, sent here before it is forwarded. The held bytes
+# are a client's, so the tab is evidence; its literal baseline is what the client sent, so a
+# `$NAME` the operator typed into the hold first is still theirs (#1416 carried across).
+describe "Gori::Tui::RepeaterView#load_held" do
+  it "is evidence whose literal baseline is the held bytes, not the edited text" do
+    with_env_syntax(Gori::Env::Syntax::Namespaced) do
+      held = "GET /a?c=$ENV.CAPTURED HTTP/1.1\r\nHost: h.test\r\n\r\n"
+      edited = "GET /a?c=$ENV.CAPTURED&t=$ENV.TYPED HTTP/1.1\r\nHost: h.test\r\n\r\n"
+      view = RepeaterView.new
+      view.load_held("http://h.test", edited, held, false, true)
+      view.evidence?.should be_true
+      view.request_text.should eq(edited) # verbatim, $ references unresolved
+      view.evidence_send_literals.should contain("ENV.CAPTURED")
+      view.evidence_send_literals.should_not contain("ENV.TYPED")
+      view.focus.should eq(:request)
+      view.target.should eq("http://h.test")
+    end
+  end
+
+  it "keeps a client's § inert and carries the hold's auto Content-Length choice" do
+    req = "POST /p HTTP/1.1\r\nHost: h.test\r\nContent-Length: 99\r\n\r\na=§x§"
+    view = RepeaterView.new
+    view.load_held("http://h.test", req, req, false, false)
+    view.markers_active?.should be_false # evidence: a § the client sent is data
+    view.auto_content_length?.should be_false
+    view.request_text.should eq(req) # the deliberately wrong CL was not resynced
+  end
+end

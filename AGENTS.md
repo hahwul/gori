@@ -175,7 +175,9 @@ key grammar, the 2026-09-25 #1274 entries and the 2026-09-26 #1295 entries).
     on `available?` and never collapsed into its lone member.
 - **A bare key that belongs to one pane declares `chord_sections:`.** Do not hide that gate in
   `available:`, because the R1 guard reads the declaration. Never pane-gate a letter that Global
-  binds: outside the pane, the press falls through to Global.
+  binds: outside the pane, the press falls through to Global. An `available:` gate is the
+  opposite: a tab verb that is unavailable holds its key with a "not available here" toast and
+  never hands it to Global (`Keymap#held_from_global`, DESIGN.md §7 2026-11-25).
 - **The space menu is for the frequent; the palette takes the long tail.** A row that only
   repeats a direct chord for an editing or navigation convenience, or a once-a-session
   configuration action, is placed `menu: :palette` (`Verb::Placement`): no row at either level,

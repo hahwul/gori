@@ -91,6 +91,10 @@ module Gori::Tui
       @desc_dirty = false
       @desc_base = ""
       @desc_conflict = false
+      # The stored bytes the last refused `save` saw, which an armed `esc` may overwrite.
+      @desc_conflict_current = nil.as(String?)
+      # The last peer description `desc_peer_changed?` announced, so the tick says it once.
+      @desc_peer_seen = nil.as(String?)
       @desc_mode = InputMode::Read
       @desc_read = TextReadState.new
 
@@ -141,6 +145,15 @@ module Gori::Tui
       # on the card border: prepending under a parked cursor is silent otherwise, and a feed that
       # has quietly stopped showing its own newest rows reads as a feed that has gone quiet.
       @act_new_above = 0
+      # The event a FOLLOWING cursor sat on when a card over the tab held it there
+      # (`refresh_activity(hold: true)`). A cursor still on that event is still following, so
+      # the first refresh after the card closes takes it back to the head; one the operator
+      # moved off it is parked like any other.
+      @act_follow_held = nil.as(Int64?)
+      # How much of `@act_new_above` the last held miss in `refresh_activity_head` already
+      # counted. A held miss keeps the list, so the next tick walks the same pages from the same
+      # head and would count that burst again; only the difference is new.
+      @act_held_burst = 0
       @act_source = nil.as(String?)
       @act_level = nil.as(String?)
       @act_actor = nil.as(String?)
@@ -966,8 +979,31 @@ module Gori::Tui
       load_network_values
     end
 
+    # Put ONE refused edit back to its load-time value and leave every other pending edit in
+    # place: `group` (field indices in `settings_values` order) is reverted whole. False, and
+    # nothing touched, when none of it differs from what was loaded.
+    def revert_settings_fields(group : Array(Int32)) : Bool
+      current = settings_values
+      return false unless group.any? { |i| current[i] != @set_baseline[i] }
+      group.each { |i| @set_values[i] = @set_baseline[i] }
+      @set_cursor = current_set_value.size
+      @set_preedit = ""
+      true
+    end
+
+    # The typed fields as they stand, so a revert that turns out not to clear a refusal can be
+    # put back (`ProjectController#revert_blamed_group`).
+    def settings_snapshot : Array(String)
+      @set_values.dup
+    end
+
+    def restore_settings_snapshot(values : Array(String)) : Nil
+      @set_values = values.dup
+      @set_cursor = current_set_value.size
+    end
+
     # …and the mirror image, after a proto-schema apply. A network field may be holding a
-    # half-typed value that `settings_invalid(on_leave: false)` deliberately LEFT on screen for
+    # half-typed value that a refused ↵ (`commit_project_network(on_leave: false)`) deliberately LEFT on screen for
     # the operator to correct; resetting the six here would erase it mid-correction, under a
     # toast still naming it.
     def refresh_protos : Nil
@@ -1254,7 +1290,11 @@ module Gori::Tui
       # A cursor on the newest row FOLLOWS the head, as `prepend_activity` says: re-anchored by
       # id instead, a tab entry after events arrived put it N rows down, with the newest ones
       # scrolled off above it.
-      @act_anchor = nil if @act_sel == 0
+      if activity_following?
+        @act_sel = 0
+        @act_anchor = nil
+      end
+      @act_follow_held = nil
       page = store.events_recent(ACT_PAGE, source: @act_source,
         levels: ProjectView.act_level_set(@act_level), actor: @act_actor, query: filter_query)
       @act_rows = page.rows
@@ -1262,6 +1302,7 @@ module Gori::Tui
       @act_scanned = page.window
       @act_walked = false
       @act_new_above = 0 # page one IS the head again
+      @act_held_burst = 0
       @act_feed_empty = if !page.rows.empty?
                           false
                         elsif activity_filtered?
@@ -1308,11 +1349,15 @@ module Gori::Tui
     # the exact lie `activity_no_match_line` exists to prevent. Nothing NEW can appear below the
     # walk either — `id` is AUTOINCREMENT, so every later insert lands above the head — so the
     # walked cursor stays correct and the new matches are all in page one.
-    def refresh_activity(store : Store) : Nil
+    #
+    # `hold` is `Host#list_cursor_held?`: a card is open over the tab and the verb it runs
+    # (`activity.open`, `activity.copy`) reads the row under the cursor when it RUNS, so a
+    # following cursor keeps its event until the card closes (see `@act_follow_held`).
+    def refresh_activity(store : Store, hold : Bool = false) : Nil
       page = store.events_recent(ACT_PAGE, source: @act_source,
         levels: ProjectView.act_level_set(@act_level), actor: @act_actor, query: filter_query)
       if head = @act_rows.first?
-        refresh_activity_head(store, head.id, page)
+        refresh_activity_head(store, head.id, page, hold)
         return
       end
 
@@ -1366,13 +1411,13 @@ module Gori::Tui
     # exactly the burst this pane exists to show. Bounded all the same, because keeping a scroll
     # position while an agent is mid-fuzz is not worth an unbounded scan on the render fiber.
     private def refresh_activity_head(store : Store, head_id : Int64,
-                                      page : Store::EventPage) : Nil
+                                      page : Store::EventPage, hold : Bool) : Nil
       fresh = [] of Store::EventRow
       ACT_CATCHUP_PAGES.times do |i|
         if idx = page.rows.index { |r| r.id == head_id }
           fresh.concat(page.rows[0...idx])
           return if fresh.empty? # nothing new above the head
-          prepend_activity(fresh)
+          prepend_activity(fresh, hold)
           return
         end
         fresh.concat(page.rows)
@@ -1383,6 +1428,17 @@ module Gori::Tui
       end
       # The head is gone (a peer's ⇧X, a retention sweep) or sits further back than the walk
       # goes. Either way page one is the only honest starting point left.
+      #
+      # Not while a card holds the cursor: a reload replaces the list, and the event the card
+      # was opened over is not on page one. Keep the loaded list and announce the burst; the
+      # first refresh after the card closes walks, misses again, and reloads (a following
+      # cursor, still on `@act_follow_held`, then snaps to the head).
+      if hold
+        @act_follow_held = activity_selected_row.try(&.id) if activity_following?
+        @act_new_above += {fresh.size - @act_held_burst, 0}.max
+        @act_held_burst = {fresh.size, @act_held_burst}.max
+        return
+      end
       reload_activity(store)
     end
 
@@ -1398,12 +1454,20 @@ module Gori::Tui
     # For that parked cursor the arrivals are still ANNOUNCED. `activity_meta` renders the count
     # on the card border, because a list that is quietly no longer at the top of its own feed is
     # the same failure in a slower form.
-    private def prepend_activity(fresh : Array(Store::EventRow)) : Nil
-      following = @act_sel == 0
+    private def prepend_activity(fresh : Array(Store::EventRow), hold : Bool = false) : Nil
+      following = activity_following?
+      @act_follow_held = nil
+      if following && hold
+        # A card is open over the feed: park on the event, and remember that it was following.
+        @act_follow_held = activity_selected_row.try(&.id)
+        @act_anchor = @act_follow_held
+        following = false
+      end
       # Read BEFORE the concat below, which grows `fresh` into the whole list — taking it
       # afterwards credited the border's "↑N new" with every row on screen (`↑8 new` over five
       # arrivals). The count is what ARRIVED, and after the concat `fresh` no longer means that.
       arrived = fresh.size
+      @act_held_burst = 0 # the head moved, so a later miss counts from the new one
       # `fresh.concat`, not `fresh + @act_rows`: the sum allocates a THIRD array and copies
       # both halves into it, and this runs on the render fiber on every poll. `fresh` is the
       # walk's own scratch list and is dropped by its caller, so growing it in place is free.
@@ -1486,6 +1550,13 @@ module Gori::Tui
     # Arriving back on the head clears the "N new" count and re-arms following. The count is a
     # note about rows the cursor has not seen; being on them again is what makes it seen, and
     # leaving it up would make the border keep reporting an absence the operator just closed.
+    # On the head, or still on the event a card held a following cursor on (`@act_follow_held`).
+    private def activity_following? : Bool
+      return true if @act_sel == 0
+      return false unless held = @act_follow_held
+      activity_selected_row.try(&.id) == held
+    end
+
     private def settle_activity_new_above : Nil
       @act_new_above = 0 if @act_sel == 0
     end
@@ -1901,8 +1972,29 @@ module Gori::Tui
 
     getter? desc_conflict : Bool
 
+    # What the store held when the last `save` was refused, exactly as stored (CR bytes
+    # included). The controller arms the next `esc` with it, the shape of
+    # `IssuesController#save_notes_or_report`: an overwrite is granted for the one peer
+    # version the refusal reported, never for a later one nobody has seen.
+    getter desc_conflict_current : String?
+
     def reload_desc(store : Store) : Nil
       load_desc_text(store.setting(DESC_KEY).to_s)
+    end
+
+    # Take the stored description over a refused draft (`^W` on an armed refusal) as ONE
+    # undoable edit — `replace_from_outside`, not `set_text`, which clears the undo stack and
+    # would make the draft unrecoverable. The baseline moves to the stored text, so a `^Z` back
+    # to the draft is an ordinary edit over the version the operator has now seen.
+    def take_stored_desc(store : Store) : Nil
+      @desc_area.replace_from_outside(store.setting(DESC_KEY).to_s)
+      @desc_base = @desc_area.text
+      @desc_dirty = false
+      @desc_conflict = false
+      @desc_conflict_current = nil
+      @desc_peer_seen = nil
+      @desc_mode = InputMode::Read
+      @desc_read.sync_from(@desc_area)
     end
 
     private def load_desc_text(text : String) : Nil
@@ -1910,17 +2002,24 @@ module Gori::Tui
       @desc_base = @desc_area.text
       @desc_dirty = false
       @desc_conflict = false
+      @desc_conflict_current = nil
+      @desc_peer_seen = nil
       @desc_mode = InputMode::Read
       @desc_read.sync_from(@desc_area)
     end
 
     # An absent row and an empty description display the same text. A draft that
     # converged with a peer, or that was undone to its base, needs no database write.
-    def save(store : Store) : Bool
+    #
+    # `overwrite` is the stored value a refused save reported, passed back by the operator's
+    # second `esc`. It is compared inside the same writer transaction, so a peer that wrote
+    # AGAIN between the two presses is refused afresh rather than silently replaced.
+    def save(store : Store, *, overwrite : String? = nil) : Bool
       return true unless @desc_dirty
       draft = @desc_area.text
       base = @desc_base
       saved = draft.as(String?)
+      seen = nil.as(String?)
       committed = store.mutate_setting(DESC_KEY) do |raw|
         current = raw.to_s
         # TextArea#text joins its CR-free lines with LF. Compare that projection,
@@ -1931,20 +2030,36 @@ module Gori::Tui
         elsif draft == base
           saved = current
           nil
-        elsif visible == base
+        elsif visible == base || current == overwrite
           draft
         else
+          seen = current
           saved = nil
         end
       end
       @desc_conflict = committed && saved.nil?
+      @desc_conflict_current = @desc_conflict ? seen : nil
       return false unless committed && (text = saved)
       if text == draft
         @desc_base = text
         @desc_dirty = false
+        @desc_peer_seen = nil
       else
         load_desc_text(text)
       end
+      true
+    end
+
+    # True ONCE for each distinct peer description that arrives over an unsaved draft, so the
+    # data_version tick can say so while the operator is still typing rather than at `esc`.
+    # The tick also fires on this session's own captures, hence the latch. The Issues notes
+    # twin is `IssuesView#refresh_detail(announce: true)`.
+    def desc_peer_changed?(store : Store) : Bool
+      return false unless @desc_dirty
+      current = store.setting(DESC_KEY).to_s
+      visible = TextArea.normalize_lf(current)
+      return false if visible == @desc_base || visible == @desc_area.text || current == @desc_peer_seen
+      @desc_peer_seen = current
       true
     end
 

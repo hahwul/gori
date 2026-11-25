@@ -191,44 +191,57 @@ module Gori::Tui
           # now the one place the key is named.
           keys("{editor.insert}/↵ edit · #{run} run · #{pretty} pretty · #{point} mark · ^O config · space cmds · esc sub-tabs")
         end
-      when :config then config_hint(v, run)
-      when :results
-        # ⇧E only while the verb would actually fire. `fuzz.save-results` is gated on
-        # `fuzzer_results_saveable?` (verbs/history.cr), which is false while a run is going,
-        # while a save/load is in flight, with no results, and once the run has been saved or
-        # restored — and an unavailable verb is never dispatched, so the key did NOTHING and
-        # said nothing while this line kept promising it. That also made the controller's own
-        # "fuzz results already saved as run #N" refusal unreachable through the binding.
-        # Named off the same predicate the gate reads, not a second copy of its conditions.
-        save = v.results_saveable? ? " · #{save_key} save" : ""
-        # `{space:fuzz.sort} sort`, not `{fuzz.sort} sort`. `fuzz.sort` is MENU-ONLY by
-        # decision (verbs/history.cr, key audit F2: a sort order is set once and read for the
-        # rest of the run, which is not worth a bare letter), so it carries a `mnemonic:` and
-        # no chord — and `Hotkeys.expand` leaves a token it cannot resolve ALONE. This line
-        # printed the literal `{fuzz.sort} sort` into the footer, braces and all, and the one
-        # key it named answered "nothing bound here". The `space:` form spells the menu path
-        # from the registry, as the Rewriter does for its own menu-only action.
-        #
-        # Direct keys first, menu paths last: `space → o sort · m matched` read as if `m` were
-        # behind `space` too. The paths sit just before `space cmds`, so a narrow row drops
-        # them before any direct key.
-        fold = v.grouped? ? " · ←/→ fold" : ""
-        "↑/↓ select · ↵ detail#{fold} · #{keys("{fuzz.matched} matched · {fuzz.dist} dist")}#{save} · " \
-        "#{run} run · #{stop} stop · #{keys("{space:fuzz.sort} sort · {space:fuzz.group} shapes")} · space cmds · esc sub-tabs"
-      when :detail then "↑/↓ move · ←/→ pane · ^F find · space cmds · esc back"
-      else              "↹/esc sub-tabs"
+      when :config  then config_hint(v, run)
+      when :results then results_hint(v, run, stop, save_key)
+      when :detail  then "↑/↓ move · ←/→ pane · ^F find · space cmds · esc back"
+      else               "↹/esc sub-tabs"
       end
+    end
+
+    # The RESULTS footer — its own method so `body_hint` stays one decision per pane.
+    private def results_hint(v : FuzzerView, run : String, stop : String, save_key : String) : String
+      # ⇧E only while the verb would actually fire. `fuzz.save-results` is gated on
+      # `fuzzer_results_saveable?` (verbs/history.cr), which is false while a run is going,
+      # while a save/load is in flight, with no results, and once the run has been saved or
+      # restored — and an unavailable verb is never dispatched, so the key did NOTHING and
+      # said nothing while this line kept promising it. That also made the controller's own
+      # "fuzz results already saved as run #N" refusal unreachable through the binding.
+      # Named off the same predicate the gate reads, not a second copy of its conditions.
+      save = v.results_saveable? ? " · #{save_key} save" : ""
+      # `{space:fuzz.sort} sort`, not `{fuzz.sort} sort`. `fuzz.sort` is MENU-ONLY by
+      # decision (verbs/history.cr, key audit F2: a sort order is set once and read for the
+      # rest of the run, which is not worth a bare letter), so it carries a `mnemonic:` and
+      # no chord — and `Hotkeys.expand` leaves a token it cannot resolve ALONE. This line
+      # printed the literal `{fuzz.sort} sort` into the footer, braces and all, and the one
+      # key it named answered "nothing bound here". The `space:` form spells the menu path
+      # from the registry, as the Rewriter does for its own menu-only action.
+      #
+      # Direct keys first, menu paths last: `space → o sort · m matched` read as if `m` were
+      # behind `space` too. The paths sit just before `space cmds`, so a narrow row drops
+      # them before any direct key.
+      fold = v.grouped? ? " · ←/→ fold" : ""
+      #
+      # RUN or STOP, whichever is live, and straight after `↵ detail`: at 80 columns the line
+      # keeps about three tokens, and the key that starts or stops the run outranks the view
+      # toggles. Both together pushed each other off; the Miner's footer makes the same pick.
+      go = v.running? ? "#{stop} stop" : "#{run} run"
+      "↑/↓ select · ↵ detail · #{go}#{fold} · #{keys("{fuzz.matched} matched · {fuzz.dist} dist")}#{save} · " \
+      "#{keys("{space:fuzz.sort} sort · {space:fuzz.group} shapes")} · space cmds · esc sub-tabs"
     end
 
     # `esc sub-tabs` on all four, for the same reason the pane strips above carry it:
     # `handle_escape`'s final arm answers escape here too, and the CONFIG column was the one
     # part of the tab that never said where it goes.
+    #
+    # Each row leads with what ↵ does on it and then `run`: at 80 columns only the first two
+    # tokens survive, and `^R run` sat fourth on every row, so the column the operator sets a
+    # run up in never named the key that starts it.
     private def config_hint(v : FuzzerView, run : String) : String
       case v.config_row
-      when :set  then "↑/↓ row · ↵ edit set · Del remove · #{run} run · ↹ pane · space cmds · esc sub-tabs"
-      when :add  then keys("↵ add a payload set · {fuzz.list-paste} quick List · ↑/↓ row · #{run} run · ↹ pane · space cmds · esc sub-tabs")
-      when :mode then "→/↵ next mode · ← template · ↑/↓ row · #{run} run · ↹ pane · space cmds · esc sub-tabs"
-      else            "↵ open Advanced · ↑/↓ row · #{run} run · ↹ pane · space cmds · esc sub-tabs"
+      when :set  then "↵ edit set · #{run} run · ↑/↓ row · Del remove · ↹ pane · space cmds · esc sub-tabs"
+      when :add  then keys("↵ add a payload set · #{run} run · {fuzz.list-paste} quick List · ↑/↓ row · ↹ pane · space cmds · esc sub-tabs")
+      when :mode then "→/↵ next mode · #{run} run · ← template · ↑/↓ row · ↹ pane · space cmds · esc sub-tabs"
+      else            "↵ open Advanced · #{run} run · ↑/↓ row · ↹ pane · space cmds · esc sub-tabs"
       end
     end
 
@@ -411,8 +424,8 @@ module Gori::Tui
 
     # The Runner calls these when an overlay applies (esc / ↵-on-last-field), with the view the
     # card was opened on. Reconcile keeps running under the modal, so a peer closing that session
-    # re-anchors `current_view` on a neighbour: writing there replaced ITS set, or — Advanced —
-    # flipped a running sweep's live `Config` (the engine reads it per request).
+    # re-anchors `current_view` on a neighbour: writing there replaced ITS set or rewrote ITS
+    # Advanced knobs. (A running sweep reads its own `Config` copy, `Fuzz::Plan.build`.)
     def apply_fuzz_set(v : FuzzerView, edit_index : Int32?, spec : SetSpec?) : Nil
       return unless tab = tab_for_edit(v)
       v.apply_set(edit_index, spec)
@@ -589,8 +602,7 @@ module Gori::Tui
       when editor_read_sideways(ev) then nil # ←/→ h/l, ⌥ by word
       when key.page_up?             then v.template_read_page(-1, selecting: selecting)
       when key.page_down?           then v.template_read_page(1, selecting: selecting)
-      when key.home?                then v.template_home(selecting)
-      when key.end?                 then v.template_end(selecting)
+      when key.home?, key.end?      then v.template_read_motion_key(ev) # ⌃/⌥ jump the buffer
       when c && !ev.ctrl? && !ev.alt? && !c.control?
         return false # i INSERT, x/y + Global breath → keymap
       end
@@ -1282,16 +1294,36 @@ module Gori::Tui
       # Judged, like `gori run fuzz`'s and MCP's gates, on what the run can SEND: a positive
       # Max requests caps the wire, so it bounds the prompt too (#1209).
       bound = Fuzz.request_bound(total, v.config.max_requests, engine.macro_requests(total))
+      # A re-run replaces RESULTS and deletes the last run's private spool, so a finished run
+      # nobody saved is gone for good — the loss `load_saved_run` asks about first. Asked only
+      # when ⇧E could still keep it (`results_saveable?`) AND it found something
+      # (`results_have_findings?`): tweak-and-re-run is the Fuzzer's loop, and a card on every
+      # ^R over a sweep with no hits was friction with nothing to protect. It is NOT a danger
+      # card either — ↵ runs, so `^R ↵` always runs, and the card is a pause that names the hits.
+      unsaved = v.results_saveable? && v.results_have_findings? ? replace_unsaved_line(v) : nil
       if bound.nil? || bound > CONFIRM_THRESHOLD
         e = engine
         # Name the archive policy: `keep: interesting` spools only the interesting rows, so the
         # confirm should not promise "every result is spooled" (issue #1240).
         spooled = v.config.keep.interesting? ? "Only interesting results (matched + error/re-send/incomplete/stop) are spooled" : "Every result is privately spooled"
-        @host.confirm("RUN FUZZ", "Send #{bound ? bound.to_s : "an unknown number of"} requests to #{v.target_origin}?\n#{spooled}; the pane keeps at most 5,000 rows / 64 MiB.#{payload_confirm(v)}",
+        # One card, not two in a row: the large-run question gains the unsaved line.
+        @host.confirm("RUN FUZZ", "Send #{bound ? bound.to_s : "an unknown number of"} requests to #{v.target_origin}?\n#{spooled}; the pane keeps at most 5,000 rows / 64 MiB.#{payload_confirm(v)}#{unsaved.try { |u| "\n#{u}" }}",
+          confirm_label: "run", danger: false) { start_run(v, e, total) }
+      elsif unsaved
+        e = engine
+        @host.confirm("REPLACE UNSAVED RESULTS", "Start a new run?\n#{unsaved}",
           confirm_label: "run", danger: false) { start_run(v, e, total) }
       else
         start_run(v, engine, total)
       end
+    end
+
+    # The sentence both REPLACE UNSAVED RESULTS cards say (a re-run here, a history load in
+    # `load_saved_run`), with the key that keeps the rows: cancel, save, then run or load.
+    private def replace_unsaved_line(v : FuzzerView) : String
+      save = Hotkeys.binding_label(@host.session.registry, "fuzz.save-results", "⇧E")
+      hits = v.results_have_findings? ? " (#{v.hit_label})" : ""
+      "The current #{v.result_count}-row run#{hits} has not been saved and will be replaced (#{save} saves it)."
     end
 
     private def start_run(v : FuzzerView, engine : Fuzz::Engine, total : Int64?) : Nil
@@ -1322,7 +1354,7 @@ module Gori::Tui
       events = @fuzz_events
       io_events = @fuzz_io_events
       generation = v.run_generation
-      calibrate = v.config.auto_calibrate?
+      calibrate = engine.auto_calibrate? # the run's own config, not the form the operator keeps editing
       done_sent = false
       error_sent = false
       spool_lost = false
@@ -1587,7 +1619,7 @@ module Gori::Tui
       return @host.status("result I/O in progress — wait before loading history") if view.saving_results? || view.loading_results?
       if view.results_saveable? && !replace_unsaved
         @host.confirm("REPLACE UNSAVED RESULTS",
-          "Load saved run ##{id}?\nThe current #{view.result_count}-row run has not been saved and will be replaced.",
+          "Load saved run ##{id}?\n#{replace_unsaved_line(view)}",
           confirm_label: "load", danger: true) { load_saved_run(id, true) }
         return
       end

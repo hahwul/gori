@@ -356,9 +356,8 @@ module Gori::Tui
       when key.enter? then return false # editor.insert-enter
       when nav_up?(ev)              then input_step(s, -1, growing)
       when nav_down?(ev)            then input_step(s, 1, growing)
-      when editor_read_sideways(ev) then nil                     # ←/→ h/l, ⌥ by word
-      when key.home?                then s.input_home(selecting) # editor move + read-cursor adopt — see WorkbenchSession
-      when key.end?                 then s.input_end(selecting)
+      when editor_read_sideways(ev) then nil                                         # ←/→ h/l, ⌥ by word
+      when key.home?, key.end?      then s.input_read.handle_motion_key(s.input, ev) # ⌃/⌥ jump the buffer
       when plain_char?(ev, c)
         return false # i INSERT, x/y/c + Global breath → keymap
       end

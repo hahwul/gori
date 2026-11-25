@@ -369,3 +369,45 @@ describe "LineFieldRead#copy_text past the line" do
     r.copy_text("short", 30).should eq("short")
   end
 end
+
+# The window was recomputed from the caret on every frame (`Screen.input_start`), so a press in
+# a scrolled field moved the caret, the next frame snapped the window back towards the start,
+# and every drag event after it was rebased on text that had just jumped: the band took
+# characters the pointer never crossed. The window now holds while the caret stays inside it.
+describe "TextField drag on a scrolled value" do
+  it "selects what the pointer swept, the window holding still under it" do
+    value = ("0123456789" * 6) + "XYZEND"
+    f = TextField.new(value) # caret at the end: the 30-column window shows the tail
+    b = MemoryBackend.new(40, 3)
+    s = Screen.new(b)
+    f.render(s, 0, 1, 30, true, Theme.text, Theme.bg)
+    swept = b.row(1)[5, 10]
+    f.click_to_cursor(5, 1).should be_true
+    2.times do |i|
+      b = MemoryBackend.new(40, 3)
+      f.render(Screen.new(b), 0, 1, 30, true, Theme.text, Theme.bg)
+      b.row(1)[5, 10].should eq(swept) # the text under the pointer did not move
+      f.click_to_cursor(i == 0 ? 10 : 15, 1, selecting: true).should be_true
+    end
+    f.selection_text.should eq(swept)
+  end
+
+  it "still follows a caret that leaves the window, on either side" do
+    value = ("0123456789" * 6) + "XYZEND"
+    f = TextField.new(value)
+    b = MemoryBackend.new(40, 3)
+    f.render(Screen.new(b), 0, 1, 30, true, Theme.text, Theme.bg)
+    f.home # far off the left edge
+    b = MemoryBackend.new(40, 3)
+    s = Screen.new(b)
+    f.render(s, 0, 1, 30, true, Theme.text, Theme.bg)
+    b.row(1)[0, 10].should eq("0123456789")
+    s.desired_cursor.should eq({0, 1})
+    f.end_of_line # and back off the right
+    b = MemoryBackend.new(40, 3)
+    s = Screen.new(b)
+    f.render(s, 0, 1, 30, true, Theme.text, Theme.bg)
+    b.row(1)[23, 6].should eq("XYZEND")
+    s.desired_cursor.should eq({29, 1})
+  end
+end

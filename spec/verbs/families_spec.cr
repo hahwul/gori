@@ -16,10 +16,12 @@ private def ctx_for(v : Gori::Verb::Definition) : FakeExecContext
   ctx.fuzzer_has_result = true
   ctx.miner_has_issue = true
   ctx.selected_evidence = 1_i64
+  ctx.intercept_selected = 3_i64 # a hold under the queue cursor (intercept.repeater)
   ctx.current_tab = case v.scope
-                    when .fuzzer? then :fuzzer
-                    when .miner?  then :miner
-                    else               :history
+                    when .fuzzer?    then :fuzzer
+                    when .miner?     then :miner
+                    when .intercept? then :intercept
+                    else                  :history
                     end
   ctx
 end

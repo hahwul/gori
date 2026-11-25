@@ -188,3 +188,152 @@ describe "the TARGET row selection" do
     end
   end
 end
+
+# The row drew its value from column 0 whatever the caret did, so typing past the field's
+# width (a long query string) went on blind behind the trailing `…`, caret included. It now
+# windows around the caret the way every `input_line` field does, with a leading `…` for the
+# scrolled-off start. At 80 columns the card is the top three rows: the value runs from
+# column 4 to 78, and the border sits at 79.
+private LONG_URL = "https://example.com/" + ("0123456789" * 15) + "XYZEND"
+
+private def target_frame(v) : {MemoryBackend, Screen}
+  b = MemoryBackend.new(80, 24)
+  s = Screen.new(b)
+  v.render(s, Rect.new(0, 0, 80, 24))
+  {b, s}
+end
+
+private TARGET_CARD = Rect.new(0, 0, 80, 3)
+
+describe "the TARGET row window" do
+  it "keeps the caret and the tail of a long value on screen, in READ and INSERT" do
+    each_target_view(LONG_URL) do |v, name|
+      v.target_end
+      b, s = target_frame(v)
+      row = b.row(1)
+      row.should contain("XYZEND"), "#{name}: the typed tail was off screen"
+      row[4].should eq('…'), "#{name}: no mark for the scrolled-off start"
+      cx, cy = s.desired_cursor.not_nil!
+      cy.should eq(1)
+      (cx < 79).should be_true, "#{name}: the caret left the field"
+      row[cx - 6, 6].should eq("XYZEND"), "#{name}: the caret is not after the tail"
+
+      v.enter_target_insert!
+      "QQ".each_char { |c| v.target_insert(c) }
+      b, s = target_frame(v)
+      b.row(1).should contain("XYZENDQQ"), "#{name}: typed text went on blind"
+      s.desired_cursor.not_nil![0].should be < 79
+    end
+  end
+
+  it "keeps both marks off a caret in the middle of a long value" do
+    each_target_view(LONG_URL) do |v, name|
+      v.target_end
+      v.target_read_move(-100)
+      at = LONG_URL.size - 100
+      b, s = target_frame(v)
+      row = b.row(1)
+      row[4].should eq('…'), name
+      row[78].should eq('…'), "#{name}: no mark for the hidden tail"
+      cx, _ = s.desired_cursor.not_nil!
+      (5..77).should contain(cx)
+      row[cx].should eq(LONG_URL[at]), "#{name}: the caret cell is not the caret's character"
+      row[cx - 1].should eq(LONG_URL[at - 1]), "#{name}: the text left of the caret is off by the window"
+    end
+  end
+
+  it "puts a click on a scrolled row on the character under the pointer" do
+    each_target_view(LONG_URL) do |v, name|
+      v.target_end
+      b, _ = target_frame(v)
+      col = b.row(1).index("XYZEND").not_nil!
+      v.target_click_to_cursor(TARGET_CARD, col, 1)
+      v.target_end(true)
+      v.target_copy_text.should eq("XYZEND"), "#{name}: the click was not rebased by the window"
+    end
+  end
+
+  it "reads an unfocused row from its start, and a click there lands by that frame" do
+    each_target_view(LONG_URL) do |v, name|
+      v.target_end
+      v.focus_pane(name == "Fuzzer" ? :template : :request)
+      b, _ = target_frame(v)
+      b.row(1)[4, 8].should eq("https://"), "#{name}: an unfocused row kept its window"
+      v.focus_pane(:target)
+      v.target_click_to_cursor(TARGET_CARD, 4 + 8, 1) # what the unfocused frame showed there
+      v.target_end(true)
+      v.target_copy_text.should eq(LONG_URL[8..]), name
+    end
+  end
+end
+
+# A READ selection was painted from the field's start to the screen's edge, over the trailing
+# `…` and the card's right border, so a selected long URL read as if it ended there. The band
+# now stops where the text stops, on either side of the window.
+describe "the TARGET row selection band" do
+  it "stops short of the trailing mark and the border" do
+    each_target_view(LONG_URL) do |v, name|
+      v.target_end
+      v.target_home(true) # the whole value, the caret back at its start (an unscrolled row)
+      b, _ = target_frame(v)
+      b.row(1)[78].should eq('…'), "#{name}: the band painted over the trailing mark"
+      b.bg_at(78, 1).should_not eq(Theme.accent_bg), name
+      b.row(1)[79].should eq('│'), "#{name}: the band painted over the border"
+      b.bg_at(79, 1).should_not eq(Theme.accent_bg), name
+      b.bg_at(10, 1).should eq(Theme.accent_bg), "#{name}: no band at all"
+    end
+  end
+
+  it "covers neither mark on a scrolled window" do
+    each_target_view(LONG_URL) do |v, name|
+      v.target_end(true) # the whole value, the caret at its end: the window scrolled
+      b, _ = target_frame(v)
+      b.row(1)[4].should eq('…'), name
+      b.bg_at(4, 1).should_not eq(Theme.accent_bg), "#{name}: the band covered the leading mark"
+      b.bg_at(5, 1).should eq(Theme.accent_bg), "#{name}: no band over the visible text"
+
+      v.target_end
+      v.target_read_move(-100, selecting: true) # anchor at the end, beyond the trailing mark
+      b, _ = target_frame(v)
+      b.row(1)[78].should eq('…'), name
+      b.bg_at(78, 1).should_not eq(Theme.accent_bg), "#{name}: the band covered the trailing mark"
+      b.bg_at(79, 1).should_not eq(Theme.accent_bg), name
+    end
+  end
+end
+
+# The window followed the caret alone, so a press on a scrolled row moved the caret, the next
+# frame re-windowed around it, and the drag events after it were rebased on text that had
+# jumped: the band ran left while the pointer moved right. It now holds while the caret stays
+# inside it. A frame is drawn between events, as the TUI does.
+describe "the TARGET row drag on a scrolled window" do
+  it "selects what the pointer swept" do
+    each_target_view(LONG_URL) do |v, name|
+      v.target_end
+      b, _ = target_frame(v)
+      swept = b.row(1)[20, 10]
+      v.target_click_to_cursor(TARGET_CARD, 20, 1)
+      {25, 30}.each do |x|
+        b, _ = target_frame(v)
+        b.row(1)[20, 10].should eq(swept), "#{name}: the text moved under the pointer"
+        v.target_drag_to_cursor(TARGET_CARD, x, 1)
+      end
+      v.target_copy_text.should eq(swept), "#{name}: the band took text the pointer never crossed"
+    end
+  end
+end
+
+# A zero-width char is drawn as its six-column `⟨ZWSP⟩` badge, and the window kept one cell
+# for the caret: a caret on it at the right edge stamped the badge over the card border.
+describe "the TARGET row caret on a wide glyph" do
+  it "keeps the caret's glyph inside the card" do
+    each_target_view("https://example.com/" + ("x" * 120) + "\u200By") do |v, name|
+      v.target_end
+      v.target_read_move(-2) # onto the ZWSP
+      b, s = target_frame(v)
+      b.row(1)[79].should eq('│'), "#{name}: the caret badge ran over the border"
+      cx, _ = s.desired_cursor.not_nil!
+      (cx + 6 <= 79).should be_true, "#{name}: the badge does not fit where the caret sits"
+    end
+  end
+end

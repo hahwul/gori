@@ -17,6 +17,8 @@ module Gori::Tui
       s = @host.session
       @project_view = ProjectView.new(s.scope, s.host_overrides)
       @project_view.registry = s.registry
+      # The exact peer description an `esc` overwrite may replace (see `save_desc_or_report`).
+      @desc_overwrite_armed = nil.as(String?)
     end
 
     def view : ProjectView
@@ -76,7 +78,10 @@ module Gori::Tui
         settings_hint
       else
         if @project_view.desc_insert_mode?
-          keys("type · ^Y copy · {editor.goto-line} goto · {editor.find} find · ^E $EDITOR · esc read")
+          # `^W` only while a refusal is armed: it is a delete-word reflex everywhere else, and
+          # outside a conflict this pane gives it nothing to do (`desc_leave_key`).
+          tail = @desc_overwrite_armed ? "esc overwrites · ^W theirs" : "esc save"
+          keys("type · ^Y copy · {editor.goto-line} goto · {editor.find} find · ^E $EDITOR · #{tail}")
         else
           keys("{editor.insert}/↵ edit · {editor.goto-line} goto · {editor.find} find · ^E $EDITOR · space cmds · esc sub-tabs")
         end
@@ -616,23 +621,74 @@ module Gori::Tui
       # peer's write, so re-reading page one here would snap a deeply-paged list back to 200
       # rows several times a second during live capture. See `ProjectView#refresh_activity`.
       refresh_activity if @project_view.pane == :activity
+      announce_peer_description
+    end
+
+    # A draft over a description another session has since rewritten. Said while the operator
+    # is still typing, once per peer value, as the Issues notes pane does
+    # (`IssuesController#on_external_change`): otherwise the first sign is the refusal at `esc`.
+    private def announce_peer_description : Nil
+      return unless @project_view.desc_peer_changed?(@host.session.store)
+      @host.status(DESC_PEER_CHANGED)
+    rescue DB::Error | SQLite3::Exception
+      nil # a busy read only delays the notice; `esc` still checks inside the write
     end
 
     # As `reload_activity`, but keeps the pages already loaded. Same rescue, same reason: the
     # rows ARE the answer, so a swallowed read error must not render as a quiet feed.
     def refresh_activity : Nil
-      @project_view.refresh_activity(@host.session.store)
+      @project_view.refresh_activity(@host.session.store, @host.list_cursor_held?)
     rescue ex : DB::Error | SQLite3::Exception
       Log.warn(exception: ex) { "activity: event feed refresh failed" }
       @host.status("could not read the event feed — see gori.log")
     end
 
+    # Every passive save (a sub-tab change, ↑ off the top, a tab switch, ^P). NOT armable from
+    # here: moving away is not a save key, so a refusal names the pane's own key rather than
+    # turning an unrelated keypress into a write over a peer. `IssuesController#commit_notes`.
     def save : Bool
       saved = @project_view.save(@host.session.store)
       if @project_view.desc_conflict?
-        @host.status("project description changed in another session — your draft is still in the editor")
+        @host.status(DESC_REFUSED)
+      elsif saved
+        @desc_overwrite_armed = nil
       end
       saved
+    end
+
+    # `esc` in INS, the pane's save key. A refusal arms the NEXT `esc` with the stored value
+    # it reported, so a second press writes the draft over that one version — a guard here
+    # can only be an interruption, never a veto (the Issues notes rule, #1980). The store
+    # compares those bytes inside the write, so a newer peer edit refuses and re-arms.
+    private def save_desc_or_report : Nil
+      overwrite = @desc_overwrite_armed
+      @desc_overwrite_armed = nil
+      if @project_view.save(@host.session.store, overwrite: overwrite)
+        @project_view.exit_desc_insert!
+      elsif @project_view.desc_conflict?
+        @desc_overwrite_armed = @project_view.desc_conflict_current
+        @host.status(DESC_CONFLICT)
+      else
+        @host.status(DESC_BUSY)
+      end
+    end
+
+    # The description's conflict toasts, word for word the Issues notes ones, each held to the
+    # 59-column status budget (`spec/tui/controllers/project_controller_spec.cr`). Only the
+    # esc refusal names `^W`, because only that refusal arms it.
+    DESC_PEER_CHANGED = "description changed elsewhere — esc checks first"
+    DESC_REFUSED      = "description NOT saved — changed elsewhere (esc in it)"
+    DESC_CONFLICT     = "NOT saved — changed elsewhere · esc overwrites, ^W theirs"
+    DESC_BUSY         = "description NOT saved — project busy · esc retries"
+
+    # `^W` in INS while a refusal is armed: take the stored text as ONE undoable edit, so `^Z`
+    # brings the draft back. Disarms on the way out, so an arm granted for a refusal answered
+    # this way cannot spend itself on the NEXT edit's conflict.
+    private def take_theirs_desc : Nil
+      @desc_overwrite_armed = nil
+      @project_view.take_stored_desc(@host.session.store)
+    rescue DB::Error | SQLite3::Exception
+      @host.status("could not read the saved description — draft kept")
     end
 
     # Re-sync the SETTINGS pane's inherited network fields after a global settings:network
@@ -659,12 +715,8 @@ module Gori::Tui
       if ev.ctrl? && key.lower_p?
         save
         @host.open_palette
-      elsif key.escape?
-        if @project_view.desc_insert_mode?
-          editor_exit_insert
-        else
-          leave_to_strip
-        end
+      elsif desc_leave_key(ev, key)
+        nil
       elsif (ev.ctrl? || ev.alt?) && !ev.ctrl_z? && !editing_motion?(ev)
         # Any OTHER modified chord defers to the central keymap so it stays rebindable —
         # `^Y` Copy above all, which is the only way to copy an INS selection (bare `y` is a
@@ -675,6 +727,22 @@ module Gori::Tui
         edit_desc_insert(ev, key, c)
       else
         return handle_desc_read(ev, key, c)
+      end
+      true
+    end
+
+    # The two keys that end a visit to the editor: esc steps out one level (INS saves, READ goes
+    # up to the strip), and ^W in INS takes the stored text — but only while a conflict refusal
+    # is armed, the Issues notes pair. Unarmed, ^W falls through to the keymap as it always did:
+    # it is a delete-word reflex, and a whole draft must not go on one key.
+    private def desc_leave_key(ev : Termisu::Event::Key, key) : Bool
+      insert = @project_view.desc_insert_mode?
+      if key.escape?
+        insert ? editor_exit_insert : leave_to_strip
+      elsif insert && @desc_overwrite_armed && ev.ctrl? && key.lower_w?
+        take_theirs_desc
+      else
+        return false
       end
       true
     end
@@ -722,16 +790,7 @@ module Gori::Tui
 
     def editor_exit_insert : Bool
       return false unless editor_pane?
-      if !save && @project_view.desc_conflict?
-        @host.confirm("DESCRIPTION CHANGED", "Discard your draft and load the saved project description?",
-          confirm_label: "discard", danger: true) do
-          @project_view.reload_desc(@host.session.store)
-        rescue DB::Error | SQLite3::Exception
-          @host.status("could not load the saved project description — your draft is still in the editor")
-        end
-      else
-        @project_view.exit_desc_insert!
-      end
+      save_desc_or_report
       true
     end
 
@@ -1456,41 +1515,112 @@ module Gori::Tui
     # rebind). `on_leave` = the commit fired because the pane is being left (Tab/arrow/click;
     # esc cancels instead, see `cancel_settings_to_strip`) rather than an explicit ↵: a leave with an invalid field drops the bad edit, while
     # ↵ keeps it so the user can fix it. Dirty-guarded so an unchanged pane never re-applies.
+    #
+    # "Drops the bad edit" means THAT field, not the card. A leave applies (DESIGN.md §7
+    # 2026-11-19), so the operator's other edits in the same visit are applied without it, and
+    # the toast names each field it dropped. Reloading every field here (the old shape)
+    # threw away a valid connect timeout beside an invalid capture limit and said nothing.
+    # Each round either clears its refusal by reverting a changed field or drops everything,
+    # so the loop ends.
     private def commit_project_network(on_leave : Bool = false) : String?
       return nil unless @project_view.settings_dirty?
+      dropped = [] of String
+      loop do
+        checked = project_network_config
+        if checked.is_a?(Settings::ProjectNetworkConfig)
+          line = persist_project_network(checked)
+          return dropped.empty? ? line : "#{dropped.join(" · ")} — dropped · #{line.sub(/\Aproject network /, "network ")}"
+        end
+        return settings_invalid(checked.message) unless on_leave
+        unless label = revert_blamed_group(checked)
+          # No single edit can be blamed: the refusal stands with every changed group reverted
+          # in turn (a broken inherited upstream, say), so drop them all and say so.
+          @project_view.refresh_settings
+          return "#{(dropped << checked.groups.first[0]).uniq.join(" · ")} — all network edits dropped"
+        end
+        dropped << label unless dropped.includes?(label) # a toast never repeats a refusal
+        return "#{dropped.join(" · ")} — dropped" unless @project_view.settings_dirty?
+      end
+    end
+
+    # Revert the first of the refusal's groups whose revert CLEARS that refusal, and keep the
+    # rest of the card as typed. A group whose revert leaves the same refusal standing is put
+    # back as it was: blaming it would drop a valid edit (a fixed username beside a proxy turned
+    # off) and then refuse anyway.
+    # Answers the reverted group's toast label, or nil when no revert clears the refusal.
+    private def revert_blamed_group(refusal : NetworkRefusal) : String?
+      refusal.groups.each do |label, group|
+        before = @project_view.settings_snapshot
+        next unless @project_view.revert_settings_fields(group)
+        again = project_network_config
+        return label unless again.is_a?(NetworkRefusal) && again.message == refusal.message
+        @project_view.restore_settings_snapshot(before)
+      end
+      nil
+    end
+
+    # A network refusal: the full sentence ↵ shows, and the field groups to blame, in the order
+    # a leave should try them, each with the short label a leave's toast names it by.
+    private record NetworkRefusal, message : String, groups : Array({String, Array(Int32)})
+
+    # The pane's network fields as a config to apply, or the first refusal. Grouped because
+    # three of the fields only mean something together (proxy kind + host + port, auth + its
+    # credentials).
+    private def project_network_config : Settings::ProjectNetworkConfig | NetworkRefusal
       host, port_s, _protocol, _proxy_host, _proxy_port, destination, auth_s, username, password, connect_s, idle_s, cap_s =
         @project_view.settings_values
       if err = bind_host_problem(host)
-        return settings_invalid(err, on_leave)
+        return refusal(err, "bind IP", host, [0])
       end
       port = port_s.to_i?
       unless port && 0 <= port <= 65535
-        return settings_invalid("invalid bind port #{port_s.inspect}", on_leave)
+        return refusal("invalid bind port #{port_s.inspect}", "bind port", port_s, [ProjectView::SETTINGS_BIND_PORT_INDEX])
       end
       upstream, proxy_error = @project_view.settings_upstream_proxy
       if proxy_error
-        return settings_invalid(proxy_error, on_leave)
+        return refusal(proxy_error, "upstream proxy", nil, PROXY_FIELDS)
       end
       if err = Settings.upstream_proxy_error(upstream)
-        return settings_invalid(err, on_leave)
+        return refusal(err, "upstream proxy", nil, PROXY_FIELDS)
       end
       if err = Settings.upstream_destination_error(destination)
-        return settings_invalid(err, on_leave)
+        return refusal(err, "destination", destination, [ProjectView::SETTINGS_DESTINATION_INDEX])
       end
       auth, auth_error = Settings.build_project_proxy_auth(upstream, auth_s == "on", username, password)
-      if auth_error
-        return settings_invalid(auth_error, on_leave)
-      end
+      return auth_refusal(auth_error, upstream) if auth_error
       connect = positive_secs(connect_s)
-      return settings_invalid("invalid connect timeout #{connect_s.inspect} (seconds, min 1)", on_leave) unless connect
+      return refusal("invalid connect timeout #{connect_s.inspect} (seconds, min 1)", "connect timeout", connect_s, [CONNECT_FIELD]) unless connect
       idle = positive_secs(idle_s)
-      return settings_invalid("invalid idle timeout #{idle_s.inspect} (seconds, min 1)", on_leave) unless idle
+      return refusal("invalid idle timeout #{idle_s.inspect} (seconds, min 1)", "idle timeout", idle_s, [CONNECT_FIELD + 1]) unless idle
       cap = positive_secs(cap_s)
-      return settings_invalid("invalid capture limit #{cap_s.inspect} (MiB, min 1)", on_leave) unless cap
+      return refusal("invalid capture limit #{cap_s.inspect} (MiB, min 1)", "capture limit", cap_s, [CONNECT_FIELD + 2]) unless cap
       cap = cap.clamp(1, Settings::MAX_CAPTURE_MAX_MIB) # keep cap*1024*1024 inside Int32
-      config = Settings::ProjectNetworkConfig.new(host, port, upstream, auth, connect, idle, cap, destination)
-      persist_project_network(config)
+      Settings::ProjectNetworkConfig.new(host, port, upstream, auth, connect, idle, cap, destination)
     end
+
+    # A proxy that is off or unusable is what an "auth requires an upstream proxy" refusal is
+    # about, so the proxy change is blamed first; any other auth refusal is the auth row's own.
+    # `revert_blamed_group` moves on when the first guess does not clear it.
+    private def auth_refusal(message : String, upstream : String) : NetworkRefusal
+      route = Settings.parse_upstream_proxy(upstream)
+      proxy = {"upstream proxy invalid for auth", PROXY_FIELDS}
+      own = {"proxy auth invalid", AUTH_FIELDS}
+      NetworkRefusal.new(message, route.direct? || route.configuration_error ? [proxy, own] : [own, proxy])
+    end
+
+    # A one-group refusal whose toast label quotes the typed value, cut so a leave's toast fits
+    # the status line (`capture limit "abc" invalid — dropped · network saved`).
+    private def refusal(message : String, field : String, value : String?, group : Array(Int32)) : NetworkRefusal
+      label = value ? %(#{field} "#{value.size > 6 ? "#{value[0, 5]}…" : value}" invalid) : "#{field} invalid"
+      NetworkRefusal.new(message, [{label, group}])
+    end
+
+    # Field indices (`ProjectView#settings_values` order) for the groups above.
+    private PROXY_FIELDS = [ProjectView::SETTINGS_PROTOCOL_INDEX, ProjectView::SETTINGS_PROXY_HOST_ROW - ProjectView::SETTINGS_FIELD_BASE,
+                            ProjectView::SETTINGS_PROXY_PORT_INDEX]
+    private AUTH_FIELDS = [ProjectView::SETTINGS_AUTH_INDEX, ProjectView::SETTINGS_USERNAME_INDEX,
+                           ProjectView::SETTINGS_PASSWORD_INDEX]
+    private CONNECT_FIELD = ProjectView::SETTINGS_PASSWORD_INDEX + 1 # then idle, then capture limit
 
     private def persist_project_network(config : Settings::ProjectNetworkConfig) : String
       line, saved = @host.apply_project_network(config)
@@ -1514,8 +1644,7 @@ module Gori::Tui
 
     # The refusal SENTENCE, handed back so `commit_project_settings` can place it beside the
     # proto half's rather than have one overwrite the other.
-    private def settings_invalid(msg : String, on_leave : Bool) : String
-      @project_view.refresh_settings if on_leave # leaving the pane drops the half-typed value
+    private def settings_invalid(msg : String) : String
       msg.starts_with?("settings:") ? msg : "project network: #{msg}"
     end
   end

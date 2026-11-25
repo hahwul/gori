@@ -561,12 +561,12 @@ module Gori::Proxy::H2
       if held.request
         @interceptor.enqueue_request(raw, method: held.method, target: held.target,
           host: held.host, port: held.port, scheme: held.scheme,
-          edit_refusal: held.refusal, head_only: body.nil?)
+          edit_refusal: held.refusal, head_only: body.nil?, http2: true)
       else
         @interceptor.enqueue_response(raw, flow_id: @assembler.flow_id_of(held.stream_id),
           method: held.method, target: held.target, host: held.host, port: held.port,
           scheme: held.scheme, edit_refusal: held.refusal, head_only: body.nil?,
-          request_target: held.request_target)
+          request_target: held.request_target, http2: true)
       end
     end
 
@@ -967,15 +967,14 @@ module Gori::Proxy::H2
         edit = decision.bytes != item.raw
         slot.decided = decided = edit ? edited(slot, block, decision) : (slot.decided || block)
         # An edit that actually changed what goes out (a refused one forwards the peer's own
-        # `block`) keeps the request as it was held beside the flow, as h1 does (#1378). The
-        # held message is the h1-shaped projection the operator edited: h2 has no client bytes
-        # in that form, and its held frames were never logged because they never went out.
+        # `block`) keeps the message as it was held beside the flow, as h1 does (#1378, V54) —
+        # the client's request or the origin's response. The held message is the h1-shaped
+        # projection the operator edited: h2 has no peer bytes in that form, and its held frames
+        # were never logged because they never went out. A HEAD-ONLY hold's body passes this gate
+        # untouched, so the original's body is the one the flow stores (`head_only`).
         if edit && (decided != block || slot.rebuilt)
-          if @ordered
-            @assembler.note_intercept_original(block.stream_id, item.raw)
-          else
-            @assembler.note_response_edited(block.stream_id)
-          end
+          @assembler.note_intercept_original(block.stream_id, item.raw, request: @ordered,
+            head_only: !slot.holds_body?)
         end
       end
       slot.ready = true

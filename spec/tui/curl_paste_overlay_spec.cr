@@ -1,6 +1,7 @@
 require "../spec_helper"
 require "../support/memory_backend"
 require "../support/overlay_harness"
+require "../support/tui_probes"
 
 include Gori::Tui
 
@@ -132,5 +133,14 @@ describe Gori::Tui::CurlPasteOverlay do
     h.type("curl https://acme.test/x")
     ov.render(Screen.new(MemoryBackend.new(80, 24)), h.area)
     ov.preview.first.should eq("GET https://acme.test/x")
+  end
+end
+
+describe "CurlPasteOverlay hint on an 80-column row" do
+  it "keeps the key that opens the request" do
+    ov = CurlPasteOverlay.new(:repeater)
+    Chrome.status_row(ov.hint, ov.title).should contain("↵ open in Repeater")
+    ov = CurlPasteOverlay.new(:history)
+    Chrome.status_row(ov.hint, ov.title).should contain("↵ import")
   end
 end

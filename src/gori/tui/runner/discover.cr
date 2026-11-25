@@ -39,6 +39,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # a toast and fall back to the cursor row.
   def history_discover : Nil
     ids = history_target_flow_ids
+    return if !ids.empty? && history_hidden_marks_gate?("DISCOVER", "Discover from") { history_discover }
     # flow_row, not get_flow: all this needs per flow is the URL, and get_flow would pull the
     # full request+response bodies for every mark — up to a whole page after ⇧T — most of which
     # this then throws away. Only the ONE header donor below is loaded in full.

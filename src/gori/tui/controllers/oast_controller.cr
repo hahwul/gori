@@ -244,7 +244,10 @@ module Gori::Tui
         # `esc sub-tabs`, the way the PROVIDERS line below already ends — `handle_callbacks_key`
         # and `handle_providers_key` send escape to the same place, and only one of the two
         # said so.
-        keys("↑/↓ select · ←/→ provider · {oast.generate} payload · y copy · {oast.filter} filter · {oast.listen} listen · {oast.stop} stop · ↵ detail · space cmds · esc sub-tabs")
+        # Listen and payload lead: they are what the sub-tab is for, and at 80 columns the line
+        # kept `←/→ provider` and lost both. `^R listen` first, the way `^R` starts every other
+        # tab's job; there is room for one of the two.
+        keys("↑/↓ select · {oast.listen} listen · {oast.generate} payload · ←/→ provider · y copy · {oast.filter} filter · {oast.stop} stop · ↵ detail · space cmds · esc sub-tabs")
       else
         # `t on/off` and `↵/e edit` — the vocabulary all four rule lists use since the key
         # audit's F4 moved the toggle off `x` (which is select-line everywhere). ↵ has always

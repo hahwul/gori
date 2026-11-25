@@ -451,6 +451,35 @@ describe Gori::MCP::Server do
       end
     end
 
+    # A response edited at Intercept (V54): the flow's response is what the client got, and the
+    # origin's own response is the response original, under the same header redaction.
+    it "returns the origin's response as the original of a response edited at Intercept" do
+      with_store do |store|
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_000_i64, scheme: "http", host: "rw.test", port: 80, method: "GET",
+          target: "/r", http_version: "HTTP/1.1", head: "GET /r HTTP/1.1\r\nHost: rw.test\r\n\r\n".to_slice,
+          source: Gori::FlowSource::Kind::Proxy))
+        resp = Gori::Store::CapturedResponse.new(flow_id: id, status: 403,
+          head: "HTTP/1.1 403 Forbidden\r\nContent-Length: 6\r\n\r\n".to_slice, body: "edited".to_slice)
+        resp.intercept_original = "HTTP/1.1 200 OK\r\nSet-Cookie: sid=secret\r\nContent-Length: 6\r\n\r\norigin".to_slice
+        store.update_response(resp)
+        store.flush
+
+        call = %({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":#{id}}}})
+        payload = mcp_tool_payload(mcp_drive(store, call)[0])
+        payload["intercept_edited"].as_bool.should be_true
+        payload["status"].as_i.should eq(403)
+        payload["response_original_head"].as_s.should start_with("HTTP/1.1 200 OK")
+        payload["response_original_head"].as_s.should_not contain("secret")
+        payload["response_original_body"]["text"].as_s.should eq("origin")
+        payload["request_original_head"]?.should be_nil
+
+        list = %({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"list_history","arguments":{}}})
+        row = mcp_tool_payload(mcp_drive(store, list)[0])["flows"].as_a.find!(&.["id"].as_i64.==(id))
+        row["intercept_edited"].as_bool.should be_true
+      end
+    end
+
     # An imported archive's global rule cannot be named here (`rule_id` 0), but the flow was
     # still rewritten: `rewritten_by: []` alone reads as "no rule changed it".
     it "says a flow was rewritten when no rule that did it can be named" do

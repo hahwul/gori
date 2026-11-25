@@ -281,6 +281,9 @@ module Gori::Tui
       @run_grpc_fields = nil.as(Fuzz::GrpcFieldTemplate?)
       @pending_grpc_fields = nil.as(Fuzz::GrpcFieldTemplate?)
       @pending_websocket = false
+      # …and the labels the run is counted, saved and judged under, off the PLAN's own copy
+      # (see `RunLabels`). nil until a build, and spent by the `begin_run` that reads it.
+      @pending_labels = nil.as(RunLabels?)
       # `Fuzz::Plan#rewrites_content_length?` as of the last plan build, plus the
       # `@editor.edits` revision it was computed at — an edit to the template invalidates
       # the answer, and a stale "your CL is being rewritten" is worse than none.
@@ -1042,19 +1045,21 @@ module Gori::Tui
       @scroll = 0
       @running = true
       @stop_requested = false
-      @run_selective = @matcher.constrained? || @matcher.auto_calibrate?
+      labels = @pending_labels || form_run_labels
+      @pending_labels = nil
+      @run_selective = labels.selective
       @run_total = total
       @run_started_at = Time.utc.to_unix_ms * 1000_i64
       @run_status = "running"
-      @run_target = target_origin
-      @run_http2 = @http2
-      @run_sni = sni_override
-      @run_mode = @config.race_count.try { |n| "race ×#{n.clamp(2, Fuzz::Engine::MAX_RACE_SIZE)}" } || @config.mode.label
-      @run_tls_preset = @config.tls_preset
+      @run_target = labels.target
+      @run_http2 = labels.http2
+      @run_sni = labels.sni
+      @run_mode = labels.mode
+      @run_tls_preset = labels.tls_preset
       @run_websocket = @pending_websocket
-      @run_max_requests = @config.max_requests
-      @run_keep = @config.keep
-      @run_extractors = @matcher.extractors
+      @run_max_requests = labels.max_requests
+      @run_keep = labels.keep
+      @run_extractors = labels.extractors
       @run_stop_idx = nil
       @run_edit_mark = edit_mark(@sets.dup)
       @next_run_noticed = false
@@ -1063,6 +1068,28 @@ module Gori::Tui
       @loaded_saved_run = false
       @progress = Fuzz::Progress.new(0_i64, total, 0_i64, 0_i64)
       clear_detail_decode # a new run reuses request indices → drop the old decode cache
+    end
+
+    # What a run is labelled, counted and saved under. Frozen in `build_engine` from the plan's
+    # own `Config`/`Matcher` copies, NOT read off the form in `begin_run`: the RUN FUZZ confirm
+    # sits between the two, and the peer reconcile keeps applying rows under it, so a form read
+    # there could save a run as `cluster-bomb` while the engine swept the confirmed sniper.
+    record RunLabels, mode : String, tls_preset : String?, max_requests : Int64?,
+      keep : Fuzz::Keep, selective : Bool, extractors : Array(Fuzz::Extractor),
+      target : String, http2 : Bool, sni : String?
+
+    private def run_labels(config : Fuzz::Config, matcher : Fuzz::Matcher) : RunLabels
+      mode = config.race_count.try { |n| "race ×#{n.clamp(2, Fuzz::Engine::MAX_RACE_SIZE)}" } || config.mode.label
+      RunLabels.new(mode, config.tls_preset, config.max_requests, config.keep,
+        matcher.constrained? || matcher.auto_calibrate?, matcher.extractors,
+        target_origin, @http2, sni_override)
+    end
+
+    # The fallback for a `begin_run` no build preceded (a focused spec). The form's matcher
+    # flag OR its config's, since `Plan.build` syncs the two only on the run's copy.
+    private def form_run_labels : RunLabels
+      labels = run_labels(@config, @matcher)
+      labels.copy_with(selective: labels.selective || @config.auto_calibrate?)
     end
 
     # TARGET, TEMPLATE text, payload sets and Mode stay editable mid-run, but the run snapshotted
@@ -1176,6 +1203,13 @@ module Gori::Tui
 
     def results_windowed? : Bool
       result_count > retained_result_count
+    end
+
+    # A finished run whose rows say something a re-run would lose: hits under a real match rule
+    # (with no rule every row "matches", which is no finding), or the row its stop condition
+    # tripped on. `FuzzerController#fuzz_run` asks before replacing only these.
+    def results_have_findings? : Bool
+      (@run_selective && matched_count > 0) || !@run_stop_idx.nil?
     end
 
     def results_saveable? : Bool
@@ -1331,6 +1365,7 @@ module Gori::Tui
         @progress = nil
         @run_total = nil
         @run_stop_idx = nil
+        @run_status = "" # the RESULTS border's ending chip belonged to the run just dropped
       end
       @saved_run_id = nil
       @loaded_saved_run = false
@@ -1838,8 +1873,10 @@ module Gori::Tui
       # Freeze the CL knobs + retention policy the same way: the reconstruction in
       # `result_request` has to reproduce what THIS run's generator did, and its note has to
       # name the retention THIS run used — not what the CONFIG pane says after a post-run edit.
-      @pending_policy = {@config.update_content_length?, true,
-                         @matcher.keep_bodies}
+      # Off the PLAN's copy: a verbatim session turns auto Content-Length off on the run's
+      # config only (`Plan.build` snapshots it), so `@config` would name the wrong framing.
+      @pending_policy = {plan.config.update_content_length?, true,
+                         plan.matcher.keep_bodies}
       @pending_auto_encode = plan.auto_encode
       # The generator's OWN answer, not `@config.reframe_grpc?`: the knob is only half of it —
       # `Generator` also requires a template `GrpcVerdict.reframable_template?` accepts, and a
@@ -1850,6 +1887,7 @@ module Gori::Tui
       # position for it. nil for every run that named no field, which is every run there was.
       @pending_grpc_fields = plan.grpc_fields
       @pending_websocket = plan.websocket?
+      @pending_labels = run_labels(plan.config, plan.matcher)
       # The template declares a Content-Length that disagrees with its own body BEFORE any
       # payload is substituted — so the auto-resync is about to rewrite framing the operator
       # authored deliberately, on every variation, and the sweep would report a clean
@@ -2747,6 +2785,14 @@ module Gori::Tui
       @template_read.sync_to(@editor, selecting: selecting) unless template_insert?
     end
 
+    # Home/End in READ, ⌃/⌥ included — see `RepeaterView#request_read_motion_key`: the READ
+    # arm called `template_home`/`template_end` whatever the modifier, so ⌃End landed on the
+    # line's end while INS (`buffer_jump?`) went to the buffer's.
+    def template_read_motion_key(ev : Termisu::Event::Key) : Bool
+      return false if template_insert?
+      @template_read.handle_motion_key(@editor, ev)
+    end
+
     # ⌃/⌥ + Home/End — the buffer's start/end rather than the line's.
     def template_buffer_start(selecting : Bool = false) : Nil
       @editor.to_buffer_start(selecting)
@@ -3109,12 +3155,6 @@ module Gori::Tui
       @template_read.paint_chrome(screen, inner, @editor, read_active)
     end
 
-    # `TargetField`'s selection band (Repeater answers with its wrap-aware variant).
-    private def paint_char_span_bg(screen : Screen, x : Int32, y : Int32, line : String,
-                                   x0 : Int32, x1 : Int32, bg : Color) : Nil
-      screen.char_span_bg(x, y, line, x0, x1, bg)
-    end
-
     # The calm CONFIG summary: a header, the payload-set rows + an Add row, then the
     # Mode / Advanced rows + a passive run-size read-out anchored at the bottom. One row
     # cursor (@cfg_row), no text field, no caret — so ←/→ can only cycle Mode. All editing
@@ -3379,7 +3419,12 @@ module Gori::Tui
     # always published it (`Fuzz::Progress#requests`).
     # Public so a spec can assert on the exact string the border draws — the whole defect
     # was a header reporting a different number from the one on the wire.
-    def results_count_label : String
+    #
+    # `width` is the RESULTS card's: given it, the label sheds its own ending-state additions
+    # (the ending chip, then the `/total`) before it would push the DIST / MATCH badges off the
+    # border. A lit MATCH is the only sign that the matched-only lens hides rows, so it outranks
+    # them. `results_chrome_hit` passes the same width, so the hit boxes measure what was drawn.
+    def results_count_label(width : Int32? = nil) : String
       p = @progress
       req = p ? p.requests : 0_i64
       if @running
@@ -3399,7 +3444,42 @@ module Gori::Tui
         # The row the run ended on (issue #1270), standing — the row itself can be scrolled
         # away, windowed out, or hidden by the matched-only lens.
         stop = FuzzerView.stop_chip(@run_stop_idx)
-        "#{result_count} sent#{extra} · #{hit_label}#{stop}#{window}#{archive}#{saved}#{shapes_chip}"
+        fit_count_label(width, "#{extra} · #{hit_label}", "#{stop}#{window}#{archive}#{saved}#{shapes_chip}")
+      end
+    end
+
+    # Where the RESULTS count starts on the card's top border: past ` RESULTS `.
+    COUNT_LABEL_X = 11
+
+    # The finished label at its longest that still leaves the DIST and MATCH badges their room:
+    # whole, then without the ending chip, then without the `/total` as well.
+    private def fit_count_label(width : Int32?, mid : String, tail : String) : String
+      full = "#{sent_of_total} sent#{mid}#{ending_chip}#{tail}"
+      return full unless width
+      room = width - COUNT_LABEL_X - 2 - Frame.badge_text("DIST").size - Frame.badge_text("MATCH").size
+      return full if full.size <= room
+      no_ending = "#{sent_of_total} sent#{mid}#{tail}"
+      no_ending.size <= room ? no_ending : "#{result_count} sent#{mid}#{tail}"
+    end
+
+    # `5/12` for a run that ended short of its plan, `12` for one that sent it all (or had no
+    # known total) — the running label's `5/12`, kept once it stops. Without it a ^X at 5 of 12
+    # read, once the toast was gone, exactly like a complete 5-payload run.
+    private def sent_of_total : String
+      sent = result_count
+      total = @run_total
+      total && sent < total ? "#{sent}/#{total}" : sent.to_s
+    end
+
+    # How the run ENDED, standing on the border for every ending but a clean one. The toast
+    # says `(stopped)` / `(request budget exhausted — partial run)` once and the next keypress
+    # replaces it; `condition_met` already has its `stop #N` chip, so it adds a word only for a
+    # saved run that carries no stop row. Spelled from `Fuzz::Terminal`'s durable labels.
+    private def ending_chip : String
+      case @run_status
+      when "", "done", "running" then ""
+      when "condition_met"       then @run_stop_idx ? "" : " · condition met"
+      else                            " · #{@run_status.tr("_", " ")}"
       end
     end
 
@@ -3408,7 +3488,7 @@ module Gori::Tui
       Frame.card(screen, rect, "RESULTS", bg: Theme.bg, border: Frame.pane_border(focused))
       # Left: the live count. Right: keyed toggle badges (sort value · matched · dist) so
       # each results toggle's shortcut rides the border, not just the bottom hint bar.
-      count = results_count_label
+      count = results_count_label(rect.w)
       # +11 clears the " RESULTS " title; the trailing space keeps the count off the hairline
       # that resumes after it (`╭─ RESULTS 0 sent · 0 hit────` read as one glued token).
       screen.text(rect.x + 11, rect.y, "#{count} ", Theme.muted, Theme.bg)
@@ -4255,7 +4335,7 @@ module Gori::Tui
     def results_chrome_hit(rect : Rect, mx : Int32, my : Int32) : Symbol?
       return nil unless pane = results_rect(rect)
       return nil if pane.w < 2 || my != pane.y
-      min_x = pane.x + 11 + results_count_label.size + 1
+      min_x = pane.x + 11 + results_count_label(pane.w).size + 1
       Frame.right_badge_hit(mx, my, pane.y, pane.right - 1, min_x, [
         {:dist, "DIST"},
         {:match, "MATCH"},

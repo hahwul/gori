@@ -150,3 +150,107 @@ describe "HistoryController detail esc" do
     end
   end
 end
+
+private def hm_flow(store : Gori::Store, host : String, target : String) : Int64
+  store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_i64, scheme: "http", host: host, port: 80,
+    method: "GET", target: target, http_version: "HTTP/1.1",
+    head: "GET #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil,
+    source: Gori::FlowSource::Kind::Proxy))
+end
+
+private def hm_filter(ctl : HistoryController, store : Gori::Store, query : String) : Nil
+  ctl.view.set_query(query)
+  ctl.view.reload(store)
+  settle_history(ctl, store)
+end
+
+# reports/loop #4: one mark the filter hides (`1 marked ·1 hidden`) silently turned a press on
+# the visible cursor row into an action on that invisible flow. Every batch-capable verb now
+# asks first, on a card that names the split and offers the cursor row alone.
+private def with_hidden_mark(name : String, &)
+  TuiContract.with_session(name) do |session|
+    store = session.store
+    hidden = hm_flow(store, "hidden.test", "/backups/db.sql.gz")
+    shown = hm_flow(store, "shown.test", "/w1")
+    store.flush
+    host = TuiContract::Host.new(session)
+    ctl = HistoryController.new(host)
+    hm_filter(ctl, store, "host:hidden.test")
+    ctl.history_mark_toggle
+    hm_filter(ctl, store, "host:shown.test")
+    ctl.view.selected_id.should eq(shown)
+    ctl.view.marked_hidden_count.should eq(1)
+    yield ctl, host, store, hidden, shown
+  end
+end
+
+describe "HistoryController hidden-marks card" do
+  it "asks before acting on a mark the filter hides, naming the split and the cursor row" do
+    with_hidden_mark("history-hidden-card") do |ctl, host, _store, hidden, _shown|
+      got = nil.as({Array(Int64), Bool}?)
+      ctl.hidden_marks_card?("SEND TO REPEATER", "Open in Repeater") { |ids, c| got = {ids, c} }.should be_true
+      host.confirms.last.should eq({"SEND TO REPEATER",
+                                    "Open in Repeater 1 marked flow?\n1 marked · 1 not on the list.\nCursor row: “GET /w1”."})
+      host.alt_confirms.last[2].should eq("all 1")
+      host.alt_confirms.last[3].should eq("cursor row")
+      got.should eq({[hidden], false})
+    end
+  end
+
+  it "hands the cursor row alone to the `c` answer, and nothing to a decline" do
+    with_hidden_mark("history-hidden-alt") do |ctl, host, _store, _hidden, shown|
+      host.alt_answer = true
+      got = nil.as({Array(Int64), Bool}?)
+      ctl.hidden_marks_card?("COPY", "Copy the URLs of") { |ids, c| got = {ids, c} }
+      got.should eq({[shown], true})
+
+      host.alt_answer = nil
+      got = nil
+      ctl.hidden_marks_card?("COPY", "Copy the URLs of") { |ids, c| got = {ids, c} }.should be_true
+      got.should be_nil
+    end
+  end
+
+  it "stays out of the way while every mark is on screen" do
+    with_hidden_mark("history-hidden-none") do |ctl, host, store, _hidden, _shown|
+      hm_filter(ctl, store, "")
+      ctl.view.marked_hidden_count.should eq(0)
+      before = host.confirms.size
+      ctl.hidden_marks_card?("SEND TO REPEATER", "Open in Repeater") { |_, _| }.should be_false
+      host.confirms.size.should eq(before)
+    end
+  end
+
+  it "has no cursor-row button when the filter shows no row at all" do
+    with_hidden_mark("history-hidden-empty") do |ctl, host, store, _hidden, _shown|
+      hm_filter(ctl, store, "host:nothing.test")
+      ctl.view.selected_id.should be_nil
+      ctl.hidden_marks_card?("ADD TO SCOPE", "Add the hosts of") { |_, _| }.should be_true
+      host.alt_confirms.last[3].should be_nil
+      host.confirms.last[1].should_not contain("Cursor row")
+    end
+  end
+
+  it "makes the delete over a hidden mark the same card, and `c` deletes only the cursor row" do
+    with_hidden_mark("history-hidden-delete") do |ctl, host, store, hidden, shown|
+      host.alt_answer = true
+      ctl.history_delete
+      host.confirms.last.should eq({"DELETE FLOWS",
+                                    "Delete 1 marked flow?\n1 marked · 1 not on the list.\nCursor row: “GET /w1”.\nThis can't be undone."})
+      host.alt_confirms.last[2].should eq("delete 1")
+      store.flow_row(shown).should be_nil
+      store.flow_row(hidden).should_not be_nil
+      host.statuses.last.should eq("flow deleted: GET /w1")
+    end
+  end
+
+  it "deletes nothing when the hidden-marks delete card is declined" do
+    with_hidden_mark("history-hidden-delete-no") do |ctl, host, store, hidden, shown|
+      host.alt_answer = nil
+      ctl.history_delete
+      store.flow_row(shown).should_not be_nil
+      store.flow_row(hidden).should_not be_nil
+    end
+  end
+end

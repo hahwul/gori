@@ -139,7 +139,8 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ field · type to edit selector · ←/→ options · ↵ start · esc cancel"
+      # ↵ second: an 80-column row cuts a card's hint from the right, and `↵ start` was the cut.
+      "↑/↓ field · ↵ start · type to edit selector · ←/→ options · esc cancel"
     end
 
     # Own key handling (formerly Runner#handle_sequence_config_key). ↑/↓ move fields; the

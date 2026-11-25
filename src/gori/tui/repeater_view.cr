@@ -116,6 +116,12 @@ module Gori::Tui
     # the commonest workflow there is.
     getter? evidence : Bool
 
+    # The Intercept hold this tab was seeded from while it was still held (`load_held`), else
+    # nil. While the tab is open the operator is working that message, so gori's own reaper
+    # leaves it held (`Runner.reap_exempt?`). In memory only, like the tab itself; a duplicate
+    # does not inherit it.
+    getter held_id : Int64? = nil
+
     # The registry the border chips read their menu letters from (` FRAME `, the WS ` KEY ` chip,
     # the TLS chip), set by the controller that makes the view (#1295). Nil in a bare view, whose
     # chips then read `␣` alone (`Hotkeys.menu_chip`).

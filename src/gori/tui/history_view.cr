@@ -133,6 +133,14 @@ module Gori::Tui
     # Whether this process still relays the flow's WebSocket (#1630): `Proxy::WS::Live`, a hash
     # lookup, asked only for a WS row on screen and the open drill-in. Injected by the shell.
     property ws_open : Proc(Int64, Bool) = ->(_id : Int64) { false }
+    # True while the space menu, a family card, the palette, a picker or a modal floats over
+    # this list (`Host#list_cursor_held?`). Follow then stops moving the cursor: rows still
+    # land, but the highlight keeps its flow, because every verb resolves its target when it
+    # RUNS and the operator chose it when the card opened. A capture landing under an open
+    # `space` used to put `H`, `d`, `>` `r` and `^P` Send to Repeater on the new flow. `@follow`
+    # stays on, so the first capture after the card closes snaps back to the tail. Injected by
+    # the shell, like `ws_open`.
+    property cursor_hold : Proc(Bool) = -> { false }
     getter? searching : Bool = false
     # `searching?` is the controller's truth (it guards the capture flush and the deferred
     # click); `searching_shown?` is what the bar and the empty list PAINT. A search that
@@ -299,7 +307,7 @@ module Gori::Tui
       @last_search = "" # the last non-empty ^F query — what a narrow takes
       # The request as the client sent it, when the operator edited it at Intercept (#1378) or a
       # Match&Replace rule changed it (#1589) — the ORIGINAL pane — and the response as the
-      # origin sent it before a rule changed it, ORIGINAL RESP. {head, body}; nil for every flow
+      # origin sent it before a rule or an Intercept edit changed it, ORIGINAL RESP. {head, body}; nil for every flow
       # nothing changed, so the pane is not offered. `@detail_rewrite_note` names the rules.
       @detail_original = nil.as({Bytes, Bytes?}?)
       @detail_original_resp = nil.as({Bytes, Bytes?}?)
@@ -981,8 +989,11 @@ module Gori::Tui
       new_question = !@applied_question.nil? && asked != @applied_question # not the first load
       @applied_question = asked
       kept = prev_id ? index_of(prev_id) : nil
+      # A card over the list holds a following cursor on its flow too (`cursor_hold`): a
+      # filtered list under capture reloads here rather than in `on_event`.
+      following = @follow && !@cursor_hold.call
       @selected =
-        if @follow
+        if following
           follow_index
         elsif kept
           kept # keep the highlight on the same flow across a reload
@@ -991,6 +1002,8 @@ module Gori::Tui
         else
           @selected.clamp(0, {@rows.size - 1, 0}.max)
         end
+      # Held (following, under a card) leaves the viewport at the tail follow had it on, as
+      # `on_event` does: the arrivals show above the held row instead of scrolling off.
       return if @follow
       # render's ensure_visible brings an oldest-first list's newest row in from the top.
       if new_question && kept.nil?
@@ -1312,7 +1325,11 @@ module Gori::Tui
             # on an already-empty list), which leaves @follow off with @selected at 0.
             anchored = !@rows.empty?
             @rows.unshift(row)
-            if @follow
+            if @follow && @cursor_hold.call
+              # Held under a card: the highlight keeps its flow, the viewport stays at the
+              # tail follow had it on, so the arrival shows above the held row.
+              @selected += 1 if anchored
+            elsif @follow
               @selected = 0
             elsif anchored
               # Keep the highlight + viewport on the same flows the user is looking at.
@@ -1321,8 +1338,8 @@ module Gori::Tui
             end
           else
             @rows << row
-            @selected = @rows.size - 1 if @follow
-            # Not following: selection/scroll stay put (new row is past the end).
+            @selected = @rows.size - 1 if @follow && !@cursor_hold.call
+            # Not following (or held under a card): selection/scroll stay put (new row is past the end).
           end
           trim_window if @rows.size > @max_rows + @trim_slack
         end
@@ -1975,8 +1992,7 @@ module Gori::Tui
       # Primary-key reads, and only for a row the list already flags as edited or rewritten.
       @detail_original = detail.try { |d| Gori::Interceptor.original(store, d, Store::RuleTarget::Request) }
       @detail_original_resp = detail.try { |d| Gori::Interceptor.original(store, d, Store::RuleTarget::Response) }
-      kept = !!(@detail_original || @detail_original_resp)
-      @detail_rewrite_note = detail.try(&.row.rewritten_by).try { |refs| rewrite_note(store, refs, kept) }
+      @detail_rewrite_note = detail.try { |d| d.row.rewritten_by.try { |refs| rewrite_note(store, d.row.id, refs) } }
       # A primary-key range read that finds nothing for almost every flow.
       @detail_interims = detail.try { |d| store.interims(d.row.id) }
       # SSE events are a derived view (parsed from the stored response body at
@@ -2973,17 +2989,27 @@ module Gori::Tui
 
     # The footer sentence naming the rules that changed this flow, by `Rules.rule_phrase` while
     # the rule still exists; a rule since deleted keeps its scope and id (neither is reused).
-    # `kept`: an ORIGINAL pane is offered. A WebSocket rule's messages, and an h2 response the
-    # operator then edited, record the rules but not the bytes before.
-    private def rewrite_note(store : Store, refs : Array(Store::RuleRef), kept : Bool) : String
+    # It points at the pane of each side a rule changed whose original is offered — ORIGINAL for
+    # the request, ORIGINAL RESP for the response — and never at the other side's: a request
+    # edited at Intercept beside a response rule has an ORIGINAL that holds no rule's input.
+    # A WebSocket rule's messages record the rules but not the bytes before.
+    private def rewrite_note(store : Store, flow_id : Int64, refs : Array(Store::RuleRef)) : String
       rules = Rules.merged(store)
       names = refs.map do |ref|
         word = Rules.scope_word(ref.scope)
         rule = rules.find { |r| r.scope == ref.scope && r.id == ref.id }
         rule ? "#{word} rule #{Rules.rule_phrase(rule)}" : "#{word} rule ##{ref.id} (deleted)"
       end
+      panes = store.rule_hit_sides(flow_id).compact_map do |side|
+        if side.request?
+          "ORIGINAL" if @detail_original
+        else
+          "ORIGINAL RESP" if @detail_original_resp
+        end
+      end
       # No names: only rules an imported archive numbered on another install (`ProjectArchive`).
-      "! rewritten by Match&Replace#{": " unless names.empty?}#{names.join(", ")}#{kept ? " — the bytes before are in ORIGINAL" : ""}"
+      "! rewritten by Match&Replace#{": " unless names.empty?}#{names.join(", ")}" \
+      "#{" — the bytes before are in #{panes.join(" and ")}" unless panes.empty?}"
     end
 
     private def combine_bytes(head : Bytes?, body : Bytes?) : Bytes?
@@ -3006,7 +3032,8 @@ module Gori::Tui
       # RESPONSE, beside the response they preceded.
       panes << :interim if @detail_interims
       # ORIGINAL: the client's request before the operator's Intercept edit (#1378). REQUEST
-      # stays what went upstream; this is what it replaced.
+      # stays what went upstream; this is what it replaced. ORIGINAL RESP: the origin's
+      # response before a rule or the operator's edit (V54); RESPONSE is what the client got.
       panes << :original if @detail_original
       panes << :original_resp if @detail_original_resp
       # MESSAGES: the socket transcript, right after the handshake it belongs to, and a pane
@@ -3624,7 +3651,8 @@ module Gori::Tui
         # IS a real response from the origin; only its request came from gori.
         #
         # An Intercept edit (#1378) takes the cell as `EDIT`, in `STUB`'s yellow and for the same
-        # reason: the request on this row is the operator's, not the one the client sent.
+        # reason: the request on this row is the operator's, not the one the client sent — or the
+        # response is, not the one the origin sent.
         if show_src
           src = row.source
           if row.intercept_edited?
@@ -4243,10 +4271,10 @@ module Gori::Tui
       if note = source_note(detail.row)
         lines << [Highlight::Span.new(note, Theme.muted)]
       end
-      # An Intercept edit (#1378): REQUEST is what went upstream, and the client's own request
-      # is one pane over. Yellow, like the row's `EDIT` cell.
-      if detail.row.intercept_edited?
-        lines << [Highlight::Span.new("! edited at Intercept — the client's original request is in ORIGINAL", Theme.yellow)]
+      # An Intercept edit (#1378): REQUEST is what went upstream (RESPONSE what the client got),
+      # and its peer's own message is one pane over. Yellow, like the row's `EDIT` cell.
+      if note = intercept_edit_note(detail.row)
+        lines << [Highlight::Span.new(note, Theme.yellow)]
       end
       if note = @detail_rewrite_note
         lines << [Highlight::Span.new(note, Theme.yellow)]
@@ -4262,6 +4290,19 @@ module Gori::Tui
         lines << [Highlight::Span.new("! #{a}", Theme.yellow)]
       end
       lines
+    end
+
+    # Which side the operator edited at Intercept and where its original is, or nil for a flow
+    # nobody edited there.
+    private def intercept_edit_note(row : Store::FlowRow) : String?
+      request, response = row.intercept_edited_request?, row.intercept_edited_response?
+      if request && response
+        "! edited at Intercept — the client's original request is in ORIGINAL, the origin's response in ORIGINAL RESP"
+      elsif request
+        "! edited at Intercept — the client's original request is in ORIGINAL"
+      elsif response
+        "! response edited at Intercept — the origin's original response is in ORIGINAL RESP"
+      end
     end
 
     # `200 · HTTP/1.1 · req 312B · res 1.4KB · 123ms · application/json · 09-05 14:02:11` —
@@ -4839,8 +4880,16 @@ module Gori::Tui
 
     # Drop the oldest rows so the window stays at MAX_ROWS. Newest-first: oldest
     # are at the END (pop). Oldest-first: oldest are at the START (shift).
+    #
+    # A cursor held under a card (`cursor_hold`) is never trimmed away: the card's verb will
+    # read it, and a clamp onto a neighbour would retarget that verb to a flow nobody chose.
+    # The window grows past MAX_ROWS instead, by the captures that land while the card is up,
+    # and the first un-held insert (which snaps the cursor back to the tail) trims it again.
     private def trim_window : Nil
       drop = @rows.size - @max_rows
+      if @follow && @cursor_hold.call
+        drop = {drop, newest_first? ? @rows.size - 1 - @selected : @selected}.min
+      end
       return if drop <= 0
       if newest_first?
         @rows.pop(drop)

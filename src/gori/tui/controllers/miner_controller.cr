@@ -78,7 +78,10 @@ module Gori::Tui
       # honest about which half of the pair is live.
       go = v.running? ? "{mine.stop} stop" : "{mine.run} run"
       case v.focus
-      when :results then keys("↑/↓ select · ↵ detail · {mine.filter} filter · #{go} · space cmds · ↹ pane · esc sub-tabs")
+      # `go` second: this line's tail is three segments wide, so an 80-column row keeps ONE
+      # token after the first, and it should be the tab's job rather than ↵ (which opens a
+      # row on every list in the app).
+      when :results then keys("↑/↓ select · #{go} · ↵ detail · {mine.filter} filter · space cmds · ↹ pane · esc sub-tabs")
       when :detail  then "↑/↓ scroll · esc back"
       else               keys("↓ findings · #{go} · space cmds · ↹ pane · esc sub-tabs")
       end

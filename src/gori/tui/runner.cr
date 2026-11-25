@@ -2024,7 +2024,14 @@ module Gori::Tui
     private def dispatch_chord(ev : Termisu::Event::Key, chord : Verb::Chord? = nil) : Bool
       chord ||= Keybind.from_event(ev)
       return false unless chord
-      return false unless id = resolve_verb_id(chord, current_scope)
+      unless id = resolve_verb_id(chord, current_scope)
+        # The tab claims this key but cannot run it now: say so, rather than leave a key the
+        # footer labels "compare" looking dead — the Global verb on it is not the fallback.
+        return false unless held = @keymap.held_from_global(chord, current_scope, @session.registry, self)
+        status(Hotkeys.expand(@session.registry,
+          Runner.held_key_toast(@session.registry[held].title, chord, editor_read_mode?)))
+        return true
+      end
       verb = @session.registry[id]
       from_read = Runner.read_mode_global?(verb, chord, editor_read_mode?)
       before = @toast
@@ -2065,8 +2072,21 @@ module Gori::Tui
     # READ: the hand most likely thought it was typing. The key keeps its meaning (#1375); the
     # toast says where it came from and how to type, or the flip goes unnoticed.
     def self.read_mode_global?(verb : Verb::Definition, chord : Verb::Chord, read_mode : Bool) : Bool
-      read_mode && verb.scope.global? && !chord.ctrl && !chord.alt &&
-        chord.key.size == 1 && chord.key[0].letter?
+      read_mode && verb.scope.global? && bare_letter?(chord)
+    end
+
+    # The refusal for a key the tab holds from Global (`Verb::Keymap#held_from_global`). From
+    # an editor in READ it carries the same note a fired Global letter does (#1375): the hand
+    # that pressed a bare letter there most likely meant to type it. Unexpanded: the caller
+    # runs it through `Hotkeys.expand`, as `tag_read_mode_toast` does. The note drops " here"
+    # so the longest held title (Open original source) still fits the 59-column row.
+    def self.held_key_toast(title : String, chord : Verb::Chord, read_mode : Bool) : String
+      return not_available_toast(title) unless read_mode && bare_letter?(chord)
+      read_mode_note("#{title}: not available")
+    end
+
+    private def self.bare_letter?(chord : Verb::Chord) : Bool
+      !chord.ctrl && !chord.alt && chord.key.size == 1 && chord.key[0].letter?
     end
 
     def self.read_mode_note(toast : String) : String
@@ -2117,9 +2137,10 @@ module Gori::Tui
 
     # Keymap id for `chord` down the SCOPE CHAIN — Editor (only while a text editor pane
     # holds focus), then `scope`, then Global — taking the first link whose verb is currently
-    # available. A hit that fails available? does not block the links behind it, so e.g.
-    # Repeater's READ-only `y` does not shadow a future Global on the same letter when the
-    # user is in INS, and gated response tools never swallow breath keys.
+    # available. An unavailable Editor verb does not block the tab behind it, but an
+    # unavailable TAB verb does block Global: a letter the tab claims never reaches Global
+    # (`dispatch_chord` toasts the refusal; DESIGN.md §7, 2026-11-25), or Evidence's `c`
+    # compare on an empty list stopped capture.
     #
     # `Scope::Editor` at the head is the FOCUS DIMENSION the keymap did not have (KEY_AUDIT
     # §2d): eleven editor panes hand-rolled `i`/`↵`/`x` in `handle_body_key` because one
@@ -2359,6 +2380,22 @@ module Gori::Tui
                 danger : Bool = true, return_to : Symbol = :none, &action : -> Nil) : Nil
       ov = ConfirmDialog.new(title, message, confirm_label: confirm_label,
         cancel_label: cancel_label, danger: danger)
+      open_confirm(ov, return_to) { action.call }
+    end
+
+    # `confirm` with a third button (`Host#confirm_or_alt`): `action` gets true when the
+    # operator chose `alt_label` (`c`), false for `confirm_label` (`y`). Same restore-then-act
+    # order and the same cancel paths — esc, `n`, a click off the card, a card too small to
+    # draw — none of which runs `action` at all. A nil `alt_label` is the plain two-button card.
+    def confirm_or_alt(title : String, message : String, *, confirm_label : String,
+                       alt_label : String?, danger : Bool, return_to : Symbol = :none,
+                       &action : Bool -> Nil) : Nil
+      ov = ConfirmDialog.new(title, message, confirm_label: confirm_label,
+        danger: danger, alt_label: alt_label)
+      open_confirm(ov, return_to) { action.call(ov.alt_selected?) }
+    end
+
+    private def open_confirm(ov : ConfirmDialog, return_to : Symbol, &action : -> Nil) : Nil
       back = OverlayKind.from_sym(return_to)
       # Capture the parent BEFORE open_overlay: that call overwrites @active_overlay, and
       # this is the only reference to the modal the confirm was raised from.
@@ -2461,21 +2498,39 @@ module Gori::Tui
       return true if ids.empty?
       store = @session.store
       raw = calc.value
+      derived = raw.empty? ? nil : Gori::Cvss.severity_for(raw)
+      # Read BEFORE the write, for the toast only: which targets the derivation moves.
+      before = derived ? ids.compact_map { |id| store.get_issue(id).try(&.severity) } : [] of Store::Severity
       ok = if raw.empty?
              store.update_issues(ids, cvss: nil, clear_cvss: true)
            else
-             store.update_issues(ids, cvss: raw, severity: Gori::Cvss.severity_for(raw))
+             store.update_issues(ids, cvss: raw, severity: derived)
            end
       unless ok
         @toast = "cvss NOT saved — project busy; try again"
         return false
       end
       issues_controller.view.resync(store)
-      # Only a BATCH needs saying — a single issue's chip and severity badge both change under
-      # the operator's eyes, and echoing a 44-character vector into the status strip just
-      # truncates it. Same rule apply_issue_choice follows.
-      @toast = "#{raw.empty? ? "cvss cleared" : "cvss set"} · #{Gori.plural(ids.size, "issue")}" if ids.size > 1
+      @toast = Runner.cvss_applied_toast(raw.empty?, ids.size, before, derived)
       true
+    end
+
+    # What Set CVSS says after it wrote, nil for nothing. A batch always says how many it
+    # touched (a single issue's chip changes under the operator's eyes, and echoing a
+    # 44-character vector into the status strip just truncates it — the rule
+    # apply_issue_choice follows). A SEVERITY the derivation moved is always said, single
+    # issue included, old → new: the re-sort it causes moves the issue out from under the
+    # cursor, and a Critical that became Info on one ↵ is exactly what must not pass quietly.
+    def self.cvss_applied_toast(cleared : Bool, count : Int32, before : Array(Store::Severity),
+                                derived : Store::Severity?) : String?
+      head = count > 1 ? "#{cleared ? "cvss cleared" : "cvss set"} · #{Gori.plural(count, "issue")}" : nil
+      moved = derived ? before.reject(derived) : [] of Store::Severity
+      return head if moved.empty? || derived.nil?
+      olds = moved.uniq
+      from = olds.size == 1 ? "#{olds.first.label} → " : "→ "
+      change = "severity #{from}#{derived.label}"
+      change += " on #{moved.size}" if count > 1
+      head ? "#{head} · #{change}" : change
     end
 
     # Apply the picked Probe scan MODE to the analyzer and re-read the findings list.
@@ -2514,6 +2569,7 @@ module Gori::Tui
     # current focus. Falls back to the plain smart-copy when the context has no format
     # variants (a decoded/hex pane), so the verb never dead-ends.
     def copy_as_open : Nil
+      return if history_hidden_marks_gate?("COPY AS", "Copy") { copy_as_open }
       title, options = copy_as_menu
       if options.empty?
         # No format variants here — degrade to the existing "Copy" behaviour.
@@ -2841,12 +2897,18 @@ module Gori::Tui
       cvss_raw = form.cvss.strip
       cvss_val = cvss_raw.presence
       if id = form.edit_id
-        # editing an existing issue's title + severity + cvss (from its detail view)
+        # editing an existing issue's title / severity / cvss (from its detail view). Only
+        # the fields this form changed are written (`IssueForm#edit_fields`): the card was
+        # seeded at open, and a peer may have re-scored the issue since.
         # A rolled-back write (cross-process SQLite busy/lock) leaves the issue on its OLD
         # title/severity, and `resync` re-reads exactly that — so "issue updated" was a
         # phantom, and returning true dropped the form with the retyped title inside it.
         # FALSE keeps the card up, which is the only place that text still exists.
-        unless @session.store.update_issue(id, title: title, severity: form.severity, cvss: cvss_val, clear_cvss: cvss_val.nil?)
+        unless form.edited?
+          @toast = "issue unchanged"
+          return true
+        end
+        unless @session.store.update_issue(id, **form.edit_fields(title))
           @toast = "issue NOT updated — project busy; the form is still here, ↵ to retry"
           return false
         end
@@ -4164,13 +4226,20 @@ module Gori::Tui
       @palette_return = OverlayKind::None
     end
 
+    # The refusal for a tab verb that cannot run right now: a palette pick whose state changed
+    # under it (`any_more`), or a key the tab claims while its verb is unavailable
+    # (`Verb::Keymap#held_from_global`). One wording, so both read as the same refusal.
+    def self.not_available_toast(title : String, any_more : Bool = false) : String
+      "#{title}: not available here#{" any more" if any_more}"
+    end
+
     # Close the palette, then run its pick with the state restored. A tab row was listed
     # against the state ^P was pressed in, so it is re-checked here, in the state it will run
     # in, rather than trusted; a Global row keeps its own listing (same as before #1282).
     private def run_palette_verb(verb : Verb::Definition) : Nil
       close_overlay
       if @palette.tab_verb?(verb) && !verb.available?(self)
-        @toast = "#{verb.title}: not available here any more"
+        @toast = Runner.not_available_toast(verb.title, any_more: true)
         return
       end
       @toast = verb.call(self) || @toast
@@ -5503,11 +5572,50 @@ module Gori::Tui
     # trim_window, or a follow-mode reload. Ids that no longer resolve are skipped and
     # counted in the summary toast rather than aborting the batch.
     def history_target_flow_ids : Array(Int64)
+      if picked = @history_marks_pick
+        return picked[0]
+      end
       if pin = @detail_pin
         return [pin]
       end
       return [history_controller.view.detail_flow_id].compact if @overlay.detail?
       history_controller.target_flow_ids
+    end
+
+    # The hidden-marks card's answer (HistoryController#hidden_marks_card?), held for the one
+    # synchronous re-run of the verb that raised it — an intra-event carrier like `@detail_pin`,
+    # set and cleared by `history_hidden_marks_gate?` alone. {ids, cursor_only}: the marks the
+    # card was opened over, or `[cursor]` with `cursor_only` true so a verb that reads the
+    # mark count besides the ids (`y` copies URLs over marks, a raw request over the cursor;
+    # an issue's primary flow) answers as if nothing were marked.
+    @history_marks_pick : {Array(Int64), Bool}? = nil
+
+    # The gate every batch-capable History LIST verb runs first: when a mark is off the list,
+    # raise the hidden-marks card and return true (the caller stops); its answer re-runs
+    # `rerun` — the verb itself — with `history_target_flow_ids` pinned to the chosen set. No
+    # gate from the drill-in (it pins one flow, so marks never reach it), on another tab, or
+    # on the re-run itself. `question` leads the card ("Open in Repeater 3 marked flows?").
+    private def history_hidden_marks_gate?(heading : String, question : String, &rerun : -> Nil) : Bool
+      return false if @history_marks_pick || @detail_pin || @overlay.detail? || @active_tab != :history
+      history_controller.hidden_marks_card?(heading, question) do |ids, cursor_only|
+        @history_marks_pick = {ids, cursor_only}
+        begin
+          rerun.call
+        ensure
+          @history_marks_pick = nil
+        end
+      end
+    end
+
+    # The verb is the hidden-marks card's re-run and the operator chose the cursor row.
+    private def history_cursor_pick? : Bool
+      @history_marks_pick.try(&.[1]) || false
+    end
+
+    # The verb is the hidden-marks card's re-run: the set was already confirmed on that card,
+    # so a batch count confirm of its own would ask the same question twice.
+    private def history_marks_picked? : Bool
+      !@history_marks_pick.nil?
     end
 
     # `Host#detail_pinned_flow_id` — the flow an OPEN History detail pins, for the selection
@@ -5522,6 +5630,19 @@ module Gori::Tui
     # esc and was looking at their four marks again.
     def detail_pinned_flow_id : Int64?
       @overlay.detail? ? history_controller.view.detail_flow_id : nil
+    end
+
+    # `Host#list_cursor_held?`: a card a verb runs from is up, so a following list keeps its
+    # cursor on the row the operator opened it over. The space menu (its family cards are a
+    # level of it), the two prompt-tier pickers, and every `@overlay` but the History drill-in,
+    # which is not a card: its verbs act on the flow it pins (`history_target_flow_ids`), and
+    # live capture advancing the list under it is the documented behaviour (`detail_row_index`).
+    # A card opened OVER the drill-in takes the drill-in's slot, so it holds. The palette is an
+    # `@overlay` too, and the confirm a verb raises is one, so the target the card was opened
+    # on stays the target through to the confirm's ↵.
+    def list_cursor_held? : Bool
+      return true if @space_menu_open || copy_as_shown? || send_to_shown?
+      !(@overlay.none? || @overlay.detail?)
     end
 
     # Hard ceiling on batch verbs that spawn a sub-tab or a session per flow (Repeater,
@@ -5572,6 +5693,7 @@ module Gori::Tui
     # being asked about an implementation detail at the moment of filing. See
     # runner/evidence.cr for where the pick lands.
     def link_attach : Nil
+      return if history_hidden_marks_gate?("LINK", "Link") { link_attach }
       refs = current_link_refs
       return (@toast = "nothing to link") if refs.empty?
       # Persist the notes buffer before listing it: the rows are read off the store, so an
@@ -6017,11 +6139,9 @@ module Gori::Tui
 
     def open_fuzz_advanced_editor : Nil
       return unless v = fuzzer_controller.current_view
-      # `Config` is shared by reference with the live engine (`Fuzz::PlanOptions#config`),
-      # which reads `retries`, `follow_redirects?`, `max_requests` and the Content-Length knobs
-      # PER REQUEST — so a mid-run edit changed the rest of the sweep while the reconstruction
-      # of its rows kept the policy the run started with. The Sets editor is different: sets
-      # are read once at build time.
+      # A running sweep reads its own `Config` copy (`Fuzz::PlanOptions#snapshot`), so an edit
+      # here can no longer change it. The block stays because the card would show knobs the run
+      # in flight is not using, and only Mode, sets, target and template carry the `next run` badge.
       return status("fuzz running — ^X to stop before editing Advanced", :busy) if v.running?
       ov = FuzzAdvancedOverlay.new(v.advanced_snapshot)
       ov.on_commit = -> {
@@ -6345,10 +6465,22 @@ module Gori::Tui
     # mark-capable surface feeds it; only one can be active at a time (they are different tabs),
     # so the sum is always just the live one's count.
     # nil ⇒ the section label (or nothing at all), exactly as before.
+    #
+    # History and Issues add the hidden split their chip carries (`3 MARKED · 1 HIDDEN`): the
+    # card is where the operator reads what a verb below will act on, and the hidden-marks
+    # card a verb raises for it should not be the first place those marks are mentioned.
     private def space_menu_banner : String?
       n = history_mark_menu_count + intercept_mark_menu_count +
           sitemap_mark_menu_count + issues_mark_menu_count + subtab_mark_menu_count
-      n > 0 ? "#{n} MARKED" : nil
+      return nil unless n > 0
+      hidden = if history_mark_menu_count > 0
+                 history_controller.view.marked_hidden_count
+               elsif issues_mark_menu_count > 0
+                 issues_controller.view.marked_hidden_count
+               else
+                 0
+               end
+      hidden > 0 ? "#{n} MARKED · #{hidden} HIDDEN" : "#{n} MARKED"
     end
 
     # How many sub-tab marks the menu should speak for (#683); 0 anywhere but the STRIP. The
@@ -6468,11 +6600,12 @@ module Gori::Tui
       end
     end
 
-    # How many marks the Intercept QUEUE menu should speak for; 0 on any other tab. The
-    # held-bytes editor keeps the same target set (marks don't belong to the cursor row), so
-    # unlike History's detail there is no sub-state to exclude here.
+    # How many marks the Intercept QUEUE menu should speak for; 0 on any other tab, and 0 while
+    # the held-message editor is open: forward/drop there act on the message being edited
+    # (`InterceptView#target_ids`), so a "Forward 3 held messages" title or a "3 MARKED"
+    # banner over the editor would promise the batch the keys no longer send.
     private def intercept_mark_menu_count : Int32
-      @active_tab == :intercept ? intercept_controller.marked_intercept_count : 0
+      @active_tab == :intercept ? intercept_controller.intercept_batch_count : 0
     end
 
     # Retitle the Intercept queue's menu entries while marks are set, so the menu says what

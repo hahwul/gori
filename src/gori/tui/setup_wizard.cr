@@ -8,6 +8,8 @@ require "./layout"
 require "./mascot"
 require "./tutorial"
 require "./viewport"
+require "./paste_gate"
+require "./line_edit"
 require "../settings"
 
 module Gori::Tui
@@ -156,6 +158,8 @@ module Gori::Tui
       @cursor = @ip.size # per-field caret (mid-string edit, like SettingsView)
       @preedit = ""      # live IME composition for the focused bind field
       @status = nil.as(String?)
+      # Bracketed pastes: which pasted keys reach the step under them (see PasteGate).
+      @paste = PasteGate.new
       # The "host:port" the user has already been told is in use and pressed ↵ on again —
       # see `advance_from_bind`. Cleared by any edit to either field (`set_bind_value`).
       @port_warned = nil.as(String?)
@@ -214,18 +218,16 @@ module Gori::Tui
       warn_busy_default if @first_run && @step.bind?
       @running = true
       loop do
-        render
-        case ev = @term.poll_event(50)
-        when Termisu::Event::Resize
-          @backend.resize(ev.width, ev.height) # re-fit grids off the event dims (lockstep w/ termisu)
-          @resized = true                      # buffer already resized; force a full repaint next frame
-        when Termisu::Event::Key
-          handle_key(ev)
-        when Termisu::Event::Mouse
-          handle_mouse(ev)
-        when Termisu::Event::Preedit
-          @preedit = ev.text # live IME composition; the committed key clears it
+        render unless @paste.refusing? # a refused paste changes nothing until it ends
+        if ev = @term.poll_event(50)
+          handle_event(ev)
+          # A paste's queued keys are handled as one burst (see PasteGate#drain).
+          @paste.drain(@term) do |more|
+            handle_event(more)
+            !@running
+          end
         end
+        @term.leave_paste! if @paste.end_if_stalled
         break unless @running
       end
       # Opted into the tour on the Review step → run it now, reusing this terminal
@@ -251,6 +253,41 @@ module Gori::Tui
     end
 
     # --- input ---------------------------------------------------------------
+
+    # One polled event, through the paste gate first (see PasteGate). A multi-line paste
+    # would otherwise walk the steps on its line breaks: ↵ moves BIND from the IP to the port,
+    # then on to the next step, and ↵ on REVIEW is `finish`, which persists the bind address.
+    private def handle_event(ev : Termisu::Event::Any) : Nil
+      case @paste.filter(ev) { |key| takes_pasted?(key) }
+      in .absorb? then return
+      in .refuse?
+        # The status row exists on BIND only. Elsewhere the refusal is silent rather than left
+        # to surface on BIND later, out of context. Nor does it displace what the row already
+        # says: "port busy · ↵ keep" is armed (`@port_warned`), and hiding it left the next ↵
+        # keeping a busy port with no warning on screen.
+        @status = @paste.note if @step.bind? && (@status.nil? || PasteGate.note?(@status))
+        return
+      in .deliver?
+      end
+      case ev
+      when Termisu::Event::Resize
+        @backend.resize(ev.width, ev.height) # re-fit grids off the event dims (lockstep w/ termisu)
+        @resized = true                      # buffer already resized; force a full repaint next frame
+      when Termisu::Event::Key
+        handle_key(ev)
+      when Termisu::Event::Mouse
+        handle_mouse(ev)
+      when Termisu::Event::Preedit
+        @preedit = ev.text # live IME composition; the committed key clears it
+      end
+    end
+
+    # Whether a pasted key reaches the wizard: a printable character in a BIND field, and
+    # nothing else. Every other step is a choice made with ↵, ⇥ and the arrows, and a
+    # clipboard is not a choice.
+    private def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      @step.bind? && !typed_char(ev).nil?
+    end
 
     private def handle_key(ev : Termisu::Event::Key) : Nil
       @preedit = "" # any committed key ends an in-progress IME composition
@@ -493,6 +530,9 @@ module Gori::Tui
     end
 
     private def switch_bind_field(f : Symbol) : Nil
+      # A paste refusal is about the field it was refused in. Other notes stay: the caller
+      # sets a validation message right after, and the busy-port warning outlives a move.
+      @status = nil if PasteGate.note?(@status)
       @bind_field = f
       @cursor = bind_value.size
       @preedit = ""

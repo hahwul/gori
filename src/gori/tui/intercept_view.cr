@@ -303,11 +303,28 @@ module Gori::Tui
       @marks.to_a.sort!
     end
 
-    # The effective target set every batch verb acts on: the marks if any are set, else the
-    # cursor row. One rule, so forward/drop need no notion of "batch mode".
+    # The effective target set every batch verb acts on: the message the editor holds while
+    # the editor is open, else the marks if any are set, else the cursor row. One rule, so
+    # forward/drop need no notion of "batch mode".
+    #
+    # The editor comes first because it is the drill-in of this tab (DESIGN.md §7, 2026-09-18:
+    # "where a detail overlay is open, the flow it pins"). Marks stay set and on screen while a
+    # held message is being edited, and with them first `^R` from INS or READ forwarded the
+    # MARKED holds while the message just rewritten stayed held, its edit unsent. A forward or
+    # drop reached from inside the editor is about the bytes in front of the operator.
     def target_ids : Array(Int64)
+      if id = editor_target_id
+        return [id]
+      end
       return marked_ids unless @marks.empty?
       [selected_id].compact
+    end
+
+    # The held message an OPEN editor (text or hex) pins, or nil on the queue. `@loaded_id` and
+    # not the cursor: they agree while the editor is open (`move` refuses to step under it),
+    # but the loaded id is the one `pending_edit` keys its bytes on.
+    def editor_target_id : Int64?
+      @editing ? @loaded_id : nil
     end
 
     # `t` — flip the cursor row's mark, then step DOWN one, so a run of `t` marks consecutive
@@ -503,10 +520,10 @@ module Gori::Tui
       read_move(dir * @editor.page_rows, 0, selecting)
     end
 
-    def read_line_edge(dir : Int32, selecting : Bool = false) : Nil
-      return unless text_read?
-      dir < 0 ? @editor.home(selecting) : @editor.end_of_line(selecting)
-      @read.sync_to(@editor, selecting: selecting)
+    # Home/End, ⌃/⌥ included — see `RepeaterView#request_read_motion_key`.
+    def read_home_end(ev : Termisu::Event::Key) : Bool
+      return false unless text_read?
+      @read.handle_motion_key(@editor, ev)
     end
 
     # Only reload from pristine bytes when switching to a DIFFERENT held item; re-entering
@@ -742,6 +759,18 @@ module Gori::Tui
     def effective_method_target(it : Interceptor::Item) : {String, String}
       return {it.method, it.target} unless @loaded_id == it.id && @editor_dirty
       it.edited_method_target(@editor.to_bytes)
+    end
+
+    # A held message's text as it stands NOW, for a tool it is sent to without being forwarded
+    # (Send flow to… → Repeater): the editor's unforwarded edit when the editor holds this item,
+    # else the held bytes. `wire_text` and not `pending_edit`: the edit's line terminators are
+    # kept as typed and its `$` references stay UNRESOLVED, so the receiving tab applies the
+    # #1416 rule itself (the held bytes are its literal baseline) and a resolved project secret
+    # never lands in another tab's buffer. The hex buffer is never read here: only a WebSocket
+    # BINARY message opens one, and those are not requests.
+    def current_text(it : Interceptor::Item) : String
+      return String.new(it.raw) unless @loaded_id == it.id && @editor_dirty && @hex.nil?
+      @editor.wire_text
     end
 
     # backspace/delete/undo are no-ops at buffer start / end-of-buffer / empty undo

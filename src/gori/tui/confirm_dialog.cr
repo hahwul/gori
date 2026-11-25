@@ -41,9 +41,15 @@ module Gori::Tui
     getter heading : String
     getter message : String
 
+    # `alt_label` adds a THIRD button between the two, pressed with `c`: the hidden-marks
+    # card (`HistoryController#hidden_marks_card?`) answers "the marks" with `y` and "only
+    # the cursor row" with it. nil, the default, is the two-button card every other confirm
+    # draws, byte for byte.
+    getter alt_label : String?
+
     def initialize(@heading : String, @message : String, *,
                    @confirm_label : String = "confirm", @cancel_label : String = "cancel",
-                   @danger : Bool = true)
+                   @danger : Bool = true, @alt_label : String? = nil)
       # The safe default for a DANGER card is the cancel button — ↵ under "DELETE 40 FLOWS?"
       # must not delete. A card that asks something recoverable ("open in Repeater?", "run
       # the fuzz?", "save the results?") lights its own verb instead: eleven such cards said
@@ -80,11 +86,16 @@ module Gori::Tui
     # Spelled from the buttons, so what ↵ will do is readable before it is pressed, and `y`
     # names the verb it stands for rather than a generic "confirm" the button never says.
     def hint : String
-      lit = @selected == :confirm ? @confirm_label : @cancel_label
+      lit = case @selected
+            when :confirm then @confirm_label
+            when :alt     then @alt_label || @cancel_label
+            else               @cancel_label
+            end
       return "make window taller to read · n/esc cancel" if @message_room == 0
       scroll = @scroll_max > 0 ? "↑/↓ scroll · " : ""
       return "#{scroll}read to the end · n/esc cancel" unless @can_confirm
-      "#{scroll}←/→ choose · ↵ #{lit} · #{CONFIRM_KEY} #{@confirm_label} · #{CANCEL_KEY}/esc #{@cancel_label}"
+      alt = (a = @alt_label) ? " · #{ALT_KEY} #{a}" : ""
+      "#{scroll}←/→ choose · ↵ #{lit} · #{CONFIRM_KEY} #{@confirm_label}#{alt} · #{CANCEL_KEY}/esc #{@cancel_label}"
     end
 
     # ←/→ or Tab move between the buttons; `y` confirms, `n`/esc cancels, ↵ acts on the
@@ -113,6 +124,14 @@ module Gori::Tui
       ev.key.y? && !ev.ctrl? && !ev.alt?
     end
 
+    # The third button's key, guarded on ctrl/alt for the reason `affirmative?` is — and here
+    # the chord it must not read is `^C`, which a modal card receives instead of the quit
+    # handler (`Runner.quit_chord_claimed?`). An operator reaching for quit over the card must
+    # not be told they chose the cursor row.
+    def alt_pressed?(ev : Termisu::Event::Key) : Bool
+      !@alt_label.nil? && ev.key.c? && !ev.ctrl? && !ev.alt?
+    end
+
     # A pasted `y` is not an answer, and a pasted esc/`n` is not a refusal either: the card
     # ignores the whole paste and waits for a key that was pressed at it.
     def takes_pasted?(ev : Termisu::Event::Key) : Bool
@@ -126,21 +145,35 @@ module Gori::Tui
       when ConfirmDialog.affirmative?(ev)
         # An answer to a question nobody could read is not an answer. `n`/esc stay open to a
         # window this short — cancelling costs a keystroke, committing costs the data.
-        @drawn && @can_confirm ? :commit : :stay
+        answer(:confirm)
+      when alt_pressed?(ev)
+        answer(:alt)
       when key.up?
         handle_wheel(-1)
         :stay
       when key.down?
         handle_wheel(1)
         :stay
-      when key.left?, key.right?, key.tab?, key.back_tab?
-        move
+      when key.left?, key.back_tab?
+        move(-1)
+        :stay
+      when key.right?, key.tab?
+        move(1)
         :stay
       when key.enter?
-        return :cancel unless confirm_selected? && @drawn
+        return :cancel if @selected == :cancel || !@drawn
         @can_confirm ? :commit : :stay
       else :stay
       end
+    end
+
+    # A key or click that names its button commits THAT button, whatever is lit: the
+    # selection is set first, so `alt_selected?` read by the commit closure says which answer
+    # was given. Refused (stay) on a card that is not drawn or not read to the end.
+    private def answer(button : Symbol) : Symbol
+      return :stay unless @drawn && @can_confirm
+      @selected = button
+      :commit
     end
 
     # A click on a button acts; a click outside the card dismisses. A click inside the
@@ -149,7 +182,8 @@ module Gori::Tui
       box = overlay_box(area)
       return :cancel unless box.contains?(mx, my)
       case button_at(box, mx, my)
-      when :confirm then @drawn && @can_confirm ? :commit : :stay
+      when :confirm then answer(:confirm)
+      when :alt     then answer(:alt)
       when :cancel  then :cancel
       else               :stay
       end
@@ -160,14 +194,23 @@ module Gori::Tui
       @scroll = (@scroll + step).clamp(0, @scroll_max)
     end
 
-    # Toggle between the two buttons (←/→ or Tab). With only two choices the
-    # direction is irrelevant — any move flips the selection.
-    def move(_dir : Int32 = 1) : Nil
-      @selected = @selected == :confirm ? :cancel : :confirm
+    # Step between the buttons (←/→ or Tab). With only two choices the direction is
+    # irrelevant — any move flips the selection; with the third button it walks
+    # confirm → alt → cancel in drawn order, wrapping.
+    def move(dir : Int32 = 1) : Nil
+      order = @alt_label ? [:confirm, :alt, :cancel] : [:confirm, :cancel]
+      i = order.index(@selected) || 0
+      @selected = order[(i + (dir < 0 ? -1 : 1)) % order.size]
     end
 
     def confirm_selected? : Bool
       @selected == :confirm
+    end
+
+    # The third button is lit — read by the commit closure after a `c`, a click on it, or ↵
+    # over it (see `answer`).
+    def alt_selected? : Bool
+      @selected == :alt
     end
 
     # Whether every wrapped message line can be read in `area` without the compact-card
@@ -244,6 +287,7 @@ module Gori::Tui
     # The keys that press the buttons — the same two `handle_key` answers to and `hint` names.
     CONFIRM_KEY = 'y'
     CANCEL_KEY  = 'n'
+    ALT_KEY     = 'c'
 
     # A button wears its accelerator: `[y] open`, `[n] stay`. The two words alone were not the
     # keys that press them — an operator reading `open` / `stay` reaches for `o` and `s`, and
@@ -254,7 +298,12 @@ module Gori::Tui
     end
 
     private def button_row_width : Int32
-      btn_width(confirm_text) + 4 + btn_width(cancel_text)
+      w = btn_width(confirm_text) + 4 + btn_width(cancel_text)
+      (t = alt_text) ? w + btn_width(t) + 4 : w
+    end
+
+    private def alt_text : String?
+      @alt_label.try { |l| ConfirmDialog.button_text(l, ALT_KEY) }
     end
 
     private def confirm_text : String
@@ -272,6 +321,9 @@ module Gori::Tui
     private def render_buttons(screen : Screen, box : Rect) : Nil
       confirm_rect, cancel_rect = button_rects(box)
       render_button(screen, confirm_rect.x, confirm_rect.y, confirm_text, @selected == :confirm, @danger)
+      if (r = alt_rect(box)) && (t = alt_text)
+        render_button(screen, r.x, r.y, t, @selected == :alt, false)
+      end
       render_button(screen, cancel_rect.x, cancel_rect.y, cancel_text, @selected == :cancel, false)
     end
 
@@ -282,15 +334,24 @@ module Gori::Tui
       x = box.x + (box.w - button_row_width) // 2
       y = box.bottom - 3
       confirm = Rect.new(x, y, btn_width(confirm_text), 1)
-      cancel = Rect.new(confirm.right + 4, y, btn_width(cancel_text), 1)
+      left = (a = alt_rect(box)) ? a.right : confirm.right
+      cancel = Rect.new(left + 4, y, btn_width(cancel_text), 1)
       {confirm, cancel}
     end
 
-    # Maps a click to :confirm/:cancel when it lands on that button, else nil
+    # The third button, drawn between the two — nil on a two-button card.
+    def alt_rect(box : Rect) : Rect?
+      return nil unless t = alt_text
+      x = box.x + (box.w - button_row_width) // 2
+      Rect.new(x + btn_width(confirm_text) + 4, box.bottom - 3, btn_width(t), 1)
+    end
+
+    # Maps a click to :confirm/:alt/:cancel when it lands on that button, else nil
     # (gaps between/around buttons return nil).
     def button_at(box : Rect, mx : Int32, my : Int32) : Symbol?
       confirm_rect, cancel_rect = button_rects(box)
       return :confirm if confirm_rect.contains?(mx, my)
+      return :alt if alt_rect(box).try(&.contains?(mx, my))
       return :cancel if cancel_rect.contains?(mx, my)
       nil
     end

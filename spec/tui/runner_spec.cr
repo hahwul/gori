@@ -24,6 +24,10 @@ private class RunnerSpecShell < Gori::Tui::Runner
     repeater_controller
   end
 
+  def issues : Gori::Tui::IssuesController
+    issues_controller
+  end
+
   def feed(ev : Termisu::Event::Key) : Nil
     handle_key(ev)
   end
@@ -70,6 +74,15 @@ private class RunnerSpecShell < Gori::Tui::Runner
   def notification_hint : String
     active_overlay.not_nil!.hint
   end
+
+  # Run a verb as the space menu runs its row: the menu closes, then the verb reads its target.
+  def run_from_space_menu(id : String) : Nil
+    run_space_verb(@session.registry[id])
+  end
+
+  def close_palette : Nil
+    close_overlay
+  end
 end
 
 private def runner_spec_request(path : String) : String
@@ -81,6 +94,18 @@ private def runner_spec_flow(store : Gori::Store, path : String) : Int64
     created_at: 1_i64, scheme: "http", host: "localhost", port: 80,
     method: "GET", target: path, http_version: "HTTP/1.1",
     head: runner_spec_request(path).to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+end
+
+# A capture tick as the Runner's drain runs it: the flow event, then the debounced flush a
+# filtered or lensed list takes instead, then whatever search that flush started.
+private def runner_spec_capture(history : Gori::Tui::HistoryController, store : Gori::Store,
+                                path : String) : Int64
+  id = runner_spec_flow(store, path)
+  history.view.on_event(Gori::Store::FlowEvent.new(id, :inserted), store)
+  sleep Gori::Tui::HistoryView::FILTER_FLUSH_INTERVAL
+  history.view.flush_filter(store)
+  settle_history(history, store)
+  id
 end
 
 describe Gori::Tui::Runner do
@@ -194,6 +219,49 @@ describe Gori::Tui::Runner do
       runner.resize_terminal(40, 8)
       runner.press(Termisu::Input::Key::Escape)
       runner.space_menu_open?.should be_false
+    end
+  end
+
+  # chrome.md #3 / loop.md #2: with follow on, a capture landing while `space` (or `^P`) was
+  # open moved the cursor to the new row, and the verb then ran on it. The card holds the
+  # cursor on the row it was opened over; with nothing open, follow behaves as before.
+  it "runs a space-menu verb on the row the menu was opened over, not a capture that landed under it" do
+    clipboard = Gori::Settings.clipboard_osc52?
+    Gori::Settings.clipboard_osc52 = false
+    begin
+      TuiContract.with_session("runner-follow-hold") do |session|
+        store = session.store
+        runner_spec_flow(store, "/old")
+        looked_at = runner_spec_flow(store, "/looked-at")
+        runner = RunnerSpecShell.new(session, RunnerSpecTerminal.allocate)
+        runner.focus_tab(:history)
+        history = runner.history
+        settle_history(history, store)
+        history.view.follow?.should be_true
+        history.view.selected_id.should eq(looked_at)
+
+        runner.open_space_menu
+        runner.space_menu_open?.should be_true
+        arrived = runner_spec_capture(history, store, "/arrived-under-menu")
+        history.view.rows.first.id.should eq(arrived)
+        history.view.selected_id.should eq(looked_at)
+        runner.run_from_space_menu("history.copy")
+        Gori::Tui::Register.text.should eq(runner_spec_request("/looked-at"))
+
+        # The palette holds it the same way.
+        runner.open_palette
+        palette_arrival = runner_spec_capture(history, store, "/arrived-under-palette")
+        history.view.rows.first.id.should eq(palette_arrival)
+        history.view.selected_id.should eq(looked_at)
+        runner.close_palette
+
+        # Nothing open: follow takes the next capture, as it always did.
+        newest = runner_spec_capture(history, store, "/after-close")
+        history.view.selected_id.should eq(newest)
+      end
+    ensure
+      Gori::Settings.clipboard_osc52 = clipboard
+      Gori::Tui::Register.clear
     end
   end
 
@@ -356,5 +424,93 @@ describe Gori::Tui::Runner do
       runner.overlay.should eq(:none)
       runner.fuzzer.current_view.should be(fv)
     end
+  end
+  # The EDIT ISSUE form is seeded once, at open. A peer that re-scored the issue while it was
+  # up must keep that score when the operator saves only a new title (and vice versa).
+  it "writes only the fields EDIT ISSUE changed, keeping a peer's re-score" do
+    TuiContract.with_session("runner-issue-retitle") do |session|
+      store = session.store
+      id = store.insert_issue("Reflected XSS", Gori::Store::Severity::Low, "localhost", nil)
+      runner = RunnerSpecShell.new(session, RunnerSpecTerminal.allocate)
+      runner.focus_tab(:issues)
+      runner.issues.view.open_detail_id(id, store).should be_true
+      runner.issue_edit_title
+      runner.@active_overlay.should be_a(Gori::Tui::IssueForm)
+
+      peer = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+      store.update_issue(id, severity: Gori::Store::Severity::Critical, cvss: peer).should be_true
+      runner.type(" in search")
+      runner.press(Termisu::Input::Key::Enter)
+
+      issue = store.get_issue(id).not_nil!
+      issue.title.should eq("Reflected XSS in search")
+      issue.severity.should eq(Gori::Store::Severity::Critical)
+      issue.cvss.should eq(peer)
+      runner.toast.should eq("issue updated")
+
+      # The other way round: a severity changed here leaves a peer's new title alone.
+      runner.issue_edit_title
+      store.update_issue(id, title: "Peer title").should be_true
+      runner.press(Termisu::Input::Key::Tab) # cvss
+      runner.press(Termisu::Input::Key::Tab) # severity
+      runner.press(Termisu::Input::Key::Left)
+      runner.press(Termisu::Input::Key::Enter)
+      issue = store.get_issue(id).not_nil!
+      issue.title.should eq("Peer title")
+      issue.severity.should eq(Gori::Store::Severity::High)
+      issue.cvss.should eq(peer)
+
+      # And an untouched save writes nothing at all.
+      runner.issue_edit_title
+      store.update_issue(id, severity: Gori::Store::Severity::Low).should be_true
+      runner.press(Termisu::Input::Key::Enter)
+      store.get_issue(id).not_nil!.severity.should eq(Gori::Store::Severity::Low)
+      runner.toast.should eq("issue unchanged")
+    end
+  end
+
+  # Set CVSS on an issue with no vector opens on the least-severe placeholder. ↵ on it used to
+  # score the issue 0.0 and derive Info, so a Critical finding became Info on one key.
+  it "refuses Set CVSS on an untouched calculator and names a severity the vector moves" do
+    TuiContract.with_session("runner-issue-cvss") do |session|
+      store = session.store
+      id = store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "localhost", nil)
+      runner = RunnerSpecShell.new(session, RunnerSpecTerminal.allocate)
+      runner.focus_tab(:issues)
+      runner.issues.view.open_detail_id(id, store).should be_true
+      runner.issue_set_cvss
+      calc = runner.@active_overlay.as(Gori::Tui::CvssCalculatorOverlay)
+
+      runner.press(Termisu::Input::Key::Enter)
+      runner.@active_overlay.should be(calc) # still up
+      runner.toast.should eq(Gori::Tui::CvssCalculatorOverlay::UNTOUCHED_REFUSAL)
+      issue = store.get_issue(id).not_nil!
+      issue.severity.should eq(Gori::Store::Severity::Critical)
+      issue.cvss.should be_nil
+
+      # The refusal landed on the first metric; walk to C and pick High: 7.5, High.
+      calc.sel.should eq(Gori::Tui::CvssCalculatorOverlay::ROW_FIRST_M)
+      5.times { runner.press(Termisu::Input::Key::Down) }
+      runner.type("3")
+      runner.press(Termisu::Input::Key::Enter)
+      issue = store.get_issue(id).not_nil!
+      issue.cvss.should eq("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N")
+      issue.severity.should eq(Gori::Store::Severity::High)
+      runner.toast.should eq("severity critical → high")
+    end
+  end
+
+  it "words the Set CVSS toast for a batch and for a severity that did not move" do
+    Gori::Tui::Runner.cvss_applied_toast(false, 1, [Gori::Store::Severity::High], Gori::Store::Severity::High).should be_nil
+    Gori::Tui::Runner.cvss_applied_toast(false, 1, [Gori::Store::Severity::Critical], Gori::Store::Severity::Info)
+      .should eq("severity critical → info")
+    Gori::Tui::Runner.cvss_applied_toast(false, 3, [Gori::Store::Severity::Critical, Gori::Store::Severity::Critical, Gori::Store::Severity::Info], Gori::Store::Severity::Info)
+      .should eq("cvss set · 3 issues · severity critical → info on 2")
+    Gori::Tui::Runner.cvss_applied_toast(false, 3, [Gori::Store::Severity::Critical, Gori::Store::Severity::High, Gori::Store::Severity::Low], Gori::Store::Severity::Low)
+      .should eq("cvss set · 3 issues · severity → low on 2")
+    Gori::Tui::Runner.cvss_applied_toast(false, 2, [Gori::Store::Severity::Low, Gori::Store::Severity::Low], Gori::Store::Severity::Low)
+      .should eq("cvss set · 2 issues")
+    Gori::Tui::Runner.cvss_applied_toast(true, 2, [] of Gori::Store::Severity, nil)
+      .should eq("cvss cleared · 2 issues")
   end
 end

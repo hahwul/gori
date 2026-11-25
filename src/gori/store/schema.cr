@@ -2311,10 +2311,26 @@ module Gori
         "UPDATE probe_issues SET severity = 0 WHERE code = 'cors_wildcard' AND severity > 0",
       ]
 
+      # V54 — the response an origin sent before the operator EDITED it at Intercept, V44's
+      # other half. Only the edited bytes reach `flows` (they are what the client received), so
+      # an edited response read as the origin's, or was credited to the Match&Replace rule that
+      # also touched it. A table of its own rather than a `response` column on V44's: that
+      # table's `request` is NOT NULL and its row's existence means "the request was edited",
+      # which a response-only edit is not. `response` is the whole message (head + body), the
+      # origin's head before any rule and its body as it arrived, cut to the capture cap.
+      V54 = [
+        <<-SQL,
+          CREATE TABLE IF NOT EXISTS intercept_response_originals (
+            flow_id  INTEGER PRIMARY KEY,
+            response BLOB    NOT NULL
+          )
+          SQL
+      ]
+
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
                     V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33,
                     V34, V35, V36, V37, V38, V39, V40, V41, V42, V43, V44, V45, V46,
-                    V47, V48, V49, V50, V51, V52, V53]
+                    V47, V48, V49, V50, V51, V52, V53, V54]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

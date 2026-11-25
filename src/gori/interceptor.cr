@@ -138,10 +138,15 @@ module Gori
       # A response's own `target` is its status line, so the request target it answers rides
       # here for the label; nil for every other kind.
       getter request_target : String?
+      # Held by the HTTP/2 gate, whose `raw` is the h1 TEXT FORM of an h2 head. Provenance and
+      # not the version token in `raw`: an h1 client can send `HTTP/2` on its request line, and a
+      # tool the hold is sent to (Send flow to… → Repeater) must pick the transport the message
+      # arrived on, not the one a byte claims.
+      getter? http2 : Bool
 
       def initialize(@id, @kind, @method, @host, @target, @port, @scheme, @raw, @held_at,
                      @flow_id = nil, @binary = false, @edit_refusal = nil, @head_only = false,
-                     @request_target = nil)
+                     @request_target = nil, @http2 = false)
         @reply = Channel(Decision).new(1)
         @held_at_ms = Time.utc.to_unix_ms
       end
@@ -284,12 +289,12 @@ module Gori
       {bytes[0, idx], idx < bytes.size}
     end
 
-    # One side of a flow as it was before anything changed it: the client's request before an
-    # Intercept edit (V44, kept whole) or a Match&Replace rule, the origin's response before a
-    # rule (#1589). A body the rules left alone is the stored one. nil when nothing changed it.
-    # History's ORIGINAL panes and `gori run show --original` both read it.
+    # One side of a flow as it was before anything changed it: the client's request or the
+    # origin's response before an Intercept edit (V44/V54, kept whole) or a Match&Replace rule
+    # (#1589). A body the rules left alone is the stored one. nil when nothing changed it.
+    # History's ORIGINAL panes, `gori run show --original` and `get_flow` all read it.
     def self.original(store : Store, d : Store::FlowDetail, side : Store::RuleTarget) : {Bytes, Bytes?}?
-      if side.request? && d.row.intercept_edited? && (raw = store.intercept_original(d.row.id))
+      if d.row.intercept_edited?(side) && (raw = store.intercept_original(d.row.id, side))
         head, has_body = split_edit(raw)
         return {head, has_body ? raw[head.size..] : nil}
       end
@@ -732,17 +737,19 @@ module Gori
     # defaults, which is what "an h1 decision is forwarded byte-exact" means.
     def enqueue_request(raw : Bytes, *, method : String, target : String,
                         host : String, port : Int32, scheme : String,
-                        edit_refusal : String? = nil, head_only : Bool = false) : Item?
+                        edit_refusal : String? = nil, head_only : Bool = false,
+                        http2 : Bool = false) : Item?
       enqueue(Kind::Request, raw, method, target, host, port, scheme, nil,
-        edit_refusal: edit_refusal, head_only: head_only)
+        edit_refusal: edit_refusal, head_only: head_only, http2: http2)
     end
 
     def enqueue_response(raw : Bytes, *, flow_id : Int64?, method : String, target : String,
                          host : String, port : Int32, scheme : String,
                          edit_refusal : String? = nil, head_only : Bool = false,
-                         request_target : String? = nil) : Item?
+                         request_target : String? = nil, http2 : Bool = false) : Item?
       enqueue(Kind::Response, raw, method, target, host, port, scheme, flow_id,
-        edit_refusal: edit_refusal, head_only: head_only, request_target: request_target)
+        edit_refusal: edit_refusal, head_only: head_only, request_target: request_target,
+        http2: http2)
     end
 
     # Queue one reassembled WebSocket message (#500 step 2). `raw` is the payload as it would
@@ -762,13 +769,14 @@ module Gori
 
     private def enqueue(kind, raw, method, target, host, port, scheme, flow_id,
                         binary = false, edit_refusal : String? = nil,
-                        head_only : Bool = false, request_target : String? = nil) : Item?
+                        head_only : Bool = false, request_target : String? = nil,
+                        http2 : Bool = false) : Item?
       return nil unless intercepts_host?(host)
       item = @mutex.synchronize do
         return nil if @shutting_down || !@enabled
         id = (@next_id += 1)
         it = Item.new(id, kind, method, host, target, port, scheme, raw, Time.instant, flow_id,
-          binary, edit_refusal, head_only, request_target)
+          binary, edit_refusal, head_only, request_target, http2)
         @items[id] = it
         it
       end

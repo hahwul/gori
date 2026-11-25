@@ -1,6 +1,7 @@
 require "../spec_helper"
 require "../support/memory_backend"
 require "../support/overlay_harness"
+require "../support/tui_probes"
 
 include Gori::Tui
 
@@ -274,5 +275,12 @@ describe "Gori::Tui::ExportOverlay — Overlay seam" do
     h = OverlayHarness.new(ExportOverlay.new(:note, "/tmp/x.md"))
     h.preedit("preedithere")
     h.rendered?("preedithere").should be_true
+  end
+end
+
+describe "ExportOverlay hint on an 80-column row" do
+  it "keeps the key that writes, under the longest title" do
+    ov = ExportOverlay.new(:issues_sarif, "/tmp/x.sarif")
+    Chrome.status_row(ov.hint, ov.title).should contain("↵ write")
   end
 end

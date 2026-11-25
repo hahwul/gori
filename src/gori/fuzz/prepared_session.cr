@@ -15,20 +15,22 @@ module Gori::Fuzz
       validate = options
       validate.run_hooks = false
       plan = Plan.build(validate, outbound)
-      state = SessionConfig.new(options.config, options.matcher, options.http2?, options.sni || "",
+      # The PLAN's config and matcher, which `Plan.build` copied off `options` and then settled
+      # (`--verbatim` turns auto Content-Length off on the copy), so the stored tab says that.
+      state = SessionConfig.new(plan.config, plan.matcher, options.http2?, options.sni || "",
         options.sources.map { |source| SetSpec.from_source(source) })
       state.options = SessionOptions.capture(options)
       state.evidence = options.evidence?
       state.grpc_fields = options.grpc_fields.empty? ? "" : options.grpc_fields.to_json
-      state.extractor_columns = options.matcher.extractors.map_with_index do |extractor, i|
+      state.extractor_columns = plan.matcher.extractors.map_with_index do |extractor, i|
         loc = extractor.loc
         Store::DisplayColumn.new(0_i64, i, extractor.label, Gori::MessageSide::Response,
           loc.kind, loc.selector, loc.pos_start, loc.pos_end)
       end
-      if condition = options.matcher.stop_condition
+      if condition = plan.matcher.stop_condition
         state.stop_on = SavedMatcher.capture(condition).to_json
       end
-      if macro_spec = options.config.request_macro
+      if macro_spec = plan.config.request_macro
         state.macro_steps = macro_spec.steps.join(",")
         state.macro_every = macro_spec.cadence.token
         state.macro_expect = macro_spec.expect.join(",")

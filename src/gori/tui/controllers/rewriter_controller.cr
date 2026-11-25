@@ -280,7 +280,7 @@ module Gori::Tui
       @focus = :list if @focus != :list && !@view.preview_shown?(inner)
       target = preview_target
       sync_preview_out(target)
-      @view.render(screen, inner, list, @sel, @scroll, rules_engine.enabled_count,
+      @view.render(screen, inner, list, @sel, @scroll, rules_engine.rules.size,
         @focus, body_focused, @preview_input, @out, target, @preview_host,
         empty_hint: keys(rules_empty_hint))
       # At rest the filter rides the rules card's border, after its title and short of its
@@ -928,13 +928,26 @@ module Gori::Tui
     # preset installed a second time duplicates visibly (each row carries the preset's name)
     # rather than silently — the rules are deletable like any other.
     def install_preset(preset : RulePresets::Preset) : Nil
-      n = rules_engine.add_preset(preset, scope: Store::RuleScope::Project, enabled: true).size
-      if n == 0
+      prev = selected_rule_key
+      ids = rules_engine.add_preset(preset, scope: Store::RuleScope::Project, enabled: true)
+      if ids.empty?
         return @host.status("preset NOT installed (project busy or unwritable)")
       end
       @sub = :rules
-      @sel = last_index_of_scope(Store::RuleScope::Project)
-      @host.status("installed \"#{preset.name}\" — #{Gori.plural(n, "rule")} added (editable, deletable like any other)")
+      hidden = land_on(ids.map { |id| {Store::RuleScope::Project, id} }, prev)
+      added = ": #{Gori.plural(ids.size, "rule")} added"
+      if hidden == 0
+        @host.status("installed #{quoted_fit(preset.name, "installed " + added)}#{added}")
+      else
+        suffix = RowFilter.hidden_suffix(keys("{rewriter.filter}"), hidden, ids.size)
+        report_hidden("#{quoted_fit(preset.name, added + suffix)}#{added}", hidden, ids.size)
+      end
+    end
+
+    # `"name"`, clipped so the toast it heads fits the status row with `rest` after it. A
+    # preset's name is the one part of these toasts whose length nobody here controls.
+    private def quoted_fit(name : String, rest : String) : String
+      "\"#{Screen.fit(name, {RowFilter::TOAST_COLS - Screen.display_width(rest) - 2, 1}.max)}\""
     end
 
     def rewriter_edit : Nil
@@ -1045,9 +1058,10 @@ module Gori::Tui
         return @host.status("can't duplicate this rule: #{why}; edit its host first")
       end
       name = rule.name.empty? ? "" : "#{rule.name} copy"
-      unless rules_engine.add(rule.target, rule.part, rule.pattern, rule.replacement,
-               rule.op, rule.match_kind, name, rule.host, rule.body_file, scope: rule.scope,
-               enabled: rule.enabled?, respond: rule.respond, respond_args: rule.respond_args)
+      copy = rules_engine.create(rule.target, rule.part, rule.pattern, rule.replacement,
+        rule.op, rule.match_kind, name, rule.host, rule.body_file, scope: rule.scope,
+        enabled: rule.enabled?, respond: rule.respond, respond_args: rule.respond_args)
+      if copy == 0
         return @host.status("rule NOT duplicated (project busy or settings not writable)")
       end
       # Land on the copy, as `apply_rewriter_rule` lands on an added rule and `install_preset`
@@ -1055,9 +1069,12 @@ module Gori::Tui
       # list longer than the card is off screen — so the highlight stayed on the original, the
       # toast said "duplicated", and the `e` that duplicating is almost always followed by
       # re-opened the rule the operator had just copied instead of the copy.
-      @sel = last_index_of_scope(rule.scope)
-      state = rule.enabled? ? "" : " (disabled, like the original)"
-      @host.status(rule.global? ? "global rule duplicated#{state}" : "rule duplicated#{state}")
+      scope = rule.global? ? "global " : ""
+      if land_on([{rule.scope, copy}], {rule.scope, rule.id}) == 0
+        @host.status("#{scope}rule duplicated#{rule.enabled? ? "" : " (disabled, like the original)"}")
+      else
+        report_hidden("#{scope}rule copied#{rule.enabled? ? "" : " (off)"}")
+      end
     end
 
     # `s`: move the selected rule between the global library and this project. The rule keeps
@@ -1073,8 +1090,11 @@ module Gori::Tui
       # leaving the highlight on whatever slid into its old index. It lands at the END of the
       # destination block (both stores append), which is an exact answer where matching on the
       # fields would pick the wrong twin among duplicates.
-      @sel = last_index_of_scope(to)
-      @host.status(to.global? ? "rule is now GLOBAL — it applies in every project" : "rule is now project-scoped")
+      if land_on(appended(to), nil) == 0
+        @host.status(to.global? ? "rule is now GLOBAL — it applies in every project" : "rule is now project-scoped")
+      else
+        report_hidden(to.global? ? "rule now GLOBAL (all projects)" : "rule now project-scoped")
+      end
     end
 
     def rewriter_reload : Nil
@@ -1088,57 +1108,101 @@ module Gori::Tui
     # the edit applied rather than silently dropping both halves).
     def apply_rewriter_rule(ov : RewriterRuleOverlay) : Bool
       return false unless ov.valid?
-      if id = ov.edit_id
-        from = ov.edit_scope || Store::RuleScope::Project
-        return true if reject_inert_edit?(id, from)
-        unless rules_engine.update(id, ov.target, ov.part, ov.pattern, ov.replacement,
-                 ov.op, ov.match_kind, ov.name, ov.host, ov.body_file, scope: from,
-                 respond: ov.respond, respond_args: ov.respond_args)
-          @host.status("rule NOT saved (project busy or settings not writable) — it is unchanged")
-          return true
-        end
-        if from != ov.scope
-          # `rules_engine.rules`, not the filtered `rule_list`: an edit that stops matching a
-          # standing `/` query would otherwise drop its scope change silently.
-          moved = rules_engine.rules.find { |r| r.scope == from && r.id == id }
-          if moved.nil?
-            @host.status("rule saved, but it is gone now (deleted elsewhere) — not moved")
-            return false
-          end
-          if rules_engine.set_scope(moved, ov.scope)
-            # The rule left its block for the end of the other one, and `@sel` still named
-            # its OLD index — the row that slid into it. `rewriter_scope_toggle` follows the
-            # move for the same reason; the form's scope row is the same move, one dialog in.
-            @sel = last_index_of_scope(ov.scope)
-          else
-            @host.status("rule saved, but the scope change did not commit — it is still #{from.label}")
-          end
-        end
-      else
-        unless rules_engine.add(ov.target, ov.part, ov.pattern, ov.replacement,
-                 ov.op, ov.match_kind, ov.name, ov.host, ov.body_file, scope: ov.scope,
-                 respond: ov.respond, respond_args: ov.respond_args)
-          # Report rather than re-select: with nothing added, `last_index_of_scope` would
-          # move the highlight onto whatever already sat at the end of that block.
-          @host.status("rule NOT added (project busy or settings not writable)")
-          return true
-        end
-        # A global rule lands at the end of the GLOBAL block, which is not the end of the list.
-        @sel = last_index_of_scope(ov.scope)
+      (id = ov.edit_id) ? apply_rewriter_edit(ov, id) : apply_rewriter_add(ov)
+    end
+
+    private def apply_rewriter_edit(ov : RewriterRuleOverlay, id : Int64) : Bool
+      from = ov.edit_scope || Store::RuleScope::Project
+      return true if reject_inert_edit?(id, from)
+      unless rules_engine.update(id, ov.target, ov.part, ov.pattern, ov.replacement,
+               ov.op, ov.match_kind, ov.name, ov.host, ov.body_file, scope: from,
+               respond: ov.respond, respond_args: ov.respond_args)
+        @host.status("rule NOT saved (project busy or settings not writable) — it is unchanged")
+        return true
       end
+      # The rule keeps its row, but an edit can stop it matching a standing `/` query: then
+      # `@sel` named whichever rule slid up into its slot, silently.
+      landed = [{from, id}]
+      if from != ov.scope
+        # `rules_engine.rules`, not the filtered `rule_list`: an edit that stops matching a
+        # standing `/` query would otherwise drop its scope change silently.
+        moved = rules_engine.rules.find { |r| r.scope == from && r.id == id }
+        if moved.nil?
+          @host.status("rule saved, but it is gone now (deleted elsewhere) — not moved")
+          return false
+        end
+        unless rules_engine.set_scope(moved, ov.scope)
+          @host.status("rule saved, but the scope change did not commit — it is still #{from.label}")
+          return true
+        end
+        # The rule left its block for the end of the other one, and `@sel` still named its
+        # OLD index — the row that slid into it. `rewriter_scope_toggle` follows the move for
+        # the same reason; the form's scope row is the same move, one dialog in.
+        landed = appended(ov.scope)
+      end
+      report_hidden("rule saved") if land_on(landed, nil) > 0
       true
     end
 
+    private def apply_rewriter_add(ov : RewriterRuleOverlay) : Bool
+      prev = selected_rule_key
+      new_id = rules_engine.create(ov.target, ov.part, ov.pattern, ov.replacement,
+        ov.op, ov.match_kind, ov.name, ov.host, ov.body_file, scope: ov.scope,
+        respond: ov.respond, respond_args: ov.respond_args)
+      if new_id == 0
+        # Report rather than re-select: with nothing added there is no row to land on.
+        @host.status("rule NOT added (project busy or settings not writable)")
+        return true
+      end
+      # By the id the write answered, not by position: a global rule lands at the end of the
+      # GLOBAL block, which is not the end of the list. The row the cursor lands on is the
+      # answer to "did it work"; only a rule the `/` query hides needs words.
+      report_hidden(ov.scope.global? ? "global rule added" : "rule added") if land_on([{ov.scope, new_id}], prev) > 0
+      true
+    end
+
+    # The WHOLE list, not the filtered `rule_list`: the inert gate is a property of the rule,
+    # and a `/` query that happens to hide it must not wave its edit through.
     private def reject_inert_edit?(id : Int64, scope : Store::RuleScope) : Bool
-      rule = rule_list.find { |r| r.id == id && r.scope == scope }
+      rule = rules_engine.rules.find { |r| r.id == id && r.scope == scope }
       return false unless rule && rule.inert?
       @host.status("#{rule.inert_reason} — can't edit this rule; delete it or use a newer gori")
       true
     end
 
-    private def last_index_of_scope(scope : Store::RuleScope) : Int32
-      idx = rule_list.rindex { |r| r.scope == scope }
-      idx || {rule_list.size - 1, 0}.max
+    # Put the cursor on a rule a write just produced and answer how many of `targets` the `/`
+    # query hides. The last target on screen gets the cursor.
+    #
+    # Looked up by identity in the list `@sel` indexes. The predecessor took "the last row of
+    # the scope block" off the FILTERED list, so under a `/` query that hid the new rule it
+    # landed on whatever visible row happened to close the block: the form closed silently,
+    # the highlight sat on an unrelated rule (the next `e` edited it), and the new rule was
+    # rewriting traffic off screen with only the header's `rules:N` to show for it. A target
+    # the query hides leaves the cursor on the rule it was on (`prev`; nil when that rule is
+    # the one now hidden, which clamps), and the caller says so (`report_hidden`).
+    private def land_on(targets : Array({Store::RuleScope, Int64}), prev : {Store::RuleScope, Int64}?) : Int32
+      list = rule_list
+      shown = targets.compact_map { |key| list.index { |r| {r.scope, r.id} == key } }
+      @sel = shown.max? || prev.try { |key| list.index { |r| {r.scope, r.id} == key } } ||
+             @sel.clamp(0, {list.size - 1, 0}.max)
+      targets.size - shown.size
+    end
+
+    # `head · hidden by /` on the status row, sized for its 59 columns at 80×24, and the long
+    # form — which filter, how to clear it — in the Notifications card.
+    private def report_hidden(head : String, hidden : Int32 = 1, of : Int32 = 1) : Nil
+      key = keys("{rewriter.filter}")
+      @host.status(head + RowFilter.hidden_suffix(key, hidden, of))
+      @host.notifications.push(:info, "Rewriter: #{head}, hidden by the filter", source: "rewriter",
+        detail: @filter.hidden_detail(key))
+    end
+
+    # The rule a scope MOVE just re-homed: both stores append, so it is the last row of its
+    # new block in the WHOLE list — an exact answer where matching on the fields would pick the
+    # wrong twin among duplicates. (`set_scope` answers only whether it committed.)
+    private def appended(scope : Store::RuleScope) : Array({Store::RuleScope, Int64})
+      rule = rules_engine.rules.reverse_each.find { |r| r.scope == scope }
+      rule ? [{rule.scope, rule.id}] : [] of {Store::RuleScope, Int64}
     end
 
     # --- extract sub-tab actions (#501) ---

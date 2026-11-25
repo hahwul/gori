@@ -74,6 +74,24 @@ describe Gori::Tui::PreferencesView do
     v.handle_key(pkey(ESC)).kind.should eq(:close)
   end
 
+  it "never discards on ↑ from the strip: the warning names esc, so only esc confirms it" do
+    v = PreferencesView.new
+    v.open_default
+    into_fields(v)
+    v.handle_key(pkey(RIGHT))
+    v.handle_key(pkey(Termisu::Input::Key::Up))                       # back onto the strip
+    v.handle_key(pkey(Termisu::Input::Key::Up)).kind.should eq(:none) # warns
+    v.handle_key(pkey(Termisu::Input::Key::Up)).kind.should eq(:none) # …and warns again
+    v.dirty?.should be_true
+    v.handle_key(pkey(ESC)).kind.should eq(:close) # the key the warning named
+  end
+
+  it "still closes on ↑ from the strip when nothing was edited" do
+    v = PreferencesView.new
+    v.open_default
+    v.handle_key(pkey(Termisu::Input::Key::Up)).kind.should eq(:close)
+  end
+
   it "reopening reloads from disk, dropping the dirty state" do
     v = PreferencesView.new
     v.open_default
@@ -390,5 +408,40 @@ describe Gori::Tui::PreferencesView do
     # Network's last field is the "Host overrides" opener row.
     12.times { picker.handle_key(pkey(DOWN)) }
     picker.handle_key(pkey(Termisu::Input::Key::Enter)).kind.should_not eq(:open)
+  end
+end
+
+# A paste is text, so it may only reach a text field. On the group strip, a toggle or a choice
+# a printable key is a command (space flips a bool, a letter cycles a choice), so a clipboard
+# pasted at the project picker's Settings screen or the in-app modal rewrote settings.
+describe "PreferencesView#takes_pasted?" do
+  it "refuses a paste on the strip and on a toggle, and takes one in a text field" do
+    v = PreferencesView.new
+    v.open_default
+    space = pkey(Termisu::Input::Key::Space, ' ')
+    letter = pkey(Termisu::Input::Key::LowerA, 'a')
+    v.takes_pasted?(space).should be_false # the group strip
+    into_fields(v)                         # General opens on a bool row
+    v.takes_pasted?(space).should be_false
+    v.takes_pasted?(letter).should be_false
+    v.dirty?.should be_false
+
+    found = false
+    40.times do
+      if v.takes_pasted?(letter)
+        found = true
+        v.handle_key(letter)
+        v.dirty?.should be_true # a text field took the character
+        break
+      end
+      v.handle_key(pkey(DOWN))
+    end
+    found.should be_true
+    v.takes_pasted?(pkey(Termisu::Input::Key::Enter)).should be_false
+  end
+
+  it "answers for the in-app modal too" do
+    ov = PreferencesOverlay.new
+    ov.takes_pasted?(pkey(Termisu::Input::Key::Space, ' ')).should be_false
   end
 end

@@ -142,6 +142,24 @@ describe "list viewport tail clamp" do
       view.samples_selected_index.should eq(18) # following again
     end
 
+    # A card over the tab (`Host#list_cursor_held?`) holds a following cursor: the copy it runs
+    # reads the sample under the cursor when it runs. Follow stays armed and catches up after.
+    it "keeps a following cursor on its sample while a card is open over the tab" do
+      view = Gori::Tui::SequencerView.new
+      view.load("http://h.test", "GET /a HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, false, nil,
+        Gori::Sequencer::Config.new)
+      view.focus_pane(:samples)
+      view.begin_run
+      4.times { |i| view.append_sample(sequencer_sample(i)) }
+      view.samples_selected_index.should eq(3)
+
+      2.times { |i| view.append_sample(sequencer_sample(4 + i), hold: true) }
+      view.samples_selected_index.should eq(3)
+
+      view.append_sample(sequencer_sample(6))
+      view.samples_selected_index.should eq(6) # the card closed: following again
+    end
+
     # A finished collection is a static list the operator reads. `finish_run` does not clear
     # `@follow` — `@running` is the gate, so a late append (a saved run reloaded, a stray
     # terminal event) never yanks the cursor out from under a reader.

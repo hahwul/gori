@@ -135,3 +135,37 @@ describe "Runner.function_key_hint" do
     Screen.display_width(Gori::Hotkeys.expand(registry, Runner.function_key_hint("F24"))).should be <= 59
   end
 end
+
+# A key the tab claims while its verb cannot run is held, not handed to Global
+# (`Verb::Keymap#held_from_global`, DESIGN.md §7 2026-11-25), and says so in the palette's words.
+describe "Runner.not_available_toast" do
+  it "names the held verb in the palette's refusal wording" do
+    Runner.not_available_toast("Compare snapshots").should eq("Compare snapshots: not available here")
+    Runner.not_available_toast("Compare snapshots", any_more: true).should eq("Compare snapshots: not available here any more")
+  end
+
+  # Issues NOTES in READ, no RELATED row, `s`: before the hold this was the scope lens with
+  # #1375's READ note; the held refusal keeps the note.
+  it "tags a held bare letter from an editor in READ, as a fired Global letter is" do
+    s = Gori::Verb::Chord.new("s")
+    Runner.held_key_toast("Go to source", s, read_mode: true)
+      .should eq(Runner.read_mode_note("Go to source: not available"))
+    Runner.held_key_toast("Go to source", s, read_mode: false).should eq("Go to source: not available here")
+    Runner.held_key_toast("Go to source", Gori::Verb::Chord.new("s", ctrl: true), read_mode: true)
+      .should eq("Go to source: not available here")
+  end
+
+  it "fits the 59-column status row for every tab verb that holds a Global letter" do
+    reg = Gori::Verbs.registry
+    km = Gori::Verb::Keymap.build(reg)
+    reg.each do |v|
+      next if v.scope.global? || v.scope.editor?
+      v.chords.each do |chord|
+        next unless km.lookup_in(chord, v.scope) == v.id && km.lookup_in(chord, Gori::Verb::Scope::Global)
+        Runner.not_available_toast(v.title).size.should be <= 59, v.id
+        read = Gori::Hotkeys.expand(reg, Runner.held_key_toast(v.title, chord, read_mode: true))
+        read.size.should be <= 59, "#{v.id} from READ: #{read}"
+      end
+    end
+  end
+end

@@ -988,6 +988,27 @@ describe "ProjectView description saves" do
       store.setting(ProjectView::DESC_KEY).should be_nil
     end
   end
+
+  # The overwrite a second `esc` asks for is granted against the exact stored bytes the refusal
+  # reported, CRs included, and against nothing else.
+  it "overwrites only the stored value the refusal reported" do
+    with_desc_project do |store, project|
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      view.reload(project, store)
+      view.replace_desc("mine")
+      store.set_setting(ProjectView::DESC_KEY, "peer\r\none").should be_true
+      view.save(store).should be_false
+      view.desc_conflict_current.should eq("peer\r\none")
+      view.save(store, overwrite: "peer\none").should be_false # the LF projection is not what is stored
+      store.set_setting(ProjectView::DESC_KEY, "peer two").should be_true
+      view.save(store, overwrite: "peer\r\none").should be_false # a newer peer write is refused afresh
+      view.desc_conflict_current.should eq("peer two")
+      view.save(store, overwrite: "peer two").should be_true
+      store.setting(ProjectView::DESC_KEY).should eq("mine")
+      view.desc_conflict?.should be_false
+      view.desc_conflict_current.should be_nil
+    end
+  end
 end
 
 describe "ProjectView DESCRIPTION READ selection across a document hand-over" do

@@ -197,7 +197,7 @@ module Gori::Tui
         @sel = @sel.clamp(0, {rlist.size - 1, 0}.max)
         @drawn_rule = rlist[@sel]?.try { |r| {r.scope, r.id} }
         ensure_visible(rules_r, rlist.size)
-        @view.render(screen, rules_r, rlist, @sel, @scroll, engine.enabled_count,
+        @view.render(screen, rules_r, rlist, @sel, @scroll, engine.rules.size,
           body_focused && @focus == :rules)
         # At rest the filter rides the rules card's (untitled) border, short of its tally. No
         # tally means no card was drawn, and then there is no border to ride.
@@ -553,9 +553,12 @@ module Gori::Tui
       # Land on the copy: it is appended to the END of its scope block, which on a list longer
       # than the card is off screen, so the highlight (and the `e` that a duplicate is almost
       # always followed by) stayed on the original.
-      @sel = last_index_of_scope(rule.scope)
-      state = rule.enabled? ? "" : " (disabled, like the original)"
-      @host.status(rule.global? ? "global colour rule duplicated#{state}" : "colour rule duplicated#{state}")
+      scope = rule.global? ? "global " : ""
+      if land_on(appended(rule.scope), {rule.scope, rule.id}) == 0
+        @host.status("#{scope}colour rule duplicated#{rule.enabled? ? "" : " (disabled, like the original)"}")
+      else
+        report_hidden("#{scope}colour rule copied#{rule.enabled? ? "" : " (off)"}")
+      end
     end
 
     # `s`: move the selected rule between the global library and this project.
@@ -565,8 +568,7 @@ module Gori::Tui
       unless engine.set_scope(rule, to)
         return @host.status("scope NOT changed (project busy or settings not writable) — the rule is unchanged")
       end
-      @sel = last_index_of_scope(to)
-      @host.status(to.global? ? "colour rule is now GLOBAL — it applies in every project" : "colour rule is now project-scoped")
+      announce_scope(to, land_on(appended(to), nil))
     end
 
     def colormarker_reload : Nil
@@ -583,55 +585,103 @@ module Gori::Tui
     # `ProbeController#apply_custom_rule`.
     def apply_color_rule(ov : ColormarkerRuleOverlay) : Bool
       return false unless ov.valid?
-      if id = ov.edit_id
-        from = ov.edit_scope || Store::RuleScope::Project
-        unless engine.update(id, ov.condition, ov.color, ov.style, ov.name, scope: from)
-          # Return rather than fall through: `rule_list` still holds the PRE-EDIT row, so the
-          # re-home below would move that stale rule to the other scope and succeed, dropping
-          # the edit while reporting nothing.
-          @host.status("rule NOT saved (project busy or settings not writable) — it is unchanged")
-          return false
-        end
-        if from != ov.scope
-          # `engine.rules`, not the filtered `rule_list`: an edit that stops matching a standing
-          # `/` query would read as a peer delete after the field edit had already committed.
-          moved = engine.rules.find { |r| r.scope == from && r.id == id }
-          if moved.nil?
-            # The update reported a COMMIT, not a row — `Store#update_color_rule` answers through
-            # `exec_task_ok`, so an `UPDATE … WHERE id = ?` against an id a peer deleted while
-            # this card was open commits and matches nothing. Falling through here reported
-            # nothing and closed the form, so the operator watched a promotion they never got.
-            @host.status("rule is gone (deleted elsewhere) — nothing was saved or moved")
-            return false
-          end
-          unless engine.set_scope(moved, ov.scope)
-            @host.status("rule saved, but the scope change did not commit — it is still #{from.label}")
-            return true
-          end
-          # Follow the rule into its new block, exactly as `colormarker_scope_toggle` does.
-          # A re-home moves the row across the global/project boundary, so leaving `@sel` where
-          # it was left the highlight — and every rule action behind it — pointing at whichever
-          # unrelated rule slid into that index.
-          @sel = last_index_of_scope(ov.scope)
-          # And it says so, in the same words the `s` gesture uses: a promotion reaches every
-          # other project, which is not something to infer from a badge that changed.
-          @host.status(ov.scope.global? ? "colour rule is now GLOBAL — it applies in every project" : "colour rule is now project-scoped")
-        end
-      else
-        unless engine.add(ov.condition, ov.color, ov.style, ov.name, scope: ov.scope)
-          # Report rather than re-select: with nothing added, `last_index_of_scope` would move
-          # the highlight onto whatever already sat at the end of that block.
-          @host.status("rule NOT added (project busy or settings not writable)")
-          return false
-        end
-        @sel = last_index_of_scope(ov.scope)
+      (id = ov.edit_id) ? apply_color_edit(ov, id) : apply_color_add(ov)
+    end
+
+    private def apply_color_edit(ov : ColormarkerRuleOverlay, id : Int64) : Bool
+      from = ov.edit_scope || Store::RuleScope::Project
+      unless engine.update(id, ov.condition, ov.color, ov.style, ov.name, scope: from)
+        # Return rather than fall through: `rule_list` still holds the PRE-EDIT row, so the
+        # re-home below would move that stale rule to the other scope and succeed, dropping
+        # the edit while reporting nothing.
+        @host.status("rule NOT saved (project busy or settings not writable) — it is unchanged")
+        return false
       end
+      if from == ov.scope
+        # The rule keeps its row, but an edit can stop it matching a standing `/` query: then
+        # `@sel` named whichever rule slid up into its slot, silently.
+        report_hidden("colour rule saved") if land_on([{from, id}], nil) > 0
+        return true
+      end
+      # `engine.rules`, not the filtered `rule_list`: an edit that stops matching a standing
+      # `/` query would read as a peer delete after the field edit had already committed.
+      moved = engine.rules.find { |r| r.scope == from && r.id == id }
+      if moved.nil?
+        # The update reported a COMMIT, not a row — `Store#update_color_rule` answers through
+        # `exec_task_ok`, so an `UPDATE … WHERE id = ?` against an id a peer deleted while
+        # this card was open commits and matches nothing. Falling through here reported
+        # nothing and closed the form, so the operator watched a promotion they never got.
+        @host.status("rule is gone (deleted elsewhere) — nothing was saved or moved")
+        return false
+      end
+      unless engine.set_scope(moved, ov.scope)
+        @host.status("rule saved, but the scope change did not commit — it is still #{from.label}")
+        return true
+      end
+      # Follow the rule into its new block, exactly as `colormarker_scope_toggle` does.
+      # A re-home moves the row across the global/project boundary, so leaving `@sel` where
+      # it was left the highlight — and every rule action behind it — pointing at whichever
+      # unrelated rule slid into that index.
+      # And it says so, in the same words the `s` gesture uses: a promotion reaches every
+      # other project, which is not something to infer from a badge that changed.
+      announce_scope(ov.scope, land_on(appended(ov.scope), nil))
       true
     end
 
-    private def last_index_of_scope(scope : Store::RuleScope) : Int32
-      idx = rule_list.rindex { |r| r.scope == scope }
-      idx || {rule_list.size - 1, 0}.max
+    private def apply_color_add(ov : ColormarkerRuleOverlay) : Bool
+      prev = selected_rule_key
+      unless engine.add(ov.condition, ov.color, ov.style, ov.name, scope: ov.scope)
+        # Report rather than re-select: with nothing added there is no row to land on.
+        @host.status("rule NOT added (project busy or settings not writable)")
+        return false
+      end
+      # The row the cursor lands on is the answer to "did it work"; only a rule the `/`
+      # query hides needs words.
+      report_hidden(ov.scope.global? ? "global colour rule added" : "colour rule added") if land_on(appended(ov.scope), prev) > 0
+      true
+    end
+
+    # Put the cursor on a rule a write just produced and answer what the toast adds about it —
+    # `RewriterController#land_on`, for the same defect: "the last row of the scope block" read
+    # off the FILTERED list landed on whatever visible row closed the block, so under a `/`
+    # query that hid the new rule the form closed silently and the highlight (and the next `e`)
+    # sat on an unrelated rule while the new one painted rows off screen. A hidden target
+    # leaves the cursor on `prev` (nil when that is the rule now hidden, which clamps), and the
+    # answer — how many targets the query hides — is for the caller's `report_hidden`.
+    private def land_on(targets : Array({Store::RuleScope, Int64}), prev : {Store::RuleScope, Int64}?) : Int32
+      list = rule_list
+      shown = targets.compact_map { |key| list.index { |r| {r.scope, r.id} == key } }
+      @sel = shown.max? || prev.try { |key| list.index { |r| {r.scope, r.id} == key } } ||
+             @sel.clamp(0, {list.size - 1, 0}.max)
+      targets.size - shown.size
+    end
+
+    # A scope move's toast: the `s` gesture's words, or the short form when the query hides
+    # the moved rule.
+    private def announce_scope(to : Store::RuleScope, hidden : Int32) : Nil
+      if hidden == 0
+        @host.status(to.global? ? "colour rule is now GLOBAL — it applies in every project" : "colour rule is now project-scoped")
+      else
+        report_hidden(to.global? ? "colour rule now GLOBAL (all projects)" : "colour rule now project-scoped")
+      end
+    end
+
+    # `head · hidden by /` on the status row, sized for its 59 columns at 80×24, and the long
+    # form — which filter, how to clear it — in the Notifications card.
+    private def report_hidden(head : String) : Nil
+      key = keys("{colormarker.filter}")
+      @host.status(head + RowFilter.hidden_suffix(key))
+      @host.notifications.push(:info, "Colormarker: #{head}, hidden by the filter", source: "colormarker",
+        detail: @filter.hidden_detail(key))
+    end
+
+    # The rule a write just appended to `scope`'s block: both stores append, so it is the
+    # block's last row in the WHOLE list — an exact answer where matching on the fields would
+    # pick the wrong twin among duplicates (`add` and `set_scope` answer only whether they
+    # committed).
+    private def appended(scope : Store::RuleScope) : Array({Store::RuleScope, Int64})
+      rule = engine.rules.reverse_each.find { |r| r.scope == scope }
+      rule ? [{rule.scope, rule.id}] : [] of {Store::RuleScope, Int64}
     end
 
     # --- custom-colour actions (colours pane) ---

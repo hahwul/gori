@@ -2,6 +2,7 @@ require "../../spec_helper"
 require "../../support/fake_host"
 require "../../support/memory_backend"
 require "file_utils"
+require "../../support/tui_probes"
 
 include Gori::Tui
 
@@ -206,7 +207,7 @@ describe "FuzzerController — a card's commit after a peer closed its session" 
       4.times { v.form_move(1) unless v.config_row == :mode }
       v.config_row.should eq(:mode)
       hint = ctl.body_hint(:body)
-      hint.should contain("→/↵ next mode · ← template")
+      hint.should contain("→/↵ next mode · ^R run · ← template")
       hint.should_not contain("open editor")
     end
   end
@@ -375,6 +376,178 @@ describe "FuzzerController#fuzz_run refusals" do
       ctl.fuzz_run
       host.kinded.size.should eq(1)
       host.kinded.first[1].should eq(:error)
+    end
+  end
+end
+
+# Records every confirm and holds its action unanswered: the operator pressed esc / cancel
+# unless the example runs `pending` itself.
+private class DecliningFuzzHost < FakeHost
+  getter asked = [] of {String, String, Bool}
+  property pending : Proc(Nil)?
+
+  def confirm(title : String, message : String, *, confirm_label : String, danger : Bool,
+              return_to : Symbol = :none, &action : -> Nil) : Nil
+    @asked << {title, message, danger}
+    @pending = action
+  end
+end
+
+# A finished, never-saved run of `rows` results on a session that can run again. `hits` rows
+# match under a real match rule (status 200); with `hits: nil` the run has no rule at all.
+private def unsaved_fuzz_run(ctl : FuzzerController, payloads : Array(String), rows : Int32 = 2,
+                             hits : Int32? = 1) : FuzzerView
+  ctl.fuzz_from_request("http://a.invalid", "GET /?x=§1§ HTTP/1.1\r\nHost: a.invalid\r\n\r\n", false, nil)
+  view = ctl.current_view.not_nil!
+  view.apply_set(nil, SetSpec.list(payloads))
+  view.matcher.match_status = "200" if hits
+  view.begin_run(rows.to_i64)
+  rows.times do |i|
+    hit = !hits.nil? && i < hits
+    view.append_result(Gori::Fuzz::Result.new(i.to_i64, ["p#{i}"], nil, hit ? 200 : 404, 10_i64, 3, 1,
+      1000_i64, nil, hit, false, nil, shape: i.to_i64))
+  end
+  view.finish_run("done")
+  view
+end
+
+# ^R replaced RESULTS and deleted the run's private spool without a word, while loading a saved
+# run over the same rows asked first. It asks now, but only over a run that found something,
+# and ↵ runs: tweak-and-re-run is the loop, and `^R ↵` must always run.
+describe "FuzzerController#fuzz_run over unsaved results" do
+  it "pauses on a run with hits, and keeps them when the operator cancels" do
+    with_fuzzer_controller do |_, session|
+      host = DecliningFuzzHost.new(session)
+      ctl = FuzzerController.new(host)
+      view = unsaved_fuzz_run(ctl, ["a", "b"])
+      view.results_saveable?.should be_true
+      ctl.fuzz_run
+      host.asked.size.should eq(1)
+      title, message, danger = host.asked.first
+      title.should eq("REPLACE UNSAVED RESULTS")
+      message.should contain("2-row run (1 hit) has not been saved")
+      danger.should be_false # ↵ runs
+      view.running?.should be_false
+      view.result_count.should eq(2)
+      view.results_saveable?.should be_true # ⇧E can still keep them
+
+      host.pending.not_nil!.call # …and `run` on the card starts it
+      view.running?.should be_true
+      ctl.stop_all
+    end
+  end
+
+  it "re-runs a sweep that found nothing with no card" do
+    with_fuzzer_controller do |_, session|
+      [0, nil].each do |hits|
+        host = DecliningFuzzHost.new(session)
+        ctl = FuzzerController.new(host)
+        view = unsaved_fuzz_run(ctl, ["a", "b"], hits: hits) # no hit / no match rule at all
+        view.results_saveable?.should be_true
+        ctl.fuzz_run
+        host.asked.should be_empty
+        view.running?.should be_true
+        ctl.stop_all
+      end
+    end
+  end
+
+  it "folds the question into the large-run card, which ↵ still runs" do
+    with_fuzzer_controller do |_, session|
+      host = DecliningFuzzHost.new(session)
+      ctl = FuzzerController.new(host)
+      view = unsaved_fuzz_run(ctl, (1..1001).map(&.to_s))
+      ctl.fuzz_run
+      host.asked.size.should eq(1)
+      title, message, danger = host.asked.first
+      title.should eq("RUN FUZZ")
+      message.should contain("has not been saved and will be replaced")
+      danger.should be_false
+      view.running?.should be_false
+
+      quiet = DecliningFuzzHost.new(session)
+      ctl2 = FuzzerController.new(quiet)
+      unsaved_fuzz_run(ctl2, (1..1001).map(&.to_s), hits: 0)
+      ctl2.fuzz_run
+      quiet.asked.first[1].should_not contain("has not been saved")
+    end
+  end
+
+  it "re-runs without asking once the results are saved" do
+    with_fuzzer_controller do |_, session|
+      host = DecliningFuzzHost.new(session)
+      ctl = FuzzerController.new(host)
+      view = unsaved_fuzz_run(ctl, ["a", "b"])
+      view.finish_results_save(7_i64)
+      view.results_saveable?.should be_false
+      ctl.fuzz_run
+      host.asked.should be_empty
+      view.running?.should be_true
+      ctl.stop_all
+    end
+  end
+
+  it "says the same sentence on the history-load card" do
+    with_fuzzer_controller do |_, session|
+      host = DecliningFuzzHost.new(session)
+      ctl = FuzzerController.new(host)
+      unsaved_fuzz_run(ctl, ["a", "b"])
+      ctl.save_all
+      ctl.load_saved_run(1_i64)
+      host.asked.first[0].should eq("REPLACE UNSAVED RESULTS")
+      host.asked.first[1].should contain("2-row run (1 hit) has not been saved and will be replaced")
+    end
+  end
+end
+
+# The READ half of the TEMPLATE's ⌃Home/⌃End: INS honoured the modifier (`buffer_jump?`), the
+# READ arm did not and stopped at the line's edge. See the Repeater REQUEST's twin.
+describe "FuzzerController ⌃Home/⌃End on the READ template" do
+  it "jumps the buffer and extends the READ selection to its end, ⌥ alike" do
+    {Termisu::Input::Modifier::Ctrl, Termisu::Input::Modifier::Alt}.each do |mod|
+      with_fuzzer_controller do |ctl|
+        ctl.fuzz_new
+        v = ctl.current_view.not_nil!
+        v.load_request("https://h", "GET /?x=1 HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+        v.focus_pane(:template)
+        v.template_insert?.should be_false
+        ctl.handle_body_key(page_key(Termisu::Input::Key::Down)).should be_true
+        2.times { ctl.handle_body_key(page_key(Termisu::Input::Key::Right)) }
+        ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::End, mod | Termisu::Input::Modifier::Shift)).should be_true
+        v.template_copy_text.should start_with("st: h\n")
+
+        ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Home, mod)).should be_true
+        ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::End, Termisu::Input::Modifier::Shift))
+        v.template_copy_text.should eq("GET /?x=1 HTTP/1.1")
+      end
+    end
+  end
+end
+
+# The CONFIG column is where a run is set up, and `^R run` sat fourth on every row: an
+# 80-column row kept the row's own key and `↑/↓ row` and never named the key that starts it.
+describe "FuzzerController — the run key on an 80-column row" do
+  it "names ^R run on every CONFIG row" do
+    with_fuzzer_controller do |ctl, _session|
+      ctl.fuzz_new
+      v = ctl.current_view.not_nil!
+      v.apply_set(nil, SetSpec.new(:list, "aa"))
+      v.focus_pane(:config)
+      seen = [] of Symbol
+      6.times do
+        seen << v.config_row
+        row = Chrome.status_row(ctl.body_hint(:body), "BODY")
+        row.should contain("^R run"), "#{v.config_row}: #{row}"
+        v.form_move(1)
+      end
+      seen.uniq.size.should eq(4)
+    end
+  end
+
+  it "names the run key on RESULTS" do
+    with_fuzzer_controller do |ctl, _session|
+      finished_results(ctl, [fuzz_result(0), fuzz_result(1)])
+      Chrome.status_row(ctl.body_hint(:body), "BODY").should contain("^R run")
     end
   end
 end

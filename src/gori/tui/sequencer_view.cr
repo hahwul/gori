@@ -367,6 +367,7 @@ module Gori::Tui
     def begin_run : Nil
       @running = true
       @stop_requested = false
+      @stopped = false
       @collected = 0
       @sent = 0
       @errors = 0
@@ -381,18 +382,27 @@ module Gori::Tui
       @analysis.reset
     end
 
-    def finish_run : Nil
+    # `stopped` is `Sequencer::DoneEvent#stopped`: the operator halted the collection, so
+    # what it holds is a prefix of the goal and not a budget's verdict.
+    def finish_run(stopped : Bool = false) : Nil
       @running = false
+      @stopped = stopped
     end
+
+    getter? stopped : Bool = false
 
     # The follow decision lives HERE, at the append, not in render's `ensure_visible`: there
     # `@samples.size` has already grown, so a cursor on what was the tail reads as one row
     # short of it and no post-append comparison can tell it apart from a cursor the operator
     # parked one row up (#711). `@follow` is asked before the row lands, answered by the nav.
-    def append_sample(s : Sequencer::Sample) : Nil
+    #
+    # `hold` is `Host#list_cursor_held?`: a card is open over the tab, and the copy it runs
+    # reads the sample under the cursor when it RUNS, so the cursor keeps its row until the
+    # card closes. `@follow` stays on, and the next append after that catches the tail up.
+    def append_sample(s : Sequencer::Sample, hold : Bool = false) : Nil
       @samples << s
       @samples_rev += 1
-      @sel = @samples.size - 1 if @running && @follow
+      @sel = @samples.size - 1 if @running && @follow && !hold
     end
 
     # `requests` is the TRUE wire count (`Fuzz::CappedBackend#sent`, what `max_requests` is
@@ -417,7 +427,7 @@ module Gori::Tui
     # A FINISHED collection that fell short of its goal because the request cap ran out.
     # Guarded on `max_requests` so a hand-stopped (^X) or error-ended run is not relabelled.
     def budget_exhausted? : Bool
-      return false if @running
+      return false if @running || @stopped
       return false unless @config.max_requests
       @goal_display > 0 && @collected < @goal_display
     end
@@ -616,7 +626,10 @@ module Gori::Tui
       y += 1
       if y < rect.bottom - 1
         wire = @requests > @sent ? " · #{@requests} requests" : ""
-        line = "#{@collected}/#{@goal_display <= 0 ? "?" : @goal_display.to_s} collected · #{@sent} sent#{wire} · #{@errors} err"
+        # ` · stopped` standing, as on the Fuzzer's RESULTS border and the Miner's tally: the
+        # ^X toast is gone by the next keypress.
+        ending = @stopped ? " · stopped" : ""
+        line = "#{@collected}/#{@goal_display <= 0 ? "?" : @goal_display.to_s} collected · #{@sent} sent#{wire} · #{@errors} err#{ending}"
         screen.text(x, y, line, Theme.muted, Theme.bg, width: rect.w - 4)
       end
       y += 1

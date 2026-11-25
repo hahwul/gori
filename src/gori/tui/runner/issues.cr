@@ -15,13 +15,17 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def issue_create : Nil
     ids = history_target_flow_ids
     return if ids.empty?
+    return if history_hidden_marks_gate?("ADD ISSUE", "File one issue with") { issue_create }
     # The primary supplies the title/host/evidence; it is the CURSOR row when that is itself a
     # target, else the oldest mark — never `ids.first`, which follows the display order and would
     # hand a different flow the title after a history_list_order flip.
     # The drill-in's flow first: filed from it, the flow on screen is the primary even when
     # the list underneath holds marks or follow moved the cursor (the controller only knows
     # the marks and the cursor). `@detail_pin` for a caller that closed the detail first.
-    primary = @detail_pin || detail_pinned_flow_id || history_controller.primary_target_flow_id
+    # The hidden-marks card's cursor-row answer has exactly one target, and the controller's
+    # primary would still read the marks it was chosen over.
+    primary = @detail_pin || detail_pinned_flow_id ||
+              (history_cursor_pick? ? ids.first : history_controller.primary_target_flow_id)
     # Find the first target that still resolves rather than dead-ending on a stale primary: with
     # 5 marks and the primary deleted from another surface, giving up would silently discard four
     # live marks with no form and no toast.
@@ -68,10 +72,29 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Callers must resolve each id THROUGH THE STORE, never through the view's rows: a kept
   # mark can outlive the visible list via a filter change or a peer's write.
   def issues_target_ids : Array(Int64)
+    if picked = @issues_marks_pick
+      return picked[0]
+    end
     if f = issues_controller.view.detail_issue
       return [f.id]
     end
     issues_controller.target_issue_ids
+  end
+
+  # The Issues twin of `@history_marks_pick` / `history_hidden_marks_gate?` (runner.cr): the
+  # hidden-marks card's answer, held for the one synchronous re-run of the verb that raised it.
+  @issues_marks_pick : {Array(Int64), Bool}? = nil
+
+  private def issues_hidden_marks_gate?(heading : String, question : String, &rerun : -> Nil) : Bool
+    return false if @issues_marks_pick || @active_tab != :issues || issues_controller.view.detail_open?
+    issues_controller.hidden_marks_card?(heading, question) do |ids, cursor_only|
+      @issues_marks_pick = {ids, cursor_only}
+      begin
+        rerun.call
+      ensure
+        @issues_marks_pick = nil
+      end
+    end
   end
 
   def selected_issue_ids : Array(Int64)
@@ -108,6 +131,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def issue_set_severity : Nil
     ids = issues_target_ids
     return if ids.empty?
+    return if issues_hidden_marks_gate?("SET SEVERITY", "Set the severity of") { issue_set_severity }
     seed = issues_picker_seed(ids)
     return (@toast = "no issues left to update") unless seed
     open_choice_picker(ChoicePicker.for_severity(seed.severity.value)) { |p| apply_issue_choice(p, ids) }
@@ -116,6 +140,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def issue_set_status : Nil
     ids = issues_target_ids
     return if ids.empty?
+    return if issues_hidden_marks_gate?("SET STATUS", "Set the status of") { issue_set_status }
     seed = issues_picker_seed(ids)
     return (@toast = "no issues left to update") unless seed
     open_choice_picker(ChoicePicker.for_status(seed.status.value)) { |p| apply_issue_choice(p, ids) }
@@ -127,6 +152,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def issue_set_cvss : Nil
     ids = issues_target_ids
     return if ids.empty?
+    return if issues_hidden_marks_gate?("SET CVSS", "Score") { issue_set_cvss }
     seed = issues_picker_seed(ids)
     return (@toast = "no issues left to update") unless seed
     calc = CvssCalculatorOverlay.new(seed.cvss || "")
@@ -140,7 +166,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # so a single stale mark can't dead-end a live batch.
   private def issues_picker_seed(ids : Array(Int64)) : Store::Issue?
     store = @session.store
-    primary = issues_controller.view.detail_issue.try(&.id) || issues_controller.primary_target_issue_id
+    # The hidden-marks card's cursor-row answer has one target; the controller's primary
+    # would still read the marks it was chosen over.
+    primary = issues_controller.view.detail_issue.try(&.id) ||
+              (@issues_marks_pick.try(&.[1]) ? ids.first? : issues_controller.primary_target_issue_id)
     primary.try { |id| store.get_issue(id) } ||
       ids.each.compact_map { |id| store.get_issue(id) }.first?
   end

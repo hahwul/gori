@@ -34,9 +34,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       handle_right_click(layout, mx, my)
     else
       @quit_armed = false
-      @toast = nil
-      @toast_seen = nil          # as a key does: a click repeating the same toast is fresh feedback
-      press_left(layout, mx, my) # left (middle treated as left)
+      press_left(layout, mx, my) # left (middle treated as left); clears the toast unless swallowed
     end
   end
 
@@ -54,9 +52,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # land somewhere draggable — otherwise a click on the tab bar would leave the flag set and
   # the next stray motion would extend a selection the operator had moved on from.
   @dragging = false
-  # The press just consumed was Miss Ring's. Reset at the top of every dispatch_click, so
-  # it is true only for the press immediately after one she took.
-  @companion_pressed = false
+  # The press just dispatched opened, closed or committed a modal (see `modal_layer`), or
+  # ran a space-menu row. Set by `press_left` after every ordinary press, so it describes only
+  # the press immediately before the next one.
+  @modal_pressed = false
   # Whether the press just dispatched reached the ACTIVE TAB'S BODY — i.e. whether
   # `click_body` ran and the controller got a `handle_click` at all.
   #
@@ -115,24 +114,40 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # A double-click consumes the pair: a THIRD press in the same cell starts a new pair
     # rather than reading as another double (and, on the way, as a triple nobody asked for).
     @last_press = double ? nil : {mx, my, now}
-    # THE SECOND PRESS OF A DOUBLE-CLICK ON MISS RING BELONGS TO HER, not to the ring the
-    # first press opened. Without this it falls through to the modal tier and reaches that
-    # overlay: outside its card a `:cancel`, so the gesture reads as "the mascot does
-    # nothing", and inside it a `:commit` that jumps to whatever note happens to sit under
-    # the pointer. The ⌕ pill's rule (see dispatch_click) for the same reason — but scoped
-    # to the press that PAIRS with one she took rather than to her geometry, so it can
-    # never make a cell of the ring's own card dead.
-    if double && @companion_pressed
-      @companion_pressed = false
+    # THE SECOND PRESS OF A DOUBLE-CLICK BELONGS TO WHATEVER THE FIRST PRESS DID. A picker
+    # row, a space-menu row and a confirm button act on a single click and close their card;
+    # a top-bar chip, Miss Ring and the `0:Tabs` pill open one. The paired press then found a
+    # different screen under the same cell: the list behind a closed card (the cursor jumped
+    # to a row the operator never chose, and the next `d`/`s` acted on it), or click-away on
+    # the card just opened (the button read as doing nothing). So the pair's second press is
+    # swallowed whole, and it does not wipe the toast the first press's action left — that
+    # toast is the only word on what the click did. Scoped to the press that PAIRS with one
+    # that changed the modal layer, never to geometry, so no cell of a card goes dead.
+    if double && @modal_pressed
+      @modal_pressed = false
       @dragging = false
       return
     end
+    @toast = nil
+    @toast_seen = nil # as a key does: a click repeating the same toast is fresh feedback
+    before = modal_layer
+    @modal_pressed = false # click_space_menu re-arms it for a row it ran
     if double && dispatch_double_click(layout, mx, my)
       @dragging = false
-      return
+    else
+      dispatch_click(layout, mx, my)
+      @dragging = drag_press_target?(layout, mx, my)
     end
-    dispatch_click(layout, mx, my)
-    @dragging = drag_press_target?(layout, mx, my)
+    @modal_pressed ||= modal_layer != before
+  end
+
+  # What captures the pointer right now — compared across one press by `press_left` to tell
+  # whether that press opened, closed or swapped a modal. The History detail is deliberately
+  # absent: it is a body drill-in, not a capturing modal, and a double-click on a list row
+  # that drills in on the first press is the gesture working, not a second press to swallow.
+  private def modal_layer
+    {@space_menu_open, copy_as_shown?, send_to_shown?, active_overlay.try(&.object_id),
+     @overlay.palette?, @goto_open, @search_open, @rename_open, @tag_edit_open}
   end
 
   # Whether a press at these coords landed somewhere that can extend a selection — i.e.
@@ -218,6 +233,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       apply_overlay_outcome(ov, outcome)
       return true
     end
+    tab_double_click(layout, mx, my)
+  end
+
+  # The active tab's half of a double-click — split out so the overlay half above can be
+  # driven on its own (spec/tui/runner/mouse_spec.cr).
+  private def tab_double_click(layout : Layout, mx : Int32, my : Int32) : Bool
     @tabs[@active_tab]?.try(&.handle_double_click(layout.body, mx, my)) || false
   end
 
@@ -250,7 +271,6 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # body drill-in, so it falls through to the tab bar + body (the bar stays live,
   # like the keyboard). Centered modals capture every click (outside → dismiss).
   private def dispatch_click(layout : Layout, mx : Int32, my : Int32) : Nil
-    @companion_pressed = false
     @click_reached_body = false
     return if @space_menu_open && click_space_menu(layout, mx, my)
     return if copy_as_shown? && click_copy_as(layout.body, mx, my) # modal while up — floats over @overlay
@@ -312,8 +332,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       # is the half with the text on it.
       return false unless Companion.hit?(layout.body, frame, mx, my)
     end
-    open_notifications
-    @companion_pressed = true
+    open_notifications # opens the ring, so `press_left` swallows the double-click's other half
     true
   end
 
@@ -452,6 +471,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   private def click_space_menu(layout : Layout, mx : Int32, my : Int32) : Bool
     if idx = @space_menu.row_at(layout.body, mx, my)
       @space_menu.set_selected(idx)
+      # Armed by hand: a sticky family's card closes and reopens, and a family row descends
+      # within the same open menu, so `modal_layer` reads the same before and after — yet the
+      # paired press would land on a different row (or run the same toggle twice).
+      @modal_pressed = true
       activate_space_entry(@space_menu.selected_entry)
     elsif !@space_menu.box(layout.body).contains?(mx, my)
       close_space_menu

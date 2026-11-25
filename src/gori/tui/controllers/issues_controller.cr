@@ -20,7 +20,13 @@ module Gori::Tui
   # are shell mediators. Detail notes use READ/INS (like Notes): the shell routes
   # detail keys here before the focus ring when an issue is open.
   class IssuesController < TabController
-    private NOTES_ISSUE_DELETED = "issue was deleted — draft kept in the notes editor"
+    # The notes toasts, held to the 59-column status budget and shared word for word with the
+    # Project description's (`ProjectController::DESC_*`).
+    NOTES_ISSUE_DELETED = "issue was deleted — draft kept · ^W discards it"
+    NOTES_PEER_CHANGED  = "notes changed elsewhere — esc checks first"
+    NOTES_REFUSED       = "notes NOT saved — changed elsewhere (esc in it)"
+    NOTES_CONFLICT      = "NOT saved — changed elsewhere · esc overwrites, ^W theirs"
+    NOTES_BUSY          = "notes NOT saved — project busy · esc retries"
 
     def initialize(host : Host)
       super(host)
@@ -28,6 +34,8 @@ module Gori::Tui
       @issues.menu_registry = host.session.registry
       # The issue id and exact peer notes an `esc` overwrite can replace.
       @notes_overwrite_armed = nil.as({Int64, String}?)
+      # The issue whose draft a refused save found DELETED: `^W` discards it, as nothing else can.
+      @notes_discard_armed = nil.as(Int64?)
     end
 
     # Would `commit` REFUSE the open Issues writeup right now? Asked by the quit and
@@ -296,7 +304,7 @@ module Gori::Tui
         # Dropped whole when there is nowhere to step — see DrillIn::Host's `step_available?`.
         step = @issues.step_available? ? "{issue.next-item}/{issue.prev-item} issue · " : ""
         if @issues.notes_insert_mode?
-          "type · ^Y copy · esc save · ^W discard"
+          notes_insert_hint
         elsif @issues.notes_focused?
           keys("↑/↓ move · {editor.insert}/↵ edit · #{step}space cmds · ↹/←/esc related")
         else
@@ -583,15 +591,15 @@ module Gori::Tui
     end
 
     # Replacing the detail would discard a READ draft. Return to the editor so the
-    # operator can save or discard it with the usual keys.
+    # operator can save it with the usual keys (esc saves; ^W only answers a refused save).
     def prepare_detail_departure : Bool
       return leave_notes_editor if @issues.notes_insert_mode?
       return true unless read_draft?
       if @host.active_tab == :issues
         @issues.enter_notes_insert!
-        @host.status("unsaved issue notes — esc saves, ^W discards")
+        @host.status("unsaved issue notes — esc saves them")
       else
-        @host.status("unsaved issue notes — return to Issues to save or discard them")
+        @host.status("unsaved issue notes — return to Issues to save them")
       end
       false
     end
@@ -787,13 +795,8 @@ module Gori::Tui
 
     private def handle_notes_insert_key(ev : Termisu::Event::Key, key, c : Char?) : Bool
       case
-      when ev.ctrl? && key.lower_w?
-        # Disarmed on the way out: an arm granted for a refusal the operator then answered with
-        # `^W` must not still be sitting there for the NEXT edit of this issue, where a second
-        # `esc` would write over a peer without ever showing the refusal that earns it.
-        @notes_overwrite_armed = nil
-        @issues.cancel_notes_edit
-        @issues.refresh_detail(@host.session.store)
+      when ev.ctrl? && key.lower_w? && notes_w_armed?
+        notes_take_theirs
       when ev.ctrl_z? then @issues.notes_undo
       when (ev.ctrl? || ev.alt?) && !@issues.notes_word_delete_key?(ev) && !editing_motion?(ev)
         # Every other modified chord defers to the central keymap so it stays rebindable —
@@ -862,7 +865,7 @@ module Gori::Tui
       # Announce instead — the alternative is the operator finding out at `esc`, when the save
       # is refused for a reason nothing on screen had hinted at. Latched to once per distinct
       # peer value: this tick also fires on this session's OWN captures.
-      @host.status("notes changed by another session — esc checks for conflicts, ^W discards yours")
+      @host.status(NOTES_PEER_CHANGED)
     end
 
     def commit : Bool
@@ -895,15 +898,17 @@ module Gori::Tui
       case @issues.save_notes(@host.session.store).status
       in .committed?
         @notes_overwrite_armed = nil
+        @notes_discard_armed = nil
         true
       in .conflict?
-        @host.status("notes NOT saved — another session rewrote them, esc in the notes pane prompts before overwriting, ^W takes theirs")
+        @host.status(NOTES_REFUSED)
         allow_pending_conflict
       in .missing?
+        @notes_discard_armed = @issues.detail_issue.try(&.id)
         @host.status(NOTES_ISSUE_DELETED)
         false
       in .busy?
-        @host.status("notes NOT saved — project busy, esc to retry")
+        @host.status(NOTES_BUSY)
         false
       end
     end
@@ -914,6 +919,7 @@ module Gori::Tui
       return unless issue = @issues.detail_issue
       confirmation = @notes_overwrite_armed
       @notes_overwrite_armed = nil
+      @notes_discard_armed = nil
       overwrite = confirmation[1] if confirmation && confirmation[0] == issue.id
       result = @issues.save_notes(@host.session.store, overwrite: overwrite)
       case result.status
@@ -921,11 +927,55 @@ module Gori::Tui
         nil
       in .conflict?
         @notes_overwrite_armed = result.current.try { |current| {issue.id, current} }
-        @host.status("notes NOT saved — another session rewrote them; esc again overwrites theirs, ^W takes theirs, ^Y copies yours")
+        @host.status(NOTES_CONFLICT)
       in .missing?
+        @notes_discard_armed = issue.id
         @host.status(NOTES_ISSUE_DELETED)
       in .busy?
-        @host.status("notes NOT saved — project busy; your text is still here, esc to retry")
+        @host.status(NOTES_BUSY)
+      end
+    end
+
+    # `^W` answers only a refusal on screen: it is a delete-word reflex everywhere else, and
+    # one key must not throw a whole writeup away. Armed by an `esc` conflict (take theirs) or
+    # by a save that found the issue deleted (discard, the only way to let go of that draft).
+    private def notes_w_armed? : Bool
+      return true if notes_conflict_armed?
+      return false unless issue = @issues.detail_issue
+      @notes_discard_armed == issue.id
+    end
+
+    private def notes_conflict_armed? : Bool
+      return false unless issue = @issues.detail_issue
+      @notes_overwrite_armed.try(&.[0]) == issue.id
+    end
+
+    # Disarmed on the way out: an arm granted for a refusal the operator then answered with
+    # `^W` must not still be sitting there for the NEXT edit of this issue, where a second
+    # `esc` would write over a peer without ever showing the refusal that earns it. Taking
+    # theirs is one undoable edit (`IssuesView#take_stored_notes`), so `^Z` brings the draft
+    # back; a deleted issue's draft is discarded and the detail closes, as before.
+    private def notes_take_theirs : Nil
+      conflict = notes_conflict_armed?
+      @notes_overwrite_armed = nil
+      @notes_discard_armed = nil
+      store = @host.session.store
+      if conflict
+        @issues.take_stored_notes(store)
+      else
+        @issues.cancel_notes_edit
+        @issues.refresh_detail(store)
+      end
+    end
+
+    # The INS hint names `^W` only while it is armed, and names it for what it will do.
+    private def notes_insert_hint : String
+      if notes_conflict_armed?
+        "type · ^Y copy · esc overwrites · ^W theirs"
+      elsif notes_w_armed?
+        "type · ^Y copy · ^W discard"
+      else
+        "type · ^Y copy · esc save"
       end
     end
 
@@ -1109,18 +1159,13 @@ module Gori::Tui
       from_detail = @issues.detail_open?
       ids = from_detail ? [@issues.detail_issue.try(&.id)].compact : @issues.target_ids
       return if ids.empty?
-      # Marks can outlive the visible list (a filter change, a peer delete), so a batch
-      # confirm spells out the split: this dialog — not the list chip — is the last thing
-      # read before data is destroyed.
+      return if !from_detail && hidden_marks_delete_card?
+      # Marks can outlive the visible list (a filter change, a peer delete): that split is
+      # the hidden-marks card's, above. Past it every mark is on the list, or the detail pins
+      # one issue.
       # Two labels — see HistoryController#delete_selected, which this mirrors: the confirm
       # body quotes the name, the toast reports it after a colon.
-      name =
-        if ids.size == 1
-          @issues.issue_summary(ids.first)
-        else
-          hidden = @issues.hidden_count(ids)
-          "#{ids.size} issues#{hidden > 0 ? " (#{hidden} not visible)" : ""}"
-        end
+      name = ids.size == 1 ? @issues.issue_summary(ids.first) : "#{ids.size} issues"
       label = ids.size == 1 ? "“#{name}”" : name
       # Frozen evidence is project-wide (#1039): deleting an Issue removes only these
       # memberships. Say that explicitly so the operator never reads the confirm as a byte
@@ -1135,6 +1180,38 @@ module Gori::Tui
         unless @issues.delete_ids(@host.session.store, ids)
           @host.status("issue NOT deleted (project busy) — the marks are kept, try again")
           next
+        end
+        @host.status("issue deleted: #{name}")
+      end
+    end
+
+    # The hidden-marks card (`TabController.hidden_marks_card?`) over Issues' marks: the gate
+    # `Runner#issues_hidden_marks_gate?` raises for every batch-capable list verb, and the
+    # delete raises with its own wording. False when every mark is on the list.
+    def hidden_marks_card?(heading : String, question : String, tail : String? = nil, *,
+                           confirm_verb : String? = nil, danger : Bool = false,
+                           &act : Array(Int64), Bool -> Nil) : Bool
+      return false if @issues.mark_count == 0
+      cursor = @issues.selected_id
+      TabController.hidden_marks_card?(@host, heading, question, noun: "issue",
+        marks: @issues.marked_ids, hidden: @issues.marked_hidden_count, cursor: cursor,
+        cursor_label: cursor.try { |c| @issues.issue_summary(c) }, tail: tail,
+        confirm_verb: confirm_verb, danger: danger) { |ids, cursor_only| act.call(ids, cursor_only) }
+    end
+
+    # The delete over marks the filter hides: ONE danger card that names the split and offers
+    # the cursor row, as History's does. Frozen evidence is disclosed without a count — the
+    # card answers for two different sets, and the reassurance (the copies stay) holds for both.
+    private def hidden_marks_delete_card? : Bool
+      store = @host.session.store
+      candidates = @issues.marked_ids + [@issues.selected_id].compact
+      frozen = candidates.any? { |id| !store.issue_evidence(id).empty? }
+      tail = frozen ? "Frozen evidence links are removed; the archived copies stay.\n" : ""
+      hidden_marks_card?("DELETE ISSUES", "Delete", "#{tail}This can't be undone.",
+        confirm_verb: "delete", danger: true) do |ids, _|
+        name = ids.size == 1 ? @issues.issue_summary(ids.first) : Gori.plural(ids.size, "issue")
+        unless @issues.delete_ids(store, ids)
+          next @host.status("issue NOT deleted (project busy) — the marks are kept, try again")
         end
         @host.status("issue deleted: #{name}")
       end
@@ -1223,6 +1300,10 @@ module Gori::Tui
     def issues_copy_all : Nil
       # With no issue open, `y` is the LIST's copy: every marked row, or the cursor row.
       unless @issues.detail_open?
+        # A mark the filter hides asks first, as every batch verb does (`hidden_marks_card?`).
+        return if hidden_marks_card?("COPY", "Copy") do |ids, _|
+                    copy_text(@issues.copy_rows_text(ids), ids.size > 1 ? "#{ids.size} issues" : nil)
+                  end
         n = @issues.mark_count
         return copy_text(@issues.copy_rows_text, n > 1 ? "#{n} issues" : nil)
       end

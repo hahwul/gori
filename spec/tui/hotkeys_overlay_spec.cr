@@ -317,4 +317,28 @@ describe "HotkeysOverlay — leaving with unsaved rebinds" do
     o.handle_click(area, 0, 0).should eq(:stay)   # outside: warns instead of discarding
     o.handle_click(area, 0, 0).should eq(:cancel) # again: discards
   end
+
+  # A double-click outside is two presses at the shell: the second reaches
+  # `handle_double_click` first, and a `:pass` there becomes a click that discards unseen.
+  it "keeps a double-click outside from answering the question its first press asked" do
+    o = fresh_overlay
+    o.move(1)
+    o.unbind_selected
+    area = Rect.new(0, 0, 120, 40)
+    o.handle_click(area, 0, 0).should eq(:stay)
+    o.handle_double_click(area, 0, 0).should eq(:stay)
+  end
+
+  it "asks on ^P too, and goes on the second" do
+    o = fresh_overlay
+    o.move(1)
+    o.unbind_selected
+    jumped = 0
+    o.on_palette = -> { jumped += 1; nil }
+    ctrl_p = Termisu::Event::Key.new(Termisu::Input::Key::LowerP, Termisu::Input::Modifier::Ctrl)
+    o.handle_key(ctrl_p)
+    jumped.should eq(0)
+    o.handle_key(ctrl_p)
+    jumped.should eq(1)
+  end
 end

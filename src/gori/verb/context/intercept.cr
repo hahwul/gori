@@ -3,8 +3,8 @@
 abstract class Gori::Verb::ExecContext
   # intercept (hold-and-decide; P4)
   abstract def intercept_toggle : Nil          # toggle the hold queue on/off
-  abstract def intercept_forward : Nil         # forward the marked holds, else the cursor row (edited bytes)
-  abstract def intercept_drop : Nil            # drop the marked holds, else the cursor row
+  abstract def intercept_forward : Nil         # forward the open editor's hold, else the marks, else the cursor row
+  abstract def intercept_drop : Nil            # drop the open editor's hold, else the marks, else the cursor row
   abstract def intercept_forward_all : Nil     # forward every held message (marks or not)
   abstract def intercept_query : Nil           # focus the catch-condition filter bar
   abstract def intercept_cycle_direction : Nil # cycle catch direction (req/res/all)
@@ -23,4 +23,7 @@ abstract class Gori::Verb::ExecContext
   # Copy's wider gate: also true while the held-bytes EDITOR is open, so an INS selection there
   # can be copied (`^Y`) instead of only destroyed by the next printable.
   abstract def intercept_copyable? : Bool
+  # Send flow to… → Repeater: open the held request (an unforwarded edit included) in a new
+  # Repeater tab without deciding the hold.
+  abstract def intercept_repeater : Nil
 end

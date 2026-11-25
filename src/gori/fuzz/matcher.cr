@@ -459,6 +459,26 @@ module Gori::Fuzz
       @baseline = [] of BaselineSample
     end
 
+    # The copy a run owns (`Fuzz::Plan.build`). The TUI's CONFIG and ADVANCED cards keep
+    # writing the matcher they were handed, so a run that shared it changed what it matched
+    # and stopped on while it ran. The copy also keeps what a run writes (the calibration
+    # baseline, the gRPC counters) off the form's instance.
+    #
+    # `dup` is shallow. Each spec setter swaps in a freshly compiled value, a `Regex` does not
+    # change, and the arrays are copied below. So no later edit to the original reaches the copy.
+    def snapshot : Matcher
+      copy = dup
+      copy.snapshot_owned!
+      copy
+    end
+
+    protected def snapshot_owned! : Nil
+      @extractors = @extractors.dup
+      @extract_res = @extract_res.dup
+      @baseline = @baseline.dup
+      @stop_condition = @stop_condition.try(&.snapshot)
+    end
+
     def baseline=(samples : Array(BaselineSample)) : Nil
       @baseline = samples
       @reflects_length = Matcher.reflects_length?(samples)
