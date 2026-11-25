@@ -4,6 +4,8 @@ require "../../support/fake_context"
 require "../../support/memory_backend"
 require "../../support/sse_origin"
 require "../../support/tui_probes"
+require "../../support/demo_descriptor"
+require "base64"
 
 include Gori::Tui
 
@@ -757,5 +759,36 @@ describe "RepeaterController footer on an 80-column row" do
       v.focus_pane(:response)
       Chrome.status_row(ctl.body_hint(:body), "RESPONSE").should contain("^R send")
     end
+  end
+end
+
+# The gRPC FIELDS footer names two palette-only verbs by their routes, and a route already
+# spells the verb's title (`^P → Edit gRPC message as JSON`): the word after it read twice.
+describe "RepeaterController gRPC FIELDS footer" do
+  it "names each palette route once" do
+    dir = File.tempname("gori-protos-ctl")
+    Dir.mkdir_p(dir)
+    File.write(File.join(dir, "demo.desc"), Base64.decode(DEMO_DESC_B64))
+    with_repeater_controller do |ctl, host|
+      Gori::Protobuf::Schemas.apply(dir) # after Session.open, which applies the project's own
+      head = "POST /demo.Users/GetUser HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\n\r\n"
+      msg = Bytes[0x0A, 0x03, 0x62, 0x6F, 0x62] # demo.GetUserRequest{name: "bob"}
+      id = host.session.store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
+        method: "POST", target: "/demo.Users/GetUser", http_version: "HTTP/2",
+        head: head.to_slice, body: Gori::Proxy::H2::Grpc.frame(false, msg),
+        source: Gori::FlowSource::Kind::Proxy))
+      ctl.repeater_flow(id)
+      v = ctl.current_view.not_nil!
+      v.focus_pane(:request)
+      v.toggle_grpc_fields.should be_true
+      hint = ctl.body_hint(:body)
+      hint.should contain("Edit gRPC message as JSON · ")
+      hint.should_not contain("JSON JSON")
+      hint.should_not contain("field add field")
+    end
+  ensure
+    Gori::Protobuf::Schemas.clear
+    FileUtils.rm_rf(dir) if dir
   end
 end

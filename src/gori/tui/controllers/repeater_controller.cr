@@ -440,7 +440,9 @@ module Gori::Tui
       if v.grpc_fields_editing?
         keys("type the value · ↵ apply · esc cancel · {repeater.send} send")
       elsif v.grpc_fields?
-        keys("↑/↓ pick a field · i/↵ edit · {repeater.send} send · {space:repeater.grpc-json-edit} JSON · {space:repeater.grpc-add-field} add field · #{chip("repeater.toggle-grpc-fields")}/esc head · {repeater.toggle-hex} hex")
+        # The two palette routes print their own titles (`^P → Edit gRPC message as JSON`), so a
+        # word after them read twice: `… as JSON JSON`, `… Add gRPC field add field`.
+        keys("↑/↓ pick a field · i/↵ edit · {repeater.send} send · {space:repeater.grpc-json-edit} · {space:repeater.grpc-add-field} · #{chip("repeater.toggle-grpc-fields")}/esc head · {repeater.toggle-hex} hex")
       elsif v.request_hex?
         keys("gRPC payload hex — overtype 0-9a-f · {repeater.send} send · Ins/Del length · {repeater.toggle-hex}/esc exit")
       elsif v.request_insert?

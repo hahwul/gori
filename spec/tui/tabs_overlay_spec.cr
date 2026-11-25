@@ -185,4 +185,79 @@ describe TabsOverlay do
     available.to_prefs.map(&.[0]).should contain("evidence")
     unavailable.entry_count.should eq(available.entry_count - 1)
   end
+
+  # At 80 columns the hint's tail — `↵ save · esc cancel` — is the part cut, so a reorder the
+  # operator could see vanished on esc or a stray click without a word. Hotkeys and
+  # Preferences both ask once; so does this card.
+  describe "leaving with unsaved changes" do
+    esc = Termisu::Event::Key.new(Termisu::Input::Key::Escape)
+    down = Termisu::Event::Key.new(Termisu::Input::Key::Down)
+    area = Rect.new(0, 0, 80, 24)
+
+    it "closes straight away when nothing changed" do
+      TabsOverlay.new.handle_key(esc).should eq(:cancel)
+    end
+
+    it "warns on the first esc and discards on the second" do
+      o = TabsOverlay.new
+      o.move_selected(1)
+      o.unsaved?.should be_true
+      o.handle_key(esc).should eq(:stay)
+      o.hint.should contain("esc again discards") # on the line itself, not a toast
+      o.handle_key(esc).should eq(:cancel)
+    end
+
+    it "expires the warning after any other key, so esc must warn again" do
+      o = TabsOverlay.new
+      o.move_selected(1)
+      o.handle_key(esc).should eq(:stay)
+      o.handle_key(down)
+      o.handle_key(esc).should eq(:stay)
+    end
+
+    it "asks the same way on a click outside the card" do
+      o = TabsOverlay.new
+      o.move_selected(1)
+      o.handle_click(area, 0, 0).should eq(:stay)
+      o.handle_click(area, 0, 0).should eq(:cancel)
+    end
+
+    # The shell offers the pair's second press to `handle_double_click` first, and the base
+    # `:pass` turned it into the click that discarded, with the question never seen.
+    it "keeps a double-click outside from answering the question its first press asked" do
+      o = TabsOverlay.new
+      o.move_selected(1)
+      o.handle_click(area, 0, 0).should eq(:stay)
+      o.handle_double_click(area, 0, 0).should eq(:stay)
+      o.hint.should contain("esc again discards")
+    end
+
+    it "asks on ^P too, and goes on the second" do
+      o = TabsOverlay.new
+      jumped = 0
+      o.on_palette = -> { jumped += 1; nil }
+      ctrl_p = Termisu::Event::Key.new(Termisu::Input::Key::LowerP, Termisu::Input::Modifier::Ctrl)
+      o.move_selected(1)
+      o.handle_key(ctrl_p)
+      jumped.should eq(0)
+      o.hint.should contain("esc again discards")
+      o.handle_key(ctrl_p)
+      jumped.should eq(1)
+    end
+
+    it "jumps to the palette at once when nothing changed" do
+      o = TabsOverlay.new
+      jumped = 0
+      o.on_palette = -> { jumped += 1; nil }
+      o.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerP, Termisu::Input::Modifier::Ctrl))
+      jumped.should eq(1)
+    end
+
+    it "counts a reorder put back by hand as no change" do
+      o = TabsOverlay.new
+      o.move_selected(1)
+      o.move_selected(-1)
+      o.handle_key(esc).should eq(:cancel)
+    end
+  end
 end

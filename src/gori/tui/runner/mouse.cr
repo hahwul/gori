@@ -233,6 +233,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       apply_overlay_outcome(ov, outcome)
       return true
     end
+    tab_double_click(layout, mx, my)
+  end
+
+  # The active tab's half of a double-click — split out so the overlay half above can be
+  # driven on its own (spec/tui/runner/mouse_spec.cr).
+  private def tab_double_click(layout : Layout, mx : Int32, my : Int32) : Bool
     @tabs[@active_tab]?.try(&.handle_double_click(layout.body, mx, my)) || false
   end
 

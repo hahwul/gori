@@ -177,13 +177,19 @@ module Gori::Tui
       :stay
     end
 
+    # ^P leaves the card as surely as esc does, so it asks the same question first
+    # (Preferences does too); a second ^P, like a second esc, goes.
+    private def palette_or_ask(armed : Bool) : Nil
+      on_palette.try(&.call) if escape_browse(armed) == :cancel
+    end
+
     # :browse — navigate/edit the list. ↵ saves+applies, esc discards the working copy.
     private def handle_browse_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       armed = @discard_armed
       @discard_armed = false
       if ev.ctrl? && key.lower_p?
-        on_palette.try(&.call)
+        palette_or_ask(armed)
       elsif key.escape?
         return escape_browse(armed)
       elsif key.enter?
@@ -211,8 +217,10 @@ module Gori::Tui
     # from. Unlike capture, this mode never asks the shell for raw chords.
     private def handle_search_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
+      armed = @discard_armed
+      @discard_armed = false
       if ev.ctrl? && key.lower_p?
-        on_palette.try(&.call)
+        palette_or_ask(armed)
       elsif key.escape?
         cancel_search
       elsif key.enter?
@@ -380,6 +388,15 @@ module Gori::Tui
         set_selected(idx)
       end
       :stay
+    end
+
+    # A double-click's second press must not answer the question its first press just asked:
+    # the base hands a miss back as an ordinary click, and that one would discard unseen —
+    # the same hole `DiscardGuard#handle_double_click` closes for the forms.
+    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :stay if @discard_armed && (box.nil? || !box.contains?(mx, my))
+      super
     end
 
     private def selected_id : String

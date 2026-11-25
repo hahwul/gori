@@ -55,10 +55,20 @@ private class PairRunner < Runner
     press_left(Layout.compute(80, 24), mx, my)
   end
 
+  @discarded = false
+  getter? discarded : Bool
+
+  # Put `ov` up as the active modal, the way `Runner#open_overlay` leaves it.
+  def show(ov : Overlay) : Nil
+    @active_overlay = ov
+    @overlay = ov.key
+  end
+
   # Not taken, as a tab that implements no double-click answers. Stubbed rather than reached:
   # the real one types every controller's `handle_double_click`, and EvidenceController's asks
-  # its Host for `evidence_open`, which FakeHost (loaded beside this file) does not have.
-  private def dispatch_double_click(layout : Layout, mx : Int32, my : Int32) : Bool
+  # its Host for `evidence_open`, which FakeHost (loaded beside this file) does not have. The
+  # overlay half of `dispatch_double_click` stays real.
+  private def tab_double_click(layout : Layout, mx : Int32, my : Int32) : Bool
     false
   end
 
@@ -72,6 +82,12 @@ private class PairRunner < Runner
       @toast = "status set"
     when :open
       @space_menu_open = true
+    when :overlay # the modal tier: the overlay answers its own click, as dispatch_overlay_click
+      ov = @active_overlay.not_nil!
+      if ov.handle_click(layout.body, mx, my) == :cancel
+        @discarded = true
+        @overlay = OverlayKind::None
+      end
     end
   end
 end
@@ -126,5 +142,24 @@ describe "Runner double-click over a modal change" do
     r.press(10, 10)
     r.press(11, 10)
     r.clicks.should eq(2)
+  end
+end
+
+# A press OUTSIDE a card with unsaved edits asks "esc again discards" and leaves the modal
+# layer as it was, so the pair swallow above does not fire: the second press reaches the
+# overlay's `handle_double_click`, and the base answer (`:pass`, a miss is an ordinary click)
+# would make it the click that confirms the discard — before the question could be read.
+describe "Runner double-click outside a card that just asked about a discard" do
+  it "does not let the pair's second press answer the question" do
+    r = PairRunner.allocate
+    r.prepare
+    ov = TabsOverlay.new
+    ov.move_selected(1) # an arrangement not saved yet
+    r.show(ov)
+    r.script(:overlay, :overlay)
+    r.press(1, 5) # asks
+    r.press(1, 5) # the pair's other half
+    r.discarded?.should be_false
+    ov.hint.should contain("esc again discards") # the question is still on the line
   end
 end

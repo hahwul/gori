@@ -202,9 +202,13 @@ module Gori::Tui
       NONE
     end
 
+    # ↑ off the top of the strip leaves the card like esc, but it never CONFIRMS a discard:
+    # the warning says "esc again discards", and an operator pressing ↑ to climb back to the
+    # strip presses it twice without reading anything. Over unsaved edits ↑ only warns.
     private def handle_strip_key(key : Termisu::Input::Key, confirming : Bool) : Outcome
       case
-      when key.escape?, key.up?  then return close_or_warn(confirming)
+      when key.escape?           then return close_or_warn(confirming)
+      when key.up?               then return close_or_warn(false)
       when key.left?             then set_group(@group - 1)
       when key.right?            then set_group(@group + 1)
       when key.down?, key.enter? then @on_strip = false

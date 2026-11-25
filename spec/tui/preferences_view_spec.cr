@@ -74,6 +74,24 @@ describe Gori::Tui::PreferencesView do
     v.handle_key(pkey(ESC)).kind.should eq(:close)
   end
 
+  it "never discards on ↑ from the strip: the warning names esc, so only esc confirms it" do
+    v = PreferencesView.new
+    v.open_default
+    into_fields(v)
+    v.handle_key(pkey(RIGHT))
+    v.handle_key(pkey(Termisu::Input::Key::Up))                       # back onto the strip
+    v.handle_key(pkey(Termisu::Input::Key::Up)).kind.should eq(:none) # warns
+    v.handle_key(pkey(Termisu::Input::Key::Up)).kind.should eq(:none) # …and warns again
+    v.dirty?.should be_true
+    v.handle_key(pkey(ESC)).kind.should eq(:close) # the key the warning named
+  end
+
+  it "still closes on ↑ from the strip when nothing was edited" do
+    v = PreferencesView.new
+    v.open_default
+    v.handle_key(pkey(Termisu::Input::Key::Up)).kind.should eq(:close)
+  end
+
   it "reopening reloads from disk, dropping the dirty state" do
     v = PreferencesView.new
     v.open_default
