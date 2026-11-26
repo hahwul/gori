@@ -156,6 +156,15 @@ describe Gori::SessionSlot do
 end
 
 describe Gori::SessionRefresh do
+  # `-id` raised OverflowError on Int64::MIN, which failed every list of the slots.
+  it "labels a detached step without negating its id" do
+    with_refresh_env do |store|
+      slot = Gori::SessionSlot.new("admin", refresh: [Int64::MIN, -5_i64])
+      Gori::SessionRefresh.step_labels(store, slot)
+        .should eq(["repeater #9223372036854775808 (deleted)", "repeater #5 (deleted)"])
+    end
+  end
+
   it "reads the earliest exp out of a bound value" do
     payload = Base64.urlsafe_encode(%({"exp":1700000000}), padding: false)
     header = Base64.urlsafe_encode(%({"alg":"HS256"}), padding: false)
