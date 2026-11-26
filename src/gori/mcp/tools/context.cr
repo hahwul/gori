@@ -209,6 +209,15 @@ module Gori
           "QUERY_SYNTAX", field: "filter")
       end
 
+      # `query` as a case-folded literal. PCRE2 refuses a pattern past its size limit (an
+      # escaped query of ~35k chars) with ArgumentError, which the blanket rescue coded INTERNAL:
+      # an oversized argument is the caller's to shorten, not a broken server.
+      private def repeater_query_regex(q : String) : Regex | Result
+        Regex.new(Regex.escape(q), Regex::Options::IGNORE_CASE)
+      rescue ArgumentError
+        err("'query' is too long to search (#{q.bytesize} bytes); shorten it", "INVALID_ARGUMENT", field: "query")
+      end
+
       REPEATER_CONTEXT_LIMIT = PageLimit.new(50, 500)
 
       @[Tool("get_repeater_context", requires: ["get_response_body_chunk"])]
@@ -220,7 +229,8 @@ module Gori
         include_sensitive = bool_arg(h, "include_sensitive", false)
         pg = page_args(h, REPEATER_CONTEXT_LIMIT)
         query_str = str(h, "query").try(&.strip)
-        query_rx = query_str.try { |q| q.empty? ? nil : Regex.new(Regex.escape(q), Regex::Options::IGNORE_CASE) }
+        query_rx = query_str.try { |q| q.empty? ? nil : repeater_query_regex(q) }
+        return query_rx if query_rx.is_a?(Result)
         include_response_body = bool_arg(h, "include_response_body", false)
         req_body_cap = optional_int_arg(h, "max_body_bytes")
         body_cap = clamp(req_body_cap, MCP_REPEATER_BODY_DEFAULT, MCP_REPEATER_BODY_MAX)
