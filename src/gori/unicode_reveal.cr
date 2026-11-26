@@ -105,51 +105,74 @@ module Gori::UnicodeReveal
 
     needs_badge = false
     text.each_grapheme do |grapheme|
-      source = grapheme.to_s
-      source_width = Termisu::UnicodeWidth.grapheme_width(source)
-      prev = nil.as(Char?)
-      source.each_char do |char|
-        if name = label(char.ord)
-          if !(source_width > 0 && contextual_invisible?(char, source, name, prev))
-            needs_badge = true
-            break
-          end
-        end
-        prev = char
-      end
-      break if needs_badge
+      next unless badged?(grapheme.to_s)
+      needs_badge = true
+      break
     end
     return nil unless needs_badge
 
-    out = String::Builder.new
-    text.each_grapheme do |grapheme|
-      source = grapheme.to_s
-      source_width = Termisu::UnicodeWidth.grapheme_width(source)
-      prev = nil.as(Char?)
-      source.each_char do |char|
-        prev_char = prev
-        prev = char
-        if name = label(char.ord)
-          if source_width > 0 && contextual_invisible?(char, source, name, prev_char)
-            # Keep combining marks and emoji shaping controls attached to visible text;
-            # their grapheme still renders, so replacing the control would break the glyph.
-            out << char
+    String.build do |io|
+      text.each_grapheme do |grapheme|
+        each_verdict(grapheme.to_s) do |char, badge|
+          if badge
+            io << '⟨' << badge << '⟩'
           else
-            out << '⟨' << name << '⟩'
+            io << char
           end
-        else
-          out << char
         end
       end
     end
-    out.to_s
   end
 
-  private def self.contextual_invisible?(char : Char, grapheme : String, name : String, prev : Char?) : Bool
+  private def self.badged?(grapheme : String) : Bool
+    each_verdict(grapheme) { |_, badge| return true if badge }
+    false
+  end
+
+  # Yields each codepoint of one grapheme with the name it is drawn as, or nil when it draws as
+  # itself. Combining marks and emoji shaping controls stay attached to visible text: their
+  # grapheme still renders, so replacing the control would break the glyph.
+  #
+  # Both passes of `visible` read this one verdict. The whole-grapheme facts it needs are
+  # computed at most once per grapheme, and only once a named codepoint asks: recomputing them
+  # per codepoint made one long cluster (an emoji ZWJ chain, `a` + ZWJ×n, or a base followed by
+  # (SpacingMark VS16)×n, each a single grapheme under UAX #29) quadratic to classify.
+  private def self.each_verdict(grapheme : String, &) : Nil
+    width = Termisu::UnicodeWidth.grapheme_width(grapheme)
+    cluster = nil.as(Cluster?)
+    prev = nil.as(Char?)
+    grapheme.each_char do |char|
+      name = label(char.ord)
+      if name && width > 0
+        cluster ||= cluster_of(grapheme)
+        name = nil if contextual_invisible?(char, cluster, name, prev)
+      end
+      yield char, name
+      prev = char
+    end
+  end
+
+  # The facts about a whole grapheme that its controls' verdicts depend on: whether it holds two
+  # or more emoji bases, and whether it is a keycap sequence (U+20E3 plus a 0-9/#/* base).
+  private record Cluster, emoji : Bool, keycap : Bool
+
+  private def self.cluster_of(grapheme : String) : Cluster
+    bases = 0
+    keycap = false
+    keycap_base = false
+    grapheme.each_char do |char|
+      bases += 1 if bases < 2 && emoji_base?(char.ord)
+      keycap = true if char.ord == 0x20e3
+      keycap_base = true if keycap_base?(char)
+    end
+    Cluster.new(bases >= 2, keycap && keycap_base)
+  end
+
+  private def self.contextual_invisible?(char : Char, cluster : Cluster, name : String, prev : Char?) : Bool
     cp = char.ord
     return false if (0xe0020..0xe007f).includes?(cp)
-    return emoji_sequence?(grapheme) if cp == 0x200d
-    return presentation_selector?(cp, grapheme, prev) if variation_selector?(cp)
+    return cluster.emoji if cp == 0x200d
+    return presentation_selector?(cp, cluster, prev) if variation_selector?(cp)
     # Only unnamed combining/emoji extenders may stay attached to a visible grapheme. Explicitly
     # named format controls such as CGJ must remain visible even when grapheme segmentation
     # attaches them to a printable neighbor.
@@ -162,31 +185,14 @@ module Gori::UnicodeReveal
   # Only VS15/VS16 choose how an emoji draws, and only ONE, directly after its base. Every
   # other selector — VS1-14, VS17-256, or a repeat — changes nothing on screen, which is what
   # makes a run of them after an emoji a place to hide bytes ("emoji smuggling"); it is named.
-  private def self.presentation_selector?(cp : Int32, grapheme : String, prev : Char?) : Bool
+  private def self.presentation_selector?(cp : Int32, cluster : Cluster, prev : Char?) : Bool
     return false unless cp == 0xfe0e || cp == 0xfe0f
     return false unless prev && label(prev.ord).nil?
-    emoji_base?(prev.ord) || (keycap_sequence?(grapheme) && keycap_base?(prev))
+    emoji_base?(prev.ord) || (cluster.keycap && keycap_base?(prev))
   end
 
   private def self.keycap_base?(char : Char) : Bool
     (char >= '0' && char <= '9') || char == '#' || char == '*'
-  end
-
-  private def self.emoji_sequence?(grapheme : String) : Bool
-    count = 0
-    grapheme.each_char { |char| count += 1 if emoji_base?(char.ord) }
-    count >= 2
-  end
-
-  private def self.keycap_sequence?(grapheme : String) : Bool
-    keycap = false
-    base = false
-    grapheme.each_char do |char|
-      cp = char.ord
-      keycap = true if cp == 0x20e3
-      base = true if (char >= '0' && char <= '9') || char == '#' || char == '*'
-    end
-    keycap && base
   end
 
   # Emoji=Yes bases, the BMP text-default ones included (©, ™, ↔, ▶, ⬆, ⭐, 〰, ㊗…), so their
