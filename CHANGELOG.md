@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- TUI: a response with one very long grapheme cluster (an emoji ZWJ chain or a run of joiners), `\uXXXX` decoding with `u`, a selection tint on a long non-ASCII line, a WebSocket frame packed with empty SignalR records, or a Sitemap folding thousands of query paths no longer freezes gori for seconds to hours; every hidden character is still revealed (#2029).
+
+- TUI: editing a Repeater or Intercept buffer that holds non-UTF-8 bytes no longer crashes gori when a backspace, delete or cut joins a stray lead byte to a continuation byte, and a pasted find string of tens of thousands of characters is refused as too long (#2029).
+
+- TUI: leaving a project while Fuzzer, Miner, Sequencer or Discover runs still have requests in flight no longer leaks those runs, and a run started as the project closes is refused (#2029).
+
+- A damaged or crafted project archive (an unknown zip compression method, an impossible entry date, or a binary value in a text column) is refused at import with a reason, and a Fuzzer timeout, Miner calibration rounds or a session-slot refresh id out of range in an imported or foreign project no longer leaves it unopenable or sending thousands of extra requests (#2029).
+
+- Outbound HTTPS sends and the proxy's upstream dial give up on a TLS handshake dripped out slowly after three I/O timeouts, an OAST provider exchange is capped at 60 s, and a WebSocket replay over HTTP/2 stops waiting on an origin that keeps the connection busy without answering (#2029).
+
+- Repeater, Fuzzer and races over HTTP/2 keep the response, sibling results and WebSocket transcript already received when the origin resets with an error code of 2^31 or more, and name that code instead of reporting "Arithmetic overflow" (#2029).
+
+- A JSON-RPC, MCP or LLM call, or a Socket.IO, SignalR, Action Cable or SockJS frame, no longer drops out of the decoded view when it holds a number past Int64, and numbers keep the digits that were sent (#2029).
+
+- Cache status (QL `cache:`, History, `get_flow` and cache deception checks) is read from response heads with bare-LF line endings too, so a cached private page behind such a cache is no longer reported as served (#2029).
+
+- MCP: `discover_start` caps `timeout_ms` like every other tool, `update_repeater` refuses malformed `tags` before writing anything, an oversized `query` is INVALID_ARGUMENT instead of INTERNAL, and a number or boolean file path is refused instead of becoming a file named `true` (#2029).
+
+- Discover no longer ends a brute-force run on a confirmed hit whose extension is not valid UTF-8, and a `--db` path through a symlink loop or an unsearchable directory is refused as "cannot open PATH" instead of a backtrace (#2029).
+
 - TUI: empty multi-line overlay editors keep IME composition visible while typing, arrow keys in path cards no longer reopen a dismissed completion list or disarm overwrite prompts, filter pickers and cross-project search show text selection and honor `Home`/`End`, and the Settings card asks before discarding unsaved edits (#2028).
 
 - TUI: `discover.dismiss` (when findings exist) and `authorize.remove` ask before deleting, Authorize reports seeded requests hidden by `/` and allows passive mode to re-queue removed items, Repeater confirms duplicating hidden marked tabs and detaches closed Timing runs cleanly, `^F` refuses in Repeater Response hex mode, failure toasts persist in Notifications, and OAST, Colormarker, JWT and Cookie lists support `PageUp`/`PageDown`/`Home`/`End` (#2028).
@@ -12,7 +32,7 @@
 
 - TUI: nine more editing cards (OAST provider, column, Sequencer config, custom colour, WS inject, Authorize identity, cURL paste, CA import and CVSS calculator) ask before discarding unsaved edits, bottom prompts and Fuzzer/OAST pickers ignore destructive pasted keys, and clicking or pressing Space on an invalid Save row shows what is missing (#2027).
 
-- TUI: History holds follow while focused in the preview pane and keeps single-pane detail scroll across Request/Response switches; Sitemap batch actions and Issues export ask before acting on hidden marks; Issues notes when an update hides a row under `/`; and Miner, Sequencer and Discover ask before `^R` clears existing results (#2027).
+- TUI: History holds follow while focused in the preview pane (until the list reaches twice its row cap) and keeps single-pane detail scroll across Request/Response switches; Sitemap batch actions and Issues export ask before acting on hidden marks; Issues notes when an update hides a row under `/`; and Miner, Sequencer and Discover ask before `^R` clears existing results (#2027, #2029).
 
 - TUI: a paste at the project picker, the setup wizard or the tour is typed into their text fields and refused everywhere else, as it already was in the app; a paste on a picker project row could open the action menu and delete the project (#2026).
 
