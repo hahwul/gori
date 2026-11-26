@@ -117,6 +117,22 @@ describe Gori::WsProto do
       decode([%({"type":99}) + RS, %({"type":98}) + RS]).should be_empty
     end
 
+    it "splits non-ASCII records on byte offsets, past empty records" do
+      fs = decode([%({"type":1,"target":"Senden","arguments":["é"]}) + RS + RS +
+                   %({"type":1,"target":"Grüßen","arguments":[]}) + RS])
+      fs.map(&.name).should eq(["Senden", "Grüßen"])
+      fs[0].payload.should eq(%(["é"]))
+    end
+
+    # A char offset into a non-ASCII String walks from byte 0 on every call, and empty records
+    # did not count against MAX_RECORDS: this frame took ~4 s before the fix (1 MiB: an hour
+    # of a frozen scheduler). Generous bound; the fix is well under a millisecond.
+    it "decodes a non-ASCII frame of empty records in bounded time" do
+      payload = ("é" + RS * 32_768).to_slice
+      elapsed = Time.measure { WP::SignalR.decode(payload).should be_nil }
+      elapsed.should be < 1.5.seconds
+    end
+
     it "requires the record separator, so ordinary JSON is not a hub message" do
       WP::SignalR.decode(%({"type":1,"target":"A","arguments":[]}).to_slice).should be_nil
       decode([%({"type":1,"target":"A","arguments":[]})]).should be_empty

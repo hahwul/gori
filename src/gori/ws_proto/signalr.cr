@@ -25,8 +25,7 @@ module Gori
       NAME  = "signalr"
       LABEL = "SignalR"
 
-      RS      = 0x1e_u8
-      RS_CHAR = '\u{1e}'
+      RS = 0x1e_u8
 
       def hinted?(sub : String) : Bool
         sub == "signalr" || sub == "json.signalr" || sub == "messagepack.signalr"
@@ -35,18 +34,22 @@ module Gori
       def decode(payload : Bytes) : Array(Decoded)?
         return nil if payload.empty?
         return nil unless payload.unsafe_fetch(payload.size - 1) == RS # the prefilter AND the proof
-        s = String.new(payload).scrub
         out = [] of Decoded
         pos = 0
+        records = 0
         # A bounded scan rather than `split`: a 1 MiB frame of nothing but separators would
-        # materialise a million substrings before any cap could look at them.
-        while out.size < MAX_RECORDS
-          idx = s.index(RS_CHAR, pos) || break
-          raw, pos = s[pos, idx - pos], idx + 1
-          next if raw.empty?
-          out << (hub_record(raw) || WsProto.unreadable)
+        # materialise a million substrings before any cap could look at them. BYTE offsets, as
+        # in `Stomp.frames`: a char offset into a non-ASCII String walks from byte 0 on every
+        # call, and an empty record is still a record against the cap — skipping it uncounted
+        # let `"é" + RS * N` loop N times at O(N) each, an hour of a frozen scheduler at 1 MiB.
+        while records < MAX_RECORDS
+          idx = payload.index(RS, pos) || break
+          start, pos = pos, idx + 1
+          records += 1
+          next if idx == start
+          out << (hub_record(String.new(payload[start, idx - start]).scrub) || WsProto.unreadable)
         end
-        out << WsProto.truncated if out.size == MAX_RECORDS && s.index(RS_CHAR, pos)
+        out << WsProto.truncated if records == MAX_RECORDS && payload.index(RS, pos)
         # Every SignalR record is `strong` (the separator is proof), so a frame that yielded
         # only unreadable rows was never SignalR — it falls through to raw, as it must.
         out.any?(&.strong) ? out : nil
