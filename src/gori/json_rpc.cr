@@ -4,6 +4,7 @@ require "./sse"
 require "./graphql"
 require "./plural"
 require "./raw_json"
+require "./utf8"
 
 module Gori
   # JSON-RPC 2.0 — and so MCP's Streamable HTTP transport — as a display-time projection of one
@@ -30,12 +31,17 @@ module Gori
     # transport answers on a separate GET flow, so its replies land here, unpaired).
     record Message, method : String?, id : String?, body : String
 
-    # One JSON-RPC message as RAW JSON text: the object, and its members' values (the last of
-    # a duplicated key, as `JSON.parse` reads it). Everything this module shows is a value it
-    # re-emits, so it never holds a `JSON::Any`: `JSON.parse` rejects a whole document over one
-    # number past Int64 (a uint64 id), and a `RawJson.parse` tree would quote that number back
-    # out — and pair the number 18446744073709551615 with the string "18446744073709551615".
-    private record Msg, raw : String, m : Hash(String, String)
+    # One JSON-RPC message as RAW JSON text: its members in order (duplicates kept) and as a
+    # Hash (the last of a duplicated key, as `JSON.parse` reads it). Everything this module
+    # shows is a value it re-emits, so it never holds a `JSON::Any`: `JSON.parse` rejects a
+    # whole document over one number past Int64 (a uint64 id), and a `RawJson.parse` tree would
+    # quote that number back out — and pair the number 18446744073709551615 with the string
+    # "18446744073709551615". The SHOWN members (`PRETTY`) are held already pretty, read so in
+    # the one parse; the rest are compact.
+    private record Msg, members : Array({String, String}), m : Hash(String, String)
+
+    # The members a pane shows as pretty JSON. Every other member is compact (`id` is a key).
+    private PRETTY = {"params", "result", "error"}
 
     record Exchange, calls : Array(Call), stream : Array(Message)
 
@@ -73,7 +79,7 @@ module Gori
         if key && !m.m.has_key?("method") && (q = replies[key] ||= Deque(Msg).new).size < wanted.fetch(key, 0)
           q << m
         else
-          stream << Message.new(str(m.m["method"]?), key, pretty(m.raw))
+          stream << Message.new(str(m.m["method"]?), key, RawJson.reformat(RawJson.object(m.members), "  "))
         end
       end
       list = calls.map do |c|
@@ -81,9 +87,8 @@ module Gori
         r = id.try { |i| replies[i]?.try(&.shift?) }
         # `"error": null` beside a result is no error.
         err = r.try(&.m["error"]?).try { |e| e == "null" ? nil : e }
-        reply = r.try { |x| (err || x.m["result"]?).try { |v| pretty(v) } || "null" }
-        params = c.m["params"]?.try { |v| pretty(v) }
-        Call.new(str(c.m["method"]?) || "", id, label(c), params, reply, !err.nil?)
+        reply = r.try { |x| err || x.m["result"]? || "null" }
+        Call.new(str(c.m["method"]?) || "", id, label(c), c.m["params"]?, reply, !err.nil?)
       end
       Exchange.new(list, stream)
     end
@@ -100,35 +105,23 @@ module Gori
       return [] of Msg unless text.includes?(%("jsonrpc"))
       # `members` skips `tolerant` (it re-emits for a JWT re-sign); this is display, so one
       # unpaired surrogate escape must not hide the message.
-      json = RawJson.tolerant(text.scrub)
-      items = batch?(json) ? RawJson.elements(json) || [] of String : [json]
-      items.compact_map do |item|
-        m = RawJson.members(item).try(&.to_h) || next
-        Msg.new(item, m) if m["jsonrpc"]? == %("2.0")
+      # One pull pass over the document, the shown members read straight to pretty text: an
+      # element re-emitted as text, re-lexed for its members and then reformatted was three
+      # parses, ~3x `JSON.parse` on a 4 MB batch opened in History.
+      items = RawJson.object_members(RawJson.tolerant(Utf8.subject(text))) do |key, pull|
+        PRETTY.includes?(key) ? JSON.build("  ") { |j| pull.read_raw(j) } : pull.read_raw
+      end
+      items.compact_map do |members|
+        members || next
+        m = members.to_h
+        Msg.new(members, m) if m["jsonrpc"]? == %("2.0")
       end
     rescue JSON::ParseException
       [] of Msg
     end
 
-    # Whether the document's root is an array, read off its first byte: a single message is
-    # then parsed once, not once more to learn it is not a batch.
-    private def batch?(json : String) : Bool
-      json.each_byte do |b|
-        next if b === ' ' || b === '\n' || b === '\r' || b === '\t'
-        return b === '['
-      end
-      false
-    end
-
-    # A raw JSON string member, decoded; nil for any other value (or none).
     private def str(raw : String?) : String?
-      raw.try { |r| String.from_json(r) if r.starts_with?('"') }
-    end
-
-    # Raw JSON as pretty text: the indentation `to_pretty_json` gives, but every number as the
-    # digits that were sent and every duplicated member kept.
-    private def pretty(raw : String) : String
-      RawJson.reformat(raw, "  ")
+      RawJson.string?(raw)
     end
 
     # A response's SSE events, under the same MAX_BODY a plain JSON reply is held to: a 32 KB
@@ -136,19 +129,6 @@ module Gori
     def sse_events(head : Bytes?, body : Bytes?) : Array(Sse::Event)
       return [] of Sse::Event unless Sse.event_stream?(head) && (bytes = Entity.bytes(head, body, MAX_BODY))
       bytes.size > MAX_BODY ? [] of Sse::Event : Sse.events(bytes)
-    end
-
-    # `text` as JSON, or nil when it is not or cannot hold `needle` — a byte check that keeps
-    # an ordinary body from being parsed at all. Invalid UTF-8 is scrubbed for display (P7).
-    # Shared with LlmCall. `RawJson.parse`, so one number past Int64 (a uint64 seed) or an
-    # unpaired surrogate escape no longer makes the whole document "not JSON". For READING
-    # only: such a number is carried as a String, so a subtree of this tree is never re-emitted
-    # — a caller showing one takes its raw text (`JsonPath.raw_at`).
-    def json?(text : String, needle : String) : JSON::Any?
-      return nil unless text.includes?(needle)
-      RawJson.parse(text.scrub)
-    rescue JSON::ParseException
-      nil
     end
 
     # What an MCP call is ABOUT: the tool, prompt or resource it names.

@@ -5,6 +5,7 @@ require "./json_rpc"
 require "./json_path"
 require "./raw_json"
 require "./plural"
+require "./utf8"
 
 module Gori
   # An LLM API call as a display-time projection of one flow (#1590): OpenAI chat completions,
@@ -16,7 +17,7 @@ module Gori
   # Every read goes through `obj`/`objs`/`str`/`index`: the bytes are the server's (or the
   # operator's), and `JSON::Any#[]?` RAISES on a value that is not an object.
   #
-  # The tree is `RawJson.parse`'s (via `JsonRpc.json?`), so a number past Int64 — a uint64
+  # The tree is `RawJson.parse_typed`'s, so a number past Int64 — a uint64
   # `seed`, a usage counter — no longer hides the call; such a number is carried as a String,
   # so the subtrees this module SHOWS as JSON (a tool_use `input`, `usage`) are read as raw
   # text off the document (`raw_at`), never re-emitted from the tree.
@@ -103,32 +104,103 @@ module Gori
     # tool_use inputs shown as JSON.
     private def messages(req : Obj, raw : String) : Array({String, String})
       list = [] of {String, String}
-      system = content(req["system"]?, raw, [Step.new(key: "system")])
-      system = str(req["instructions"]?) || "" if system.empty?
-      list << {"system", system} unless system.empty?
       key = req.has_key?("messages") ? "messages" : "input"
       input = req[key]?
+      items = str(input) ? nil : input.try(&.as_a?)
+      wanted = Set(Int32).new
+      items.try &.each_with_index { |m, i| wanted << i if tool_use_in?(obj(m).try(&.["content"]?)) }
+      sys_inputs, msg_inputs = request_inputs(raw, key, tool_use_in?(req["system"]?), wanted, items.try(&.size) || 0)
+      system = content(req["system"]?, sys_inputs)
+      system = str(req["instructions"]?) || "" if system.empty?
+      list << {"system", system} unless system.empty?
       if text = str(input)
         list << {"user", text}
-      elsif items = input.try(&.as_a?)
-        raws = message_raws(items, raw, key)
-        items.each_with_index { |m, i| obj(m).try { |o| list << message(o, raws[i]) } }
+      elsif items
+        items.each_with_index { |m, i| obj(m).try { |o| list << message(o, msg_inputs[i]) } }
       end
       list
     end
 
-    # Each message's own text, split out ONCE and only when a tool_use input is to be shown:
-    # looking every input up in the whole request made a long agent transcript quadratic.
-    # Indexed like `items` (the raw array, not `objs`' compacted one), so a non-object item
-    # cannot shift an input onto the wrong message.
-    private def message_raws(items : Array(JSON::Any), raw : String, key : String) : Array(String?)
-      none = Array(String?).new(items.size, nil)
-      return none unless items.any? { |m| tool_use_in?(obj(m).try(&.["content"]?)) }
-      elems = raw_at(raw, [Step.new(key: key)]).try { |a| RawJson.elements(a) }
-      return none unless elems && elems.size == items.size
-      elems.map(&.as(String?))
+    # :nodoc: — the tool_use inputs of one `content` array as raw JSON text (numbers as sent),
+    # by the block's RAW index — `objs` compacts away a non-object block, which would put an
+    # input on the wrong block — with a tool_result's own content nested under its index.
+    class Inputs
+      getter input = {} of Int32 => String
+      getter nested = {} of Int32 => Inputs
+    end
+
+    # The `content` value the parser is on, read for its inputs (nil, skipped, when it is not
+    # an array). A duplicated `input` or `content` member: the last wins, as in the tree.
+    # Only ever run over a document that already parsed whole, so skipping cannot pass over
+    # bad syntax.
+    def read_inputs(pull : JSON::PullParser) : Inputs?
+      unless pull.kind.begin_array?
+        pull.skip
+        return nil
+      end
+      node = Inputs.new
+      j = 0
+      pull.read_array do
+        if pull.kind.begin_object?
+          pull.read_object do |k|
+            case k
+            when "input" then node.input[j] = pull.read_raw
+            when "content"
+              if sub = read_inputs(pull)
+                node.nested[j] = sub
+              else
+                node.nested.delete(j)
+              end
+            else pull.skip
+            end
+          end
+        else
+          pull.skip
+        end
+        j += 1
+      end
+      node
+    end
+
+    # The inputs of `system` and of each `wanted` message, in ONE pull pass over the request
+    # that skips everything else. Looking each input up in the whole request made a long agent
+    # transcript quadratic, and materialising each message as text cost ~3x the parse. The
+    # LAST occurrence of a duplicated key wins, as in the tree.
+    private def request_inputs(raw : String, key : String, want_system : Bool, wanted : Set(Int32),
+                               size : Int32) : {Inputs?, Array(Inputs?)}
+      system = nil.as(Inputs?)
+      msgs = Array(Inputs?).new(size, nil)
+      return {system, msgs} unless want_system || !wanted.empty?
+      pull = JSON::PullParser.new(RawJson.tolerant(raw))
+      return {system, msgs} unless pull.kind.begin_object?
+      pull.read_object do |k|
+        if k == "system" && want_system
+          system = read_inputs(pull)
+        elsif k == key && pull.kind.begin_array?
+          read_messages(pull, wanted, size).try { |found| msgs = found }
+        else
+          pull.skip
+        end
+      end
+      {system, msgs}
     rescue JSON::ParseException
-      Array(String?).new(items.size, nil)
+      {nil, Array(Inputs?).new(size, nil)}
+    end
+
+    # The messages array the parser is on: each wanted message's content inputs, by raw index.
+    # nil when the array is not the `size` the tree read (an earlier duplicated key).
+    private def read_messages(pull : JSON::PullParser, wanted : Set(Int32), size : Int32) : Array(Inputs?)?
+      found = Array(Inputs?).new(size, nil)
+      i = 0
+      pull.read_array do
+        if i < size && wanted.includes?(i) && pull.kind.begin_object?
+          pull.read_object { |mk| mk == "content" ? (found[i] = read_inputs(pull)) : pull.skip }
+        else
+          pull.skip
+        end
+        i += 1
+      end
+      i == size ? found : nil
     end
 
     # Whether a `content` holds a tool_use block, at the top or inside a tool_result.
@@ -136,9 +208,9 @@ module Gori
       objs(a).any? { |b| (t = str(b["type"]?)) == "tool_use" || (t == "tool_result" && tool_use_in?(b["content"]?)) }
     end
 
-    # `raw` is this message's own text (nil when it carries no tool_use input to show).
-    private def message(m : Obj, raw : String?) : {String, String}
-      parts = [content(m["content"]?, raw, [Step.new(key: "content")])]
+    # `inputs` are this message's content inputs (nil when it carries no tool_use to show).
+    private def message(m : Obj, inputs : Inputs?) : {String, String}
+      parts = [content(m["content"]?, inputs)]
       objs(m["tool_calls"]?).each do |tc|
         obj(tc["function"]?).try { |f| parts << "[tool call #{str(f["name"]?)}] #{str(f["arguments"]?)}" }
       end
@@ -149,19 +221,17 @@ module Gori
     end
 
     # A message's `content`: a string, or blocks. A block with no text (an image, a document)
-    # is named by its type, not dropped. `a` sits at `at` inside `raw`, where a tool_use input
-    # is read as the JSON that was sent.
-    private def content(a : JSON::Any?, raw : String?, at : Array(Step)) : String
+    # is named by its type, not dropped. A tool_use input is shown as the JSON that was sent
+    # (`inputs`, read off the request text).
+    private def content(a : JSON::Any?, inputs : Inputs?) : String
       return "" if a.nil?
       str(a) || begin
         parts = [] of String
         a.as_a?.try &.each_with_index do |v, j|
           b = obj(v) || next
           parts << case type = str(b["type"]?)
-          when "tool_use"
-            input = raw.try { |r| raw_at(r, at + [Step.new(index: j), Step.new(key: "input")]) }
-            "[tool call #{str(b["name"]?)}] #{input}"
-          when "tool_result" then "[tool result] #{content(b["content"]?, raw, at + [Step.new(index: j), Step.new(key: "content")])}"
+          when "tool_use"    then "[tool call #{str(b["name"]?)}] #{inputs.try(&.input[j]?)}"
+          when "tool_result" then "[tool result] #{content(b["content"]?, inputs.try(&.nested[j]?))}"
           else                    str(b["text"]?) || "[#{type || "?"}]"
           end
         end
@@ -177,8 +247,12 @@ module Gori
 
     private def doc(text : String, needle : String) : {Obj, String}?
       return nil unless text.includes?(needle)
-      text = text.scrub
-      obj(JsonRpc.json?(text, needle)).try { |o| {o, text} }
+      # Scrubbed only when it is invalid: the
+      # stdlib `String#scrub` rebuilds even a valid string (`Utf8.subject`).
+      text = Utf8.subject(text)
+      obj(RawJson.parse_typed(text)).try { |o| {o, text} }
+    rescue JSON::ParseException
+      nil
     end
 
     # :nodoc: — the value at `steps` in `raw` as compact JSON TEXT, numbers as sent (see the
@@ -319,8 +393,10 @@ module Gori
         when "message"
           # The RAW index: the slot, and the step to the block's text. `objs` compacts away a
           # non-object block, which would read the next block's `input` for this one.
+          # Every input read in one pass over the body, not one `raw_at` per tool_use block.
+          inputs = LlmCall.objs(r["content"]?).any? { |b| b["type"]? == "tool_use" } ? content_inputs : nil
           r["content"]?.try(&.as_a?).try &.each_with_index do |v, i|
-            LlmCall.obj(v).try { |b| block(i, b, [key("content"), Step.new(index: i)]) }
+            LlmCall.obj(v).try { |b| block(i, b) { inputs.try(&.input[i]?) } }
           end
           stop(r)
           usage(r["usage"]?, [key("usage")])
@@ -329,7 +405,9 @@ module Gori
           @model = LlmCall.str(msg["model"]?) || @model
           usage(msg["usage"]?, [key("message"), key("usage")])
         when "content_block_start"
-          LlmCall.obj(r["content_block"]?).try { |b| block(LlmCall.index(r["index"]?, 0), b, [key("content_block")], streamed: true) }
+          LlmCall.obj(r["content_block"]?).try do |b|
+            block(LlmCall.index(r["index"]?, 0), b, streamed: true) { LlmCall.raw_at(@raw, [key("content_block"), key("input")]) }
+          end
         when "content_block_delta"
           d = LlmCall.obj(r["delta"]?) || return
           @text << LlmCall.str(d["text"]?)
@@ -340,8 +418,8 @@ module Gori
         end
       end
 
-      # `at` is where `b` sits in the document being fed.
-      private def block(i : Int32, b : Obj, at : Array(Step), streamed = false) : Nil
+      # The block yields its `input` as raw JSON text, read only for a tool_use that has one.
+      private def block(i : Int32, b : Obj, streamed = false, &) : Nil
         case LlmCall.str(b["type"]?)
         when "text"
           @text << LlmCall.str(b["text"]?)
@@ -349,7 +427,7 @@ module Gori
           input = LlmCall.obj(b["input"]?)
           # A streamed block opens with `input: {}` and fills it from `input_json_delta`s; in a
           # whole message `{}` is the real (empty) input.
-          args = input.nil? || (streamed && input.empty?) ? nil : LlmCall.raw_at(@raw, at + [key("input")])
+          args = input.nil? || (streamed && input.empty?) ? nil : yield
           tool(i, LlmCall.str(b["name"]?), args)
         end
       end
@@ -388,6 +466,17 @@ module Gori
         return unless LlmCall.obj(u)
         raw = LlmCall.raw_at(@raw, at) || return
         RawJson.members(raw).try &.each { |(k, v)| @usage[k] = v }
+      end
+
+      # The body's top-level `content` (the last, if duplicated), read for its inputs.
+      private def content_inputs : Inputs?
+        pull = JSON::PullParser.new(RawJson.tolerant(@raw))
+        return nil unless pull.kind.begin_object?
+        inputs = nil.as(Inputs?)
+        pull.read_object { |k| k == "content" ? (inputs = LlmCall.read_inputs(pull)) : pull.skip }
+        inputs
+      rescue JSON::ParseException
+        nil
       end
 
       private def key(name : String) : Step

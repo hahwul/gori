@@ -1,4 +1,5 @@
 require "json"
+require "../raw_json"
 require "./frame"
 
 module Gori
@@ -63,10 +64,12 @@ module Gori
       end
 
       # `a[…]` — an array of messages, each JSON-encoded as a string. The coordinator hands
-      # each `payload` back to the other decoders; see the module header.
+      # each `payload` back to the other decoders; see the module header. Every read here is
+      # of strings and a close code, never re-emitted, so `RawJson.parse_typed`: an unpaired
+      # surrogate escape (a cut emoji, `"\ud83d"`) made `JSON.parse` drop the whole frame.
       private def batch(rest : String) : Array(Decoded)?
         return nil unless rest.starts_with?('[') # a word beginning with `a` is not a batch
-        arr = JSON.parse(rest).as_a? || return nil
+        arr = RawJson.parse_typed(rest).as_a? || return nil
         out = [] of Decoded
         arr.each do |v|
           break if out.size >= MAX_RECORDS
@@ -78,12 +81,12 @@ module Gori
 
       private def single(rest : String) : Array(Decoded)?
         return nil unless rest.starts_with?('"')
-        [Decoded.new(kind: "message", payload: JSON.parse(rest).as_s? || return nil)]
+        [Decoded.new(kind: "message", payload: RawJson.parse_typed(rest).as_s? || return nil)]
       end
 
       private def closed(rest : String) : Array(Decoded)?
         return nil unless rest.starts_with?('[')
-        arr = JSON.parse(rest).as_a? || return nil
+        arr = RawJson.parse_typed(rest).as_a? || return nil
         code = arr[0]?.try(&.as_i64?) || return nil
         [Decoded.new(kind: "close", id: code.to_s, note: arr[1]?.try(&.as_s?))]
       end

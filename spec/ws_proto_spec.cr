@@ -298,6 +298,65 @@ describe Gori::WsProto do
     end
   end
 
+  # `JSON.parse` refused a whole frame over one number past Int64 (a uint64 id in the data) or
+  # one unpaired surrogate escape (a cut emoji), so it fell back to raw. What a decoder shows
+  # as JSON keeps the wire's digits: never quoted, never respelled as a Float.
+  describe "numbers past Int64 and unpaired surrogates" do
+    big = "18446744073709551615"
+
+    it "keeps a Socket.IO event and ack, digits as sent" do
+      fs = decode([%(42["msg",{"id":#{big},"f":1.0e2}]), %(4312[#{big}])])
+      fs.map(&.kind).should eq(["event", "ack"])
+      fs[0].name.should eq("msg")
+      fs[0].payload.should eq(%([{"id":#{big},"f":1.0e2}]))
+      fs[1].payload.should eq(%([#{big}]))
+    end
+
+    it "keeps a SignalR hub record, digits as sent" do
+      fs = decode([%({"type":1,"invocationId":"0","target":"Send","arguments":[#{big},1.0e2]}) + RS +
+                   %({"type":3,"invocationId":"0","result":{"n":#{big}}}) + RS])
+      fs.map(&.kind).should eq(["invocation", "completion"])
+      fs[0].payload.should eq(%([#{big},1.0e2]))
+      fs[1].payload.should eq(%({"n":#{big}}))
+    end
+
+    it "keeps an Action Cable broadcast, digits as sent" do
+      ident = %({\\"channel\\":\\"ChatChannel\\"})
+      fs = decode([%({"identifier":"#{ident}","message":{"id":#{big}}})])
+      fs[0].kind.should eq("broadcast")
+      fs[0].name.should eq("ChatChannel")
+      fs[0].payload.not_nil!.should contain(%(message: {"id":#{big}}))
+    end
+
+    it "keeps a SockJS batch carrying an unpaired surrogate escape" do
+      fs = WP::SockJs.decode(%(a["cut \\ud83d"]).to_slice).not_nil!
+      fs[0].payload.should eq("cut �")
+    end
+
+    # A number past Int64 is not a string: where a decoder needs a JSON string, it reads one
+    # exactly as it reads an ordinary number, never as text the wire did not carry.
+    it "does not take a number past Int64 for a SockJS string" do
+      [%(a[#{big}]), %(m#{big})].each do |f|
+        WP::SockJs.decode(f.to_slice).should eq(WP::SockJs.decode(f.sub(big, "5").to_slice))
+        WP::SockJs.decode(f.to_slice).should be_nil
+      end
+      WP::SockJs.decode(%(c[3000,#{big}]).to_slice).should eq(WP::SockJs.decode(%(c[3000,5]).to_slice))
+      WP::SockJs.decode(%(c[#{big},"x"]).to_slice).should be_nil # not an Int64 close code
+    end
+
+    it "does not take a number past Int64 for a Socket.IO sid" do
+      sio = WP::SocketIo.decode(%(0{"sid":#{big},"pingInterval":1}).to_slice).not_nil!
+      sio[0].id.should be_nil
+      sio[0].strong.should be_false
+    end
+
+    it "does not take a number past Int64 for an Action Cable channel" do
+      cable = decode([%({"command":"subscribe","identifier":"{\\"channel\\":#{big}}"})])
+      cable[0].name.should be_nil
+      cable[0].name.should eq(decode([%({"command":"subscribe","identifier":"{\\"channel\\":5}"})])[0].name)
+    end
+  end
+
   describe "the transcript, as a whole" do
     # P7. gori's other WS lens (`GraphqlWs`) sniffs the PAYLOAD and never the negotiated name;
     # so does this one. The hint can switch a decoder on for a transcript that is all weak

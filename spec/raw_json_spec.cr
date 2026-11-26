@@ -88,6 +88,36 @@ describe Gori::RawJson do
     end
   end
 
+  describe ".object_members" do
+    it "reads a root object, or each object of a root array, in one pass" do
+      read = ->(json : String) { Gori::RawJson.object_members(json) { |_, pull| pull.read_raw } }
+      read.call(%({"a":18446744073709551615,"a":2})).should eq([[{"a", "18446744073709551615"}, {"a", "2"}]])
+      read.call(%([{"a":1}, 5, {"b":[1.0e2]}])).should eq([[{"a", "1"}], nil, [{"b", "[1.0e2]"}]])
+      read.call("42").should eq([nil])
+      expect_raises(JSON::ParseException) { read.call(%([{"a":1}],2)) }
+    end
+  end
+
+  describe ".string?" do
+    it "decodes a raw string value and is nil for anything else" do
+      Gori::RawJson.string?(%("a\\u00e9")).should eq("aé")
+      Gori::RawJson.string?("18446744073709551615").should be_nil
+      Gori::RawJson.string?(nil).should be_nil
+    end
+  end
+
+  describe ".parse_typed" do
+    it "reads a number past Int64/Float64 as a number, so no String node is one" do
+      doc = Gori::RawJson.parse_typed(%({"id":18446744073709551615,"f":1.5e400,"n":-1e400,"s":"18446744073709551615","i":7}))
+      doc["id"].as_s?.should be_nil
+      doc["id"].as_f.should eq(18446744073709551615.0)
+      doc["f"].as_f.should eq(Float64::INFINITY)
+      doc["n"].as_f.should eq(-Float64::INFINITY)
+      doc["s"].as_s.should eq("18446744073709551615")
+      doc["i"].as_i64.should eq(7_i64)
+    end
+  end
+
   describe ".elements" do
     it "lists an array's elements as raw text, numbers verbatim and duplicates kept" do
       Gori::RawJson.elements(%([1, 18446744073709551615, {"a":1,"a":2}, 1.0e2])).should eq(

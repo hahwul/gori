@@ -269,5 +269,17 @@ describe Gori::LlmCall do
       ]).to_slice
       Gori::LlmCall.stream_reply(head, body).should eq("secret")
     end
+
+    # A number past Int64 is not a string: where a JSON string is required (model, input,
+    # content), it reads exactly as an ordinary number does, never as text.
+    it "does not take one for a string" do
+      tr = ->(req : String) { Gori::LlmCall.transcript(REQ_HEAD, req.to_slice, nil, nil) }
+      tr.call(%({"model":"x","input":1e400})).should eq(tr.call(%({"model":"x","input":5})))
+      tr.call(%({"model":"x","input":1e400})).not_nil!.should_not contain("1e400")
+      llm(%({"model":#{big},"messages":[]}), "{}").should be_nil
+      c = llm(%({"model":"x","messages":[{"role":"user","content":#{big}}]}), %({"choices":[{"index":0,"message":{"content":#{big}}}]})).not_nil!
+      c.text.should eq("")
+      tr.call(%({"model":"x","messages":[{"role":#{big},"content":#{big}}]})).not_nil!.should_not contain(big)
+    end
   end
 end

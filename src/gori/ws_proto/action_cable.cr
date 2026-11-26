@@ -1,5 +1,6 @@
 require "json"
 require "../ascii_bytes"
+require "../raw_json"
 require "./frame"
 
 module Gori
@@ -71,7 +72,10 @@ module Gori
         return nil unless payload.unsafe_fetch(payload.size - 1) == '}'.ord
         return nil unless AsciiBytes.contains_ci?(payload, IDENTIFIER_NEEDLE) ||
                           (payload.size <= SMALL_FRAME && lifecycle?(payload))
-        h = JSON.parse(String.new(payload).scrub).as_h? || return nil
+        # RAW member text (the last of a duplicated key, as `JSON.parse` reads it), since
+        # `message` is shown: `JSON.parse` refused the frame over one number past Int64 in a
+        # broadcast, and re-emitting a tree respelled the payload's numbers.
+        h = RawJson.members(RawJson.tolerant(String.new(payload).scrub)).try(&.to_h) || return nil
         d = client(h) || server(h) || return nil
         [d]
       rescue
@@ -82,28 +86,28 @@ module Gori
         LIFECYCLE_NEEDLES.any? { |n| AsciiBytes.contains_ci?(payload, n) }
       end
 
-      private def client(h : Hash(String, JSON::Any)) : Decoded?
-        command = h["command"]?.try(&.as_s?) || return nil
+      private def client(h : Hash(String, String)) : Decoded?
+        command = RawJson.string?(h["command"]?) || return nil
         return nil unless CLIENT_COMMANDS.includes?(command)
-        identifier = h["identifier"]?.try(&.as_s?) || return nil
+        identifier = RawJson.string?(h["identifier"]?) || return nil
         channel = inner(identifier, "channel")
-        data = h["data"]?.try(&.as_s?)
+        data = RawJson.string?(h["data"]?)
         Decoded.new(kind: command, name: qualified(channel, data.try { |x| inner(x, "action") }),
           note: channel ? nil : identifier.presence,
           payload: render({"identifier", identifier}, {"data", data}))
       end
 
-      private def server(h : Hash(String, JSON::Any)) : Decoded?
-        if type = h["type"]?.try(&.as_s?)
+      private def server(h : Hash(String, String)) : Decoded?
+        if type = RawJson.string?(h["type"]?)
           return nil unless SERVER_TYPES.includes?(type)
-          identifier = h["identifier"]?.try(&.as_s?)
+          identifier = RawJson.string?(h["identifier"]?)
           return Decoded.new(kind: type, name: identifier.try { |i| inner(i, "channel") },
-            note: h["reason"]?.try(&.as_s?),
-            payload: render({"identifier", identifier}, {"message", h["message"]?.try(&.to_json)}),
+            note: RawJson.string?(h["reason"]?),
+            payload: render({"identifier", identifier}, {"message", h["message"]?}),
             strong: type != "ping" || h.has_key?("message"))
         end
         # A broadcast: no `type`, just the subscription it belongs to and the payload.
-        identifier = h["identifier"]?.try(&.as_s?) || return nil
+        identifier = RawJson.string?(h["identifier"]?) || return nil
         message = h["message"]? || return nil
         # `identifier` + `message` is a GENERIC pair — unlike `command` + `identifier`, which
         # only this protocol spells that way. So a broadcast is evidence of Action Cable only
@@ -113,7 +117,7 @@ module Gori
         # ACTION CABLE. See `Decoded#strong`.
         channel = inner(identifier, "channel")
         Decoded.new(kind: "broadcast", name: channel, note: channel ? nil : identifier.presence,
-          payload: render({"identifier", identifier}, {"message", message.to_json}),
+          payload: render({"identifier", identifier}, {"message", message}),
           strong: !channel.nil?)
       end
 
@@ -121,8 +125,8 @@ module Gori
       # not an object (some apps pass a bare name), which the caller reports verbatim instead.
       private def inner(json : String, key : String) : String?
         return nil unless json.starts_with?('{') # some apps pass a bare name; do not raise over it
-        JSON.parse(json).as_h?.try(&.[key]?).try(&.as_s?)
-      rescue
+        RawJson.parse_typed(json).as_h?.try(&.[key]?).try(&.as_s?)
+      rescue JSON::ParseException
         nil
       end
 
