@@ -260,40 +260,47 @@ module Gori
     # response that simply carried none. This scans only field names in CACHE_HEADERS, allocates
     # values only for those fields, and stops at the empty line. `bench/cache_status_bench.cr`
     # compares it with materializing every response header through the full HTTP/1 parser.
+    #
+    # The lines are the ones `Http1.parse_response_head` reads (`Http1.response_lines`): a head
+    # ended on a bare-LF blank line is walked on LF, every other head strictly on CRLF — so the
+    # byte scan and `classify(HeaderList)` over the parse cannot disagree about a stored head.
     def self.classify(head : Bytes?) : Signal
       return Signal::None if head.nil? || head.empty?
-      first_crlf = crlf_at(head, 0)
-      return Signal::None unless first_crlf
+      lines = Http1.response_lines(head)
+      pos = lines.headers_at || return Signal::None
 
-      classify_header_lines(head, first_crlf + 2)
+      classify_header_lines(head, pos, lines.lf)
     end
 
-    private def self.classify_header_lines(head : Bytes, pos : Int32) : Signal
+    private alias Http1 = Proxy::Codec::Http1
+
+    private def self.classify_header_lines(head : Bytes, pos : Int32, lf : Bool) : Signal
       signals = Signals.new
       tail_scanned = false
       last_cache_status = nil.as(Int32?)
       while pos < head.size
-        line_end = crlf_at(head, pos)
+        line_end = eol_at(head, pos, lf)
         stop = line_end || head.size
         break if stop == pos
         observe_cache_header(signals, head, pos, stop)
         tail_scanned, last_cache_status, signal = early_result(signals, head, pos, line_end,
-          tail_scanned, last_cache_status)
+          tail_scanned, last_cache_status, lf)
         if signal
           return signal
         end
         break unless line_end
-        pos = line_end + 2
+        pos = Http1.after_eol(head, line_end)
       end
       signals.result
     end
 
     private def self.early_result(signals : Signals, head : Bytes, pos : Int32, line_end : Int32?,
-                                  tail_scanned : Bool, last_cache_status : Int32?) : {Bool, Int32?, Signal?}
+                                  tail_scanned : Bool, last_cache_status : Int32?,
+                                  lf : Bool) : {Bool, Int32?, Signal?}
       if !tail_scanned && (signals.hit? || !signals.cache_status.nil?)
         tail_scanned = true
-        after_line = line_end ? line_end + 2 : head.size
-        last_cache_status = last_cache_status_after(head, after_line)
+        after_line = line_end ? Http1.after_eol(head, line_end) : head.size
+        last_cache_status = last_cache_status_after(head, after_line, lf)
         return {tail_scanned, last_cache_status, signals.result} unless last_cache_status
       end
       if last_cache_status && pos >= last_cache_status && (signals.hit? || !signals.cache_status.nil?)
@@ -327,22 +334,26 @@ module Gori
 
     # Once a positive signal or a Cache-Status verdict is found, only a later Cache-Status
     # member can change the answer. Scan the tail for that field name alone once before returning.
-    private def self.last_cache_status_after(bytes : Bytes, from : Int32) : Int32?
+    private def self.last_cache_status_after(bytes : Bytes, from : Int32, lf : Bool) : Int32?
       pos = from
       last = nil.as(Int32?)
       while pos < bytes.size
-        line_end = crlf_at(bytes, pos)
+        line_end = eol_at(bytes, pos, lf)
         stop = line_end || bytes.size
         break if stop == pos
         colon = bytes[pos, stop - pos].index(0x3A_u8).try &.+(pos)
         last = pos if colon && AsciiBytes.range_eq_ci?(bytes, pos, colon, "cache-status".to_slice)
         break unless line_end
-        pos = line_end + 2
+        pos = Http1.after_eol(bytes, line_end)
       end
       last
     end
 
-    private def self.crlf_at(bytes : Bytes, from : Int32) : Int32?
+    # `Http1.index_eol`'s answer. The strict CRLF reading is the common case and runs here on
+    # every row of a QL `cache:` query, so it keeps its memchr-backed scan: the codec's
+    # byte-at-a-time `index_crlf` made the whole classify ~45% slower (bench/cache_status_bench.cr).
+    private def self.eol_at(bytes : Bytes, from : Int32, lf : Bool) : Int32?
+      return Http1.index_eol(bytes, from, true) if lf
       while cr = bytes.index(0x0D_u8, from)
         return cr if bytes[cr + 1]? == 0x0A_u8
         from = cr + 1
