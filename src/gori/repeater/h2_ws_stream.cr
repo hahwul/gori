@@ -71,8 +71,79 @@ module Gori
       # Frames read while waiting for the response to the extended CONNECT. The same ceiling
       # `H2Engine::MAX_FRAMES` is for a response read: PING/SETTINGS/WINDOW_UPDATE are not
       # byte-capped and the per-read timeout only fires on IDLE, so a peer that chatters
-      # forever without answering needs a COUNT to terminate on.
+      # forever without answering needs a COUNT to terminate on. A count is not a TIME bound
+      # (1000 frames at a 14 s ping cadence is four hours): `HandshakeClock` is that.
       MAX_HANDSHAKE_FRAMES = 1_000
+
+      # The handshake's wall-clock bounds, the two `H2Engine.read_response` keeps for the same
+      # reason (`SendFlow#patience`): the per-read timeout fires only on IDLE, so an origin that
+      # sends a PING or a WINDOW_UPDATE under it, and never answers the CONNECT, held `open`
+      # for as long as `MAX_HANDSHAKE_FRAMES` lasted.
+      #
+      # * no progress: `patience` is the per-read bound the dial armed (`WsEngine` dials with
+      #   `HANDSHAKE_TIMEOUT`), so "the origin said nothing" and "the origin said everything
+      #   except the answer" end alike. Restarted only by a frame on the CONNECT stream itself.
+      # * the whole handshake: `patience × H2Engine::DEFAULT_BUDGET_FACTOR`, never restarted,
+      #   so an answer dripped one CONTINUATION at a time is bounded too.
+      #
+      # Each read is armed with what is left, so one blocking read cannot outlive either bound;
+      # `restore` puts the dial's bound back for the session that follows.
+      private class HandshakeClock
+        getter started : Time::Instant
+        # A frame arrived since the last progress, and `arm` found a bound already passed (see
+        # `timed_out`).
+        @chatter = false
+        @spent = false
+        @sock : ::Socket?
+        @idle : Time::Span?
+        @patience : Time::Span
+        @progress : Time::Instant
+        @hard : Time::Instant
+
+        def initialize(io : IO)
+          @sock = Proxy::SocketTuning.underlying_socket(io)
+          @idle = @sock.try(&.read_timeout)
+          @patience = @idle || WsEngine::HANDSHAKE_TIMEOUT
+          @started = @progress = Time.instant
+          @hard = @started + @patience * H2Engine::DEFAULT_BUDGET_FACTOR
+        end
+
+        # Arm the socket for the next read with the time left. Once either bound has passed it
+        # raises the `IO::TimeoutError` the read would have, so both land in one rescue arm.
+        def arm : Nil
+          now = Time.instant
+          stall = @patience - (now - @progress)
+          whole = @hard - now
+          left = stall < whole ? stall : whole
+          if left <= Time::Span.zero
+            @spent = true
+            raise IO::TimeoutError.new("HTTP/2 handshake deadline")
+          end
+          @sock.try(&.read_timeout = left)
+        end
+
+        def frame! : Nil
+          @chatter = true
+        end
+
+        def progress! : Nil
+          @progress = Time.instant
+          @chatter = false
+        end
+
+        def restore : Nil
+          @sock.try(&.read_timeout = @idle)
+        end
+
+        # The sentence for a timed-out read: `silent` when the origin simply sent nothing (that
+        # finding keeps its own words), else which bound passed, `what` naming what never came.
+        def timed_out(host : String, port : Int32, what : String, silent : String) : String
+          return silent unless @spent || @chatter || Time.instant >= @hard
+          secs = (Time.instant - @started).total_seconds.round(1)
+          "the origin at #{host}:#{port} kept the HTTP/2 connection busy for #{secs}s " \
+          "without #{what}"
+        end
+      end
 
       # Ceiling on the header block of the CONNECT's answer. HEADERS/CONTINUATION are not
       # flow-controlled, so a CONTINUATION flood is unbounded without one — the same 1 MiB
@@ -176,7 +247,8 @@ module Gori
         # otherwise deadlock against a `sync = false` TLS socket, both sides waiting to read.
         io.flush
 
-        enabled, err = await_connect_protocol(io, flow, host, port)
+        clock = HandshakeClock.new(io)
+        enabled, err = await_connect_protocol(io, flow, host, port, clock)
         return refused(err) if err
         unless enabled
           return refused(
@@ -207,7 +279,10 @@ module Gori
         note = body && !body.empty? ? "#{Gori.plural(body.size, "byte")} below the " \
                                       "handshake's blank line were NOT sent: an RFC 8441 extended CONNECT carries no " \
                                       "request body, and this stream's DATA frames are the WebSocket's own frames" : nil
-        read_answer(conn, flow, host, port, note)
+        read_answer(conn, flow, host, port, note, clock)
+      ensure
+        # The dial's own per-read bound, for the session (or the caller's close) that follows.
+        clock.try(&.restore)
       end
 
       # Read the peer's SETTINGS and answer the one question RFC 8441 §3 makes a precondition.
@@ -220,22 +295,27 @@ module Gori
       # A SETTINGS with no 0x8 entry is a definite NO (the default is 0 — §3), so the answer is
       # taken from the FIRST non-ACK SETTINGS and not waited on further.
       private def self.await_connect_protocol(io : IO, flow : H2Engine::SendFlow,
-                                              host : String, port : Int32) : {Bool, String?}
+                                              host : String, port : Int32,
+                                              clock : HandshakeClock) : {Bool, String?}
         budget = H2Engine::AWAIT_SETTINGS_FRAMES
+        no_settings = "an HTTP/2 SETTINGS frame, so gori could not learn whether it accepts " \
+                      "an RFC 8441 extended CONNECT"
         while budget > 0
           budget -= 1
           frame = begin
+            clock.arm
             Frame.read(io)
           rescue IO::TimeoutError
-            return {false, "the origin at #{host}:#{port} sent no HTTP/2 SETTINGS frame before " \
-                           "the read timed out, so gori could not learn whether it accepts an " \
-                           "RFC 8441 extended CONNECT"}
+            return {false, clock.timed_out(host, port, no_settings,
+              "the origin at #{host}:#{port} sent no HTTP/2 SETTINGS frame before the read " \
+              "timed out, so gori could not learn whether it accepts an RFC 8441 extended CONNECT")}
           rescue ex : IO::Error | Gori::Error | OpenSSL::Error
             return {false, "the HTTP/2 connection to #{host}:#{port} ended before the origin's " \
                            "SETTINGS arrived (#{ex.message || ex.class.name})"}
           end
           return {false, "the origin at #{host}:#{port} closed the HTTP/2 connection before " \
                          "sending SETTINGS"} if frame.nil?
+          clock.frame!
           case frame.frame_type
           when Frame::Type::Settings
             next if frame.ack?
@@ -285,12 +365,17 @@ module Gori
       # socket — NOT a 101, which has no meaning on h2 (RFC 9113 §8.1 forbids the h1 upgrade
       # mechanism outright). Anything else is a refusal with a head the operator can read.
       private def self.read_answer(conn : H2Engine::Conn, flow : H2Engine::SendFlow,
-                                   host : String, port : Int32, note : String?) : Opened
+                                   host : String, port : Int32, note : String?,
+                                   clock : HandshakeClock) : Opened
         io = conn.io
         block = IO::Memory.new
         foreign = H2Engine::ForeignBlock.new # other streams' blocks, decoded and dropped
         blocks = H2Engine::HeaderBlockGate.new
         seen = 0
+        # The CONNECT is out: the wait for its answer starts now, under the same whole-handshake
+        # ceiling the SETTINGS wait ran under.
+        clock.progress!
+        unanswered = "answering the RFC 8441 extended CONNECT"
         loop do
           seen += 1
           if seen > MAX_HANDSHAKE_FRAMES
@@ -298,16 +383,19 @@ module Gori
                            "frames without answering the extended CONNECT")
           end
           frame = begin
+            clock.arm
             Frame.read(io)
           rescue IO::TimeoutError
-            return refused("the origin at #{host}:#{port} did not answer the RFC 8441 extended " \
-                           "CONNECT before the read timed out")
+            return refused(clock.timed_out(host, port, unanswered,
+              "the origin at #{host}:#{port} did not answer the RFC 8441 extended CONNECT " \
+              "before the read timed out"))
           rescue ex : IO::Error | Gori::Error | OpenSSL::Error
             return refused("the HTTP/2 connection to #{host}:#{port} ended before the extended " \
                            "CONNECT was answered (#{ex.message || ex.class.name})")
           end
           return refused("the origin at #{host}:#{port} closed the HTTP/2 connection before " \
                          "answering the extended CONNECT") if frame.nil?
+          clock.frame!
           begin
             blocks.check(frame)
           rescue ex : Gori::Error
@@ -355,6 +443,7 @@ module Gori
                              "#{MAX_HEADER_BLOCK} bytes answering the extended CONNECT")
             end
             block.write(chunk)
+            clock.progress! # the answer itself, or an interim 1xx: the CONNECT stream moved
             next unless frame.end_headers?
             fields = begin
               conn.decoder.decode(block.to_slice)
