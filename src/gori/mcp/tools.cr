@@ -2420,7 +2420,8 @@ module Gori
       # this same tool and `--timeout 0` is refused on the CLI. It used to clamp UP to 1 ms, so
       # a caller writing the conventional zero got every send timed out and a `done` verdict
       # about a test they never asked for. Every MCP `timeout_ms` reads through this one rule
-      # (send_request, grpc_reflect and cache_deception_check each once clamped 0 to 1 ms).
+      # (send_request, grpc_reflect and cache_deception_check each once clamped 0 to 1 ms;
+      # discover_start once read it with no ceiling, so a stop waited on a stalled origin for good).
       private def fuzz_timeout(h) : Time::Span?
         optional_int_arg(h, "timeout_ms").try { |ms| ms <= 0 ? nil : ms.clamp(1_i64, 600_000_i64).milliseconds }
       end

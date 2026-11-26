@@ -85,7 +85,7 @@ module Gori
           # `rate` bounds THROUGHPUT; a target that rate-limits on the inter-request GAP needs
           # this instead (`gori run discover --throttle`). Declared on fuzz_start only until now.
           throttle_ms: optional_int_arg(h, "throttle_ms").try(&.clamp(0_i64, 600_000_i64).to_i),
-          timeout: discover_timeout(h),
+          timeout: fuzz_timeout(h),
           retries: (optional_int_arg(h, "retries") || 1_i64).clamp(0_i64, 1000_i64).to_i,
           max_requests: cap ? {cap, DISCOVER_MAX_REQUESTS}.min : DISCOVER_MAX_REQUESTS,
           keep_alive: bool_arg(h, "keep_alive", true),
@@ -165,11 +165,6 @@ module Gori
         in Discover::PlanError::Reason::UnresolvedEnv
           env_unresolved_error(ex.detail)
         end
-      end
-
-      private def discover_timeout(h) : Time::Span?
-        ms = optional_int_arg(h, "timeout_ms")
-        ms && ms > 0 ? ms.milliseconds : nil
       end
 
       # Background drain, mirroring run_fuzz_job/mine/sequence: a per-event rescue keeps the
