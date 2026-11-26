@@ -189,10 +189,8 @@ module Gori
         # WRITE. Same question, same refusal, said before either branch is taken.
         refuse_two_targets(project_name, db_path, "gori run import")
         if path = db_path
-          abort "gori run import: --db is a directory, not a file: #{path}" if Dir.exists?(path)
-          parent = File.dirname(path)
-          abort "gori run import: --db parent directory does not exist: #{parent}" unless Dir.exists?(parent)
-          return Project.new(File.basename(parent), path)
+          explicit_db_error(path, "gori run import").try { |message| abort message }
+          return Project.new(File.basename(File.dirname(path)), path)
         end
         resolve_read_project(project_name, nil)
       end

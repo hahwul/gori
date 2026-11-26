@@ -182,10 +182,8 @@ module Gori
         # WRITE. Same question, same refusal, said before either branch is taken.
         refuse_two_targets(project_name, db_path, "gori run discover")
         if path = db_path
-          abort "gori run discover: --db is a directory, not a file: #{path}" if Dir.exists?(path)
-          parent = File.dirname(path)
-          abort "gori run discover: --db parent directory does not exist: #{parent}" unless Dir.exists?(parent)
-          return Project.new(File.basename(parent), path)
+          explicit_db_error(path, "gori run discover").try { |message| abort message }
+          return Project.new(File.basename(File.dirname(path)), path)
         end
         resolve_read_project(project_name, nil)
       end

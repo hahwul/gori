@@ -675,6 +675,18 @@ module Gori
         "(#{db_flag} names the database file directly, so #{project_flag} #{CLI::Output.term_safe(name).inspect} would be ignored)"
       end
 
+      # Why a create-or-reopen `--db` (capture, import, discover) is refused before the store
+      # opens, or nil. Split from the abort for the same reason as `two_targets_error`. A path
+      # or parent gori cannot stat (a symlink loop, a directory it may not search) is nil too:
+      # `Store.open` names that errno, where `Dir.exists?` here raised a bare backtrace.
+      def self.explicit_db_error(path : String, prefix : String) : String?
+        return "#{prefix}: --db is a directory, not a file: #{path}" if File.info?(path).try(&.directory?)
+        parent = File.dirname(path)
+        "#{prefix}: --db parent directory does not exist: #{parent}" unless File.info?(parent).try(&.directory?)
+      rescue File::Error
+        nil
+      end
+
       # --db wins → else --project resolved via ProjectRegistry#find (exact short id
       # → exact dir slug or display name → unique id-prefix, all case-insensitive)
       # → else the most-recently-active project. Aborts when nothing resolves, and when
@@ -756,10 +768,8 @@ module Gori
         if path = db_path
           # Catch the unopenable cases up front with a clean message — otherwise
           # SQLite raises a raw DB::ConnectionRefused backtrace deep in Session.open.
-          abort "gori run capture: --db is a directory, not a file: #{path}" if Dir.exists?(path)
-          parent = File.dirname(path)
-          abort "gori run capture: --db parent directory does not exist: #{parent}" unless Dir.exists?(parent)
-          return Project.new(File.basename(parent), path)
+          explicit_db_error(path, "gori run capture").try { |message| abort message }
+          return Project.new(File.basename(File.dirname(path)), path)
         end
         # create() rejects a name that slugifies to nothing (blank / punctuation-only)
         # with a Gori::Error, and Dir.mkdir_p raises a File::Error for an unusable slug
