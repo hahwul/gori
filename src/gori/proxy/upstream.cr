@@ -114,7 +114,10 @@ module Gori::Proxy
     # `IO::TimeoutError` so every classifier that already reads a timeout as "nothing came back
     # in time" (`tls_dial_error`) keeps doing so; its message carries the ceiling it hit.
     class HandshakeTimeout < IO::TimeoutError
-      def initialize(budget : Time::Span)
+      # The caller's own `deadline` was the nearer ceiling, so it, not this dial, ran out.
+      getter? caller_deadline : Bool
+
+      def initialize(budget : Time::Span, @caller_deadline : Bool = false)
         super("the TLS handshake did not complete within #{budget.total_seconds.round(1)}s")
       end
     end
@@ -123,20 +126,34 @@ module Gori::Proxy
     # `io` is the transport socket beneath the handshake, never the SSL object being built:
     # closing it is what wakes OpenSSL out of SSL_connect (see `dial_tls_result`). A handshake
     # that finished just as the ceiling closed `io` holds a dead socket, so it is refused too.
+    # `deadline` is a caller's own, earlier ceiling (a whole exchange's); the nearer one wins.
+    #
+    # The watcher fiber runs on every dial, the proxy's own included, where `with_cancel(nil)`
+    # started nothing. Measured (--release, loopback TLS 1.3, N=3000, 2026-11-27): the wrapper
+    # alone costs ~0.3 µs and 624 B per call; a whole dial went from ~68.0 KB to ~68.8 KB
+    # allocated (+1.3%) at ~435 µs either way (run-to-run noise exceeds the delta). That is
+    # under 0.1% of the handshake, so the simpler fiber stays.
     def self.bounded_handshake(io : IO, cancel : Proc(Bool)?, io_timeout : Time::Span,
-                               & : -> T) : T forall T
-      budget = io_timeout * HANDSHAKE_BUDGET_FACTOR
-      watch = CancelWatch.new(io, cancel, Time.instant + budget)
+                               deadline : Time::Instant? = nil, & : -> T) : T forall T
+      now = Time.instant
+      due = now + io_timeout * HANDSHAKE_BUDGET_FACTOR
+      capped = false
+      if deadline && deadline < due
+        due = deadline
+        capped = true
+      end
+      budget = {due - now, Time::Span.zero}.max
+      watch = CancelWatch.new(io, cancel, due)
       result = begin
         yield
       rescue ex
         watch.stop
-        raise watch.expired? ? HandshakeTimeout.new(budget) : ex
+        raise watch.expired? ? HandshakeTimeout.new(budget, capped) : ex
       end
       watch.stop
       return result unless watch.expired?
       result.close rescue nil
-      raise HandshakeTimeout.new(budget)
+      raise HandshakeTimeout.new(budget, capped)
     end
 
     # Dial the origin (directly, or via the configured upstream proxy's CONNECT

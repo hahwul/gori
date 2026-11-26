@@ -38,6 +38,16 @@ module Gori::Oast
     # kilobytes — so 16 MiB is orders past legitimate and still safe to hold.
     MAX_BODY = 16 * 1024 * 1024
 
+    # Wall-clock ceiling on one whole request, from the TLS handshake to the last body byte (the
+    # TCP connect has its own bound, never longer than this). TIMEOUT is per read and
+    # MAX_BODY counts bytes, so neither stops a server that drips its head or body a byte at a
+    # time inside TIMEOUT: MCP's single tool fiber, `gori run oast` and the TUI poller all
+    # waited on it. A real register or poll is one round trip and a few kilobytes.
+    EXCHANGE_BUDGET = TIMEOUT * 3
+
+    def initialize(@exchange_budget : Time::Span = EXCHANGE_BUDGET)
+    end
+
     # This client takes no `verify_tls` knob, on any surface. `--insecure-upstream` / `-k` is for a TARGET with a
     # broken certificate (settings/network.cr says it must not relax a hop the operator did
     # not choose to inspect), and an interaction server is gori's own service traffic, like
@@ -57,8 +67,15 @@ module Gori::Oast
       end
       host = uri.host
       raise Gori::Error.new("OAST: invalid URL #{url}") unless host
-      client = Gori::HttpTransport.client(uri, verify_tls: true,
-        connect_timeout: TIMEOUT, read_timeout: TIMEOUT)
+      # The deadline reaches the TLS handshake too, so a collector that drips that is held to
+      # the same ceiling as one that drips its answer.
+      client = begin
+        Gori::HttpTransport.client(uri, verify_tls: true,
+          connect_timeout: {TIMEOUT, @exchange_budget}.min, read_timeout: TIMEOUT,
+          deadline: Time.instant + @exchange_budget)
+      rescue ex : Gori::HttpTransport::Error
+        raise ex.expired? ? deadline_error(method, host) : ex
+      end
 
       hdrs = HTTP::Headers.new
       headers.each { |k, v| hdrs[k] = v }
@@ -72,15 +89,23 @@ module Gori::Oast
           status = resp.status_code
           payload = read_capped(resp.body_io, host)
         end
+        # A close under a read can surface as an EOF rather than an error, and a short body
+        # must not pass for a whole one. Asked of the watcher, not the clock: a response whose
+        # last byte beat the deadline is whole, however close it ran.
+        raise deadline_error(method, host) if Gori::HttpTransport.expired?(client)
         Response.new(status, payload)
       rescue ex : Gori::Error
         # Already worded by a layer that knows what broke — `HttpTransport::Error` names the
         # dial stage, `read_capped` names the cap. Re-wording either here would bury it.
         raise ex
-      rescue IO::TimeoutError
-        raise ExchangeError.new("OAST: #{host} accepted the connection but did not answer " \
-                                "within #{TIMEOUT.total_seconds.round}s")
       rescue ex
+        # The deadline closed the socket under the read, so what surfaced is a closed stream;
+        # the cause is the clock, and saying so keeps it apart from a reset.
+        raise deadline_error(method, host) if Gori::HttpTransport.expired?(client)
+        if ex.is_a?(IO::TimeoutError)
+          raise ExchangeError.new("OAST: #{host} accepted the connection but did not answer " \
+                                  "within #{TIMEOUT.total_seconds.round}s")
+        end
         # Everything past the handshake: a reset, a truncated response, a body that is not what
         # the provider's reader expects. Naming the stage keeps it apart from the dial failures
         # above, whose remedies (a CA bundle, a resolver) are wrong for a connection that was
@@ -90,6 +115,11 @@ module Gori::Oast
       ensure
         client.close
       end
+    end
+
+    private def deadline_error(method : String, host : String) : ExchangeError
+      ExchangeError.new("OAST: the #{method.upcase} to #{host} did not finish within " \
+                        "#{@exchange_budget.total_seconds.round(1)}s — the server is answering too slowly")
     end
 
     # Read `io` fully into a String, raising once it would exceed MAX_BODY. A clean engine error

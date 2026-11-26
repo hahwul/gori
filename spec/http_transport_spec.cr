@@ -269,6 +269,26 @@ describe Gori::HttpTransport do
     reset_http_transport_proxy
   end
 
+  # Whether a response was cut is the watcher's answer, not the clock's: one that finished
+  # before the deadline is whole even when the caller looks after the deadline has passed.
+  it "does not call a response that beat its deadline expired once the deadline passes" do
+    with_socks_http_response("ok") do |port, _seen|
+      Gori::Settings.upstream_proxy = "socks5h://127.0.0.1:#{port}"
+      uri = URI.parse("http://remote-only.invalid/resource")
+      client = Gori::HttpTransport.client(uri, deadline: Time.instant + 300.milliseconds)
+      begin
+        client.get(uri.request_target).body.should eq("ok")
+        sleep 500.milliseconds
+        Gori::HttpTransport.expired?(client).should be_false
+      ensure
+        client.close
+      end
+      Gori::HttpTransport.expired?(client).should be_false
+    end
+  ensure
+    reset_http_transport_proxy
+  end
+
   it "does not offer a CA bundle for a handshake that never judged a certificate" do
     # A plaintext port answered as if it were TLS: no certificate was exchanged, so a trust
     # store cannot be the fix and saying so would send the operator after the wrong thing.
