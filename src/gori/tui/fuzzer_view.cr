@@ -1680,7 +1680,7 @@ module Gori::Tui
     end
 
     private def buffered_timeout : Time::Span?
-      @s_timeout.to_f?.try { |t| t.finite? && t > 0 ? t.clamp(0.001, Int32::MAX).seconds : nil }
+      @s_timeout.to_f?.try { |t| t.finite? && t > 0 ? t.clamp(0.001, Fuzz::SessionConfig::MAX_TIMEOUT.total_seconds).seconds : nil }
     end
 
     # The ADVANCED card's macro rows as a spec, or nil when no steps are named (which is every
@@ -1749,7 +1749,7 @@ module Gori::Tui
     private def sync_buffers : Nil
       @s_conc = @config.concurrency.to_s
       @s_rate = @config.rps.try(&.to_s) || ""
-      @s_timeout = @config.timeout.try { |t| t.total_seconds % 1 == 0 ? t.total_seconds.to_i.to_s : t.total_seconds.to_s } || ""
+      @s_timeout = @config.timeout.try { |t| t.total_seconds % 1 == 0 ? t.to_i.to_s : t.total_seconds.to_s } || ""
       @s_retries = @config.retries.to_s
       @s_max_req = @config.max_requests.try(&.to_s) || ""
       @s_race = @config.race_count.try(&.to_s) || ""

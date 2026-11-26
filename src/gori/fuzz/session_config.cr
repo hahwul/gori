@@ -33,6 +33,16 @@ module Gori::Fuzz
     # imported archive. A surface drops a key once the operator sets that knob again.
     property unread : Hash(String, JSON::Any) = {} of String => JSON::Any
 
+    # The longest per-request timeout a tab holds: what the ADVANCED card's buffer clamps to,
+    # and what a stored row is read back under. gori never writes past it, so a larger one is a
+    # row from an archive or a foreign database, and its whole-second display overflowed Int32.
+    MAX_TIMEOUT = Int32::MAX.seconds
+
+    # A stored timeout as a tab reads it: nonpositive is none (the buffer's `t > 0` reading).
+    def self.bounded_timeout(span : Time::Span?) : Time::Span?
+      span.try { |t| t > Time::Span.zero ? {t, MAX_TIMEOUT}.min : nil }
+    end
+
     def initialize(@config = Config.new(keep_bodies: :all), @matcher = Matcher.new,
                    @http2 = false, @sni = "", @sets = [] of SetSpec,
                    @extractor_columns = [] of Store::DisplayColumn,
@@ -62,7 +72,7 @@ module Gori::Fuzz
           j.field "concurrency", @config.concurrency
           j.field "rps", @config.rps
           j.field "throttle_ms", @config.throttle_ms
-          j.field "timeout_s", @config.timeout.try(&.total_seconds.to_i)
+          j.field "timeout_s", @config.timeout.try(&.to_i)
           j.field "retries", @config.retries
           j.field "max_requests", @config.max_requests
           j.field "race_count", @config.race_count
@@ -127,8 +137,10 @@ module Gori::Fuzz
       @config.throttle_ms = Settings.int_field(obj, "throttle_ms")
       # Assigned, not guarded: `config_json` writes the key as `null` when there is no
       # timeout, and a guarded read kept the stale one when the peer had CLEARED it.
-      @config.timeout = Settings.int_field(obj, "timeout_s").try(&.seconds)
-      obj["timeout_ms"]?.try(&.as_i64?).try { |ms| @config.timeout = ms.milliseconds }
+      # Read as Int64 and bounded (`bounded_timeout`): an Int32 read dropped a larger
+      # `timeout_s` to none while the same value as `timeout_ms` kept the whole span.
+      @config.timeout = SessionConfig.bounded_timeout(obj["timeout_s"]?.try(&.as_i64?).try(&.seconds))
+      obj["timeout_ms"]?.try(&.as_i64?).try { |ms| @config.timeout = SessionConfig.bounded_timeout(ms.milliseconds) }
       Settings.int_field(obj, "retries").try { |n| @config.retries = n }
       @config.max_requests = obj["max_requests"]?.try(&.as_i64?)
       @config.race_count = Settings.int_field(obj, "race_count")

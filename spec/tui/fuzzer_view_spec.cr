@@ -2061,6 +2061,19 @@ describe "Gori::Tui::FuzzerView durable run state" do
     view.config.timeout.should eq(Int32::MAX.seconds)
   end
 
+  # The restore (and every peer reconcile) formatted the stored timeout through Int32, so a
+  # foreign row past it raised OverflowError while the Runner was being built.
+  it "restores a stored timeout past Int32 seconds without overflowing" do
+    record = Gori::Store::FuzzSessionRecord.new(1_i64, "https://h", "GET / HTTP/1.1\r\nHost: h\r\n\r\n",
+      false, nil, %({"timeout_ms":3000000000000}), nil, 0)
+    view = Gori::Tui::FuzzerView.new
+    view.restore(record)
+    view.advanced_snapshot.timeout.should eq(Int32::MAX.to_s)
+    view.apply_peer_session(record)
+    view.config_json
+    view.config.timeout.should eq(Int32::MAX.seconds)
+  end
+
   it "marks a max-requests cutoff as budget_exhausted" do
     view = loaded_fuzzer
     view.@config.max_requests = 3_i64
