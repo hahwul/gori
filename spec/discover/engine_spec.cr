@@ -323,6 +323,24 @@ describe Gori::Discover::Engine do
     kinds.last.should eq(:done)
   end
 
+  # The same raise from the other side: a wordlist line is kept bytes-faithful, so a Latin-1
+  # `notes.caf\xE9` that the origin confirms reached `file_shaped?`'s version-suffix regex on
+  # the orchestrator fiber, and the run ended with an ErrorEvent, dropping the queued sweep.
+  it "finishes a brute-force run whose confirmed hit has a not-valid-UTF-8 extension" do
+    cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 2, concurrency: 1,
+      retries: 0, confidence_floor: 0.4)
+    word = String.new("notes.caf".to_slice + Bytes[0xE9])
+    backend = TargetRecordingBackend.new(->(t : String) do
+      t.starts_with?("/notes.") || t == "/admin" ? make(200, "REAL FILE #{t.bytesize}") : make(404, "not found here")
+    end)
+    kinds, messages = terminal_of(D::Engine.new("http://t/", ["admin", word, "zzz-after"], backend, cfg, D::OpenScope.new))
+    messages.should be_empty
+    kinds.last.should eq(:done)
+    # The /admin/ sweep queued before the hit still ran, and the hit itself was not swept.
+    backend.targets.should contain("/admin/zzz-after")
+    backend.targets.none?(&.starts_with?("/#{word}/")).should be_true
+  end
+
   # A redirect `Location` is chosen by the target, so a SP/TAB/DEL/C0 in it is refused rather
   # than percent-encoded and fetched; a page-authored href with a space is still repaired.
   it "refuses a redirect Location carrying a request-line breaker, and still follows a clean one" do
