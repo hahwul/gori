@@ -37,20 +37,25 @@ module Gori::Proxy
     # owns when that predicate becomes true. The watcher is joined before returning so a
     # cancelled send cannot leave a fiber behind. TLS dials use this on the underlying socket
     # while OpenSSL performs its handshake; send engines use it on the completed SSL socket.
+    #
+    # `deadline` is the same close on a wall clock. A per-read io timeout alone lets a peer
+    # that drips its bytes, each slice inside the timeout, hold the operation for hours. With
+    # no predicate the fiber sleeps straight to the deadline instead of polling. `expired?`
+    # says the close was the deadline's, so the caller words a timeout, not a broken stream.
     class CancelWatch
-      def initialize(@io : IO, @cancel : Proc(Bool))
+      POLL = 10.milliseconds
+
+      getter? expired = false
+
+      def initialize(@io : IO, @cancel : Proc(Bool)?, @deadline : Time::Instant? = nil)
         @stop = Channel(Nil).new(1)
         @joined = Channel(Nil).new(1)
         spawn do
-          loop do
-            if @cancel.call
-              @io.close rescue nil
-              break
-            end
+          while wait = next_wait
             select
             when @stop.receive
               break
-            when timeout(10.milliseconds)
+            when timeout(wait)
             end
           end
         rescue
@@ -65,6 +70,24 @@ module Gori::Proxy
         @stop.send(nil)
         @joined.receive
       end
+
+      # How long to sleep before looking again, or nil once `io` has been closed: by the
+      # predicate, or by the deadline (which also marks `expired?`).
+      private def next_wait : Time::Span?
+        if (predicate = @cancel) && predicate.call
+          @io.close rescue nil
+          return
+        end
+        due = @deadline
+        return POLL unless due
+        left = due - Time.instant
+        if left <= Time::Span.zero
+          @expired = true
+          @io.close rescue nil
+          return
+        end
+        @cancel ? {POLL, left}.min : left
+      end
     end
 
     def self.watch_cancel(io : IO, cancel : Proc(Bool)?) : CancelWatch?
@@ -78,6 +101,42 @@ module Gori::Proxy
       ensure
         watcher.try(&.stop)
       end
+    end
+
+    # A TLS handshake's wall-clock ceiling, in io timeouts. The io timeout bounds each read, so
+    # an origin that drips its ServerHello/Certificate records in slices, each inside it, kept
+    # a send alive for as long as it liked: the send's own head/body budgets start only once
+    # the dial returns. A client handshake waits on the peer at most two or three times, so a
+    # handshake that each wait finishes inside today's io timeout still finishes inside this.
+    HANDSHAKE_BUDGET_FACTOR = 3
+
+    # Raised by `bounded_handshake` when the ceiling, not the peer, ended the handshake. An
+    # `IO::TimeoutError` so every classifier that already reads a timeout as "nothing came back
+    # in time" (`tls_dial_error`) keeps doing so; its message carries the ceiling it hit.
+    class HandshakeTimeout < IO::TimeoutError
+      def initialize(budget : Time::Span)
+        super("the TLS handshake did not complete within #{budget.total_seconds.round(1)}s")
+      end
+    end
+
+    # Run a TLS handshake (the block) under `cancel` and the HANDSHAKE_BUDGET_FACTOR ceiling.
+    # `io` is the transport socket beneath the handshake, never the SSL object being built:
+    # closing it is what wakes OpenSSL out of SSL_connect (see `dial_tls_result`). A handshake
+    # that finished just as the ceiling closed `io` holds a dead socket, so it is refused too.
+    def self.bounded_handshake(io : IO, cancel : Proc(Bool)?, io_timeout : Time::Span,
+                               & : -> T) : T forall T
+      budget = io_timeout * HANDSHAKE_BUDGET_FACTOR
+      watch = CancelWatch.new(io, cancel, Time.instant + budget)
+      result = begin
+        yield
+      rescue ex
+        watch.stop
+        raise watch.expired? ? HandshakeTimeout.new(budget) : ex
+      end
+      watch.stop
+      return result unless watch.expired?
+      result.close rescue nil
+      raise HandshakeTimeout.new(budget)
     end
 
     # Dial the origin (directly, or via the configured upstream proxy's CONNECT
@@ -1470,8 +1529,9 @@ module Gori::Proxy
       # result. During the handshake, close the transport socket beneath any proxy TLS wrapper
       # rather than calling SSL.close while OpenSSL is in SSL_connect. Once the SSL socket has
       # been constructed, callers install their normal watcher on that socket for subsequent IO.
+      # The same close ends a handshake that outlives its wall-clock ceiling.
       handshake_io = SocketTuning.underlying_socket(tcp) || tcp
-      ssl = with_cancel(handshake_io, cancel) do
+      ssl = bounded_handshake(handshake_io, cancel, io_timeout) do
         OpenSSL::SSL::Socket::Client.new(tcp, context: client_context(verify, alpn, tls_policy),
           sync_close: true, hostname: sni || host)
       end
@@ -1515,10 +1575,12 @@ module Gori::Proxy
       # A read timeout is not a TLS verdict — nothing came back to judge. Naming the layer
       # TLS here is precisely what produced the certificate advice for a black hole, so it
       # gets its own kind and carries how long gori actually waited (the stall was otherwise
-      # invisible: a failed dial records no duration).
+      # invisible: a failed dial records no duration). A handshake the wall-clock ceiling ended
+      # is the same verdict with a different wait, so it names the ceiling instead.
       if ex.is_a?(IO::TimeoutError)
+        waited = ex.is_a?(HandshakeTimeout) ? ex.message : nil
         return DialError.new(DialErrorKind::Timeout,
-          cause: "no TLS response within #{io_timeout.total_seconds.round(1)}s",
+          cause: waited || "no TLS response within #{io_timeout.total_seconds.round(1)}s",
           via_proxy: proxied_via(host, "https", origin_port))
       end
       cause = exception_cause(ex)

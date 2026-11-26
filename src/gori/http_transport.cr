@@ -123,7 +123,12 @@ module Gori
       else
         context.verify_mode = OpenSSL::SSL::VerifyMode::NONE
       end
-      OpenSSL::SSL::Socket::Client.new(tcp, context: context, sync_close: true, hostname: host)
+      # Under the target dialer's wall-clock ceiling: the per-read timeout alone let a
+      # collector or updater host that drips its handshake hold the call for hours.
+      handshake_io = Proxy::SocketTuning.underlying_socket(tcp) || tcp
+      Proxy::Upstream.bounded_handshake(handshake_io, nil, io_timeout) do
+        OpenSSL::SSL::Socket::Client.new(tcp, context: context, sync_close: true, hostname: host)
+      end
     rescue ex
       tcp.close rescue nil
       raise tls_failure(host, port, ex, io_timeout)
@@ -144,8 +149,13 @@ module Gori
           "TLS-inspecting proxy or is signed by a private CA, trust that CA by running with " \
           "SSL_CERT_FILE=/path/to/ca-bundle.crt (or SSL_CERT_DIR=/path/to/certs)"
         when .timeout?
-          "TLS handshake with #{host} did not complete — the port accepted the connection " \
-          "and then said nothing"
+          if ex.is_a?(Proxy::Upstream::HandshakeTimeout)
+            "TLS handshake with #{host} did not complete — the port accepted the connection " \
+            "and then answered too slowly"
+          else
+            "TLS handshake with #{host} did not complete — the port accepted the connection " \
+            "and then said nothing"
+          end
         else
           "TLS handshake with #{host} failed before any certificate was judged, so " \
           "SSL_CERT_FILE cannot help here"

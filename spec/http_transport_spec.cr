@@ -37,6 +37,47 @@ rescue
   raw.close rescue nil
 end
 
+# A relay to `up_port` that forwards what the origin sends in `slice`-byte pieces `gap` apart,
+# so no single read waits as long as the read timeout. The client's direction is not slowed.
+private def with_dripping_relay(up_port : Int32, slice : Int32, gap : Time::Span, &)
+  server = TCPServer.new("127.0.0.1", 0)
+  spawn do
+    while raw = server.accept?
+      spawn drip_relay(raw, up_port, slice, gap)
+    end
+  rescue
+  end
+  begin
+    yield server.local_address.port
+  ensure
+    server.close rescue nil
+  end
+end
+
+private def drip_relay(client : TCPSocket, up_port : Int32, slice : Int32, gap : Time::Span) : Nil
+  up = TCPSocket.new("127.0.0.1", up_port)
+  spawn do
+    buf = Bytes.new(4096)
+    while (n = client.read(buf)) > 0
+      up.write(buf[0, n])
+      up.flush
+    end
+  rescue
+  ensure
+    up.close rescue nil
+  end
+  buf = Bytes.new(slice)
+  while (n = up.read(buf)) > 0
+    sleep gap
+    client.write(buf[0, n])
+    client.flush
+  end
+rescue
+ensure
+  client.close rescue nil
+  up.try(&.close) rescue nil
+end
+
 private def reset_http_transport_proxy : Nil
   Gori::Settings.upstream_rules = [] of Gori::Settings::UpstreamRule
   Gori::Settings.upstream_proxy = ""
@@ -203,6 +244,26 @@ describe Gori::HttpTransport do
         Gori::Oast::HttpClient.new.request("GET", "https://localhost:#{port}/poll")
       end
       err.kind.should eq(Gori::Proxy::Upstream::DialErrorKind::TlsVerify)
+    end
+  ensure
+    reset_http_transport_proxy
+  end
+
+  # The relay drips ~2 KB of handshake 16 bytes per 100 ms (about 14 s), each slice a tenth of
+  # the 1 s read timeout; the wall-clock ceiling is three read timeouts.
+  it "ends a handshake the server drips in slices at its wall-clock ceiling" do
+    with_untrusted_tls_origin do |origin_port|
+      with_dripping_relay(origin_port, 16, 100.milliseconds) do |port|
+        started = Time.instant
+        err = expect_raises(Gori::HttpTransport::Error) do
+          Gori::HttpTransport.client(URI.parse("https://localhost:#{port}/"), verify_tls: false,
+            connect_timeout: 2.seconds, read_timeout: 1.second).close
+        end
+        (Time.instant - started).should be < 8.seconds
+        err.kind.should eq(Gori::Proxy::Upstream::DialErrorKind::Timeout)
+        err.message.not_nil!.should contain("answered too slowly")
+        err.message.not_nil!.should contain("within 3.0s")
+      end
     end
   ensure
     reset_http_transport_proxy
