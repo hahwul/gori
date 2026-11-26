@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./highlight"
 require "./reveal"
+require "../utf8"
 
 module Gori::Tui
   # Soft wrap: one LOGICAL line → N VISUAL rows, Burp-style (the line number is printed
@@ -698,7 +699,10 @@ module Gori::Tui
     # and a mutating call on a struct read out of a union would mutate the copy the union
     # hands back — the walk would silently restart from byte 0 per match, which is the very
     # cost this removes.
-    private class Offsets
+    #
+    # Public for `Highlight`, whose span cutters (`emphasize`, `conceal`, the env overlay) ask
+    # the same non-decreasing questions of one span and were quadratic the same way.
+    class Offsets
       @bytes : Bytes
       @ascii : Bool
       @ci : Int32
@@ -739,14 +743,21 @@ module Gori::Tui
         @bi
       end
 
-      # One character forward: the lead byte plus the continuation bytes after it (a
-      # continuation byte can never be a lead byte, which is what makes this a walk and not
-      # a decode).
+      # The character `[a, b)` slice of `s` (the string this cursor walks), cut by byte.
+      # `a` must not be behind the last question asked.
+      def slice(s : String, a : Int32, b : Int32) : String
+        ba = byte_at(a)
+        s.byte_slice(ba, byte_at(b) - ba)
+      end
+
+      # One character forward, counted the way `String#size` and every char index count it
+      # (`Utf8.width_at`): a valid sequence is one character, and each byte of an invalid one
+      # is a character of its own. Skipping every continuation byte after a lead instead
+      # agrees on valid text and drifts on a captured binary line, where a stray continuation
+      # byte is a character the stdlib counts and this would not.
       private def step : Nil
-        @bi += 1
-        while @bi < @bytes.size && (@bytes[@bi] & 0xC0_u8) == 0x80_u8
-          @bi += 1
-        end
+        w = Utf8.width_at(@bytes.to_unsafe, @bi, @bytes.size)
+        @bi += w == 0 ? 1 : w
         @ci += 1
       end
     end
