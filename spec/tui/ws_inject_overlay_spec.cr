@@ -92,6 +92,8 @@ describe Gori::Tui::WsInjectOverlay do
     itype(ov, "hi") # on the direction row: lands in the payload
     String.new(ov.payload.not_nil!).should eq("hi")
     ov.handle_key(ikey(Termisu::Input::Key::Enter)).should eq(:commit)
+    ov.handle_key(ikey(Termisu::Input::Key::Escape)).should eq(:stay)
+    ov.discard_armed?.should be_true
     ov.handle_key(ikey(Termisu::Input::Key::Escape)).should eq(:cancel)
   end
 

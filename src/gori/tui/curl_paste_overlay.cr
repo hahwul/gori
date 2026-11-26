@@ -23,6 +23,7 @@ module Gori::Tui
   # restored. `pasting` is how the card knows, injected by the shell that owns the paste state.
   class CurlPasteOverlay < Overlay
     include EditorCard
+    include DiscardGuard
 
     # Where the request goes: a new Repeater sub-tab, or History.
     getter mode : Symbol
@@ -35,6 +36,11 @@ module Gori::Tui
     def initialize(@mode : Symbol)
       @editor = TextArea.new("")
       @editor.wrap = true
+      @opened_state = form_state
+    end
+
+    private def form_state : String
+      @editor.text
     end
 
     def text : String
@@ -64,13 +70,16 @@ module Gori::Tui
     end
 
     def paste_text(text : String) : Bool
+      @discard_armed = false
       @editor.insert_text(text)
       true
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol
+      if outcome = discard_key(ev)
+        return outcome
+      end
       key = ev.key
-      return :cancel if key.escape?
       if key.enter?
         return :commit unless pasting.call || Gori::Import::Shell.incomplete?(@editor.text)
         @editor.insert_newline
@@ -89,7 +98,8 @@ module Gori::Tui
     # A click outside the card cancels (the default); inside, it places the caret.
     def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
       box = overlay_box(area)
-      return :cancel if box.nil? || !box.contains?(mx, my)
+      return discard_or_ask if box.nil? || !box.contains?(mx, my)
+      @discard_armed = false
       @editor.click_to_cursor(editor_rect(box), mx, my)
       :stay
     end

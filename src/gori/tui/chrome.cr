@@ -460,12 +460,29 @@ module Gori::Tui
     # is gori putting requests on the target. Every state that warns (red, orange, yellow) stays.
     TOP_YIELDING = {:palette, :settings, :rules, :probe}
 
+    # Secondary yield order when active chips still overflow the entire bar past `name_x`.
+    # Safety-critical readouts (`:sandbox`, `:intercept`, `:ask`, error `:listeners`, and
+    # `:listen` carrying Capture OFF / DB write failures) stay pinned on screen rather than
+    # getting clipped off the right edge by `render_chips`.
+    TOP_OVERFLOW_YIELDING = {:scope_off, :notify, :agents, :session, :scope, :probe, :authorize, :listeners_ok, :bypass}
+
     private def self.fit_top_chips(chips : Array(Chip), rect : Rect, name_x : Int32, project : String) : Array(Chip)
       want = {Screen.display_width("· #{project}"), TOP_NAME_RESERVE}.min
       room = rect.right - name_x - want - TOP_NAME_GAP - 1
       TOP_YIELDING.each do |tag|
         break if chips_width(chips) <= room
         chips = chips.reject { |c| c.tag == tag && !(tag == :probe && c.label.ends_with?(":active")) }
+      end
+      max_room = rect.right - name_x - 1
+      TOP_OVERFLOW_YIELDING.each do |rule|
+        break if chips_width(chips) <= max_room
+        chips = chips.reject do |c|
+          case rule
+          when :scope_off    then c.tag == :scope && c.label.includes?(":off")
+          when :listeners_ok then c.tag == :listeners && c.color != Theme.red
+          else                    c.tag == rule
+          end
+        end
       end
       chips
     end

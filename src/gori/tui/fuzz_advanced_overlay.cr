@@ -335,6 +335,7 @@ module Gori::Tui
     end
 
     def render(screen : Screen, area : Rect) : Nil
+      text_fields.each(&.forget_geometry)
       box = overlay_box(area)
       unless box
         Overlay.too_small(screen, area, "advanced editor needs a larger window")
@@ -353,10 +354,7 @@ module Gori::Tui
         break if ri >= ROWS.size
         render_row(screen, box, ri, top + i, vx)
       end
-      # No key hint on the card — the shell draws `hint` in the status strip for the open
-      # modal (Runner#key_hints). This copy had drifted furthest of the nine: it spelled the
-      # same three keys differently (`⇥/↑↓` for `↑/↓/⇥`, `space` for `␣`) and omitted `↵ next`
-      # entirely, so the two lines on screen disagreed about what the form could do.
+      Frame.scroll_gauge(screen, Rect.new(box.x + 1, top, box.w - 2, visible), ROWS.size, @scroll, true, Theme.bg)
     end
 
     # A toggle row's current state, by field key — pulled out of `render_row` so that method

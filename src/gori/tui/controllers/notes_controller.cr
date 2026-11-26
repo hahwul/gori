@@ -434,6 +434,7 @@ module Gori::Tui
     # changes (mirrors Repeater's ^N).
     def notes_new : Nil
       @notes.new_note
+      reveal_active_subtab
       @notes.enter_insert!
       @host.focus_body
       # `⇧1-9`, not `^1-9` — same reason as the Repeater's arrival hint: Ctrl+digit is the
@@ -493,6 +494,7 @@ module Gori::Tui
       else
         @notes.duplicate_current
       end
+      reveal_active_subtab
       refresh_link_preview
       @host.focus_body
       @host.status("#{msg} (#{@notes.count} open)") if saved

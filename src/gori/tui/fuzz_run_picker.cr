@@ -41,6 +41,10 @@ module Gori::Tui
       true
     end
 
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      false
+    end
+
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       case

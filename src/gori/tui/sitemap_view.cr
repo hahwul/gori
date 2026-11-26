@@ -629,8 +629,12 @@ module Gori::Tui
     # node — seeding the buffer from the PRIMARY target's current memo. Returns false when
     # there is nothing taggable (a fold under the cursor with nothing marked / empty tree),
     # so the controller can toast instead.
-    def start_tag : Bool
-      targets = target_keys
+    def start_tag(cursor_only : Bool = false) : Bool
+      targets = if cursor_only
+                  resolve_target.try { |k| [k] } || [] of {String, String}
+                else
+                  target_keys
+                end
       return false if targets.empty?
       @tag_targets = targets # pinned NOW, before any reload can retarget the selection
       @tagging = true
@@ -717,6 +721,10 @@ module Gori::Tui
     # Selection-based (host, path) for the row currently under the cursor — the LIVE
     # target, used to seed the pin at start_tag and as the single-row fallback for
     # target_keys. Refuses a fold: a synthetic node has no path and is not taggable.
+    def taggable_cursor? : Bool
+      !resolve_target.nil?
+    end
+
     private def resolve_target : {String, String}?
       visible_rows[@selected]?.try { |row| mark_key(row) }
     end
@@ -801,12 +809,14 @@ module Gori::Tui
     #
     # A marked row is its SUBTREE, as the cursor row is: marking `/api` and exporting means the
     # API under it. A mark the tree no longer holds drops out.
-    def export_targets : {Hash(Sitemap::Origin, Set(String)?), String}?
-      if @marks.empty?
-        t = selected_params_target || return nil
-        return nil unless o = t.origin
-        return { {o => t.paths}, t.label }
-      end
+    private def cursor_export_targets : {Hash(Sitemap::Origin, Set(String)?), String}?
+      t = selected_params_target || return nil
+      return nil unless o = t.origin
+      { {o => t.paths}, t.label }
+    end
+
+    def export_targets(cursor_only : Bool = false) : {Hash(Sitemap::Origin, Set(String)?), String}?
+      return cursor_export_targets if cursor_only || @marks.empty?
       index = node_index
       out = {} of Sitemap::Origin => Set(String)?
       marked = 0

@@ -240,13 +240,33 @@ module Gori::Tui
       area.card?({longest + 6, 54}.max.clamp(30, 64), @info.size + row_count + 4, 30, 6)
     end
 
-    # First interactive row's y: below the header block + a blank spacer line.
+    # Maximum header lines that still leave room for the spacer, every interactive row
+    # (notify, unsafe methods, Run active scan), and both card borders.
+    private def head_limit(box : Rect) : Int32
+      {box.h - row_count - 3, 1}.max
+    end
+
+    private def head_lines(box : Rect) : Array(String)
+      limit = head_limit(box)
+      return @info if @info.size <= limit
+      # Keep the target line and the trailing warning + request-total summary visible on short
+      # terminals, collapsing excess rule lines into a single "+N more" row.
+      tail_n = @allow_unsafe ? 2 : 1
+      return @info.last(limit) if limit <= tail_n + 1
+      tail = @info.last(tail_n)
+      body_room = limit - tail_n - 1 # reserve 1 row for the "+N more" summary
+      head = @info[0, body_room]
+      omitted = @info[body_room...(@info.size - tail_n)].count { |l| !l.empty? }
+      omitted > 0 ? head + ["  … +#{omitted} more"] + tail : head + tail
+    end
+
+    # First interactive row's y: below the rendered header block + a blank spacer line.
     private def first_row_y(box : Rect) : Int32
-      box.y + 1 + @info.size + 1
+      box.y + 1 + head_lines(box).size + 1
     end
 
     private def rows_bottom(box : Rect) : Int32
-      box.bottom
+      box.bottom - 1
     end
 
     def card_title : String
@@ -258,13 +278,15 @@ module Gori::Tui
     end
 
     private def draw_head(screen : Screen, box : Rect) : Nil
-      @info.each_with_index do |line, i|
+      head_lines(box).each_with_index do |line, i|
         py = box.y + 1 + i
-        break if py >= box.bottom - 2
-        fg = if i == 0
-               Theme.text_bright
-             elsif line.starts_with?("⚠")
+        break if py >= first_row_y(box) - 1
+        fg = if line.starts_with?("⚠")
                Theme.red
+             elsif i == 0
+               Theme.text_bright
+             elsif line.starts_with?("  …")
+               Theme.muted
              else
                Theme.text
              end

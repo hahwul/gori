@@ -23,6 +23,8 @@ module Gori::Tui
   # which lines it would not take. Dropping an `Authorization` line in silence is how an
   # authenticated sweep runs unauthenticated and reports nothing found.
   class AuthorizeIdentityOverlay < Overlay
+    include DiscardGuard
+
     NAME_ROW   = 0
     REMOVE_ROW = 1
     EDITOR_ROW = 2
@@ -85,6 +87,11 @@ module Gori::Tui
       @taken = taken.map(&.downcase).to_set
       @selected = NAME_ROW
       @refused = nil.as(String?)
+      @opened_state = form_state
+    end
+
+    private def form_state : String
+      "#{super}|#{@editor.text}"
     end
 
     def editing? : Bool
@@ -175,6 +182,7 @@ module Gori::Tui
 
     # Which pasted keystrokes reach this card (see `Overlay#takes_pasted?`): the headers editor takes a line break as a newline; the name/remove rows keep the default.
     def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      return false if ev.key.escape?
       @selected == EDITOR_ROW || super
     end
 
@@ -191,9 +199,12 @@ module Gori::Tui
       # Not for a pasted key: a clipboard's ↵ is a newline, and accepting on it spliced the
       # suggestion into the next pasted header (`Runner#pasted_key?`, the tab tier's twin).
       if @selected == EDITOR_ROW && !pasting.call && @editor.env_completing? && @editor.handle_env_complete_key(ev)
+        @discard_armed = false
         return :stay
       end
-      return :cancel if key.escape?
+      if outcome = discard_key(ev)
+        return outcome
+      end
       if key.tab?
         move(1)
         return :stay
@@ -283,7 +294,8 @@ module Gori::Tui
     # --- pointer ---
     def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
       box = overlay_box(area)
-      return :cancel if box.nil? || !box.contains?(mx, my)
+      return discard_or_ask if box.nil? || !box.contains?(mx, my)
+      @discard_armed = false
       ed = editor_rect(box)
       if my == box.y + 2
         set_selected(NAME_ROW)

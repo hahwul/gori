@@ -15,9 +15,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # `⇧E` — the marked paths, else the cursor's host or subtree, as an OpenAPI 3.0.3 document
   # (#1241). The flow set is the tree's own (the `/` query, the scope and hide-static lenses),
   # so the file describes what the tree shows. The path comes from the export popup.
-  def sitemap_export : Nil
+  def sitemap_export(cursor_only : Bool = false, *, confirmed : Bool = false) : Nil
+    if !confirmed && sitemap_controller.hidden_marks_card?("EXPORT OPENAPI", "Export", confirm_verb: "export") { |co| sitemap_export(co, confirmed: true) }
+      return
+    end
     view = sitemap_controller.view
-    unless picked = view.export_targets
+    unless picked = view.export_targets(cursor_only: cursor_only)
       @toast = "select a host or path to export"
       return
     end
@@ -85,8 +88,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # The cursor row: unchanged, and deliberately NOT routed through the marked-set path below —
   # `selected_endpoint` resolves a `{uuid}` fold to a real descendant, which a mark never needs
   # (a fold can't be marked) and which target_endpoints therefore doesn't do.
-  def sitemap_repeater : Nil
-    return sitemap_repeater_marked if sitemap_controller.marked_node_count > 0
+  def sitemap_repeater(cursor_only : Bool = false, *, confirmed : Bool = false) : Nil
+    if !cursor_only && sitemap_controller.marked_node_count > 0
+      if !confirmed && sitemap_controller.hidden_marks_card?("SEND TO REPEATER", "Send", confirm_verb: "send") { |co| sitemap_repeater(co, confirmed: true) }
+        return
+      end
+      return sitemap_repeater_marked
+    end
     if ref = sitemap_controller.view.selected_js_ref
       return sitemap_repeater_js(ref[:host], ref[:path], ref[:origin])
     end

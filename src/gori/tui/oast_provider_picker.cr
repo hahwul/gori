@@ -16,6 +16,10 @@ module Gori::Tui
     private def letter_key(c : Char) : Nil
     end
 
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      false
+    end
+
     # esc cancels · ↑/↓ (and j/k, as in every sibling picker) move · ↵ picks.
     def handle_key(ev : Termisu::Event::Key) : Symbol
       if nav = nav_key(ev)

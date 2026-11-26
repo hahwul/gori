@@ -229,11 +229,33 @@ module Gori::Tui
       handle_double_click_content(rect.inset(1, 1), mx, my)
     end
 
+    # Hidden-marks confirmation card (same pattern as HistoryController/IssuesController):
+    # warns before a batch verb acts on marks currently hidden by collapse, `/`, or scope.
+    def hidden_marks_card?(heading : String, question : String, *,
+                           confirm_verb : String? = nil, danger : Bool = false,
+                           allow_cursor : Bool = true,
+                           &act : Bool -> Nil) : Bool
+      hidden = @sitemap.marked_hidden_count
+      n = @sitemap.mark_count
+      return false if n == 0 || hidden <= 0
+      cursor_label = allow_cursor ? @sitemap.selected_url : nil
+      lines = ["#{question} #{Gori.plural(n, "marked path")}?", TabController.hidden_marks_line(n, hidden)]
+      lines << "Cursor row: “#{cursor_label}”." if cursor_label
+      @host.confirm_or_alt(heading, lines.join('\n'), confirm_label: "#{confirm_verb || "all"} #{n}",
+        alt_label: cursor_label ? "cursor row" : nil, danger: danger) do |alt|
+        act.call(alt && !cursor_label.nil?)
+      end
+      true
+    end
+
     # `y`: every marked row as a URL, one per line — or the cursor row's: the origin for a host
     # row (`https://h:8443`), origin + path below it. A root is an origin (#1371), so this is
     # the URL the row stands for, scheme and port included, the way the rows read.
-    def copy_row : Nil
-      keys = @sitemap.marked_keys
+    def copy_row(cursor_only : Bool = false, *, confirmed : Bool = false) : Nil
+      if !confirmed && hidden_marks_card?("COPY PATHS", "Copy", confirm_verb: "copy") { |co| copy_row(co, confirmed: true) }
+        return
+      end
+      keys = cursor_only ? [] of {String, String} : @sitemap.marked_keys
       text = if keys.empty?
                @sitemap.selected_url || ""
              else
@@ -473,9 +495,13 @@ module Gori::Tui
     # Tag path (space menu, `sitemap.tag`) — open the tag editor over the target set (the marks if any, else the selected
     # node). A synthetic group fold node has no real path, so it can't be tagged — toast
     # instead of opening an empty editor.
-    def sitemap_tag : Nil
-      n = @sitemap.mark_count
-      if @sitemap.start_tag
+    def sitemap_tag(cursor_only : Bool = false, *, confirmed : Bool = false) : Nil
+      if !confirmed && hidden_marks_card?("TAG PATHS", "Tag", confirm_verb: "tag",
+           allow_cursor: @sitemap.taggable_cursor?) { |co| sitemap_tag(co, confirmed: true) }
+        return
+      end
+      n = cursor_only ? 0 : @sitemap.mark_count
+      if @sitemap.start_tag(cursor_only: cursor_only)
         subject = n > 0 ? "tag #{paths(n)}" : "tag"
         @host.status("#{subject}: type a memo · ↵ save · esc cancel")
       else

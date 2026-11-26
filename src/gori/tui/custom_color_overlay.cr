@@ -30,6 +30,7 @@ module Gori::Tui
         name: TextField.new(name),
         hex:  TextField.new(hex),
       }
+      @opened_state = form_state
     end
 
     def self.adding : CustomColorOverlay
@@ -107,8 +108,10 @@ module Gori::Tui
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol
+      if outcome = discard_key(ev)
+        return outcome
+      end
       key = ev.key
-      return :cancel if key.escape?
       return :stay if field_nav?(ev)
 
       if @sel == ROW_SAVE

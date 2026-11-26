@@ -584,7 +584,15 @@ module Gori::Tui
         return
       end
       drain_events
-      start_run(v)
+      if v.sample_count > 0
+        @host.confirm("REPLACE SAMPLES",
+          "Start a new collection?\nThe current #{Gori.plural(v.sample_count, "sample")} and report will be cleared.",
+          confirm_label: "run", danger: false) do
+          start_run(v) if @sessions.any?(&.view.same?(v)) && !v.running?
+        end
+      else
+        start_run(v)
+      end
     end
 
     def sequence_stop : Nil

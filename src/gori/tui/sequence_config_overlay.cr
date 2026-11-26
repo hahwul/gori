@@ -90,6 +90,11 @@ module Gori::Tui
       @conc_idx = nearest_index(CONC_CHOICES, cfg.try(&.concurrency) || 1)
       @notify_idx = NOTIFY_CHOICES.index(cfg.try(&.notify) || Sequencer::NotifyMode::WhenDone) || 0
       @sel = SELECTOR_ROW
+      @opened_state = form_state
+    end
+
+    private def form_state : String
+      "#{super}|#{@kind_idx}|#{@goal_idx}|#{@maxreq_idx}|#{@conc_idx}|#{@notify_idx}"
     end
 
     # The cycler position for a persisted value. A cycler can only offer what it lists, and a
@@ -148,16 +153,11 @@ module Gori::Tui
     # cyclers see them; ↵ starts from any row, as the hint says (it used to advance the
     # focused cycler — `samples` 500 → 1000 — #1373); ␣ advances a cycler; esc cancels.
     def handle_key(ev : Termisu::Event::Key) : Symbol
+      if outcome = discard_key(ev)
+        return outcome
+      end
       key = ev.key
-      return :cancel if key.escape?
-      if key.up?
-        move(-1)
-        return :stay
-      end
-      if key.down?
-        move(1)
-        return :stay
-      end
+      return :stay if field_nav?(ev)
       return :commit if key.enter?
       return :stay if editing_selector? && handle_text_key(ev)
       if key.left?

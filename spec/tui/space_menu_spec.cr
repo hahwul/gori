@@ -1568,4 +1568,18 @@ describe "Runner — a space card whose pane moved under it" do
     top.should contain(" #{menu.card_title} ")
     top.should_not contain("…")
   end
+
+  it "scrolls multi-column menus on short terminals instead of dropping trailing rows" do
+    ctx = FakeExecContext.new
+    ctx.selected = 5_i64
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+    menu.open(Gori::Verb::Scope::Body, :common, ctx)
+    last_title = menu.entries.last.title
+    # Short multi-column viewport: avail = 10, fit = 2, History Body has >20 padded rows.
+    body = Rect.new(0, 0, 80, 12)
+    backend = MemoryBackend.new(80, 12)
+    (menu.entries.size - 1).times { menu.move(1) }
+    menu.render(Screen.new(backend), body)
+    backend.contains?(last_title).should be_true
+  end
 end

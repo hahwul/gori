@@ -59,6 +59,11 @@ module Gori::Tui
       }
       @kind_i = KINDS.index(kind) || 0
       @side_i = SIDES.index(side) || 0
+      @opened_state = form_state
+    end
+
+    private def form_state : String
+      "#{super}|#{@side_i}|#{@kind_i}"
     end
 
     def self.adding : ColumnOverlay
@@ -170,8 +175,10 @@ module Gori::Tui
     end
 
     private def dispatch_key(ev : Termisu::Event::Key) : Symbol
+      if outcome = discard_key(ev)
+        return outcome
+      end
       key = ev.key
-      return :cancel if key.escape?
       return :stay if field_nav?(ev)
 
       if @sel == ROW_SIDE || @sel == ROW_KIND

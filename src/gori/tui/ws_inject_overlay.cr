@@ -26,6 +26,11 @@ module Gori::Tui
       @dir_idx = 0
       @kind_idx = 0
       @payload = TextField.new("") # rows: 0 direction · 1 opcode · 2 payload · 3 inject
+      @opened_state = form_state
+    end
+
+    private def form_state : String
+      "#{super}|#{@dir_idx}|#{@kind_idx}"
     end
 
     def direction : String
@@ -92,8 +97,10 @@ module Gori::Tui
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol
+      if outcome = discard_key(ev)
+        return outcome
+      end
       key = ev.key
-      return :cancel if key.escape?
       return :commit if key.enter?
       return :stay if field_nav?(ev)
       @sel == 2 ? @payload.handle_edit_key(ev) : off_payload_key(ev)

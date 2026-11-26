@@ -325,14 +325,19 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # focus sat on a row that was no longer drawn.
   def resolve_subtab_focus : Nil
     case @active_tab
-    when :repeater
-      focus_pane(:menu) if repeater_controller.empty?
-      focus_pane(:body) if !repeater_controller.empty? && !subtabs_shown?
-    when :fuzzer
-      focus_pane(:menu) if fuzzer_controller.empty?
-      focus_pane(:body) if !fuzzer_controller.empty? && !subtabs_shown?
-    else
-      focus_pane(:body) unless subtabs_shown? # Notes/Decoder always keep ≥1 session
+    when :repeater  then resolve_emptiable_subtab(repeater_controller.empty?)
+    when :fuzzer    then resolve_emptiable_subtab(fuzzer_controller.empty?)
+    when :miner     then resolve_emptiable_subtab(miner_controller.empty?)
+    when :sequencer then resolve_emptiable_subtab(sequencer_controller.empty?)
+    else                 focus_pane(:body) unless subtabs_shown? # Notes/Decoder always keep ≥1 session
+    end
+  end
+
+  private def resolve_emptiable_subtab(empty : Bool) : Nil
+    if empty
+      focus_pane(:menu)
+    elsif !subtabs_shown?
+      focus_pane(:body)
     end
   end
 end
