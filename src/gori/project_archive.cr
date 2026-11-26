@@ -388,8 +388,22 @@ module Gori
       return false unless File.info(path, follow_symlinks: false).file?
       names = Compress::Zip::File.open(path, &.entries.map(&.filename))
       names.sort == ["gori.db", "manifest.json"]
-    rescue Compress::Zip::Error | IO::Error
+    rescue ex
+      raise ex unless ex.is_a?(Compress::Zip::Error) || ex.is_a?(IO::Error) || zip_shape_error?(ex)
       false
+    end
+
+    # Crystal's zip reader raises two shapes it does not type for an archive's own bytes: a
+    # BARE `Exception` ("Unsupported compression method: N", FileInfo#decompressor_for) and an
+    # `ArgumentError` ("Invalid time", Time.utc under FileInfo#from_dos, on a DOS date or time
+    # no clock has). Matched on the exact class, as `Update.http_guard` does, so a subclass
+    # from a bug of ours (IndexError, OverflowError, KeyError) keeps its trace.
+    private def self.zip_shape_error?(ex : Exception) : Bool
+      ex.class.in?(Exception, ArgumentError)
+    end
+
+    private def self.damaged_archive(source : String, ex : Exception) : Gori::Error
+      Gori::Error.new("could not read project archive '#{source}': #{ex.message.presence || ex.class}")
     end
 
     def self.expand_archive_path(path : String) : String
@@ -490,7 +504,7 @@ module Gori
       seen_manifest = false
       seen_database = false
       uncompressed_bytes = 0_i64
-      Compress::Zip::Reader.open(source) do |zip|
+      read_zip_entries(source) do |zip|
         zip.each_entry do |entry|
           case entry.filename
           when "manifest.json"
@@ -517,6 +531,17 @@ module Gori
       raise Gori::Error.new("project archive is missing manifest.json") unless seen_manifest
       raise Gori::Error.new("project archive is missing gori.db") unless seen_database
       manifest_json || raise Gori::Error.new("project archive is missing manifest.json")
+    end
+
+    # `Zip::Reader` re-parses each local header, so a crafted archive whose central directory
+    # is sound still meets the untyped shapes here (`zip_shape_error?`). The guard also covers
+    # the caller's block: a bare `raise "…"` added there would read as a damaged archive.
+    # Every `Gori::Error` the block raises is a subclass and passes through untouched.
+    private def self.read_zip_entries(source : String, &)
+      Compress::Zip::Reader.open(source) { |zip| yield zip }
+    rescue ex
+      raise ex unless zip_shape_error?(ex)
+      raise damaged_archive(source, ex)
     end
 
     private def self.validate_manifest_database!(manifest : Manifest, version : Int32,
@@ -562,6 +587,10 @@ module Gori
         # A file gori cannot read (permissions) keeps its own error; only a bad shape is "not a zip".
         raise ex if ex.is_a?(File::Error)
         raise Gori::Error.new("'#{source}' is not a gori project archive (not a zip file)")
+      rescue ex
+        # A zip, just a damaged one: an entry's timestamp no clock has (`zip_shape_error?`).
+        raise ex unless zip_shape_error?(ex)
+        raise damaged_archive(source, ex)
       end
     end
 

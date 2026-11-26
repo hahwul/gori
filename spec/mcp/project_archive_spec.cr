@@ -243,6 +243,24 @@ describe "MCP export_project" do
 end
 
 describe "MCP import_project" do
+  # Crystal's zip reader raises a bare Exception for an unknown compression method, which the
+  # blanket rescue coded INTERNAL. The engine refuses it as a damaged archive.
+  it "refuses an archive entry with an unsupported compression method as INVALID_ARGUMENT" do
+    with_archive_server do |tools, _registry, _project, _store, root|
+      archive = File.join(root, "damaged.gori")
+      archive_call(tools, "export_project", {"path" => archive}).is_error.should be_false
+      bytes = File.read(archive).to_slice.dup
+      bytes[8] = 99_u8 # the first local header's compression method, low byte
+      bytes[9] = 0_u8
+      File.write(archive, bytes)
+
+      result = archive_call(tools, "import_project", {"path" => archive, "name" => "Copy"})
+      result.error_code.should eq("INVALID_ARGUMENT")
+      result.field.should eq("path")
+      result.text.should contain("could not read project archive")
+    end
+  end
+
   it "reports prolonged project import contention as retryable" do
     with_archive_server do |tools, registry, _project, _store, root|
       archive = File.join(root, "source.gori")

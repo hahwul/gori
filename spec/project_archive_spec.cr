@@ -60,6 +60,24 @@ private def corrupt_second_entry_deflate(path : String) : Nil
   File.write(path, bytes)
 end
 
+private def zip_local_header : Bytes
+  Bytes[0x50, 0x4b, 0x03, 0x04]
+end
+
+private def zip_central_header : Bytes
+  Bytes[0x50, 0x4b, 0x01, 0x02]
+end
+
+# Overwrite a 2-byte little-endian field of the first zip header starting with *signature*:
+# a local header has method @8, time @10, date @12; a central one method @10, time @12, date @14.
+private def patch_zip_u16(path : String, signature : Bytes, field_offset : Int32, value : UInt16) : Nil
+  bytes = File.read(path).to_slice.dup
+  index = (0...bytes.size - 4).find { |i| bytes[i, 4] == signature }.not_nil!
+  bytes[index + field_offset] = (value & 0xff).to_u8
+  bytes[index + field_offset + 1] = (value >> 8).to_u8
+  File.write(path, bytes)
+end
+
 private def write_minimal_current_database(path : String) : Nil
   DB.open("sqlite3:#{path}") do |db|
     db.exec("CREATE TABLE flows (id INTEGER PRIMARY KEY)")
@@ -928,6 +946,37 @@ describe Gori::ProjectArchive do
       error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
       error.message.not_nil!.should contain("could not read project archive")
       Dir.children(Dir.tempdir).count(&.starts_with?(prefix)).should eq(before)
+    end
+  end
+
+  # Crystal's zip reader raises a bare Exception for an unknown compression method and an
+  # ArgumentError for a DOS date or time no clock has; both escaped every surface's rescue.
+  {
+    {"an entry with an unsupported compression method", true, 8, 99_u16},
+    {"a central directory naming an impossible entry date", false, 14, 0_u16},
+    {"a local header naming an impossible entry time", true, 10, 0xffff_u16},
+  }.each do |label, local, offset, value|
+    it "refuses an archive with #{label} as a damaged archive" do
+      with_archive_project do |_registry, project, _store, root|
+        archive_path = File.join(root, "damaged-header.gori")
+        export_archive(project, archive_path)
+        patch_zip_u16(archive_path, local ? zip_local_header : zip_central_header, offset, value)
+
+        prefix = "gori-gori-import"
+        before = Dir.children(Dir.tempdir).count(&.starts_with?(prefix))
+        error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+        error.message.not_nil!.should contain("could not read project archive")
+        Dir.children(Dir.tempdir).count(&.starts_with?(prefix)).should eq(before)
+      end
+    end
+  end
+
+  it "answers archive? false for a zip whose entry carries an impossible timestamp" do
+    with_archive_project do |_registry, _project, _store, root|
+      path = File.join(root, "zero-date.zip")
+      write_archive(path, [{"x.txt", "hi"}])
+      patch_zip_u16(path, zip_central_header, 14, 0_u16)
+      Gori::ProjectArchive.archive?(path).should be_false
     end
   end
 
