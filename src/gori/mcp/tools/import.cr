@@ -61,7 +61,7 @@ module Gori
           end
         end)
       rescue ex : Gori::Error
-        err(ex.message || "import failed", "INVALID_ARGUMENT")
+        err(ex.message || "import failed", "INVALID_ARGUMENT", field: ex.as?(ArgError).try(&.field))
       end
 
       # Run the import from whichever source the call named — a `path` on the server's

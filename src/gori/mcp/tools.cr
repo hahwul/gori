@@ -2874,10 +2874,15 @@ module Gori
 
       # A file path argument. No path can hold a NUL, and every `File` call raises
       # `ArgumentError` on one, which `call`'s blanket rescue coded INTERNAL — "the server is
-      # broken" for a mistake in the caller's own argument. Refused by name instead.
+      # broken" for a mistake in the caller's own argument. Refused by name instead. Not
+      # coerced either, `strict_str`'s rule with the field named: `str` turned
+      # `{"output_path": true}` into a file named `true` in the server's cwd, and
+      # export_openapi wrote there and reported success.
       private def path_str(h, key : String) : String?
-        v = str(h, key)
-        raise ArgError.new("'#{key}' contains a NUL byte, which no file path can hold", key) if v.try(&.includes?('\0'))
+        a = h[key]?
+        return nil if a.nil? || a.raw.nil?
+        v = a.as_s? || raise ArgError.new("invalid '#{key}' (expected a string path)", key)
+        raise ArgError.new("'#{key}' contains a NUL byte, which no file path can hold", key) if v.includes?('\0')
         v
       end
 
