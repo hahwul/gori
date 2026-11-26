@@ -650,9 +650,11 @@ module Gori
         masked_request = Env.mask_secrets(request)
         name = present?(h, "name") ? str(h, "name").try { |n| Env.mask_secrets(n) } : existing.name
 
-        # Parsed before the first write, as in create_repeater: a refused frame must not leave
-        # the target/request half-updated behind an error result.
+        # Parsed before the first write, as in create_repeater: a refused frame or tag list must
+        # not leave the target/request (and name) half-updated behind an error result.
         ws_msgs = present?(h, "ws_out_messages") ? ws_out_messages_arg(h) : nil
+        tags_given = present?(h, "tags")
+        tags = tags_given ? repeater_tags_arg(h) : nil
 
         unless store.update_repeater(
                  id: id,
@@ -681,8 +683,7 @@ module Gori
 
         # Tags are the TUI's subtab labels (the `t` key) — the grouping a human uses to keep a
         # long session navigable. An explicit blank clears them.
-        if present?(h, "tags")
-          tags = repeater_tags_arg(h)
+        if tags_given
           unless store.set_repeater_tags(id, tags)
             return busy("request updated, but the TAGS were NOT saved (store busy or unwritable) — the row keeps its previous tags, and any ws frames in this call were not attempted; retry")
           end
