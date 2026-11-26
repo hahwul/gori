@@ -358,10 +358,18 @@ module Gori
         Store::QueryControl.new(cancel_signal)
       end
 
+      LIKE_TOO_COMPLEX = "LIKE or GLOB pattern too complex"
+
       # One answer for a History query that did not run, whichever path ran it: a 0 or an empty
       # page here would be a wrong answer wearing a right one's clothes.
       private def history_read_failed(ex : Exception, what : String) : Result
         return err("request cancelled", "CANCELLED") if ex.is_a?(Store::QueryCancelled)
+        # SQLite refuses a LIKE pattern past SQLITE_MAX_LIKE_PATTERN_LENGTH (50000 bytes, a bare
+        # word that long) the same way on every retry: the caller's argument, not the store.
+        if ex.is_a?(SQLite3::Exception) && ex.message.to_s.includes?(LIKE_TOO_COMPLEX)
+          return err("'query' has a term too long to search (SQLite caps a pattern at 50000 bytes); shorten it",
+            "INVALID_ARGUMENT", field: "query")
+        end
         ::Log.warn { "list_history #{what} failed: #{ex.message}" }
         err("could not #{what} the matching flows — see gori.log; retry, or simplify the query",
           "INTERNAL", field: "query")

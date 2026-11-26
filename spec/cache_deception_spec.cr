@@ -52,6 +52,20 @@ private class CacheDeceptionBackend < Gori::Fuzz::Backend
 end
 
 describe Gori::CacheDeception do
+  # A response head ended on a bare-LF blank line is read on LF by the codec; the cache signal
+  # in it must not read `none`, or a cached private response reports SERVED (false negative).
+  it "reports CACHED when the anonymous cache hit arrived in a bare-LF head" do
+    authed = cd_trial("as-captured", true, 200, AZ::Verdict::Baseline)
+    head = "HTTP/1.1 200 OK\nX-Cache: HIT\nAge: 30\n\n".to_slice
+    meta = Gori::Repeater::ExchangeMeta.of(200, 40_i64, 1_000_i64, nil)
+    anon = AZ::Trial.new("anonymous", false, meta, AZ::Verdict::Same, "Δ",
+      AZ::ResponseSummary.new(200, 40_i64, 0_u64), "req".to_slice, head, "body".to_slice)
+    control = cd_trial("anonymous-cache-busted", false, 403, AZ::Verdict::Different)
+    report = CD.classify(target(authed, anon, control))
+    report.verdict.should eq(CD::Verdict::Cached)
+    report.cache.should eq(Gori::CacheStatus::Signal::Hit)
+  end
+
   it "reports CACHED when the anonymous re-request got the authenticated body FROM a cache" do
     authed = cd_trial("as-captured", true, 200, AZ::Verdict::Baseline)
     anon = cd_trial("anonymous", false, 200, AZ::Verdict::Same, ["X-Cache: HIT", "Age: 30"])

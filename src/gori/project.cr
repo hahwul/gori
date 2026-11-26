@@ -97,8 +97,10 @@ module Gori
       if (msg = ex.message.presence) && msg.includes?(@db_path)
         return msg
       end
-      return "cannot open #{@db_path}: no such directory: #{parent}" unless Dir.exists?(parent)
-      if File.exists?(@db_path) && (ex.is_a?(DB::Error) || ex.is_a?(SQLite3::Exception))
+      # Total: this runs inside a rescue, so a parent it cannot stat (ELOOP, EACCES) must fall
+      # through to the generic line rather than raise out of it.
+      return "cannot open #{@db_path}: no such directory: #{parent}" unless (Dir.exists?(parent) rescue true)
+      if (File.exists?(@db_path) rescue false) && (ex.is_a?(DB::Error) || ex.is_a?(SQLite3::Exception))
         return "cannot open #{@db_path}: not a valid SQLite database (or unreadable)"
       end
       "could not open '#{@name}': #{ex.message.presence || ex.class}"

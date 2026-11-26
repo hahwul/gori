@@ -31,6 +31,21 @@ module Gori
       value
     end
 
+    # `parse` for a reader that asks a node's TYPE — `as_s?` meaning "is this a JSON string?".
+    # In `parse`'s tree a number past Int64/Float64 is carried as its text, a String, so it
+    # passes for one: `a[18446744073709551615]` read as a SockJS message the wire never sent.
+    # Here such a number is read as the nearest Float64 (±Infinity past the range), so a String
+    # node is always a JSON string and a number stays a number. For a document's SHAPE only:
+    # its digits are not kept, so a number anyone is shown is taken from the raw text
+    # (`members`/`elements`, `JsonPath.raw_at`). Raises JSON::ParseException as `parse` does.
+    def parse_typed(json : String) : JSON::Any
+      json = tolerant(json)
+      pull = JSON::PullParser.new(json)
+      value = read_any(pull, typed: true)
+      finish(pull, json)
+      value
+    end
+
     # `json` with every UNPAIRED surrogate escape (`"\ud83d"` alone, what `JSON.stringify` emits
     # for a cut emoji) respelled `�`, for the stdlib lexer, which raises on one although
     # the grammar allows it. `valid?` accepts such a body, so every reader here that goes through
@@ -38,8 +53,8 @@ module Gori
     # escape and an escaped backslash (`\\ud83d`, literal text) are left alone. Returns `json`
     # itself when it has no `\u` at all.
     def tolerant(json : String) : String
-      return json unless json.includes?("\\u")
       bytes = json.to_slice
+      return json unless escape_u?(bytes)
       fixes = unpaired_surrogate_escapes(bytes)
       return json if fixes.empty?
       String.build(json.bytesize) do |io|
@@ -51,6 +66,16 @@ module Gori
         end
         io.write(bytes[pos..])
       end
+    end
+
+    # `json.includes?("\\u")`, by memchr: `String#includes?` was ~1 ms of a 1 MB body's parse.
+    private def escape_u?(bytes : Bytes) : Bool
+      i = 0
+      while j = bytes.index(0x5c_u8, i)
+        return true if bytes[j + 1]? == 0x75_u8
+        i = j + 1
+      end
+      false
     end
 
     # Byte offsets of every `\uXXXX` naming a surrogate that is not half of a high+low pair.
@@ -521,6 +546,59 @@ module Gori
       acc
     end
 
+    # A JSON array's elements as compact JSON text, in order — the `members` of an array: every
+    # number as its literal digits, every duplicated member inside kept. nil when `json` is
+    # valid JSON that is not an array. Raises JSON::ParseException on bad syntax.
+    def elements(json : String) : Array(String)?
+      pull = JSON::PullParser.new(json)
+      unless pull.kind.begin_array?
+        pull.read_raw
+        finish(pull, json)
+        return nil
+      end
+      acc = [] of String
+      pull.read_array { acc << pull.read_raw }
+      finish(pull, json)
+      acc
+    end
+
+    # The members of a root object — or of each element of a root array, nil for an element
+    # that is not an object — in ONE pull pass: no element is materialised as text only to be
+    # lexed again. The block reads each member's value off the parser (`pull.read_raw` for the
+    # compact text `members` gives; a pretty `JSON.build` to skip a later `reformat`). A root
+    # that is neither yields `[nil]`. Raises JSON::ParseException on bad syntax.
+    def object_members(json : String, & : String, JSON::PullParser -> String) : Array(Array({String, String})?)
+      pull = JSON::PullParser.new(json)
+      objects = [] of Array({String, String})?
+      if pull.kind.begin_array?
+        pull.read_array do
+          if pull.kind.begin_object?
+            acc = [] of {String, String}
+            pull.read_object { |key| acc << {key, yield(key, pull)} }
+            objects << acc
+          else
+            pull.read_raw
+            objects << nil
+          end
+        end
+      elsif pull.kind.begin_object?
+        acc = [] of {String, String}
+        pull.read_object { |key| acc << {key, yield(key, pull)} }
+        objects << acc
+      else
+        pull.read_raw
+        objects << nil
+      end
+      finish(pull, json)
+      objects
+    end
+
+    # A raw value from `members`/`elements` read as the string it holds; nil for any other
+    # kind of value (or none). The one decoding a raw-text reader needs to name a thing.
+    def string?(raw : String?) : String?
+      raw.try { |r| String.from_json(r) if r.starts_with?('"') }
+    end
+
     # The compact object for `members`, values spliced in as the raw JSON they already are.
     def object(members : Array({String, String})) : String
       JSON.build { |j| j.object { members.each { |(k, v)| j.field(k) { j.raw(v) } } } }
@@ -560,30 +638,38 @@ module Gori
 
     # `JSON::Any.new(pull)` with the number arms swapped: the lexer has already vetted the
     # number's syntax, so a failed conversion can only mean it is out of range.
-    private def read_any(pull : JSON::PullParser) : JSON::Any
+    private def read_any(pull : JSON::PullParser, typed = false) : JSON::Any
       case pull.kind
       when .int?
         raw = pull.raw_value
         pull.read_next
-        JSON::Any.new(raw.to_i64? || raw)
+        i = raw.to_i64?
+        i ? JSON::Any.new(i) : carried(raw, typed)
       when .float?
         raw = pull.raw_value
         pull.read_next
         f = raw.to_f64?
-        JSON::Any.new(f && f.finite? ? f : raw)
+        f && f.finite? ? JSON::Any.new(f) : carried(raw, typed)
       when .begin_array?
         ary = [] of JSON::Any
-        pull.read_array { ary << read_any(pull) }
+        pull.read_array { ary << read_any(pull, typed) }
         JSON::Any.new(ary)
       when .begin_object?
         hash = {} of String => JSON::Any
-        pull.read_object { |key| hash[key] = read_any(pull) }
+        pull.read_object { |key| hash[key] = read_any(pull, typed) }
         JSON::Any.new(hash)
       when .null?, .bool?, .string?
         JSON::Any.new(pull)
       else
         raise JSON::ParseException.new("unexpected #{pull.kind}", pull.line_number, pull.column_number)
       end
+    end
+
+    # A number no Int64/finite Float64 holds: its text for `parse`, a Float64 for `parse_typed`.
+    private def carried(raw : String, typed : Bool) : JSON::Any
+      return JSON::Any.new(raw) unless typed
+      f = raw.to_f64?
+      JSON::Any.new(f || (raw.starts_with?('-') ? -Float64::INFINITY : Float64::INFINITY))
     end
 
     # A value followed by anything but end-of-input is not one JSON document.

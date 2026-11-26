@@ -29,6 +29,17 @@ describe Gori::Project do
       end
     end
 
+    # It runs inside the surfaces' rescue blocks, so a parent it cannot stat must not raise.
+    it "answers for a database under a symlink loop without raising" do
+      posix_only!("a symlink loop")
+      with_tmp_dir do |dir|
+        loop_path = File.join(dir, "loop")
+        File.symlink(loop_path, loop_path)
+        reason = Gori::Project.new("p", File.join(loop_path, "gori.db")).open_failure_reason(DB::ConnectionRefused.new)
+        reason.should contain("'p'")
+      end
+    end
+
     it "says a present file is not a database" do
       with_tmp_dir do |dir|
         path = File.join(dir, "notes.txt")

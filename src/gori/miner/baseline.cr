@@ -178,7 +178,7 @@ module Gori::Miner
     # bisect a reaction the calibration had been shaped to miss.
     def calibrate(locations : Array(Location),
                   widths : Hash(Location, Int32) = Hash(Location, Int32).new) : Report
-      rounds = {@config.stability_rounds, 1}.max
+      rounds = @config.effective_stability_rounds
       # Calibration is pure round-trip time and it runs BEFORE a single candidate is tested,
       # so on a real target its cost is RTTs of dead air at the head of every mine — on a
       # 100ms origin that is most of a second before the run does anything. The probes do not

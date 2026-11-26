@@ -813,6 +813,43 @@ describe Gori::Tui::Highlight do
       line = [Highlight::Span.new("abc", red), Highlight::Span.new("defg", blue)]
       Highlight.conceal(line, [{1, 3}, {4, 6}]).map(&.text).join.should eq("a" + "dg")
     end
+
+    it "cuts non-ASCII and invalid-UTF-8 spans at the same characters a char slice does" do
+      t = String.new("한\xC3a§¦b64§\x82é".to_slice)
+      line = [Highlight::Span.new(t, red)]
+      res = Highlight.conceal(line, [{3, 8}])
+      res.map(&.text).should eq([t[0...3], t[8..]])
+    end
+  end
+
+  # Decoded `\uXXXX` escapes are underlined per range. Every cut used to be a char-index
+  # `String#[]`, which on non-ASCII text walks from the span start, so a line of CJK escapes
+  # cost O(ranges × line): about 2 s at 16k escapes, quadratic beyond.
+  describe ".emphasize" do
+    it "cuts at the same characters a char slice does, invalid bytes included" do
+      t = String.new("a한\xC3b\x82é\xF0c".to_slice)
+      line = [Highlight::Span.new(t[0, 4], Theme.text), Highlight::Span.new(t[4..], Theme.muted)]
+      res = Highlight.emphasize(line, [{1, 2}, {3, 6}])
+      res.map(&.text).should eq([t[0, 1], t[1, 1], t[2, 1], t[3, 1], t[4, 2], t[6..]])
+      res.map(&.text).join.to_slice.should eq(t.to_slice)
+      res[1].attr.underline?.should be_true
+      res[3].attr.underline?.should be_true
+      res[4].attr.underline?.should be_true
+      res[5].attr.underline?.should be_false
+    end
+
+    it "stays linear in the number of decoded ranges on a non-ASCII line" do
+      n = 24_000
+      text = %(  "text": ") + "한" * n + %(")
+      line = Highlight.body_styled(text, :json)
+      ranges = (0...n).map { |k| {11 + k, 12 + k} }
+      t0 = Time.instant
+      out = Highlight.emphasize(line, ranges)
+      elapsed = Time.instant - t0
+      out.map(&.text).join.should eq(text)
+      out.count(&.attr.underline?).should eq(n)
+      elapsed.should be < 1.second # ~4 s before the forward cursor, a few ms after
+    end
   end
 end
 

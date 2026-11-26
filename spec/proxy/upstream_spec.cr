@@ -132,6 +132,48 @@ private def start_tls_origin(&)
   end
 end
 
+# A relay to `up_port` that forwards what the origin sends in `slice`-byte pieces `gap` apart:
+# a handshake dripped so that no single read waits as long as the io timeout. The
+# client-to-origin direction is not slowed. Either side hanging up ends both.
+private def with_dripping_relay(up_port : Int32, slice : Int32, gap : Time::Span, &)
+  server = TCPServer.new("127.0.0.1", 0)
+  spawn do
+    while raw = server.accept?
+      spawn drip_relay(raw, up_port, slice, gap)
+    end
+  rescue
+  end
+  begin
+    yield server.local_address.port
+  ensure
+    server.close rescue nil
+  end
+end
+
+private def drip_relay(client : TCPSocket, up_port : Int32, slice : Int32, gap : Time::Span) : Nil
+  up = TCPSocket.new("127.0.0.1", up_port)
+  spawn do
+    buf = Bytes.new(4096)
+    while (n = client.read(buf)) > 0
+      up.write(buf[0, n])
+      up.flush
+    end
+  rescue
+  ensure
+    up.close rescue nil
+  end
+  buf = Bytes.new(slice)
+  while (n = up.read(buf)) > 0
+    sleep gap
+    client.write(buf[0, n])
+    client.flush
+  end
+rescue
+ensure
+  client.close rescue nil
+  up.try(&.close) rescue nil
+end
+
 # Put the proxy-leg TLS policy back after an example. These are GLOBAL class properties, so a
 # leaked `upstream_proxy_insecure = true` would silently disarm proxy verification for every
 # example that runs afterwards.
@@ -1133,6 +1175,35 @@ describe Gori::Proxy::Upstream do
       ensure
         origin.close rescue nil
         held.each { |s| s.close rescue nil }
+      end
+    end
+
+    # Each dripped slice lands well inside the io timeout, so only a wall-clock ceiling can end
+    # it. The relay drips ~2 KB of handshake 16 bytes per 100 ms (about 14 s), each slice a
+    # tenth of the 1 s io timeout; the ceiling is three io timeouts, 3 s.
+    it "ends a handshake the origin drips in slices at its wall-clock ceiling, as a Timeout" do
+      start_tls_origin do |origin_port|
+        with_dripping_relay(origin_port, 16, 100.milliseconds) do |port|
+          started = Time.instant
+          sock, err = Gori::Proxy::Upstream.dial_tls_result("127.0.0.1", port, verify: false,
+            sni: "localhost", connect_timeout: 2.seconds, io_timeout: 1.second)
+          elapsed = Time.instant - started
+          sock.try(&.close) rescue nil
+          sock.should be_nil
+          elapsed.should be < 8.seconds
+          err.try(&.kind).should eq(Gori::Proxy::Upstream::DialErrorKind::Timeout)
+          err.try(&.cause).to_s.should contain("did not complete within 3.0s")
+        end
+      end
+    end
+
+    it "still completes a handshake that each read finishes inside the io timeout" do
+      start_tls_origin do |origin_port|
+        sock, err = Gori::Proxy::Upstream.dial_tls_result("127.0.0.1", origin_port, verify: false,
+          sni: "localhost", io_timeout: 500.milliseconds)
+        err.should be_nil
+        sock.should_not be_nil
+        sock.try(&.close) rescue nil
       end
     end
 

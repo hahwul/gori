@@ -127,6 +127,28 @@ describe "Repeater::H2Engine.single_packet" do
     c.response.should be_nil
   end
 
+  # RFC 9113 §7 allows any 32-bit code. Naming one past Int32::MAX used to raise inside the
+  # frame router, whose catch-all failed EVERY live sibling — including one whose full answer
+  # was already on the wire behind the reset.
+  it "resets only the member a RST_STREAM names, whatever its error code" do
+    port = start_h2_scripted_origin(2) do |io, ended|
+      sids = ended.to_h { |(sid, path)| {path, sid} }
+      code = Bytes.new(4)
+      IO::ByteFormat::BigEndian.encode(0xFFFF_FFFF_u32, code)
+      io.write(Frame::Header.new(Frame::Type::RstStream.value, 0_u8, sids["/a"], code).to_bytes)
+      h2_headers(io, sids["/b"], [{":status", "200"}], end_stream: false)
+      h2_data(io, sids["/b"], "ok", end_stream: true)
+    end
+
+    a, b = Gori::Repeater::H2Engine.single_packet(race_wires("/a", "/b"),
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false, timeout: 2.seconds)
+
+    a.error.not_nil!.should contain("RST_STREAM error code 4294967295")
+    b.error.should be_nil
+    b.response.try(&.status).should eq(200)
+    String.new(b.body.not_nil!).should eq("ok")
+  end
+
   # A header block the origin chose that breaks the HPACK decode must come back as a failed
   # result, not raise out of the race: the connection-wide decoder is desynced, so every stream
   # still open fails with that error while one that already finished keeps its response.

@@ -36,6 +36,55 @@ module Gori
       str.valid_encoding? ? str : scrub(str.to_slice)
     end
 
+    # `a + b` with a `size` that is true of the result. An editor splicing raw-byte lines
+    # back together (a join, a delete, a cut) must use this, not `+` or interpolation.
+    #
+    # Crystal's `String#+`, interpolation and `Array#join` cache the SUM of the operands'
+    # character counts. That holds for valid UTF-8 and breaks at one seam: a left side ending
+    # in an incomplete sequence (a lone lead byte, say) joined to a right side that opens with
+    # continuation bytes. The bytes fuse into fewer characters than the sum, so the cached
+    # `size` is too large and the first `str[str.size - 1]` raises IndexError. A TextArea
+    # holding a captured Latin-1 or binary body hit that on a backspace at a line start, and
+    # the next caret move took the TUI down.
+    #
+    # The fused bytes are kept as they are: only the cached count is recomputed, and only when
+    # the seam can fuse, so a join of ordinary text costs what `+` costs.
+    def self.join(a : String, b : String) : String
+      return a + b unless seam_fuses?(a, b)
+      String.build(a.bytesize + b.bytesize) { |io| io << a << b }
+    end
+
+    def self.join(a : String, b : String, c : String) : String
+      join(join(a, b), c)
+    end
+
+    # The index of the first character that starts at or after byte offset `byte`: the
+    # character count of `str.byte_slice(0, byte)` when `byte` is a boundary, and one past the
+    # character straddling it otherwise. A caret placed on a seam `join` fused lands after the
+    # character that absorbed it. Counts the way `String#size` does (`width_at`).
+    def self.char_index_after(str : String, byte : Int32) : Int32
+      return {byte, str.size}.min if str.ascii_only?
+      ptr = str.to_unsafe
+      len = str.bytesize
+      ci = 0
+      bi = 0
+      while bi < byte && bi < len
+        w = width_at(ptr, bi, len)
+        bi += w == 0 ? 1 : w
+        ci += 1
+      end
+      ci
+    end
+
+    # Whether `a`'s last character could absorb `b`'s first bytes. A continuation byte can
+    # only extend a sequence whose last byte is non-ASCII, so anything else decodes the same
+    # joined as apart. Conservative: it also answers true for a complete sequence followed by
+    # a stray continuation byte, where the rebuild was unnecessary but still correct.
+    private def self.seam_fuses?(a : String, b : String) : Bool
+      return false if a.empty? || b.empty?
+      a.to_unsafe[a.bytesize - 1] >= 0x80 && (b.to_unsafe[0] & 0xC0) == 0x80
+    end
+
     # Drop a trailing sequence that could have been cut mid-codepoint. Keep complete
     # codepoints and malformed bytes so the caller can still detect binary data.
     def self.trim_incomplete_end(bytes : Bytes) : Bytes

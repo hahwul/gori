@@ -1419,10 +1419,17 @@ module Gori::Discover
     # Any extension names a file, except a version suffix: `/api/v2.0` and `/app.v2` are
     # directories, and skipping them hid everything under them. An allowlist of file
     # extensions instead re-swept every `.bak`/`.sql`/`.env`-style hit.
+    #
+    # The extension is raw wordlist (or page) bytes, and PCRE2 RAISES on invalid UTF-8: on this,
+    # the orchestrator fiber, a Latin-1 `notes.caf\xE9` hit ended the whole run with no Done.
+    # A byte that is not UTF-8 is no digit, so such an extension is never a version suffix.
     private def file_shaped?(url : String) : Bool
       return false unless ext = StaticAsset.extension(url)
-      !ext.matches?(/\Av?\d+\z/)
+      return true unless ext.valid_encoding?
+      !ext.matches?(VERSION_EXT)
     end
+
+    private VERSION_EXT = /\Av?\d+\z/
 
     # The links a confirmed brute-force hit's body named, fed back into the frontier through
     # the same `consider_link` gauntlet a crawled page's links go through — dedup, template

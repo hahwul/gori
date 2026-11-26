@@ -6,6 +6,7 @@ require "../../discover/plan"
 require "../../outbound"
 require "../../store"
 require "../../plural"
+require "./run_feed"
 
 module Gori::Tui
   # The Discover sub-tab (under the Target parent tab). Spider + directory brute-force runs
@@ -27,6 +28,7 @@ module Gori::Tui
       @view = DiscoverView.new
       @view.set_registry(host.session.registry)
       @discover_events = Channel({DiscoverRun, Discover::Event}).new(256)
+      @run_feed = RunFeed.new # how each crawl fiber hands its events over; see stop_all
       @persist_buf = [] of {Store::CapturedRequest, Store::CapturedResponse?}
       # Which findings row each buffered pair came from, same order as @persist_buf, so the
       # ids the batch returns can be handed back to the rows that will open them.
@@ -328,6 +330,9 @@ module Gori::Tui
         run.request_stop
         @host.jobs.finish(run.job_id, :stopped, "project closed") if run.job_id != 0
       end
+      # A stopped crawl still handles every in-flight outcome and releases its held findings,
+      # and nothing drains @discover_events after this: detach, or its forwarder parks (RunFeed).
+      @run_feed.detach
     end
 
     # The flow behind the findings cursor — what `o` opens. Answers for the CURSOR ROW whatever
@@ -392,19 +397,24 @@ module Gori::Tui
         @host.status(err || "can't start discovery")
         return
       end
+      launch_run(run, engine)
+    end
+
+    private def launch_run(run : DiscoverRun, engine : Discover::Engine) : Nil
+      # A key handled in the same tick as the exit, after stop_all: the feed is detached, so
+      # nothing would ever read this run's events (RunFeed).
+      return @host.status("project is closing") if @run_feed.detached?
       run.engine = engine
       run.begin_run
       run.job_id = @host.jobs.start(:discover, run.label(40), goto: Jobs::Goto.new(:target, run.id))
       events = @discover_events
+      feed = @run_feed # see FuzzerController#start_run: keep consuming after a dropped delivery
       terminal_sent = false
       spawn(name: "gori-discover") do
         engine.run do |ev|
           case ev
           when Discover::ProgressEvent
-            select
-            when events.send({run, ev})
-            else
-            end
+            feed.offer(events, {run, ev})
           else
             # Done/Error is the run's VERDICT. Once one is on the channel the rescue below
             # must not send a second: `apply_event`'s ErrorEvent arm re-finishes the row,
@@ -412,8 +422,9 @@ module Gori::Tui
             # an error notification for work that succeeded. (`jobs.finish` keeps the first
             # terminal state, so the job itself was already safe — nothing else was.)
             terminal_sent = true if ev.is_a?(Discover::DoneEvent) || ev.is_a?(Discover::ErrorEvent)
-            events.send({run, ev}) # Finding/Baseline/Done/Error — blocking, never dropped
+            feed.deliver(events, {run, ev}) # Finding/Baseline/Done/Error — blocking, never dropped
           end
+          engine.stop if feed.detached? # nothing reads it any more
         end
       rescue ex
         # An unrescued raise in a `spawn` block kills only this fiber and prints to STDERR,
@@ -427,7 +438,7 @@ module Gori::Tui
         ::Log.error(exception: ex) { "discover run fiber died" }
         # `ex.class` too — see the Miner's sibling. No `ensure` here because the row's status
         # lives on the main fiber: this event IS the finish, so there is nothing local to clear.
-        events.send({run, Discover::ErrorEvent.new("#{ex.class}: #{ex.message}")}) unless terminal_sent
+        feed.deliver(events, {run, Discover::ErrorEvent.new("#{ex.class}: #{ex.message}")}) unless terminal_sent
       end
       @host.status("discovering #{run.target} in the background#{scope_note(run)} — watch the bottom bar / notifications")
     end

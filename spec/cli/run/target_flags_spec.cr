@@ -28,6 +28,30 @@ describe "gori run — --db and --project are one question, not two" do
       .not_nil!.should start_with("gori run capture:")
   end
 
+  # capture, import and discover create-or-reopen a `--db`; `Dir.exists?` raised on a path
+  # gori cannot stat, so the command backtraced. That case now defers to `Store.open`.
+  {"gori run capture", "gori run import", "gori run discover"}.each do |prefix|
+    it "#{prefix} refuses an unusable --db by name and defers an unstatable one" do
+      dir = File.tempname("gori-explicit-db")
+      Dir.mkdir_p(dir)
+      begin
+        Gori::CLI::Run.explicit_db_error(dir, prefix).not_nil!
+          .should start_with("#{prefix}: --db is a directory")
+        Gori::CLI::Run.explicit_db_error(File.join(dir, "nope", "x.db"), prefix).not_nil!
+          .should contain("parent directory does not exist")
+        Gori::CLI::Run.explicit_db_error(File.join(dir, "x.db"), prefix).should be_nil
+        {% unless flag?(:win32) %}
+          loop_path = File.join(dir, "loop.db")
+          File.symlink(loop_path, loop_path)
+          Gori::CLI::Run.explicit_db_error(loop_path, prefix).should be_nil
+          Gori::CLI::Run.explicit_db_error(File.join(loop_path, "x.db"), prefix).should be_nil
+        {% end %}
+      ensure
+        FileUtils.rm_rf(dir)
+      end
+    end
+  end
+
   it "stays out of the way when only one names the target" do
     Gori::CLI::Run.two_targets_error("acme", nil).should be_nil
     Gori::CLI::Run.two_targets_error(nil, "/tmp/x.db").should be_nil

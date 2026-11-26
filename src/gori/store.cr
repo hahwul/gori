@@ -380,8 +380,8 @@ module Gori
       # well past the handful of readers gori actually runs at once.
       url = sqlite_url(path, "journal_mode=wal&synchronous=normal&busy_timeout=#{busy_timeout_ms}" \
                              "&cache_size=-64000&max_pool_size=8&checkout_timeout=#{checkout_timeout_seconds}")
-      refuse_non_database(path)
-      refuse_foreign_database(path, read_only, busy_timeout_ms)
+      info = refuse_non_database(path)
+      refuse_foreign_database(path, info, read_only, busy_timeout_ms)
       # Announce that this process has the database open, for as long as it is (see OpenLock).
       # Taken BEFORE `DB.open` so the window in which a peer could delete the file out from
       # under a half-built store does not exist.
@@ -675,10 +675,12 @@ module Gori
     # Only an EXISTING, NON-EMPTY REGULAR file is judged: a missing path and a zero-byte file
     # are both how a new project legitimately starts (sqlite creates/initialises them), and
     # `:memory:` is not a path at all.
-    private def self.refuse_non_database(path : String) : Nil
-      # `File.info?` raises on EACCES or a symlink loop, which is unstatable too.
-      info = File.info?(path) rescue nil
-      return unless info # missing (a new project) or unstatable — the driver's problem
+    #
+    # Answers the stat it judged by (nil for a missing path), so `refuse_foreign_database`
+    # reads the same one rather than stat-ing again.
+    private def self.refuse_non_database(path : String) : File::Info?
+      info = stat_db_path(path)
+      return unless info # missing: a new project
       raise Gori::Error.new("cannot open #{path}: that is a directory, not a database file") if info.directory?
       # Judged from the TYPE, before any open. A pipe/socket/device is not a database, and
       # deciding that from `stat` rather than from its contents means this never opens one:
@@ -687,21 +689,33 @@ module Gori
       unless info.file?
         raise Gori::Error.new("cannot open #{path}: not a regular file (#{info.type.to_s.downcase}), so not a database")
       end
-      return if info.size.zero? # empty file: sqlite initialises it in place
+      return info if info.size.zero? # empty file: sqlite initialises it in place
       header = begin
         File.open(path) do |file|
           buf = Bytes.new(SQLITE_MAGIC.size)
           file.read_fully?(buf) ? buf : nil
         end
       rescue
-        return # unreadable / vanished — let the driver produce the error, it does not leak on those
+        return info # unreadable / vanished — let the driver produce the error, it does not leak on those
       end
-      return if header == SQLITE_MAGIC
+      return info if header == SQLITE_MAGIC
       # Same shape and the same key phrase as the five other surfaces that report an
       # unopenable db (`Project#open_failure_reason`, `gori run`, `gori run capture`, `gori
       # mcp`), so one failure keeps being described one way. "wrong file header" rather than
       # their "(or unreadable)": this path READ the file, so unreadability is ruled out.
       raise Gori::Error.new("cannot open #{path}: not a valid SQLite database (wrong file header)")
+    end
+
+    # `File.info?` answers nil only for a missing path; a symlink loop (ELOOP) or a parent
+    # gori cannot search (EACCES) raises. That was left to the driver, whose
+    # `DB::ConnectionRefused` has no message, and `refuse_foreign_database`'s own stat raised
+    # the bare `File::Error` first: `gori run` printed a backtrace. Named here, in the house
+    # "cannot open <path>:" phrase `Project#open_failure_reason` keys on.
+    private def self.stat_db_path(path : String) : File::Info?
+      File.info?(path)
+    rescue ex : File::Error
+      reason = ex.os_error.try(&.message) || ex.message || ex.class.name
+      raise Gori::Error.new("cannot open #{path}: #{reason.downcase}")
     end
 
     # Refuse a SQLite file that is not a gori project, BEFORE anything below writes to it
@@ -728,8 +742,9 @@ module Gori
     # A connection that cannot be made or read here (busy past the timeout, unreadable)
     # does NOT refuse: this check exists to name a foreign file, and the open below already
     # reports those failures in its own words.
-    private def self.refuse_foreign_database(path : String, read_only : Bool, busy_ms : Int32) : Nil
-      info = File.info?(path)
+    #
+    # *info* is `refuse_non_database`'s stat of the same path (nil: missing).
+    private def self.refuse_foreign_database(path : String, info : File::Info?, read_only : Bool, busy_ms : Int32) : Nil
       return unless info && info.file?
       if info.size.zero?
         return unless read_only

@@ -60,6 +60,24 @@ private def corrupt_second_entry_deflate(path : String) : Nil
   File.write(path, bytes)
 end
 
+private def zip_local_header : Bytes
+  Bytes[0x50, 0x4b, 0x03, 0x04]
+end
+
+private def zip_central_header : Bytes
+  Bytes[0x50, 0x4b, 0x01, 0x02]
+end
+
+# Overwrite a 2-byte little-endian field of the first zip header starting with *signature*:
+# a local header has method @8, time @10, date @12; a central one method @10, time @12, date @14.
+private def patch_zip_u16(path : String, signature : Bytes, field_offset : Int32, value : UInt16) : Nil
+  bytes = File.read(path).to_slice.dup
+  index = (0...bytes.size - 4).find { |i| bytes[i, 4] == signature }.not_nil!
+  bytes[index + field_offset] = (value & 0xff).to_u8
+  bytes[index + field_offset + 1] = (value >> 8).to_u8
+  File.write(path, bytes)
+end
+
 private def write_minimal_current_database(path : String) : Nil
   DB.open("sqlite3:#{path}") do |db|
     db.exec("CREATE TABLE flows (id INTEGER PRIMARY KEY)")
@@ -931,6 +949,37 @@ describe Gori::ProjectArchive do
     end
   end
 
+  # Crystal's zip reader raises a bare Exception for an unknown compression method and an
+  # ArgumentError for a DOS date or time no clock has; both escaped every surface's rescue.
+  {
+    {"an entry with an unsupported compression method", true, 8, 99_u16},
+    {"a central directory naming an impossible entry date", false, 14, 0_u16},
+    {"a local header naming an impossible entry time", true, 10, 0xffff_u16},
+  }.each do |label, local, offset, value|
+    it "refuses an archive with #{label} as a damaged archive" do
+      with_archive_project do |_registry, project, _store, root|
+        archive_path = File.join(root, "damaged-header.gori")
+        export_archive(project, archive_path)
+        patch_zip_u16(archive_path, local ? zip_local_header : zip_central_header, offset, value)
+
+        prefix = "gori-gori-import"
+        before = Dir.children(Dir.tempdir).count(&.starts_with?(prefix))
+        error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+        error.message.not_nil!.should contain("could not read project archive")
+        Dir.children(Dir.tempdir).count(&.starts_with?(prefix)).should eq(before)
+      end
+    end
+  end
+
+  it "answers archive? false for a zip whose entry carries an impossible timestamp" do
+    with_archive_project do |_registry, _project, _store, root|
+      path = File.join(root, "zero-date.zip")
+      write_archive(path, [{"x.txt", "hi"}])
+      patch_zip_u16(path, zip_central_header, 14, 0_u16)
+      Gori::ProjectArchive.archive?(path).should be_false
+    end
+  end
+
   it "rejects an archive whose total uncompressed content exceeds the documented cap" do
     with_archive_project do |_registry, project, _store, root|
       exported = Gori::ProjectArchive.prepare_export(project)
@@ -1085,6 +1134,45 @@ describe Gori::ProjectArchive do
       end
       error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
       error.message.not_nil!.should contain(%(never writes in "flows"))
+    end
+  end
+
+  # `Colormarker.load` and `SessionSlots.load` read these TEXT cells with `rs.read(String)` on
+  # every project open, so a BLOB there imported fine and then left the project unopenable.
+  it "refuses an archive with a BLOB in a TEXT column the store reads as a String" do
+    with_archive_project do |_registry, project, store, root|
+      store.insert_flow(archive_request("/a"))
+      store.flush
+      archive_path = export_archive(project, File.join(root, "blob-text.gori"))
+      original = File.read(archive_path)
+      {
+        "color_rules" => "INSERT INTO color_rules (enabled, match_filter, color, position) " \
+                         "VALUES (1, CAST('status:500' AS BLOB), 'red', 0)",
+        "settings" => "INSERT OR REPLACE INTO settings (key, value) " \
+                      "VALUES ('#{Gori::Store::SESSION_SLOTS_KEY}', CAST('[]' AS BLOB))",
+        "saved_views" => "INSERT INTO saved_views (name, query) VALUES (CAST('v' AS BLOB), 'q')",
+      }.each do |table, statement|
+        File.write(archive_path, original)
+        tamper_archive_database(archive_path, root) { |conn| conn.exec(statement) }
+        error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+        error.message.not_nil!.should contain(%(never writes in "#{table}"))
+      end
+    end
+  end
+
+  # The columns the store reads through `CAST(… AS BLOB)` hold bytes gori writes itself.
+  it "imports BLOB cells in the TEXT columns the store reads as bytes" do
+    with_archive_project do |_registry, project, store, root|
+      store.insert_flow(archive_request("/a"))
+      store.insert_repeater("https://archive.test/", "GET / HTTP/1.1\r\nHost: archive.test\r\n\r\n\0".to_slice, false, true, nil, 0)
+      store.flush
+      archive_path = export_archive(project, File.join(root, "blob-ok.gori"))
+      tamper_archive_database(archive_path, root) do |conn|
+        conn.exec("INSERT INTO match_rules (target, part, pattern, replacement, op, enabled, position) " \
+                  "VALUES ('request', 'head', CAST('a' AS BLOB), CAST('b' AS BLOB), 'replace', 1, 0)")
+        conn.exec("INSERT INTO issues (created_at, updated_at, title, severity, notes) VALUES (1, 1, 't', 0, CAST('n' AS BLOB))")
+      end
+      Gori::ProjectArchive.prepare_import(archive_path).close
     end
   end
 

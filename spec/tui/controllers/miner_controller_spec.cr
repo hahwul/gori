@@ -384,3 +384,114 @@ describe "MinerController footer on FINDINGS" do
     end
   end
 end
+
+# Every name in the wordlist is a hidden parameter: a probe carrying one answers 500, slowly,
+# so each one-name bucket in flight at the stop still comes back a finding. Calibration
+# carries no wordlist name and answers 200 at once.
+private class SlowHiddenParamBackend < Gori::Fuzz::Backend
+  getter closes = 0
+
+  def initialize(@delay : Time::Span)
+  end
+
+  def origin : Gori::Fuzz::Origin
+    Gori::Fuzz::Origin.new("http", "h", 80)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    line = String.new(bytes).lines.first? || ""
+    hit = line.matches?(/[?&]hidden\d+=/)
+    sleep @delay if hit
+    head = (hit ? "HTTP/1.1 500 X\r\nContent-Length: 0\r\n\r\n" : "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n").to_slice
+    Gori::Repeater::Result.new(head, Bytes.new(0), Gori::Proxy::Codec::Http1.parse_response_head(head), 1_i64)
+  end
+
+  def close : Nil
+    @closes += 1
+  end
+end
+
+class Gori::Tui::MinerController
+  def open_running_for_spec(view : MinerView, engine : Gori::Miner::Engine) : Nil
+    open_session(view, nil)
+    launch_run(view, engine)
+  end
+end
+
+describe "MinerController#stop_all with mines in flight" do
+  # Leave project: nothing drains @mine_events after stop_all, yet each of these three mines
+  # still turns its 100 in-flight one-name buckets into findings, then a Done. 303 events
+  # overran the shared 256-slot channel, and the forwarders behind it parked for good.
+  it "lets every run fiber consume its engine to the end once nothing drains it" do
+    with_miner_controller do |ctl, _session|
+      base = "GET /api HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+      engines = (0..2).map do |tab|
+        cfg = Gori::Miner::Config.new
+        cfg.locations = [Gori::Miner::Location::Query]
+        cfg.bucket_size = {Gori::Miner::Location::Query => 1}
+        cfg.concurrency = Gori::Miner::Engine::MAX_CONCURRENCY
+        cfg.stability_rounds = 1
+        cfg.confirm_rounds = 0
+        cfg.retries = 0
+        names = (1..Gori::Miner::Engine::MAX_CONCURRENCY).map { |i| "hidden#{tab * 1000 + i}" }
+        view = MinerView.new
+        view.load("http://h", base, false, nil, cfg)
+        engine = Gori::Miner::Engine.new(base, false, names, SlowHiddenParamBackend.new(500.milliseconds), cfg)
+        ctl.open_running_for_spec(view, engine)
+        engine
+      end
+      sleep 100.milliseconds # calibrated, every bucket inside its send
+      ctl.stop_all
+      undelivered = ->(e : Gori::Miner::Engine) { e.events.@queue.try(&.size) || 0 }
+      deadline = Time.instant + 5.seconds
+      until engines.all? { |e| e.events.closed? && undelivered.call(e) == 0 } || Time.instant >= deadline
+        sleep 20.milliseconds
+      end
+      engines.map { |e| {e.events.closed?, undelivered.call(e)} }.should eq([{true, 0}] * 3)
+    end
+  end
+end
+
+private def detach_spec_mine(names : Int32, concurrency : Int32, delay : Time::Span) : {MinerView, Gori::Miner::Engine}
+  base = "GET /api HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+  cfg = Gori::Miner::Config.new
+  cfg.locations = [Gori::Miner::Location::Query]
+  cfg.bucket_size = {Gori::Miner::Location::Query => 1}
+  cfg.concurrency = concurrency
+  cfg.stability_rounds = 1
+  cfg.confirm_rounds = 0
+  cfg.retries = 0
+  view = MinerView.new
+  view.load("http://h", base, false, nil, cfg)
+  {view, Gori::Miner::Engine.new(base, false, (1..names).map { |i| "hidden#{i}" }, SlowHiddenParamBackend.new(delay), cfg)}
+end
+
+describe "MinerController after stop_all" do
+  # A key handled in the same tick as the exit reaches the controller after stop_all: a
+  # mine it starts would have no reader at all, and nothing would ever stop it.
+  it "refuses to start a mine" do
+    with_miner_controller do |ctl, _session|
+      ctl.stop_all
+      view, engine = detach_spec_mine(10, 1, 1.millisecond)
+      ctl.open_running_for_spec(view, engine)
+      view.running?.should be_false
+      view.engine.should be_nil
+      ctl.@host.as(FakeHost).statuses.last.should eq("project is closing")
+    end
+  end
+
+  it "halts a mine whose feed was detached under it" do
+    with_miner_controller do |ctl, _session|
+      view, engine = detach_spec_mine(2000, 4, 10.milliseconds) # ~5 s of work
+      ctl.open_running_for_spec(view, engine)
+      sleep 30.milliseconds
+      ctl.@run_feed.detach
+      deadline = Time.instant + 2.seconds
+      until engine.events.closed? || Time.instant >= deadline
+        sleep 10.milliseconds
+      end
+      engine.stopped?.should be_true
+      engine.events.closed?.should be_true
+    end
+  end
+end

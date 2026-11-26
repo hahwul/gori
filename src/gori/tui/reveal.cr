@@ -56,8 +56,7 @@ module Gori::Tui
       line.each_grapheme do |grapheme|
         source = grapheme.to_s
         marker = visible_grapheme(source)
-        shown = marker || source
-        width = Screen.draw_width(shown)
+        width = shown_cols(source, marker)
         break if cols + width > max_cols
         if marker
           unless run.empty?
@@ -78,7 +77,17 @@ module Gori::Tui
     # Drawn width of a source grapheme in reveal mode. Wrap, caret and search use this same
     # representation measure when whitespace is expanded to one-cell markers.
     def self.grapheme_cols(grapheme : String) : Int32
-      Screen.draw_width(visible_grapheme(grapheme) || grapheme)
+      shown_cols(grapheme, visible_grapheme(grapheme))
+    end
+
+    # `Screen.draw_width(marker || source)` for one source grapheme, without classifying it a
+    # second time: `Screen.draw_width` reveals every cluster it measures, and a grapheme that
+    # took no marker here would take none there, so it measures as Termisu draws it, floored
+    # to one column the way `Screen.grapheme_cols` floors it.
+    private def self.shown_cols(source : String, marker : String?) : Int32
+      return Screen.draw_width(marker) if marker
+      return source.size if Screen.printable_ascii?(source)
+      {Termisu::UnicodeWidth.grapheme_width(source).to_i32, 1}.max
     end
 
     def self.draw_width(text : String) : Int32
@@ -115,8 +124,9 @@ module Gori::Tui
       String.build do |io|
         text.each_grapheme do |grapheme|
           source = grapheme.to_s
-          shown = visible_grapheme(source) || source
-          width = Screen.draw_width(shown)
+          marker = visible_grapheme(source)
+          shown = marker || source
+          width = shown_cols(source, marker)
           if cutting
             if acc + width <= start_col
               acc += width

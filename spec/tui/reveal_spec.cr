@@ -35,4 +35,13 @@ describe Gori::Tui::Reveal do
   it "stops at max_cols so a huge minified line never builds past the pane" do
     Reveal.styled("x" * 5000, false, 10).sum { |sp| sp.text.size }.should be <= 10
   end
+
+  # `grapheme_cols` measures a grapheme that takes no marker without revealing it again; the
+  # width must stay the one `Screen.draw_width` gives the shown text.
+  it "measures each grapheme as Screen draws its marker or itself" do
+    ["a", " ", "\t", "\e", "中", "e\u{301}", "\u{1f468}\u{200d}\u{1f469}", "1\u{fe0f}\u{20e3}",
+     "a\u{200d}", "\u{0915}\u{0903}\u{fe0f}", "\u{1100}\u{1161}", "\u{a0}", "\u{9f}", "\u{0600}a"].each do |g|
+      Reveal.grapheme_cols(g).should eq(Screen.draw_width(Reveal.visible_grapheme(g) || g))
+    end
+  end
 end

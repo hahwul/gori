@@ -1,4 +1,5 @@
 require "json"
+require "../raw_json"
 require "./frame"
 
 module Gori
@@ -125,15 +126,15 @@ module Gori
       # An EVENT's first element IS the event name; without one this is not an event.
       private def event(type : Char, p : Prefix, note : String?) : Decoded?
         arr = json_array(p.body) || return nil
-        name = arr[0]?.try(&.as_s?) || return nil
+        name = RawJson.string?(arr[0]?) || return nil
         Decoded.new(kind: type == '2' ? "event" : "binary_event", name: name, id: p.ack,
-          note: note, payload: arr[1..].to_json)
+          note: note, payload: "[#{arr[1..].join(',')}]")
       end
 
       private def ack(type : Char, p : Prefix, note : String?) : Decoded?
         arr = json_array(p.body) || return nil
         Decoded.new(kind: type == '3' ? "ack" : "binary_ack", id: p.ack, note: note,
-          payload: arr.to_json)
+          payload: "[#{arr.join(',')}]")
       end
 
       # CONNECT carries an optional auth payload. Bare `40` is two digits and stays weak.
@@ -166,17 +167,23 @@ module Gori
       # Both readers check their opening byte first. The Engine.IO type digits let plenty of
       # ordinary numeric text through (`42abc` reaches here as an EVENT with body `abc`), and a
       # raised parse costs ~10µs against the ~1ns the prefilter above spends.
-      private def json_array(s : String) : Array(JSON::Any)?
+      #
+      # The array's elements as RAW JSON text, since they are shown: `JSON.parse` refused the
+      # whole frame over one number past Int64 (a uint64 id in an event's data), and re-emitting
+      # a tree would respell `1.0e2` as `100.0`. The decoded payload keeps the wire's digits.
+      private def json_array(s : String) : Array(String)?
         return nil unless s.starts_with?('[')
-        JSON.parse(s).as_a?
-      rescue
+        RawJson.elements(RawJson.tolerant(s))
+      rescue JSON::ParseException
         nil
       end
 
+      # Read, never re-emitted, so `RawJson.parse_typed`: a number past Int64 does not hide
+      # `sid`, and is not taken for one.
       private def json_object(s : String) : Hash(String, JSON::Any)?
         return nil unless s.starts_with?('{')
-        JSON.parse(s).as_h?
-      rescue
+        RawJson.parse_typed(s).as_h?
+      rescue JSON::ParseException
         nil
       end
     end

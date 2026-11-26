@@ -495,7 +495,7 @@ module Gori::Miner
     private def confirm(name : String, location : Location,
                         evidence : Evidence, canary : String?) : Finding?
       r = report
-      rounds = @config.confirm_rounds
+      rounds = @config.effective_confirm_rounds
       if rounds <= 0
         return Finding.new(name, location, evidence, confidence_for(true, location), canary, nil, 0_i64)
       end

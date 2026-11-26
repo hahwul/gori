@@ -851,6 +851,18 @@ module Gori::Proxy::Codec::Http1
   # head's status and headers come back as for every caller (Probe, export, evidence,
   # bindings, MCP) — nothing is rewritten, the raw bytes stay the record (P7).
   def self.parse_response_head(raw : Bytes) : RawResponse
+    v = response_lines(raw)
+    build_response(raw, v.start_end, parse_headers(raw, v.headers_at, lf: v.lf), from: v.from)
+  end
+
+  # How `parse_response_head` reads a response head's lines: the status line is
+  # `raw[from, start_end - from]`, the header lines start at `headers_at` (nil when the head
+  # has no line after the status line) and end per `index_eol(raw, pos, lf)`. The ONE home of
+  # that choice (see `parse_response_head`), so a read-only byte scan over a stored head —
+  # `CacheStatus.classify` — walks the same lines the parse does without re-deriving the switch.
+  record ResponseLines, from : Int32, start_end : Int32, headers_at : Int32?, lf : Bool
+
+  def self.response_lines(raw : Bytes) : ResponseLines
     if lf_terminated_head?(raw)
       # Blank lines in front of the status line are skipped, as the reader skipped them before
       # it would let a bare-LF blank line end the head (`has_content?`) — so both agree on which
@@ -861,10 +873,10 @@ module Gori::Proxy::Codec::Http1
       end
       nl = raw.index(0x0a_u8, first) || raw.size - 1 # an LF-terminated head always has one
       start_end = nl > first && raw.unsafe_fetch(nl - 1) == 0x0d_u8 ? nl - 1 : nl
-      return build_response(raw, start_end, parse_headers(raw, nl + 1, lf: true), from: first)
+      return ResponseLines.new(first, start_end, nl + 1, true)
     end
     first_crlf = index_crlf(raw, 0)
-    build_response(raw, first_crlf || raw.size, parse_headers(raw, first_crlf.try(&.+(2))))
+    ResponseLines.new(0, first_crlf || raw.size, first_crlf.try(&.+(2)), false)
   end
 
   # The status-line projection over `raw[from, start_end - from]`, shared by both line readings.
@@ -1072,14 +1084,15 @@ module Gori::Proxy::Codec::Http1
 
   # Where the line starting at `from` ends: its CRLF (`lf` false, `parse_headers`' view), or
   # for a head read on LF its LF — or the CR right before that LF. nil when the line runs on.
-  private def self.index_eol(head : Bytes, from : Int32, lf : Bool) : Int32?
+  # Public with `after_eol` for the read-only scans that walk `response_lines`' lines.
+  def self.index_eol(head : Bytes, from : Int32, lf : Bool) : Int32?
     return index_crlf(head, from) unless lf
     return nil unless nl = head.index(0x0a_u8, from)
     nl > from && head.unsafe_fetch(nl - 1) == 0x0d_u8 ? nl - 1 : nl
   end
 
   # The first byte after the terminator that starts at `eol` (CRLF or a lone LF).
-  private def self.after_eol(head : Bytes, eol : Int32) : Int32
+  def self.after_eol(head : Bytes, eol : Int32) : Int32
     head.unsafe_fetch(eol) == 0x0d_u8 ? eol + 2 : eol + 1
   end
 

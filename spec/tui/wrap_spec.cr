@@ -10,6 +10,49 @@ private def rows_of(line : String, width : Int32, conceal = nil) : Array(String)
 end
 
 describe Gori::Tui::Wrap do
+  # The forward cursor answers char-index questions for callers that would otherwise re-walk
+  # the prefix per cut. It has to count characters exactly as `String#[]` does, captured
+  # binary lines included: a stray continuation byte is a character of its own there.
+  describe "Offsets" do
+    it "slices like String#[] over random invalid UTF-8" do
+      r = Random.new(2028)
+      alphabet = [0x61_u8, 0x80_u8, 0x82_u8, 0xA9_u8, 0xBF_u8, 0xC3_u8, 0xE2_u8, 0xED_u8,
+                  0xF0_u8, 0xF4_u8, 0xF5_u8, 0xC0_u8, 0xED_u8, 0x9F_u8]
+      500.times do
+        s = String.new(Bytes.new(r.rand(1..12)) { alphabet.sample(r) })
+        cuts = Array.new(3) { r.rand(0..s.size) }.sort!
+        cur = Wrap::Offsets.new(s)
+        prev = 0
+        cuts.each do |c|
+          cur.slice(s, prev, c).should eq(s[prev...c])
+          prev = c
+        end
+        cur.slice(s, prev, s.size).should eq(s[prev..])
+      end
+    end
+  end
+
+  describe "each_cluster" do
+    # The selection tint's walk: it must yield exactly the clusters the old
+    # `cluster_end` + `line[i...e]` loop produced, raw invalid bytes included.
+    it "yields the same raw clusters as the per-cluster char-index loop" do
+      [String.new("cafe\u0301 👨‍👩‍👧 🇰🇷🇯🇵 \r\n\xC3x\x82é".to_slice), "plain ascii", "한글 텍스트"].each do |line|
+        a = Screen.cluster_start(line, 1)
+        b = line.size
+        want = [] of String
+        i = a
+        while i < b
+          e = Screen.cluster_end(line, i + 1)
+          want << line[i...e]
+          i = e
+        end
+        got = [] of String
+        Wrap.each_cluster(line, a, b) { |seg| got << seg }
+        got.map(&.to_slice).should eq(want.map(&.to_slice))
+      end
+    end
+  end
+
   describe "layout" do
     it "keeps a line that fits on a single row" do
       lay = Wrap.layout("GET /x HTTP/1.1", 40)

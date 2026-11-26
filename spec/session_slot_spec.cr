@@ -61,6 +61,13 @@ describe Gori::SessionSlot do
       json.includes?("remove").should be_true
     end
 
+    # No deleted session's id negates to Int64::MIN, so only a foreign row holds it, and every
+    # `-id` on it raised (`SessionRefresh.step_labels` failed MCP list_session_slots whole).
+    it "drops an Int64::MIN refresh step and keeps an ordinary detached one" do
+      back = Slot.parse_json(%([{"name":"admin","refresh":[-9223372036854775808,-5,7]}]))
+      back[0].refresh.should eq([-5_i64, 7_i64])
+    end
+
     # BACKWARD compatibility: the blob every existing project already has on disk.
     it "reads a pre-slot identities blob as slots that claim nothing" do
       legacy = %([{"name":"admin","baseline":false,"set":[{"name":"Cookie","value":"s=1"}],"remove":[]}])

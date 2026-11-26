@@ -3,6 +3,8 @@ require "./entity"
 require "./sse"
 require "./graphql"
 require "./plural"
+require "./raw_json"
+require "./utf8"
 
 module Gori
   # JSON-RPC 2.0 — and so MCP's Streamable HTTP transport — as a display-time projection of one
@@ -18,15 +20,28 @@ module Gori
 
     alias Obj = Hash(String, JSON::Any)
 
-    # One call the request made. `id` is the request's id (nil for a notification); `reply` is
-    # the paired result or error as pretty JSON, nil while unanswered in this flow.
-    record Call, method : String, id : JSON::Any?, label : String?, params : String?,
+    # One call the request made. `id` is the request's id as the compact JSON it was sent as
+    # (`7`, `"a"`, `18446744073709551615`; nil for a notification); `reply` is the paired result
+    # or error as pretty JSON, nil while unanswered in this flow.
+    record Call, method : String, id : String?, label : String?, params : String?,
       reply : String?, error : Bool
 
     # A message the response carried that answers no call of this request: a server request or
     # notification inside the stream, or a reply whose id matched nothing (MCP's legacy HTTP+SSE
     # transport answers on a separate GET flow, so its replies land here, unpaired).
-    record Message, method : String?, id : JSON::Any?, body : String
+    record Message, method : String?, id : String?, body : String
+
+    # One JSON-RPC message as RAW JSON text: its members in order (duplicates kept) and as a
+    # Hash (the last of a duplicated key, as `JSON.parse` reads it). Everything this module
+    # shows is a value it re-emits, so it never holds a `JSON::Any`: `JSON.parse` rejects a
+    # whole document over one number past Int64 (a uint64 id), and a `RawJson.parse` tree would
+    # quote that number back out — and pair the number 18446744073709551615 with the string
+    # "18446744073709551615". The SHOWN members (`PRETTY`) are held already pretty, read so in
+    # the one parse; the rest are compact.
+    private record Msg, members : Array({String, String}), m : Hash(String, String)
+
+    # The members a pane shows as pretty JSON. Every other member is compact (`id` is a key).
+    private PRETTY = {"params", "result", "error"}
 
     record Exchange, calls : Array(Call), stream : Array(Message)
 
@@ -36,7 +51,7 @@ module Gori
                     "completion/", "logging/", "elicitation/"}
 
     def from_flow(req_head : Bytes?, req_body : Bytes?, resp_head : Bytes?, resp_body : Bytes?) : Exchange?
-      calls = parse(Entity.bytes(req_head, req_body, MAX_BODY)).select { |m| m["method"]?.try(&.as_s?) }
+      calls = parse(Entity.bytes(req_head, req_body, MAX_BODY)).select { |m| str(m.m["method"]?) }
       sse = Sse.event_stream?(resp_head)
       # The response is read only for a JSON-RPC request, or for a bodiless one opening a stream
       # (a GET carrying server-to-client messages): an LLM or REST stream is not parsed twice.
@@ -53,40 +68,60 @@ module Gori
 
     # Replies pair by id, whatever order a batch is answered in. Calls sharing an id (a client
     # bug, or a probe for one) take that id's replies in order; a reply left over is listed
-    # with the stream.
-    private def pair(calls : Array(Obj), resp : Array(Obj)) : Exchange
-      wanted = calls.compact_map { |c| c["id"]?.try(&.to_json) }.tally
-      replies = {} of String => Deque(Obj)
+    # with the stream. The key is the id's compact JSON text, so `1` and `"1"` stay apart — and
+    # so do `1` and `1.0`, which are different spellings on the wire.
+    private def pair(calls : Array(Msg), resp : Array(Msg)) : Exchange
+      wanted = calls.compact_map(&.m["id"]?).tally
+      replies = {} of String => Deque(Msg)
       stream = [] of Message
       resp.each do |m|
-        key = m["id"]?.try(&.to_json)
-        if key && !m.has_key?("method") && (q = replies[key] ||= Deque(Obj).new).size < wanted.fetch(key, 0)
+        key = m.m["id"]?
+        if key && !m.m.has_key?("method") && (q = replies[key] ||= Deque(Msg).new).size < wanted.fetch(key, 0)
           q << m
         else
-          stream << Message.new(m["method"]?.try(&.as_s?), m["id"]?, m.to_pretty_json)
+          stream << Message.new(str(m.m["method"]?), key, RawJson.reformat(RawJson.object(m.members), "  "))
         end
       end
       list = calls.map do |c|
-        id = c["id"]?
-        r = id.try { |i| replies[i.to_json]?.try(&.shift?) }
+        id = c.m["id"]?
+        r = id.try { |i| replies[i]?.try(&.shift?) }
         # `"error": null` beside a result is no error.
-        err = r.try(&.["error"]?).try { |e| e.raw.nil? ? nil : e }
-        reply = r.try { |x| (err || x["result"]?).try(&.to_pretty_json) || "null" }
-        Call.new(c["method"].as_s, id, label(c), c["params"]?.try(&.to_pretty_json), reply, !err.nil?)
+        err = r.try(&.m["error"]?).try { |e| e == "null" ? nil : e }
+        reply = r.try { |x| err || x.m["result"]? || "null" }
+        Call.new(str(c.m["method"]?) || "", id, label(c), c.m["params"]?, reply, !err.nil?)
       end
       Exchange.new(list, stream)
     end
 
-    private def parse(bytes : Bytes?) : Array(Obj)
-      return [] of Obj unless bytes && bytes.size <= MAX_BODY
+    private def parse(bytes : Bytes?) : Array(Msg)
+      return [] of Msg unless bytes && bytes.size <= MAX_BODY
       parse(String.new(bytes))
     end
 
     # JSON-RPC 2.0 objects only, single or batch; any other JSON (a scalar, an array of ids) is
-    # not JSON-RPC and yields nothing.
-    private def parse(text : String) : Array(Obj)
-      any = json?(text, %("jsonrpc")) || return [] of Obj
-      (any.as_a? || [any]).compact_map(&.as_h?).select! { |m| m["jsonrpc"]? == "2.0" }
+    # not JSON-RPC and yields nothing. The needle runs first, so an ordinary body is never
+    # scrubbed or parsed (P6); invalid UTF-8 is scrubbed for display (P7).
+    private def parse(text : String) : Array(Msg)
+      return [] of Msg unless text.includes?(%("jsonrpc"))
+      # `members` skips `tolerant` (it re-emits for a JWT re-sign); this is display, so one
+      # unpaired surrogate escape must not hide the message.
+      # One pull pass over the document, the shown members read straight to pretty text: an
+      # element re-emitted as text, re-lexed for its members and then reformatted was three
+      # parses, ~3x `JSON.parse` on a 4 MB batch opened in History.
+      items = RawJson.object_members(RawJson.tolerant(Utf8.subject(text))) do |key, pull|
+        PRETTY.includes?(key) ? JSON.build("  ") { |j| pull.read_raw(j) } : pull.read_raw
+      end
+      items.compact_map do |members|
+        members || next
+        m = members.to_h
+        Msg.new(members, m) if m["jsonrpc"]? == %("2.0")
+      end
+    rescue JSON::ParseException
+      [] of Msg
+    end
+
+    private def str(raw : String?) : String?
+      RawJson.string?(raw)
     end
 
     # A response's SSE events, under the same MAX_BODY a plain JSON reply is held to: a 32 KB
@@ -96,24 +131,14 @@ module Gori
       bytes.size > MAX_BODY ? [] of Sse::Event : Sse.events(bytes)
     end
 
-    # `text` as JSON, or nil when it is not or cannot hold `needle` — a byte check that keeps
-    # an ordinary body from being parsed at all. Invalid UTF-8 is scrubbed for display (P7).
-    # Shared with LlmCall.
-    def json?(text : String, needle : String) : JSON::Any?
-      return nil unless text.includes?(needle)
-      JSON.parse(text.scrub)
-    rescue JSON::ParseException
-      nil
-    end
-
     # What an MCP call is ABOUT: the tool, prompt or resource it names.
-    private def label(c : Obj) : String?
-      key = case c["method"].as_s
+    private def label(c : Msg) : String?
+      key = case str(c.m["method"]?)
             when "tools/call", "prompts/get"             then "name"
             when "resources/read", "resources/subscribe" then "uri"
             else                                              return nil
             end
-      c["params"]?.try(&.as_h?).try(&.[key]?).try(&.as_s?)
+      c.m["params"]?.try { |p| RawJson.member(p, key) }.try(&.as_s?)
     end
 
     def mcp?(ex : Exchange) : Bool
@@ -138,7 +163,7 @@ module Gori
         ex.calls.each do |c|
           io << "\n\n" if io.bytesize > 0
           io << "# → " << c.method
-          c.id.try { |i| io << " id=" << i.to_json }
+          c.id.try { |i| io << " id=" << i }
           c.label.try { |l| io << " · " << l }
           io << '\n' << (c.params || "(no params)")
           if r = c.reply
@@ -150,7 +175,7 @@ module Gori
         ex.stream.each do |m|
           io << "\n\n" if io.bytesize > 0
           io << "# ⇠ stream " << (m.method || "reply")
-          m.id.try { |i| io << " id=" << i.to_json }
+          m.id.try { |i| io << " id=" << i }
           io << '\n' << m.body
         end
       end

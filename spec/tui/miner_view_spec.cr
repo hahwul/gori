@@ -59,6 +59,23 @@ describe Gori::Tui::MinerView do
     restored.config.notify.should eq(Gori::Miner::NotifyMode::Always)
   end
 
+  # No surface sets these two, so an out-of-bound one is a foreign row (an imported archive):
+  # it ran as hidden load the moment the operator pressed Run.
+  it "clamps stored stability and confirm rounds to the engine's bounds" do
+    {
+      %({"stability_rounds":20000,"confirm_rounds":2147483647}) => {32, 16},
+      %({"stability_rounds":-5,"confirm_rounds":-5})            => {1, 0},
+      %({"stability_rounds":7,"confirm_rounds":3})              => {7, 3},
+    }.each do |config, (stability, confirm)|
+      restored = Gori::Tui::MinerView.new
+      restored.restore(Gori::Store::MinerSessionRecord.new(
+        id: 1, target: "http://h.test", request: Bytes.empty, http2: false, sni: nil,
+        config: config, flow_id: nil, position: 0, name: nil))
+      restored.config.stability_rounds.should eq(stability)
+      restored.config.confirm_rounds.should eq(confirm)
+    end
+  end
+
   it "fronts a custom name on the sub-tab label (the rename path now wired for Miner)" do
     view = Gori::Tui::MinerView.new
     view.load("http://h.test", "GET /a HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, false, nil,

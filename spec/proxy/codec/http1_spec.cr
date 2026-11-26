@@ -387,6 +387,19 @@ describe Gori::Proxy::Codec::Http1 do
     end
   end
 
+  describe ".response_lines" do
+    it "reports the line model parse_response_head reads a head with" do
+      crlf = Http1.response_lines(bytes("HTTP/1.1 200 OK\r\nA: 1\r\n\r\n"))
+      {crlf.from, crlf.start_end, crlf.headers_at, crlf.lf}.should eq({0, 15, 17, false})
+      lf = Http1.response_lines(bytes("HTTP/1.1 200 OK\nA: 1\n\n"))
+      {lf.from, lf.start_end, lf.headers_at, lf.lf}.should eq({0, 15, 16, true})
+      # Leading blank lines are skipped on the LF reading, as the reader skipped them.
+      lead = Http1.response_lines(bytes("\r\nHTTP/1.1 200 OK\r\nA: 1\n\n"))
+      {lead.from, lead.start_end, lead.headers_at, lead.lf}.should eq({2, 17, 19, true})
+      Http1.response_lines(bytes("HTTP/1.1 200 OK")).headers_at.should be_nil
+    end
+  end
+
   describe ".response_head_end" do
     it "finds the earliest blank line of any shape, as the response reader does" do
       ["HTTP/1.1 200 OK\nA: 1\n\nbody\r\n\r\n", "HTTP/1.1 200 OK\r\nA: 1\r\n\r\nbody",

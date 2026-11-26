@@ -101,6 +101,46 @@ describe Gori::CacheStatus do
     end
   end
 
+  # A head the reader ended on a bare-LF blank line is stored verbatim (P7), and
+  # `parse_response_head` reads it on LF. The byte scan read only CRLF, so every such head was
+  # `none` — a QL `cache:hit` miss and a CacheDeception false negative.
+  it "agrees with the parse on heads ended by a bare-LF blank line" do
+    shapes = {
+      "crlf"          => ->(ls : Array(String)) { "HTTP/1.1 200 OK\r\n" + ls.join { |l| "#{l}\r\n" } + "\r\n" },
+      "all-lf"        => ->(ls : Array(String)) { "HTTP/1.1 200 OK\n" + ls.join { |l| "#{l}\n" } + "\n" },
+      "crlf-start-lf" => ->(ls : Array(String)) { "HTTP/1.1 200 OK\r\n" + ls.join { |l| "#{l}\n" } + "\n" },
+      "end-cr-lf-lf"  => ->(ls : Array(String)) { "HTTP/1.1 200 OK\n" + ls.join { |l| "#{l}\r\n" } + "\n" },
+      "end-lf-cr-lf"  => ->(ls : Array(String)) { "HTTP/1.1 200 OK\n" + ls.join { |l| "#{l}\n" } + "\r\n" },
+      "mixed-lines"   => ->(ls : Array(String)) { "HTTP/1.1 200 OK\r\nX-A: 1\n" + ls.join { |l| "#{l}\r\n" } + "\n" },
+      "leading-blank" => ->(ls : Array(String)) { "\nHTTP/1.1 200 OK\n" + ls.join { |l| "#{l}\n" } + "\n" },
+    }
+    shapes.each do |shape, build|
+      (AGREEMENT_EXAMPLES + VENDOR_EXAMPLES).each do |lines, expected|
+        raw = build.call(lines).to_slice
+        Gori::Proxy::Codec::Http1.lf_terminated_head?(raw).should eq(shape != "crlf"), shape
+        parsed = Gori::Proxy::Codec::Http1.parse_response_head(raw).headers
+        got = Gori::CacheStatus.classify(raw)
+        got.should eq(Gori::CacheStatus.classify(parsed)), "#{shape}: #{lines.join(" | ")}"
+        got.token.should eq(expected.to_s), "#{shape}: #{lines.join(" | ")}"
+      end
+    end
+  end
+
+  it "reads a later Cache-Status member on an LF head the same way it does on CRLF" do
+    raw = "HTTP/1.1 200 OK\nAge: 30\nCache-Status: edge; fwd=miss\n\n".to_slice
+    Gori::CacheStatus.classify(raw).should eq(Gori::CacheStatus::Signal::Miss)
+  end
+
+  # The switch is the TERMINATOR, not an LF anywhere: a CRLFCRLF head with a bare LF inside
+  # reads strictly (Age folds into X-A), exactly as the parse does — splitting on every LF
+  # here would make the two disagree.
+  it "keeps the strict CRLF reading of a CRLFCRLF head with an interior bare LF" do
+    raw = "HTTP/1.1 200 OK\r\nX-A: 1\nAge: 30\r\n\r\n".to_slice
+    parsed = Gori::Proxy::Codec::Http1.parse_response_head(raw).headers
+    Gori::CacheStatus.classify(parsed).should eq(Gori::CacheStatus::Signal::None)
+    Gori::CacheStatus.classify(raw).should eq(Gori::CacheStatus::Signal::None)
+  end
+
   describe "hit signals (served from a shared cache)" do
     it "reads X-Cache: HIT and its 'HIT from …' variants" do
       classify("X-Cache: HIT").should eq(:hit)

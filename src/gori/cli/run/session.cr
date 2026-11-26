@@ -729,7 +729,7 @@ module Gori
       # not necessarily this project's. nil (a caller with no store) falls back to the ids.
       private def self.refresh_labels(slot : Gori::SessionSlot, store : Store?) : Array(String)
         return [] of String unless slot.refreshable?
-        return slot.refresh.map { |id| id < 0 ? "repeater ##{-id} (deleted)" : "repeater ##{id}" } unless store
+        return slot.refresh.map { |id| id < 0 ? Gori::SessionRefresh.deleted_step_label(id) : "repeater ##{id}" } unless store
         Gori::SessionRefresh.step_labels(store, slot)
       end
 

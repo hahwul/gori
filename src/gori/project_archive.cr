@@ -388,8 +388,22 @@ module Gori
       return false unless File.info(path, follow_symlinks: false).file?
       names = Compress::Zip::File.open(path, &.entries.map(&.filename))
       names.sort == ["gori.db", "manifest.json"]
-    rescue Compress::Zip::Error | IO::Error
+    rescue ex
+      raise ex unless ex.is_a?(Compress::Zip::Error) || ex.is_a?(IO::Error) || zip_shape_error?(ex)
       false
+    end
+
+    # Crystal's zip reader raises two shapes it does not type for an archive's own bytes: a
+    # BARE `Exception` ("Unsupported compression method: N", FileInfo#decompressor_for) and an
+    # `ArgumentError` ("Invalid time", Time.utc under FileInfo#from_dos, on a DOS date or time
+    # no clock has). Matched on the exact class, as `Update.http_guard` does, so a subclass
+    # from a bug of ours (IndexError, OverflowError, KeyError) keeps its trace.
+    private def self.zip_shape_error?(ex : Exception) : Bool
+      ex.class.in?(Exception, ArgumentError)
+    end
+
+    private def self.damaged_archive(source : String, ex : Exception) : Gori::Error
+      Gori::Error.new("could not read project archive '#{source}': #{ex.message.presence || ex.class}")
     end
 
     def self.expand_archive_path(path : String) : String
@@ -490,7 +504,7 @@ module Gori
       seen_manifest = false
       seen_database = false
       uncompressed_bytes = 0_i64
-      Compress::Zip::Reader.open(source) do |zip|
+      read_zip_entries(source) do |zip|
         zip.each_entry do |entry|
           case entry.filename
           when "manifest.json"
@@ -517,6 +531,17 @@ module Gori
       raise Gori::Error.new("project archive is missing manifest.json") unless seen_manifest
       raise Gori::Error.new("project archive is missing gori.db") unless seen_database
       manifest_json || raise Gori::Error.new("project archive is missing manifest.json")
+    end
+
+    # `Zip::Reader` re-parses each local header, so a crafted archive whose central directory
+    # is sound still meets the untyped shapes here (`zip_shape_error?`). The guard also covers
+    # the caller's block: a bare `raise "…"` added there would read as a damaged archive.
+    # Every `Gori::Error` the block raises is a subclass and passes through untouched.
+    private def self.read_zip_entries(source : String, &)
+      Compress::Zip::Reader.open(source) { |zip| yield zip }
+    rescue ex
+      raise ex unless zip_shape_error?(ex)
+      raise damaged_archive(source, ex)
     end
 
     private def self.validate_manifest_database!(manifest : Manifest, version : Int32,
@@ -562,6 +587,10 @@ module Gori
         # A file gori cannot read (permissions) keeps its own error; only a bad shape is "not a zip".
         raise ex if ex.is_a?(File::Error)
         raise Gori::Error.new("'#{source}' is not a gori project archive (not a zip file)")
+      rescue ex
+        # A zip, just a damaged one: an entry's timestamp no clock has (`zip_shape_error?`).
+        raise ex unless zip_shape_error?(ex)
+        raise damaged_archive(source, ex)
       end
     end
 
@@ -1197,7 +1226,19 @@ module Gori
       "ws_messages"        => %w[opcode],
     }
 
-    STRING_ONLY_TABLES = %w[flows scope_rules]
+    # The TEXT-affinity columns that may hold a BLOB: the store reads each one through
+    # `CAST(… AS BLOB)` (`RepeaterSessions::REQUEST_COL`, `FuzzSessions::TEMPLATE_COL`,
+    # `Store#match_rules`, `ISSUE_NOTES_COL`, `RETEST_ASSERTION_COL`), and `insert_repeater`
+    # binds the repeater's request as Bytes. Every other TEXT column is read with
+    # `rs.read(String)`. A new byte-carrying TEXT column read through a cast joins this list.
+    BLOB_TEXT_COLUMNS = {
+      "repeaters"              => %w[request],
+      "fuzz_sessions"          => %w[template],
+      "match_rules"            => %w[pattern replacement],
+      "issues"                 => %w[notes],
+      "issue_retest_steps"     => %w[assertion],
+      "issue_retest_run_steps" => %w[assertion],
+    }
 
     # gori binds only integers (or NULL) into an INTEGER column, and the store reads every one
     # of them with a typed read that raises `DB::ColumnTypeMismatchError` on anything else. So
@@ -1214,14 +1255,13 @@ module Gori
           check = "typeof(#{col}) NOT IN ('integer', 'null')"
           narrow.includes?(column) ? "#{check} OR #{col} NOT BETWEEN #{Int32::MIN} AND #{Int32::MAX}" : check
         end
-        # A BLOB in a TEXT-affinity column is stored as-is and `rs.read(String)` raises on it.
-        # Only tables whose TEXT columns the store always binds as Strings: elsewhere (a
-        # repeater's `request`) gori itself binds bytes into a TEXT column.
-        if STRING_ONLY_TABLES.includes?(table)
-          checks += conn.query_all("SELECT name FROM pragma_table_info(?) WHERE instr(upper(type), 'INT') = 0 " \
-                                   "AND (instr(upper(type), 'CHAR') > 0 OR instr(upper(type), 'TEXT') > 0)",
-            table, as: String).map { |column| "typeof(#{quote_ident(column)}) NOT IN ('text', 'null')" }
-        end
+        # A BLOB in a TEXT-affinity column is stored as-is and `rs.read(String)` raises on it,
+        # which left a project whose open (`Store#color_rules`, the session-slots setting)
+        # raised forever. Every TEXT column but the ones read through a cast (`BLOB_TEXT_COLUMNS`).
+        blob_ok = BLOB_TEXT_COLUMNS[table]? || [] of String
+        checks += conn.query_all("SELECT name FROM pragma_table_info(?) WHERE instr(upper(type), 'INT') = 0 " \
+                                 "AND (instr(upper(type), 'CHAR') > 0 OR instr(upper(type), 'TEXT') > 0)",
+          table, as: String).reject(&.in?(blob_ok)).map { |column| "typeof(#{quote_ident(column)}) NOT IN ('text', 'null')" }
         next if checks.empty?
         next unless conn.query_one?("SELECT 1 FROM #{quote_ident(table)} WHERE #{checks.join(" OR ")} LIMIT 1", as: Int64)
         raise Gori::Error.new("project archive database has a value gori never writes in #{table.inspect}; refusing to import it")

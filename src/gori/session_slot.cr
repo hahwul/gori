@@ -361,13 +361,15 @@ module Gori
     end
 
     # A step id of zero, or anything that is not an integer, is skipped: neither can name a
-    # Repeater session. A negative id is KEPT — it is a detached step (see `refresh`).
+    # Repeater session. A negative id is KEPT — it is a detached step (see `refresh`) — except
+    # Int64::MIN, which no deleted session's id negates to (`detach_refresh` negates a positive
+    # rowid), so only a foreign row holds it, and every `-id` on it raises.
     private def self.parse_ids(node : JSON::Any?) : Array(Int64)
       ids = [] of Int64
       return ids unless arr = node.try(&.as_a?)
       arr.each do |e|
         id = e.as_i64?
-        ids << id if id && id != 0
+        ids << id if id && id != 0 && id != Int64::MIN
       end
       ids
     end

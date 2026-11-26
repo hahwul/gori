@@ -1524,12 +1524,24 @@ module Gori
       # RFC 9113 §7 error codes, by their spec names — the operator is going to search for
       # the name, not the integer. Shared by GOAWAY (§6.8) and RST_STREAM (§7): the code
       # space is one registry.
+      #
+      # Keyed by UInt32, the code's wire width. §7 lets a peer send ANY 32-bit value, and the
+      # old Int32 keys forced a checked `to_i` that raised OverflowError for a code ≥ 2^31 —
+      # which no read-path rescue catches, so the response, race siblings or WebSocket
+      # transcript already received were thrown away for "Arithmetic overflow".
       ERROR_CODES = {
-        0 => "NO_ERROR", 1 => "PROTOCOL_ERROR", 2 => "INTERNAL_ERROR", 3 => "FLOW_CONTROL_ERROR",
-        4 => "SETTINGS_TIMEOUT", 5 => "STREAM_CLOSED", 6 => "FRAME_SIZE_ERROR", 7 => "REFUSED_STREAM",
-        8 => "CANCEL", 9 => "COMPRESSION_ERROR", 10 => "CONNECT_ERROR", 11 => "ENHANCE_YOUR_CALM",
-        12 => "INADEQUATE_SECURITY", 13 => "HTTP_1_1_REQUIRED",
+        0_u32 => "NO_ERROR", 1_u32 => "PROTOCOL_ERROR", 2_u32 => "INTERNAL_ERROR",
+        3_u32 => "FLOW_CONTROL_ERROR", 4_u32 => "SETTINGS_TIMEOUT", 5_u32 => "STREAM_CLOSED",
+        6_u32 => "FRAME_SIZE_ERROR", 7_u32 => "REFUSED_STREAM", 8_u32 => "CANCEL",
+        9_u32 => "COMPRESSION_ERROR", 10_u32 => "CONNECT_ERROR", 11_u32 => "ENHANCE_YOUR_CALM",
+        12_u32 => "INADEQUATE_SECURITY", 13_u32 => "HTTP_1_1_REQUIRED",
       }
+
+      # A §7 error code by its spec name, or its unsigned decimal value when unregistered (never
+      # a wrapped negative: that would name a code the peer did not send).
+      def self.error_name(code : UInt32) : String
+        ERROR_CODES[code]? || "error code #{code}"
+      end
 
       # A GOAWAY payload as a sentence (§6.8: last-stream-id, error code, optional debug data).
       # The code was previously read only as "stop looping", so an origin that told gori
@@ -1538,9 +1550,8 @@ module Gori
       # PUBLIC for `H2WsStream` — see `SendFlow` (`H2WsStream` reports the peer's own reason with it).
       def self.goaway_reason(frame : Frame::Header) : String
         payload = frame.payload
-        return "h2 GOAWAY (no error code)" if payload.size < 8
-        code = IO::ByteFormat::BigEndian.decode(UInt32, payload[4, 4]).to_i
-        name = ERROR_CODES[code]? || "error code #{code}"
+        return "h2 GOAWAY (no error code)" unless code = goaway_code(frame)
+        name = error_name(code)
         # The debug data is the PEER's bytes, and this sentence becomes `Result#error`, which a
         # dozen `gori run` sites and MCP's log print as-is. `scrub` alone left an ESC sequence
         # intact for the operator's terminal, so the controls are badged here, once, at the
@@ -1579,11 +1590,14 @@ module Gori
       # instruction to retry on a new connection.
       # PUBLIC for `H2WsStream` — see `SendFlow` (`H2WsStream` reports the peer's own reason with it).
       def self.rst_reason(frame : Frame::Header) : String
-        payload = frame.payload
-        return "h2 RST_STREAM on stream #{frame.stream_id} (no error code)" if payload.size < 4
-        code = IO::ByteFormat::BigEndian.decode(UInt32, payload[0, 4]).to_i
-        name = ERROR_CODES[code]? || "error code #{code}"
-        "h2 RST_STREAM #{name} on stream #{frame.stream_id}"
+        return "h2 RST_STREAM on stream #{frame.stream_id} (no error code)" unless code = rst_code(frame)
+        "h2 RST_STREAM #{error_name(code)} on stream #{frame.stream_id}"
+      end
+
+      # A RST_STREAM's error code, or nil when the payload is too short to carry one.
+      def self.rst_code(frame : Frame::Header) : UInt32?
+        return nil if frame.payload.size < 4
+        IO::ByteFormat::BigEndian.decode(UInt32, frame.payload[0, 4])
       end
 
       # Decode a completed header block, splitting the pseudo-headers off the regular fields.

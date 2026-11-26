@@ -693,15 +693,14 @@ module Gori::Tui
       b = Screen.cluster_end(line, {x1, line.size}.min)
       right = {x + width, @width}.min
       px = x + Screen.draw_width(line[0, a])
-      i = a
-      while i < b && px < right
-        e = Screen.cluster_end(line, i + 1)
-        seg = line[i...e]
+      # One forward walk (`Wrap.each_cluster`): `cluster_end` + `line[i...e]` per cluster
+      # re-walked a non-ASCII line from byte 0 each time.
+      Wrap.each_cluster(line, a, b) do |seg|
+        break if px >= right
         cols = Screen.draw_width(seg)
         break if px + cols > right
         text(px, y, seg, fg, bg)
         px += cols
-        i = e
       end
     end
 

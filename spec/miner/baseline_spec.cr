@@ -438,6 +438,16 @@ describe "Gori::Miner::Baseline#calibrate" do
     report.warning.should be_nil
   end
 
+  # No surface sets the rounds, so a huge one is a foreign session row: it sent that many
+  # baseline copies before any candidate (and Int32::MAX asked for a 2^31-slot probe array).
+  it "bounds the stability wave to the configured ceiling" do
+    backend = FailFirstBackend.new(fail_first: 0)
+    b = M::Baseline.new(backend, "GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice,
+      calibrate_cfg(stability_rounds: 20_000))
+    b.calibrate(Array(M::Location).new).reachable?.should be_true
+    backend.sent.should eq(M::Config::STABILITY_ROUNDS.end)
+  end
+
   it "still gives up when the retry fails too" do
     b = M::Baseline.new(DeadBackend.new, "GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice,
       calibrate_cfg(stability_rounds: 2, retries: 2))

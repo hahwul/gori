@@ -1,3 +1,5 @@
+require "./run_feed"
+
 module Gori::Tui
   # The sub-tab shell MinerController and SequencerController share: a list of seeded sessions
   # (`@sessions`, each a record with a `view`, a `flow_id` and a `db_id`), drawn, keyed, scrolled,
@@ -11,6 +13,9 @@ module Gori::Tui
   # drain, reconcile, close and save shadow the ones here.
   module SeededToolTabs
     DRAIN_CAP = 512 # bounded per-tick drain so a fast run can't starve render
+
+    # How each run fiber hands its events to the Runner; `stop_all` detaches it (RunFeed).
+    @run_feed = RunFeed.new
 
     def subtab_labels : Array(String)
       @sessions.map_with_index { |t, i| "#{i + 1}:#{t.view.label(Chrome::SUBTAB_LABEL_MAX)}" }
@@ -325,6 +330,9 @@ module Gori::Tui
         tab.view.request_stop
         @host.jobs.finish(tab.view.job_id, :stopped, "project closed")
       end
+      # Nothing drains the run channel after this, and a stopped run still reports what it had
+      # in flight: without the detach its forwarder parks on the full channel forever.
+      @run_feed.detach
     end
 
     # Live converge with the tool's session rows after a data_version bump. Soft-sync only —

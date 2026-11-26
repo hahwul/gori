@@ -173,6 +173,51 @@ private def with_scope(&)
   end
 end
 
+# An RFC 8441 origin that keeps the connection busy with a PING every `gap`, `count` times,
+# and only then answers 403: before its SETTINGS (`before_settings`) or between the CONNECT and
+# its answer. Each PING lands well inside the per-read timeout, so only a wall-clock bound on
+# the handshake ends the wait before the 403.
+private def start_h2_ws_origin_chatter(count : Int32, gap : Time::Span, *,
+                                       before_settings : Bool = false) : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    next unless conn = origin.accept?
+    begin
+      conn.read_timeout = 30.seconds
+      Frame.read_preface(conn)
+      ping = -> do
+        count.times do
+          sleep gap
+          conn.write(Frame::Header.new(Frame::Type::Ping.value, 0_u8, 0_u32, Bytes.new(8)).to_bytes)
+          conn.flush
+        end
+      end
+      ping.call if before_settings
+      conn.write(Frame::Header.new(Frame::Type::Settings.value, 0_u8, 0_u32,
+        Bytes[0x00, 0x08, 0x00, 0x00, 0x00, 0x01]).to_bytes)
+      conn.flush
+      stream = 0_u32
+      while stream == 0_u32
+        f = Frame.read(conn)
+        break if f.nil?
+        stream = f.stream_id if f.frame_type == Frame::Type::Headers
+      end
+      spawn { loop { break unless Frame.read(conn) } rescue nil } # the client's ACKs
+      ping.call unless before_settings
+      block = HPACK::Encoder.new.encode([{":status", "403"}])
+      conn.write(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS | Frame::END_STREAM,
+        stream, block).to_bytes)
+      conn.flush
+      sleep 0.5.seconds
+    rescue
+    ensure
+      conn.close rescue nil
+    end
+  end
+  port
+end
+
 private def text(s : String, evidence : Bool = false) : WsEngine::OutMsg
   WsEngine::OutMsg.new(WS::OP_TEXT.to_i, s.to_slice, evidence: evidence)
 end
@@ -302,6 +347,34 @@ describe "WebSocket over HTTP/2 (RFC 8441) replay" do
         opened.error.not_nil!.should contain "X-Gori-Protocol"
       ensure
         conn.try(&.close)
+      end
+    end
+
+    # The per-read timeout fires only on IDLE, so a PING under it used to hold the handshake for
+    # up to MAX_HANDSHAKE_FRAMES reads (hours at a 14 s cadence). The wall-clock bound is the
+    # dial's per-read timeout — `HANDSHAKE_TIMEOUT` from `WsEngine` — dialled small here.
+    # The PINGs alone last 15 × 400 ms = 6 s, or 8 × 400 ms = 3.2 s before SETTINGS (where the
+    # frame budget is `AWAIT_SETTINGS_FRAMES`); the bound is the 1 s per-read timeout.
+    {false => 15, true => 8}.each do |before_settings, pings|
+      it "bounds a handshake an origin keeps busy without answering (#{before_settings ? "before SETTINGS" : "after the CONNECT"})" do
+        port = start_h2_ws_origin_chatter(pings, 400.milliseconds, before_settings: before_settings)
+        conn, err = Gori::Repeater::H2Engine.dial("http", "127.0.0.1", port, false, nil,
+          1.second, nil, nil)
+        err.should be_nil
+        begin
+          started = Time.instant
+          opened = H2WsStream.open(conn.not_nil!, connect_head(port),
+            scheme: "http", host: "127.0.0.1", port: port, stall: 2.seconds)
+          elapsed = Time.instant - started
+
+          elapsed.should be < 2.5.seconds
+          opened.stream.should be_nil
+          opened.status.should eq 0
+          opened.error.not_nil!.should contain "kept the HTTP/2 connection busy"
+          opened.error.not_nil!.should contain(before_settings ? "SETTINGS" : "extended CONNECT")
+        ensure
+          conn.try(&.close)
+        end
       end
     end
 
@@ -490,14 +563,40 @@ describe "WebSocket over HTTP/2 (RFC 8441) replay" do
   end
 
   describe "failures the operator has to see" do
-    it "names a RST_STREAM and keeps the transcript it already had" do
+    # The second code is past Int32::MAX: RFC 9113 §7 allows any 32-bit value, and it used to
+    # raise OverflowError while naming the code, which threw away the whole transcript.
+    {0x0b_u32 => "ENHANCE_YOUR_CALM", 0x8000_0000_u32 => "error code 2147483648"}.each do |rst_code, name|
+      it "names a RST_STREAM (#{name}) and keeps the transcript it already had" do
+        seen = Channel(H2WsSeen).new
+        port = start_h2_ws_origin(seen) do |conn, send_ws, frames|
+          read_ws_frames(conn, 1, frames)
+          send_ws.call(WS.encode(WS::OP_TEXT, "before-reset".to_slice, mask: false))
+          code = Bytes.new(4)
+          IO::ByteFormat::BigEndian.encode(rst_code, code)
+          conn.write(Frame::Header.new(Frame::Type::RstStream.value, 0_u8, 1_u32, code).to_bytes)
+          conn.flush
+        end
+
+        res = send_over_h2(port, [text("go")], idle: 2.seconds)
+        receive_within(seen, what: "the origin's observations")
+        res.upgraded?.should be_true
+        res.messages.select { |m| m.direction == "in" && m.opcode == WS::OP_TEXT.to_i }
+          .map { |m| String.new(m.payload) }.should eq ["before-reset"]
+        note = res.note.not_nil!
+        note.should contain name
+        note.downcase.should contain "reset"
+      end
+    end
+
+    it "keeps the transcript under an error GOAWAY whose code is past Int32::MAX" do
       seen = Channel(H2WsSeen).new
       port = start_h2_ws_origin(seen) do |conn, send_ws, frames|
         read_ws_frames(conn, 1, frames)
-        send_ws.call(WS.encode(WS::OP_TEXT, "before-reset".to_slice, mask: false))
-        code = Bytes.new(4)
-        IO::ByteFormat::BigEndian.encode(0x0b_u32, code) # ENHANCE_YOUR_CALM
-        conn.write(Frame::Header.new(Frame::Type::RstStream.value, 0_u8, 1_u32, code).to_bytes)
+        send_ws.call(WS.encode(WS::OP_TEXT, "before-goaway".to_slice, mask: false))
+        payload = Bytes.new(8)
+        IO::ByteFormat::BigEndian.encode(0_u32, payload[0, 4])
+        IO::ByteFormat::BigEndian.encode(0xFFFF_FFFF_u32, payload[4, 4])
+        conn.write(Frame::Header.new(Frame::Type::Goaway.value, 0_u8, 0_u32, payload).to_bytes)
         conn.flush
       end
 
@@ -505,10 +604,8 @@ describe "WebSocket over HTTP/2 (RFC 8441) replay" do
       receive_within(seen, what: "the origin's observations")
       res.upgraded?.should be_true
       res.messages.select { |m| m.direction == "in" && m.opcode == WS::OP_TEXT.to_i }
-        .map { |m| String.new(m.payload) }.should eq ["before-reset"]
-      note = res.note.not_nil!
-      note.should contain "ENHANCE_YOUR_CALM"
-      note.downcase.should contain "reset"
+        .map { |m| String.new(m.payload) }.should eq ["before-goaway"]
+      res.note.not_nil!.should contain "GOAWAY error code 4294967295"
     end
 
     it "names a GOAWAY rather than reporting a quiet end" do

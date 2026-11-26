@@ -2420,7 +2420,8 @@ module Gori
       # this same tool and `--timeout 0` is refused on the CLI. It used to clamp UP to 1 ms, so
       # a caller writing the conventional zero got every send timed out and a `done` verdict
       # about a test they never asked for. Every MCP `timeout_ms` reads through this one rule
-      # (send_request, grpc_reflect and cache_deception_check each once clamped 0 to 1 ms).
+      # (send_request, grpc_reflect and cache_deception_check each once clamped 0 to 1 ms;
+      # discover_start once read it with no ceiling, so a stop waited on a stalled origin for good).
       private def fuzz_timeout(h) : Time::Span?
         optional_int_arg(h, "timeout_ms").try { |ms| ms <= 0 ? nil : ms.clamp(1_i64, 600_000_i64).milliseconds }
       end
@@ -2873,10 +2874,15 @@ module Gori
 
       # A file path argument. No path can hold a NUL, and every `File` call raises
       # `ArgumentError` on one, which `call`'s blanket rescue coded INTERNAL — "the server is
-      # broken" for a mistake in the caller's own argument. Refused by name instead.
+      # broken" for a mistake in the caller's own argument. Refused by name instead. Not
+      # coerced either, `strict_str`'s rule with the field named: `str` turned
+      # `{"output_path": true}` into a file named `true` in the server's cwd, and
+      # export_openapi wrote there and reported success.
       private def path_str(h, key : String) : String?
-        v = str(h, key)
-        raise ArgError.new("'#{key}' contains a NUL byte, which no file path can hold", key) if v.try(&.includes?('\0'))
+        a = h[key]?
+        return nil if a.nil? || a.raw.nil?
+        v = a.as_s? || raise ArgError.new("invalid '#{key}' (expected a string path)", key)
+        raise ArgError.new("'#{key}' contains a NUL byte, which no file path can hold", key) if v.includes?('\0')
         v
       end
 

@@ -155,7 +155,7 @@ module Gori
               ex.calls.first(cap).each do |c|
                 j.object do
                   j.field "method", c.method
-                  j.field "id", c.id
+                  j.field("id") { (i = c.id) ? j.raw(i) : j.null }
                   j.field "label", c.label
                   emit_text(j, "params", c.params, clip, "client")
                   j.field "reply_kind", c.reply ? (c.error ? "error" : "result") : nil
@@ -170,7 +170,7 @@ module Gori
               ex.stream.first(cap).each do |m|
                 j.object do
                   j.field "method", m.method
-                  j.field "id", m.id
+                  j.field("id") { (i = m.id) ? j.raw(i) : j.null }
                   emit_text(j, "message", m.body, clip, "target")
                 end
               end
@@ -201,7 +201,7 @@ module Gori
             end
           end
           j.field "stop_reason", c.stop
-          j.field "usage", c.usage
+          j.field("usage") { (u = c.usage) ? j.raw(u) : j.null }
         end
       end
     end

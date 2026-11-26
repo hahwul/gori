@@ -950,6 +950,81 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  # Reading the preview pane holds a following cursor like a card does, but it can last a
+  # whole unattended capture: the window must not keep one row per flow for as long as it
+  # does. Past the ceiling the held row is trimmed and the cursor resumes following.
+  it "bounds the window while the preview pane holds the cursor" do
+    prev = Gori::Settings.history_preview
+    begin
+      Gori::Settings.history_preview = true
+      with_store do |store|
+        looked_at = add_flow(store, "GET", "/looked-at", 200)
+        view = HistoryView.new(max_rows: 10, trim_slack: 4)
+        view.reload(store)
+        view.set_preview_focus(:req)
+        view.follow?.should be_true
+        5.times do |i|
+          id = add_flow(store, "GET", "/early/#{i}", 200)
+          view.on_event(Gori::Store::FlowEvent.new(id, :inserted), store)
+        end
+        view.selected_id.should eq(looked_at) # the preview keeps its flow (#2028)
+        peak = 0
+        200.times do |i|
+          id = add_flow(store, "GET", "/crawl/#{i}", 200)
+          view.on_event(Gori::Store::FlowEvent.new(id, :inserted), store)
+          peak = {peak, view.rows.size}.max
+        end
+        peak.should be <= 10 * HistoryView::PREVIEW_HOLD_GROWTH
+        view.selected_id.should_not be_nil
+        view.follow?.should be_true
+      end
+    ensure
+      Gori::Settings.history_preview = prev
+    end
+  end
+
+  # Off-tab nobody is reading the preview, so a following list follows the tail as it does
+  # with the list focused; the hold comes back once History is shown again.
+  it "does not hold for preview focus while History is not the active tab" do
+    prev = Gori::Settings.history_preview
+    begin
+      Gori::Settings.history_preview = true
+      with_store do |store|
+        looked_at = add_flow(store, "GET", "/looked-at", 200)
+        view = HistoryView.new
+        shown = false
+        view.tab_active = -> { shown }
+        view.reload(store)
+        view.set_preview_focus(:req)
+        arrived = add_flow(store, "GET", "/arrived-off-tab", 200)
+        view.on_event(Gori::Store::FlowEvent.new(arrived, :inserted), store)
+        view.selected_id.should eq(arrived)
+        view.selected_id.should_not eq(looked_at)
+
+        shown = true
+        later = add_flow(store, "GET", "/arrived-on-tab", 200)
+        view.on_event(Gori::Store::FlowEvent.new(later, :inserted), store)
+        view.selected_id.should eq(arrived) # held again: the preview keeps its flow
+      end
+    ensure
+      Gori::Settings.history_preview = prev
+    end
+  end
+
+  it "never releases a card's hold, however long the capture" do
+    with_store do |store|
+      looked_at = add_flow(store, "GET", "/looked-at", 200)
+      view = HistoryView.new(max_rows: 10, trim_slack: 4)
+      view.cursor_hold = -> { true }
+      view.reload(store)
+      60.times do |i|
+        id = add_flow(store, "GET", "/burst/#{i}", 200)
+        view.on_event(Gori::Store::FlowEvent.new(id, :inserted), store)
+      end
+      view.selected_id.should eq(looked_at)
+    end
+  end
+
   it "holds an oldest-first following cursor the same way" do
     prev = Gori::Settings.history_list_order
     begin
@@ -4348,6 +4423,47 @@ describe "History detail text search" do
       view.detail_search_lines("find-me").should be_empty
       view.toggle_detail_hex
       view.detail_search_lines("find-me").should eq([0])
+    end
+  end
+end
+
+# A selected line is tinted cluster by cluster. Each step used to re-derive the cluster's edge
+# and slice by char index, and both walk a non-ASCII line from byte 0, so a selected minified
+# body with one `é` in it cost O(line²) per frame (seconds at 24k chars, unwrapped).
+describe "HistoryView selection tint on a long non-ASCII line" do
+  it "paints one frame of a selected line in linear time" do
+    prev = Gori::Settings.wrap_lines?
+    begin
+      Gori::Settings.wrap_lines = false
+      with_store do |store|
+        body = %(var s="café";) + "a" * 24_000
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_700_000_000_000_000_i64, scheme: "https", host: "h.test", port: 443,
+          method: "GET", target: "/app.js", http_version: "HTTP/1.1",
+          head: "GET /app.js HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200,
+          head: "HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\n\r\n".to_slice,
+          body: body.to_slice, content_type: "application/javascript"))
+        view = HistoryView.new
+        view.reload(store)
+        view.open_detail(store).should be_true
+        view.toggle_pane if view.detail_pane != :response
+        backend = MemoryBackend.new(120, 30)
+        view.render_detail(Screen.new(backend), Rect.new(0, 0, 120, 30))
+        3.times { view.detail_move(1, 0) }
+        view.detail_select_line
+        view.detail_selection?.should be_true
+        backend = MemoryBackend.new(120, 30)
+        t0 = Time.instant
+        view.render_detail(Screen.new(backend), Rect.new(0, 0, 120, 30))
+        elapsed = Time.instant - t0
+        tinted = backend.bg_grid.sum(&.count(Theme.accent_bg))
+        tinted.should be > 40        # the selected line is still tinted across the pane
+        elapsed.should be < 1.second # ~4 s before the forward walk, a few ms after
+      end
+    ensure
+      Gori::Settings.wrap_lines = prev
     end
   end
 end

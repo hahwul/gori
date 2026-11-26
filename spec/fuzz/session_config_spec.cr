@@ -33,6 +33,31 @@ describe Gori::Fuzz::SessionConfig do
     config.stop_on.should eq("")
   end
 
+  # gori never writes a timeout past Int32::MAX seconds, so a larger one is a foreign row: its
+  # whole-second display raised OverflowError and the TUI could never open the project.
+  it "reads a stored timeout back within the bound the tab writes" do
+    {
+      %({"timeout_ms":3000000000000})        => Int32::MAX.seconds,
+      %({"timeout_ms":2147483648000})        => Int32::MAX.seconds,
+      %({"timeout_ms":9223372036854775807})  => Int32::MAX.seconds,
+      %({"timeout_ms":3000000000001})        => Int32::MAX.seconds,
+      %({"timeout_ms":2147483647000})        => Int32::MAX.seconds,
+      %({"timeout_ms":1500})                 => 1.5.seconds,
+      %({"timeout_s":3000000000})            => Int32::MAX.seconds,
+      %({"timeout_ms":-3000000000000})       => nil,
+      %({"timeout_ms":-9223372036854775808}) => nil,
+      %({"timeout_ms":0})                    => nil,
+      %({"timeout_s":-5})                    => nil,
+    }.each do |raw, expected|
+      config = Gori::Fuzz::SessionConfig.new
+      config.apply_json(raw).should be_true
+      config.config.timeout.should eq(expected)
+      again = Gori::Fuzz::SessionConfig.new
+      again.apply_json(config.to_json).should be_true
+      again.config.timeout.should eq(expected)
+    end
+  end
+
   # A row from a newer gori or an imported archive: an unknown mode used to run as Sniper, an
   # uncompilable match regex as "match everything", and an unknown set kind shifted the others
   # onto the wrong positions — and a re-save erased all three.

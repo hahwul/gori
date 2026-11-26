@@ -157,13 +157,19 @@ module Gori
     def self.step_labels(store : Store, slot : SessionSlot) : Array(String)
       slot.refresh.map do |id|
         if id < 0
-          "repeater ##{-id} (deleted)"
+          deleted_step_label(id)
         elsif rec = store.get_repeater(id)
           step_label(rec)
         else
           "repeater ##{id} (missing)"
         end
       end
+    end
+
+    # A detached step (a negative id) as the session it named. `abs_unsigned`, not `-id`: the
+    # negation raises on Int64::MIN, which a foreign settings row can hold.
+    def self.deleted_step_label(id : Int64) : String
+      "repeater ##{id.abs_unsigned} (deleted)"
     end
 
     def self.step_label(rec : Store::RepeaterRecord) : String
@@ -627,7 +633,7 @@ module Gori
       private def run_step(slot : SessionSlot, id : Int64, n : Int32, outbound : Outbound,
                            manual : Bool, flows : Array(Int64)) : Outcome?
         if id < 0
-          return failed(slot, manual, n, "repeater ##{-id} (deleted)",
+          return failed(slot, manual, n, SessionRefresh.deleted_step_label(id),
             "its Repeater session was deleted; remove the step from the slot's refresh list", nil, flows)
         end
         rec = @store.get_repeater(id)

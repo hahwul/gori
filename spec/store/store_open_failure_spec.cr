@@ -91,6 +91,41 @@ describe "Gori::Store.open failure handling" do
     end
   end
 
+  # `File.info?` raises on ELOOP rather than answering nil, and the foreign-database stat had no
+  # rescue: `gori run --db` printed a backtrace and the TUI showed stdlib's raw sentence.
+  it "names a path inside a symlink loop instead of raising a bare File::Error" do
+    posix_only!("a symlink loop")
+    dir = File.tempname("gori-open-loop")
+    Dir.mkdir_p(dir)
+    loop_path = File.join(dir, "loop.db")
+    File.symlink(loop_path, loop_path)
+    begin
+      [loop_path, File.join(loop_path, "x.db")].each do |path|
+        {false, true}.each do |read_only|
+          ex = expect_raises(Gori::Error) { Gori::Store.open(path, read_only: read_only) }
+          ex.message.to_s.should start_with("cannot open #{path}: ")
+        end
+      end
+    ensure
+      FileUtils.rm_rf(dir)
+    end
+  end
+
+  it "still opens a gori database through a symlink" do
+    posix_only!("a symlink")
+    dir = File.tempname("gori-open-link")
+    Dir.mkdir_p(dir)
+    real = File.join(dir, "real.db")
+    link = File.join(dir, "link.db")
+    begin
+      Gori::Store.open(real).close
+      File.symlink(real, link)
+      Gori::Store.open(link, read_only: true).close
+    ensure
+      FileUtils.rm_rf(dir)
+    end
+  end
+
   it "still creates a brand-new database, and opens a zero-byte file" do
     dir = File.tempname("gori-open-fresh")
     Dir.mkdir_p(dir)

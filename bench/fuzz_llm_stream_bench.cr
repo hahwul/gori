@@ -8,10 +8,11 @@
 #
 # Measured (M-series, --release):
 #   stream_reply, JSON reply (not a stream)    42 ns     32 B/op
-#   stream_reply, 400-delta stream (52 KB)    885 µs    944 kB/op
-#   Matcher#build with --mr, JSON reply        48 µs     42 kB/op
-#   Matcher#build with --mr, 400-delta stream 966 µs    0.97 MB/op
-# The stream's cost is one `JSON.parse` per event; a streamed completion takes seconds to arrive.
+#   stream_reply, 400-delta stream (52 KB)    850 µs    1.0 MB/op
+#   Matcher#build with --mr, JSON reply        52 µs     42 kB/op
+#   Matcher#build with --mr, 400-delta stream 880 µs    1.05 MB/op
+# The stream's cost is one `RawJson.parse` per event (one scrub only when the event is invalid
+# UTF-8); a streamed completion takes seconds to arrive.
 #
 # Build: crystal build bench/fuzz_llm_stream_bench.cr -o bin/fuzz_llm_stream_bench --release
 # Run:   bin/fuzz_llm_stream_bench

@@ -87,11 +87,19 @@ describe "IssuesController hidden-marks card" do
       "shown".each_char { |c| ctl.view.query_insert(c) }
       ctl.view.selected_id.should eq(shown)
 
-      host.alt_answer = true
-      ctl.issues_copy_all
-      host.confirms.last[0].should eq("COPY")
-      cursor_row = "[#{Gori::Store::Severity::Low.label}] shown finding (b.test)"
-      host.statuses.last.should eq("copied #{cursor_row.bytesize}b to clipboard")
+      # The toast wording depends on the global clipboard setting, which an earlier spec in
+      # the same binary may have left off (a saved settings file reloaded later), so pin it.
+      prev_osc52 = Gori::Settings.clipboard_osc52?
+      begin
+        Gori::Settings.clipboard_osc52 = true
+        host.alt_answer = true
+        ctl.issues_copy_all
+        host.confirms.last[0].should eq("COPY")
+        cursor_row = "[#{Gori::Store::Severity::Low.label}] shown finding (b.test)"
+        host.statuses.last.should eq("copied #{cursor_row.bytesize}b to clipboard")
+      ensure
+        Gori::Settings.clipboard_osc52 = prev_osc52
+      end
     end
   end
 end

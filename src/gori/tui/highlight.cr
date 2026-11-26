@@ -237,9 +237,14 @@ module Gori::Tui
       offset = 0
       line.each do |span|
         text = span.text
-        finish = offset + text.size
+        len = text.size
+        finish = offset + len
+        # Cut through one forward cursor per span: a char-index `text[a...b]` on non-ASCII text
+        # walks from the span's start every time, and one decoded escape per range made a line
+        # of CJK escapes O(ranges × line) — seconds per frame on a 100 KB body.
+        cur = Wrap::Offsets.new(text)
         pos = 0
-        while pos < text.size
+        while pos < len
           range = ordered[range_i]?
           while range && range[1] <= offset + pos
             range_i += 1
@@ -247,15 +252,15 @@ module Gori::Tui
           end
 
           if range.nil? || range[0] >= finish
-            out << Span.new(text[pos..], span.fg, span.attr) if pos < text.size
-            pos = text.size
+            out << Span.new(pos == 0 ? text : cur.slice(text, pos, len), span.fg, span.attr)
+            pos = len
           elsif offset + pos < range[0]
-            stop = {range[0] - offset, text.size}.min
-            out << Span.new(text[pos...stop], span.fg, span.attr)
+            stop = {range[0] - offset, len}.min
+            out << Span.new(cur.slice(text, pos, stop), span.fg, span.attr)
             pos = stop
           else
-            stop = {range[1] - offset, text.size}.min
-            out << Span.new(text[pos...stop], Theme.accent, span.attr | Attribute::Underline) if stop > pos
+            stop = {range[1] - offset, len}.min
+            out << Span.new(cur.slice(text, pos, stop), Theme.accent, span.attr | Attribute::Underline) if stop > pos
             pos = stop
             range_i += 1 if offset + pos >= range[1]
           end
@@ -385,8 +390,9 @@ module Gori::Tui
       return [Span.new(text, base_fg, attr)] if regions.empty?
       spans = [] of Span
       pos = 0
+      cur = Wrap::Offsets.new(text) # one forward walk for every cut — see `emphasize`
       regions.each do |r|
-        spans << Span.new(text[pos...r.start], base_fg, attr) if r.start > pos
+        spans << Span.new(cur.slice(text, pos, r.start), base_fg, attr) if r.start > pos
         # A name the caller ships literally is not resolvable ON THIS BUFFER, whatever the
         # global var table says — paint what the wire will carry, not what it could have.
         # Keyed QUALIFIED when the token names a namespace, so an evidence `$ENV.id` cannot be
@@ -396,10 +402,10 @@ module Gori::Tui
           ns = r.ns
           known = false if literal.includes?(ns ? Env.qualify(ns, r.name) : r.name)
         end
-        spans << Span.new(text[r.start...r.stop], known ? Theme.env_known : Theme.env_unknown, known ? attr : (attr | Attribute::Italic))
+        spans << Span.new(cur.slice(text, r.start, r.stop), known ? Theme.env_known : Theme.env_unknown, known ? attr : (attr | Attribute::Italic))
         pos = r.stop
       end
-      spans << Span.new(text[pos..], base_fg, attr) if pos < text.size
+      spans << Span.new(cur.slice(text, pos, text.size), base_fg, attr) if pos < text.size
       spans
     end
 
@@ -759,7 +765,8 @@ module Gori::Tui
       line.each do |span|
         t = span.text
         len = t.size
-        pos = 0 # local index of the next unemitted char in `t`
+        pos = 0                    # local index of the next unemitted char in `t`
+        cur = Wrap::Offsets.new(t) # one forward walk for every cut — see `emphasize`
         ranges.each do |(a, b)|
           la = a - off
           lb = b - off
@@ -767,10 +774,10 @@ module Gori::Tui
           la = {la, pos}.max
           lb = {lb, len}.min
           next if la >= lb
-          out << Span.new(t[pos...la], span.fg, span.attr) if la > pos
+          out << Span.new(cur.slice(t, pos, la), span.fg, span.attr) if la > pos
           pos = lb
         end
-        out << Span.new(t[pos...len], span.fg, span.attr) if pos < len
+        out << Span.new(pos == 0 ? t : cur.slice(t, pos, len), span.fg, span.attr) if pos < len
         off += len
       end
       out

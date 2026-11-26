@@ -104,3 +104,47 @@ describe "Gori::Utf8.scrub" do
     Gori::Utf8.subject(String.new(bytes)).should eq(String.new(bytes).scrub)
   end
 end
+
+describe "Gori::Utf8.join" do
+  # `String#+` caches the sum of the operands' sizes, which overcounts when a trailing lead
+  # byte fuses with a leading continuation byte. `join` must report the size a fresh String
+  # over the same bytes reports, and keep those bytes exactly.
+  it "reports the true size across a fusing seam, byte for byte" do
+    a = String.new("é\xC3".to_slice)
+    b = String.new("\x82bc".to_slice)
+    a.size.should eq(2)
+    b.size.should eq(3)
+    joined = Gori::Utf8.join(a, b)
+    joined.to_slice.should eq(a.to_slice + b.to_slice)
+    joined.size.should eq(String.new(joined.to_slice).size)
+    joined[joined.size - 1].should eq('c')
+  end
+
+  it "agrees with a fresh decode on random byte runs" do
+    r = Random.new(1897)
+    alphabet = [0x61_u8, 0x80_u8, 0x82_u8, 0xA9_u8, 0xBF_u8, 0xC3_u8, 0xC2_u8, 0xE2_u8,
+                0xE0_u8, 0xED_u8, 0xF0_u8, 0xF4_u8, 0xF5_u8, 0xC0_u8, 0x9F_u8]
+    2000.times do
+      a = String.new(Bytes.new(r.rand(0..5)) { alphabet.sample(r) })
+      b = String.new(Bytes.new(r.rand(0..5)) { alphabet.sample(r) })
+      a.size
+      b.size # cache both counts, as an editor's lines have them
+      joined = Gori::Utf8.join(a, b)
+      fresh = String.new(a.to_slice + b.to_slice)
+      joined.to_slice.should eq(fresh.to_slice)
+      joined.size.should eq(fresh.size)
+      Gori::Utf8.join(a, "", b).size.should eq(fresh.size)
+    end
+  end
+end
+
+describe "Gori::Utf8.char_index_after" do
+  it "counts characters up to a boundary and rounds a straddled one up" do
+    s = String.new("é\xC3\x82bc".to_slice) # é, Â, b, c
+    Gori::Utf8.char_index_after(s, 0).should eq(0)
+    Gori::Utf8.char_index_after(s, 2).should eq(1)
+    Gori::Utf8.char_index_after(s, 3).should eq(2) # inside Â → after it
+    Gori::Utf8.char_index_after(s, s.bytesize).should eq(4)
+    Gori::Utf8.char_index_after("abc", 9).should eq(3)
+  end
+end
