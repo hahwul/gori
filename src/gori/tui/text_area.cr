@@ -470,18 +470,17 @@ module Gori::Tui
       tail_eol = eol_at(@cy)
       parts = text.split('\n')
       if parts.size == 1
-        @lines[@cy] = "#{head}#{parts[0]}#{tail}"
-        @cx = cx + parts[0].size
+        @lines[@cy], @cx = splice(Utf8.join(head, parts[0]), tail)
       else
-        @lines[@cy] = "#{head}#{parts[0]}"
+        @lines[@cy] = Utf8.join(head, parts[0])
         @eols[@cy] = DEFAULT_EOL
         last = parts.size - 1
         (1..last).each do |i|
-          @lines.insert(@cy + i, i == last ? "#{parts[i]}#{tail}" : parts[i])
+          @lines.insert(@cy + i, parts[i])
           @eols.insert(@cy + i, i == last ? tail_eol : DEFAULT_EOL)
         end
         @cy += last
-        @cx = parts[last].size
+        @lines[@cy], @cx = splice(parts[last], tail)
       end
       snap_cx_to_cluster(1) # the paste's last char can merge with the text it landed before
       @styled = nil
@@ -694,13 +693,11 @@ module Gori::Tui
         # (Composing a cluster codepoint-by-codepoint is the IME's job, via preedit; once it
         # has COMMITTED a glyph, taking it apart is not something a backspace should do.)
         st = Screen.cluster_start(line, cx - 1)
-        @lines[@cy] = "#{line[0, st]}#{line[cx..]}"
-        @cx = st
+        @lines[@cy], @cx = splice(line[0, st], line[cx..])
       elsif @cy > 0
         push_undo
         prev = @lines[@cy - 1]
-        @cx = prev.size
-        @lines[@cy - 1] = prev + @lines[@cy]
+        @lines[@cy - 1], @cx = splice(prev, @lines[@cy])
         @lines.delete_at(@cy)
         # The terminator that separated the two lines is exactly what the backspace deleted;
         # the merged line now ends with whatever ended the line pulled up.
@@ -841,7 +838,7 @@ module Gori::Tui
       push_undo
       word_left
       line = @lines[@cy]
-      @lines[@cy] = "#{line[0, @cx]}#{line[from.clamp(0, line.size)..]}"
+      @lines[@cy], @cx = splice(line[0, @cx], line[from.clamp(0, line.size)..])
       @styled = nil
       @edits += 1
       refresh_env_complete
@@ -857,10 +854,10 @@ module Gori::Tui
       if cx < line.size
         push_undo
         # Whole-cluster forward delete, mirroring backspace — see the note there.
-        @lines[@cy] = "#{line[0, cx]}#{line[Screen.cluster_end(line, cx + 1)..]}"
+        @lines[@cy], cx = splice(line[0, cx], line[Screen.cluster_end(line, cx + 1)..])
       elsif @cy < @lines.size - 1
         push_undo
-        @lines[@cy] = line + @lines[@cy + 1]
+        @lines[@cy], cx = splice(line, @lines[@cy + 1])
         @lines.delete_at(@cy + 1)
         @eols.delete_at(@cy) # the separator is what forward-delete removed (mirrors backspace)
       else
@@ -1019,13 +1016,12 @@ module Gori::Tui
       @sel_anchor = nil
       return false unless r
       y0, x0, y1, x1 = r
-      @lines[y0] = "#{@lines[y0][0, x0]}#{@lines[y1][x1..]}"
+      @lines[y0], @cx = splice(@lines[y0][0, x0], @lines[y1][x1..])
       (y1 - y0).times do
         @lines.delete_at(y0 + 1)
         @eols.delete_at(y0)
       end
       @cy = y0
-      @cx = x0
       # The splice re-clusters across the seam the same way a backspace-join does: if the
       # kept tail opens with a combining mark it has just fused onto the head's last glyph,
       # so the seam is now cluster interior. Snap forward, past the fused glyph — see the
@@ -2174,6 +2170,18 @@ module Gori::Tui
     # supplied index (place_cursor / place_at_offset / undo) is unconstrained.
     # Both helpers no-op cheaply when @cx is already on a boundary (Screen.boundary?), so
     # ordinary typing never pays for the grapheme walk.
+    # `head + tail` for an edit that brought two runs of the buffer together, and the caret
+    # for the seam between them. Through `Utf8.join`, never `+`: these lines hold captured
+    # bytes, and a head ending in a lone lead byte fused with a tail opening on continuation
+    # bytes left a line whose cached `size` overcounted, so the next caret move indexed past
+    # its end and raised. The caret is `head.size` unless the seam fused, in which case it goes
+    # after the character that absorbed it (the forward snap a combining-mark join gets).
+    private def splice(head : String, tail : String) : {String, Int32}
+      joined = Utf8.join(head, tail)
+      return {joined, head.size} if joined.size == head.size + tail.size
+      {joined, Utf8.char_index_after(joined, head.bytesize)}
+    end
+
     private def snap_cx_to_cluster(dir : Int32) : Nil
       line = @lines[@cy]
       @cx = dir > 0 ? Screen.cluster_end(line, @cx) : Screen.cluster_start(line, @cx)

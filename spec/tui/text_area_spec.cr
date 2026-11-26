@@ -1310,3 +1310,69 @@ describe Gori::Tui::TextArea do
     area.search_hits("漢").should eq([{0, 1}])
   end
 end
+
+# A captured Latin-1 or binary body can put a lone UTF-8 lead byte at the end of one run and a
+# continuation byte at the start of the next. Every edit that brings two runs together (a join,
+# a delete, a cut) must leave a line whose `size` is true, or the next caret move indexes past
+# its end and raises out of the input loop.
+describe "Gori::Tui::TextArea splices over invalid UTF-8" do
+  raw = ->(s : String) { String.new(s.to_slice) }
+  # The editor caches every line's size as it draws; the overcount needs both halves cached.
+  area = ->(s : String) do
+    ta = Gori::Tui::TextArea.new(raw.call(s))
+    ta.lines_snapshot.each(&.size)
+    ta
+  end
+  check = ->(ta : Gori::Tui::TextArea) do
+    ta.lines_snapshot.each { |l| l.size.should eq(String.new(l.to_slice).size) }
+    screen = Gori::Tui::Screen.new(MemoryBackend.new(40, 6))
+    rect = Gori::Tui::Rect.new(0, 0, 40, 6)
+    ta.end_of_line
+    ta.move(0, -1)
+    ta.move(0, 1)
+    ta.backspace
+    ta.render(screen, rect, true)
+    ta.lines_snapshot.each { |l| l.size.should eq(String.new(l.to_slice).size) }
+  end
+
+  it "joins lines with backspace at a line start" do
+    ta = area.call("é\xC3\n\x82bc")
+    ta.place_cursor(1, 0)
+    ta.backspace
+    ta.lines_snapshot.should eq([raw.call("é\xC3\x82bc")])
+    ta.cx.should eq(2) # after the fused Â, where the seam visually is
+    check.call(ta)
+  end
+
+  it "joins lines with forward delete at a line end" do
+    ta = area.call("ab\xC3\n\x82cd")
+    ta.place_cursor(0, 3)
+    ta.delete
+    ta.lines_snapshot.should eq([raw.call("ab\xC3\x82cd")])
+    ta.cx.should eq(3)
+    check.call(ta)
+  end
+
+  it "closes the gap an in-line backspace or delete leaves" do
+    ta = area.call("é\xC3a\x82bc")
+    ta.place_cursor(0, 3)
+    ta.backspace # drops the 'a' between the lead and the continuation byte
+    ta.lines_snapshot.should eq([raw.call("é\xC3\x82bc")])
+    check.call(ta)
+
+    ta = area.call("é\xC3a\x82bc")
+    ta.place_cursor(0, 2)
+    ta.delete
+    ta.lines_snapshot.should eq([raw.call("é\xC3\x82bc")])
+    check.call(ta)
+  end
+
+  it "cuts a selection that spans the seam" do
+    ta = area.call("x\xC3\nmid\n\x82yz")
+    ta.place_cursor(0, 2)
+    ta.move(2, -2, selecting: true)
+    ta.backspace
+    ta.lines_snapshot.should eq([raw.call("x\xC3\x82yz")])
+    check.call(ta)
+  end
+end
