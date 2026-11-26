@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- TUI: quitting or leaving a project asks before forwarding held Intercept traffic unedited, `^P → Quit gori` confirms while background jobs are running, and `QUIT GORI` closes any open Space menu or picker first (#2027).
+
+- TUI: multi-column Space menus scroll on short terminals instead of dropping trailing rows, the 80-column top bar keeps capture-off, `sandbox` and `intercept` chips visible, the Active Scan card keeps its run controls on screen at 80×24, and `v` or `Space` opens full text for clipped notifications (#2027).
+
+- TUI: nine more editing cards (OAST provider, column, Sequencer config, custom colour, WS inject, Authorize identity, cURL paste, CA import and CVSS calculator) ask before discarding unsaved edits, bottom prompts and Fuzzer/OAST pickers ignore destructive pasted keys, and clicking or pressing Space on an invalid Save row shows what is missing (#2027).
+
+- TUI: History holds follow while focused in the preview pane and keeps single-pane detail scroll across Request/Response switches; Sitemap batch actions and Issues export ask before acting on hidden marks; Issues notes when an update hides a row under `/`; and Miner, Sequencer and Discover ask before `^R` clears existing results (#2027).
+
 - TUI: a paste at the project picker, the setup wizard or the tour is typed into their text fields and refused everywhere else, as it already was in the app; a paste on a picker project row could open the action menu and delete the project (#2026).
 
 - Intercept: forwarding or dropping from inside a held message's editor (`Ctrl-R`, `f` in READ, the space menu) acts on that message and its edits instead of the marked holds, and the hint and toast say the marks stay held (#2026).
