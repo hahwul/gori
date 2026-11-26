@@ -186,6 +186,28 @@ module Gori::Tui
       reveal ? Reveal.draw_width_upto(line, limit) : Screen.draw_width_upto(line, limit)
     end
 
+    # Each grapheme cluster of the character span `[a, b)` of `line`, as the raw bytes
+    # `line[i...e]` would give, in ONE forward walk. `a` and `b` must be cluster boundaries
+    # (`Screen.cluster_start` / `cluster_end`), which is what a tint over a selection snaps
+    # its edges to. The loop it replaces called `Screen.cluster_end(line, i + 1)` and
+    # `line[i...e]` per cluster, and both re-walk a non-ASCII line from byte 0: a selected
+    # minified body with one `é` in it repainted in O(line²) per frame.
+    #
+    # The grapheme walk supplies only each cluster's CHARACTER count; the bytes come from an
+    # `Offsets` cursor. `each_grapheme` turns an invalid byte into U+FFFD, and the tint has to
+    # paint the same text the base draw put there.
+    def self.each_cluster(line : String, a : Int32, b : Int32, & : String ->) : Nil
+      return if a >= b
+      sub = line[a...b]
+      cur = Offsets.new(sub)
+      i = 0
+      sub.each_grapheme do |g|
+        e = i + g.size
+        yield cur.slice(sub, i, e)
+        i = e
+      end
+    end
+
     # --- the (line, sub-row) scroll anchor -----------------------------------
     # A pane scrolled by wrapped rows does NOT hold a flat visual-row index: producing one
     # means wrapping every line from the top of the document, which is an O(whole buffer)

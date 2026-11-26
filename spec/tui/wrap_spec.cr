@@ -32,6 +32,27 @@ describe Gori::Tui::Wrap do
     end
   end
 
+  describe "each_cluster" do
+    # The selection tint's walk: it must yield exactly the clusters the old
+    # `cluster_end` + `line[i...e]` loop produced, raw invalid bytes included.
+    it "yields the same raw clusters as the per-cluster char-index loop" do
+      [String.new("cafe\u0301 👨‍👩‍👧 🇰🇷🇯🇵 \r\n\xC3x\x82é".to_slice), "plain ascii", "한글 텍스트"].each do |line|
+        a = Screen.cluster_start(line, 1)
+        b = line.size
+        want = [] of String
+        i = a
+        while i < b
+          e = Screen.cluster_end(line, i + 1)
+          want << line[i...e]
+          i = e
+        end
+        got = [] of String
+        Wrap.each_cluster(line, a, b) { |seg| got << seg }
+        got.map(&.to_slice).should eq(want.map(&.to_slice))
+      end
+    end
+  end
+
   describe "layout" do
     it "keeps a line that fits on a single row" do
       lay = Wrap.layout("GET /x HTTP/1.1", 40)

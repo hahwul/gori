@@ -217,10 +217,10 @@ class Gori::Tui::RepeaterView
     b = Screen.cluster_end(line, {x1, line.size}.min)
     return if a >= b
     px = x + Wrap.row_col(line, nil, row_start, a, reveal: reveal) - resp_xscroll
-    i = a
-    while i < b
-      e = Screen.cluster_end(line, i + 1)
-      seg = line[i...e]
+    # One forward walk, stopped past the last drawable cell — see HistoryView's copy.
+    right = resp_xscroll > 0 && clip_w > 0 ? {clip_x + clip_w, screen.width}.min : screen.width
+    Wrap.each_cluster(line, a, b) do |seg|
+      break if px >= right
       w = Wrap.draw_width(seg, reveal)
       # A cluster the h-scroll pushed off either edge is skipped rather than half-painted:
       # those cells belong to the gutter or to the pane next door. Inert with no offset, so
@@ -228,7 +228,6 @@ class Gori::Tui::RepeaterView
       shown = reveal ? Reveal.rendered_text(seg) : seg
       screen.text(px, y, shown, Theme.text, bg) if resp_xscroll <= 0 || clip_w <= 0 || (px >= clip_x && px + w <= clip_x + clip_w)
       px += w
-      i = e
     end
   end
 end

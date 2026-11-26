@@ -4351,3 +4351,44 @@ describe "History detail text search" do
     end
   end
 end
+
+# A selected line is tinted cluster by cluster. Each step used to re-derive the cluster's edge
+# and slice by char index, and both walk a non-ASCII line from byte 0, so a selected minified
+# body with one `é` in it cost O(line²) per frame (seconds at 24k chars, unwrapped).
+describe "HistoryView selection tint on a long non-ASCII line" do
+  it "paints one frame of a selected line in linear time" do
+    prev = Gori::Settings.wrap_lines?
+    begin
+      Gori::Settings.wrap_lines = false
+      with_store do |store|
+        body = %(var s="café";) + "a" * 24_000
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_700_000_000_000_000_i64, scheme: "https", host: "h.test", port: 443,
+          method: "GET", target: "/app.js", http_version: "HTTP/1.1",
+          head: "GET /app.js HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200,
+          head: "HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\n\r\n".to_slice,
+          body: body.to_slice, content_type: "application/javascript"))
+        view = HistoryView.new
+        view.reload(store)
+        view.open_detail(store).should be_true
+        view.toggle_pane if view.detail_pane != :response
+        backend = MemoryBackend.new(120, 30)
+        view.render_detail(Screen.new(backend), Rect.new(0, 0, 120, 30))
+        3.times { view.detail_move(1, 0) }
+        view.detail_select_line
+        view.detail_selection?.should be_true
+        backend = MemoryBackend.new(120, 30)
+        t0 = Time.instant
+        view.render_detail(Screen.new(backend), Rect.new(0, 0, 120, 30))
+        elapsed = Time.instant - t0
+        tinted = backend.bg_grid.sum(&.count(Theme.accent_bg))
+        tinted.should be > 40        # the selected line is still tinted across the pane
+        elapsed.should be < 1.second # ~4 s before the forward walk, a few ms after
+      end
+    ensure
+      Gori::Settings.wrap_lines = prev
+    end
+  end
+end

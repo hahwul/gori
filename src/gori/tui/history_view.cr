@@ -4583,17 +4583,19 @@ module Gori::Tui
       b = Screen.cluster_end(line, {x1, line.size}.min)
       return if a >= b
       px = x + Wrap.row_col(line, nil, row_start, a, reveal: reveal) - detail_xscroll
-      i = a
-      while i < b
-        e = Screen.cluster_end(line, i + 1)
-        seg = line[i...e]
+      # One forward walk (`Wrap.each_cluster`), stopped at the last cell anything can be
+      # drawn in: re-deriving each cluster's edge and slice by char index re-walked the line
+      # per cluster, and an unwrapped selected line has no other bound. A selected minified
+      # body with one `é` cost seconds per frame.
+      right = detail_xscroll > 0 && cw > 0 ? {x + cw, screen.width}.min : screen.width
+      Wrap.each_cluster(line, a, b) do |seg|
+        break if px >= right
         w = Wrap.draw_width(seg, reveal)
         # Clipped only while panned — see `paint_detail_line_chrome`. A wrapped row cannot
         # exceed the width it was laid out at, so the unpanned draw is byte-identical.
         shown = reveal ? Reveal.rendered_text(seg) : seg
         screen.text(px, y, shown, Theme.text, bg) if detail_xscroll <= 0 || (px >= x && (cw <= 0 || px + w <= x + cw))
         px += w
-        i = e
       end
     end
 
