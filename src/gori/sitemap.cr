@@ -756,13 +756,18 @@ module Gori
       return if groups.empty?
       # Which fold each absorbed child belongs to, by identity.
       folded = {} of UInt64 => String
+      # The query-less leaf siblings by label, built once: a per-group `children.find` made
+      # this O(groups x children), ~250 ms per reload at the 10k cap on a slug-heavy tree.
+      # `||=` keeps the FIRST match, as `find` did.
+      bare_leaves = {} of String => Node
+      node.children.each { |c| bare_leaves[c.label] ||= c if !c.grouped && c.leaf? }
       groups.each do |key, kids|
         kids.each { |k| folded[k.object_id] = key }
         # The query-LESS sibling joins its own variants, so /search and /search?q=1 are ONE
         # row. Only when it is a LEAF: a path that is also a directory (/api/users, with
         # /api/users/5 under it) would take its whole subtree into the collapsed fold with
         # it — the fold would then HIDE endpoints instead of deduplicating one.
-        if bare = node.children.find { |c| !c.grouped && c.leaf? && c.label == key }
+        if bare = bare_leaves[key]?
           kids.unshift(bare)
           folded[bare.object_id] = key
         end

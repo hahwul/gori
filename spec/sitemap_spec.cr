@@ -431,6 +431,26 @@ describe Gori::Sitemap do
       hosts.first.children.each { |c| c.query_fold.should be_true }
     end
 
+    it "folds many distinct slug paths in linear time, absorbing each bare sibling" do
+      # The query-less sibling was found with a linear `children.find` per group, so a
+      # directory of N slugs each carrying a query cost O(N^2): >5 s here before the fix, a stall
+      # of the single scheduler on every Sitemap reload. Generous bound; the fix is ~ms.
+      n = 20_000
+      rows = [] of {String, String, String}
+      n.times do |i|
+        rows << {"h", "GET", "/products/shirt-#{i}x?ref=home"}
+        rows << {"h", "GET", "/products/shirt-#{i}x"} if i.even?
+      end
+      hosts = Gori::Sitemap.build(rows)
+      elapsed = Time.measure { Gori::Sitemap.fold_queries!(hosts.first) }
+      products = hosts.first.children.first
+      products.children.size.should eq(n)
+      products.children.all?(&.query_fold).should be_true
+      products.children[0].children.map(&.path).should eq(["/products/shirt-0x", "/products/shirt-0x?ref=home"])
+      products.children[1].children.map(&.path).should eq(["/products/shirt-1x?ref=home"])
+      elapsed.should be < 1.5.seconds
+    end
+
     it "is idempotent — a second call does not nest another level" do
       hosts = Gori::Sitemap.build([{"h", "GET", "/search?q=1"}, {"h", "GET", "/search?q=2"}])
       Gori::Sitemap.fold_queries!(hosts.first)
