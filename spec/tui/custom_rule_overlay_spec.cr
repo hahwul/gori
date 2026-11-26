@@ -45,14 +45,21 @@ describe Gori::Tui::CustomRuleOverlay do
     saved.should eq([{"leaky header", "finds a debug header", "global", "X-Debug"}])
   end
 
-  it "keeps the form open when the controller rejects it (invalid rule)" do
-    ov = CustomRuleOverlay.adding
-    ov.valid?.should be_false # nothing filled in
-    h = OverlayHarness.new(ov, commit: false)
-    ov.set_selected(8) # Save row
-    # Space on Save: ↵ stops at the form first (`FormOverlay#commit_blocker`).
-    h.press(Termisu::Input::Key::Space).should eq(:open)
-    h.commits.should eq(1) # apply_custom_rule DID run — it just returned false
+  it "blocks an invalid form on Space, and stays open when the controller rejects a valid one" do
+    invalid = CustomRuleOverlay.adding
+    invalid.valid?.should be_false # nothing filled in
+    hi = OverlayHarness.new(invalid, commit: false)
+    invalid.set_selected(8) # Save row
+    hi.press(Termisu::Input::Key::Space).should eq(:open)
+    hi.commits.should eq(0)
+    hi.status.should_not be_nil
+
+    valid = CustomRuleOverlay.new(title: "leaky", description: "finds a debug header", pattern: "X-Debug")
+    valid.valid?.should be_true
+    hv = OverlayHarness.new(valid, commit: false)
+    valid.set_selected(8)
+    hv.press(Termisu::Input::Key::Space).should eq(:open)
+    hv.commits.should eq(1) # apply_custom_rule DID run — it just returned false
   end
 
   it "esc cancels and a click-away dismisses — neither persists anything" do

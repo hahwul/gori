@@ -287,6 +287,23 @@ module Gori::Tui
         return
       end
       label = run.label(40)
+      if run.running?
+        @host.status("#{label} is still going — ^X to stop it first")
+        return
+      end
+      if !run.findings.empty?
+        @host.confirm("DISMISS RUN",
+          "Dismiss #{label}?\nIts #{Gori.plural(run.findings.size, "finding")} will be removed from this list.",
+          confirm_label: "dismiss", danger: true) do
+          next unless @view.runs.any?(&.same?(run))
+          if @view.dismiss(run)
+            @host.status(@view.empty? ? "dismissed #{label} — no runs left" : "dismissed #{label}")
+          else
+            @host.status("#{label} is still going — ^X to stop it first")
+          end
+        end
+        return
+      end
       unless @view.dismiss(run)
         @host.status("#{label} is still going — ^X to stop it first")
         return

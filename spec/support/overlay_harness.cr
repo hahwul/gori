@@ -114,14 +114,7 @@ class OverlayHarness
             ctrl : Bool = false, alt : Bool = false, shift : Bool = false) : Symbol
     live!
     ev = event(k, char, ctrl, alt, shift)
-    outcome = @overlay.handle_key(ev)
-    # ↵ on a form that cannot save stays up on the field that blocks it, the reason on the
-    # status line (`Overlay#commit_blocker`).
-    if outcome == :commit && ev.key.enter? && (why = @overlay.commit_blocker)
-      @status = why
-      return :open
-    end
-    dispatch(outcome)
+    dispatch(@overlay.handle_key(ev))
   end
 
   # Type a literal string one printable key at a time. Returns the state after the LAST
@@ -245,7 +238,12 @@ class OverlayHarness
   private def dispatch(outcome : Symbol) : Symbol
     case outcome
     when :cancel then close!
-    when :commit then close! if @overlay.commit
+    when :commit
+      if why = @overlay.commit_blocker
+        @status = why
+        return :open
+      end
+      close! if @overlay.commit
     end
     @open ? :open : :closed
   end

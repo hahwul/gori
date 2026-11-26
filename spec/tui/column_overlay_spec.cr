@@ -80,12 +80,13 @@ describe Gori::Tui::ColumnOverlay do
   # HOST and PATH for the rest of the engagement. (`apply_extract_rule` carries the same guard,
   # for the same reason, one sub-tab over.)
   # ↵ now stops at the form (`FormOverlay#commit_blocker`); Space on Save still gets here.
-  it "reaches the commit site while the form is still invalid" do
+  it "stops at commit_blocker on Space while the form is still invalid" do
     ov = ColumnOverlay.adding
     h = OverlayHarness.new(ov, commit: false)
     ov.set_selected(ColumnOverlay::ROW_SAVE)
     h.press(Termisu::Input::Key::Space).should eq(:open)
-    h.commits.should eq(1)
+    h.commits.should eq(0)
+    h.status.not_nil!.should contain("enter a column label")
     ov.valid?.should be_false
     ov.invalid_reason.should eq("enter a column label")
   end

@@ -514,7 +514,7 @@ module Gori::Tui
       links = begin
         @host.session.store.list_links(Store::LinkOwnerKind::Note, @notes.current_note_id)
       rescue DB::Error | SQLite3::Exception
-        return @host.status("note NOT removed — could not check its links")
+        return @host.status("note NOT removed — could not check its links", :error)
       end
       if @notes.current_blank? && links.empty?
         do_notes_close

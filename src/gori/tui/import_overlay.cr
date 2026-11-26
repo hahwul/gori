@@ -115,8 +115,13 @@ module Gori::Tui
         return :stay
       end
 
+      edit_path_key(ev)
+    end
+
+    private def edit_path_key(ev : Termisu::Event::Key) : Symbol
+      before = @field.value
       @field.handle_edit_key(ev)
-      @path_complete.refresh(@field.value) # keep the dropdown in lockstep
+      @path_complete.refresh(@field.value) if @field.value != before # keep the dropdown in lockstep on edits only
       :stay
     end
 

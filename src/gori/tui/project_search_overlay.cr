@@ -343,7 +343,7 @@ module Gori::Tui
         screen.text(qx, y, "host, path or body text in every project…", Theme.muted, Theme.panel, width: qw)
         screen.cursor(qx, y)
       else
-        screen.input_line(qx, y, @field.value, @field.caret, @field.preedit, Theme.text_bright, Theme.panel, width: qw)
+        @field.render(screen, qx, y, qw, true, Theme.text_bright, Theme.panel)
       end
     end
 

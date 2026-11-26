@@ -260,12 +260,18 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     jump_line(@search_target, li + 1, cx) # hits are 0-based; jump is 1-based
   end
 
+  private def refuse_hex_search(verb_id : String) : Nil
+    reg = @session.registry
+    route = Hotkeys.binding_label(reg, verb_id, "")
+    route = Hotkeys.route(reg, verb_id) if route.empty?
+    status(route ? "Switch to text to search (#{route})" : "Switch to text to search")
+  end
+
   private def open_search(target : Symbol) : Nil
     if target == :detail && history_controller.view.hex_view?
-      reg = @session.registry
-      route = Hotkeys.binding_label(reg, "detail.toggle-hex", "")
-      route = Hotkeys.route(reg, "detail.toggle-hex") if route.empty?
-      return status(route ? "Switch to text to search (#{route})" : "Switch to text to search")
+      return refuse_hex_search("detail.toggle-hex")
+    elsif target == :repeater_response && repeater_controller.current_view.try(&.resp_hex_active?)
+      return refuse_hex_search("repeater.toggle-hex")
     end
     @search_input_hit = nil
     @search_target = target

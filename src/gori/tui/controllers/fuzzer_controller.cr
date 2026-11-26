@@ -1015,7 +1015,7 @@ module Gori::Tui
         end
         @host.status("saved #{event.written} fuzz results as run ##{event.run_id}")
       else
-        @host.status("fuzz results NOT saved: #{event.error || "project write failed"}")
+        @host.status("fuzz results NOT saved: #{event.error || "project write failed"}", :error)
       end
     end
 
@@ -1607,7 +1607,7 @@ module Gori::Tui
       rescue ex
         # A transient read failure is not a decision that this session has no history.
         @auto_load_considered.delete(session_id)
-        @host.status("could not restore latest fuzz run: #{ex.message}")
+        @host.status("could not restore latest fuzz run: #{ex.message}", :error)
       end
     end
 

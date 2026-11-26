@@ -109,14 +109,21 @@ describe "Gori::Tui::OastProviderOverlay — Overlay seam" do
     saved.should eq([{"my-oast", "global", "https://oast.pro"}])
   end
 
-  it "keeps the form open when the controller rejects it (name/host required)" do
-    ov = OastProviderOverlay.adding
-    ov.valid?.should be_false # no name yet
-    h = OverlayHarness.new(ov, commit: false)
-    ov.set_selected(5) # Save row
-    # Space on Save: ↵ stops at the form first (`FormOverlay#commit_blocker`).
-    h.press(Termisu::Input::Key::Space).should eq(:open)
-    h.commits.should eq(1) # save_provider DID run — it just returned false
+  it "blocks an invalid form on Space, and stays open when the controller rejects a valid one" do
+    invalid = OastProviderOverlay.adding
+    invalid.valid?.should be_false # no name yet
+    hi = OverlayHarness.new(invalid, commit: false)
+    invalid.set_selected(5) # Save row
+    hi.press(Termisu::Input::Key::Space).should eq(:open)
+    hi.commits.should eq(0)
+    hi.status.should_not be_nil
+
+    valid = OastProviderOverlay.editing(config(scope: "project"))
+    valid.valid?.should be_true
+    hv = OverlayHarness.new(valid, commit: false)
+    valid.set_selected(5)
+    hv.press(Termisu::Input::Key::Space).should eq(:open)
+    hv.commits.should eq(1) # save_provider DID run — it just returned false
   end
 
   # `gori run oast providers` and MCP refuse this host (`Oast::Provider.endpoint_error`).

@@ -276,6 +276,15 @@ module Gori::Tui
       @focus = @colors_shown ? :colors : :rules
     end
 
+    def body_scroll(delta : Int32) : Bool
+      if @focus == :colors
+        @color_sel = (@color_sel + delta).clamp(0, {custom_colors.size - 1, 0}.max)
+        return true
+      end
+      move_sel(delta)
+      true
+    end
+
     # --- keys ---
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       key = ev.key

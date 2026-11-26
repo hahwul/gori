@@ -1334,6 +1334,7 @@ module Gori::Tui
     end
 
     def hint : String
+      return DiscardGuard::DISCARD_HINT if @discard_armed
       "↑/↓ field · type to edit · ↵ save · ^R reset · esc close"
     end
 
@@ -1354,27 +1355,50 @@ module Gori::Tui
     # ↑/↓ and the wheel share this — in :theme the section's single field IS the list, so
     # this scrolls the theme selection and previews it.
     def move(step : Int32) : Nil
+      @discard_armed = false
       @view.move_field(step)
       preview
     end
 
+    @discard_armed = false
+
     # ↑/↓ pick a field, type to edit, ↵ save (persist + apply), esc close, ^P palette.
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
+      if key.escape?
+        return discard_or_cancel
+      end
+      @discard_armed = false
       if ev.ctrl? && key.lower_p?
         on_palette.try(&.call)
       elsif ev.ctrl? && key.lower_r?
         # ^R (not a bare letter — those are typed into the focused field) reverts the
         # section to its factory defaults, gated behind a confirm like the tab-bar reset.
         on_reset.try(&.call)
-      elsif key.escape?
-        return :cancel
       elsif key.enter?
         activate
       else
         handle_field_key(ev)
       end
       :stay
+    end
+
+    private def discard_or_cancel : Symbol
+      armed = @discard_armed
+      @discard_armed = false
+      return :cancel if armed || !@view.dirty?
+      @discard_armed = true
+      :stay
+    end
+
+    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = @view.overlay_box(area)
+      return :stay if @discard_armed && !box.contains?(mx, my)
+      super
+    end
+
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      super && !ev.key.escape?
     end
 
     # ↑/↓ move between fields (in :theme the section IS the list, so they scroll it) and
@@ -1408,7 +1432,8 @@ module Gori::Tui
     # sub-editor (mouse parity with ↵), or live-previews a clicked theme.
     def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
       box = @view.overlay_box(area)
-      return :cancel unless box.contains?(mx, my)
+      return discard_or_cancel unless box.contains?(mx, my)
+      @discard_armed = false
       if idx = @view.field_at(box, mx, my)
         @view.set_field(idx)
         if opener = @view.focused_opener

@@ -157,7 +157,11 @@ module Gori::Tui
       case
       when key.up?, key.lower_k?
         s.view.attacks_at_top? ? cross_pane(s, -1) : s.view.attacks_move(-1)
-      when key.down?, key.lower_j? then s.view.attacks_move(1)
+      when key.down?, key.lower_j? then s.view.attacks_move(1, s.attacks.size)
+      when key.page_up?            then s.view.attacks_move(-10, s.attacks.size)
+      when key.page_down?          then s.view.attacks_move(10, s.attacks.size)
+      when key.home?               then s.view.attacks_move(-1_000_000, s.attacks.size)
+      when key.end?                then s.view.attacks_move(1_000_000, s.attacks.size)
       when key.enter?              then jwt_copy_attack
       when plain_char?(ev, ev.char || key.to_char)
         return false # y + Global breath → keymap

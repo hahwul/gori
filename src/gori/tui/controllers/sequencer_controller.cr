@@ -354,7 +354,7 @@ module Gori::Tui
       # insert_issue returns 0 — NOT nil — when the write never committed (busy/locked/closing
       # store), and 0 is TRUTHY in Crystal. Reporting success there would tell the operator a
       # finding is recorded when nothing was written; the same trap Probe::Triage.promote names.
-      return @host.status("could not file the issue (store busy) — nothing was written, try again") if id == 0
+      return @host.status("could not file the issue (store busy) — nothing was written, try again", :error) if id == 0
       # A failed notes update leaves the Issue standing with its title and severity, which is
       # still the finding — say which half landed rather than claim the whole thing did.
       if store.update_issue(id, notes: Sequencer::Present.report_markdown(rep, v.subject))

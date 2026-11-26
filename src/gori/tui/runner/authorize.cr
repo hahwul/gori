@@ -7,9 +7,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     ids = history_target_flow_ids
     return (@toast = "select a flow first") if ids.empty?
     return if history_hidden_marks_gate?("SEND TO AUTHORIZE", "Queue in Authorize") { authorize_seed_selected }
-    added, skipped = authorize_controller.seed_flows(ids)
+    added, skipped, hidden = authorize_controller.seed_flows_report(ids)
     goto_tab(:authorize) if added > 0
-    @toast = authorize_seed_toast(added, skipped)
+    @toast = authorize_seed_toast(added, skipped, hidden)
   end
 
   # CROSS-TAB: the Sitemap cursor's endpoint → the Authorize queue, resolved through the same
@@ -19,19 +19,19 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return (@toast = "select an endpoint to send") unless ep
     id = sitemap_flow_id(ep)
     return (@toast = "no captured request for this path — capture it, or use Discover") unless id
-    added, skipped = authorize_controller.seed_flows([id])
+    added, skipped, hidden = authorize_controller.seed_flows_report([id])
     goto_tab(:authorize) if added > 0
-    @toast = authorize_seed_toast(added, skipped)
+    @toast = authorize_seed_toast(added, skipped, hidden)
   end
 
   # What a seed actually did. A duplicate is REPORTED rather than dropped in silence — the
   # queue size not moving is otherwise indistinguishable from the send having failed.
-  private def authorize_seed_toast(added : Int32, skipped : Int32) : String
+  private def authorize_seed_toast(added : Int32, skipped : Int32, hidden : Int32 = 0) : String
     return "authorize: already queued" if added == 0 && skipped > 0
     return "those flows are no longer available" if added == 0
     base = "authorize: loaded #{Gori.plural(added, "request")}"
-    return "#{base}, #{skipped} already queued" if skipped > 0
-    "#{base} — ^R to run"
+    msg = skipped > 0 ? "#{base}, #{skipped} already queued" : "#{base} — ^R to run"
+    hidden > 0 ? "#{msg}#{RowFilter.hidden_suffix("/", hidden, added)}" : msg
   end
 
   # The identity LIST card. Add/edit hand off to the form and come back here.

@@ -191,7 +191,7 @@ class Gori::Tui::RepeaterView
   # `apply_request_fields` flips the SAME view into ws_mode and nothing clears `@resp_hex`
   # (`apply_group` is the only place that ever did). With `at_top?` now crossing cards rather
   # than ejecting, that left a response column you could neither navigate nor leave upward.
-  private def resp_hex_active? : Bool
+  def resp_hex_active? : Bool
     @resp_hex && !resp_transcript?
   end
 

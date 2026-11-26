@@ -1438,6 +1438,19 @@ module Gori::Tui
       end
     end
 
+    def body_scroll(delta : Int32) : Bool
+      if callbacks_sub?
+        return false if @cb_detail || @filter_editing
+        max = {filtered_callbacks.size - 1, 0}.max
+        @cb_sel = (@cb_sel + delta).clamp(0, max)
+        sync_scroll
+        return true
+      end
+      max = {@providers.size - 1, 0}.max
+      @prov_sel = (@prov_sel + delta).clamp(0, max)
+      true
+    end
+
     private def handle_providers_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       case

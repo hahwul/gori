@@ -2084,15 +2084,21 @@ module Gori::Tui
     # duplicate only opens tabs the operator can close again with the key they just used.
     def repeater_duplicate : Nil
       srcs = target_views
-      if srcs.size > 1
-        if srcs.size > Runner::BATCH_SUBTAB_CAP
-          @host.status("#{srcs.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
-          return
-        end
-        duplicate_views(srcs)
+      return @host.status("no repeater open to duplicate") if srcs.empty?
+      if srcs.size > Runner::BATCH_SUBTAB_CAP
+        @host.status("#{srcs.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
         return
       end
-      duplicate_one(srcs.first? || return @host.status("no repeater open to duplicate"))
+      if hidden_marked_count > 0
+        @host.confirm("DUPLICATE SUB-TABS", "Duplicate #{marked_subtab_phrase(srcs.size)}?",
+          confirm_label: "duplicate", danger: false) do
+          live = srcs.select { |v| @repeaters.any?(&.view.same?(v)) }
+          next if live.empty?
+          live.size > 1 ? duplicate_views(live) : duplicate_one(live.first)
+        end
+        return
+      end
+      srcs.size > 1 ? duplicate_views(srcs) : duplicate_one(srcs.first)
     end
 
     private def duplicate_views(srcs : Array(RepeaterView)) : Nil
@@ -2241,8 +2247,14 @@ module Gori::Tui
         @minimize_job = nil
         @minimize_stop = nil
       end
-      # A timing run against the tab being closed — either half of its pair — stops too.
-      @timing_stop.try(&.stop) if timing_running? && @timing_members.any?(&.same?(closing))
+      # A timing run against the tab being closed — either half of its pair — stops and is
+      # detached so neither a buffered progress tick nor a terminal report fires for a closed tab.
+      if @timing_stop && @timing_members.any?(&.same?(closing))
+        @timing_stop.try(&.stop)
+        @timing_stop = nil
+        @timing_view = nil
+        @timing_members.clear
+      end
       # …and so does an open event stream (#1631), which would otherwise read on unbounded.
       closing.live.try(&.stop) if closing.inflight?
       close_live_ws(closing) # …and a live WebSocket session (#1630), off the UI fiber
@@ -3082,7 +3094,7 @@ module Gori::Tui
 
       n = plan.requests.size
       transport = view.http2? ? "single-packet h2" : "last-byte-sync h1"
-      @host.confirm("SEND RACE", "Race #{n} marked sub-tabs against #{plan.host}:#{plan.port}?\n" \
+      @host.confirm("SEND RACE", "Race #{marked_subtab_phrase(n)} against #{plan.host}:#{plan.port}?\n" \
                                  "All #{n} fire together (#{transport}).",
         confirm_label: "race", danger: false) { launch_race_fiber(view, plan, labels) }
     end
@@ -3300,8 +3312,10 @@ module Gori::Tui
       loop do
         select
         when pairs = @timing_progress.receive
-          @host.status("timing #{pairs} pairs… · #{TIMING_CANCEL_HINT}", :busy)
-          applied = true
+          if timing_running?
+            @host.status("timing #{pairs} pairs… · #{TIMING_CANCEL_HINT}", :busy)
+            applied = true
+          end
         else
           break
         end
@@ -3310,7 +3324,10 @@ module Gori::Tui
         select
         when triple = @timing_done.receive
           run, rep, subject = triple
-          @timing_view = nil if @timing_stop.same?(run)
+          next unless @timing_stop.same?(run)
+          @timing_stop = nil
+          @timing_view = nil
+          @timing_members.clear
           # Hand the report to the shell to open as a card (a controller cannot open an overlay).
           @timing_report = {rep, subject}
           @host.status("timing: #{rep.verdict.label} · #{rep.rationale}", rep.verdict.no_difference? ? :done : :warn)
@@ -3321,9 +3338,13 @@ module Gori::Tui
       end
       select
       when pair = @timing_failed.receive
-        @timing_view = nil if @timing_stop.same?(pair[0])
-        @host.status(pair[1], :warn)
-        applied = true
+        if @timing_stop.same?(pair[0])
+          @timing_stop = nil
+          @timing_view = nil
+          @timing_members.clear
+          @host.status(pair[1], :warn)
+          applied = true
+        end
       else
       end
       applied

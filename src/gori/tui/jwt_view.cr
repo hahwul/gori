@@ -193,8 +193,9 @@ module Gori::Tui
     end
 
     # ---- attack selection mutators (called by the controller) ----
-    def attacks_move(dir : Int32) : Nil
-      @atk_sel = {@atk_sel + dir, 0}.max
+    def attacks_move(dir : Int32, count : Int32? = nil) : Nil
+      nxt = {@atk_sel + dir, 0}.max
+      @atk_sel = count ? nxt.clamp(0, {count - 1, 0}.max) : nxt
     end
 
     def attacks_selected : Int32
