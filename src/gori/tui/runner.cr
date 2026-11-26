@@ -5696,9 +5696,12 @@ module Gori::Tui
     # A card opened OVER the drill-in takes the drill-in's slot, so it holds. The palette is an
     # `@overlay` too, and the confirm a verb raises is one, so the target the card was opened
     # on stays the target through to the confirm's ↵.
+    #
+    # History's preview pane holding focus is NOT a card and is not answered here: the view
+    # holds for it itself while History is the active tab (`HistoryView#preview_held?`),
+    # because unlike a card it can last indefinitely and its trim exemption has to be bounded.
     def list_cursor_held? : Bool
       return true if @space_menu_open || copy_as_shown? || send_to_shown?
-      return true if @active_tab == :history && history_controller.view.preview_focus != :list
       !(@overlay.none? || @overlay.detail?)
     end
 

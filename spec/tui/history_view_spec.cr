@@ -950,6 +950,81 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  # Reading the preview pane holds a following cursor like a card does, but it can last a
+  # whole unattended capture: the window must not keep one row per flow for as long as it
+  # does. Past the ceiling the held row is trimmed and the cursor resumes following.
+  it "bounds the window while the preview pane holds the cursor" do
+    prev = Gori::Settings.history_preview
+    begin
+      Gori::Settings.history_preview = true
+      with_store do |store|
+        looked_at = add_flow(store, "GET", "/looked-at", 200)
+        view = HistoryView.new(max_rows: 10, trim_slack: 4)
+        view.reload(store)
+        view.set_preview_focus(:req)
+        view.follow?.should be_true
+        5.times do |i|
+          id = add_flow(store, "GET", "/early/#{i}", 200)
+          view.on_event(Gori::Store::FlowEvent.new(id, :inserted), store)
+        end
+        view.selected_id.should eq(looked_at) # the preview keeps its flow (#2028)
+        peak = 0
+        200.times do |i|
+          id = add_flow(store, "GET", "/crawl/#{i}", 200)
+          view.on_event(Gori::Store::FlowEvent.new(id, :inserted), store)
+          peak = {peak, view.rows.size}.max
+        end
+        peak.should be <= 10 * HistoryView::PREVIEW_HOLD_GROWTH
+        view.selected_id.should_not be_nil
+        view.follow?.should be_true
+      end
+    ensure
+      Gori::Settings.history_preview = prev
+    end
+  end
+
+  # Off-tab nobody is reading the preview, so a following list follows the tail as it does
+  # with the list focused; the hold comes back once History is shown again.
+  it "does not hold for preview focus while History is not the active tab" do
+    prev = Gori::Settings.history_preview
+    begin
+      Gori::Settings.history_preview = true
+      with_store do |store|
+        looked_at = add_flow(store, "GET", "/looked-at", 200)
+        view = HistoryView.new
+        shown = false
+        view.tab_active = -> { shown }
+        view.reload(store)
+        view.set_preview_focus(:req)
+        arrived = add_flow(store, "GET", "/arrived-off-tab", 200)
+        view.on_event(Gori::Store::FlowEvent.new(arrived, :inserted), store)
+        view.selected_id.should eq(arrived)
+        view.selected_id.should_not eq(looked_at)
+
+        shown = true
+        later = add_flow(store, "GET", "/arrived-on-tab", 200)
+        view.on_event(Gori::Store::FlowEvent.new(later, :inserted), store)
+        view.selected_id.should eq(arrived) # held again: the preview keeps its flow
+      end
+    ensure
+      Gori::Settings.history_preview = prev
+    end
+  end
+
+  it "never releases a card's hold, however long the capture" do
+    with_store do |store|
+      looked_at = add_flow(store, "GET", "/looked-at", 200)
+      view = HistoryView.new(max_rows: 10, trim_slack: 4)
+      view.cursor_hold = -> { true }
+      view.reload(store)
+      60.times do |i|
+        id = add_flow(store, "GET", "/burst/#{i}", 200)
+        view.on_event(Gori::Store::FlowEvent.new(id, :inserted), store)
+      end
+      view.selected_id.should eq(looked_at)
+    end
+  end
+
   it "holds an oldest-first following cursor the same way" do
     prev = Gori::Settings.history_list_order
     begin

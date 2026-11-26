@@ -72,6 +72,9 @@ module Gori::Tui
     # cell plus a one-column gap. See render_list_body.
     STRIP_W    =   2
     TRIM_SLACK = 512
+    # How far past MAX_ROWS the window may grow while the PREVIEW pane holds a following
+    # cursor (`preview_held?`), as a multiple of it. See `trim_window`.
+    PREVIEW_HOLD_GROWTH = 2
     # The list's TIME span (value plus its one-column gap): `MM-DD HH:MM:SS`, or the bare
     # `HH:MM:SS` a narrow pane falls back to. See `compact_time?`.
     TIME_W       = 15
@@ -139,8 +142,13 @@ module Gori::Tui
     # RUNS and the operator chose it when the card opened. A capture landing under an open
     # `space` used to put `H`, `d`, `>` `r` and `^P` Send to Repeater on the new flow. `@follow`
     # stays on, so the first capture after the card closes snaps back to the tail. Injected by
-    # the shell, like `ws_open`.
+    # the shell, like `ws_open`. The preview pane holding focus is the view's own hold
+    # (`preview_held?`), kept apart because it is not brief — see `trim_window`.
     property cursor_hold : Proc(Bool) = -> { false }
+    # Whether History is the tab on screen. The preview hold (`preview_held?`) applies only
+    # then: off-tab, nobody is reading the preview, so a following list keeps following the
+    # tail. Injected by the shell; a bare view (specs, tools) counts as shown.
+    property tab_active : Proc(Bool) = -> { true }
     getter? searching : Bool = false
     # `searching?` is the controller's truth (it guards the capture flush and the deferred
     # click); `searching_shown?` is what the bar and the empty list PAINT. A search that
@@ -991,7 +999,7 @@ module Gori::Tui
       kept = prev_id ? index_of(prev_id) : nil
       # A card over the list holds a following cursor on its flow too (`cursor_hold`): a
       # filtered list under capture reloads here rather than in `on_event`.
-      following = @follow && !@cursor_hold.call
+      following = @follow && !cursor_held?
       @selected =
         if following
           follow_index
@@ -1145,6 +1153,17 @@ module Gori::Tui
     end
 
     # Index of the live tail (newest flow) in the current display order.
+    # Whether a following cursor stays on its flow as captures land: a card is up over the
+    # list (`cursor_hold`), or the operator is reading the preview pane on the History tab,
+    # which a capture moving the cursor would swap out from under them.
+    private def cursor_held? : Bool
+      @cursor_hold.call || preview_held?
+    end
+
+    private def preview_held? : Bool
+      preview_enabled? && @preview_focus != :list && @tab_active.call
+    end
+
     private def follow_index : Int32
       return 0 if @rows.empty?
       newest_first? ? 0 : @rows.size - 1
@@ -1325,7 +1344,7 @@ module Gori::Tui
             # on an already-empty list), which leaves @follow off with @selected at 0.
             anchored = !@rows.empty?
             @rows.unshift(row)
-            if @follow && @cursor_hold.call
+            if @follow && cursor_held?
               # Held under a card: the highlight keeps its flow, the viewport stays at the
               # tail follow had it on, so the arrival shows above the held row.
               @selected += 1 if anchored
@@ -1338,7 +1357,7 @@ module Gori::Tui
             end
           else
             @rows << row
-            @selected = @rows.size - 1 if @follow && !@cursor_hold.call
+            @selected = @rows.size - 1 if @follow && !cursor_held?
             # Not following (or held under a card): selection/scroll stay put (new row is past the end).
           end
           trim_window if @rows.size > @max_rows + @trim_slack
@@ -4893,10 +4912,23 @@ module Gori::Tui
     # read it, and a clamp onto a neighbour would retarget that verb to a flow nobody chose.
     # The window grows past MAX_ROWS instead, by the captures that land while the card is up,
     # and the first un-held insert (which snaps the cursor back to the tail) trims it again.
+    #
+    # A preview-pane hold gets the same exemption with a ceiling. Focus can sit in the preview
+    # through a whole unattended crawl, and unbounded, the window kept one row per capture for
+    # as long as it did. Past PREVIEW_HOLD_GROWTH × MAX_ROWS the held row is trimmed like any
+    # other and the cursor resumes following at the tail: no verb is waiting on it, and a
+    # preview that changes after thousands of arrivals is the lesser surprise. A card is never
+    # released that way, because its verb would then run on a flow nobody chose.
     private def trim_window : Nil
       drop = @rows.size - @max_rows
-      if @follow && @cursor_hold.call
-        drop = {drop, newest_first? ? @rows.size - 1 - @selected : @selected}.min
+      released = false
+      if @follow && cursor_held?
+        keep = newest_first? ? @rows.size - 1 - @selected : @selected
+        if @cursor_hold.call || @rows.size <= @max_rows * PREVIEW_HOLD_GROWTH
+          drop = {drop, keep}.min
+        else
+          released = drop > keep
+        end
       end
       return if drop <= 0
       if newest_first?
@@ -4906,6 +4938,7 @@ module Gori::Tui
         @selected = {@selected - drop, 0}.max
         @scroll = {@scroll - drop, 0}.max
       end
+      @selected = follow_index if released
       @selected = @selected.clamp(0, {@rows.size - 1, 0}.max)
       @scroll = @scroll.clamp(0, {@rows.size - 1, 0}.max)
       # The colour memo is keyed by flow id and nothing else prunes it, so a long capture would

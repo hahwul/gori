@@ -44,6 +44,7 @@ module Gori::Tui
       sink = @host.session.proxy.sink
       @history.ws_open = ->(id : Int64) { !Proxy::WS::Live.find(sink, id).nil? }
       @history.cursor_hold = -> { @host.list_cursor_held? }
+      @history.tab_active = -> { @host.active_tab == :history }
     end
 
     # Read the project's persisted active view (#776) into the list.
