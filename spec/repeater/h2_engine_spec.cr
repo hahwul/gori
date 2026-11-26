@@ -1872,6 +1872,30 @@ describe Gori::Repeater::H2Engine do
       result.error.not_nil!.should contain("h2 RST_STREAM CANCEL on stream 1")
     end
 
+    # RFC 9113 §7 allows any 32-bit code. One past Int32::MAX used to raise OverflowError while
+    # naming it, and the head and body above were dropped for "Arithmetic overflow".
+    it "keeps the partial response under a RST_STREAM code past Int32::MAX" do
+      port = start_h2_origin_rst(0x8000_0000_u32, after_headers: true)
+      result = Gori::Repeater::H2Engine.send(
+        "GET /x HTTP/2\r\nHost: h\r\n\r\n".to_slice,
+        scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false, timeout: 5.seconds)
+
+      result.response.try(&.status).should eq(200)
+      String.new(result.body.not_nil!).should eq("partial")
+      result.incomplete?.should be_true
+      result.error.not_nil!.should contain("h2 RST_STREAM error code 2147483648 on stream 1")
+    end
+
+    it "names a GOAWAY code past Int32::MAX instead of an arithmetic overflow" do
+      port = start_h2_origin_goaway(0xFFFF_FFFF_u32, "x")
+      result = Gori::Repeater::H2Engine.send("GET / HTTP/2\r\n\r\n".to_slice,
+        scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false, timeout: 5.seconds)
+
+      error = result.error.not_nil!
+      error.should contain("h2 GOAWAY error code 4294967295 (x)")
+      error.should_not contain("overflow")
+    end
+
     it "tells an idle read timeout apart from a connection that closed" do
       mute = Gori::Repeater::H2Engine.send(
         "GET /x HTTP/2\r\nHost: h\r\n\r\n".to_slice,
@@ -2279,6 +2303,27 @@ describe "Gori::Repeater::H2Engine.goaway_reason" do
     frame = Frame::Header.new(Frame::Type::Goaway.value, 0_u8, 0_u32, payload.to_slice)
     reason = Gori::Repeater::H2Engine.goaway_reason(frame)
     reason.should eq("h2 GOAWAY PROTOCOL_ERROR (bad⟨ESC⟩]0;PWNED⟨BEL⟩ frame)")
+  end
+
+  # §7: any 32-bit value is a legal code. The names still resolve, and an unregistered code is
+  # spelled unsigned — never raised on, never wrapped negative.
+  it "names every 32-bit error code, in GOAWAY and RST_STREAM alike" do
+    goaway = ->(code : UInt32) do
+      payload = Bytes.new(8)
+      IO::ByteFormat::BigEndian.encode(code, payload[4, 4])
+      Gori::Repeater::H2Engine.goaway_reason(Frame::Header.new(Frame::Type::Goaway.value, 0_u8, 0_u32, payload))
+    end
+    rst = ->(code : UInt32) do
+      payload = Bytes.new(4)
+      IO::ByteFormat::BigEndian.encode(code, payload)
+      Gori::Repeater::H2Engine.rst_reason(Frame::Header.new(Frame::Type::RstStream.value, 0_u8, 1_u32, payload))
+    end
+
+    goaway.call(7_u32).should eq("h2 GOAWAY REFUSED_STREAM")
+    goaway.call(0x8000_0000_u32).should eq("h2 GOAWAY error code 2147483648")
+    rst.call(7_u32).should eq("h2 RST_STREAM REFUSED_STREAM on stream 1")
+    rst.call(0xFFFF_FFFF_u32).should eq("h2 RST_STREAM error code 4294967295 on stream 1")
+    rst.call(0x7FFF_FFFF_u32).should eq("h2 RST_STREAM error code 2147483647 on stream 1")
   end
 end
 

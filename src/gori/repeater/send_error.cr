@@ -29,7 +29,7 @@ module Gori
       # h2/RFC 9113 §7 conditions that are TRANSIENT even though the sentence naming them
       # trips PROTOCOL_ERROR_PHRASES (every one of them says "h2 "). Keyed on the SPEC
       # ERROR-CODE NAMES, not on gori's sentence: the names are fixed by the RFC and the
-      # engine renders them straight out of `H2Engine::GOAWAY_ERRORS`, so matching
+      # engine renders them straight out of `H2Engine::ERROR_CODES`, so matching
       # `refused_stream` survives any rewording of the sentence carrying it — which is the
       # failure mode a whole-sentence literal would have.
       #

@@ -490,14 +490,40 @@ describe "WebSocket over HTTP/2 (RFC 8441) replay" do
   end
 
   describe "failures the operator has to see" do
-    it "names a RST_STREAM and keeps the transcript it already had" do
+    # The second code is past Int32::MAX: RFC 9113 §7 allows any 32-bit value, and it used to
+    # raise OverflowError while naming the code, which threw away the whole transcript.
+    {0x0b_u32 => "ENHANCE_YOUR_CALM", 0x8000_0000_u32 => "error code 2147483648"}.each do |rst_code, name|
+      it "names a RST_STREAM (#{name}) and keeps the transcript it already had" do
+        seen = Channel(H2WsSeen).new
+        port = start_h2_ws_origin(seen) do |conn, send_ws, frames|
+          read_ws_frames(conn, 1, frames)
+          send_ws.call(WS.encode(WS::OP_TEXT, "before-reset".to_slice, mask: false))
+          code = Bytes.new(4)
+          IO::ByteFormat::BigEndian.encode(rst_code, code)
+          conn.write(Frame::Header.new(Frame::Type::RstStream.value, 0_u8, 1_u32, code).to_bytes)
+          conn.flush
+        end
+
+        res = send_over_h2(port, [text("go")], idle: 2.seconds)
+        receive_within(seen, what: "the origin's observations")
+        res.upgraded?.should be_true
+        res.messages.select { |m| m.direction == "in" && m.opcode == WS::OP_TEXT.to_i }
+          .map { |m| String.new(m.payload) }.should eq ["before-reset"]
+        note = res.note.not_nil!
+        note.should contain name
+        note.downcase.should contain "reset"
+      end
+    end
+
+    it "keeps the transcript under an error GOAWAY whose code is past Int32::MAX" do
       seen = Channel(H2WsSeen).new
       port = start_h2_ws_origin(seen) do |conn, send_ws, frames|
         read_ws_frames(conn, 1, frames)
-        send_ws.call(WS.encode(WS::OP_TEXT, "before-reset".to_slice, mask: false))
-        code = Bytes.new(4)
-        IO::ByteFormat::BigEndian.encode(0x0b_u32, code) # ENHANCE_YOUR_CALM
-        conn.write(Frame::Header.new(Frame::Type::RstStream.value, 0_u8, 1_u32, code).to_bytes)
+        send_ws.call(WS.encode(WS::OP_TEXT, "before-goaway".to_slice, mask: false))
+        payload = Bytes.new(8)
+        IO::ByteFormat::BigEndian.encode(0_u32, payload[0, 4])
+        IO::ByteFormat::BigEndian.encode(0xFFFF_FFFF_u32, payload[4, 4])
+        conn.write(Frame::Header.new(Frame::Type::Goaway.value, 0_u8, 0_u32, payload).to_bytes)
         conn.flush
       end
 
@@ -505,10 +531,8 @@ describe "WebSocket over HTTP/2 (RFC 8441) replay" do
       receive_within(seen, what: "the origin's observations")
       res.upgraded?.should be_true
       res.messages.select { |m| m.direction == "in" && m.opcode == WS::OP_TEXT.to_i }
-        .map { |m| String.new(m.payload) }.should eq ["before-reset"]
-      note = res.note.not_nil!
-      note.should contain "ENHANCE_YOUR_CALM"
-      note.downcase.should contain "reset"
+        .map { |m| String.new(m.payload) }.should eq ["before-goaway"]
+      res.note.not_nil!.should contain "GOAWAY error code 4294967295"
     end
 
     it "names a GOAWAY rather than reporting a quiet end" do
