@@ -456,8 +456,8 @@ module Gori::Tui
       # has no `cachebuster` field, and reading its absence as "off" would silently opt an old
       # session out of the safe default it ran under.
       @config.cachebuster = any["cachebuster"]?.try(&.as_bool?) != false
-      Settings.int_field(any, "stability_rounds").try { |n| @config.stability_rounds = n }
-      Settings.int_field(any, "confirm_rounds").try { |n| @config.confirm_rounds = n }
+      Settings.int_field(any, "stability_rounds").try { |n| @config.stability_rounds = n.clamp(Miner::Config::STABILITY_ROUNDS) }
+      Settings.int_field(any, "confirm_rounds").try { |n| @config.confirm_rounds = n.clamp(Miner::Config::CONFIRM_ROUNDS) }
       if buckets = any["buckets"]?.try(&.as_h?)
         buckets.each_key do |k|
           loc = Miner::Location.parse?(k)

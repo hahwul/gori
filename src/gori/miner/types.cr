@@ -340,6 +340,23 @@ module Gori
       def bucket_for(loc : Location) : Int32
         (@bucket_size[loc]? || 64).clamp(1, 1024)
       end
+
+      # The two rounds knobs no surface sets, so a value outside these comes from a foreign
+      # session row (an imported archive). Calibration sends `stability_rounds` copies of the
+      # baseline in one wave before any candidate, and `confirm_rounds` is per finding, so an
+      # unbounded one was hidden load on the target (and a 2^31 probe array). 32 and 16 are
+      # 8× the defaults (4 and 2): tolerance has settled long before, and a 16-round confirm
+      # already wants 9 agreeing re-tests. 0 confirm rounds is the engine's own "skip" reading.
+      STABILITY_ROUNDS = 1..32
+      CONFIRM_ROUNDS   = 0..16
+
+      def effective_stability_rounds : Int32
+        @stability_rounds.clamp(STABILITY_ROUNDS)
+      end
+
+      def effective_confirm_rounds : Int32
+        @confirm_rounds.clamp(CONFIRM_ROUNDS)
+      end
     end
   end
 end
