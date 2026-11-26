@@ -40,6 +40,7 @@ module Gori::Tui
   # in-card hint overwrote the Cancel button even at full width.
   class CvssCalculatorOverlay < Overlay
     include IssuePresentation
+    include DiscardGuard
 
     # One base metric: the row label, the vector key it writes, and its choices as
     # {vector value, display}. Base metrics only — temporal/threat/environmental are not
@@ -158,6 +159,11 @@ module Gori::Tui
         @vector.set(initial.strip)
         sync_from_field
       end
+      @opened_state = form_state
+    end
+
+    private def form_state : String
+      untouched? ? "untouched" : @vector.value
     end
 
     # --- shape ---------------------------------------------------------------
@@ -345,8 +351,10 @@ module Gori::Tui
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol
+      if outcome = discard_key(ev)
+        return outcome
+      end
       key = ev.key
-      return :cancel if key.escape?
       return :stay if move_row(ev)
       return save_outcome if key.enter?
 
@@ -399,24 +407,25 @@ module Gori::Tui
       end
     end
 
-    # ↵ on a value that scores as nothing keeps the card up — the save row already says so,
-    # and dropping the modal would throw the typed text away with it. Same rule the base
-    # class states for a commit closure that returns false, decided here because the card,
-    # not the open-site, is what knows the value is unreadable.
     private def save_outcome : Symbol
-      invalid? ? :stay : :commit
+      :commit
     end
 
     UNTOUCHED_REFUSAL = "not saved — pick the metrics or paste a vector first"
+    INVALID_REFUSAL   = "not saved — not a valid CVSS vector or score"
 
-    # ↵ on the untouched placeholder (see `untouched?`) lands on the first metric and says what
-    # to do; esc still cancels. Kept as a refusal rather than a silent no-op so the operator
-    # learns why nothing happened, and rather than a clear, because the issue had no vector to
-    # clear in the first place.
+    # ↵ on the untouched placeholder lands on the first metric; ↵ on an unparseable vector
+    # lands on the vector row and explains why it could not save.
     def commit_blocker : String?
-      return nil unless untouched?
-      @sel = ROW_FIRST_M
-      UNTOUCHED_REFUSAL
+      if untouched?
+        @sel = ROW_FIRST_M
+        return UNTOUCHED_REFUSAL
+      end
+      if invalid?
+        @sel = ROW_VECTOR
+        return INVALID_REFUSAL
+      end
+      nil
     end
 
     def set_preedit(text : String) : Nil
@@ -425,16 +434,15 @@ module Gori::Tui
 
     def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
       box = overlay_box(area)
-      return :cancel if box.nil? || !box.contains?(mx, my)
+      return discard_or_ask if box.nil? || !box.contains?(mx, my)
+      @discard_armed = false
       if row = row_at(box, mx, my)
         # Captured BEFORE the row moves: the strip this click is inverting was drawn with the
         # focus state of the LAST frame, and `Frame.option_cycle` only draws the `‹/›` cue —
         # and only reserves room for it — on the focused row.
         was_focused = row == @sel
         set_selected(row)
-        # The save row draws the refusal itself while the card is untouched, so a click on it
-        # has its explanation under the pointer (the shell asks `commit_blocker` on ↵ only).
-        return (untouched? ? :stay : save_outcome) if on_save_row?
+        return :commit if on_save_row?
         if on_version_row?
           # Pick the pill that was clicked, not "the next one": clicking the label already
           # under the cursor must be a no-op, and it was switching away from it.
@@ -513,6 +521,7 @@ module Gori::Tui
     end
 
     def render(screen : Screen, area : Rect) : Nil
+      text_fields.each(&.forget_geometry)
       box = overlay_box(area)
       unless box
         Overlay.too_small(screen, area, "cvss form needs a larger window")

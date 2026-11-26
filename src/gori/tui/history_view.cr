@@ -2085,6 +2085,7 @@ module Gori::Tui
       return if log_pane? # frames/events have no raw-bytes hex; don't strand a hidden flag
       @detail_hex = !@detail_hex
       @detail_scroll = 0 # row-based offset differs from the line-based one
+      @split_marks.clear
       detail_wrap_reset
       @detail_read.reset
     end
@@ -2815,6 +2816,7 @@ module Gori::Tui
       load_detail_logs(store)
       drop_detail_cache
       @detail_scroll = 0
+      @split_marks.clear
       detail_wrap_reset
       @detail_read.reset
       if q = @ws_narrow
@@ -2833,6 +2835,7 @@ module Gori::Tui
       return if @reveal == on
       @reveal = on
       @detail_scroll = 0
+      @split_marks.clear
       # Reveal renders on its own line space, so the memo (keyed only by line index and
       # width) would hand the new path the OLD lines' layouts. drop_detail_cache is not on
       # this path — it clears the windowed view, which reveal doesn't use — so reset here.
@@ -2848,6 +2851,7 @@ module Gori::Tui
       @pretty = on
       drop_detail_cache
       @detail_scroll = 0 # reflow changes the line count → a stale offset could blank the pane (like hex/pane toggles)
+      @split_marks.clear
       detail_wrap_reset
       @detail_read.reset
     end
@@ -2881,6 +2885,7 @@ module Gori::Tui
       @decode_unicode = !@decode_unicode
       drop_detail_cache
       @detail_scroll = 0
+      @split_marks.clear
       detail_wrap_reset
       @detail_read.reset
     end
@@ -3256,8 +3261,9 @@ module Gori::Tui
       drop_detail_cache       # pane switch changes the content
       @detail_hex_bytes = nil # …and the hex source bytes
       @detail_read.reset
-      # Split, the pane was on screen in its half: it comes back where it was left.
-      if split_enabled? && (mark = @split_marks[pane]?)
+      # Restore where the operator left this pane (split or single-pane alike); open_detail
+      # clears @split_marks when switching flows.
+      if mark = @split_marks[pane]?
         @detail_scroll = mark[0]
         @detail_read.move_to(mark[1], 0)
       end

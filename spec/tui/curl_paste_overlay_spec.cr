@@ -72,9 +72,15 @@ describe Gori::Tui::CurlPasteOverlay do
     ov.preview.first.should eq("POST https://a.test/")
   end
 
-  it "esc cancels and a click away dismisses, neither committing" do
+  it "esc asks before discarding typed text, and an untouched click away dismisses" do
     h = OverlayHarness.new(CurlPasteOverlay.new(:repeater))
     h.type("curl https://a.test/")
+    h.press(Termisu::Input::Key::Escape).should eq(:open)
+    h.overlay.as(CurlPasteOverlay).discard_armed?.should be_true
+    # Pasting more text disarms the pending discard so the next esc asks again.
+    h.overlay.as(CurlPasteOverlay).paste_text(" -H 'X-Test: 1'").should be_true
+    h.overlay.as(CurlPasteOverlay).discard_armed?.should be_false
+    h.press(Termisu::Input::Key::Escape).should eq(:open)
     h.press(Termisu::Input::Key::Escape).should eq(:closed)
     h.commits.should eq(0)
     away = OverlayHarness.new(CurlPasteOverlay.new(:repeater))

@@ -250,6 +250,10 @@ module Gori::Tui
       @issues.size
     end
 
+    def visible_id?(id : Int64) : Bool
+      @issues.any? { |i| i.id == id }
+    end
+
     # The rail's window of list context around the open item — see DrillIn.
     def rail_rows : Array(DrillIn::RailRow)
       n = rail_count

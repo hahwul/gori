@@ -364,6 +364,10 @@ module Gori::Tui
       @config.mode.manual? ? @config.manual_tokens.count { |t| !t.empty? } : @config.goal
     end
 
+    def sample_count : Int32
+      @samples.size
+    end
+
     def begin_run : Nil
       @running = true
       @stop_requested = false

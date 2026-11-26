@@ -669,9 +669,10 @@ module Gori::Tui
       ncols = {(base.size + avail - 1) // avail, fit}.min
       col_rows = (base.size + ncols - 1) // ncols
       # Padding adds rows, which can push the balanced height back up — settle it by
-      # growing the column (up to avail), then by adding a column. Bounded: each pass
-      # strictly grows col_rows or ncols, both of which are capped.
-      4.times do
+      # growing the column (up to avail), then by adding a column. Once at `fit` columns,
+      # grow `col_rows` past `avail` so the excess scrolls rather than silently clipping
+      # trailing rows off the bottom of the card.
+      8.times do
         need = (pad_rows(base, col_rows).size + ncols - 1) // ncols
         break if need <= col_rows
         if need <= avail
@@ -680,8 +681,7 @@ module Gori::Tui
           ncols += 1
           col_rows = (base.size + ncols - 1) // ncols
         else
-          col_rows = avail
-          break
+          col_rows = need
         end
       end
       Grid.new(ncols, col_rows, {col_rows, avail}.min, pad_rows(base, col_rows))

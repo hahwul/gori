@@ -214,6 +214,20 @@ describe Gori::Tui::ProbeActiveOverlay do
     end
   end
 
+  it "keeps interactive rows visible and inside the card at 80x24 with many applicable rules" do
+    with_store do |store|
+      rules = (1..12).map { |i| est("active_rule_#{i}") }
+      ov = ProbeActiveOverlay.new(flow(store, "POST", "/submit?q=1"), rules, rules)
+      body = Gori::Tui::Rect.new(2, 4, 76, 17)
+      h = OverlayHarness.new(ov, area: body)
+      box = h.box.not_nil!
+      h.rendered?("Run active scan").should be_true
+      h.rendered?("more").should be_true
+      run_y = (box.y + 1...box.bottom - 1).find { |y| ov.row_at(box, box.x + 3, y) == ov.row_count - 1 }
+      run_y.should_not be_nil
+    end
+  end
+
   it "runs the scan from a click in the rect the shell passes (layout.body)" do
     # Production hands an overlay `layout.body` — 6 rows shorter and offset from the screen.
     # Asserting row_at over that box would just restate the 80x24 example above, since the

@@ -279,4 +279,15 @@ describe "a notification with nowhere to jump" do
     note.opens_card?.should be_true
     OverlayHarness.new(NotificationsOverlay.new(store)).rendered?("›").should be_true
   end
+
+  it "lets v or Space inspect a clipped goto notification without losing ↵ jump" do
+    store = Notifications.new
+    store.push(:error, "oast: registration failed with a long remedy that clips at 60 cols",
+      goto: Gori::Tui::Jobs::Goto.new(:oast))
+    ov = NotificationsOverlay.new(store)
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerV, char: 'v')).should eq(:commit)
+    ov.inspect_requested?.should be_true
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter)).should eq(:commit)
+    ov.inspect_requested?.should be_false
+  end
 end

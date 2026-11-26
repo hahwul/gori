@@ -1658,7 +1658,8 @@ module Gori::Tui
         # The policy is `Runner.quit_decision`, shared with `quit!` (the palette's Quit) so
         # the two entry points cannot answer "does this need a confirm?" differently again.
         case Runner.quit_decision(Settings.confirm_quit?, chord: true, armed: @quit_armed,
-          notes_conflict: issues_notes_conflict?, temporary_sessions: !temporary_session_summary.nil?)
+          notes_conflict: issues_notes_conflict?, temporary_sessions: !temporary_session_summary.nil?,
+          active_jobs: !@jobs.active.empty?, held_intercept: @session.interceptor.pending_count > 0)
         in .confirm?
           # A quit preference or temporary work replaces the double-press arm with a modal. Skip
           # re-opening if the quit confirm is already up (^D then just waits for y/n/esc).
@@ -1686,21 +1687,16 @@ module Gori::Tui
       # per-site change. Deliberately AFTER the quit arm (^C/^D stays Ctrl-only) and after
       # the capture branch above (the Hotkeys editor must see ⌥ chords verbatim).
       ev = Keybind.dealias(ev)
-      return handle_space_menu_key(ev) if @space_menu_open # the space menu is modal while up
-      return handle_copy_as_key(ev) if copy_as_shown?      # the copy-as picker is modal while up
-      return handle_send_to_key(ev) if send_to_shown?      # the send-to picker is modal while up
-      # The four bottom prompts are modal while up — EXCEPT under a confirm card, which must
-      # get the keys. ^F's replace confirm was the first case (the prompt stays open behind
-      # it so cancelling doesn't cost you the query you just typed); the QUIT confirm is the
-      # general one: `quit_chord_claimed?` sees no `active_overlay` while a prompt is up, so
-      # ^D raised the card — and then the prompt claimed `y`, `n` and esc, leaving a modal on
-      # screen that nothing could answer. A confirm over a prompt now takes the keys, and the
-      # prompt is still there when the card closes.
+      # A confirm card over a prompt or picker (e.g. ^F replace confirm, or QUIT GORI raised
+      # over a prompt/menu) takes every key ahead of the picker/prompt layer behind it.
       unless @overlay.confirm?
-        return handle_goto_key(ev) if @goto_open         # the ^G line prompt
-        return handle_search_key(ev) if @search_open     # the ^F find prompt
-        return handle_rename_key(ev) if @rename_open     # the sub-tab rename prompt
-        return handle_tag_edit_key(ev) if @tag_edit_open # the Repeater tag editor
+        return handle_space_menu_key(ev) if @space_menu_open # the space menu is modal while up
+        return handle_copy_as_key(ev) if copy_as_shown?      # the copy-as picker is modal while up
+        return handle_send_to_key(ev) if send_to_shown?      # the send-to picker is modal while up
+        return handle_goto_key(ev) if @goto_open             # the ^G line prompt
+        return handle_search_key(ev) if @search_open         # the ^F find prompt
+        return handle_rename_key(ev) if @rename_open         # the sub-tab rename prompt
+        return handle_tag_edit_key(ev) if @tag_edit_open     # the Repeater tag editor
       end
       # ^G "go to line" / ^F "find" — both open a bottom prompt for the focused
       # multi-line view (editors move the cursor, read-only panes scroll). Modifier
@@ -2258,8 +2254,9 @@ module Gori::Tui
       when :commit
         # An unusable frame omits the card, leaving its own "drawn" flag stale.
         return unless overlay_commit_visible?(ov, ev)
-        # ↵ on a form that cannot save lands on the field that blocks it and says what is missing.
-        if ev.key.enter? && (why = ov.commit_blocker)
+        # Committing a form that cannot save (via ↵ or Space on Save) lands on the blocking
+        # field and says what is missing.
+        if why = ov.commit_blocker
           status(why)
           return
         end
@@ -2301,7 +2298,12 @@ module Gori::Tui
     private def apply_overlay_outcome(ov : Overlay, outcome : Symbol) : Nil
       case outcome
       when :cancel then close_active_overlay(ov)
-      when :commit then close_active_overlay(ov) if ov.commit
+      when :commit
+        if why = ov.commit_blocker
+          status(why)
+          return
+        end
+        close_active_overlay(ov) if ov.commit
       end
     end
 
@@ -2486,7 +2488,13 @@ module Gori::Tui
         return
       end
       issues_controller.view.resync(store)
-      @toast = "#{Gori.plural(ids.size, "issue")} updated" if ids.size > 1
+      hidden = issues_controller.view.filtering? ? ids.count { |id| !issues_controller.view.visible_id?(id) } : 0
+      base = ids.size > 1 ? "#{Gori.plural(ids.size, "issue")} updated" : nil
+      @toast = if hidden > 0
+                 "#{base || "issue updated"}#{RowFilter.hidden_suffix("/", hidden, ids.size)}"
+               else
+                 base
+               end
     end
 
     # Score the target issues, straight from the Space menu. The same calculator the create
@@ -2511,7 +2519,13 @@ module Gori::Tui
         return false
       end
       issues_controller.view.resync(store)
-      @toast = Runner.cvss_applied_toast(raw.empty?, ids.size, before, derived)
+      hidden = issues_controller.view.filtering? ? ids.count { |id| !issues_controller.view.visible_id?(id) } : 0
+      base = Runner.cvss_applied_toast(raw.empty?, ids.size, before, derived)
+      @toast = if hidden > 0
+                 "#{base || (raw.empty? ? "cvss cleared" : "cvss set")}#{RowFilter.hidden_suffix("/", hidden, ids.size)}"
+               else
+                 base
+               end
       true
     end
 
@@ -3444,10 +3458,12 @@ module Gori::Tui
     # bottom-anchored input prompts, all drawn last and orthogonal to @overlay so
     # they float over whatever's underneath (a tab body or the History detail).
     private def render_prompts(screen : Screen, layout : Layout) : Nil
-      @copy_picker.try(&.render(screen, layout.body)) if copy_as_shown?
-      @send_picker.try(&.render(screen, layout.body)) if send_to_shown?
-      close_space_menu_moved_under
-      @space_menu.render(screen, layout.body) if @space_menu_open
+      unless @overlay.confirm?
+        @copy_picker.try(&.render(screen, layout.body)) if copy_as_shown?
+        @send_picker.try(&.render(screen, layout.body)) if send_to_shown?
+        close_space_menu_moved_under
+        @space_menu.render(screen, layout.body) if @space_menu_open
+      end
       render_goto_prompt(screen, layout.status) if @goto_open
       render_search_prompt(screen, layout.status) if @search_open
       render_rename_prompt(screen, layout.status) if @rename_open
@@ -3869,10 +3885,12 @@ module Gori::Tui
     # "Quit gori" is already the deliberate act the arm asks for.
     def quit! : Nil
       # chord: false — a palette dispatch can never arm, so this is Confirm or Quit, and with
-      # the confirm setting off it is Quit with nothing shown. `notes_conflict` is what turns
-      # that one into a question; temporary sessions do too.
+      # the confirm setting off it is Quit with nothing shown. `notes_conflict`, `temporary_sessions`,
+      # `active_jobs`, and `held_intercept` turn that into a question so nothing live or held is
+      # dropped or forwarded unedited without asking.
       if Runner.quit_decision(Settings.confirm_quit?, chord: false, armed: false,
-           notes_conflict: issues_notes_conflict?, temporary_sessions: !temporary_session_summary.nil?).confirm?
+           notes_conflict: issues_notes_conflict?, temporary_sessions: !temporary_session_summary.nil?,
+           active_jobs: !@jobs.active.empty?, held_intercept: @session.interceptor.pending_count > 0).confirm?
         raise_quit_confirm
       else
         finish_quit
@@ -3892,7 +3910,11 @@ module Gori::Tui
 
     # The one QUIT GORI modal, raised from both quit paths so the chord and the palette cannot
     # show different prompts — the same anti-drift reason the message helpers below are shared.
+    # Closes any open picker/space menu first so QUIT GORI is never buried under them.
     private def raise_quit_confirm : Nil
+      close_space_menu if @space_menu_open
+      close_copy_picker if copy_as_shown?
+      close_send_picker if send_to_shown?
       confirm("QUIT GORI", quit_message, confirm_label: "quit", danger: true) { finish_quit }
     end
 
@@ -3903,13 +3925,18 @@ module Gori::Tui
     # the frontier to completion against the target while the operator was back at the
     # picker with no bottom bar, no run list and no key that could stop it.
     #
-    # Without jobs, peer conflicts or temporary work, leaving stays a routine confirmation.
+    # Without jobs, peer conflicts, temporary work or held Intercept traffic, leaving stays
+    # a routine confirmation.
     def leave_project : Nil
       active = @jobs.active_summary
       notes_conflict = issues_notes_conflict?
       temporary = temporary_session_summary
-      confirm("LEAVE PROJECT", Runner.leave_confirm_message(active, @jobs.active.size, notes_conflict, temporary_sessions: temporary),
-        confirm_label: "leave", danger: !active.nil? || notes_conflict || !temporary.nil?, return_to: @overlay.to_sym) do
+      held = @session.interceptor.pending_count
+      held_edited = !intercept_controller.held_edit_id.nil?
+      confirm("LEAVE PROJECT", Runner.leave_confirm_message(active, @jobs.active.size, notes_conflict,
+        temporary_sessions: temporary, held_intercept: held, held_edited: held_edited),
+        confirm_label: "leave", danger: !active.nil? || notes_conflict || !temporary.nil? || held > 0,
+        return_to: @overlay.to_sym) do
         # Inside the accept block, so a CANCEL leaves every job running untouched.
         finish_exit(:back)
       end
@@ -3943,7 +3970,9 @@ module Gori::Tui
 
     private def quit_message : String
       Runner.quit_confirm_message(@jobs.active_summary, @jobs.active.size, issues_notes_conflict?,
-        temporary_sessions: temporary_session_summary)
+        temporary_sessions: temporary_session_summary,
+        held_intercept: @session.interceptor.pending_count,
+        held_edited: !intercept_controller.held_edit_id.nil?)
     end
 
     private def temporary_session_summary : String?
@@ -4003,24 +4032,37 @@ module Gori::Tui
     # The two modal messages put the count/consequence and the per-kind inventory on
     # SEPARATE lines: `ConfirmDialog` sizes its card to the longest line and clamps at 60
     # columns, so one combined sentence lost its own verb to the ellipsis.
-    def self.leave_confirm_message(active : String?, count : Int32, notes_conflict : Bool = false, *, temporary_sessions : String? = nil) : String
+    def self.leave_confirm_message(active : String?, count : Int32, notes_conflict : Bool = false, *,
+                                   temporary_sessions : String? = nil, held_intercept : Int32 = 0,
+                                   held_edited : Bool = false) : String
       base = "Close this project and return to the picker?"
       msg = active ? "#{base}\n#{job_count(count)} still running — leaving stops #{count == 1 ? "it" : "them"}.\n#{active}" : base
+      msg = warn_held_intercept(msg, held_intercept, held_edited, "leaving")
       msg = notes_conflict ? "#{msg}\n#{NOTES_CONFLICT_LINE}" : msg
       warn_temporary_sessions(msg, temporary_sessions)
     end
 
     # Quit's two prompts — the opt-in modal and the double-press arm — name the live jobs
     # for the same reason the leave confirm does: quitting abandons them.
-    def self.quit_confirm_message(active : String?, count : Int32, notes_conflict : Bool = false, *, temporary_sessions : String? = nil) : String
+    def self.quit_confirm_message(active : String?, count : Int32, notes_conflict : Bool = false, *,
+                                  temporary_sessions : String? = nil, held_intercept : Int32 = 0,
+                                  held_edited : Bool = false) : String
       # The parenthetical is a PROMISE, so it only gets made when it is true. `commit_pending_edits`
       # refuses an Issues writeup a peer has rewritten (IssuesController#commit), and saying
       # "pending edits are committed first" over the top of that is the lie that made this the
       # one place a writeup could disappear without the operator being told anything at all.
       base = notes_conflict ? "Quit gori?" : "Quit gori? (pending edits are committed first)"
       msg = active ? "#{base}\n#{job_count(count)} still running — quitting stops #{count == 1 ? "it" : "them"}.\n#{active}" : base
+      msg = warn_held_intercept(msg, held_intercept, held_edited, "quitting")
       msg = notes_conflict ? "#{msg}\n#{NOTES_CONFLICT_LINE}" : msg
       warn_temporary_sessions(msg, temporary_sessions)
+    end
+
+    private def self.warn_held_intercept(message : String, count : Int32, edited : Bool, verb : String) : String
+      return message if count <= 0
+      edits = edited ? " (with unsaved edits)" : ""
+      pronoun = count == 1 ? "it" : "them"
+      "#{message}\n#{Gori.plural(count, "held Intercept item")}#{edits} — #{verb} forwards #{pronoun} unedited."
     end
 
     # Said the same way in all three exit prompts, because it is the same fact — and said in
@@ -4127,16 +4169,15 @@ module Gori::Tui
     end
 
     def self.quit_decision(confirm_setting : Bool, *, chord : Bool, armed : Bool,
-                           notes_conflict : Bool = false, temporary_sessions : Bool = false) : QuitAction
-      return QuitAction::Confirm if confirm_setting || temporary_sessions
+                           notes_conflict : Bool = false, temporary_sessions : Bool = false,
+                           active_jobs : Bool = false, held_intercept : Bool = false) : QuitAction
+      return QuitAction::Confirm if confirm_setting || temporary_sessions || held_intercept
       return QuitAction::Quit if armed # the arm hint already said what this press costs
       # The palette's "Quit gori" verb is not a chord, so it never arms — with the confirm
       # setting off it is the ONE quit that tears down having shown nothing at all. That is
-      # fine for a quit that only drops a session; it is not fine for one that drops a writeup
-      # a peer's rewrite has already made unsaveable. "Confirm before quit" is a preference
-      # about a routine action, and this stops being one — the same reason `esc` refuses once
-      # before it will overwrite.
-      return QuitAction::Confirm if notes_conflict && !chord
+      # fine for a quit that only drops an idle session; it is not fine for one that kills
+      # live background jobs or drops a writeup a peer's rewrite has already made unsaveable.
+      return QuitAction::Confirm if (notes_conflict || active_jobs) && !chord
       return QuitAction::Quit if !chord
       QuitAction::Arm
     end
@@ -4403,6 +4444,9 @@ module Gori::Tui
         note = ov.selected_note
         if note.nil?
           false
+        elsif ov.inspect_requested?
+          detail_note = note
+          true
         elsif q = answerable_question_for(note)
           question = {q, note.id}
           true
@@ -4909,7 +4953,18 @@ module Gori::Tui
 
     # --- Repeater sub-tab rename (bottom prompt, like ^G/^F) -------------------
 
+    # Bottom prompts (`^G`, `^F`, rename, tag) accept typed paste text, never a pasted
+    # newline or tab that would commit/switch mode and leak trailing clipboard text into the
+    # editor underneath (`PASTE_MODAL_REFUSED`).
+    private def refuse_prompt_paste?(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      return false unless @paste_newline.pasting? && (key.enter? || key.tab? || key.back_tab?)
+      refuse_modal_paste(ev)
+      true
+    end
+
     private def handle_rename_key(ev : Termisu::Event::Key) : Nil
+      return if refuse_prompt_paste?(ev)
       key = ev.key
       if key.escape?
         close_rename
@@ -5026,6 +5081,7 @@ module Gori::Tui
     end
 
     private def handle_tag_edit_key(ev : Termisu::Event::Key) : Nil
+      return if refuse_prompt_paste?(ev)
       key = ev.key
       if key.escape?
         close_tag_edit
@@ -5642,6 +5698,7 @@ module Gori::Tui
     # on stays the target through to the confirm's ↵.
     def list_cursor_held? : Bool
       return true if @space_menu_open || copy_as_shown? || send_to_shown?
+      return true if @active_tab == :history && history_controller.view.preview_focus != :list
       !(@overlay.none? || @overlay.detail?)
     end
 
@@ -5777,6 +5834,10 @@ module Gori::Tui
     # per flow and each send goes through the Outbound chokepoint individually.
     private def open_probe_active_overlay(details : Array(Store::FlowDetail), repeater_id : Int64? = nil) : Nil
       return if details.empty?
+      if @session.probe.disabled_degraded?
+        status("active scan refused — disabled rules failed to load; check gori.log", :error)
+        return
+      end
       est_safe = merged_active_estimate(details, Probe::Active::Options::DEFAULT)
       est_unsafe = merged_active_estimate(details, Probe::Active::Options.new(allow_unsafe: true))
       # Nothing applies even with unsafe methods allowed — no popup to show.
@@ -5826,13 +5887,22 @@ module Gori::Tui
         @toast = "nothing to send — enable unsafe methods to probe this #{ov.detail.row.method}"
         return false
       end
+      if @session.probe.disabled_degraded?
+        status("active scan refused — disabled rules failed to load; check gori.log", :error)
+        return false
+      end
       notify = ov.notify_mode
       status("notify choice applied — could not save to #{Settings.path}", :error) unless Settings.save_probe_active_notify(notify.token)
       # One run per flow (already background), so each target keeps its own scope decision at
       # the Outbound chokepoint — the batch changed the count, not the gate.
+      started = 0
       ov.details.each do |d|
-        @session.probe.run_active_now(d, repeater_id: ov.repeater_id,
-          allow_unsafe: ov.allow_unsafe?, notify: notify)
+        started += 1 if @session.probe.run_active_now(d, repeater_id: ov.repeater_id,
+                          allow_unsafe: ov.allow_unsafe?, notify: notify)
+      end
+      if started == 0
+        status("active scan did not start — probe analyzer is unavailable", :error)
+        return false
       end
       hosts = ov.details.map(&.row.host).uniq!
       dest = hosts.size == 1 ? hosts.first : "#{hosts.size} hosts"

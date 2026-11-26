@@ -16,6 +16,10 @@ module Gori::Tui
       @sessions.map_with_index { |t, i| "#{i + 1}:#{t.view.label(Chrome::SUBTAB_LABEL_MAX)}" }
     end
 
+    def empty? : Bool
+      @sessions.empty?
+    end
+
     # Show the strip from the FIRST session (not ≥2): a single session still labels its
     # chip and exposes the strip's space-menu (^W close). Empty → no strip.
     def subtab_strip_shown? : Bool
@@ -290,6 +294,7 @@ module Gori::Tui
       return if @current_idx < 0 || @current_idx >= @sessions.size
       orphaned = close_subtab_at(@current_idx)
       @host.status(TabClose.message(@sessions.empty? ? "closed — none open" : "closed (#{@sessions.size} open)", orphaned))
+      @host.resolve_subtab_focus
     end
 
     # Close sub-tab `idx` and report whether the store rolled its DELETE back. Toast-free and

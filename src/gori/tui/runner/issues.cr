@@ -85,8 +85,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # hidden-marks card's answer, held for the one synchronous re-run of the verb that raised it.
   @issues_marks_pick : {Array(Int64), Bool}? = nil
 
-  private def issues_hidden_marks_gate?(heading : String, question : String, &rerun : -> Nil) : Bool
-    return false if @issues_marks_pick || @active_tab != :issues || issues_controller.view.detail_open?
+  private def issues_hidden_marks_gate?(heading : String, question : String, *,
+                                        skip_in_detail : Bool = true, &rerun : -> Nil) : Bool
+    return false if @issues_marks_pick || @active_tab != :issues || (skip_in_detail && issues_controller.view.detail_open?)
     issues_controller.hidden_marks_card?(heading, question) do |ids, cursor_only|
       @issues_marks_pick = {ids, cursor_only}
       begin
@@ -216,20 +217,28 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # the path popup: asking two questions and then refusing to write is worse than not asking.
   # It uses count_issues rather than materializing store.issues here and again downstream.
   def issues_export_pick : Nil
+    return if issues_hidden_marks_gate?("EXPORT ISSUES", "Export", skip_in_detail: false) { issues_export_pick }
     if refusal = issues_export_refusal
       @toast = refusal
       return
     end
+    pick = @issues_marks_pick
     # A modal opened from inside another's commit is not closed afterwards (see
     # `close_active_overlay`) — the same seam `open_view_scope` rides for its two-step.
     open_choice_picker(ChoicePicker.for_export_format) do |p|
-      issues_export(EXPORT_FORMATS[p.selected_value]? || :markdown)
+      @issues_marks_pick = pick
+      begin
+        issues_export(EXPORT_FORMATS[p.selected_value]? || :markdown)
+      ensure
+        @issues_marks_pick = nil
+      end
     end
   end
 
   # Step two: WHERE to write it. Still reachable on its own — `gori run issues --export` has
   # no picker, and a caller that already knows the format should not have to open one.
   def issues_export(format : Symbol) : Nil
+    return if issues_hidden_marks_gate?("EXPORT ISSUES", "Export", skip_in_detail: false) { issues_export(format) }
     if refusal = issues_export_refusal
       @toast = refusal
       return
@@ -254,6 +263,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # The palette's "Export issues…" from any other tab writes all of them: the view there is a
   # snapshot from the last visit, and a filter nobody can see must not thin a report.
   private def issues_export_selection : {Array(Int64), String}?
+    if pick = @issues_marks_pick
+      ids, cursor_only = pick
+      return {ids, cursor_only ? "1 issue" : "#{Gori.plural(ids.size, "marked issue")}"}
+    end
     issues_controller.view.export_selection if @active_tab == :issues
   end
 end

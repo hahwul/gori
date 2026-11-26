@@ -37,6 +37,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # The ^G "go to line" prompt: digits only; Enter jumps the captured target, Esc
   # cancels. A modal mini-input (mirrors handle_palette_key) drawn over the status.
   private def handle_goto_key(ev : Termisu::Event::Key) : Nil
+    return if refuse_prompt_paste?(ev)
     key = ev.key
     c = ev.char || key.to_char
     if key.escape?
@@ -116,6 +117,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Tab flips to find&replace, where typing feeds the replacement row and ↵ swaps
   # every match (behind a confirm) instead of stepping. ↑/↓ step in both modes.
   private def handle_search_key(ev : Termisu::Event::Key) : Nil
+    return if refuse_prompt_paste?(ev)
     key = ev.key
     if key.escape?
       close_search
@@ -127,7 +129,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       search_step(1)
     elsif key.up?
       search_step(-1)
-    elsif @search_replace
+    else
+      handle_search_edit(ev)
+    end
+  end
+
+  private def handle_search_edit(ev : Termisu::Event::Key) : Nil
+    if @search_replace
       if edited = prompt_edit(ev, @search_replace_buffer, @search_replace_cx)
         @search_replace_buffer, @search_replace_cx = edited
         @search_preedit = ""

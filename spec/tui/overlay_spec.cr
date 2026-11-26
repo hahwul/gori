@@ -99,8 +99,7 @@ describe Gori::Tui::DiscardGuard do
   end
 
   it "closes a form that never opted in on one click outside, typed or not" do
-    ov = CustomColorOverlay.adding
-    ov.set_selected(0)
+    ov = UnoptedDiscardForm.new
     ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerX, char: 'x'))
     ov.handle_click(Rect.new(0, 0, 80, 24), 0, 0).should eq(:cancel)
   end
@@ -110,6 +109,9 @@ describe Gori::Tui::DiscardGuard do
     ov.takes_pasted?(esc_key).should be_false
     ov.takes_pasted?(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: 'a')).should be_true
     IssueForm.new.takes_pasted?(esc_key).should be_false
+    auth = AuthorizeIdentityOverlay.new
+    auth.set_selected(AuthorizeIdentityOverlay::EDITOR_ROW)
+    auth.takes_pasted?(esc_key).should be_false
   end
 end
 
@@ -117,6 +119,50 @@ end
 # character and the caret only while it fit: a pattern or a `when:` filter longer than the card
 # was typed blind past the border, and a ⇧arrow selection (which the next key replaces) was
 # never painted. It is the TextField's own render now, windowed, band and caret included.
+private class UnoptedDiscardForm < FormOverlay
+  def initialize
+    @field = TextField.new("")
+  end
+
+  def key : OverlayKind
+    OverlayKind::Choice
+  end
+
+  def title : String
+    "TEST"
+  end
+
+  def hint : String
+    ""
+  end
+
+  def row_count : Int32
+    2
+  end
+
+  def card_title : String
+    "TEST"
+  end
+
+  def too_small_what : String
+    "too small"
+  end
+
+  def text_fields : Array(TextField)
+    [@field]
+  end
+
+  def handle_key(ev : Termisu::Event::Key) : Symbol
+    return :cancel if ev.key.escape?
+    @field.handle_edit_key(ev)
+    :stay
+  end
+
+  def draw_row_body(screen : Screen, box : Rect, i : Int32, py : Int32,
+                    x : Int32, bg : Color, fg : Color, sel : Bool) : Nil
+  end
+end
+
 describe "Gori::Tui::Overlay#draw_field" do
   it "scrolls a long value with its caret and paints its selection" do
     ov = ColormarkerRuleOverlay.adding

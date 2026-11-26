@@ -112,14 +112,18 @@ module Gori::Tui
       if flash = @flash
         return "#{flash} · ↑/↓ select · ↵ open · esc close"
       end
-      "↑/↓ select · ↵ open · y copy · c clear · esc close"
+      "↑/↓ select · ↵ open · v detail · y copy · c clear · esc close"
     end
 
     # Copy and jump feedback shown in the card until the next key.
     setter flash : String? = nil
 
+    # True when `v` / `Space` asked to open the full detail card regardless of `goto`.
+    getter? inspect_requested : Bool = false
+
     # Formerly Runner#handle_notifications_key. ↵ commits (the open-site's closure jumps
-    # to the selected note's result); `c` empties the store in place and stays open.
+    # to the selected note's result); `v`/Space opens the full wrapped detail card even on
+    # `goto` notes whose message clipped inside the 60-col card; `c` empties the store in place.
     # Nothing here takes text, and a pasted `c` wiped every notification: no paste at all.
     def takes_pasted?(ev : Termisu::Event::Key) : Bool
       false
@@ -127,8 +131,8 @@ module Gori::Tui
 
     def handle_key(ev : Termisu::Event::Key) : Symbol
       k = ev.key
-      c = ev.char
       @flash = nil
+      @inspect_requested = false
       if ev.ctrl? && k.lower_p?
         @on_palette.try(&.call)
       elsif k.escape?
@@ -137,17 +141,22 @@ module Gori::Tui
         # ↑/↓, PgUp/PgDn/Home/End
       elsif k.enter?
         return :commit
-      elsif c == 'y' && !ev.ctrl? && !ev.alt?
+      else
+        return handle_action_key(ev)
+      end
+      :stay
+    end
+
+    private def handle_action_key(ev : Termisu::Event::Key) : Symbol
+      return :stay if ev.ctrl? || ev.alt?
+      c = ev.char
+      if c == 'v' || ev.key.space?
+        @inspect_requested = true
+        return :commit
+      elsif c == 'y'
         copy_selected
-      elsif c == 'c' && !ev.ctrl? && !ev.alt?
-        # Guarded, and not merely for tidiness. `Event::Key#char` is `@char || key.to_char`,
-        # so `^C` reports 'c' — and this branch WIPES the whole store. It used to be
-        # unreachable by accident: the shell claimed ^C for the quit-arm before any overlay
-        # saw a key. That stopped being true when the quit-arm learned to yield while a modal
-        # is up (so ^D could reach the Fuzzer payload editor), which quietly handed this
-        # branch the one chord an operator presses to LEAVE. Pressing it here erased every
-        # notification instead. A destructive mnemonic must own its guard rather than borrow
-        # one from a Runner invariant that can change out from under it.
+      elsif c == 'c'
+        # Guarded on `!ctrl? && !alt?` above so ^C (which reports 'c') never wipes the store.
         @store.clear
         reset
       end
@@ -166,6 +175,7 @@ module Gori::Tui
         return :stay
       end
       if idx = row_at(box, mx, my)
+        @inspect_requested = false
         set_selected(idx)
         return :commit
       end

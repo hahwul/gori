@@ -58,6 +58,11 @@ module Gori::Tui
       @token = TextField.new(token)
       @host_dirty = !@edit_id.nil? # editing keeps its host; adding auto-syncs to the type default
       @sel = 0                     # ROW_NAME · ROW_SCOPE · ROW_TYPE · ROW_HOST · ROW_TOKEN · ROW_SAVE
+      @opened_state = form_state
+    end
+
+    private def form_state : String
+      "#{super}|#{@scope_i}|#{@kind_idx}"
     end
 
     def self.adding : OastProviderOverlay
@@ -162,8 +167,10 @@ module Gori::Tui
 
     # :stay | :commit | :cancel
     def handle_key(ev : Termisu::Event::Key) : Symbol
+      if outcome = discard_key(ev)
+        return outcome
+      end
       key = ev.key
-      return :cancel if key.escape?
       return :stay if field_nav?(ev)
 
       if cycler_row?(@sel)

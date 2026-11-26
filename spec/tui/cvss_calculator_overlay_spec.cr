@@ -210,14 +210,41 @@ describe Gori::Tui::CvssCalculatorOverlay do
     h.rendered?("pick the metrics or paste a vector").should be_true
     h.rendered?("0.0").should be_false # no readout scoring a vector nobody chose
 
-    # A click on the save row is refused too; the row itself carries the reason.
+    # A click on the save row delegates to commit_blocker (the shell runs commit_blocker on
+    # mouse commits too, so clicking Save surfaces the refusal and jumps to the blocking row).
     area = Rect.new(0, 0, 80, 24)
     box = calc.overlay_box(area).not_nil!
-    calc.handle_click(area, box.x + 4, box.y + 2 + calc.row_save).should eq(:stay)
+    calc.handle_click(area, box.x + 4, box.y + 2 + calc.row_save).should eq(:commit)
+    calc.commit_blocker.should eq(CvssCalculatorOverlay::UNTOUCHED_REFUSAL)
+    calc.sel.should eq(CvssCalculatorOverlay::ROW_FIRST_M)
 
     # Looking at the other version is not an edit either.
     calc.cycle_version(1)
     calc.untouched?.should be_true
+  end
+
+  it "refuses an invalid vector through commit_blocker and jumps back to the vector row" do
+    h = calc_harness
+    calc = h.overlay.as(CvssCalculatorOverlay)
+    calc.set_selected(CvssCalculatorOverlay::ROW_VECTOR)
+    h.type("NOT-A-VECTOR")
+    h.press(Termisu::Input::Key::Enter).should eq(:open)
+    h.commits.should eq(0)
+    h.status.should eq(CvssCalculatorOverlay::INVALID_REFUSAL)
+    calc.sel.should eq(CvssCalculatorOverlay::ROW_VECTOR)
+  end
+
+  it "closes untouched version browsing on one esc, and guards edited metrics with DiscardGuard" do
+    calc = CvssCalculatorOverlay.new("")
+    calc.cycle_version(1)
+    calc.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape)).should eq(:cancel)
+
+    edited = CvssCalculatorOverlay.new("")
+    edited.set_selected(CvssCalculatorOverlay::ROW_FIRST_M)
+    edited.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Num2, char: '2'))
+    edited.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape)).should eq(:stay)
+    edited.discard_armed?.should be_true
+    edited.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape)).should eq(:cancel)
   end
 
   it "commits the least-severe vector once a metric was chosen, even back to none" do

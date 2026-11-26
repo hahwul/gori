@@ -247,6 +247,12 @@ module Gori
         arm_active_backfill
       end
 
+      # Public read-only query so surfaces can refuse a manual active scan up front instead of
+      # claiming probes were sent while `active_degraded?` drops them fail-closed.
+      def disabled_degraded? : Bool
+        @disabled_degraded
+      end
+
       # Fail-closed guard for every active entry point: with the disabled-list unreadable we do
       # not know which active probes the operator authorised, so we send none and say so once.
       private def active_degraded? : Bool
@@ -453,9 +459,9 @@ module Gori
       # flow re-send — the automatic pipeline only sets it in AGGRESSIVE mode (via active_opts).
       def run_active_now(detail : Store::FlowDetail, *, repeater_id : Int64? = nil,
                          allow_unsafe : Bool = false,
-                         notify : Miner::NotifyMode = Miner::NotifyMode::WhenFound) : Nil
-        return if @stopped
-        return if active_degraded?
+                         notify : Miner::NotifyMode = Miner::NotifyMode::WhenFound) : Bool
+        return false if @stopped
+        return false if active_degraded?
         opts = Active::Options.new(allow_unsafe: allow_unsafe, oob: @oob)
         spawn(name: "gori-probe-active-manual") do
           # `rule.plan` runs hostile captured bytes through every rule's parser, so a rule bug
@@ -490,6 +496,7 @@ module Gori
             end
           end
         end
+        true
       end
 
       # --- passive fiber ----------------------------------------------------------------

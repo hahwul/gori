@@ -217,4 +217,16 @@ describe "Chrome top bar — the project name outlasts the chips" do
   it "never drops an active probe chip for the name" do
     top_bar_row(60, "a-long-project-name", "probe:active").should contain("probe:active")
   end
+
+  it "keeps intercept and listen chips visible at 80 columns when active chips overflow" do
+    be = MemoryBackend.new(76, 1)
+    Chrome.render_top_bar(Screen.new(be), Rect.new(0, 0, 76, 1), project: "demo",
+      listen: "127.0.0.1:8070", scope: "scope:on(2)", probe: "probe:active", rules: "rules:3",
+      intercept: "intercept:on(3)", sandbox: "sandbox", unread: 5, capturing: false,
+      write_failures: 0, authorize: "authz:replay", session: "session:admin", agents: "agent:claude")
+    row = be.row(0)
+    row.should contain("sandbox")
+    row.should contain("intercept:on(3)")
+    row.should contain("OFF · 127.0.0.1:8070")
+  end
 end

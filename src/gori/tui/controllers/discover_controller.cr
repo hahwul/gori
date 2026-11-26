@@ -250,7 +250,15 @@ module Gori::Tui
         return
       end
       drain_events # flush a just-finished run's trailing Done before start_run rebinds job_id
-      start_run(run)
+      if !run.findings.empty?
+        @host.confirm("REPLACE RESULTS",
+          "Re-run #{run.label(40)}?\nThe current #{Gori.plural(run.findings.size, "finding")} will be cleared.",
+          confirm_label: "run", danger: false) do
+          start_run(run) if @view.runs.any?(&.same?(run)) && !run.running?
+        end
+      else
+        start_run(run)
+      end
     end
 
     # Stops the SELECTED run, not "the" run — with several crawls in flight the operator has

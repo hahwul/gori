@@ -245,6 +245,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Right-click: rename a Repeater/Fuzzer/Decoder/Miner sub-tab chip (the one context menu we have).
   # Only acts on the sub-tab strip; anywhere else is a no-op (no left-click side effects).
   private def handle_right_click(layout : Layout, mx : Int32, my : Int32) : Nil
+    return if modal_overlay?
     if @goto_open || @search_open || @rename_open || @tag_edit_open
       # A right-click dismisses an open bottom prompt (like left-click/esc), so it can't
       # stack a second orthogonal prompt on top of the first.
@@ -254,7 +255,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       close_tag_edit if @tag_edit_open
       return
     end
-    return unless renameable_subtabs? && @overlay.none? && !@space_menu_open && !copy_as_shown? && !@rename_open && !@tag_edit_open && subtabs_shown?
+    return unless renameable_subtabs? && @overlay.none? && !@space_menu_open && !copy_as_shown? && !send_to_shown? && !@rename_open && !@tag_edit_open && subtabs_shown?
     sub_rect = BodyChrome.strip_rect(layout.body, strip: true, strip_divider: subtab_strip_divider?, shell: body_shell?)
     return unless sub_rect && sub_rect.contains?(mx, my)
     icon, chips = subtab_strip_split(sub_rect)
@@ -272,9 +273,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # like the keyboard). Centered modals capture every click (outside → dismiss).
   private def dispatch_click(layout : Layout, mx : Int32, my : Int32) : Nil
     @click_reached_body = false
-    return if @space_menu_open && click_space_menu(layout, mx, my)
-    return if copy_as_shown? && click_copy_as(layout.body, mx, my) # modal while up — floats over @overlay
-    return if send_to_shown? && click_send_to(layout.body, mx, my) # ditto
+    unless @overlay.confirm?
+      return if @space_menu_open && click_space_menu(layout, mx, my)
+      return if copy_as_shown? && click_copy_as(layout.body, mx, my) # modal while up — floats over @overlay
+      return if send_to_shown? && click_send_to(layout.body, mx, my) # ditto
+    end
     # A confirm card over a prompt takes the click (its buttons, or click-away to cancel),
     # the same precedence the key path gives it; the prompt is still there afterwards.
     if (@goto_open || @search_open || @rename_open || @tag_edit_open) && !@overlay.confirm?

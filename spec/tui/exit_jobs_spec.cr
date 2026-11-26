@@ -444,3 +444,32 @@ describe "exiting with temporary sessions" do
     end
   end
 end
+
+describe "exiting with held Intercept items or active jobs" do
+  it "requires a modal from either quit entry point when Intercept holds traffic" do
+    {false, true}.each do |chord|
+      {false, true}.each do |armed|
+        Runner.quit_decision(false, chord: chord, armed: armed, held_intercept: true)
+          .should eq(Runner::QuitAction::Confirm)
+      end
+    end
+  end
+
+  it "confirms palette quit when active jobs are running, while keeping chord arming" do
+    Runner.quit_decision(false, chord: false, armed: false, active_jobs: true)
+      .should eq(Runner::QuitAction::Confirm)
+    Runner.quit_decision(false, chord: true, armed: false, active_jobs: true)
+      .should eq(Runner::QuitAction::Arm)
+    Runner.quit_decision(false, chord: true, armed: true, active_jobs: true)
+      .should eq(Runner::QuitAction::Quit)
+  end
+
+  it "warns that leaving or quitting forwards held Intercept traffic unedited" do
+    leave = Runner.leave_confirm_message(nil, 0, held_intercept: 2, held_edited: true)
+    leave.should contain("2 held Intercept items (with unsaved edits)")
+    leave.should contain("leaving forwards them unedited")
+
+    quit = Runner.quit_confirm_message(nil, 0, held_intercept: 1, held_edited: false)
+    quit.should contain("1 held Intercept item — quitting forwards it unedited")
+  end
+end

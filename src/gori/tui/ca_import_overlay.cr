@@ -17,6 +17,8 @@ module Gori::Tui
   # CertAuthority#import! — is injected as `on_commit` at the open-site (Runner#import_ca).
   # This form never touches the CA itself.
   class CAImportOverlay < Overlay
+    include DiscardGuard
+
     ROWS = [:cert, :key]
 
     def initialize
@@ -26,6 +28,7 @@ module Gori::Tui
         :key  => TextField.new(""),
       }
       @path_complete = PathComplete.new
+      @opened_state = form_state
     end
 
     def cert_path : String
@@ -89,15 +92,17 @@ module Gori::Tui
       # The path dropdown owns navigation keys while it's open.
       if @path_complete.open?
         case
-        when key.tab?, key.enter?   then return accept_path
-        when key.back_tab?, key.up? then @path_complete.move(-1); return :stay
-        when key.down?              then @path_complete.move(1); return :stay
-        when key.escape?            then @path_complete.close; return :stay
+        when key.tab?, key.enter?   then @discard_armed = false; return accept_path
+        when key.back_tab?, key.up? then @discard_armed = false; @path_complete.move(-1); return :stay
+        when key.down?              then @discard_armed = false; @path_complete.move(1); return :stay
+        when key.escape?            then @path_complete.close; @discard_armed = false; return :stay
         else # printables fall through → edit + refilter
         end
       end
 
-      return :cancel if key.escape?
+      if outcome = discard_key(ev)
+        return outcome
+      end
       if key.tab? || key.down?
         move_row(1); return :stay
       elsif key.back_tab? || key.up?
@@ -107,8 +112,10 @@ module Gori::Tui
         move_row(1); return :stay
       end
 
-      @fields[focused].handle_edit_key(ev)
-      @path_complete.refresh(@fields[focused].value) # keep the dropdown in lockstep
+      field = @fields[focused]
+      before = field.value
+      field.handle_edit_key(ev)
+      @path_complete.refresh(field.value) if field.value != before # keep the dropdown in lockstep on edits only
       :stay
     end
 
@@ -184,7 +191,8 @@ module Gori::Tui
     # submit, since the CA swap behind it is destructive.
     def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
       box = overlay_box(area)
-      return :cancel if box.nil? || !box.contains?(mx, my)
+      return discard_or_ask if box.nil? || !box.contains?(mx, my)
+      @discard_armed = false
       i = my - (box.y + 3)
       if 0 <= i < ROWS.size
         @sel = i
