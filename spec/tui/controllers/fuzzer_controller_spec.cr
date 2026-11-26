@@ -551,3 +551,106 @@ describe "FuzzerController — the run key on an 80-column row" do
     end
   end
 end
+
+# A backend whose every send outlives FuzzerController::QUIESCE_DEADLINE, and that counts
+# `close` — the engine's last act once every worker has left, so a count of 0 means the run
+# never unwound.
+private class OutlivesQuiesceBackend < Gori::Fuzz::Backend
+  getter closes = 0
+
+  def initialize(@delay : Time::Span)
+  end
+
+  def origin : Gori::Fuzz::Origin
+    Gori::Fuzz::Origin.new("http", "h", 80)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    sleep @delay
+    head = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_slice
+    Gori::Repeater::Result.new(head, Bytes.new(0), Gori::Proxy::Codec::Http1.parse_response_head(head), 1_i64)
+  end
+
+  def close : Nil
+    @closes += 1
+  end
+end
+
+class Gori::Tui::FuzzerController
+  def start_run_with_engine_for_spec(v : FuzzerView, engine : Gori::Fuzz::Engine, total : Int64?) : Nil
+    start_run(v, engine, total)
+  end
+end
+
+describe "FuzzerController#stop_all past QUIESCE_DEADLINE" do
+  # Leave project with sweeps whose requests are still out: stop_all drains only until the
+  # deadline, then the Runner is gone, yet every in-flight request still reports a result. The
+  # tabs share one 256-slot channel, so the second tab's forwarder parked for good behind the
+  # first's rows; and 600 results overran the engine's own buffer too, so that engine's workers
+  # parked behind ITS forwarder and the keep-alive pool was never closed.
+  it "lets every run fiber consume its engine to the end once nothing drains it" do
+    with_fuzzer_controller do |ctl, _session|
+      runs = [600, 128].map do |payloads|
+        ctl.fuzz_from_request("http://h", "GET /?q=§x§ HTTP/1.1\r\nHost: h\r\n\r\n", false, nil)
+        cfg = Gori::Fuzz::Config.new(concurrency: payloads)
+        gen = Gori::Fuzz::Generator.new(Gori::Fuzz::Template.parse("GET /?q=§a§ HTTP/1.1\r\nHost: h\r\n\r\n"),
+          [Gori::Fuzz::PayloadSet.new(Gori::Fuzz::InlineList.new((1..payloads).map(&.to_s)))], cfg)
+        backend = OutlivesQuiesceBackend.new(FuzzerController::QUIESCE_DEADLINE + 1.second)
+        engine = Gori::Fuzz::Engine.new(gen, Gori::Fuzz::Matcher.new, backend, cfg)
+        ctl.start_run_with_engine_for_spec(ctl.current_view.not_nil!, engine, payloads.to_i64)
+        {engine, backend}
+      end
+      sleep 50.milliseconds # every worker is inside its send
+      ctl.stop_all
+      unwound = ->(e : Gori::Fuzz::Engine, b : OutlivesQuiesceBackend) do
+        e.events.closed? && (e.events.@queue.try(&.size) || 0) == 0 && b.closes > 0
+      end
+      deadline = Time.instant + 10.seconds
+      until runs.all? { |e, b| unwound.call(e, b) } || Time.instant >= deadline
+        sleep 20.milliseconds
+      end
+      runs.map { |e, b| {e.events.closed?, e.events.@queue.try(&.size) || 0, b.closes} }
+        .should eq([{true, 0, 1}, {true, 0, 1}])
+    end
+  end
+end
+
+private def detach_spec_engine(payloads : Int32, concurrency : Int32, delay : Time::Span) : Gori::Fuzz::Engine
+  cfg = Gori::Fuzz::Config.new(concurrency: concurrency)
+  gen = Gori::Fuzz::Generator.new(Gori::Fuzz::Template.parse("GET /?q=§a§ HTTP/1.1\r\nHost: h\r\n\r\n"),
+    [Gori::Fuzz::PayloadSet.new(Gori::Fuzz::InlineList.new((1..payloads).map(&.to_s)))], cfg)
+  Gori::Fuzz::Engine.new(gen, Gori::Fuzz::Matcher.new, OutlivesQuiesceBackend.new(delay), cfg)
+end
+
+describe "FuzzerController after stop_all" do
+  # A key handled in the same tick as the exit reaches the controller after stop_all: a run
+  # it starts would have no reader at all.
+  it "refuses to start a run" do
+    with_fuzzer_controller do |ctl, _session|
+      ctl.fuzz_from_request("http://h", "GET /?q=§x§ HTTP/1.1\r\nHost: h\r\n\r\n", false, nil)
+      v = ctl.current_view.not_nil!
+      ctl.stop_all
+      engine = detach_spec_engine(10, 1, 1.millisecond)
+      ctl.start_run_with_engine_for_spec(v, engine, 10_i64)
+      v.running?.should be_false
+      v.engine.should be_nil
+      ctl.@host.as(FakeHost).statuses.last.should eq("project is closing")
+    end
+  end
+
+  it "halts a run whose feed was detached under it" do
+    with_fuzzer_controller do |ctl, _session|
+      ctl.fuzz_from_request("http://h", "GET /?q=§x§ HTTP/1.1\r\nHost: h\r\n\r\n", false, nil)
+      engine = detach_spec_engine(2000, 4, 10.milliseconds) # ~5 s of work
+      ctl.start_run_with_engine_for_spec(ctl.current_view.not_nil!, engine, 2000_i64)
+      sleep 30.milliseconds
+      ctl.@run_feed.detach
+      deadline = Time.instant + 2.seconds
+      until engine.events.closed? || Time.instant >= deadline
+        sleep 10.milliseconds
+      end
+      engine.stopped?.should be_true
+      engine.events.closed?.should be_true
+    end
+  end
+end

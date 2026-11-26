@@ -281,3 +281,98 @@ describe "SequencerController footer on SAMPLES" do
     end
   end
 end
+
+# Every send outlives the moment the spec calls stop_all, so each worker still reports one
+# sample after the stop.
+private class SlowSequencerBackend < Gori::Fuzz::Backend
+  getter closes = 0
+
+  def initialize(@delay : Time::Span)
+  end
+
+  def origin : Gori::Fuzz::Origin
+    Gori::Fuzz::Origin.new("http", "h", 80)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    sleep @delay
+    head = "HTTP/1.1 200 OK\r\nSet-Cookie: sid=abc\r\nContent-Length: 0\r\n\r\n".to_slice
+    Gori::Repeater::Result.new(head, Bytes.new(0), Gori::Proxy::Codec::Http1.parse_response_head(head), 1_i64)
+  end
+
+  def close : Nil
+    @closes += 1
+  end
+end
+
+class Gori::Tui::SequencerController
+  def open_running_for_spec(view : SequencerView, engine : Gori::Sequencer::Engine) : Nil
+    open_session(view, nil)
+    launch_run(view, engine)
+  end
+end
+
+describe "SequencerController#stop_all with collections in flight" do
+  # Leave project: nothing drains @seq_events after stop_all, yet each of these six
+  # collections still reports its 50 in-flight samples and a Done. 306 events overran the
+  # shared 256-slot channel, and the forwarders behind it parked for good.
+  it "lets every run fiber consume its engine to the end once nothing drains it" do
+    with_sequencer_controller do |ctl, _session|
+      req = "GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+      engines = (1..6).map do
+        cfg = Gori::Sequencer::Config.new(goal: 5000, concurrency: Gori::Sequencer::Engine::MAX_CONCURRENCY)
+        view = SequencerView.new
+        view.load("http://h", req, false, nil, cfg)
+        engine = Gori::Sequencer::Engine.new(req, false, SlowSequencerBackend.new(300.milliseconds), cfg)
+        ctl.open_running_for_spec(view, engine)
+        engine
+      end
+      sleep 50.milliseconds # every worker is inside its send
+      ctl.stop_all
+      undelivered = ->(e : Gori::Sequencer::Engine) { e.events.@queue.try(&.size) || 0 }
+      deadline = Time.instant + 5.seconds
+      until engines.all? { |e| e.events.closed? && undelivered.call(e) == 0 } || Time.instant >= deadline
+        sleep 20.milliseconds
+      end
+      engines.map { |e| {e.events.closed?, undelivered.call(e)} }.should eq([{true, 0}] * 6)
+    end
+  end
+end
+
+private def detach_spec_sequencer(delay : Time::Span) : {SequencerView, Gori::Sequencer::Engine}
+  req = "GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+  cfg = Gori::Sequencer::Config.new(goal: 5000, concurrency: 4)
+  view = SequencerView.new
+  view.load("http://h", req, false, nil, cfg)
+  {view, Gori::Sequencer::Engine.new(req, false, SlowSequencerBackend.new(delay), cfg)}
+end
+
+describe "SequencerController after stop_all" do
+  # A key handled in the same tick as the exit reaches the controller after stop_all: a
+  # collection it starts would have no reader at all, and nothing would ever stop it.
+  it "refuses to start a collection" do
+    with_sequencer_controller do |ctl, _session|
+      ctl.stop_all
+      view, engine = detach_spec_sequencer(1.millisecond)
+      ctl.open_running_for_spec(view, engine)
+      view.running?.should be_false
+      view.engine.should be_nil
+      ctl.@host.as(FakeHost).statuses.last.should eq("project is closing")
+    end
+  end
+
+  it "halts a collection whose feed was detached under it" do
+    with_sequencer_controller do |ctl, _session|
+      view, engine = detach_spec_sequencer(10.milliseconds) # 5000 samples at 4 wide: ~12 s
+      ctl.open_running_for_spec(view, engine)
+      sleep 30.milliseconds
+      ctl.@run_feed.detach
+      deadline = Time.instant + 2.seconds
+      until engine.events.closed? || Time.instant >= deadline
+        sleep 10.milliseconds
+      end
+      engine.stopped?.should be_true
+      engine.events.closed?.should be_true
+    end
+  end
+end

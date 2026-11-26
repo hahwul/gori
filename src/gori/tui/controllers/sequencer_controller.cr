@@ -529,21 +529,26 @@ module Gori::Tui
         @host.status(err || "can't collect")
         return
       end
+      launch_run(view, engine)
+    end
+
+    private def launch_run(view : SequencerView, engine : Sequencer::Engine) : Nil
+      # A key handled in the same tick as the exit, after stop_all: the feed is detached, so
+      # nothing would ever read this run's events (RunFeed).
+      return @host.status("project is closing") if @run_feed.detached?
       # Hand the engine over BEFORE anything can be sent, so ^X reaches it without waiting
       # for the next event to come back through the run block.
       view.engine = engine
       view.begin_run
       view.job_id = @host.jobs.start(:sequence, view.summary, goto: goto_for(view))
       events = @seq_events
+      feed = @run_feed # see FuzzerController#start_run: keep consuming after a dropped delivery
       terminal_sent = false
       spawn(name: "gori-sequencer") do
         engine.run do |ev|
           case ev
           when Sequencer::ProgressEvent
-            select
-            when events.send({view, ev})
-            else
-            end
+            feed.offer(events, {view, ev})
           else
             # Done/Error is the collection's VERDICT. Once one is on the channel the rescue below
             # must not send a second: `apply_event`'s ErrorEvent arm re-finishes the run,
@@ -551,9 +556,9 @@ module Gori::Tui
             # an error notification for work that succeeded. (`jobs.finish` keeps the first
             # terminal state, so the job itself was already safe — nothing else was.)
             terminal_sent = true if ev.is_a?(Sequencer::DoneEvent) || ev.is_a?(Sequencer::ErrorEvent)
-            events.send({view, ev}) # Sample/Done/Error — blocking, never dropped
+            feed.deliver(events, {view, ev}) # Sample/Done/Error — blocking, never dropped
           end
-          engine.stop if view.stop_requested?
+          engine.stop if view.stop_requested? || feed.detached? # nothing reads it any more
         end
       rescue ex
         # Same shape as the Miner's, for the same two reasons: an unrescued raise here writes
@@ -563,7 +568,7 @@ module Gori::Tui
         ::Log.error(exception: ex) { "sequencer run fiber died" }
         unless terminal_sent
           view.finish_run # before the blocking send — see the Miner's sibling for why
-          events.send({view, Sequencer::ErrorEvent.new("#{ex.class}: #{ex.message}")})
+          feed.deliver(events, {view, Sequencer::ErrorEvent.new("#{ex.class}: #{ex.message}")})
         end
       ensure
         # If no terminal event was placed on the channel (e.g. an unhandled failure

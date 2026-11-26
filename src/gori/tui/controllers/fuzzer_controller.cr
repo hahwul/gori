@@ -1327,6 +1327,9 @@ module Gori::Tui
     end
 
     private def start_run(v : FuzzerView, engine : Fuzz::Engine, total : Int64?) : Nil
+      # A key handled in the same tick as the exit, after stop_all: the feed is detached, so
+      # nothing would ever read this run's events (RunFeed).
+      return @host.status("project is closing") if @run_feed.detached?
       # A peer may have closed this session (reconcile evicted the tab) while its RUN FUZZ
       # confirm dialog was pending — don't launch an unstoppable engine fiber + orphaned job
       # into a detached view whose events drain_events would then drop forever.
@@ -1353,6 +1356,10 @@ module Gori::Tui
       v.job_id = @host.jobs.start(:fuzz, v.summary, goto: goto_for(v))
       events = @fuzz_events
       io_events = @fuzz_io_events
+      # Every send goes through the feed, so a project exit cannot park this fiber on a channel
+      # nobody reads again (RunFeed). A dropped delivery does not end the loop: `engine.run`
+      # is consumed to the end, so the stopped engine unwinds and closes its pool.
+      feed = @run_feed
       generation = v.run_generation
       calibrate = engine.auto_calibrate? # the run's own config, not the form the operator keeps editing
       done_sent = false
@@ -1364,10 +1371,7 @@ module Gori::Tui
         engine.run do |ev|
           case ev
           when Fuzz::ProgressEvent
-            select
-            when events.send({v, ev})
-            else
-            end
+            feed.offer(events, {v, ev})
           when Fuzz::ResultEvent
             # Temp persistence is non-blocking. A saturated/full spool becomes unavailable,
             # but the authorized sweep and bounded display continue (P6). Say so at the FIRST
@@ -1377,31 +1381,32 @@ module Gori::Tui
             # every view mutation, belongs to the Runner fiber.
             if (run = spool_run) && !spool_lost && !run.append(ev.result)
               spool_lost = true
-              io_events.send(SpoolLost.new(v, generation,
+              feed.deliver(io_events, SpoolLost.new(v, generation,
                 run.error || "the temporary archive stopped accepting results"))
             end
-            events.send({v, ev})
+            feed.deliver(events, {v, ev})
           when Fuzz::ErrorEvent
             error_sent = true
-            events.send({v, ev})
+            feed.deliver(events, {v, ev})
           when Fuzz::DoneEvent
             terminal = v.terminal_status(ev.progress, ev.stopped, error_sent, ev.stop_reason)
             spool_run.try(&.finish(ev.progress.sent, ev.progress.matched,
               ev.progress.errors, terminal))
-            events.send({v, ev})
+            feed.deliver(events, {v, ev})
             done_sent = true
           end
-          engine.stop if v.stop_requested?
+          # A detached feed halts the run too: nothing will read what it sends from here.
+          engine.stop if v.stop_requested? || feed.detached?
         end
       rescue ex
         ::Log.error(exception: ex) { "fuzz run fiber died" }
         unless done_sent
           engine.stop
           unless error_sent
-            events.send({v, Fuzz::ErrorEvent.new("#{ex.class}: #{ex.message}")})
+            feed.deliver(events, {v, Fuzz::ErrorEvent.new("#{ex.class}: #{ex.message}")})
           end
           spool_run.try(&.abort(reason: "fuzz run failed before spool completion"))
-          events.send({v, Fuzz::DoneEvent.new(Fuzz::Progress.new(0_i64, total, 0_i64, 1_i64), true)})
+          feed.deliver(events, {v, Fuzz::DoneEvent.new(Fuzz::Progress.new(0_i64, total, 0_i64, 1_i64), true)})
         end
       ensure
         end_worker(v)
@@ -1979,6 +1984,9 @@ module Gori::Tui
         drain_events
         sleep 1.millisecond
       end
+      # Past the deadline nothing will drain @fuzz_events again: a run still out would park its
+      # forwarder on the full channel forever, pinning its view, engine and this controller.
+      @run_feed.detach
       while drain_events
       end
       @spool_runs.clear
