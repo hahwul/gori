@@ -88,6 +88,19 @@ describe Gori::RawJson do
     end
   end
 
+  describe ".elements" do
+    it "lists an array's elements as raw text, numbers verbatim and duplicates kept" do
+      Gori::RawJson.elements(%([1, 18446744073709551615, {"a":1,"a":2}, 1.0e2])).should eq(
+        ["1", "18446744073709551615", %({"a":1,"a":2}), "1.0e2"])
+    end
+
+    it "is nil for valid JSON that is not an array, and raises on anything else" do
+      Gori::RawJson.elements(%({})).should be_nil
+      expect_raises(JSON::ParseException) { Gori::RawJson.elements(%([1],2)) }
+      expect_raises(JSON::ParseException) { Gori::RawJson.elements(%([1)) }
+    end
+  end
+
   describe ".parse" do
     it "reads every other value when one number anywhere is past Int64/Float64 (#1200)" do
       doc = Gori::RawJson.parse(%({"id":18446744073709551615,"a":{"n":[1.5e400,2,-3.5]},"token":"t","ok":true,"z":null}))

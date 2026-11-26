@@ -18,7 +18,7 @@ describe Gori::JsonRpc do
     ex.calls.size.should eq(1)
     c = ex.calls[0]
     c.method.should eq("sum")
-    c.id.should eq(JSON::Any.new(1_i64))
+    c.id.should eq("1")
     c.params.not_nil!.should contain("2")
     c.reply.should eq("3")
     c.error.should be_false
@@ -85,7 +85,7 @@ describe Gori::JsonRpc do
       head("text/event-stream"), body.to_slice).not_nil!
     ex.calls.should be_empty
     ex.stream.size.should eq(1)
-    ex.stream[0].id.should eq(JSON::Any.new(9_i64))
+    ex.stream[0].id.should eq("9")
   end
 
   # Hostile or merely unusual JSON: `JSON::Any#[]?` raises on a non-object, and every History
@@ -100,5 +100,45 @@ describe Gori::JsonRpc do
     ex.calls[0].label.should be_nil
     ex.calls[0].error.should be_false # `"error": null` is no error
     ex.calls[0].reply.should eq("1")
+  end
+
+  # `JSON.parse` rejects a whole document over one number past Int64/Float64, so a uint64 id
+  # hid the call and a bignum in the reply read "no reply in this flow" (a false statement).
+  # The decoded view keeps the digits as sent: never quoted, never respelled as a Float.
+  describe "numbers past Int64/Float64" do
+    big_req = %({"jsonrpc":"2.0","id":18446744073709551615,"method":"tools/call","params":{"name":"x","n":-9223372036854775809}})
+    big_resp = %({"jsonrpc":"2.0","id":18446744073709551615,"result":{"n":18446744073709551615,"f":1.5e400,"g":1.0e2}})
+
+    it "keeps a call whose id, params or result holds one" do
+      ex = rpc(big_req, big_resp).not_nil!
+      c = ex.calls[0]
+      c.id.should eq("18446744073709551615")
+      c.label.should eq("x")
+      c.params.not_nil!.should contain(%("n": -9223372036854775809))
+      reply = c.reply.not_nil!
+      reply.should contain(%("n": 18446744073709551615))
+      reply.should contain(%("f": 1.5e400))
+      reply.should contain(%("g": 1.0e2))
+      Gori::JsonRpc.display(ex).should contain("id=18446744073709551615")
+      Gori::JsonRpc.summary(ex).should_not contain("unanswered")
+    end
+
+    it "pairs the same reply when it arrives as an SSE event" do
+      ex = rpc(big_req, "data: #{big_resp}\n\n", "text/event-stream").not_nil!
+      ex.calls[0].reply.not_nil!.should contain(%("n": 18446744073709551615))
+      ex.stream.should be_empty
+    end
+
+    it "does not pair a numeric id with a string of the same digits" do
+      ex = rpc(big_req, %({"jsonrpc":"2.0","id":"18446744073709551615","result":1})).not_nil!
+      ex.calls[0].reply.should be_nil
+      ex.stream.size.should eq(1)
+      ex.stream[0].id.should eq(%("18446744073709551615"))
+    end
+
+    it "reads a reply carrying an unpaired surrogate escape" do
+      ex = rpc(%({"jsonrpc":"2.0","id":1,"method":"m"}), %({"jsonrpc":"2.0","id":1,"result":{"t":"cut \\ud83d"}})).not_nil!
+      ex.calls[0].reply.not_nil!.should contain("cut �")
+    end
   end
 end

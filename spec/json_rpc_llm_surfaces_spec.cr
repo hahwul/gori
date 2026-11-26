@@ -92,6 +92,23 @@ describe "JSON-RPC / MCP and LLM decoding — every surface" do
     end
   end
 
+  # A uint64 id made `JSON.parse` reject the body, so every surface lost the RPC view. The id is
+  # emitted as the raw number it was, never a quoted string.
+  it "keeps a call whose id is past Int64 on every surface, id unquoted" do
+    with_store do |store|
+      big = "18446744073709551615"
+      req = %({"jsonrpc":"2.0","id":#{big},"method":"tools/call","params":{"name":"get_weather"}})
+      id = body_flow(store, req, %({"jsonrpc":"2.0","id":#{big},"result":{"n":#{big}}}), "application/json")
+      detail = store.get_flow(id).not_nil!
+      mcp = Gori::MCP::Serialize.flow_detail_json(detail)
+      mcp.should contain(%("id":#{big}))
+      Gori::RawJson.parse(mcp)["json_rpc"]["calls"][0]["reply"].as_s.should contain(%("n": #{big}))
+      cli = JSON.build { |j| j.object { Gori::DecodedView.emit_json(j, target: detail.row.target, req_head: detail.request_head, req_body: detail.request_body, resp_head: detail.response_head, resp_body: detail.response_body) } }
+      cli.should contain(%("id":#{big}))
+      pane_text(store).should contain("# → tools/call id=#{big} · get_weather")
+    end
+  end
+
   it "offers no key and no pane for plain JSON" do
     with_store do |store|
       id = body_flow(store, %({"q":"shoes"}), %({"items":[]}), "application/json")

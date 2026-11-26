@@ -45,7 +45,7 @@ describe Gori::LlmCall do
     whole.tool_calls.map(&.name).should eq(["get_weather"])
     whole.tool_calls[0].arguments.should contain(%("city": "Seoul"))
     whole.stop.should eq("tool_calls")
-    whole.usage.not_nil!["completion_tokens"].should eq(5)
+    JSON.parse(whole.usage.not_nil!)["completion_tokens"].should eq(5)
     whole.streamed.should be_false
 
     streamed = llm(CHAT_REQ, sse([
@@ -219,5 +219,55 @@ describe Gori::LlmCall do
     Gori::LlmCall.transcript(REQ_HEAD, %({"model":"gpt-5","input":"hi"}).to_slice, nil, nil).should eq(
       "# LLM call: openai-responses · gpt-5\n\n## user\n\nhi\n")
     Gori::LlmCall.transcript(REQ_HEAD, %({"model":"sedan","year":2020}).to_slice, nil, nil).should be_nil
+  end
+
+  # `JSON.parse` rejects a whole document over one number past Int64/Float64: a uint64 `seed`
+  # hid the call, a bignum in `usage` emptied the reply, and a streamed event carrying one was
+  # dropped from the text the Fuzzer matches. What is shown as JSON keeps the digits as sent.
+  describe "numbers past Int64/Float64" do
+    big = "18446744073709551615"
+
+    it "still decodes a request carrying one" do
+      req = %({"model":"gpt-4o","seed":#{big},"messages":[{"role":"user","content":"hi"}]})
+      c = llm(req, %({"choices":[{"index":0,"message":{"content":"ok"}}]})).not_nil!
+      c.model.should eq("gpt-4o")
+      c.roles.should eq("user")
+      c.text.should eq("ok")
+    end
+
+    it "keeps the reply, and shows usage with the number unquoted" do
+      c = llm(CHAT_REQ, %({"choices":[{"index":0,"message":{"content":"ok"}}],"usage":{"total_tokens":#{big},"f":1.0e2}})).not_nil!
+      c.text.should eq("ok")
+      c.usage.should eq(%({"total_tokens":#{big},"f":1.0e2}))
+      Gori::LlmCall.display(c).should contain(%("total_tokens":#{big}))
+    end
+
+    it "shows an Anthropic tool_use input with the number unquoted, past a non-object block" do
+      resp = %({"type":"message","content":[7,{"type":"tool_use","name":"a","input":{"id":#{big}}},) +
+             %({"type":"tool_use","name":"b","input":{"n":1}}],"stop_reason":"tool_use"})
+      c = llm(ANTHROPIC_REQ, resp).not_nil!
+      c.tool_calls.map(&.name).should eq(["a", "b"])
+      c.tool_calls[0].arguments.should contain(big)
+      c.tool_calls[0].arguments.should_not contain(%("#{big}"))
+      c.tool_calls[1].arguments.should_not contain(big)
+      req = %({"model":"claude-x","messages":[7,{"role":"assistant","content":[{"type":"tool_use","name":"t","input":{"id":#{big}}}]}]})
+      Gori::LlmCall.transcript(REQ_HEAD, req.to_slice, nil, nil).not_nil!.should contain(%([tool call t] {"id":#{big}}))
+    end
+
+    it "keeps both members of a duplicated key in chat tool-call arguments" do
+      resp = %({"choices":[{"index":0,"message":{"tool_calls":[{"function":{"name":"f","arguments":"{\\"a\\":1,\\"a\\":2}"}}]}}]})
+      args = llm(CHAT_REQ, resp).not_nil!.tool_calls[0].arguments
+      args.should contain(%("a": 1))
+      args.should contain(%("a": 2))
+    end
+
+    it "reassembles a stream whose event carries one" do
+      head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n".to_slice
+      body = sse([
+        %({"choices":[{"index":0,"delta":{"content":"sec"}}]}),
+        %({"choices":[{"index":0,"delta":{"content":"ret"}}],"x":#{big}}),
+      ]).to_slice
+      Gori::LlmCall.stream_reply(head, body).should eq("secret")
+    end
   end
 end

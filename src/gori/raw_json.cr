@@ -521,6 +521,22 @@ module Gori
       acc
     end
 
+    # A JSON array's elements as compact JSON text, in order — the `members` of an array: every
+    # number as its literal digits, every duplicated member inside kept. nil when `json` is
+    # valid JSON that is not an array. Raises JSON::ParseException on bad syntax.
+    def elements(json : String) : Array(String)?
+      pull = JSON::PullParser.new(json)
+      unless pull.kind.begin_array?
+        pull.read_raw
+        finish(pull, json)
+        return nil
+      end
+      acc = [] of String
+      pull.read_array { acc << pull.read_raw }
+      finish(pull, json)
+      acc
+    end
+
     # The compact object for `members`, values spliced in as the raw JSON they already are.
     def object(members : Array({String, String})) : String
       JSON.build { |j| j.object { members.each { |(k, v)| j.field(k) { j.raw(v) } } } }
