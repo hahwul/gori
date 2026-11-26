@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- TUI: empty multi-line overlay editors keep IME composition visible while typing, arrow keys in path cards no longer reopen a dismissed completion list or disarm overwrite prompts, filter pickers and cross-project search show text selection and honor `Home`/`End`, and the Settings card asks before discarding unsaved edits (#2028).
+
+- TUI: `discover.dismiss` (when findings exist) and `authorize.remove` ask before deleting, Authorize reports seeded requests hidden by `/` and allows passive mode to re-queue removed items, Repeater confirms duplicating hidden marked tabs and detaches closed Timing runs cleanly, `^F` refuses in Repeater Response hex mode, failure toasts persist in Notifications, and OAST, Colormarker, JWT and Cookie lists support `PageUp`/`PageDown`/`Home`/`End` (#2028).
+
 - TUI: quitting or leaving a project asks before forwarding held Intercept traffic unedited, `^P → Quit gori` confirms while background jobs are running, and `QUIT GORI` closes any open Space menu or picker first (#2027).
 
 - TUI: multi-column Space menus scroll on short terminals instead of dropping trailing rows, the 80-column top bar keeps capture-off, `sandbox` and `intercept` chips visible, the Active Scan card keeps its run controls on screen at 80×24, and `v` or `Space` opens full text for clipped notifications (#2027).
