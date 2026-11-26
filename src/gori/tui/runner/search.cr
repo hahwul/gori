@@ -197,6 +197,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # `TextArea#searchable?`). Named rather than folded into "no matches": this is the
     # ordinary shape of a Repeater tab seeded from a captured upload, and silence would
     # read as "your query is not in there".
+    return status("replace: the find text is too long to match — shorten it") if n == TextArea::QUERY_TOO_LONG
     if n < 0
       return status("replace: this buffer holds bytes that are not valid UTF-8 — " \
                     "search and replace can't run over it (^F highlighting still works)")

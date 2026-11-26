@@ -1446,11 +1446,17 @@ module Gori::Tui
     # -1 when the buffer cannot be searched at all — see `searchable?`. The caller reports
     # that; it must not be folded into 0, which reads as "no matches" and would make
     # find-and-replace a silent no-op on exactly the buffers where it looks like it worked.
+    #
+    # QUERY_TOO_LONG when the query itself cannot be compiled — see `search_regex`. Also not
+    # "no matches": the text may well be in the buffer.
     def match_count(query : String) : Int32
       return 0 if query.empty?
       return -1 unless searchable?
-      text.scan(search_regex(query)).size
+      rx = search_regex(query) || return QUERY_TOO_LONG
+      text.scan(rx).size
     end
+
+    QUERY_TOO_LONG = -2
 
     # Whether a PCRE may be run over this buffer. Crystal's Regex RAISES
     # `ArgumentError: UTF-8 error: illegal byte` on a subject that is not valid UTF-8, and
@@ -1478,9 +1484,10 @@ module Gori::Tui
     # (clamped): a bulk edit has no single site to land on.
     def replace_matches(query : String, replacement : String) : Int32
       return 0 if query.empty?
-      return 0 unless searchable? # see `searchable?`; the confirm never opens for these
+      return 0 unless searchable?          # see `searchable?`; the confirm never opens for these
+      rx = search_regex(query) || return 0 # see `match_count`; the confirm never opens for these
       n = 0
-      swapped = text.gsub(search_regex(query)) { n += 1; replacement }
+      swapped = text.gsub(rx) { n += 1; replacement }
       return 0 if n == 0
       # `swapped` is the LF projection: writing it back would flatten every CRLF the capture
       # carried in its BODY, and this editor is the one the Repeater and the Intercept hold
@@ -1493,8 +1500,14 @@ module Gori::Tui
     # Literal `query`, matched case-insensitively to mirror what ^F highlights. Regex
     # rather than a downcase scan because downcasing can change a string's LENGTH for
     # some Unicode (e.g. 'İ'), which would skew the offsets a manual scan splices on.
-    private def search_regex(query : String) : Regex
+    #
+    # nil when PCRE2 refuses to compile it, which a literal does only past its pattern-size
+    # limit ("regular expression is too large", from about 35k characters of pasted find
+    # text). That raise used to escape the input loop.
+    private def search_regex(query : String) : Regex?
       Regex.new(Regex.escape(query), Regex::Options::IGNORE_CASE)
+    rescue ArgumentError
+      nil
     end
 
     # `highlight` overlays request/response syntax colours on the buffer while

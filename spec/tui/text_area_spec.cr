@@ -1376,3 +1376,17 @@ describe "Gori::Tui::TextArea splices over invalid UTF-8" do
     check.call(ta)
   end
 end
+
+# PCRE2 refuses a pattern past its size limit with ArgumentError, and a pasted find string of
+# about 35k characters reached it through `search_regex`: the raise escaped the input loop.
+describe "Gori::Tui::TextArea find&replace with an oversized query" do
+  it "reports QUERY_TOO_LONG and replaces nothing instead of raising" do
+    body = "x" * 10 + "a" * 60_000
+    ta = Gori::Tui::TextArea.new(body)
+    query = "a" * 60_000
+    ta.match_count(query).should eq(Gori::Tui::TextArea::QUERY_TOO_LONG)
+    ta.replace_matches(query, "b").should eq(0)
+    ta.text.should eq(body)
+    ta.match_count("xa").should eq(1) # an ordinary query still counts
+  end
+end
