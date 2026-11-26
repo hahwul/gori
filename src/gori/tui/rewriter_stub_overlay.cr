@@ -111,7 +111,7 @@ module Gori::Tui
       statusy = box.bottom - 3
       hintline = box.bottom - 2
       editor = editor_rect(box)
-      if @editor.line_count == 1 && @editor.text.empty?
+      if @editor.empty_for_placeholder?
         screen.text(editor.x, editor.y, "200 OK", Theme.muted, Theme.bg, width: editor.w)
         screen.text(editor.x, editor.y + 1, "Content-Type: application/json", Theme.muted, Theme.bg, width: editor.w) if editor.h > 1
         screen.text(editor.x, editor.y + 3, "{\"isAdmin\": true}", Theme.muted, Theme.bg, width: editor.w) if editor.h > 3

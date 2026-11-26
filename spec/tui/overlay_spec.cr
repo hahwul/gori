@@ -113,6 +113,18 @@ describe Gori::Tui::DiscardGuard do
     auth.set_selected(AuthorizeIdentityOverlay::EDITOR_ROW)
     auth.takes_pasted?(esc_key).should be_false
   end
+
+  it "keeps empty TextArea overlays showing IME preedit and ignores raw C0 control chars" do
+    ta = TextArea.new("")
+    ta.empty_for_placeholder?.should be_true
+    ta.set_preedit("ㅎ")
+    ta.empty_for_placeholder?.should be_false
+    ta.set_preedit("")
+    ta.handle_edit_key(Termisu::Event::Key.new(Termisu::Input::Key::Unknown, char: '\u{1F}')).should be_false
+    ta.text.should eq("")
+    ta.handle_edit_key(Termisu::Event::Key.new(Termisu::Input::Key::Tab, char: '\t')).should be_true
+    ta.text.should eq("\t")
+  end
 end
 
 # `draw_field`, the `label: value` row of every rule form, drew the value from its first

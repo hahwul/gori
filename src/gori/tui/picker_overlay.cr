@@ -180,9 +180,30 @@ module Gori::Tui
       refilter
     end
 
+    def text_fields : Array(TextField)
+      [@field]
+    end
+
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :cancel if box.nil? || !box.contains?(mx, my)
+      if my == box.y + 1
+        click_text_field(mx, my)
+        return :stay
+      end
+      super
+    end
+
     # esc cancels · ↑/↓ move · ↵ picks · ⌫ edits the filter · anything else printable
     # goes into the filter (query_char drops control chars itself).
     def handle_key(ev : Termisu::Event::Key) : Symbol
+      # Home/End (and Shift+Home/End) belong to the filter text field whenever there is text
+      # to move/select across; on an empty filter they still jump the list via nav_key.
+      key = ev.key
+      if (key.home? || key.end?) && (!@field.value.empty? || ev.shift?)
+        @field.handle_edit_key(ev)
+        return :stay
+      end
       if nav = nav_key(ev)
         return nav
       end
@@ -201,11 +222,10 @@ module Gori::Tui
     # hint: the status row already draws `hint` for the open picker, and the copy that sat
     # here while the bar was empty was the same sentence twice on one screen.
     private def render_filter(screen : Screen, box : Rect) : Int32
-      # input_line shows committed text + IME preedit (underline) + a caret, and syncs
-      # the terminal cursor so Hangul/CJK composition renders where the user is typing.
+      # Render via TextField#render so selection bands, caret windowing, and pointer hit-testing
+      # stay in lockstep with every other card input.
       px = screen.text(box.x + 2, box.y + 1, "filter › ", Theme.accent, Theme.panel)
-      screen.input_line(px, box.y + 1, @field.value, @field.caret, @field.preedit, Theme.text_bright,
-        Theme.panel, width: {box.right - 1 - px, 1}.max)
+      @field.render(screen, px, box.y + 1, {box.right - 1 - px, 1}.max, true, Theme.text_bright, Theme.panel)
       Frame.tee_divider(screen, box, box.y + 2)
       box.y + LIST_OFFSET
     end

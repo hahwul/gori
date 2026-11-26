@@ -144,9 +144,12 @@ module Gori::Tui
         return :stay
       end
 
+      before = @field.value
       @field.handle_edit_key(ev)
-      @path_complete.refresh(@field.value) # keep the dropdown in lockstep
-      disarm                               # a retyped path is a DIFFERENT path — re-ask before clobbering it
+      if @field.value != before
+        @path_complete.refresh(@field.value) # keep the dropdown in lockstep on edits only
+        disarm                               # a retyped path is a DIFFERENT path — re-ask before clobbering it
+      end
       :stay
     end
 

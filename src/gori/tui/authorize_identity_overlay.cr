@@ -321,8 +321,21 @@ module Gori::Tui
 
     def handle_drag(area : Rect, mx : Int32, my : Int32) : Nil
       return unless box = overlay_box(area)
-      return unless @selected == EDITOR_ROW
-      @editor.click_to_cursor(editor_rect(box), mx, my, selecting: true)
+      if @selected == EDITOR_ROW
+        @editor.click_to_cursor(editor_rect(box), mx, my, selecting: true)
+      else
+        super
+      end
+    end
+
+    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      if (box = overlay_box(area)) && editor_rect(box).contains?(mx, my)
+        set_selected(EDITOR_ROW)
+        @discard_armed = false
+        @editor.select_word_at(editor_rect(box), mx, my)
+        return :stay
+      end
+      super
     end
 
     # --- geometry / render ---
@@ -369,7 +382,7 @@ module Gori::Tui
       screen.text(box.x + 3, box.y + 5, "set headers — one Name: Value per line",
         Theme.muted, Theme.bg, width: box.w - 6)
       ed = editor_rect(box)
-      if @editor.line_count == 1 && @editor.text.empty?
+      if @editor.empty_for_placeholder?
         screen.text(ed.x, ed.y, "e.g. Cookie: session=…", Theme.muted, Theme.bg, width: ed.w)
         screen.cursor(ed.x, ed.y) if @selected == EDITOR_ROW
       else

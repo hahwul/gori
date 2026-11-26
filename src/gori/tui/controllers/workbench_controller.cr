@@ -358,6 +358,8 @@ module Gori::Tui
       when nav_down?(ev)            then input_step(s, 1, growing)
       when editor_read_sideways(ev) then nil                                         # ←/→ h/l, ⌥ by word
       when key.home?, key.end?      then s.input_read.handle_motion_key(s.input, ev) # ⌃/⌥ jump the buffer
+      when key.page_up?             then s.input_read.move(s.input, -s.input.page_rows, 0, selecting: growing)
+      when key.page_down?           then s.input_read.move(s.input, s.input.page_rows, 0, selecting: growing)
       when plain_char?(ev, c)
         return false # i INSERT, x/y/c + Global breath → keymap
       end
@@ -494,8 +496,21 @@ module Gori::Tui
         at_bottom ? cross_pane(s, 1) : scroll_pane(s, which, 1)
       when plain_char?(ev, ev.char || key.to_char)
         return false # y/c + Global breath → keymap
+      else
+        if delta = readonly_page_delta(key)
+          scroll_pane(s, which, delta)
+        end
       end
       true
+    end
+
+    private def readonly_page_delta(key : Termisu::Input::Key) : Int32?
+      case
+      when key.page_up?   then -10
+      when key.page_down? then 10
+      when key.home?      then -1_000_000
+      when key.end?       then 1_000_000
+      end
     end
 
     private def scroll_pane(s : S, which : Symbol, step : Int32) : Nil

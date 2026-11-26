@@ -79,7 +79,7 @@ module Gori::Tui
       Frame.card(screen, box, "USER-AGENTS", bg: Theme.bg, border: Theme.border_focus)
       hintline = box.bottom - 2
       editor = editor_rect(box)
-      if @editor.line_count == 1 && @editor.text.empty?
+      if @editor.empty_for_placeholder?
         screen.text(editor.x, editor.y,
           "empty — $GEN.USER_AGENT draws from the built-in list (#{Env::USER_AGENTS.size})",
           Theme.muted, Theme.bg, width: editor.w)

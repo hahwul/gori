@@ -170,13 +170,40 @@ module Gori::Tui
       id = (@next_id += 1)
       @entries << Entry.new(id, detail)
       touch
-      # Land on the new seed — unless the lens hides it, in which case the cursor stays.
-      @sel = visible.index(@entries.size - 1) || @sel.clamp(0, {visible.size - 1, 0}.max)
+      # Land on the new seed — unless the lens hides it, in which case the cursor and scroll
+      # stay untouched on the row the operator is already reading.
+      if idx = visible.index(@entries.size - 1)
+        @sel = idx
+        anchor_sel
+        @tsel = 0
+        @trial_scroll = 0
+        @detail_scroll = 0
+      else
+        @sel = @sel.clamp(0, {visible.size - 1, 0}.max)
+        anchor_sel
+      end
+      id
+    end
+
+    def filtering? : Bool
+      !@filter.query.empty?
+    end
+
+    def visible_entry_id?(id : Int32) : Bool
+      visible.any? { |i| @entries[i]?.try(&.id) == id }
+    end
+
+    def remove_by_id(id : Int32) : Entry?
+      e = entry_by_id(id)
+      return nil unless e && e.state != :running
+      @entries.delete(e)
+      touch
+      @sel = @sel.clamp(0, {visible.size - 1, 0}.max)
       anchor_sel
       @tsel = 0
       @trial_scroll = 0
       @detail_scroll = 0
-      id
+      e
     end
 
     def entry_by_id(id : Int32) : Entry?

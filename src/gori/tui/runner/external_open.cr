@@ -73,14 +73,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
         error: Process::Redirect::Close)
       # explorer.exe answers 1 even when it opened the file, so on Windows its code says nothing.
       unless st.success? || {{ flag?(:win32) }}
-        return status("open in browser: #{program} exited #{st.exit_code} — the file is at #{result.path}")
+        return status("open in browser: #{program} exited #{st.exit_code} — the file is at #{result.path}", :error)
       end
     rescue File::NotFoundError
       # `xdg-open` is absent on a bare box or a minimal container, and this is the ordinary
       # shape of that — not a bug to surface as one.
-      return status("open in browser: #{program} is not installed — the file is at #{result.path}")
+      return status("open in browser: #{program} is not installed — the file is at #{result.path}", :error)
     rescue ex
-      return status("open in browser: #{program} failed: #{ex.message} — the file is at #{result.path}")
+      return status("open in browser: #{program} failed: #{ex.message} — the file is at #{result.path}", :error)
     end
 
     status(opened_message(result))

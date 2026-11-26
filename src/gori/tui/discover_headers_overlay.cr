@@ -106,7 +106,7 @@ module Gori::Tui
       Frame.card(screen, box, "CUSTOM HEADERS", bg: Theme.bg, border: Theme.border_focus)
       hintline = box.bottom - 2
       editor = editor_rect(box)
-      if @editor.line_count == 1 && @editor.text.empty?
+      if @editor.empty_for_placeholder?
         screen.text(editor.x, editor.y, "one header per line — e.g. Authorization: Bearer …", Theme.muted, Theme.bg, width: editor.w)
         screen.cursor(editor.x, editor.y)
       else

@@ -375,8 +375,9 @@ module Gori::Tui
       when key.down?  then move_row(1)
       when key.enter? then return commit_or_flag if on_last_row?; move_row(1)
       else
+        before = tf.value
         tf.handle_edit_key(ev)
-        refresh_path(f) # keep the wordlist dropdown in lockstep with the field
+        refresh_path(f) if tf.value != before # keep the wordlist dropdown in lockstep on edits only
       end
       :stay
     end
@@ -739,7 +740,9 @@ module Gori::Tui
         render_project_value(screen, box, f, y, vx, vw, foc, bg)
       end
       meta = "reads captured data · sends nothing · the run reports what it read"
-      screen.text(box.x + 2, box.bottom - 4, meta, Theme.muted, Theme.bg, width: box.w - 4)
+      if box.bottom - 4 > box.y + 3 + field_rows.size - 1
+        screen.text(box.x + 2, box.bottom - 4, meta, Theme.muted, Theme.bg, width: box.w - 4)
+      end
     end
 
     PROJECTION_HINTS = {
@@ -789,7 +792,7 @@ module Gori::Tui
     private def render_values(screen : Screen, box : Rect) : Nil
       editor = values_rect(box)
       foc = focused == :values
-      if @values.line_count == 1 && @values.text.empty?
+      if @values.empty_for_placeholder?
         hint = @ptype == :bytes ? "JSON array of base64 payloads, e.g. [\"YQ==\",\"\"]" : "one value per line — paste a wordlist, it splits automatically"
         screen.text(editor.x, editor.y, hint, Theme.muted, Theme.bg, width: editor.w)
         screen.cursor(editor.x, editor.y) if foc

@@ -1334,6 +1334,12 @@ module Gori::Tui
     # undo, then `handle_motion_key`, ⌫/Del and a printable. ↑/↓ have no pane to cross into,
     # so they are the motion keymap's too. `TextField#handle_edit_key`'s multi-line
     # counterpart; true when consumed.
+    # True when a card may draw its placeholder instead of the editor: empty single-line buffer
+    # with no active IME preedit (showing a placeholder during IME composition hides Hangul/CJK).
+    def empty_for_placeholder? : Bool
+      line_count == 1 && text.empty? && @preedit.empty?
+    end
+
     def handle_edit_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       case
@@ -1345,11 +1351,18 @@ module Gori::Tui
       when key.delete?           then delete
       when handle_motion_key(ev) then nil
       else
-        ch = ev.char || key.to_char
-        return false unless ch && !ev.ctrl? && !ev.alt?
+        ch = insertable_char(ev)
+        return false unless ch
         insert(ch)
       end
       true
+    end
+
+    private def insertable_char(ev : Termisu::Event::Key) : Char?
+      return nil if ev.ctrl? || ev.alt?
+      ch = ev.char || ev.key.to_char
+      return nil unless ch
+      ch if ch == '\t' || (ch.ord >= 0x20 && ch.ord != 0x7F)
     end
 
     # One screenful for `page`, taken from the LAST RENDERED viewport height so the step

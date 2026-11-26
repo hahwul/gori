@@ -153,11 +153,13 @@ module Gori::Tui
 
     # ---- scroll mutators (called by the controller) ----
     def scroll_decoded(step : Int32) : Nil
-      @dec_scroll = {@dec_scroll + step, 0}.max
+      nxt = {@dec_scroll + step, 0}.max
+      @dec_scroll = @dec_h > 0 ? nxt.clamp(0, {@dec_lines - @dec_h, 0}.max) : nxt
     end
 
     def scroll_output(step : Int32) : Nil
-      @out_scroll = {@out_scroll + step, 0}.max
+      nxt = {@out_scroll + step, 0}.max
+      @out_scroll = @out_h > 0 ? nxt.clamp(0, {@out_lines - @out_h, 0}.max) : nxt
     end
 
     def decoded_at_top? : Bool

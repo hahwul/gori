@@ -136,7 +136,7 @@ module Gori::Tui
       # The write's outcome is the caller's answer: `false` keeps the form open, which is what
       # stops an identity from looking saved and being gone at the next restart.
       unless replace_identities(list)
-        @host.status("authorize: the project could not be written — identity not saved")
+        @host.status("authorize: the project could not be written — identity not saved", :error)
         return false
       end
       true
@@ -479,20 +479,27 @@ module Gori::Tui
     # counts as already-queued too. A pruned/stale id is skipped silently: it is not a duplicate,
     # it is a flow that no longer exists, and the caller's "loaded N" already says so by omission.
     def seed_flows(ids : Array(Int64)) : {Int32, Int32}
+      added, skipped, _ = seed_flows_report(ids)
+      {added, skipped}
+    end
+
+    def seed_flows_report(ids : Array(Int64)) : {Int32, Int32, Int32}
       queued = @view.queued_flow_ids
       added = 0
       skipped = 0
+      added_ids = [] of Int32
       ids.uniq.each do |id|
         if queued.includes?(id)
           skipped += 1
           next
         end
         next unless detail = @host.session.store.get_flow(id)
-        @view.add(detail)
+        added_ids << @view.add(detail)
         queued << id
         added += 1
       end
-      {added, skipped}
+      hidden = @view.filtering? ? added_ids.count { |eid| !@view.visible_entry_id?(eid) } : 0
+      {added, skipped, hidden}
     end
 
     # --- run lifecycle -------------------------------------------------------
@@ -722,11 +729,24 @@ module Gori::Tui
     # Drop the cursor request from the queue. Refused while it is mid-run — its outcome is
     # still on the way.
     def remove_selected : Nil
-      return @host.status("nothing to remove") unless @view.any_requests?
-      unless @view.remove_selected
+      return @host.status("nothing to remove") unless e = @view.selected_entry
+      if e.state == :running
         return @host.status("that request is still running — ^X to stop it first")
       end
-      @host.status("authorize: removed — #{@view.size} left")
+      entry_id = e.id
+      url = e.detail.row.url
+      url = "#{url[0, 47]}…" if url.size > 48
+      label = "#{e.detail.row.method} #{url}"
+      @host.confirm("REMOVE REQUEST",
+        "Remove #{label} from Authorize?\nIts replay results will be dropped.",
+        confirm_label: "remove", danger: true) do
+        if removed = @view.remove_by_id(entry_id)
+          @passive_seen.delete(Authorize::Passive.key(removed.detail))
+          @host.status("authorize: removed — #{@view.size} left")
+        else
+          @host.status("that request is still running — ^X to stop it first")
+        end
+      end
     end
 
     # The one clear-all verb that used to go straight through. It was menu-only when it was

@@ -1236,7 +1236,7 @@ module Gori::Tui
         # Memory follows disk: a name that resolves in this process alone, and is gone at
         # the next start, is a library that lies. Mirrors `Settings.delete_decoder_chain`.
         Settings.decoder_chains = before
-        @host.status("could not save chain")
+        @host.status("could not save chain", :error)
         false
       end
     end

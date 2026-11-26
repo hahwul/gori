@@ -280,28 +280,29 @@ module Gori::Tui
         # while comparing it to a path never matched, so the row stuck on the first (#1373).
         Frame.option_cycle(screen, x, py, box.right - 2, bg, "start at:",
           @seed.choices.map(&.[0]), @target_idx, sel && @seed.choices.size > 1)
-      when ROW_SPIDER  then check(screen, x, py, bg, sel, @spider, "spider (follow links)")
-      when ROW_BRUTE   then check(screen, x, py, bg, sel, @bruteforce, "bruteforce (probe paths)")
-      when ROW_EXT     then check(screen, x, py, bg, sel, @ext, "probe common extensions")
-      when ROW_KEEP    then check(screen, x, py, bg, sel, @keep_alive, "reuse connections (keep-alive)")
-      when ROW_ASSETS  then check(screen, x, py, bg, sel, @assets, "fetch images/fonts/media")
+      when ROW_SPIDER  then check(screen, x, py, bg, sel, @spider, "spider (follow links)", box.right - 2)
+      when ROW_BRUTE   then check(screen, x, py, bg, sel, @bruteforce, "bruteforce (probe paths)", box.right - 2)
+      when ROW_EXT     then check(screen, x, py, bg, sel, @ext, "probe common extensions", box.right - 2)
+      when ROW_KEEP    then check(screen, x, py, bg, sel, @keep_alive, "reuse connections (keep-alive)", box.right - 2)
+      when ROW_ASSETS  then check(screen, x, py, bg, sel, @assets, "fetch images/fonts/media", box.right - 2)
       when ROW_DEPTH   then Frame.option_cycle(screen, x, py, box.right - 2, bg, "max depth:", DEPTHS.map(&.to_s), @depth_idx, sel)
       when ROW_CONTAIN then Frame.option_cycle(screen, x, py, box.right - 2, bg, "scope:", CONTAINMENTS.map(&.label), @contain_idx, sel)
       when ROW_CONC    then Frame.option_cycle(screen, x, py, box.right - 2, bg, "concurrency:", CONCS.map(&.to_s), @conc_idx, sel)
       when ROW_MAXREQ  then Frame.option_cycle(screen, x, py, box.right - 2, bg, "max requests:", MAX_REQ_CHOICES.map { |c| c.try(&.to_s) || "uncapped" }, @maxreq_idx, sel)
       when ROW_HEADERS then headers_row(screen, x, py, bg, sel)
-      else                  start_row(screen, x, py, bg)
+      else                  start_row(screen, x, py, bg, box.right - 2)
       end
     end
 
-    private def start_row(screen : Screen, x : Int32, py : Int32, bg : Color) : Nil
+    private def start_row(screen : Screen, x : Int32, py : Int32, bg : Color, right : Int32) : Nil
       label = valid? ? "[ Start discovery ]" : "[ enable spider or bruteforce ]"
-      screen.text(x, py, label, valid? ? Theme.accent : Theme.muted, bg, Attribute::Bold)
+      screen.text(x, py, label, valid? ? Theme.accent : Theme.muted, bg, Attribute::Bold, width: {right - x, 1}.max)
     end
 
-    private def check(screen : Screen, x : Int32, py : Int32, bg : Color, sel : Bool, on : Bool, label : String) : Nil
+    private def check(screen : Screen, x : Int32, py : Int32, bg : Color, sel : Bool, on : Bool, label : String,
+                      right : Int32) : Nil
       screen.text(x, py, on ? "[x]" : "[ ]", on ? Theme.green : Theme.muted, bg)
-      screen.text(x + 4, py, label, sel ? Theme.text_bright : Theme.text, bg)
+      screen.text(x + 4, py, label, sel ? Theme.text_bright : Theme.text, bg, width: {right - (x + 4), 1}.max)
     end
 
     private def headers_row(screen : Screen, x : Int32, py : Int32, bg : Color, sel : Bool) : Nil

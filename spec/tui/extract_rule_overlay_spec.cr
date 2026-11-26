@@ -141,13 +141,19 @@ describe "Gori::Tui::ExtractRuleOverlay — Overlay seam" do
     saved.should eq([{"SESSION", "path:/login", "sid"}])
   end
 
-  it "keeps the form open when the binding table refuses it" do
-    ov = ExtractRuleOverlay.adding
-    h = OverlayHarness.new(ov, commit: false)
-    ov.set_selected(ExtractRuleOverlay::ROW_SAVE)
-    # Space on Save: ↵ stops at the form first (`FormOverlay#commit_blocker`).
-    h.press(Termisu::Input::Key::Space).should eq(:open)
-    h.commits.should eq(1) # apply_extract_rule DID run — it just returned false
+  it "blocks an invalid form on Space, and stays open when the binding table refuses a valid one" do
+    invalid = ExtractRuleOverlay.adding
+    hi = OverlayHarness.new(invalid, commit: false)
+    invalid.set_selected(ExtractRuleOverlay::ROW_SAVE)
+    hi.press(Termisu::Input::Key::Space).should eq(:open)
+    hi.commits.should eq(0)
+    hi.status.should_not be_nil
+
+    valid = ExtractRuleOverlay.new(name: "SESSION", selector: "sid")
+    hv = OverlayHarness.new(valid, commit: false)
+    valid.set_selected(ExtractRuleOverlay::ROW_SAVE)
+    hv.press(Termisu::Input::Key::Space).should eq(:open)
+    hv.commits.should eq(1) # apply_extract_rule DID run — it just returned false
   end
 end
 

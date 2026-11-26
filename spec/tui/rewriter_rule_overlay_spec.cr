@@ -299,14 +299,21 @@ describe "Gori::Tui::RewriterRuleOverlay — Overlay seam" do
     saved.should eq([{"strip-csp", "secret", "REDACTED"}])
   end
 
-  it "keeps the form open when the controller rejects it (empty pattern)" do
-    ov = RewriterRuleOverlay.adding
-    ov.valid?.should be_false
-    h = OverlayHarness.new(ov, commit: false)
-    ov.set_selected(RewriterRuleOverlay::ROW_SAVE)
-    # Space on Save: ↵ stops at the form first (`FormOverlay#commit_blocker`).
-    h.press(Termisu::Input::Key::Space).should eq(:open)
-    h.commits.should eq(1) # apply_rewriter_rule DID run — it just returned false
+  it "blocks an invalid form at commit_blocker on Space, and stays open when the controller rejects a valid one" do
+    invalid = RewriterRuleOverlay.adding
+    invalid.valid?.should be_false
+    hi = OverlayHarness.new(invalid, commit: false)
+    invalid.set_selected(RewriterRuleOverlay::ROW_SAVE)
+    hi.press(Termisu::Input::Key::Space).should eq(:open)
+    hi.commits.should eq(0)
+    hi.status.should_not be_nil
+
+    valid = RewriterRuleOverlay.new(pattern: "secret")
+    valid.valid?.should be_true
+    hv = OverlayHarness.new(valid, commit: false)
+    valid.set_selected(RewriterRuleOverlay::ROW_SAVE)
+    hv.press(Termisu::Input::Key::Space).should eq(:open)
+    hv.commits.should eq(1) # apply_rewriter_rule DID run — it just returned false
   end
 
   it "esc cancels and a click-away dismisses — neither persists anything" do
@@ -321,7 +328,7 @@ describe "Gori::Tui::RewriterRuleOverlay — Overlay seam" do
   end
 
   it "click selects a row, and a click on Save commits" do
-    ov = RewriterRuleOverlay.adding
+    ov = RewriterRuleOverlay.new(pattern: "secret")
     h = OverlayHarness.new(ov)
     # Rows start at box.y + 2, so row i sits at y = i + 2.
     h.click_in_box(3, RewriterRuleOverlay::ROW_OP + 2).should eq(:open)

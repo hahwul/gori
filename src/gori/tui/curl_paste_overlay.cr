@@ -165,7 +165,7 @@ module Gori::Tui
       Frame.card(screen, box, title, bg: Theme.bg, border: Theme.border_focus)
       statusy = box.bottom - 2
       editor = editor_rect(box)
-      if @editor.line_count == 1 && @editor.text.empty?
+      if @editor.empty_for_placeholder?
         screen.text(editor.x, editor.y, "curl 'https://api.example.com/v1/items' \\", Theme.muted, Theme.bg, width: editor.w)
         screen.text(editor.x, editor.y + 1, "  -H 'Authorization: Bearer …' \\", Theme.muted, Theme.bg, width: editor.w) if editor.h > 1
         screen.text(editor.x, editor.y + 2, "  --data-raw '{\"a\":1}'", Theme.muted, Theme.bg, width: editor.w) if editor.h > 2

@@ -413,14 +413,15 @@ module Gori::Tui
       x = box.x + 3
       if i < @seed.applicable.size
         loc = @seed.applicable[i]
-        draw_check(screen, x, py, bg, sel, @checked[loc]? || false, "#{loc.label} mining")
+        draw_check(screen, x, py, box.right - 2, bg, sel, @checked[loc]? || false, "#{loc.label} mining")
       elsif i == keepalive_row
-        draw_check(screen, x, py, bg, sel, @keep_alive, "reuse connections (keep-alive)")
+        draw_check(screen, x, py, box.right - 2, bg, sel, @keep_alive, "reuse connections (keep-alive)")
       elsif i == cachebuster_row
-        draw_check(screen, x, py, bg, sel, @cachebuster, "cache-buster (avoid poisoning shared caches)")
+        draw_check(screen, x, py, box.right - 2, bg, sel, @cachebuster, "cache-buster (avoid poisoning shared caches)")
       elsif i == start_row
         label = any_checked? ? (reconfiguring? ? "[ Apply to session ]" : "[ Start mining ]") : "[ select a location ]"
-        screen.text(x, py, label, any_checked? ? Theme.accent : Theme.muted, bg, Attribute::Bold)
+        screen.text(x, py, label, any_checked? ? Theme.accent : Theme.muted, bg, Attribute::Bold,
+          width: {box.right - 2 - x, 1}.max)
       elsif inert_macro_row?(i)
         screen.text(x, py, inert_macro_text(i), Theme.muted, bg, width: box.right - 2 - x)
       else
@@ -447,10 +448,10 @@ module Gori::Tui
 
     # One ␣-toggled checkbox row — the location rows and the keep-alive row are the same
     # widget, so they draw through the same three lines rather than two copies of them.
-    private def draw_check(screen : Screen, x : Int32, py : Int32, bg : Color,
+    private def draw_check(screen : Screen, x : Int32, py : Int32, right : Int32, bg : Color,
                            sel : Bool, on : Bool, label : String) : Nil
       screen.text(x, py, on ? "[x]" : "[ ]", on ? Theme.green : Theme.muted, bg)
-      screen.text(x + 4, py, label, sel ? Theme.text_bright : Theme.text, bg)
+      screen.text(x + 4, py, label, sel ? Theme.text_bright : Theme.text, bg, width: {right - (x + 4), 1}.max)
     end
 
     # The three ←/→-cycled rows, split out of draw_row so adding a knob does not keep

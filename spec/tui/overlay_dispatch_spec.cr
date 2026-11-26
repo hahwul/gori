@@ -568,13 +568,18 @@ describe "FormOverlay — ↵ on a form that cannot save" do
     h.commits.should eq(1)
   end
 
-  it "leaves a key other than ↵ that commits as it was" do
+  it "blocks Space on Save and mouse Save clicks through commit_blocker too" do
     ov = ScopeRuleOverlay.adding
     ov.set_selected(3)
     h = OverlayHarness.new(ov, commit: false)
     h.press(Termisu::Input::Key::Space).should eq(:open)
-    h.commits.should eq(1)
-    h.status.should be_nil
+    h.commits.should eq(0)
+    h.status.not_nil!.should contain("not saved")
+
+    h2 = OverlayHarness.new(ScopeRuleOverlay.adding, commit: false)
+    h2.click_in_box(3, 3 + 2).should eq(:open)
+    h2.commits.should eq(0)
+    h2.status.not_nil!.should contain("not saved")
   end
 end
 
