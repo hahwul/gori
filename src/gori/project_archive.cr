@@ -1226,7 +1226,19 @@ module Gori
       "ws_messages"        => %w[opcode],
     }
 
-    STRING_ONLY_TABLES = %w[flows scope_rules]
+    # The TEXT-affinity columns that may hold a BLOB: the store reads each one through
+    # `CAST(… AS BLOB)` (`RepeaterSessions::REQUEST_COL`, `FuzzSessions::TEMPLATE_COL`,
+    # `Store#match_rules`, `ISSUE_NOTES_COL`, `RETEST_ASSERTION_COL`), and `insert_repeater`
+    # binds the repeater's request as Bytes. Every other TEXT column is read with
+    # `rs.read(String)`. A new byte-carrying TEXT column read through a cast joins this list.
+    BLOB_TEXT_COLUMNS = {
+      "repeaters"              => %w[request],
+      "fuzz_sessions"          => %w[template],
+      "match_rules"            => %w[pattern replacement],
+      "issues"                 => %w[notes],
+      "issue_retest_steps"     => %w[assertion],
+      "issue_retest_run_steps" => %w[assertion],
+    }
 
     # gori binds only integers (or NULL) into an INTEGER column, and the store reads every one
     # of them with a typed read that raises `DB::ColumnTypeMismatchError` on anything else. So
@@ -1243,14 +1255,13 @@ module Gori
           check = "typeof(#{col}) NOT IN ('integer', 'null')"
           narrow.includes?(column) ? "#{check} OR #{col} NOT BETWEEN #{Int32::MIN} AND #{Int32::MAX}" : check
         end
-        # A BLOB in a TEXT-affinity column is stored as-is and `rs.read(String)` raises on it.
-        # Only tables whose TEXT columns the store always binds as Strings: elsewhere (a
-        # repeater's `request`) gori itself binds bytes into a TEXT column.
-        if STRING_ONLY_TABLES.includes?(table)
-          checks += conn.query_all("SELECT name FROM pragma_table_info(?) WHERE instr(upper(type), 'INT') = 0 " \
-                                   "AND (instr(upper(type), 'CHAR') > 0 OR instr(upper(type), 'TEXT') > 0)",
-            table, as: String).map { |column| "typeof(#{quote_ident(column)}) NOT IN ('text', 'null')" }
-        end
+        # A BLOB in a TEXT-affinity column is stored as-is and `rs.read(String)` raises on it,
+        # which left a project whose open (`Store#color_rules`, the session-slots setting)
+        # raised forever. Every TEXT column but the ones read through a cast (`BLOB_TEXT_COLUMNS`).
+        blob_ok = BLOB_TEXT_COLUMNS[table]? || [] of String
+        checks += conn.query_all("SELECT name FROM pragma_table_info(?) WHERE instr(upper(type), 'INT') = 0 " \
+                                 "AND (instr(upper(type), 'CHAR') > 0 OR instr(upper(type), 'TEXT') > 0)",
+          table, as: String).reject(&.in?(blob_ok)).map { |column| "typeof(#{quote_ident(column)}) NOT IN ('text', 'null')" }
         next if checks.empty?
         next unless conn.query_one?("SELECT 1 FROM #{quote_ident(table)} WHERE #{checks.join(" OR ")} LIMIT 1", as: Int64)
         raise Gori::Error.new("project archive database has a value gori never writes in #{table.inspect}; refusing to import it")

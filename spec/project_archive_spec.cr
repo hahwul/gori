@@ -1137,6 +1137,45 @@ describe Gori::ProjectArchive do
     end
   end
 
+  # `Colormarker.load` and `SessionSlots.load` read these TEXT cells with `rs.read(String)` on
+  # every project open, so a BLOB there imported fine and then left the project unopenable.
+  it "refuses an archive with a BLOB in a TEXT column the store reads as a String" do
+    with_archive_project do |_registry, project, store, root|
+      store.insert_flow(archive_request("/a"))
+      store.flush
+      archive_path = export_archive(project, File.join(root, "blob-text.gori"))
+      original = File.read(archive_path)
+      {
+        "color_rules" => "INSERT INTO color_rules (enabled, match_filter, color, position) " \
+                         "VALUES (1, CAST('status:500' AS BLOB), 'red', 0)",
+        "settings" => "INSERT OR REPLACE INTO settings (key, value) " \
+                      "VALUES ('#{Gori::Store::SESSION_SLOTS_KEY}', CAST('[]' AS BLOB))",
+        "saved_views" => "INSERT INTO saved_views (name, query) VALUES (CAST('v' AS BLOB), 'q')",
+      }.each do |table, statement|
+        File.write(archive_path, original)
+        tamper_archive_database(archive_path, root) { |conn| conn.exec(statement) }
+        error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+        error.message.not_nil!.should contain(%(never writes in "#{table}"))
+      end
+    end
+  end
+
+  # The columns the store reads through `CAST(… AS BLOB)` hold bytes gori writes itself.
+  it "imports BLOB cells in the TEXT columns the store reads as bytes" do
+    with_archive_project do |_registry, project, store, root|
+      store.insert_flow(archive_request("/a"))
+      store.insert_repeater("https://archive.test/", "GET / HTTP/1.1\r\nHost: archive.test\r\n\r\n\0".to_slice, false, true, nil, 0)
+      store.flush
+      archive_path = export_archive(project, File.join(root, "blob-ok.gori"))
+      tamper_archive_database(archive_path, root) do |conn|
+        conn.exec("INSERT INTO match_rules (target, part, pattern, replacement, op, enabled, position) " \
+                  "VALUES ('request', 'head', CAST('a' AS BLOB), CAST('b' AS BLOB), 'replace', 1, 0)")
+        conn.exec("INSERT INTO issues (created_at, updated_at, title, severity, notes) VALUES (1, 1, 't', 0, CAST('n' AS BLOB))")
+      end
+      Gori::ProjectArchive.prepare_import(archive_path).close
+    end
+  end
+
   # SQLite gives INTEGER affinity to any declared type containing "INT", and a table rebuilt
   # with CREATE TABLE … AS SELECT declares its integer columns `INT`, not `INTEGER`. A table
   # with no `id` column, so the primary-key check below does not answer first.
