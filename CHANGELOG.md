@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- MCP / TUI: Preferences › AI › MCP features has a checkbox per workbench tab, so `gori mcp` can leave out the tabs an agent does not need while capture, project, scope and operator tools stay served (#2030).
+- MCP / TUI: Preferences › AI › MCP features has a checkbox per workbench tab, so `gori mcp` can leave out the tabs an agent does not need while capture, project, scope and operator tools stay served; its prompts say which tabs and permission groups are off (#2030, #2031).
 
 - TUI: a response with one very long grapheme cluster (an emoji ZWJ chain or a run of joiners), `\uXXXX` decoding with `u`, a selection tint on a long non-ASCII line, a WebSocket frame packed with empty SignalR records, or a Sitemap folding thousands of query paths no longer freezes gori for seconds to hours; every hidden character is still revealed (#2029).
 
@@ -118,7 +118,7 @@
 
 - Probe: the request-smuggling rule adds the 0.CL-by-`Expect: 100-continue` desync (plain and obfuscated) as a High timing lead, sent as a complete POST so a conformant server answers fast and only a front-end/back-end split hangs; still off by default and behind unsafe (#1945).
 
-- Import GraphQL introspection JSON (`data.__schema` or top-level `__schema`) into unsent POST templates, one per query or mutation, with typed variables and bounded selections from the TUI, CLI and MCP; subscriptions are omitted with a count (#1948).
+- Import GraphQL introspection JSON (`data.__schema` or top-level `__schema`) into unsent POST templates, one per query or mutation, with typed variables and bounded selections from the TUI, CLI and MCP; subscriptions are omitted with a count, and a skipped operation is named in the import notes (#1948, #2031).
 
 - GraphQL upload previews find the multipart boundary among adjacent media type parameters (#1968)
 
