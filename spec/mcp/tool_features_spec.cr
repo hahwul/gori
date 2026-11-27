@@ -80,7 +80,7 @@ describe "MCP tool features" do
 
   # A turned-off feature must not leave a served tool whose workflow depends on one of its
   # tools. `get_current_context` is the one Core hub that points at whatever tab the TUI is
-  # viewing and adapts its `selection_next_call` to `serves?`.
+  # viewing and adapts its `selection_next_call` and its description to `serves?`.
   it "never splits a declared workflow across two features" do
     Gori::MCP::Tools::TOOL_DEPENDENCIES.each do |name, deps|
       next if name == "get_current_context"
