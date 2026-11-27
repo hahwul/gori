@@ -197,6 +197,33 @@ describe Gori::Import::Graphql do
     result.notes.join.should contain("generated nodes")
   end
 
+  it "validates each input object once, not once per visit" do
+    # A 15-deep LIST chain on every leaf field, reached through 64×64 nullable input fields:
+    # re-validated per visit this was ~650k name checks per operation before the node budget
+    # threw it away, ~200 ms of a blocked scheduler each (P6).
+    deep = %({"kind":"SCALAR","name":"String"})
+    15.times { deep = %({"kind":"LIST","name":null,"ofType":#{deep}}) }
+    input = ->(n : String, ref : String) do
+      JSON.parse(%({"kind":"INPUT_OBJECT","name":"#{n}","inputFields":[#{(0...64).map { |i| %({"name":"f#{i}","type":#{ref}}) }.join(",")}]}))
+    end
+    doc = schema_doc
+    types = gql_types(doc)
+    types << input.call("DeepC", deep)
+    types << input.call("DeepB", %({"kind":"INPUT_OBJECT","name":"DeepC"}))
+    types << input.call("DeepA", %({"kind":"INPUT_OBJECT","name":"DeepB"}))
+    fields = types[5]["fields"].as_a
+    fields.clear
+    24.times { |i| fields << JSON.parse(%({"name":"q#{i}","args":[{"name":"x","type":{"kind":"INPUT_OBJECT","name":"DeepA"}}],"type":{"kind":"SCALAR","name":"String"}})) }
+    doc["data"]["__schema"].as_h["mutationType"] = JSON::Any.new(nil)
+    started = Time.instant
+    result = parse_graphql(doc)
+    elapsed = Time.instant - started
+    result.skipped.should eq(24)
+    result.notes.join.should contain("generated nodes")
+    # Main spent ~200 ms per operation here (~5 s); memoized it is tens of ms in all.
+    elapsed.should be < 2.seconds
+  end
+
   it "limits acyclic output expansion by depth" do
     doc = schema_doc
     types = gql_types(doc)

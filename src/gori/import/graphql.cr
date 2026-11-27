@@ -39,7 +39,16 @@ module Gori::Import
     end
 
     private class Generator
+      # One INPUT_OBJECT's fields as `input_sample` reads them, validated once per schema: the
+      # valid prefix, then the refusal that ended it (if any), which `input_sample` raises after
+      # sampling that prefix, exactly where an inline walk would. Without it every visit re-walked
+      # each field's 16-level wrapper chain, and a cut nullable field charges no node, so one
+      # operation could do ~650k name checks before the budget threw it away (P6).
+      private record InputField, name : String, ref : JSON::Any?, leaf : String, nullable : Bool
+      private record InputShape, fields : Array(InputField), error : String?
+
       @types = {} of String => JSON::Any
+      @inputs = {} of String => InputShape
       @left = MAX_NODES
 
       def initialize(@schema : JSON::Any)
@@ -201,19 +210,38 @@ module Gori::Import
 
       private def input_sample(type : JSON::Any, n : String, chain : Array(String), depth : Int32) : JSON::Any
         raise Gori::Error.new("GraphQL required input cycle/depth at #{n}") if chain.includes?(n) || depth >= MAX_DEPTH
+        shape = input_shape(type, n)
         values = {} of String => JSON::Any
-        list(type, "inputFields", MAX_ARGS).each do |field|
-          f = name(field)
-          raise Gori::Error.new("duplicate GraphQL input field #{f}") if values.has_key?(f)
-          ref = Graphql.at(field, "type")
-          input_type!(ref)
+        shape.fields.each do |field|
           # Nullable recursion can stop at null; non-null recursion cannot produce a valid seed.
-          leaf = named(ref)
-          cut = chain.includes?(name(leaf)) || name(leaf) == n || depth + 1 >= MAX_DEPTH
-          nullable = Graphql.at(ref, "kind").try(&.as_s?) != "NON_NULL"
-          values[f] = nullable && cut ? JSON::Any.new(nil) : sample(ref, f, chain + [n], depth + 1)
+          cut = chain.includes?(field.leaf) || field.leaf == n || depth + 1 >= MAX_DEPTH
+          values[field.name] = field.nullable && cut ? JSON::Any.new(nil) : sample(field.ref, field.name, chain + [n], depth + 1)
         end
+        shape.error.try { |why| raise Gori::Error.new(why) }
         JSON::Any.new(values)
+      end
+
+      private def input_shape(type : JSON::Any, n : String) : InputShape
+        @inputs[n] ||= begin
+          fields = [] of InputField
+          seen = Set(String).new
+          error = nil
+          begin
+            list(type, "inputFields", MAX_ARGS).each do |field|
+              f = name(field)
+              raise Gori::Error.new("duplicate GraphQL input field #{f}") unless seen.add?(f)
+              ref = Graphql.at(field, "type")
+              input_type!(ref)
+              nullable = Graphql.at(ref, "kind").try(&.as_s?) != "NON_NULL"
+              fields << InputField.new(f, ref, name(named(ref)), nullable)
+            end
+          rescue ex : Gori::Error
+            error = ex.message || "invalid GraphQL input object #{n}"
+          end
+          # Each shape is built once, but one operation can reach many new ones.
+          Fiber.yield
+          InputShape.new(fields, error)
+        end
       end
 
       private def requires_arguments?(field : JSON::Any) : Bool
