@@ -70,6 +70,8 @@ module Gori
         @dead = false
         @session = nil.as(Session?)
         @rotation_warned = false
+        @written = nil.as(File::Info?)
+        @written_end = 0_i64
       end
 
       # Whether the session line is out. The server asks before each event so the line is
@@ -85,22 +87,24 @@ module Gori
       end
 
       private def session_line(s : Session) : Nil
-        write("s") do |j|
-          j.field "gori", Gori::VERSION
-          if client = UsageLog.clean(s.client, CLIENT_MAX)
-            j.field "client", client
-          end
-          if version = UsageLog.clean(s.client_version, CLIENT_MAX)
-            j.field "client_version", version
-          end
-          if tools = UsageLog.clean(s.tools, SPEC_MAX + 1)
-            j.field "tools", tools.size > SPEC_MAX ? SPEC_TOO_LONG : tools
-          end
-          j.field "advertised", s.advertised
-          j.field "read_only", s.read_only
-          j.field "denied", s.denied unless s.denied.empty?
-          j.field "disabled_features", s.disabled_features unless s.disabled_features.empty?
+        write("s") { |j| session_fields(j, s) }
+      end
+
+      private def session_fields(j : JSON::Builder, s : Session) : Nil
+        j.field "gori", Gori::VERSION
+        if client = UsageLog.clean(s.client, CLIENT_MAX)
+          j.field "client", client
         end
+        if version = UsageLog.clean(s.client_version, CLIENT_MAX)
+          j.field "client_version", version
+        end
+        if tools = UsageLog.clean(s.tools, SPEC_MAX + 1)
+          j.field "tools", tools.size > SPEC_MAX ? SPEC_TOO_LONG : tools
+        end
+        j.field "advertised", s.advertised
+        j.field "read_only", s.read_only
+        j.field "denied", s.denied unless s.denied.empty?
+        j.field "disabled_features", s.disabled_features unless s.disabled_features.empty?
       end
 
       # A `tools/list` answer: what the catalogue cost this session before a question was asked.
@@ -187,18 +191,29 @@ module Gori
       # server's rotation never leaves this one appending to a file that has been renamed
       # away, and a line is on disk before the next call starts. One `write(2)` under
       # `O_APPEND` per line, which is what keeps several servers' lines whole in one file.
+      #
+      # The session line goes again in front of this session's first line in a file it has
+      # not written to before: one rotated by this server or by ANY other sharing the path,
+      # or removed by hand. Only one server wins a rotation, so a session that left it to the
+      # rotator would keep appending lines that name no client, and lose its client and
+      # profile once the NEXT rotation replaced the only file that named it. The check is on
+      # the descriptor being written, so a rename between a `stat` and this `open` cannot
+      # slip past it.
       private def write(kind : String, & : JSON::Builder ->) : Nil
         return if @dead
-        line = JSON.build do |j|
-          j.object do
-            j.field "t", kind
-            j.field "at", @clock.call.to_unix
-            j.field "sid", @sid
-            yield j
-          end
-        end
+        line = entry(kind) { |j| yield j }
         Dir.mkdir_p(File.dirname(@path))
-        File.open(@path, "a", perm: 0o600, &.print("#{line}\n"))
+        File.open(@path, "a", perm: 0o600) do |file|
+          now = file.info
+          session = @session
+          if kind != "s" && session && moved?(now)
+            line = "#{entry("s") { |j| session_fields(j, session) }}\n#{line}"
+          end
+          file.print("#{line}\n")
+          file.flush
+          @written = now
+          @written_end = now.size + line.bytesize + 1
+        end
       rescue ex
         # Everything, not `IO::Error` alone: this runs inside a tool call's handler, and an
         # exception that escaped it would cost the client the answer to a call that succeeded.
@@ -206,14 +221,34 @@ module Gori
         Log.warn { "usage log switched off for this session: cannot write #{@path} (#{ex.message})" }
       end
 
+      private def entry(kind : String, & : JSON::Builder ->) : String
+        JSON.build do |j|
+          j.object do
+            j.field "t", kind
+            j.field "at", @clock.call.to_unix
+            j.field "sid", @sid
+            yield j
+          end
+        end
+      end
+
+      # Whether `now`, the file about to be appended to, is not the one this session last
+      # wrote: a different file, or the same identity SMALLER than this session left it (a
+      # fresh file that reused a freed inode two rotations on, or one truncated in place).
+      # Not caught: a reused inode other servers already grew past this session's offset. That
+      # takes two rotations with no line from this session between them, and costs only that
+      # file's lines their client name.
+      private def moved?(now : File::Info) : Bool
+        return false unless last = @written
+        !now.same_file?(last) || now.size < @written_end
+      end
+
       # A session that outlives the bound. Asked before every line, at the price of one
       # `stat`: a server an agent keeps for days would otherwise grow the file without limit,
-      # since nothing else looks at its size once the session line is out. The session line
-      # is written again at the head of the fresh file, so this session's later lines are
-      # still that client's after the NEXT rotation has replaced the one that held the first.
+      # since nothing else looks at its size once the session line is out. The fresh file
+      # names this session again at its next line (`write`).
       private def roll : Nil
-        return if @dead || !rotate
-        @session.try { |s| session_line(s) }
+        rotate unless @dead
       end
 
       # Whether the file was moved aside. The size is read again UNDER the lock: a second
