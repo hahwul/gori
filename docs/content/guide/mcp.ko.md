@@ -382,7 +382,7 @@ create_repeaters{flow_ids: [...], name_prefix: "oas: ", tags: "spec"}
 
 각 프롬프트의 이름은 플레이북 페이지 이름과 같고, 선택 인자 `focus` 하나를 받습니다. 시작할 호스트, 경로 또는 flow id이며 그대로 전달됩니다. 본문은 영문 플레이북에서 스크린샷을 빼고 링크를 절대 주소로 바꾼 것이고, 앞에 짧은 머리말이 붙습니다. 머리말은 이 플레이북이 TUI와 `gori run`용으로 쓰였으니 각 단계를 `tools/list`의 도구로 수행하라고 에이전트에게 알립니다. 목록의 어떤 도구로도 할 수 없는 단계는 `ask_operator`가 제공되면 그것으로 운영자에게 넘기고, 아니면 이름만 밝히고 건너뜁니다.
 
-모든 서버가 같은 프롬프트를 나열합니다. `--read-only`나 `--tools` 필터가 걸려 있으면 프롬프트를 숨기는 대신 머리말이 그 사실을 알립니다. [AI 코파일럿 세션 실행](/ko/playbooks/run-an-ai-co-pilot/)은 이 서버를 설치하는 내용이라 제공하지 않습니다.
+모든 서버가 같은 프롬프트를 나열합니다. `--read-only`나 `--tools` 필터가 걸려 있거나 MCP permissions·features에서 끈 항목이 있으면 프롬프트를 숨기는 대신 머리말이 그 사실을 알립니다. [AI 코파일럿 세션 실행](/ko/playbooks/run-an-ai-co-pilot/)은 이 서버를 설치하는 내용이라 제공하지 않습니다.
 
 ## 프로토콜 리비전 {#protocol-revisions}
 

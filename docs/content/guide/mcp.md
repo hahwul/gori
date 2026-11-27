@@ -383,7 +383,7 @@ The [playbooks](/playbooks/) are served as MCP prompts, so a client lists them w
 
 Each prompt is named after its playbook's page and takes one optional argument, `focus`: a host, path or flow id to start from. It is passed on verbatim. The text is the English playbook with its screenshots removed and its links made absolute, after a short preamble. The preamble tells the agent that the playbook was written for the TUI and `gori run`, and to carry each step out with a tool from `tools/list`. A step no listed tool can do goes to you through `ask_operator` when that tool is served, and is otherwise named and skipped.
 
-Every server lists the same prompts. Under `--read-only` or a `--tools` filter, the preamble says so instead of hiding prompts. [Run an AI co-pilot](/playbooks/run-an-ai-co-pilot/) is not served, because it is about installing this server.
+Every server lists the same prompts. Under `--read-only`, a `--tools` filter, or MCP permissions and features you switched off, the preamble says so instead of hiding prompts. [Run an AI co-pilot](/playbooks/run-an-ai-co-pilot/) is not served, because it is about installing this server.
 
 ## Protocol Revisions
 

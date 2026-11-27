@@ -10,7 +10,8 @@ private MODERN_META = %("_meta":{"io.modelcontextprotocol/protocolVersion":"#{Go
 
 # Drives a server over `lines` (after a legacy handshake) and returns the reply to id 7, plus
 # the names `tools/list` carried, so a prompt can be checked against the catalogue it runs on.
-private def prompt_call(store, line : String, *, allow_actions = true, tools : String? = nil) : {JSON::Any, Set(String)}
+private def prompt_call(store, line : String, *, allow_actions = true, tools : String? = nil,
+                        disabled : Set(String)? = nil, denied : Set(String)? = nil) : {JSON::Any, Set(String)}
   filter = tools.try do |sp|
     Gori::MCP::ToolFilter.parse(sp, Gori::MCP::Tools::TOOL_NAMES, Gori::MCP::Tools::TOOL_DEPENDENCIES)
   end
@@ -20,7 +21,8 @@ private def prompt_call(store, line : String, *, allow_actions = true, tools : S
     %({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}) + "\n" + line + "\n")
   output = IO::Memory.new
   Gori::MCP::Server.new(store, allow_actions: allow_actions, verify_upstream: false,
-    tool_filter: filter.as(Gori::MCP::ToolFilter?), input: input, output: output).run
+    tool_filter: filter.as(Gori::MCP::ToolFilter?), disabled_features: disabled,
+    denied_permissions: denied, input: input, output: output).run
   lines = output.to_s.each_line.reject(&.strip.empty?).map { |l| JSON.parse(l) }.to_a
   names = lines.find! { |l| l["id"]? == 2 }["result"]["tools"].as_a.map(&.["name"].as_s).to_set
   {lines.find! { |l| l["id"]? == 7 }, names}
@@ -186,6 +188,24 @@ describe "MCP prompts" do
           preamble.should contain("named and skipped")
         end
       end
+    end
+  end
+
+  # The Preferences switches are facts `instructions` states; a prompt run on such a server
+  # has to state them too, or a playbook whose tab is off reads as a broken gori.
+  it "says which tabs and permission groups the operator turned off" do
+    with_store do |store|
+      resp, listed = prompt_call(store, get_prompt("attack-a-jwt"),
+        disabled: Set{"jwt"}, denied: Set{"send"})
+      preamble = prompt_text(resp).split("\n\n", 2)[0]
+      preamble.should contain("turned off JWT")
+      preamble.should contain("AI › MCP features")
+      preamble.should contain("AI › MCP permissions")
+      named = Gori::MCP::Tools::TOOL_NAMES.select { |n| preamble.matches?(/\b#{Regex.escape(n)}\b/) }.to_set
+      (named - listed).should be_empty, "preamble names #{(named - listed).to_a.join(", ")}"
+
+      plain, _ = prompt_call(store, get_prompt("attack-a-jwt"))
+      prompt_text(plain).split("\n\n", 2)[0].should_not contain("Preferences")
     end
   end
 end

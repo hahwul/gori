@@ -172,6 +172,9 @@ describe "MCP tool features" do
       text, names = feature_instructions(store, Set{"issues", "jwt", "decoder", "repeater", "authorize"})
       text.should contain("turned off Repeater, Decoder, JWT, Authorize, Issues")
       text.should contain("AI › MCP features")
+      # The opening list of what the project data covers follows what is served, rather than
+      # promising issues and then saying the Issues tab is off.
+      text.should contain("(history, flows, sitemap, scope, notes, match&replace rules)")
       %w[send_request send_websocket create_issue update_issue decode jwt_decode cache_deception_check].each do |tool_name|
         names.should_not contain(tool_name)
         text.should_not match(/\b#{Regex.escape(tool_name)}\b/)
