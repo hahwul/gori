@@ -71,9 +71,10 @@ module Gori
       # back as the error `Result`.
       private def import_source(h, kind : Symbol, kind_s : String) : Import::Result | Result
         path = path_str(h, "path").try(&.strip).presence
-        # Blank is absent, as `path` above: a client filling every property sends `text: ""`.
+        # Blank is absent, as `path` above: a client filling every property sends `text: ""`
+        # and `endpoint: ""`, whatever the kind.
         text = str(h, "text").presence
-        endpoint = str(h, "endpoint")
+        endpoint = str(h, "endpoint").presence
         return err("endpoint applies only to GraphQL imports", "INVALID_ARGUMENT", field: "endpoint") if endpoint && kind != :graphql
         return err("pass 'path' or 'text', not both", "INVALID_ARGUMENT", field: "text") if text && path
         return Import.import_text(store, kind, text, Gori::FlowSource::Surface::Mcp, endpoint: endpoint) if text
