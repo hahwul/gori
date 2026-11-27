@@ -1036,6 +1036,47 @@ describe SettingsView do
     end
   end
 
+  it "edits MCP features as inline checkboxes, preserves unknown keys and resets to all on" do
+    dir = File.tempname("gori-settings-mcp-features")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev = Gori::Settings.mcp_disabled_features
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.mcp_disabled_features = Set{"future"}
+      v = SettingsView.new
+      v.reload(:mcp_features)
+      backend = MemoryBackend.new(140, 30)
+      v.render(Screen.new(backend), Rect.new(0, 0, 140, 30))
+      Gori::Settings::MCP_FEATURES.each { |feat| backend.contains?(feat.title).should be_true }
+      backend.contains?("[✓] on").should be_true
+
+      jwt_idx = Gori::Settings::MCP_FEATURES.index!(&.key.==("jwt"))
+      issues_idx = Gori::Settings::MCP_FEATURES.index!(&.key.==("issues"))
+      v.set_field(jwt_idx)
+      v.insert(' ') # space toggles checkbox off
+      v.set_field(issues_idx)
+      v.toggle_or_move(1) # arrow toggles checkbox off
+      v.render(Screen.new(backend), Rect.new(0, 0, 140, 30))
+      backend.contains?("[ ] off").should be_true
+
+      v.save
+      Gori::Settings.mcp_feature_enabled?("jwt").should be_false
+      Gori::Settings.mcp_feature_enabled?("issues").should be_false
+      Gori::Settings.mcp_feature_enabled?("target").should be_true
+      Gori::Settings.mcp_feature_enabled?("future").should be_false
+
+      v.reset_to_defaults
+      v.save
+      Gori::Settings::MCP_FEATURES.all? { |feat| Gori::Settings.mcp_feature_enabled?(feat.key) }.should be_true
+      Gori::Settings.mcp_feature_enabled?("future").should be_false
+    ensure
+      Gori::Settings.mcp_disabled_features = prev
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+    end
+  end
+
   # Preferences › Network edits the GLOBAL bind, so a `-p` run or a project pin listens
   # elsewhere; the row says so under the Project pane's rule (`Settings.bind_run_note`).
   it "notes the port this run listens on beside the global Bind rows" do

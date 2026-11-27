@@ -18,7 +18,7 @@ module Gori
 
       FREEZE_SOURCES = [Store::LinkRefKind::Flow, Store::LinkRefKind::Repeater].map(&.label)
 
-      @[Tool("freeze_evidence", gated: true, agent_action: true, permission: "write", open_world: false, destructive: false)]
+      @[Tool("freeze_evidence", gated: true, agent_action: true, permission: "write", open_world: false, destructive: false, feature: "evidence")]
       private def freeze_evidence(h) : Result
         issue_id = required_id(h, "issue_id")
         return not_found("no issue with id #{issue_id}") unless store.get_issue(issue_id)
@@ -77,7 +77,7 @@ module Gori
       # Evidence tab shows, newest first — which is the only listing that can name an
       # ORPHAN (a snapshot whose last issue link was removed, or whose issue was deleted).
       # Scoping the only listing to an issue would make those copies unfindable by id alone.
-      @[Tool("list_evidence")]
+      @[Tool("list_evidence", feature: "evidence")]
       private def list_evidence(h) : Result
         issue_id = int(h, "issue_id")
         return Result.new(id_error(h, "issue_id"), is_error: true) if issue_id.nil? && present?(h, "issue_id")
@@ -102,7 +102,7 @@ module Gori
         end)
       end
 
-      @[Tool("get_evidence")]
+      @[Tool("get_evidence", feature: "evidence")]
       private def get_evidence(h) : Result
         id = required_id(h, "id")
         ev = store.get_evidence(id)
@@ -127,7 +127,7 @@ module Gori
         {clean, Serialize::RedactionNote.new(matcher.profile.name, count, 0, decoded)}
       end
 
-      @[Tool("delete_evidence", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("delete_evidence", gated: true, agent_action: true, permission: "write", open_world: false, feature: "evidence")]
       private def delete_evidence(h) : Result
         id = required_id(h, "id")
         meta = store.get_evidence_meta(id)
@@ -136,7 +136,7 @@ module Gori
         Result.new({"deleted" => true, "id" => id, "issue_ids" => meta.issue_ids}.to_json)
       end
 
-      @[Tool("link_evidence", gated: true, agent_action: true, permission: "write", open_world: false, destructive: false)]
+      @[Tool("link_evidence", gated: true, agent_action: true, permission: "write", open_world: false, destructive: false, feature: "evidence")]
       private def link_evidence(h) : Result
         id = required_id(h, "id")
         issue_id = required_id(h, "issue_id")
@@ -149,7 +149,7 @@ module Gori
         Result.new({"linked" => true, "id" => id, "issue_id" => issue_id, "already_linked" => already}.to_json)
       end
 
-      @[Tool("unlink_evidence", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("unlink_evidence", gated: true, agent_action: true, permission: "write", open_world: false, feature: "evidence")]
       private def unlink_evidence(h) : Result
         id = required_id(h, "id")
         issue_id = required_id(h, "issue_id")

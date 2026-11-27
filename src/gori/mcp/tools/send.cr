@@ -26,7 +26,7 @@ module Gori
     class Tools
       # --- action / write tools (gated) ---------------------------------------
 
-      @[Tool("send_request", gated: true, agent_action: true, env_refresh: true, permission: "send")]
+      @[Tool("send_request", gated: true, agent_action: true, env_refresh: true, permission: "send", feature: "repeater")]
       private def send_request(h) : Result
         return err("request cancelled", "CANCELLED") if cancelled?
         # FIRST, ahead of every other read: the one refusal whose entire value is its
@@ -206,7 +206,7 @@ module Gori
       # `repeater.send-race`; the first multi-request send tool on MCP (`send_request` is one
       # request). All members must resolve to ONE origin and share the transport.
       @[Tool("race_requests", gated: true, agent_action: true, env_refresh: true,
-        requires: ["get_job", "stop_job"], permission: "send")]
+        requires: ["get_job", "stop_job"], permission: "send", feature: "repeater")]
       private def race_requests(h) : Result
         members = race_member_ids(h)
         return members if members.is_a?(Result)
@@ -433,7 +433,7 @@ module Gori
       end
 
       @[Tool("timing_requests", gated: true, agent_action: true, env_refresh: true,
-        requires: ["get_job", "stop_job"], permission: "send")]
+        requires: ["get_job", "stop_job"], permission: "send", feature: "repeater")]
       private def timing_requests(h) : Result
         members = timing_member_ids(h)
         return members if members.is_a?(Result)
@@ -1213,7 +1213,7 @@ module Gori
       # `WsEngine`'s framed message exchange and therefore returns the inbound transcript
       # instead of stopping at the handshake's own response — the 101 of an RFC 6455 upgrade,
       # or the 2xx of an RFC 8441 extended CONNECT (#733).
-      @[Tool("send_websocket", gated: true, agent_action: true, env_refresh: true, permission: "send")]
+      @[Tool("send_websocket", gated: true, agent_action: true, env_refresh: true, permission: "send", feature: "repeater")]
       private def send_websocket(h) : Result
         return err("request cancelled", "CANCELLED") if cancelled?
         found = ws_repeater(h)

@@ -142,8 +142,8 @@ module Gori
             {% raise "#{m.name}: @[Tool] takes the tool name as its one positional argument" %}
           {% end %}
           {% for key in ann.named_args.keys %}
-            {% unless %w[gated agent_action env_refresh unbound read_only requires permission open_world destructive idempotent].includes?(key.stringify) %}
-              {% raise "#{m.name}: unknown @[Tool] flag '#{key}' — allowed: gated, agent_action, env_refresh, unbound, read_only, requires, permission, open_world, destructive, idempotent" %}
+            {% unless %w[gated agent_action env_refresh unbound read_only requires permission feature open_world destructive idempotent].includes?(key.stringify) %}
+              {% raise "#{m.name}: unknown @[Tool] flag '#{key}' — allowed: gated, agent_action, env_refresh, unbound, read_only, requires, permission, feature, open_world, destructive, idempotent" %}
             {% end %}
           {% end %}
           # The three hint flags spell only the NON-default answer: unstated is the MCP spec's
@@ -168,6 +168,11 @@ module Gori
             {% end %}
           {% elsif ann[:agent_action] %}
             {% raise "#{m.name}: @[Tool] agent_action needs a `permission:` group — an agent action is a mutation or an outbound send, and the operator's Preferences switch for it has to reach it" %}
+          {% end %}
+          {% if ann.named_args.keys.map(&.stringify).includes?("feature") %}
+            {% unless Gori::Settings::MCP_FEATURE_KEYS.includes?(ann[:feature]) %}
+              {% raise "#{m.name}: @[Tool] feature: must be one of #{Gori::Settings::MCP_FEATURE_KEYS}" %}
+            {% end %}
           {% end %}
           {% if ann.named_args.keys.map(&.stringify).includes?("requires") %}
             {% unless ann[:requires].is_a?(ArrayLiteral) && !ann[:requires].empty? %}
@@ -230,6 +235,17 @@ module Gori
             {% ann = m.annotation(Tool) %}
             {% if ann.named_args.keys.map(&.stringify).includes?("permission") %}
               {{ ann[0] }} => {{ ann[:permission] }},
+            {% end %}
+          {% end %}
+        } of String => String
+
+        # tool name → the Preferences feature switch (`Settings::MCP_FEATURES` key) that exposes
+        # it (`feature:`). A tool absent here is Core and stays exposed.
+        TOOL_FEATURES = {
+          {% for m in tools %}
+            {% ann = m.annotation(Tool) %}
+            {% if ann.named_args.keys.map(&.stringify).includes?("feature") %}
+              {{ ann[0] }} => {{ ann[:feature] }},
             {% end %}
           {% end %}
         } of String => String
@@ -402,11 +418,13 @@ module Gori
                      @db_path : String? = nil, @selection_source : String? = nil,
                      @workspace_root : String? = nil, @project_id : String? = nil,
                      @bind_error : String? = nil, @tool_filter : ToolFilter? = nil,
-                     denied_permissions : Set(String)? = nil, asked_permissions : Set(String)? = nil)
+                     denied_permissions : Set(String)? = nil, asked_permissions : Set(String)? = nil,
+                     disabled_features : Set(String)? = nil)
         # A copy, never the caller's set: a later mutation there must not reach this server.
         @denied_permissions = denied_permissions.try(&.dup) || Set(String).new
         # Never both: a group the operator switched off is off, whatever else asked for it.
         @asked_permissions = (asked_permissions.try(&.dup) || Set(String).new) - @denied_permissions
+        @disabled_features = disabled_features.try(&.dup) || Set(String).new
         @permission_denial_log_db_path = @db_path
         @permission_denials_logged = Set({String, String}).new
         # The binding table (#501) is built ONCE per bound project and kept, not rebuilt per
@@ -555,7 +573,8 @@ module Gori
       # and the operator's Preferences switches, neither of which a restart without
       # --read-only reverses. Every other reader wants `serves?` below.
       def advertises?(name : String) : Bool
-        ((f = @tool_filter).nil? || f.allows?(name)) && denied_permission(name).nil?
+        ((f = @tool_filter).nil? || f.allows?(name)) && denied_permission(name).nil? &&
+          disabled_feature(name).nil?
       end
 
       # The Preferences permission group (`Settings::MCP_PERMISSIONS` key) that withholds
@@ -569,9 +588,26 @@ module Gori
         (key = TOOL_PERMISSIONS[name]?) && denied.includes?(key) ? key : nil
       end
 
+      # The Preferences feature (`Settings::MCP_FEATURES` key) that withholds `name` on this
+      # server, or nil when it is enabled (or Core).
+      def disabled_feature(name : String) : String?
+        Tools.disabled_feature(@disabled_features, name)
+      end
+
+      def self.disabled_feature(disabled : Set(String)?, name : String) : String?
+        return nil if disabled.nil? || disabled.empty?
+        (key = TOOL_FEATURES[name]?) && disabled.includes?(key) ? key : nil
+      end
+
       # The groups switched off on this server, in Preferences order — for `instructions`.
       def denied_groups : Array(Settings::McpPermission)
         Settings.mcp_permission_groups(@denied_permissions)
+      end
+
+      # The tab features turned off on this server, in Preferences order — for `instructions`
+      # and `UsageLog`.
+      def disabled_feature_groups : Array(Settings::McpFeature)
+        Settings.mcp_feature_groups(@disabled_features)
       end
 
       # The group that refuses THIS call, or nil. The name decides for almost every tool; the
@@ -617,40 +653,43 @@ module Gori
       # this one: `instructions` used to offer `delete_project` on a read-only server, where
       # it is neither listed nor runnable.
       def serves?(name : String) : Bool
-        Tools.serves?(@tool_filter, @allow_actions, name, @denied_permissions)
+        Tools.serves?(@tool_filter, @allow_actions, name, @denied_permissions, @disabled_features)
       end
 
       # How many tools this server's `tools/list` carries.
       def served_count : Int32
-        Tools.served_names(@tool_filter, @allow_actions, @denied_permissions).size
+        Tools.served_names(@tool_filter, @allow_actions, @denied_permissions, @disabled_features).size
       end
 
       # The ONE home for "is it in tools/list", asked of the two flags rather than of a
       # server: `serves?` above reads it per name, `gori mcp` counts it for the start-up
       # banner and refuses a `--tools` spec that leaves it empty. A second spelling of this
       # rule is how the banner came to promise all 179 tools on a server about to advertise 62.
-      # `denied` is the third reason, the operator's Preferences switches (`denied_permission`).
+      # `denied` is the third reason (MCP permissions), `disabled_features` the fourth (MCP features).
       def self.serves?(filter : ToolFilter?, allow_actions : Bool, name : String,
-                       denied : Set(String)? = nil) : Bool
+                       denied : Set(String)? = nil, disabled_features : Set(String)? = nil) : Bool
         (filter.nil? || filter.allows?(name)) && (allow_actions || !GATED_TOOLS.includes?(name)) &&
-          denied_permission(denied, name).nil?
+          denied_permission(denied, name).nil? && disabled_feature(disabled_features, name).nil?
       end
 
       # …and the whole set of them, in declaration order.
       def self.served_names(filter : ToolFilter?, allow_actions : Bool,
-                            denied : Set(String)? = nil) : Array(String)
-        TOOL_NAMES.select { |name| serves?(filter, allow_actions, name, denied) }
+                            denied : Set(String)? = nil,
+                            disabled_features : Set(String)? = nil) : Array(String)
+        TOOL_NAMES.select { |name| serves?(filter, allow_actions, name, denied, disabled_features) }
       end
 
-      # The `tools` array of `tools/list`, byte for byte, under these two flags — what the
+      # The `tools` array of `tools/list`, byte for byte, under these flags — what the
       # start-up banner weighs and what the guide's catalogue table is checked against
       # (#1137). Built on a detached, storeless instance, which is exact rather than an
       # approximation: the listing may not vary with anything on the connection (the
       # 2026-07-28 MUST that `Tools#list` already keeps), so which project is bound cannot
       # change a byte of it. A storeless `Tools` opens nothing and announces nothing.
       def self.catalogue_json(filter : ToolFilter?, allow_actions : Bool,
-                              denied : Set(String)? = nil) : String
-        tools = new(nil, allow_actions, true, tool_filter: filter, denied_permissions: denied)
+                              denied : Set(String)? = nil,
+                              disabled_features : Set(String)? = nil) : String
+        tools = new(nil, allow_actions, true, tool_filter: filter,
+          denied_permissions: denied, disabled_features: disabled_features)
         JSON.build { |j| tools.list(j) }
       end
 
@@ -664,8 +703,9 @@ module Gori
       # one-tool `--tools` spec used to be reported as "~0 KB", the one line whose job is the
       # cost saying there is none.
       def self.catalogue_weight(filter : ToolFilter?, allow_actions : Bool,
-                                denied : Set(String)? = nil) : String
-        bytes = catalogue_json(filter, allow_actions, denied).bytesize
+                                denied : Set(String)? = nil,
+                                disabled_features : Set(String)? = nil) : String
+        bytes = catalogue_json(filter, allow_actions, denied, disabled_features).bytesize
         kb = catalogue_kb(bytes)
         kb.zero? ? "tools/list #{bytes} bytes" : "tools/list ~#{kb} KB"
       end
@@ -1760,6 +1800,9 @@ module Gori
         if hidden = filtered_out(name)
           return hidden
         end
+        if feat = disabled_feature(name)
+          return feature_disabled(name, feat)
+        end
         # Refused like `--read-only` refuses, and for the same reason it is refused rather
         # than answered: the tool is out of `tools/list`, so `declared_args` has no entry for
         # it and dispatch would run it with every argument unchecked.
@@ -1952,7 +1995,7 @@ module Gori
 
       # Read-only tools (always exposed). nil when `name` isn't one of them.
       # --- OAST (out-of-band) tools ------------------------------------------
-      @[Tool("oast_presets", unbound: true)]
+      @[Tool("oast_presets", unbound: true, feature: "oast")]
       private def oast_presets_tool : Result
         presets = Oast::Presets.all.map { |p| {type: p.kind.label, name: p.name, host: p.host} }
         items_result(presets.to_json)
@@ -1991,7 +2034,7 @@ module Gori
       end
 
       @[Tool("oast_start", gated: true, agent_action: true, unbound: true,
-        requires: ["oast_poll", "oast_payload", "oast_stop", "oast_resume", "list_oast_providers", "list_oast_sessions"], permission: "send")]
+        requires: ["oast_poll", "oast_payload", "oast_stop", "oast_resume", "list_oast_providers", "list_oast_sessions"], permission: "send", feature: "oast")]
       private def oast_start(h) : Result
         # A SAVED provider, by the id list_oast_providers prints. The provider CRUD tools next
         # door exist so an operator can configure a private collaborator once — and until this
@@ -2143,14 +2186,14 @@ module Gori
           "NOT_FOUND", field: "session_id")
       end
 
-      @[Tool("oast_payload", gated: true, unbound: true, permission: "send")]
+      @[Tool("oast_payload", gated: true, unbound: true, permission: "send", feature: "oast")]
       private def oast_payload(h) : Result
         s = oast_session(h)
         return s if s.is_a?(Result)
         Result.new({session_id: str(h, "session_id"), payload_url: s.provider.generate_payload(s.session)}.to_json)
       end
 
-      @[Tool("oast_poll", gated: true, unbound: true, permission: "send")]
+      @[Tool("oast_poll", gated: true, unbound: true, permission: "send", feature: "oast")]
       private def oast_poll(h) : Result
         s = oast_session(h)
         return s if s.is_a?(Result)
@@ -2204,7 +2247,7 @@ module Gori
         end
       end
 
-      @[Tool("oast_stop", gated: true, agent_action: true, unbound: true, requires: ["oast_release"], permission: "send")]
+      @[Tool("oast_stop", gated: true, agent_action: true, unbound: true, requires: ["oast_release"], permission: "send", feature: "oast")]
       private def oast_stop(h) : Result
         s = oast_session(h, delete: true)
         return s if s.is_a?(Result)
@@ -2512,6 +2555,13 @@ module Gori
                end
         err("#{what} is disabled by the operator: \"#{title}\" is switched off in gori " \
             "Preferences › AI › MCP permissions. Ask the operator to allow it; the change applies " \
+            "when this MCP server is started again.", "TOOL_DISABLED")
+      end
+
+      private def feature_disabled(name : String, key : String) : Result
+        title = Settings.mcp_feature(key).try(&.title) || key
+        err("tool '#{name}' is disabled by the operator: \"#{title}\" is turned off in gori " \
+            "Preferences › AI › MCP features. Ask the operator to enable it; the change applies " \
             "when this MCP server is started again.", "TOOL_DISABLED")
       end
 
@@ -3263,6 +3313,7 @@ module Gori
         # matters (see `filtered_out`).
         return if (f = @tool_filter) && !f.allows?(name)
         return if denied_permission(name)
+        return if disabled_feature(name)
         sb = SchemaBuilder.new
         yield sb
         if withheld = @tool_filter.try(&.withheld_args(name))

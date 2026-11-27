@@ -59,7 +59,8 @@ module Gori
       # is everything that decides which tools were in `tools/list`, which is what the report
       # needs to say which of them were never called.
       record Session, client : String?, client_version : String?, tools : String?,
-        advertised : Int32, read_only : Bool, denied : Array(String) = [] of String
+        advertised : Int32, read_only : Bool, denied : Array(String) = [] of String,
+        disabled_features : Array(String) = [] of String
 
       getter path : String
 
@@ -98,6 +99,7 @@ module Gori
           j.field "advertised", s.advertised
           j.field "read_only", s.read_only
           j.field "denied", s.denied unless s.denied.empty?
+          j.field "disabled_features", s.disabled_features unless s.disabled_features.empty?
         end
       end
 
@@ -262,9 +264,9 @@ module Gori
         end
 
         # A served catalogue as a session described it: the `--tools` spec (nil for the whole
-        # catalogue), whether the server was `--read-only`, and the permission groups that
-        # were switched off (sorted).
-        alias Profile = {String?, Bool, Array(String)}
+        # catalogue), whether the server was `--read-only`, the permission groups switched off
+        # (sorted), and the tab features turned off (sorted).
+        alias Profile = {String?, Bool, Array(String), Array(String)}
 
         getter sessions = 0
         # Sessions in the window that never called a tool.
@@ -358,8 +360,9 @@ module Gori
             @clients[meta.try(&.["client"]?).try(&.as_s?) || "(unnamed)"] += 1
             next unless meta
             denied = meta["denied"]?.try(&.as_a?).try(&.compact_map(&.as_s?)) || [] of String
+            disabled_features = meta["disabled_features"]?.try(&.as_a?).try(&.compact_map(&.as_s?)) || [] of String
             profile = {meta["tools"]?.try(&.as_s?), meta["read_only"]?.try(&.as_bool?) || false,
-                       denied.sort!.uniq!}
+                       denied.sort!.uniq!, disabled_features.sort!.uniq!}
             @profiles[profile] += 1
           end
         end

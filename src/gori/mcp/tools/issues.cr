@@ -20,7 +20,7 @@ module Gori
       ISSUE_ITEMS_PREVIEW =  5
       ISSUE_ITEMS_MAX     = 25
 
-      @[Tool("list_issues")]
+      @[Tool("list_issues", feature: "issues")]
       private def list_issues(h) : Result
         format = str(h, "format") || "json"
         unless ISSUE_FORMATS.includes?(format)
@@ -144,7 +144,7 @@ module Gori
         {head, entity}
       end
 
-      @[Tool("get_issue")]
+      @[Tool("get_issue", feature: "issues")]
       private def get_issue(h) : Result
         id = required_id(h, "id")
         f = store.get_issue(id)
@@ -152,7 +152,7 @@ module Gori
         Result.new(JSON.build { |j| Serialize.issue(j, f, store, retest: true, items_cap: ISSUE_ITEMS_MAX) })
       end
 
-      @[Tool("create_issue", gated: true, agent_action: true, permission: "write", open_world: false, destructive: false)]
+      @[Tool("create_issue", gated: true, agent_action: true, permission: "write", open_world: false, destructive: false, feature: "issues")]
       private def create_issue(h) : Result
         title = str(h, "title")
         return Result.new("missing required 'title'", is_error: true) if title.nil? || title.strip.empty?
@@ -229,7 +229,7 @@ module Gori
         store.ensure_link(Store::LinkOwnerKind::Issue, issue_id, Store::LinkRefKind::Repeater, repeater_id)
       end
 
-      @[Tool("update_issue", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("update_issue", gated: true, agent_action: true, permission: "write", open_world: false, feature: "issues")]
       private def update_issue(h) : Result
         id = required_id(h, "id")
         return not_found("no issue with id #{id}") unless store.get_issue(id)
@@ -298,7 +298,7 @@ module Gori
       # Remove an issue outright (the TUI Issues tab's delete). Distinct from status
       # "resolved"/"false-positive", which keep it in the report — this drops it, along with
       # its entity links (Store#delete_issue clears those in the same transaction).
-      @[Tool("delete_issue", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("delete_issue", gated: true, agent_action: true, permission: "write", open_world: false, feature: "issues")]
       private def delete_issue(h) : Result
         id = required_id(h, "id")
         return not_found("no issue with id #{id}") unless store.get_issue(id)

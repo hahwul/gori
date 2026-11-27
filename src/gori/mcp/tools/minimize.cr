@@ -35,7 +35,7 @@ module Gori
       end
 
       @[Tool("minimize_repeater", gated: true, agent_action: true, env_refresh: true,
-        requires: ["get_job", "stop_job"], permission: "send")]
+        requires: ["get_job", "stop_job"], permission: "send", feature: "repeater")]
       private def minimize_repeater(h) : Result
         # `id` — the spelling `delete_repeater` / `update_repeater` use — arrives here folded
         # into `repeater_id` by `ARG_ALIASES`.

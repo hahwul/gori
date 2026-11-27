@@ -9,6 +9,7 @@ include Gori::Tui
 KNOWN_SETTINGS_SECTIONS = [
   :network, :editor, :mouse, :keys, :theme, :statusline, :display, :companion, :notifications,
   :general, :tabs, :hosts, :env, :user_agents, :hotkeys, :reset_all, :mcp, :mcp_permissions,
+  :mcp_features,
 ]
 
 # SettingsCatalog is the single source of truth both the Ctrl-P palette and the Settings

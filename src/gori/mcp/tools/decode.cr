@@ -32,7 +32,7 @@ module Gori
           "are gated writes the operator can see.", is_error: true)
       end
 
-      @[Tool("decode", unbound: true)]
+      @[Tool("decode", unbound: true, feature: "decoder")]
       private def decoder(h) : Result
         spec = str(h, "spec")
         return Result.new("missing required 'spec'", is_error: true) if spec.nil? || spec.strip.empty?
@@ -172,7 +172,7 @@ module Gori
       # Shapes come from Jwt.decode_json / Jwt.attacks_json (jwt/present.cr) so they match
       # `gori run jwt --format json` byte-for-byte.
 
-      @[Tool("jwt_decode", unbound: true)]
+      @[Tool("jwt_decode", unbound: true, feature: "jwt")]
       private def jwt_decode_tool(h) : Result
         token = jwt_input(h)
         return Result.new("missing required 'token'", is_error: true) if token.nil? || token.strip.empty?
@@ -187,7 +187,7 @@ module Gori
         str(h, "token").try { |t| Jwt.locate(t) }
       end
 
-      @[Tool("jwt_encode", unbound: true)]
+      @[Tool("jwt_encode", unbound: true, feature: "jwt")]
       private def jwt_encode_tool(h) : Result
         token = jwt_input(h)
         raw_header = str(h, "header").try(&.presence)
@@ -240,7 +240,7 @@ module Gori
         Result.new({token: signed, alg: alg}.to_json)
       end
 
-      @[Tool("jwt_attacks", unbound: true)]
+      @[Tool("jwt_attacks", unbound: true, feature: "jwt")]
       private def jwt_attacks_tool(h) : Result
         token = jwt_input(h)
         return Result.new("missing required 'token'", is_error: true) if token.nil? || token.strip.empty?
@@ -259,7 +259,7 @@ module Gori
       # Verify is its own tool rather than a flag on jwt_decode: decoding is pure and needs
       # nothing, verifying needs key material, and folding them would make every decode call
       # look like it might be checking a signature when it never was.
-      @[Tool("jwt_verify", unbound: true)]
+      @[Tool("jwt_verify", unbound: true, feature: "jwt")]
       private def jwt_verify_tool(h) : Result
         token = jwt_input(h)
         return Result.new("missing required 'token'", is_error: true) if token.nil? || token.strip.empty?
@@ -282,7 +282,7 @@ module Gori
         end
       end
 
-      @[Tool("jwt_crack", unbound: true)]
+      @[Tool("jwt_crack", unbound: true, feature: "jwt")]
       private def jwt_crack_tool(h) : Result
         token = jwt_input(h)
         return Result.new("missing required 'token'", is_error: true) if token.nil? || token.strip.empty?

@@ -60,7 +60,7 @@ gori에 저장되는 모든 환경설정은 **Preferences** 모달 한 곳에서
 
 알림은 Miner, Fuzzer, Probe, Discover의 백그라운드 결과에서 발생합니다. [Statusline](/ko/guide/statusline/)은 셸 명령을 일정 간격으로 실행해 stdout을 맨 아래 줄에 표시합니다. 명령은 라이브 세션을 설명하는 [JSON 컨텍스트](/ko/guide/statusline/#context)를 stdin으로 받으며, 그대로 붙여 넣을 수 있는 [프리셋](/ko/guide/statusline/#presets)도 있습니다.
 
-**Reset**은 한 섹션이 아니라 파일 전체입니다. `↵`(또는 `Ctrl-P` → **Settings: Reset**)로 확인을 거치면 `settings.json`이 갓 설치한 상태로 돌아가고, 테마·키맵·탭 바·목록과 미리보기 설정·프록시 바인드까지 즉시 반영됩니다. 같은 파일에 들어 있는 데이터도 함께 사라집니다. 전역 env 값, 호스트네임 오버라이드, 전역 OAST 프로바이더, 저장한 디코더 체인, 전역 Rewriter·Colormarker·Probe 규칙, 저장한 뷰, 리댁션 프로필, 업스트림 규칙, 아웃바운드 TLS 설정, 추가 리스너, User-Agent 목록이 그렇습니다. MCP 권한은 모든 묶음이 켜진 상태로, Channel delivery는 꺼진 상태로 돌아갑니다. 프로젝트와 캡처, 프로젝트가 고정한 바인드와 env는 그대로 남습니다.
+**Reset**은 한 섹션이 아니라 파일 전체입니다. `↵`(또는 `Ctrl-P` → **Settings: Reset**)로 확인을 거치면 `settings.json`이 갓 설치한 상태로 돌아가고, 테마·키맵·탭 바·목록과 미리보기 설정·프록시 바인드까지 즉시 반영됩니다. 같은 파일에 들어 있는 데이터도 함께 사라집니다. 전역 env 값, 호스트네임 오버라이드, 전역 OAST 프로바이더, 저장한 디코더 체인, 전역 Rewriter·Colormarker·Probe 규칙, 저장한 뷰, 리댁션 프로필, 업스트림 규칙, 아웃바운드 TLS 설정, 추가 리스너, User-Agent 목록이 그렇습니다. MCP 권한은 모든 묶음이 켜진 상태로, MCP features는 모든 탭이 켜진 상태로, Channel delivery는 꺼진 상태로 돌아갑니다. 프로젝트와 캡처, 프로젝트가 고정한 바인드와 env는 그대로 남습니다.
 
 초기화 뒤에도 두 가지가 남습니다. 리댁션 salt는 버리면 이미 쓴 산출물의 자리표시자가 모두 깨지므로 유지됩니다. 전역 규칙 id 카운터도 유지됩니다. 프로젝트는 전역 Rewriter·Colormarker 규칙을 id로 오버라이드할 수 있고, 그 오버라이드는 설정 초기화가 열지 않는 프로젝트 DB에 남습니다. 새 규칙이 옛 오버라이드가 가리키는 id를 다시 쓰면 안 되므로, 카운터는 계속 올라가고 `settings.json`에는 카운터 값을 기록하는 규칙 없는 블록이 남습니다.
 
@@ -116,12 +116,15 @@ Placement는 *세션에서의* 비용을 결정합니다 (선택 화면에는 �
 |------|------|
 | **MCP server** | Channel delivery (off), Usage log (off) |
 | **MCP permissions** | Send traffic, Intercept control, Edit project data, Change scope & sandbox, Manage projects, Run local commands (각각 `on`·`ask`·`off`, 기본값은 모두 `on`) |
+| **MCP features** | 워크벤치 탭마다 체크박스 하나, Target부터 Notes까지 (기본값은 모두 켜짐) |
 
 **MCP server**에는 `gori mcp` 서버에 대한 스위치가 둘 있습니다. **Channel delivery**는 "Tell the agent…" 메시지를 붙어 있는 에이전트에게 전달하는 방식에 관한 것입니다. inbox socket, Codex queue, tool-result, `operator_messages` poll 계층은 항상 동작합니다. **Channel delivery**는 그 *뒤에* `claude/channel` push를 놓습니다. 전달을 확인할 수 있는 경로가 하나도 답하지 않았을 때에만 시도합니다. 개발 채널 플래그로 Claude Code를 띄워야 하는 research preview라 기본은 off입니다. 이 값은 `gori mcp` 프로세스가 시작할 때 읽으므로, 이미 떠 있는 에이전트는 받았던 답을 그대로 유지합니다. [gori가 보내는 메시지](/ko/guide/mcp/#messages-from-gori)를 참고하세요.
 
 **Usage log**를 켜면 `gori mcp`가 도구 호출마다 이름, 인자 이름, 결과, 크기, 걸린 시간을 `~/.gori/mcp-usage.jsonl`에 기록합니다. 인자의 값, 응답, 호스트, 프로젝트 이름은 남기지 않습니다. 어디로도 전송되지 않으며, `gori mcp --usage`가 요약을 출력합니다. 기본은 off이고, Channel delivery처럼 서버가 시작할 때 읽습니다. [사용 기록](/ko/guide/mcp/#usage-log)을 참고하세요.
 
 **MCP permissions**는 `gori mcp`로 붙은 에이전트가 무엇을 할 수 있는지 묶음 단위로 정합니다. `off`는 그 묶음을 막고, `ask`는 각 호출을 TUI의 `ask:` 카드에 올려 승인을 기다리게 합니다. 캡처를 읽는 것은 항상 허용됩니다. 이 설정도 Channel delivery처럼 서버가 시작할 때 읽습니다. [Preferences에서 권한 정하기](/ko/guide/mcp/#permissions-from-preferences)를 참고하세요.
+
+**MCP features**는 `gori mcp`가 어떤 워크벤치 탭의 도구를 제공할지 정합니다. 탭의 체크를 끄면 그 탭의 도구가 `tools/list`에서 빠지고, 에이전트가 컨텍스트에 싣는 양도 그만큼 줄어듭니다. 코어 도구(캡처 읽기, 프로젝트, scope, env, 운영자 채널)는 항상 제공됩니다. 이 설정도 서버가 시작할 때 읽습니다. [Preferences에서 기능 고르기](/ko/guide/mcp/#features-from-preferences)를 참고하세요.
 
 ## 프로젝트 선택기에서 {#in-the-project-picker}
 

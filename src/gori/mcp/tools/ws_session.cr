@@ -56,7 +56,7 @@ module Gori
       # Connect a saved WebSocket repeater and keep the socket open. The handshake takes the
       # same Layer 1 / Layer 2 verdict as `send_websocket` (`ws_gated_plan`), once: every
       # later message rides the socket it admitted.
-      @[Tool("ws_session_open", gated: true, agent_action: true, env_refresh: true, permission: "send")]
+      @[Tool("ws_session_open", gated: true, agent_action: true, env_refresh: true, permission: "send", feature: "repeater")]
       private def ws_session_open(h) : Result
         return err("request cancelled", "CANCELLED") if cancelled?
         found = ws_repeater(h)
@@ -138,7 +138,7 @@ module Gori
       # Write one or more messages on an open session. Returns once they are written, or —
       # with `wait_ms` — once the server sends something back (or the session ends), at most
       # that long. The reply carries every row past the pre-send cursor.
-      @[Tool("ws_session_send", gated: true, agent_action: true, env_refresh: true, permission: "send")]
+      @[Tool("ws_session_send", gated: true, agent_action: true, env_refresh: true, permission: "send", feature: "repeater")]
       private def ws_session_send(h) : Result
         job = lookup_job(h, @ws_jobs, "ws_session", "send")
         return job if job.is_a?(Result)

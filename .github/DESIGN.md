@@ -6498,3 +6498,29 @@ batch confirm, so nothing asked. Only a multi-flow delete named the split.
   first. Intercept's queue has no filter that can hide a mark.
 - `spec/tui/hidden_marks_gate_spec.cr` fails when a Runner method reads
   `history_target_flow_ids` without the gate, unless it is named there with a reason.
+
+### 2026-11-27: MCP features let operators toggle per-tab toolsets in Preferences
+
+Refines 2026-09-27 (`mcp_permissions`). `MCP permissions` fences capabilities (`send`, `intercept`,
+`write`, `scope`, `projects`, `exec`) with `on`/`ask`/`off` while keeping reads open. Operators also
+want to narrow `gori mcp`'s 202-tool catalogue by workbench tab (e.g., turning off `Issues`, `JWT`,
+`Cookie`, `Fuzzer`, `Colormarker`) from Preferences without hand-editing `--tools` specs across
+every agent client.
+
+- **Orthogonal fourth gate (`mcp_features`).** Stored as its own top-level section in
+  `settings.json` (disabled keys only, omitted at factory defaults) so the 3-way merge reconciles it
+  independently of `mcp` and `mcp_permissions`. Composes as an intersection with `--tools`,
+  `--read-only` and `mcp_permissions` inside `Tools.serves?` and `Tools#advertises?`.
+- **18 tabs 1:1 with `Chrome::TABS`, Core always on.** Declared next to each handler via
+  `@[Tool(feature:)]` and validated at compile time against `Settings::MCP_FEATURE_KEYS`. Core tools
+  (History/capture reading, QL, saved views, project/scope/env/host overrides/session slots/wordlists,
+  GraphQL/gRPC schemas, shared job controls, entity links and operator messaging) carry no `feature:`
+  and stay exposed. `spec/mcp/tool_features_spec.cr` holds every tool to either a feature or an
+  explicit Core list, and verifies no `requires:` workflow splits across two features (except
+  `get_current_context`, whose `selection_next_call` adapts to `serves?`).
+- **Latched at startup and fail-closed on degraded loads.** `Settings.mcp_enforced_disabled_features`
+  re-reads `"mcp_features"` on degraded loads and disables all optional tab features (leaving Core
+  exposed) if the file cannot be read.
+- **Inline checkboxes in Preferences › AI › MCP features.** Reuses `SettingsView`'s inline form
+  engine (`bool: true, checkbox: true`) so both in-app Preferences and the ProjectPicker get it with
+  zero extra modal plumbing, rendering `[✓] on` / `[ ] off` beside each tab's summary.

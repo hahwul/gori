@@ -9,7 +9,7 @@ module Gori
       # --- discover (spider + directory brute-force) --------------------------
 
       @[Tool("discover_start", gated: true, agent_action: true, env_refresh: true,
-        requires: ["discover_status", "discover_results", "discover_stop", "get_flow", "list_sitemap"], permission: "send")]
+        requires: ["discover_status", "discover_results", "discover_stop", "get_flow", "list_sitemap"], permission: "send", feature: "target")]
       private def discover_start(h) : Result
         # ONE Outbound for the whole call: the builder derives the crawl-time ScopePolicy
         # from it (see Discover::Plan.resolve_policy) and the Layer-1 check below reads the
@@ -336,7 +336,7 @@ module Gori
         djob.persist_owners.clear
       end
 
-      @[Tool("discover_status", gated: true, read_only: true, permission: "send")]
+      @[Tool("discover_status", gated: true, read_only: true, permission: "send", feature: "target")]
       private def discover_status(h) : Result
         djob = lookup_job(h, @discover_jobs, "discover", "status")
         return djob if djob.is_a?(Result)
@@ -381,7 +381,7 @@ module Gori
 
       DISCOVER_RESULTS_LIMIT = PageLimit.new(100, 1000)
 
-      @[Tool("discover_results", gated: true, read_only: true, requires: ["get_flow"], permission: "send")]
+      @[Tool("discover_results", gated: true, read_only: true, requires: ["get_flow"], permission: "send", feature: "target")]
       private def discover_results(h) : Result
         djob = lookup_job(h, @discover_jobs, "discover", "results")
         return djob if djob.is_a?(Result)
@@ -407,7 +407,7 @@ module Gori
         end)
       end
 
-      @[Tool("discover_stop", gated: true, agent_action: true, permission: "send")]
+      @[Tool("discover_stop", gated: true, agent_action: true, permission: "send", feature: "target")]
       private def discover_stop(h) : Result
         djob = lookup_job(h, @discover_jobs, "discover", "stop")
         return djob if djob.is_a?(Result)

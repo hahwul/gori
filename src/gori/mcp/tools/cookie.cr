@@ -15,7 +15,7 @@ module Gori
         str(h, "cookie").try { |c| Cookie.locate(c) || c }
       end
 
-      @[Tool("cookie_decode", unbound: true)]
+      @[Tool("cookie_decode", unbound: true, feature: "cookie")]
       private def cookie_decode_tool(h) : Result
         cookie = cookie_input(h)
         return Result.new("missing required 'cookie'", is_error: true) if cookie.nil? || cookie.strip.empty?
@@ -24,7 +24,7 @@ module Gori
         Result.new(ex.message || "not a decodable cookie", is_error: true)
       end
 
-      @[Tool("cookie_verify", unbound: true)]
+      @[Tool("cookie_verify", unbound: true, feature: "cookie")]
       private def cookie_verify_tool(h) : Result
         cookie = cookie_input(h)
         return Result.new("missing required 'cookie'", is_error: true) if cookie.nil? || cookie.strip.empty?
@@ -35,7 +35,7 @@ module Gori
         Result.new(ex.message || "not a decodable cookie", is_error: true)
       end
 
-      @[Tool("cookie_crack", unbound: true)]
+      @[Tool("cookie_crack", unbound: true, feature: "cookie")]
       private def cookie_crack_tool(h) : Result
         cookie = cookie_input(h)
         return Result.new("missing required 'cookie'", is_error: true) if cookie.nil? || cookie.strip.empty?
@@ -62,7 +62,7 @@ module Gori
         Result.new(ex.message || "wordlist error", is_error: true)
       end
 
-      @[Tool("cookie_forge", unbound: true)]
+      @[Tool("cookie_forge", unbound: true, feature: "cookie")]
       private def cookie_forge_tool(h) : Result
         format = str(h, "format").try(&.downcase)
         return Result.new("missing required 'format' (flask/rack/django)", is_error: true) if format.nil? || format.empty?

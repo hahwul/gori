@@ -36,7 +36,7 @@ module Gori::Tui
     # click, reload) always steps over it.
     record Field, label : String, hint : String, bool : Bool = false, choices : Array(String)? = nil,
       opener : Symbol? = nil, readonly : Bool = false, choice_labels : Hash(String, String)? = nil,
-      header : Bool = false
+      header : Bool = false, checkbox : Bool = false, summary : String? = nil
 
     # The stored codes, in cycle order. `http+tls` sits next to `http` because it IS the same
     # proxy protocol with a TLS hop in front of it, and an operator cycling past HTTP is exactly
@@ -303,6 +303,15 @@ module Gori::Tui
         "reading the capture is always allowed; applies to agents started after the change — ←/→/space cycles",
         choices: Settings::MCP_PERMISSION_STATES)
     end
+    # MCP features: one inline checkbox row per `Settings::MCP_FEATURES` tab, in tab-bar order.
+    # Unchecking a feature hides both its reads and writes from `tools/list`; Core stays on.
+    MCP_FEATURE_FIELDS = Settings::MCP_FEATURES.map do |feat|
+      Field.new(feat.title,
+        "expose #{feat.title} tools (#{feat.summary}) over gori mcp — off hides them from tools/list and refuses them; " \
+        "Core capture, project, scope and operator tools stay on; --tools (e.g. @recon) narrows further; " \
+        "applies to agents started after saving — ←/→/space toggles",
+        bool: true, checkbox: true, summary: feat.summary)
+    end
     SECTIONS = {
       :network         => NETWORK_FIELDS,
       :editor          => EDITOR_FIELDS,
@@ -316,6 +325,7 @@ module Gori::Tui
       :general         => GENERAL_FIELDS,
       :mcp             => MCP_FIELDS,
       :mcp_permissions => MCP_PERMISSION_FIELDS,
+      :mcp_features    => MCP_FEATURE_FIELDS,
     }
 
     # Max theme rows shown at once before the list scrolls (the box also shrinks to the
@@ -380,6 +390,7 @@ module Gori::Tui
                 when :general         then general_values
                 when :mcp             then mcp_values
                 when :mcp_permissions then mcp_permission_values
+                when :mcp_features    then mcp_feature_values
                 else                       network_values
                 end
       @focused = selectable(0, 1)
@@ -461,6 +472,7 @@ module Gori::Tui
                   Settings::DEFAULT_MCP_USAGE_LOG ? "on" : "off",
                 ]
                 when :mcp_permissions then Settings::MCP_PERMISSIONS.map { "on" } # every group allowed
+                when :mcp_features    then Settings::MCP_FEATURES.map { "on" }    # every feature exposed
                 else                       [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s,
                       "none", "", "",
                       Settings::DEFAULT_UPSTREAM_PROXY_CA,
@@ -673,6 +685,11 @@ module Gori::Tui
     # Positional over `Settings::MCP_PERMISSIONS`, the list MCP_PERMISSION_FIELDS is built from.
     private def mcp_permission_values : Array(String)
       Settings::MCP_PERMISSIONS.map { |perm| Settings.mcp_permission_state(perm.key) }
+    end
+
+    # Positional over `Settings::MCP_FEATURES`, the list MCP_FEATURE_FIELDS is built from.
+    private def mcp_feature_values : Array(String)
+      Settings::MCP_FEATURES.map { |feat| Settings.mcp_feature_enabled?(feat.key) ? "on" : "off" }
     end
 
     # ↑/↓: move between fields — except in the THEME section, whose single field IS a
@@ -968,6 +985,14 @@ module Gori::Tui
         @values = mcp_permission_values
         return persist
       end
+      if @section == :mcp_features
+        # Per feature, never a rebuilt set: an unknown disabled key from a newer gori survives.
+        Settings::MCP_FEATURES.each_with_index do |feat, i|
+          Settings.set_mcp_feature_enabled(feat.key, @values[i] == "on")
+        end
+        @values = mcp_feature_values
+        return persist
+      end
       if err = Settings.bind_host_error(@values[NETWORK_BIND_HOST])
         @status = "invalid bind IP"
         return err
@@ -1216,9 +1241,18 @@ module Gori::Tui
         end
       elsif field.bool
         on = value == "on"
-        glyph = on ? "◉ on" : "◯ off"
+        glyph = if field.checkbox
+                  on ? "[✓] on" : "[ ] off"
+                else
+                  on ? "◉ on" : "◯ off"
+                end
         col = focused ? Theme.text_bright : (on ? Theme.green : Theme.muted)
         screen.text(vx, ry, glyph, col, bg, width: vw)
+        if note = field.summary
+          nx = vx + Screen.draw_width("[ ] off") + 2
+          nw = vx + vw - nx
+          screen.text(nx, ry, note, Theme.muted, bg, width: nw) if nw > 0
+        end
       elsif focused
         screen.input_line(vx, ry, value, @cursor, @preedit, Theme.text_bright, bg, width: vw)
       elsif value.empty?

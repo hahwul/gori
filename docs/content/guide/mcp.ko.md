@@ -88,6 +88,12 @@ gori mcp --read-only
 
 묶음은 도구를 막을 뿐이고, 바이트를 대상에 보낼 수 있는 묶음은 하나가 아닙니다. **Intercept control**이 켜져 있으면 에이전트는 보류된 요청을 고쳐서 forward할 수 있고, **Send traffic**이 꺼져 있어도 그 바이트는 대상에 도달합니다. 에이전트의 바이트가 대상에 닿지 않게 하려면 둘 다 끄세요. **Change scope & sandbox**를 끄면 에이전트가 scope를 고치지 못하지만, `allow_unscoped:true`를 준 요청은 규칙이 덮지 않는 대상에도 닿습니다(sandbox는 그래도 막습니다). 그것까지 막으려면 **Send traffic**도 끄거나 **Change scope & sandbox**를 ask로 두세요. 그러면 waiver가 그 호스트에 대한 승인을 기다립니다. 요청이 닿는 곳을 바꾸는 스위치가 두 개 더 있습니다. host override(**Edit project data**)는 scope 안의 호스트 이름을 다른 주소로 돌리고, **Manage projects**는 scope와 sandbox가 다른 프로젝트로 에이전트가 옮겨 갈 수 있게 합니다.
 
+### Preferences에서 기능 고르기 {#features-from-preferences}
+
+**Settings → AI → MCP features**는 능력이 아니라 워크벤치 탭 단위로 카탈로그를 줄입니다. 탭마다 체크박스가 하나씩 있고(Target, Intercept, Repeater, Fuzzer, Miner, OAST, Sequencer, Decoder, JWT, Cookie, Comparer, Rewriter, Colormarker, Probe, Authorize, Issues, Evidence, Notes), 기본은 모두 켜져 있습니다. 탭의 체크를 끄면 그 탭의 도구가 읽기·쓰기 구분 없이 `tools/list`에서 빠지고, 그래도 호출하면 `TOOL_DISABLED`로 거부됩니다. 핸드셰이크 instructions가 어떤 탭이 꺼졌는지 알려줍니다. 코어 도구는 어느 탭에도 속하지 않고 항상 제공됩니다. History와 flow 읽기, QL, 저장한 뷰, 프로젝트, scope, env, host override, 세션 슬롯, 워드리스트, GraphQL·gRPC 스키마 도구, `list_jobs` / `get_job` / `stop_job`, 링크, 운영자 채널이 그렇습니다.
+
+도구는 `--tools`, `--read-only`, MCP permissions, MCP features가 모두 허용할 때만 제공되므로, 기능 스위치가 다른 관문이 막은 도구를 켜는 일은 없습니다. 권한 스위치처럼 `gori mcp` 프로세스가 시작할 때 읽습니다. 그 시점에 설정 파일을 읽지 못하면 모든 탭이 꺼지고 코어 도구만 제공됩니다.
+
 ## 노출할 도구 고르기 {#choosing-which-tools-are-exposed}
 
 직접 실행한 `gori mcp`는 모든 도구를 노출하므로, 에이전트는 재시작 없이 워크벤치를 쓸 수 있습니다. `--install-*`이 기록한 항목은 `--tools`를 주지 않으면 `@recon`을 제공하며, `--tools='*'`로 설치하면 모든 도구를 제공합니다. 전체 카탈로그의 비용은 컨텍스트입니다. 클라이언트는 첫 질문 전에 카탈로그 전부를 모델 컨텍스트에 싣고 세션 내내 유지합니다. gori는 시작할 때마다 제공하는 도구 수와 `tools/list` 크기를 로그에 남깁니다. 컨텍스트가 빠듯한 클라이언트라면 프로필에서 시작하세요:

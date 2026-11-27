@@ -14,6 +14,7 @@ private def with_mcp_home(&)
   prev_usage_log = Gori::Settings.mcp_usage_log?
   prev_denied = Gori::Settings.mcp_denied_permissions
   prev_asked = Gori::Settings.mcp_asked_permissions
+  prev_disabled_features = Gori::Settings.mcp_disabled_features
   begin
     ENV["GORI_HOME"] = dir
     ENV.delete("GORI_CONFIG")
@@ -22,6 +23,7 @@ private def with_mcp_home(&)
     Gori::Settings.mcp_usage_log = Gori::Settings::DEFAULT_MCP_USAGE_LOG
     Gori::Settings.mcp_denied_permissions = Set(String).new
     Gori::Settings.mcp_asked_permissions = Set(String).new
+    Gori::Settings.mcp_disabled_features = Set(String).new
     yield dir
   ensure
     Gori::Settings.path_override = nil
@@ -31,6 +33,7 @@ private def with_mcp_home(&)
     Gori::Settings.mcp_usage_log = prev_usage_log
     Gori::Settings.mcp_denied_permissions = prev_denied
     Gori::Settings.mcp_asked_permissions = prev_asked
+    Gori::Settings.mcp_disabled_features = prev_disabled_features
     FileUtils.rm_rf(dir)
   end
 end
@@ -351,6 +354,89 @@ describe "Settings mcp section" do
           asked.should be_empty
           warning.not_nil!.should contain("every MCP permission group is off")
         end
+      end
+    end
+  end
+
+  describe "features" do
+    it "enables every feature by default and writes nothing for it" do
+      with_mcp_home do
+        Gori::Settings::MCP_FEATURES.all? { |f| Gori::Settings.mcp_feature_enabled?(f.key) }.should be_true
+        Gori::Settings.document_keys.should_not contain("mcp_features")
+      end
+    end
+
+    it "writes only disabled features, in their own section apart from mcp and mcp_permissions" do
+      with_mcp_home do
+        Gori::Settings.set_mcp_feature_enabled("jwt", false)
+        Gori::Settings.set_mcp_feature_enabled("issues", false)
+        Gori::Settings.document_keys.should contain("mcp_features")
+        Gori::Settings.document_keys.should_not contain("mcp")
+        Gori::Settings.document_keys.should_not contain("mcp_permissions")
+        feats = JSON.parse(Gori::Settings.export_document(["mcp_features"]))["mcp_features"].as_h
+        feats.should eq({"issues" => JSON::Any.new(false), "jwt" => JSON::Any.new(false)})
+      end
+    end
+
+    it "keeps another window's disabled features when this one saves only channels or permissions" do
+      with_mcp_home do |dir|
+        Gori::Settings.save.should be_true
+        path = File.join(dir, "settings.json")
+        File.write(path, %({"mcp_features":{"jwt":false}}))
+        Gori::Settings.mcp_channels = true
+        Gori::Settings.set_mcp_permission_state("send", "off")
+        Gori::Settings.save.should be_true
+        on_disk = JSON.parse(File.read(path))
+        on_disk["mcp_features"]["jwt"].as_bool.should be_false
+        on_disk["mcp"]["channels"].as_bool.should be_true
+        on_disk["mcp_permissions"]["send"].as_bool.should be_false
+      end
+    end
+
+    it "round-trips through save/load and treats an object as the whole set" do
+      with_mcp_home do
+        Gori::Settings.set_mcp_feature_enabled("cookie", false)
+        Gori::Settings.save.should be_true
+        Gori::Settings.mcp_disabled_features = Set(String).new
+        Gori::Settings.load
+        Gori::Settings.mcp_feature_enabled?("cookie").should be_false
+        Gori::Settings.mcp_feature_enabled?("jwt").should be_true
+
+        Gori::Settings.import_document(%({"mcp_features":{"jwt":false,"cookie":true}}))
+        Gori::Settings.mcp_feature_enabled?("cookie").should be_true
+        Gori::Settings.mcp_feature_enabled?("jwt").should be_false
+      end
+    end
+
+    it "fails closed for non-bool values on known features and preserves unknown disabled keys" do
+      with_mcp_home do
+        Gori::Settings.import_document(%({"mcp_features":{"jwt":"false","issues":0,"notes":true,"future":false,"other":"x"}}))
+        Gori::Settings.mcp_feature_enabled?("jwt").should be_false
+        Gori::Settings.mcp_feature_enabled?("issues").should be_false
+        Gori::Settings.mcp_feature_enabled?("notes").should be_true
+        Gori::Settings.mcp_feature_enabled?("future").should be_false
+        Gori::Settings.mcp_disabled_features.should_not contain("other")
+        JSON.parse(Gori::Settings.export_document(["mcp_features"]))["mcp_features"]["future"].as_bool.should be_false
+      end
+    end
+
+    it "is cleared by the factory reset" do
+      with_mcp_home do
+        Gori::Settings.set_mcp_feature_enabled("fuzzer", false)
+        Gori::Settings.save.should be_true
+        Gori::Settings.reset_to_factory.should eq(Gori::Settings::ResetResult::Saved)
+        Gori::Settings.mcp_disabled_features.should be_empty
+        Gori::Settings.document_keys.should_not contain("mcp_features")
+      end
+    end
+
+    it "fails closed when the settings file could not be read" do
+      with_mcp_home do |dir|
+        File.write(File.join(dir, "settings.json"), %({"mcp_features": {"jwt": false))
+        Gori::Settings.load
+        disabled, warning = Gori::Settings.mcp_enforced_disabled_features
+        disabled.should eq(Gori::Settings::MCP_FEATURE_KEYS.to_set)
+        warning.not_nil!.should contain("every optional MCP feature is off")
       end
     end
   end

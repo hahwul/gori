@@ -220,7 +220,7 @@ module Gori
 
       REPEATER_CONTEXT_LIMIT = PageLimit.new(50, 500)
 
-      @[Tool("get_repeater_context", requires: ["get_response_body_chunk"])]
+      @[Tool("get_repeater_context", requires: ["get_response_body_chunk"], feature: "repeater")]
       private def get_repeater_context(h) : Result
         ui = parse_ui_state
         repeater_id = int(h, "id")
@@ -756,11 +756,21 @@ module Gori
           when "flow"
             "list_history{ids: selection.ids} returns them all in one call, in this order"
           when "issue"
-            "get_issue{id} per id in selection.ids (there is no batch form)"
+            if serves?("get_issue")
+              "get_issue{id} per id in selection.ids (there is no batch form)"
+            else
+              "get_issue is not exposed by this server; this issue cannot be read through MCP"
+            end
           when "sitemap_node"
-            "these are SITEMAP NODES, not flow ids — each is a {host, path}. " \
-            "list_history{query: \"host:H path:P\"} reaches the traffic behind one; " \
-            "list_sitemap{query: \"host:H\"} reads the node"
+            if serves?("list_sitemap")
+              "these are SITEMAP NODES, not flow ids — each is a {host, path}. " \
+              "list_history{query: \"host:H path:P\"} reaches the traffic behind one; " \
+              "list_sitemap{query: \"host:H\"} reads the node"
+            else
+              "these are SITEMAP NODES, not flow ids — each is a {host, path}. " \
+              "list_history{query: \"host:H path:P\"} reaches the traffic behind one " \
+              "(list_sitemap is not exposed by this server)"
+            end
           when "intercept_item"
             if serves?("intercept_get")
               intercept_note = "intercept_get{item_id} per id in selection.ids, valid only while the hold lasts"

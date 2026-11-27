@@ -60,7 +60,7 @@ Openers exist where a section needs more than a row of fields: the theme list, t
 
 Notifications fire on background results from the Miner, Fuzzer, Probe, and Discover. The [Statusline](/guide/statusline/) runs a shell command on an interval and renders its stdout as the bottom row. The command reads a [JSON context](/guide/statusline/#context) describing the live session on stdin, and there are [ready-made commands](/guide/statusline/#presets) to paste into it.
 
-**Reset** is the whole file, not one section. `↵` (or `Ctrl-P` → **Settings: Reset**) asks, then puts `settings.json` back to a fresh install's state and applies it live: theme, keymap, tab bar, list and preview prefs, and the proxy bind. It also drops the data that lives in the same file: your global env values, hostname overrides, global OAST providers, saved decoder chains, global rewriter, colormarker and Probe rules, saved views, redaction profiles, upstream rules, outbound TLS settings, extra listeners, and the User-Agent list. MCP permissions go back to every group on, and Channel delivery back to off. Projects and their captures are untouched, and so are a project's own pinned bind and env.
+**Reset** is the whole file, not one section. `↵` (or `Ctrl-P` → **Settings: Reset**) asks, then puts `settings.json` back to a fresh install's state and applies it live: theme, keymap, tab bar, list and preview prefs, and the proxy bind. It also drops the data that lives in the same file: your global env values, hostname overrides, global OAST providers, saved decoder chains, global rewriter, colormarker and Probe rules, saved views, redaction profiles, upstream rules, outbound TLS settings, extra listeners, and the User-Agent list. MCP permissions go back to every group on, MCP features back to every tab on, and Channel delivery back to off. Projects and their captures are untouched, and so are a project's own pinned bind and env.
 
 Two things survive a reset. The redaction salt is kept, because discarding it would break every placeholder in an artifact already written. The global rule-id counters are kept too. A project can override a global rewriter or colormarker rule by id, and those overrides live in the project's own database, which a settings reset never opens. A new rule must not reuse an id an old override still names, so the counters keep counting up and `settings.json` keeps a rules-less block that records where they got to.
 
@@ -116,12 +116,15 @@ Network here is the **global default**. A project can pin its own bind address, 
 |---------|--------|
 | **MCP server** | Channel delivery (off), Usage log (off) |
 | **MCP permissions** | Send traffic, Intercept control, Edit project data, Change scope & sandbox, Manage projects, Run local commands (each `on`, `ask` or `off`; all `on` by default) |
+| **MCP features** | One checkbox per workbench tab, from Target to Notes (all on by default) |
 
 **MCP server** holds two switches for the `gori mcp` server. **Channel delivery** concerns how it delivers a "Tell the agent…" message to an attached agent. The inbox-socket, Codex-queue, tool-result and `operator_messages`-poll layers always run. **Channel delivery** adds the `claude/channel` push *behind* them, tried only when no route that can confirm delivery has answered. It is off by default because it is a research preview that needs Claude Code launched with a development-channels flag. It is read when a `gori mcp` process starts, so an agent already running keeps the answer it was given. See [Messages from gori](/guide/mcp/#messages-from-gori).
 
 **Usage log** makes `gori mcp` record each tool call's name, argument names, outcome, size and duration in `~/.gori/mcp-usage.jsonl`, never an argument's value, a reply, a host or a project name. Nothing is sent anywhere, and `gori mcp --usage` prints the summary. It is off by default and, like Channel delivery, read when the server starts. See [Usage Log](/guide/mcp/#usage-log).
 
 **MCP permissions** decides what an agent attached over `gori mcp` may do, one group at a time: `off` withholds the group, and `ask` holds each of its calls for your approval on the TUI's `ask:` card. Reading the capture is always allowed. Like Channel delivery, the setting is read when the server starts. See [Permissions from Preferences](/guide/mcp/#permissions-from-preferences).
+
+**MCP features** picks which workbench tabs' tools `gori mcp` serves at all. Unchecking a tab removes its tools from `tools/list`, which shrinks what an agent loads into its context. The core tools (reading the capture, projects, scope, env and the operator channel) are always served. It is read when the server starts too. See [Features from Preferences](/guide/mcp/#features-from-preferences).
 
 ## In the Project Picker
 

@@ -210,4 +210,130 @@ module Gori::Settings
       end
     end
   end
+
+  # One on/off feature switch over a tab's `gori mcp` toolset. Orthogonal to `MCP_PERMISSIONS`
+  # (which fences capabilities like sending or writing across every tool): turning a feature off
+  # hides both reads and writes for that workbench tab so the agent sees a smaller catalogue.
+  # Core capture reading, project/scope/env management, shared job controls and the operator
+  # channel stay on.
+  record McpFeature, key : String, title : String, summary : String
+
+  # The toggleable tab features, in the TUI tab-bar catalog order (`Chrome::TABS`). `key` is what
+  # `settings.json` stores and what a tool's `@[Tool(feature:)]` names (the registry macro refuses
+  # any other value), so keys are never renamed: a stored `false` under an old key would quietly
+  # turn back on.
+  MCP_FEATURES = [
+    McpFeature.new("target", "Target",
+      "sitemap, params, JS endpoints, OpenAPI export and Discover"),
+    McpFeature.new("intercept", "Intercept",
+      "held queue, forward/drop/edit, filters and WS inject"),
+    McpFeature.new("repeater", "Repeater",
+      "repeater tabs, send, race, timing, minimize and WS sessions"),
+    McpFeature.new("fuzzer", "Fuzzer",
+      "fuzz runs, results and saved fuzzers"),
+    McpFeature.new("miner", "Miner",
+      "parameter discovery runs and results"),
+    McpFeature.new("oast", "OAST",
+      "out-of-band listeners, providers and sessions"),
+    McpFeature.new("sequencer", "Sequencer",
+      "token collection and randomness analysis"),
+    McpFeature.new("decoder", "Decoder",
+      "encode, decode and hash chains"),
+    McpFeature.new("jwt", "JWT",
+      "decode, encode, verify, crack and attack payloads"),
+    McpFeature.new("cookie", "Cookie",
+      "decode, verify, crack and forge cookies"),
+    McpFeature.new("comparer", "Comparer",
+      "diff two captured flows"),
+    McpFeature.new("rewriter", "Rewriter",
+      "Match & Replace rules, presets and extract rules"),
+    McpFeature.new("colormarker", "Colormarker",
+      "History colour rules and custom colours"),
+    McpFeature.new("probe", "Probe",
+      "passive/active scanner, findings and custom scan rules"),
+    McpFeature.new("authorize", "Authorize",
+      "multi-identity access-control replay and cache deception"),
+    McpFeature.new("issues", "Issues",
+      "issues and issue-linked retest steps and runs"),
+    McpFeature.new("evidence", "Evidence",
+      "frozen evidence snapshots and links"),
+    McpFeature.new("notes", "Notes",
+      "project scratch notes"),
+  ]
+
+  # The same keys as a literal, for the `@[Tool]` registry macro, which can read a constant
+  # only when its value IS a literal. spec/mcp/tool_features_spec.cr holds the two in step.
+  MCP_FEATURE_KEYS = %w[
+    target intercept repeater fuzzer miner oast sequencer decoder jwt cookie comparer
+    rewriter colormarker probe authorize issues evidence notes
+  ]
+
+  # Every feature is exposed by default, matching what `gori mcp` served before these switches
+  # existed. Stored as the DISABLED keys in its own top-level section (`mcp_features`) so the
+  # 3-way merge reconciles it independently of `mcp` and `mcp_permissions`, and a default install
+  # writes nothing. An unknown key with `false` (from a newer gori) is kept and written back.
+  class_property mcp_disabled_features : Set(String) = Set(String).new
+
+  def self.mcp_feature(key : String) : McpFeature?
+    MCP_FEATURES.find(&.key.==(key))
+  end
+
+  # The features among `keys`, in Preferences order; a key this gori does not know is skipped.
+  def self.mcp_feature_groups(keys : Enumerable(String)) : Array(McpFeature)
+    MCP_FEATURES.select { |f| keys.includes?(f.key) }
+  end
+
+  def self.mcp_feature_enabled?(key : String) : Bool
+    !mcp_disabled_features.includes?(key)
+  end
+
+  def self.set_mcp_feature_enabled(key : String, enabled : Bool) : Nil
+    disabled = mcp_disabled_features.dup
+    enabled ? disabled.delete(key) : disabled.add(key)
+    self.mcp_disabled_features = disabled
+  end
+
+  # The disabled feature keys `gori mcp` enforces. Mirrors `mcp_enforced_denials`: when the last
+  # `load` left sections at defaults (`load_degraded?`), re-read `"mcp_features"` on its own from
+  # the raw file, and fail closed (all optional tab features off, core tools still served) when
+  # even that is impossible.
+  def self.mcp_enforced_disabled_features : {Set(String), String?}
+    return {mcp_disabled_features.dup, nil} unless load_degraded?
+    root = begin
+      JSON.parse(File.read(path))
+    rescue
+      nil
+    end
+    if root && (h = root.as_h?)
+      return {mcp_disabled_features_from(h["mcp_features"]?) || Set(String).new, nil}
+    end
+    {MCP_FEATURE_KEYS.to_set, "#{path} could not be read, so every optional MCP feature is off until it is fixed"}
+  end
+
+  private def self.mcp_disabled_features_from(node : JSON::Any?) : Set(String)?
+    return nil unless h = node.try(&.as_h?)
+    # Only a real `true` enables a known feature: `"jwt": "false"`, `0` or `null` fails closed.
+    h.compact_map do |k, v|
+      k if v.as_bool? == false || (v.as_bool?.nil? && MCP_FEATURE_KEYS.includes?(k))
+    end.to_set
+  end
+
+  private def self.parse_mcp_features(node : JSON::Any?) : Nil
+    if disabled = mcp_disabled_features_from(node)
+      self.mcp_disabled_features = disabled
+    end
+  end
+
+  private def self.reset_mcp_features : Nil
+    self.mcp_disabled_features = Set(String).new
+  end
+
+  private def self.serialize_mcp_features(j : JSON::Builder) : Nil
+    return if mcp_disabled_features.empty?
+    j.field "mcp_features" do
+      j.object do
+        mcp_disabled_features.to_a.sort!.each { |k| j.field k, false }
+      end
+    end
+  end
 end

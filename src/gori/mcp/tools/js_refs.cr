@@ -12,7 +12,7 @@ module Gori
       # nothing and writes nothing.
       JS_ENDPOINTS_LIMIT = PageLimit.new(200, 2000)
 
-      @[Tool("list_js_endpoints")]
+      @[Tool("list_js_endpoints", feature: "target")]
       private def list_js_endpoints(h) : Result
         pg = page_args(h, JS_ENDPOINTS_LIMIT)
         scope = Scope.load(store)
@@ -60,7 +60,7 @@ module Gori
       # Read the not-yet-scanned JS/HTML responses and store the endpoints they reference.
       # Gated because it WRITES (derived rows, deleted with their flows); it sends nothing — so
       # its permission group is "Edit project data", not "Send traffic".
-      @[Tool("scan_js_endpoints", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("scan_js_endpoints", gated: true, agent_action: true, permission: "write", open_world: false, feature: "target")]
       private def scan_js_endpoints(h) : Result
         dropped = [] of String
         filter = ql_filter_or_error(h, str(h, "query"), dropped)
@@ -99,7 +99,7 @@ module Gori
       # endpoints a minified bundle hid surface. ACTIVE: unless the map is an inline `data:` URI,
       # it makes ONE real outbound request, gated by scope (refused unless allow_unscoped). The
       # recovered references are stored against the flow, so `list_js_endpoints` then lists them.
-      @[Tool("unpack_sourcemap", gated: true, agent_action: true, permission: "send")]
+      @[Tool("unpack_sourcemap", gated: true, agent_action: true, permission: "send", feature: "target")]
       private def unpack_sourcemap(h) : Result
         return err("request cancelled", "CANCELLED") if cancelled?
         id = required_id(h, "flow_id")

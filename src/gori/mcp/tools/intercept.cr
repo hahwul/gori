@@ -10,7 +10,7 @@ module Gori
     class Tools
       # --- #123 live intercept (read side) ------------------------------------
 
-      @[Tool("intercept_list")]
+      @[Tool("intercept_list", feature: "intercept")]
       private def intercept_list(h) : Result
         include_sensitive = bool_arg(h, "include_sensitive", false)
         # The bridge blob the capturing TUI publishes (Runner#publish_intercept_bridge); nil
@@ -62,7 +62,7 @@ module Gori
         @allow_actions && denied_permission("intercept_forward").nil?
       end
 
-      @[Tool("intercept_get")]
+      @[Tool("intercept_get", feature: "intercept")]
       private def intercept_get(h) : Result
         item_id = required_id(h, "item_id")
         include_sensitive = bool_arg(h, "include_sensitive", false)
@@ -87,19 +87,19 @@ module Gori
 
       # --- #123 live intercept (write side; gated behind allow_actions) -------
 
-      @[Tool("intercept_forward", gated: true, agent_action: true, permission: "intercept")]
+      @[Tool("intercept_forward", gated: true, agent_action: true, permission: "intercept", feature: "intercept")]
       private def intercept_forward(h) : Result
         id = required_id(h, "item_id")
         enqueue_intercept("forward", item_id: id)
       end
 
-      @[Tool("intercept_drop", gated: true, agent_action: true, permission: "intercept")]
+      @[Tool("intercept_drop", gated: true, agent_action: true, permission: "intercept", feature: "intercept")]
       private def intercept_drop(h) : Result
         id = required_id(h, "item_id")
         enqueue_intercept("drop", item_id: id)
       end
 
-      @[Tool("intercept_forward_edit", gated: true, agent_action: true, permission: "intercept")]
+      @[Tool("intercept_forward_edit", gated: true, agent_action: true, permission: "intercept", feature: "intercept")]
       private def intercept_forward_edit(h) : Result
         id = required_id(h, "item_id")
         row = held_row_for_edit(id)
@@ -193,14 +193,14 @@ module Gori
         Repeater::UrlRequest.normalize_raw(raw)
       end
 
-      @[Tool("intercept_toggle", gated: true, agent_action: true, permission: "intercept")]
+      @[Tool("intercept_toggle", gated: true, agent_action: true, permission: "intercept", feature: "intercept")]
       private def intercept_toggle(h) : Result
         want = optional_bool_arg(h, "enable")
         return err("missing required 'enable' (true or false)", "INVALID_ARGUMENT", field: "enable") if want.nil?
         enqueue_intercept("toggle", arg: want ? "true" : "false")
       end
 
-      @[Tool("intercept_set_filter", gated: true, agent_action: true, permission: "intercept")]
+      @[Tool("intercept_set_filter", gated: true, agent_action: true, permission: "intercept", feature: "intercept")]
       private def intercept_set_filter(h) : Result
         q = required_str(h, "query", "(empty string to clear)", blank: true)
         # A field the hold gate refuses (`InterceptFilter::UNSUPPORTED_FIELDS`) compiles to a
@@ -225,7 +225,7 @@ module Gori
         note ? {"note" => JSON::Any.new(note)} : nil
       end
 
-      @[Tool("intercept_set_direction", gated: true, agent_action: true, permission: "intercept")]
+      @[Tool("intercept_set_direction", gated: true, agent_action: true, permission: "intercept", feature: "intercept")]
       private def intercept_set_direction(h) : Result
         raw = str(h, "direction").try(&.strip).presence
         unless raw
@@ -243,7 +243,7 @@ module Gori
       # The capturing TUI holds the socket, so the frame crosses the same bridge the intercept
       # verbs use and the TUI writes it (`Proxy::WS::Live.inject`). Layer 1 is decided HERE,
       # strictly, against the flow's own host; Layer 2 (Sandbox) runs there, on the socket.
-      @[Tool("ws_inject", gated: true, agent_action: true, permission: "send")]
+      @[Tool("ws_inject", gated: true, agent_action: true, permission: "send", feature: "intercept")]
       private def ws_inject(h) : Result
         flow_id = required_id(h, "flow_id")
         direction = str(h, "direction").try(&.strip).presence || "out"

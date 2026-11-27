@@ -15,7 +15,7 @@ module Gori
       # and `offset` page the rest.
       SITEMAP_LIMIT = PageLimit.new(50, 5000)
 
-      @[Tool("list_sitemap")]
+      @[Tool("list_sitemap", feature: "target")]
       private def list_sitemap(h) : Result
         pg = page_args(h, SITEMAP_LIMIT)
         limit, offset = pg.limit, pg.offset
@@ -168,7 +168,7 @@ module Gori
       end
 
       # Pin (or clear) a free-text memo on one sitemap endpoint — the TUI Sitemap tab's `t`.
-      @[Tool("set_sitemap_tag", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("set_sitemap_tag", gated: true, agent_action: true, permission: "write", open_world: false, feature: "target")]
       private def set_sitemap_tag(h) : Result
         host = required_str(h, "host")
         path = str(h, "path").try(&.strip).presence
@@ -201,7 +201,7 @@ module Gori
         end)
       end
 
-      @[Tool("list_sitemap_tags")]
+      @[Tool("list_sitemap_tags", feature: "target")]
       private def list_sitemap_tags(h) : Result
         host = str(h, "host").try(&.strip).presence
         tags = store.sitemap_tags
@@ -453,7 +453,7 @@ module Gori
       # The parameter inventory (#1231) — one call instead of paging list_history + get_flow
       # to learn what inputs a target takes. Read-only and recomputed per call (P6); see
       # `ParamInventory` for what "reflected" does and does not claim.
-      @[Tool("list_params")]
+      @[Tool("list_params", feature: "target")]
       private def list_params(h) : Result
         pg = page_args(h, PARAMS_LIMIT)
         query = str(h, "query")
@@ -540,7 +540,7 @@ module Gori
       # to its ceiling. That makes this read tool a writer for that call — refused under
       # --read-only, behind the `write` permission, and logged as an agent action
       # (`call_denied_permission`, `agent_action?`) — hence `read_only: false`.
-      @[Tool("export_openapi", read_only: false)]
+      @[Tool("export_openapi", read_only: false, feature: "target")]
       private def export_openapi(h) : Result
         ignored = [] of String
         filter = openapi_filter(h, ignored)

@@ -446,7 +446,7 @@ describe Gori::MCP::UsageLog do
         summary.calls.should eq(4)
         summary.clients.should eq({"claude-code" => 1, "codex" => 1})
         none = [] of String
-        summary.profiles.should eq({ {"@recon", false, none} => 1, {nil, true, none} => 1 })
+        summary.profiles.should eq({ {"@recon", false, none, none} => 1, {nil, true, none, none} => 1 })
         summary.catalogue_bytes.should eq([40_000_i64, 90_000_i64])
         summary.not_served.should eq({"send_request" => 1})
         summary.unknown.should eq({"search_history" => 1})

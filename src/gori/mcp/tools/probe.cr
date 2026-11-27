@@ -30,7 +30,7 @@ module Gori
       # light-touch active checks that SEND requests — gated on write access AND project scope
       # (the same two-layer `Gori::Outbound` model as the CLI/TUI: an allowlist filter per flow
       # + a per-send Sandbox/exclude hard block inside the sender).
-      @[Tool("probe_scan", read_only: false, env_refresh: true, permission: "write")]
+      @[Tool("probe_scan", read_only: false, env_refresh: true, permission: "write", feature: "probe")]
       private def probe_scan(h) : Result
         dropped = [] of String
         filter = probe_scan_filter(h, dropped)
@@ -155,7 +155,7 @@ module Gori
 
       # probe_issues — list persisted findings. Defaults to OPEN only, mirroring the TUI's
       # default open-only lens; include_closed:true is the `a` toggle.
-      @[Tool("probe_issues")]
+      @[Tool("probe_issues", feature: "probe")]
       private def probe_issues(h) : Result
         if e = bad_severity(str(h, "severity"))
           return e
@@ -193,7 +193,7 @@ module Gori
 
       # probe_dismiss — mute a finding. Either one `id` (toggles dismissed ⇄ open, same rule as
       # the TUI's `c`), or a bulk `code`/`host` mute of every OPEN issue sharing it.
-      @[Tool("probe_dismiss", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("probe_dismiss", gated: true, agent_action: true, permission: "write", open_world: false, feature: "probe")]
       private def probe_dismiss(h) : Result
         code = str(h, "code").try(&.strip).presence
         host = str(h, "host").try(&.strip).presence
@@ -227,7 +227,7 @@ module Gori
       end
 
       # probe_promote — turn a machine finding into a human-confirmed Issue (the Issues report).
-      @[Tool("probe_promote", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("probe_promote", gated: true, agent_action: true, permission: "write", open_world: false, feature: "probe")]
       private def probe_promote(h) : Result
         id = required_id(h, "id")
         issue = store.get_probe_issue(id)
@@ -254,7 +254,7 @@ module Gori
       # (code, host) suppression so the next scan does not immediately re-add it, whereas
       # all:true calls Store#clear_probe_issues, which wipes every suppression too — so a
       # rescan re-discovers everything. all:true is therefore gated on confirm:true.
-      @[Tool("probe_delete", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("probe_delete", gated: true, agent_action: true, permission: "write", open_world: false, feature: "probe")]
       private def probe_delete(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) if id.nil? && present?(h, "id")
@@ -286,7 +286,7 @@ module Gori
 
       # list_probe_rules — every built-in (passive + active) and custom rule, with its enabled
       # state. The ids here are what set_probe_rule_enabled / delete_probe_rule take.
-      @[Tool("list_probe_rules")]
+      @[Tool("list_probe_rules", feature: "probe")]
       private def list_probe_rules(h) : Result
         kind = str(h, "kind").try(&.strip.downcase).presence
         if kind && !PROBE_RULE_KINDS.includes?(kind)
@@ -307,7 +307,7 @@ module Gori
       # set_probe_rule_enabled — turn one rule on/off. Built-ins live in the project's
       # disabled-id set; a custom rule carries its own enabled flag (project rules only —
       # a GLOBAL custom rule lives in the user's settings.json, outside this project).
-      @[Tool("set_probe_rule_enabled", gated: true, agent_action: true, permission: "write", idempotent: true)]
+      @[Tool("set_probe_rule_enabled", gated: true, agent_action: true, permission: "write", idempotent: true, feature: "probe")]
       private def set_probe_rule_enabled(h) : Result
         id = required_str(h, "id", "(see list_probe_rules)")
         enabled = optional_bool_arg(h, "enabled")
@@ -353,7 +353,7 @@ module Gori
 
       # create_probe_rule — add a PROJECT custom match rule (string/regex over one region of a
       # flow). Global rules are a settings.json concern and are not writable here.
-      @[Tool("create_probe_rule", gated: true, agent_action: true, permission: "write")]
+      @[Tool("create_probe_rule", gated: true, agent_action: true, permission: "write", feature: "probe")]
       private def create_probe_rule(h) : Result
         fields = custom_rule_fields(h)
         return fields if fields.is_a?(Result)
@@ -370,7 +370,7 @@ module Gori
         Result.new({"id" => "custom_p_#{id}", "row_id" => id, "title" => title}.to_json)
       end
 
-      @[Tool("update_probe_rule", gated: true, agent_action: true, permission: "write")]
+      @[Tool("update_probe_rule", gated: true, agent_action: true, permission: "write", feature: "probe")]
       private def update_probe_rule(h) : Result
         id = required_str(h, "id", "(see list_probe_rules)")
         row_id = custom_rule_row_id(id)
@@ -400,7 +400,7 @@ module Gori
         Result.new({"id" => id, "title" => title}.to_json)
       end
 
-      @[Tool("delete_probe_rule", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("delete_probe_rule", gated: true, agent_action: true, permission: "write", open_world: false, feature: "probe")]
       private def delete_probe_rule(h) : Result
         id = required_str(h, "id", "(see list_probe_rules)")
         row_id = custom_rule_row_id(id)
@@ -423,7 +423,7 @@ module Gori
 
       # set_probe_mode — the per-project scan mode. Raising it to active/aggressive arms the
       # AUTOMATIC probe pipeline for a live capture, so it is gated like any outbound action.
-      @[Tool("set_probe_mode", gated: true, agent_action: true, permission: "write")]
+      @[Tool("set_probe_mode", gated: true, agent_action: true, permission: "write", feature: "probe")]
       private def set_probe_mode(h) : Result
         label = str(h, "mode").try(&.strip.downcase).presence
         return err("missing required 'mode' (off|passive|active|aggressive)", "INVALID_ARGUMENT", field: "mode") unless label

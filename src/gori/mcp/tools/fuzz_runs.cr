@@ -9,7 +9,7 @@ module Gori
       # action; live fuzz_start/status/results keep their existing action gate.
       FUZZ_RUNS_LIMIT = PageLimit.new(50, 200)
 
-      @[Tool("list_fuzz_runs")]
+      @[Tool("list_fuzz_runs", feature: "fuzzer")]
       private def list_fuzz_runs(h) : Result
         pg = page_args(h, FUZZ_RUNS_LIMIT)
         session_id = optional_int_arg(h, "session_id")
@@ -31,7 +31,7 @@ module Gori
       FUZZ_RUN_ROWS_LIMIT         = PageLimit.new(100, 1000)
       FUZZ_RUN_CONTENT_ROWS_LIMIT = PageLimit.new(25, 25)
 
-      @[Tool("get_fuzz_run")]
+      @[Tool("get_fuzz_run", feature: "fuzzer")]
       private def get_fuzz_run(h) : Result
         run_id = optional_int_arg(h, "run_id")
         return err("missing required 'run_id'", "INVALID_ARGUMENT", field: "run_id") unless run_id
@@ -110,7 +110,7 @@ module Gori
         end)
       end
 
-      @[Tool("delete_fuzz_run", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("delete_fuzz_run", gated: true, agent_action: true, permission: "write", open_world: false, feature: "fuzzer")]
       private def delete_fuzz_run(h) : Result
         run_id = optional_int_arg(h, "run_id")
         return err("missing required 'run_id'", "INVALID_ARGUMENT", field: "run_id") unless run_id
