@@ -492,6 +492,7 @@ module Gori
       parse_redaction(root["redaction"]?)
       parse_mcp(root["mcp"]?)
       parse_mcp_permissions(root["mcp_permissions"]?)
+      parse_mcp_features(root["mcp_features"]?)
       parse_layout(root["layout"]?)
       parse_statusline(root["statusline"]?)
       parse_display(root["display"]?)
@@ -1363,7 +1364,7 @@ module Gori
       theme mouse mouse_drag pretty_bodies layout statusline display companion notifications general update
       network upstream_rules outbound_tls retention listeners editor tabs hostname_overrides
       env scan_rules oast_providers hotkeys mine fuzzer probe discover decoder rewriter
-      hooks colormarker saved_views redaction mcp mcp_permissions user_agents
+      hooks colormarker saved_views redaction mcp mcp_permissions mcp_features user_agents
     ]
 
     # Every top-level key the current settings would write — i.e. which sections this install
@@ -1914,6 +1915,7 @@ module Gori
       reset_redaction
       reset_mcp
       reset_mcp_permissions
+      reset_mcp_features
       # `$KEY` highlighting is cached against this revision, exactly as apply_sections does
       # after a load — the env block just changed underneath every editor showing it.
       Env.bump_highlight_rev
@@ -1961,6 +1963,7 @@ module Gori
           serialize_redaction(j)
           serialize_mcp(j)
           serialize_mcp_permissions(j)
+          serialize_mcp_features(j)
         end
       end
     end

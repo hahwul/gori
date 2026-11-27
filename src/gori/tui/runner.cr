@@ -7153,7 +7153,7 @@ module Gori::Tui
     # to the modal) would behave differently.
     private def open_settings_section(section : Symbol, back : PreferencesOverlay?) : Nil
       case section
-      when :network, :editor, :mouse, :keys, :statusline, :display, :companion, :notifications, :general, :mcp, :mcp_permissions
+      when :network, :editor, :mouse, :keys, :statusline, :display, :companion, :notifications, :general, :mcp, :mcp_permissions, :mcp_features
         open_preferences(section)                                 # the unified grouped modal, positioned at this section
       when :theme             then open_overlay(theme_card(back)) # theme keeps its dedicated swatch-list card
       when :tabs              then open_overlay(tabs_editor(back))

@@ -29,7 +29,7 @@ module Gori
           " (e.g. status:2xx; json:<path> alone = field present)"
       end
 
-      @[Tool("list_retest_steps")]
+      @[Tool("list_retest_steps", feature: "issues")]
       private def list_retest_steps(h) : Result
         issue_id = required_id(h, "issue_id")
         return not_found("no issue with id #{issue_id}") unless store.get_issue(issue_id)
@@ -51,7 +51,7 @@ module Gori
         end)
       end
 
-      @[Tool("add_retest_step", gated: true, agent_action: true, permission: "write", open_world: false, destructive: false)]
+      @[Tool("add_retest_step", gated: true, agent_action: true, permission: "write", open_world: false, destructive: false, feature: "issues")]
       private def add_retest_step(h) : Result
         issue_id = required_id(h, "issue_id")
         return not_found("no issue with id #{issue_id}") unless store.get_issue(issue_id)
@@ -73,7 +73,7 @@ module Gori
         retest_step_reply(id, "added")
       end
 
-      @[Tool("update_retest_step", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("update_retest_step", gated: true, agent_action: true, permission: "write", open_world: false, feature: "issues")]
       private def update_retest_step(h) : Result
         id = required_id(h, "id")
         return not_found("no retest step with id #{id}") unless store.get_retest_step(id)
@@ -103,7 +103,7 @@ module Gori
       end
 
       # `position` is 1-based and CLAMPED to the list, so `position:1` always means "first".
-      @[Tool("move_retest_step", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("move_retest_step", gated: true, agent_action: true, permission: "write", open_world: false, feature: "issues")]
       private def move_retest_step(h) : Result
         id = required_id(h, "id")
         return not_found("no retest step with id #{id}") unless store.get_retest_step(id)
@@ -119,7 +119,7 @@ module Gori
         retest_step_reply(id, "moved")
       end
 
-      @[Tool("remove_retest_step", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("remove_retest_step", gated: true, agent_action: true, permission: "write", open_world: false, feature: "issues")]
       private def remove_retest_step(h) : Result
         id = required_id(h, "id")
         step = store.get_retest_step(id)
@@ -135,7 +135,7 @@ module Gori
 
       # The CLI's `retest clear`. Steps only — the runs are the record of what already
       # happened, and re-planning a check does not un-run it.
-      @[Tool("clear_retest_steps", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("clear_retest_steps", gated: true, agent_action: true, permission: "write", open_world: false, feature: "issues")]
       private def clear_retest_steps(h) : Result
         issue_id = required_id(h, "issue_id")
         return not_found("no issue with id #{issue_id}") unless store.get_issue(issue_id)
@@ -150,7 +150,7 @@ module Gori
       # under a scope since fixed. Without it an agent could record a run it cannot undo,
       # while `get_issue`'s `retest` object keeps advertising that verdict as the issue's
       # last answer.
-      @[Tool("delete_retest_run", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("delete_retest_run", gated: true, agent_action: true, permission: "write", open_world: false, feature: "issues")]
       private def delete_retest_run(h) : Result
         id = required_id(h, "run_id")
         run = store.get_retest_run(id)
@@ -162,7 +162,7 @@ module Gori
 
       # The one tool here that SENDS. Every step goes out through the project's scope and
       # Sandbox gates and is recorded in History as `src:retest`.
-      @[Tool("run_retest", gated: true, agent_action: true, env_refresh: true, permission: "send")]
+      @[Tool("run_retest", gated: true, agent_action: true, env_refresh: true, permission: "send", feature: "issues")]
       private def run_retest(h) : Result
         issue_id = required_id(h, "issue_id")
         return not_found("no issue with id #{issue_id}") unless store.get_issue(issue_id)
@@ -223,7 +223,7 @@ module Gori
           is_error: !report.verdict.pass?)
       end
 
-      @[Tool("list_retest_runs")]
+      @[Tool("list_retest_runs", feature: "issues")]
       private def list_retest_runs(h) : Result
         issue_id = required_id(h, "issue_id")
         return not_found("no issue with id #{issue_id}") unless store.get_issue(issue_id)
@@ -245,7 +245,7 @@ module Gori
         end)
       end
 
-      @[Tool("get_retest_run")]
+      @[Tool("get_retest_run", feature: "issues")]
       private def get_retest_run(h) : Result
         id = required_id(h, "run_id")
         run = store.get_retest_run(id)

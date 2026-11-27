@@ -130,6 +130,14 @@ module Gori
     #   When the project store is writable, the first denial of each tool/group pair in an MCP
     #   server's project binding also leaves a compact warning event; repeated retries add no
     #   rows, and arguments are not recorded.
+    # - `feature` — the tab/feature surface this tool belongs to, one of
+    #   `Settings::MCP_FEATURE_KEYS` (Preferences › AI › MCP features). Orthogonal to
+    #   `permission:`: turning a feature off hides both its reads and its writes from `tools/list`
+    #   and refuses them with TOOL_DISABLED, letting the operator narrow the catalogue by tab.
+    #   Tools without `feature:` are Core (capture reading, project/scope/env/slots/views/
+    #   wordlists, protocol schemas, shared job controls, entity links and the operator channel)
+    #   and stay exposed. `spec/mcp/tool_features_spec.cr` holds every tool to either a feature or
+    #   an explicit Core entry.
     annotation Tool
     end
   end

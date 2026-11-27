@@ -47,6 +47,7 @@ module Gori
                      workspace_root : String? = nil, project_id : String? = nil,
                      bind_error : String? = nil, tool_filter : ToolFilter? = nil,
                      denied_permissions : Set(String)? = nil, asked_permissions : Set(String)? = nil,
+                     disabled_features : Set(String)? = nil,
                      @usage_log : UsageLog? = nil,
                      @input : IO = STDIN, @output : IO = STDOUT)
         @allow_actions = allow_actions
@@ -54,7 +55,8 @@ module Gori
           project_name: project_name, project_slug: project_slug, db_path: db_path,
           selection_source: selection_source, workspace_root: workspace_root,
           project_id: project_id, bind_error: bind_error, tool_filter: tool_filter,
-          denied_permissions: denied_permissions, asked_permissions: asked_permissions)
+          denied_permissions: denied_permissions, asked_permissions: asked_permissions,
+          disabled_features: disabled_features)
         @initialized = false
         # Set when the output pipe breaks (client vanished mid-write): the loop then
         # stops rather than thrashing on a dead stream or raising an unhandled error.
@@ -715,7 +717,7 @@ module Gori
                "microseconds plus *_iso RFC3339 fields where available.#{failure}#{binding_note}"
         text = @allow_actions ? "#{base}#{actions_note}#{projects_note}" : "#{base}#{read_only_note}#{projects_note}"
         text += UNTRUSTED_BYTES_NOTE + REPLY_BUDGET_NOTE + operator_messages_note
-        text += permissions_note
+        text += permissions_note + features_note
         # The backstop for every name above, and for any added later without this treatment:
         # when a filter is in force at all, say so and name the authority. A sentence that
         # survives a future edit while its tool does not is then at least contradicted.
@@ -914,6 +916,16 @@ module Gori
                   "a pipe rule, an exec probe rule, a mine hook or a fuzz chain with an exec: step is refused."
         end
         note
+      end
+
+      # The Preferences feature switches (`Settings::MCP_FEATURES`), named by tab rather than by
+      # tool: those tools are omitted from `tools/list`, so this tells the agent why they are
+      # absent and who can re-enable them.
+      private def features_note : String
+        feats = @tools.disabled_feature_groups
+        return "" if feats.empty?
+        " The operator has turned off #{feats.join(", ", &.title)} in gori Preferences " \
+        "(AI › MCP features), so those tools are not served; ask the operator if you need them."
       end
 
       # #1585: the groups set to ask, which stay listed and answer APPROVAL_PENDING instead.
@@ -1154,7 +1166,7 @@ module Gori
         unless log.started?
           log.session(UsageLog::Session.new(@tools.client_name, @tools.client_version,
             @tools.tool_filter.try(&.spec), @tools.served_count, !@allow_actions,
-            @tools.denied_groups.map(&.key)))
+            @tools.denied_groups.map(&.key), @tools.disabled_feature_groups.map(&.key)))
         end
         yield log
       rescue ex

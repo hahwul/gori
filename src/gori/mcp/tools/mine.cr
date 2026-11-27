@@ -11,7 +11,7 @@ module Gori
       # --- mine tools (gated, async job model) --------------------------------
 
       @[Tool("mine_start", gated: true, agent_action: true, env_refresh: true,
-        requires: ["mine_status", "mine_results", "mine_stop"], permission: "send")]
+        requires: ["mine_status", "mine_results", "mine_stop"], permission: "send", feature: "miner")]
       private def mine_start(h) : Result
         if str(h, "hook").presence && (denied = exec_refusal)
           return denied
@@ -107,7 +107,7 @@ module Gori
         end
       end
 
-      @[Tool("mine_status", gated: true, read_only: true, permission: "send")]
+      @[Tool("mine_status", gated: true, read_only: true, permission: "send", feature: "miner")]
       private def mine_status(h) : Result
         mjob = lookup_job(h, @mine_jobs, "mine", "status")
         return mjob if mjob.is_a?(Result)
@@ -180,7 +180,7 @@ module Gori
 
       MINE_RESULTS_LIMIT = PageLimit.new(100, 1000)
 
-      @[Tool("mine_results", gated: true, read_only: true, permission: "send")]
+      @[Tool("mine_results", gated: true, read_only: true, permission: "send", feature: "miner")]
       private def mine_results(h) : Result
         mjob = lookup_job(h, @mine_jobs, "mine", "results")
         return mjob if mjob.is_a?(Result)
@@ -211,7 +211,7 @@ module Gori
         j.field "note", Miner::NOTHING_FOUND_NOTE
       end
 
-      @[Tool("mine_stop", gated: true, agent_action: true, permission: "send")]
+      @[Tool("mine_stop", gated: true, agent_action: true, permission: "send", feature: "miner")]
       private def mine_stop(h) : Result
         mjob = lookup_job(h, @mine_jobs, "mine", "stop")
         return mjob if mjob.is_a?(Result)

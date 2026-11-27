@@ -17,7 +17,7 @@ module Gori
 
       # Every colour rule that applies to this project, in PRECEDENCE order: the global library
       # first, then the project's own rows.
-      @[Tool("list_color_rules")]
+      @[Tool("list_color_rules", feature: "colormarker")]
       private def list_color_rules(h) : Result
         want = nil.as(Store::RuleScope?)
         if present?(h, "scope")
@@ -61,7 +61,7 @@ module Gori
         Store::MarkerStyle.from_label(s)
       end
 
-      @[Tool("create_color_rule", gated: true, agent_action: true, permission: "write", open_world: false, destructive: false)]
+      @[Tool("create_color_rule", gated: true, agent_action: true, permission: "write", open_world: false, destructive: false, feature: "colormarker")]
       private def create_color_rule(h) : Result
         filter = required_str(h, "when", blank: true)
         # The engine owns what is legal, so the TUI form, the CLI and this surface cannot
@@ -109,7 +109,7 @@ module Gori
         j.field "notes" { j.array { notes.each { |n| j.string n } } }
       end
 
-      @[Tool("update_color_rule", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("update_color_rule", gated: true, agent_action: true, permission: "write", open_world: false, feature: "colormarker")]
       private def update_color_rule(h) : Result
         id = required_id(h, "id")
         scope = rule_scope(h)
@@ -148,7 +148,7 @@ module Gori
       # For a global rule this writes THIS PROJECT's override by default — the same meaning `x`
       # has in the Colormarker tab. `everywhere: true` changes the library's own default
       # instead, which reaches every project that has not overridden it.
-      @[Tool("set_color_rule_enabled", gated: true, agent_action: true, permission: "write", open_world: false, idempotent: true)]
+      @[Tool("set_color_rule_enabled", gated: true, agent_action: true, permission: "write", open_world: false, idempotent: true, feature: "colormarker")]
       private def set_color_rule_enabled(h) : Result
         id = required_id(h, "id")
         scope = rule_scope(h)
@@ -187,7 +187,7 @@ module Gori
         rule.enabled == enabled ? store.clear_colormarker_override(id) : store.set_colormarker_override(id, enabled)
       end
 
-      @[Tool("delete_color_rule", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("delete_color_rule", gated: true, agent_action: true, permission: "write", open_world: false, feature: "colormarker")]
       private def delete_color_rule(h) : Result
         id = required_id(h, "id")
         scope = rule_scope(h)
@@ -210,7 +210,7 @@ module Gori
 
       # Reorder within a scope. The scope boundary is not a position: every global rule resolves
       # before every project one, so moving past the end of a block is a scope change.
-      @[Tool("move_color_rule", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("move_color_rule", gated: true, agent_action: true, permission: "write", open_world: false, feature: "colormarker")]
       private def move_color_rule(h) : Result
         id = required_id(h, "id")
         scope = rule_scope(h)
@@ -248,7 +248,7 @@ module Gori
       # How many recent flows a candidate condition would MATCH, and how many it would actually
       # PAINT once the rules that already resolve ahead of it are counted. The second number is
       # the one that answers "will I see this": an earlier enabled rule may already claim the row.
-      @[Tool("preview_color_rule")]
+      @[Tool("preview_color_rule", feature: "colormarker")]
       private def preview_color_rule(h) : Result
         filter = required_str(h, "when", blank: true)
         if reason = Gori::Colormarker.unusable_reason(filter)
@@ -290,7 +290,7 @@ module Gori
       # the six built-ins. Keyed by name (no numeric id), the same identity the picker and a
       # rule's `color` use.
 
-      @[Tool("list_custom_colors")]
+      @[Tool("list_custom_colors", feature: "colormarker")]
       private def list_custom_colors : Result
         Result.new(JSON.build do |j|
           j.object do
@@ -306,7 +306,7 @@ module Gori
         end)
       end
 
-      @[Tool("create_custom_color", gated: true, agent_action: true, permission: "write", open_world: false, destructive: false)]
+      @[Tool("create_custom_color", gated: true, agent_action: true, permission: "write", open_world: false, destructive: false, feature: "colormarker")]
       private def create_custom_color(h) : Result
         name = required_str(h, "name", blank: true)
         hex = required_str(h, "hex", blank: true)
@@ -326,7 +326,7 @@ module Gori
       #
       # Both editable fields default to the current value, so `hex` alone recolours and
       # `new_name` alone renames. The registry is the arbiter of legality and uniqueness.
-      @[Tool("update_custom_color", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("update_custom_color", gated: true, agent_action: true, permission: "write", open_world: false, feature: "colormarker")]
       private def update_custom_color(h) : Result
         name = required_str(h, "name", blank: true)
         key = name.strip.downcase
@@ -354,7 +354,7 @@ module Gori
         end)
       end
 
-      @[Tool("delete_custom_color", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("delete_custom_color", gated: true, agent_action: true, permission: "write", open_world: false, feature: "colormarker")]
       private def delete_custom_color(h) : Result
         name = required_str(h, "name", blank: true)
         key = name.strip.downcase

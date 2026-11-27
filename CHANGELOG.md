@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- MCP / TUI: Preferences › AI › MCP features adds per-tab inline checkboxes (Target, Intercept, Repeater, Fuzzer, Miner, OAST, Sequencer, Decoder, JWT, Cookie, Comparer, Rewriter, Colormarker, Probe, Authorize, Issues, Evidence, Notes) to hide unwanted tab toolsets from `gori mcp`'s `tools/list` while keeping Core capture, project, scope and operator tools exposed.
+
 - TUI: a response with one very long grapheme cluster (an emoji ZWJ chain or a run of joiners), `\uXXXX` decoding with `u`, a selection tint on a long non-ASCII line, a WebSocket frame packed with empty SignalR records, or a Sitemap folding thousands of query paths no longer freezes gori for seconds to hours; every hidden character is still revealed (#2029).
 
 - TUI: editing a Repeater or Intercept buffer that holds non-UTF-8 bytes no longer crashes gori when a backspace, delete or cut joins a stray lead byte to a continuation byte, and a pasted find string of tens of thousands of characters is refused as too long (#2029).

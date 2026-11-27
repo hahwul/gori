@@ -41,6 +41,7 @@ private RESET_FIXTURE = <<-JSON
     "redaction": { "active": "p1", "default": true, "salt": "abcd", "profiles": [ { "name": "p1", "json_fields": ["password"] } ] },
     "mcp": { "channels": true },
     "mcp_permissions": { "send": false },
+    "mcp_features": { "jwt": false },
     "user_agents": [ "Fixture/1.0" ]
   }
   JSON
@@ -162,6 +163,7 @@ describe "Settings.reset_to_factory" do
       Gori::Settings.redaction_profiles.should be_empty
       Gori::Settings.redaction_active.should eq("")
       Gori::Settings.redaction_default?.should be_false
+      Gori::Settings.mcp_disabled_features.should be_empty
       JSON.parse(File.read(path))["redaction"].as_h.keys.should eq(["salt"])
     end
   end

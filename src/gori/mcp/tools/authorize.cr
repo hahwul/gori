@@ -24,7 +24,7 @@ module Gori
       AUTHORIZE_QUERY_LIMIT = PageLimit.new(Authorize::Plan::DEFAULT_LIMIT, AUTHORIZE_MAX_FLOWS)
 
       @[Tool("authorize_start", gated: true, agent_action: true, env_refresh: true,
-        requires: ["authorize_status", "authorize_results", "authorize_stop", "ql_reference"], permission: "send")]
+        requires: ["authorize_status", "authorize_results", "authorize_stop", "ql_reference"], permission: "send", feature: "authorize")]
       private def authorize_start(h) : Result
         allow_unscoped = bool_arg(h, "allow_unscoped", false)
         ob = outbound(allow_unscoped)
@@ -166,7 +166,7 @@ module Gori
         j.field "failed_unshown_ids", ajob.failures[parts.size..].map(&.[0]) if parts.size < ajob.failures.size
       end
 
-      @[Tool("authorize_status", gated: true, read_only: true, permission: "send")]
+      @[Tool("authorize_status", gated: true, read_only: true, permission: "send", feature: "authorize")]
       private def authorize_status(h) : Result
         ajob = lookup_job(h, @authorize_jobs, "authorize", "status", missing_field: "job_id")
         return ajob if ajob.is_a?(Result)
@@ -206,7 +206,7 @@ module Gori
       # The verdicts, per replayed request. The headline fields come FIRST and are computed
       # over the whole job, never over the page: a bypass on request 40 must not be invisible
       # to a caller who read page 1 and stopped.
-      @[Tool("authorize_results", gated: true, read_only: true, permission: "send")]
+      @[Tool("authorize_results", gated: true, read_only: true, permission: "send", feature: "authorize")]
       private def authorize_results(h) : Result
         ajob = lookup_job(h, @authorize_jobs, "authorize", "results", missing_field: "job_id")
         return ajob if ajob.is_a?(Result)
@@ -248,7 +248,7 @@ module Gori
         end)
       end
 
-      @[Tool("authorize_stop", gated: true, agent_action: true, permission: "send")]
+      @[Tool("authorize_stop", gated: true, agent_action: true, permission: "send", feature: "authorize")]
       private def authorize_stop(h) : Result
         ajob = lookup_job(h, @authorize_jobs, "authorize", "stop", missing_field: "job_id")
         return ajob if ajob.is_a?(Result)

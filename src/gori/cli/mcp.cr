@@ -144,20 +144,32 @@ module Gori::CLI
     # rather than serving them all (`mcp_enforced_denials`).
     denied, asked, denial_warning = Settings.mcp_enforced_denials
     Log.warn { "mcp: #{denial_warning}" } if denial_warning
+    disabled_features, feature_warning = Settings.mcp_enforced_disabled_features
+    Log.warn { "mcp: #{feature_warning}" } if feature_warning
     unless (ask_groups = Settings.mcp_permission_groups(asked)).empty?
       Log.info { "mcp: set to ask in Preferences (AI › MCP permissions): #{ask_groups.join(", ", &.title)}" }
     end
-    unless (groups = Settings.mcp_permission_groups(denied)).empty?
+    groups = Settings.mcp_permission_groups(denied)
+    unless groups.empty?
       Log.info { "mcp: switched off in Preferences (AI › MCP permissions): #{groups.join(", ", &.title)}" }
-      advertised = MCP::Tools.served_names(tool_filter, !read_only, denied)
-      # The `--read-only` refusal above, for the switches: a spec whose every tool is in a
-      # group the operator turned off would start a server with an empty tools/list, which an
-      # agent cannot tell from a gori without the feature. Refused here, AFTER the install
-      # branch — an installed command outlives today's switches.
+    end
+    feature_groups = Settings.mcp_feature_groups(disabled_features)
+    unless feature_groups.empty?
+      Log.info { "mcp: turned off in Preferences (AI › MCP features): #{feature_groups.join(", ", &.title)}" }
+    end
+    unless groups.empty? && feature_groups.empty?
+      advertised = MCP::Tools.served_names(tool_filter, !read_only, denied, disabled_features)
+      # The `--read-only` refusal above, for the Preferences switches: a spec whose every tool is
+      # in a group/feature the operator turned off would start a server with an empty tools/list,
+      # which an agent cannot tell from a gori without the feature. Refused here, AFTER the
+      # install branch — an installed command outlives today's switches.
       if tool_filter && advertised.empty?
-        abort "gori mcp: every tool --tools=#{tools_spec} selects is switched off in Preferences " \
-              "(AI › MCP permissions: #{groups.join(", ", &.title)}), so the server would advertise " \
-              "nothing. Allow a group there, or name a read tool."
+        reasons = [] of String
+        reasons << "AI › MCP permissions: #{groups.join(", ", &.title)}" unless groups.empty?
+        reasons << "AI › MCP features: #{feature_groups.join(", ", &.title)}" unless feature_groups.empty?
+        abort "gori mcp: every tool --tools=#{tools_spec} selects is turned off in Preferences " \
+              "(#{reasons.join("; ")}), so the server would advertise nothing. " \
+              "Enable a group/feature there, or widen --tools."
       end
     end
 
@@ -174,7 +186,7 @@ module Gori::CLI
     # it is HERE and not beside the bound server below: an unbound start (outside a git
     # workspace, `--no-project`, or a database that would not open) spends exactly the same
     # context and used to say nothing at all.
-    Log.info { mcp_catalogue_banner(tool_filter, read_only, denied) }
+    Log.info { mcp_catalogue_banner(tool_filter, read_only, denied, disabled_features) }
 
     selection, bind_error = if no_project
                               {MCP::ProjectResolver::Selection.new(nil, nil, nil, "unbound"), nil}
@@ -195,7 +207,7 @@ module Gori::CLI
         project_name: nil, project_slug: nil, db_path: nil,
         selection_source: selection.source, workspace_root: nil, project_id: nil,
         bind_error: bind_error, tool_filter: tool_filter, denied_permissions: denied, asked_permissions: asked,
-        usage_log: usage_log)
+        disabled_features: disabled_features, usage_log: usage_log)
       server.trap_shutdown_signals
       server.run
       server.current_store.try(&.close) # bound later by create/switch_project
@@ -246,7 +258,7 @@ module Gori::CLI
           project_name: nil, project_slug: nil, db_path: nil,
           selection_source: "unbound", workspace_root: nil, project_id: nil,
           bind_error: reason, tool_filter: tool_filter, denied_permissions: denied, asked_permissions: asked,
-          usage_log: usage_log)
+          disabled_features: disabled_features, usage_log: usage_log)
         server.trap_shutdown_signals
         server.run
         server.current_store.try(&.close) # bound later by create/switch_project
@@ -259,7 +271,7 @@ module Gori::CLI
         project_name: project_name, project_slug: project_slug, db_path: resolved,
         selection_source: selection.source, workspace_root: selection.workspace_root,
         project_id: project_id, tool_filter: tool_filter, denied_permissions: denied, asked_permissions: asked,
-        usage_log: usage_log)
+        disabled_features: disabled_features, usage_log: usage_log)
       server.trap_shutdown_signals
       server.run # blocks until STDIN EOF (client closed), or INT/TERM
     ensure
@@ -299,10 +311,11 @@ module Gori::CLI
   # into help or docs, for the reason `mcp_tools_help` gives. One JSON build per start — the
   # same work the server's first `declared_args` does again, off any hot path.
   def self.mcp_catalogue_banner(tool_filter : MCP::ToolFilter?, read_only : Bool,
-                                denied : Set(String)? = nil) : String
-    advertised = MCP::Tools.served_names(tool_filter, !read_only, denied)
+                                denied : Set(String)? = nil,
+                                disabled_features : Set(String)? = nil) : String
+    advertised = MCP::Tools.served_names(tool_filter, !read_only, denied, disabled_features)
     total = MCP::Tools::TOOL_NAMES.size
-    weight = MCP::Tools.catalogue_weight(tool_filter, !read_only, denied)
+    weight = MCP::Tools.catalogue_weight(tool_filter, !read_only, denied, disabled_features)
     if f = tool_filter
       "mcp: #{f.flags} advertises #{advertised.size} of #{total} tools (#{weight}): #{advertised.sort.join(", ")}"
     else

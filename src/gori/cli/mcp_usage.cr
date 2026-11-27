@@ -55,14 +55,14 @@ module Gori::CLI
   # than failing the report. Empty when no session line survived in the window.
   def self.mcp_usage_advertised(summary : MCP::UsageLog::Summary) : Set(String)
     names = Set(String).new
-    summary.profiles.each_key do |(spec, read_only, denied)|
+    summary.profiles.each_key do |(spec, read_only, denied, disabled_features)|
       filter = nil.as(MCP::ToolFilter?)
       if spec
         parsed = MCP::ToolFilter.parse(spec, MCP::Tools::TOOL_NAMES, MCP::Tools::TOOL_DEPENDENCIES)
         next unless parsed.is_a?(MCP::ToolFilter)
         filter = parsed
       end
-      names.concat(MCP::Tools.served_names(filter, !read_only, denied.to_set))
+      names.concat(MCP::Tools.served_names(filter, !read_only, denied.to_set, disabled_features.to_set))
     end
     names
   end
@@ -77,10 +77,11 @@ module Gori::CLI
   end
 
   private def self.usage_profile(profile : MCP::UsageLog::Summary::Profile) : String
-    spec, read_only, denied = profile
+    spec, read_only, denied, disabled_features = profile
     notes = [] of String
     notes << "read-only" if read_only
     notes << "without #{denied.join(", ")}" unless denied.empty?
+    notes << "features off: #{disabled_features.join(", ")}" unless disabled_features.empty?
     "#{spec || "*"}#{" (#{notes.join("; ")})" unless notes.empty?}"
   end
 
@@ -177,11 +178,12 @@ module Gori::CLI
         j.field("clients") { usage_counts(j, summary.clients) }
         j.field("profiles") do
           j.array do
-            summary.profiles.to_a.sort_by! { |(p, n)| {-n, usage_profile(p)} }.each do |((spec, read_only, denied), n)|
+            summary.profiles.to_a.sort_by! { |(p, n)| {-n, usage_profile(p)} }.each do |((spec, read_only, denied, disabled_features), n)|
               j.object do
                 j.field "tools", spec
                 j.field "read_only", read_only
                 j.field "denied", denied
+                j.field "disabled_features", disabled_features unless disabled_features.empty?
                 j.field "sessions", n
               end
             end

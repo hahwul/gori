@@ -124,6 +124,11 @@ module Gori::Tui
       # by default, which is what gori mcp served before they existed.
       Section.new(:mcp_permissions, "settings.mcp-permissions", "MCP permissions",
         "Which tool groups an agent attached over gori mcp may use — send traffic, intercept control, project edits, scope & sandbox, project management, local commands; reading the capture is always allowed", :ai, :form),
+      # Which workbench tabs/feature toolsets `gori mcp` exposes at all (both reads and writes).
+      # All on by default; unchecking a tab hides its tools from `tools/list`.
+      Section.new(:mcp_features, "settings.mcp-features", "MCP features",
+        "Choose which tabs and feature toolsets gori mcp exposes — uncheck a tab to hide its tools from tools/list", :ai, :form,
+        keywords: %w[mcp tools tabs issues jwt cookie fuzzer miner oast probe rewriter]),
     ]
 
     # The tab rows for one group, in catalog order (skips in_tab: false sections).

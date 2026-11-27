@@ -182,7 +182,7 @@ module Gori
       # `Env.mask_secrets`: a masked row put `$NAME` on the wire from the TUI and the value from
       # MCP and the CLI, and a binding value masked into an SNI minted a `$NAME` no send path can
       # resolve. Redaction happens on the way OUT: every field returned to the LLM is masked.
-      @[Tool("create_repeater", gated: true, agent_action: true, permission: "write")]
+      @[Tool("create_repeater", gated: true, agent_action: true, permission: "write", feature: "repeater")]
       private def create_repeater(h) : Result
         issue_id = int(h, "issue_id")
         return Result.new(id_error(h, "issue_id"), is_error: true) if issue_id.nil? && present?(h, "issue_id")
@@ -603,7 +603,7 @@ module Gori
         Fuzz::Template.parse(request).runs_commands?(Decoder.shared_registry)
       end
 
-      @[Tool("update_repeater", gated: true, agent_action: true, permission: "write")]
+      @[Tool("update_repeater", gated: true, agent_action: true, permission: "write", feature: "repeater")]
       private def update_repeater(h) : Result
         id = int(h, "id")
         return Result.new("missing or invalid required 'id'", is_error: true) unless id
@@ -736,7 +736,7 @@ module Gori
         Result.new(ex.message || "invalid repeater arguments", is_error: true)
       end
 
-      @[Tool("delete_repeater", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("delete_repeater", gated: true, agent_action: true, permission: "write", open_world: false, feature: "repeater")]
       private def delete_repeater(h) : Result
         id = int(h, "id")
         return Result.new("missing or invalid required 'id'", is_error: true) unless id
@@ -862,7 +862,7 @@ module Gori
       # narrow: it is a DESTINATION, not a selector. A stale `to_index` puts the tab somewhere
       # else; a stale index in `id`'s place would act on a different session entirely, which is
       # why `id` stays a database id everywhere (see `repeater_tui_index`).
-      @[Tool("move_repeater", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("move_repeater", gated: true, agent_action: true, permission: "write", open_world: false, feature: "repeater")]
       private def move_repeater(h) : Result
         id = required_id(h, "id")
 
@@ -943,7 +943,7 @@ module Gori
       # Every flow is checked to EXIST before the first insert (`flow_row`, the row-only probe
       # — `get_flow` materialises both BLOBs and is read one flow at a time inside the loop, so
       # a long list never holds every response in memory at once).
-      @[Tool("create_repeaters", gated: true, agent_action: true, permission: "write", open_world: false, destructive: false)]
+      @[Tool("create_repeaters", gated: true, agent_action: true, permission: "write", open_world: false, destructive: false, feature: "repeater")]
       private def create_repeaters(h) : Result
         flow_ids = id_list_arg(h, "flow_ids")
         if flow_ids.empty?
@@ -1068,7 +1068,7 @@ module Gori
       # the workbench holds now, and a session created since the listing would be deleted
       # without ever having been read. Narrow the listing (`get_repeater_context{filter}`),
       # then pass the ids it returned.
-      @[Tool("delete_repeaters", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("delete_repeaters", gated: true, agent_action: true, permission: "write", open_world: false, feature: "repeater")]
       private def delete_repeaters(h) : Result
         sel = repeater_bulk_selection(h, "ids")
         return sel if sel.is_a?(Result)
@@ -1137,7 +1137,7 @@ module Gori
       # transport flags and WebSocket frames — a bulk tool that could reach those would let one
       # call change what many sessions PUT ON THE WIRE, and no per-id report makes that
       # reviewable. Everything this writes is a caption the strip paints.
-      @[Tool("update_repeaters", gated: true, agent_action: true, permission: "write", open_world: false)]
+      @[Tool("update_repeaters", gated: true, agent_action: true, permission: "write", open_world: false, feature: "repeater")]
       private def update_repeaters(h) : Result
         sel = repeater_bulk_selection(h, "ids")
         return sel if sel.is_a?(Result)

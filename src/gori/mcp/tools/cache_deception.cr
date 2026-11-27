@@ -19,7 +19,7 @@ module Gori
       # No `env_refresh`: unlike authorize_start, this replays the request AS CAPTURED (verbatim
       # wire bytes) under built-in identities that carry no `$NAME`/session-slot value to
       # resolve, so there is no project env to re-read before the send.
-      @[Tool("cache_deception_check", gated: true, agent_action: true, requires: ["get_flow"], permission: "send")]
+      @[Tool("cache_deception_check", gated: true, agent_action: true, requires: ["get_flow"], permission: "send", feature: "authorize")]
       private def cache_deception_check(h) : Result
         flow_id = required_id(h, "flow_id")
         detail = store.get_flow(flow_id)

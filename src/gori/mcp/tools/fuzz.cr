@@ -15,7 +15,7 @@ module Gori
       # --- fuzz tools (gated, async job model) --------------------------------
 
       @[Tool("fuzz_start", gated: true, agent_action: true, env_refresh: true,
-        requires: ["fuzz_status", "fuzz_results", "fuzz_stop"], permission: "send")]
+        requires: ["fuzz_status", "fuzz_results", "fuzz_stop"], permission: "send", feature: "fuzzer")]
       private def fuzz_start(h) : Result
         # Refused before anything is built or sent, with the code a malformed argument gets.
         extractors = fuzz_extractors_arg(h)
@@ -25,7 +25,7 @@ module Gori
         host_approval(ex.verdict)
       end
 
-      @[Tool("create_fuzzer", gated: true, agent_action: true, env_refresh: true, permission: "write")]
+      @[Tool("create_fuzzer", gated: true, agent_action: true, env_refresh: true, permission: "write", feature: "fuzzer")]
       private def create_fuzzer(h) : Result
         if bad = %w[save_results record_history allow_unscoped].find { |key| h.has_key?(key) }
           return err("'#{bad}' is not accepted by create_fuzzer", "INVALID_ARGUMENT", field: bad)
@@ -498,7 +498,7 @@ module Gori
         fjob.result_flow_source_refs << flow_ref
       end
 
-      @[Tool("fuzz_status", gated: true, read_only: true, permission: "send")]
+      @[Tool("fuzz_status", gated: true, read_only: true, permission: "send", feature: "fuzzer")]
       private def fuzz_status(h) : Result
         fjob = lookup_job(h, @jobs, "fuzz", "status")
         return fjob if fjob.is_a?(Result)
@@ -592,7 +592,7 @@ module Gori
 
       FUZZ_RESULTS_LIMIT = PageLimit.new(100, 1000)
 
-      @[Tool("fuzz_results", gated: true, read_only: true, requires: ["get_flow"], permission: "send")]
+      @[Tool("fuzz_results", gated: true, read_only: true, requires: ["get_flow"], permission: "send", feature: "fuzzer")]
       private def fuzz_results(h) : Result
         fjob = lookup_job(h, @jobs, "fuzz", "results")
         return fjob if fjob.is_a?(Result)
@@ -709,7 +709,7 @@ module Gori
         end
       end
 
-      @[Tool("fuzz_stop", gated: true, agent_action: true, permission: "send")]
+      @[Tool("fuzz_stop", gated: true, agent_action: true, permission: "send", feature: "fuzzer")]
       private def fuzz_stop(h) : Result
         fjob = lookup_job(h, @jobs, "fuzz", "stop")
         return fjob if fjob.is_a?(Result)
