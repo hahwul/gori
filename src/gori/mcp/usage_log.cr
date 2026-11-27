@@ -364,12 +364,12 @@ module Gori
 
         private def add_call(row : Hash(String, JSON::Any), sid : String) : Nil
           @called << sid
-          result = row["result"]?.try(&.as_s?) || "ok"
+          result = text(row, "result") || "ok"
           if name = row["unknown"]?.try(&.as_s?)
-            @unknown[name] += 1
+            @unknown[UsageLog.token(name)] += 1
             return
           end
-          return unless tool = row["tool"]?.try(&.as_s?)
+          return unless tool = text(row, "tool")
           if result == NOT_SERVED
             @not_served[tool] += 1
             return
@@ -378,12 +378,12 @@ module Gori
           stat.calls += 1
           stat.undelivered += 1 if row["undelivered"]?.try(&.as_bool?)
           stat.extra_args += int(row, "extra") || 0_i64
-          row["args"]?.try(&.as_a?).try(&.each { |a| a.as_s?.try { |n| stat.args[n] += 1 } })
+          names(row, "args").each { |n| stat.args[n] += 1 }
           int(row, "bytes").try { |b| stat.bytes << b }
           int(row, "ms").try { |m| stat.ms << m }
           return if result == "ok"
           stat.errors += 1
-          field = row["field"]?.try(&.as_s?)
+          field = text(row, "field")
           stat.error_codes[field ? "#{result}:#{field}" : result] += 1
         end
 
@@ -392,14 +392,30 @@ module Gori
           @idle_sessions = (@active - @called).size
           @active.each do |sid|
             meta = @meta[sid]?
-            @clients[meta.try(&.["client"]?).try(&.as_s?) || "(unnamed)"] += 1
+            @clients[meta.try { |m| text(m, "client", CLIENT_MAX) } || "(unnamed)"] += 1
             next unless meta
-            denied = meta["denied"]?.try(&.as_a?).try(&.compact_map(&.as_s?)) || [] of String
-            disabled_features = meta["disabled_features"]?.try(&.as_a?).try(&.compact_map(&.as_s?)) || [] of String
-            profile = {meta["tools"]?.try(&.as_s?), meta["read_only"]?.try(&.as_bool?) || false,
-                       denied.sort!.uniq!, disabled_features.sort!.uniq!}
+            profile = {spec(meta), meta["read_only"]?.try(&.as_bool?) || false,
+                       names(meta, "denied").sort!.uniq!, names(meta, "disabled_features").sort!.uniq!}
             @profiles[profile] += 1
           end
+        end
+
+        # A string as gori would have written it, which is all the report prints: cleaned and
+        # capped the way the writer cleans what a peer chose (`UsageLog.clean`), so a line
+        # nobody here wrote cannot put a control character on the operator's terminal or a
+        # byte that is not UTF-8 into `--json`. Idempotent on what gori did write.
+        private def text(row : Hash(String, JSON::Any), key : String, max : Int32 = NAME_MAX) : String?
+          UsageLog.clean(row[key]?.try(&.as_s?), max)
+        end
+
+        private def names(row : Hash(String, JSON::Any), key : String) : Array(String)
+          row[key]?.try(&.as_a?).try(&.compact_map { |v| UsageLog.clean(v.as_s?, NAME_MAX) }) || [] of String
+        end
+
+        # The `--tools` spec, held to what the writer keeps (`SPEC_MAX`): a longer one is not
+        # gori's, and it reaches `ToolFilter.parse`, whose "did you mean" costs grow with it.
+        private def spec(meta : Hash(String, JSON::Any)) : String?
+          text(meta, "tools", SPEC_MAX + 1).try { |s| s.size > SPEC_MAX ? SPEC_TOO_LONG : s }
         end
 
         # A count or a size as gori would have written it: an integer from 0 to `Int32::MAX`,

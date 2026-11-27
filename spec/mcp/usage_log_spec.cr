@@ -544,6 +544,23 @@ describe Gori::MCP::UsageLog do
       end
     end
 
+    it "reads back a string no gori wrote as the writer would have kept it" do
+      with_usage_file do |path|
+        File.write(path, [
+          %({"t":"s","at":1,"sid":"a","client":"cl\\u001b]0;x\\u0007i","tools":"#{"q" * 5000}","read_only":false}),
+          %({"t":"s","at":1,"sid":"b","client":"\\u0000","tools":"decode,  ql_reference"}),
+          %({"t":"c","at":1,"sid":"a","tool":"get\\u0008_flow","result":"ok"}),
+          %({"t":"c","at":1,"sid":"b","unknown":"../Etc Passwd","result":"UNKNOWN_TOOL"}),
+        ].join('\n'))
+        summary = Gori::MCP::UsageLog::Summary.read(path)
+        summary.clients.should eq({"cl]0;xi" => 1, "(unnamed)" => 1})
+        summary.profiles.keys.map(&.[0].to_s).sort!.should eq(
+          [Gori::MCP::UsageLog::SPEC_TOO_LONG, "decode, ql_reference"])
+        summary.tools.keys.should eq(["get_flow"])
+        summary.unknown.should eq({"etcpasswd" => 1})
+      end
+    end
+
     it "adds up counts no gori wrote without overflowing, and ignores negative ones" do
       with_usage_file do |path|
         File.write(path, [

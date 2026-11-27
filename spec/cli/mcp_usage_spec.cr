@@ -173,4 +173,47 @@ describe "gori mcp --usage" do
       Gori::CLI.mcp_usage_text(summary, "7d", true).should_not contain("never called")
     end
   end
+
+  # Lines no gori wrote: the file is the operator's, but the report trusts nothing it reads.
+  describe "a file gori did not write" do
+    it "reports a session with a --tools spec longer than gori ever writes quickly" do
+      summary = usage_summary do |path|
+        File.write(path, %({"t":"s","at":#{Time.utc.to_unix},"sid":"x","tools":"#{"q" * 200_000}",) +
+                         %("advertised":1,"read_only":false}\n))
+      end
+      started = Time.instant
+      text = Gori::CLI.mcp_usage_text(summary, "7d", true)
+      Gori::CLI.mcp_usage_json(summary, "7d", true)
+      (Time.instant - started).total_seconds.should be < 3.0
+      text.should contain("profile    #{Gori::MCP::UsageLog::SPEC_TOO_LONG} 1")
+    end
+
+    it "prints no control character and only valid UTF-8 from what it read back" do
+      summary = usage_summary do |path|
+        File.open(path, "w") do |f|
+          f << %({"t":"s","at":#{Time.utc.to_unix},"sid":"x","client":"a\\u001b[2Jb",) <<
+            %("tools":"decode\\u0007","advertised":1,"read_only":false,"denied":["se\\u001bnd"]}\n)
+          f << %({"t":"c","at":#{Time.utc.to_unix},"sid":"x","tool":")
+          f.write(Bytes[0xff, 0xfe])
+          f << %(\\u001b[31m","args":["in\\u0000put"],"result":"BAD\\u001b","field":"sp\\u009bec"}\n)
+          f << %({"t":"c","at":#{Time.utc.to_unix},"sid":"x","unknown":"Search\\u001b[0m History","result":"UNKNOWN_TOOL"}\n)
+        end
+      end
+      text = Gori::CLI.mcp_usage_text(summary, "7d", true)
+      json = Gori::CLI.mcp_usage_json(summary, "7d", true)
+      {text, json}.each do |report|
+        report.valid_encoding?.should be_true
+        report.should_not match(/[\x00-\x09\x0b-\x1f\x7f\x{80}-\x{9f}]/)
+      end
+      parsed = JSON.parse(json)
+      parsed["clients"].as_h.keys.should eq(["a[2Jb"])
+      parsed["profiles"][0]["tools"].as_s.should eq("decode")
+      parsed["profiles"][0]["denied"].as_a.map(&.as_s).should eq(["send"])
+      tool = parsed["tools"][0]
+      tool["tool"].as_s.should eq("\u{FFFD}\u{FFFD}[31m")
+      tool["args"].as_h.keys.should eq(["input"])
+      tool["error_codes"].as_h.keys.should eq(["BAD:spec"])
+      parsed["unknown_tools"].as_h.keys.should eq(["search0mhistory"])
+    end
+  end
 end
