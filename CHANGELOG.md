@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- MCP / TUI: Preferences › AI › MCP features adds per-tab inline checkboxes (Target, Intercept, Repeater, Fuzzer, Miner, OAST, Sequencer, Decoder, JWT, Cookie, Comparer, Rewriter, Colormarker, Probe, Authorize, Issues, Evidence, Notes) to hide unwanted tab toolsets from `gori mcp`'s `tools/list` while keeping Core capture, project, scope and operator tools exposed.
+- MCP / TUI: Preferences › AI › MCP features has a checkbox per workbench tab, so `gori mcp` can leave out the tabs an agent does not need while capture, project, scope and operator tools stay served (#2030).
 
 - TUI: a response with one very long grapheme cluster (an emoji ZWJ chain or a run of joiners), `\uXXXX` decoding with `u`, a selection tint on a long non-ASCII line, a WebSocket frame packed with empty SignalR records, or a Sitemap folding thousands of query paths no longer freezes gori for seconds to hours; every hidden character is still revealed (#2029).
 
