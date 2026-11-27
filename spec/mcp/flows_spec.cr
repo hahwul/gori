@@ -1354,6 +1354,14 @@ describe Gori::MCP::Server do
         orphan.is_error.should be_true
         orphan.text.should contain("only to GraphQL")
         store.count.should eq(10)
+        # A blank endpoint is absent, as a blank `text` is: a client filling every property
+        # sends `endpoint: ""` beside a kind that takes none.
+        blank = tools.call("import_flows", JSON.parse({kind: "urls", text: "https://a.test/x", endpoint: ""}.to_json))
+        blank.is_error.should be_false
+        JSON.parse(blank.text)["count"].as_i.should eq(1)
+        blank = tools.call("import_flows", JSON.parse({kind: "graphql", path: path, endpoint: " "}.to_json))
+        blank.is_error.should be_true
+        blank.text.should contain("requires an endpoint")
       end
     end
 

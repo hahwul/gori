@@ -80,7 +80,7 @@ describe "MCP tool features" do
 
   # A turned-off feature must not leave a served tool whose workflow depends on one of its
   # tools. `get_current_context` is the one Core hub that points at whatever tab the TUI is
-  # viewing and adapts its `selection_next_call` to `serves?`.
+  # viewing and adapts its `selection_next_call` and its description to `serves?`.
   it "never splits a declared workflow across two features" do
     Gori::MCP::Tools::TOOL_DEPENDENCIES.each do |name, deps|
       next if name == "get_current_context"
@@ -172,6 +172,9 @@ describe "MCP tool features" do
       text, names = feature_instructions(store, Set{"issues", "jwt", "decoder", "repeater", "authorize"})
       text.should contain("turned off Repeater, Decoder, JWT, Authorize, Issues")
       text.should contain("AI › MCP features")
+      # The opening list of what the project data covers follows what is served, rather than
+      # promising issues and then saying the Issues tab is off.
+      text.should contain("(history, flows, sitemap, scope, notes, match&replace rules)")
       %w[send_request send_websocket create_issue update_issue decode jwt_decode cache_deception_check].each do |tool_name|
         names.should_not contain(tool_name)
         text.should_not match(/\b#{Regex.escape(tool_name)}\b/)

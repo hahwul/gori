@@ -53,14 +53,18 @@ module Gori::CLI
   # that were switched off serve in THIS gori. A
   # spec this build cannot parse (written by a different version) contributes nothing rather
   # than failing the report. Empty when no session line survived in the window.
+  #
+  # Each spec is parsed once, however many profiles share it: a refused spec's "did you mean"
+  # is the expensive part of a parse, and it is thrown away here.
   def self.mcp_usage_advertised(summary : MCP::UsageLog::Summary) : Set(String)
     names = Set(String).new
+    parsed = {} of String => MCP::ToolFilter | String
     summary.profiles.each_key do |(spec, read_only, denied, disabled_features)|
       filter = nil.as(MCP::ToolFilter?)
       if spec
-        parsed = MCP::ToolFilter.parse(spec, MCP::Tools::TOOL_NAMES, MCP::Tools::TOOL_DEPENDENCIES)
-        next unless parsed.is_a?(MCP::ToolFilter)
-        filter = parsed
+        result = parsed[spec] ||= MCP::ToolFilter.parse(spec, MCP::Tools::TOOL_NAMES, MCP::Tools::TOOL_DEPENDENCIES)
+        next unless result.is_a?(MCP::ToolFilter)
+        filter = result
       end
       names.concat(MCP::Tools.served_names(filter, !read_only, denied.to_set, disabled_features.to_set))
     end
@@ -68,8 +72,9 @@ module Gori::CLI
   end
 
   # Advertised to some recorded session, called by none.
-  def self.mcp_usage_never_called(summary : MCP::UsageLog::Summary) : Array(String)
-    (mcp_usage_advertised(summary) - summary.tools.keys.to_set).to_a.sort!
+  def self.mcp_usage_never_called(summary : MCP::UsageLog::Summary,
+                                  advertised : Set(String) = mcp_usage_advertised(summary)) : Array(String)
+    (advertised - summary.tools.keys.to_set).to_a.sort!
   end
 
   private def self.usage_window(since : String) : String
@@ -153,7 +158,7 @@ module Gori::CLI
 
   private def self.usage_footer(io : IO, summary : MCP::UsageLog::Summary) : Nil
     advertised = mcp_usage_advertised(summary)
-    never = mcp_usage_never_called(summary)
+    never = mcp_usage_never_called(summary, advertised)
     lines = [] of String
     unless advertised.empty?
       lines << "never called: #{never.size} of #{advertised.size} advertised tools (--json lists them)"

@@ -712,7 +712,7 @@ module Gori
                                                   "#{advertised("list_history", "list_sitemap") || "filter"} queries." : ""
         decoder = @tools.advertises?("decode") ? ", plus a pure `decoder` encode/decode/hash tool" : ""
         base = "gori MCP exposes the selected project's captured HTTP traffic " \
-               "(history, flows, sitemap, scope, issues, notes, match&replace rules)" \
+               "(#{traffic_surfaces})" \
                "#{decoder}.#{ql} Timestamps include unix " \
                "microseconds plus *_iso RFC3339 fields where available.#{failure}#{binding_note}"
         text = @allow_actions ? "#{base}#{actions_note}#{projects_note}" : "#{base}#{read_only_note}#{projects_note}"
@@ -722,6 +722,19 @@ module Gori
         # when a filter is in force at all, say so and name the authority. A sentence that
         # survives a future edit while its tool does not is then at least contradicted.
         text + (filter_note || "")
+      end
+
+      # The opening sentence's list of what the project data covers. History, flows and scope
+      # are Core; the rest each sit behind an MCP feature (Target, Issues, Notes, Rewriter), so
+      # each goes when its list tool does rather than being contradicted by `features_note`.
+      private def traffic_surfaces : String
+        parts = ["history", "flows"]
+        parts << "sitemap" if @tools.serves?("list_sitemap")
+        parts << "scope"
+        parts << "issues" if @tools.serves?("list_issues")
+        parts << "notes" if @tools.serves?("list_notes")
+        parts << "match&replace rules" if @tools.serves?("list_rules")
+        parts.join(", ")
       end
 
       # The operator-messages paragraph, one clause per tool it names — the rule every other
@@ -1104,11 +1117,14 @@ module Gori
 
       # What kind of server the prompt is running on, from the facts `instructions_text`
       # reads. Names no tool: under `--read-only` the instructions name the disabled ones on
-      # purpose, but a prompt must not send the agent toward a tool it cannot call.
+      # purpose, but a prompt must not send the agent toward a tool it cannot call. The
+      # Preferences switches (MCP permissions and features) are among those facts: a playbook
+      # whose tab is turned off has to say so, or its steps read as a broken server.
       private def prompt_restriction : String?
         read_only = "This server runs with --read-only: it cannot send traffic or change the project, " \
                     "so a step that does either is one no listed tool can do." unless @allow_actions
-        [read_only, filter_note.try(&.lstrip)].compact.join(' ').presence
+        switches = (permissions_note + features_note).lstrip.presence
+        [read_only, switches, filter_note.try(&.lstrip)].compact.join(' ').presence
       end
 
       private def handle_tools_call(id : JSON::Any, era : String?, params : JSON::Any?) : Nil

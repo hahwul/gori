@@ -795,6 +795,17 @@ module Gori
         end
       end
 
+      # Repeater is the one `requires:` of `get_current_context` its DESCRIPTION names, so it
+      # follows `serves?` the way `selection_next_call` does for the other three: with the
+      # Repeater feature off (or filtered out) the chips have no MCP tool that resolves them.
+      private def subtab_resolution : String
+        if serves?("get_repeater_context")
+          "resolve via get_repeater_context"
+        else
+          "no tool on this server resolves them (Repeater is not exposed)"
+        end
+      end
+
       # The tools/list schemas for the session-context tools, kept beside the handlers that
       # implement them. `Tools#list` composes every one of these; the action gate is applied
       # here rather than around one long block, so a new write tool cannot be added on the
@@ -824,8 +835,8 @@ module Gori
           "`truncated` is the ONLY sign the list was cut — not `marked_count`, which counts " \
           "marks even when `target_source` overrides them; never act on a cut list. " \
           "`marked_hidden_count` = marks the operator's own filter hides. " \
-          "`marked_subtabs` are CHIP NUMBERS that shift as sessions change: resolve via " \
-          "get_repeater_context. `marks_elsewhere` = other tabs holding marks. " \
+          "`marked_subtabs` are CHIP NUMBERS that shift as sessions change: #{subtab_resolution}. " \
+          "`marks_elsewhere` = other tabs holding marks. " \
           "`tui.live`/`tui.windows` = attached TUIs (sharing ONE state row); `tui.unknown` = " \
           "cannot tell. `age_seconds` = since the view last MOVED (old = operator idle, not " \
           "stale). `available:false` = no TUI view yet." { }

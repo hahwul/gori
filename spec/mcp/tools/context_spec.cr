@@ -27,3 +27,27 @@ describe "MCP get_repeater_context query" do
     end
   end
 end
+
+# get_current_context is Core and `requires:` get_repeater_context, which the MCP features
+# sweep tolerates only because the hub adapts to `serves?`. Its description named the Repeater
+# tool unconditionally, so with Repeater off it sent the agent to a tool tools/list lacks.
+describe "MCP get_current_context description" do
+  it "names get_repeater_context only while it is served" do
+    with_store do |store|
+      {Set(String).new, Set{"repeater"}}.each do |disabled|
+        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false,
+          disabled_features: disabled)
+        listed = JSON.parse(JSON.build { |j| tools.list(j) }).as_a
+        desc = listed.find! { |t| t["name"] == "get_current_context" }["description"].as_s
+        desc.should contain("marked_subtabs")
+        if disabled.empty?
+          desc.should contain("resolve via get_repeater_context")
+        else
+          listed.map(&.["name"].as_s).should_not contain("get_repeater_context")
+          desc.should_not contain("get_repeater_context")
+          desc.should contain("no tool on this server resolves them")
+        end
+      end
+    end
+  end
+end

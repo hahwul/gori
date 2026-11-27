@@ -4,9 +4,9 @@ require "../spec_helper"
 # second query by host and path, which can land on another variant and retypes a host whose
 # bytes may not be what they look like.
 
-private def seed(store, host : String, target : String, status : Int32?) : Int64
+private def seed(store, host : String, target : String, status : Int32?, scheme = "https", port = 443) : Int64
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
-    created_at: 1_i64, scheme: "https", host: host, port: 443,
+    created_at: 1_i64, scheme: scheme, host: host, port: port,
     method: "GET", target: target, http_version: "HTTP/1.1",
     head: "GET #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice,
     source: Gori::FlowSource::Kind::Proxy))
@@ -70,6 +70,23 @@ describe "MCP list_sitemap sample flow ids" do
       folded["query_target_flow_ids"].as_a.map(&.as_i64).should eq([q])
       folded["bare_target_flow_id"].as_i64.should eq(bare)
       folded.as_h.has_key?("sample_flow_id").should be_false
+    end
+  end
+
+  # Rows reach the fold sorted by RAW target, so an origin-form variant sorts ahead of the
+  # absolute-form bare capture a browser sends a proxy over plain HTTP. Bareness used to be
+  # decided only for the first row, which counted the path itself as a query variant.
+  it "keeps the bare id when the bare capture is absolute-form and sorts after a variant" do
+    with_store do |store|
+      bare = seed(store, "a.test", "http://a.test/search", 200, "http", 80)
+      q = seed(store, "a.test", "/search?q=1", 200, "http", 80)
+      store.flush
+      folded = sitemap(tools_for(store)).find! { |e| e["target"].as_s == "/search" }
+      folded["count"].as_i.should eq(2)
+      folded["query_variants"].as_i.should eq(1)
+      folded["query_targets"].as_a.map(&.as_s).should eq(["/search?q=1"])
+      folded["query_target_flow_ids"].as_a.map(&.as_i64).should eq([q])
+      folded["bare_target_flow_id"]?.try(&.as_i64).should eq(bare)
     end
   end
 

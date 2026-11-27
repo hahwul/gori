@@ -291,6 +291,38 @@ describe Gori::MCP::UsageLog do
       end
     end
 
+    it "names a session again in a file another server rotated, so a second rotation keeps it" do
+      with_usage_file do |path|
+        a = Gori::MCP::UsageLog.new(path, "aaaa")
+        b = Gori::MCP::UsageLog.new(path, "bbbb")
+        a.session(usage_session("claude-code"))
+        b.session(usage_session("codex"))
+        2.times do
+          File.open(path, "a", &.print("z" * (Gori::MCP::UsageLog::MAX_BYTES + 1) + "\n"))
+          a.call("get_flow", ["id"], 0, "ok", nil, 10, 1_i64, true) # A wins the rotation
+          b.call("decode", ["input"], 0, "ok", nil, 10, 1_i64, true)
+        end
+
+        rows = usage_rows(path)
+        rows.map { |r| {r["sid"].as_s, r["t"].as_s} }.should eq(
+          [{"aaaa", "s"}, {"aaaa", "c"}, {"bbbb", "s"}, {"bbbb", "c"}])
+        summary = Gori::MCP::UsageLog::Summary.read(path)
+        summary.sessions.should eq(2)
+        summary.clients.should eq({"claude-code" => 1, "codex" => 1})
+      end
+    end
+
+    it "names the session again when the file was removed under it" do
+      with_usage_file do |path|
+        log = Gori::MCP::UsageLog.new(path, "aaaa")
+        log.session(usage_session)
+        File.delete(path)
+        log.call("decode", ["input"], 0, "ok", nil, 10, 1_i64, true)
+        log.call("decode", ["input"], 0, "ok", nil, 10, 1_i64, true)
+        usage_rows(path).map(&.["t"].as_s).should eq(["s", "c", "c"])
+      end
+    end
+
     it "does not wait for a rotation another server is doing, and keeps writing" do
       posix_only!("flock is advisory here; Windows' lock is mandatory on the lock file itself")
       with_usage_file do |path|
@@ -509,6 +541,23 @@ describe Gori::MCP::UsageLog do
         stat.calls.should eq(2)
         stat.args.should eq({"id" => 1})
         stat.bytes.should eq([5_i64])
+      end
+    end
+
+    it "reads back a string no gori wrote as the writer would have kept it" do
+      with_usage_file do |path|
+        File.write(path, [
+          %({"t":"s","at":1,"sid":"a","client":"cl\\u001b]0;x\\u0007i","tools":"#{"q" * 5000}","read_only":false}),
+          %({"t":"s","at":1,"sid":"b","client":"\\u0000","tools":"decode,  ql_reference"}),
+          %({"t":"c","at":1,"sid":"a","tool":"get\\u0008_flow","result":"ok"}),
+          %({"t":"c","at":1,"sid":"b","unknown":"../Etc Passwd","result":"UNKNOWN_TOOL"}),
+        ].join('\n'))
+        summary = Gori::MCP::UsageLog::Summary.read(path)
+        summary.clients.should eq({"cl]0;xi" => 1, "(unnamed)" => 1})
+        summary.profiles.keys.map(&.[0].to_s).sort!.should eq(
+          [Gori::MCP::UsageLog::SPEC_TOO_LONG, "decode, ql_reference"])
+        summary.tools.keys.should eq(["get_flow"])
+        summary.unknown.should eq({"etcpasswd" => 1})
       end
     end
 

@@ -8,7 +8,6 @@ module Gori::Import
     MAX_BYTES       = 8 * 1024 * 1024
     MAX_TYPES       = 4096
     MAX_OPERATIONS  = 1000
-    MAX_MEMBERS     =  256
     MAX_ARGS        =   64
     MAX_NAME        =  128
     MAX_REF_DEPTH   =   16
@@ -39,7 +38,16 @@ module Gori::Import
     end
 
     private class Generator
+      # One INPUT_OBJECT's fields as `input_sample` reads them, validated once per schema: the
+      # valid prefix, then the refusal that ended it (if any), which `input_sample` raises after
+      # sampling that prefix, exactly where an inline walk would. Without it every visit re-walked
+      # each field's 16-level wrapper chain, and a cut nullable field charges no node, so one
+      # operation could do ~650k name checks before the budget threw it away (P6).
+      private record InputField, name : String, ref : JSON::Any?, leaf : String, nullable : Bool
+      private record InputShape, fields : Array(InputField), error : String?
+
       @types = {} of String => JSON::Any
+      @inputs = {} of String => InputShape
       @left = MAX_NODES
 
       def initialize(@schema : JSON::Any)
@@ -56,7 +64,14 @@ module Gori::Import
         Builder.endpoint(endpoint) # reject a bad endpoint even when the schema has no operations
         pairs = [] of Builder::FlowPair
         skips = Skips.new
-        subscriptions = root_fields("subscriptionType").size
+        # Subscriptions are only counted, so a dangling or malformed subscriptionType is a note,
+        # not a reason to lose every query and mutation beside it.
+        subscriptions = begin
+          root_fields("subscriptionType").size
+        rescue ex : Gori::Error
+          skips.note("ignored subscriptionType: #{ex.message}")
+          0
+        end
         note = "skipped #{subscriptions} subscription operation(s): only query/mutation HTTP templates are imported"
         skips.note(note) if subscriptions > 0
         now = Time.utc.to_unix * 1_000_000
@@ -78,7 +93,7 @@ module Gori::Import
             rescue ex : Gori::Error
               # The aggregate budget is fatal: repeatedly retrying it must not grow notes/work.
               raise ex if total > MAX_TOTAL_BYTES
-              skips.add("#{kind} field #{i + 1}", ex)
+              skips.add("#{kind} field #{field_label(field, i)}", ex)
             end
             Fiber.yield
           end
@@ -119,16 +134,35 @@ module Gori::Import
 
       private def name(node : JSON::Any?) : String
         n = Graphql.at(node, "name").try(&.as_s?)
-        unless n && n.bytesize <= MAX_NAME && n.ascii_only? && /\A[_A-Za-z][_0-9A-Za-z]*\z/.matches?(n)
+        unless n && valid_name?(n)
           raise Gori::Error.new("invalid GraphQL name (expected at most #{MAX_NAME} ASCII name bytes)")
         end
         n
+      end
+
+      private def valid_name?(n : String) : Bool
+        n.bytesize <= MAX_NAME && n.ascii_only? && /\A[_A-Za-z][_0-9A-Za-z]*\z/.matches?(n)
+      end
+
+      # A skipped operation by its field name when that name is valid (it is the one the
+      # operator searches the schema for), by its position otherwise.
+      private def field_label(field : JSON::Any, i : Int32) : String
+        n = Graphql.at(field, "name").try(&.as_s?)
+        n && valid_name?(n) ? n : (i + 1).to_s
       end
 
       private def list(node : JSON::Any?, key : String, max : Int32) : Array(JSON::Any)
         values = Graphql.at(node, key).try(&.as_a?) || raise Gori::Error.new("GraphQL #{key} is not an array")
         raise Gori::Error.new("GraphQL #{key} exceeds #{max} entries") if values.size > max
         values
+      end
+
+      # The first `n` entries of a list the generator reads only the head of. An overlong list
+      # here (a 300-value country enum, a 300-field result type) costs nothing to slice, so it
+      # is not a reason to refuse the operation; every entry read is still validated.
+      private def head(node : JSON::Any?, key : String, n : Int32) : Array(JSON::Any)
+        values = Graphql.at(node, key).try(&.as_a?) || raise Gori::Error.new("GraphQL #{key} is not an array")
+        values.first(n)
       end
 
       private def definition(n : String, kind : String) : JSON::Any
@@ -189,7 +223,7 @@ module Gori::Import
           else                     JSON::Any.new(label)
           end
         when "ENUM"
-          value = name(list(type, "enumValues", MAX_MEMBERS).first?)
+          value = name(head(type, "enumValues", 1).first?)
           raise Gori::Error.new("invalid GraphQL enum value") if {"true", "false", "null"}.includes?(value)
           JSON::Any.new(value)
         when "INPUT_OBJECT"
@@ -201,23 +235,46 @@ module Gori::Import
 
       private def input_sample(type : JSON::Any, n : String, chain : Array(String), depth : Int32) : JSON::Any
         raise Gori::Error.new("GraphQL required input cycle/depth at #{n}") if chain.includes?(n) || depth >= MAX_DEPTH
+        shape = input_shape(type, n)
         values = {} of String => JSON::Any
-        list(type, "inputFields", MAX_ARGS).each do |field|
-          f = name(field)
-          raise Gori::Error.new("duplicate GraphQL input field #{f}") if values.has_key?(f)
-          ref = Graphql.at(field, "type")
-          input_type!(ref)
+        shape.fields.each do |field|
           # Nullable recursion can stop at null; non-null recursion cannot produce a valid seed.
-          leaf = named(ref)
-          cut = chain.includes?(name(leaf)) || name(leaf) == n || depth + 1 >= MAX_DEPTH
-          nullable = Graphql.at(ref, "kind").try(&.as_s?) != "NON_NULL"
-          values[f] = nullable && cut ? JSON::Any.new(nil) : sample(ref, f, chain + [n], depth + 1)
+          cut = chain.includes?(field.leaf) || field.leaf == n || depth + 1 >= MAX_DEPTH
+          values[field.name] = field.nullable && cut ? JSON::Any.new(nil) : sample(field.ref, field.name, chain + [n], depth + 1)
         end
+        shape.error.try { |why| raise Gori::Error.new(why) }
         JSON::Any.new(values)
       end
 
+      private def input_shape(type : JSON::Any, n : String) : InputShape
+        @inputs[n] ||= begin
+          fields = [] of InputField
+          seen = Set(String).new
+          error = nil
+          begin
+            list(type, "inputFields", MAX_ARGS).each do |field|
+              f = name(field)
+              raise Gori::Error.new("duplicate GraphQL input field #{f}") unless seen.add?(f)
+              ref = Graphql.at(field, "type")
+              input_type!(ref)
+              nullable = Graphql.at(ref, "kind").try(&.as_s?) != "NON_NULL"
+              fields << InputField.new(f, ref, name(named(ref)), nullable)
+            end
+          rescue ex : Gori::Error
+            error = ex.message || "invalid GraphQL input object #{n}"
+          end
+          # Each shape is built once, but one operation can reach many new ones.
+          Fiber.yield
+          InputShape.new(fields, error)
+        end
+      end
+
+      # A field with more arguments than an operation may declare is skipped like one with a
+      # required argument, rather than refusing the operation that selects it.
       private def requires_arguments?(field : JSON::Any) : Bool
-        list(field, "args", MAX_ARGS).any? do |arg|
+        args = Graphql.at(field, "args").try(&.as_a?) || raise Gori::Error.new("GraphQL args is not an array")
+        return true if args.size > MAX_ARGS
+        args.any? do |arg|
           Graphql.at(Graphql.at(arg, "type"), "kind").try(&.as_s?) == "NON_NULL" &&
             Graphql.at(arg, "defaultValue").try(&.as_s?).nil?
         end
@@ -236,7 +293,7 @@ module Gori::Import
         type = definition(n, kind)
         members = ["__typename"]
         if kind == "UNION"
-          list(type, "possibleTypes", MAX_MEMBERS).first(MAX_WIDTH).each_with_index do |member, i|
+          head(type, "possibleTypes", MAX_WIDTH).each_with_index do |member, i|
             break if @left <= 0
             m = name(member)
             definition(m, "OBJECT")
@@ -244,7 +301,7 @@ module Gori::Import
             members << "... on #{m}#{selection(member, chain + [n], depth + 1, "gori_#{i}")}"
           end
         else
-          list(type, "fields", MAX_MEMBERS).first(MAX_WIDTH).each do |field|
+          head(type, "fields", MAX_WIDTH).each do |field|
             break if @left <= 0
             f = name(field)
             next if requires_arguments?(field)

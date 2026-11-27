@@ -122,6 +122,8 @@ describe Gori::Import::Graphql do
     result.flows.size.should eq(4)
     result.skipped.should eq(1)
     result.notes.join.should contain("args is not an array")
+    # Named by the field once its name is valid, so the operator can find it in the schema.
+    result.notes.join.should contain("skipped query field me: ")
   end
 
   it "rejects malformed and overlong names before they reach generated syntax" do
@@ -131,6 +133,7 @@ describe Gori::Import::Graphql do
       result = parse_graphql(doc)
       result.flows.size.should eq(4)
       result.skipped.should eq(1)
+      result.notes.join.should contain("skipped query field 1: invalid GraphQL name")
     end
   end
 
@@ -195,6 +198,64 @@ describe Gori::Import::Graphql do
     result = parse_graphql(doc)
     result.flows.size.should eq(3)
     result.notes.join.should contain("generated nodes")
+  end
+
+  it "reads only the head of enum values, result fields and union members, however long" do
+    doc = schema_doc
+    types = gql_types(doc)
+    types << JSON.parse({name: "Country", kind: "ENUM", enumValues: (0...300).map { |i| {name: "C#{i}"} }}.to_json)
+    wide = JSON.parse({name: "Wide", kind: "OBJECT", fields: (0...300).map { |i| {name: "f#{i}", args: [] of String, type: {kind: "SCALAR", name: "String"}} }}.to_json)
+    # A selected field with more arguments than an operation may declare is left out, like
+    # one with a required argument, instead of refusing the operation.
+    wide["fields"][1].as_h["args"] = JSON.parse((0..Gori::Import::Graphql::MAX_ARGS).map { |i| {name: "a#{i}", type: {kind: "SCALAR", name: "String"}} }.to_json)
+    types << wide
+    types << JSON.parse({name: "Many", kind: "UNION", possibleTypes: (0...300).map { {kind: "OBJECT", name: "Wide"} }}.to_json)
+    field = types[5]["fields"].as_a[0].as_h
+    field["args"] = JSON.parse(%([{"name":"c","type":{"kind":"NON_NULL","ofType":{"kind":"ENUM","name":"Country"}}}]))
+    field["type"] = JSON.parse(%({"kind":"OBJECT","name":"Wide"}))
+    types[5]["fields"].as_a[1].as_h["type"] = JSON.parse(%({"kind":"UNION","name":"Many"}))
+    result = parse_graphql(doc)
+    result.skipped.should eq(0)
+    me = envelope(result.flows[0])
+    me["variables"]["c"].as_s.should eq("C0")
+    me["query"].as_s.should eq("query me($c: Country!) { me(c: $c) { __typename f0 f2 f3 f4 f5 f6 f7 } }")
+    envelope(result.flows[1])["query"].as_s.scan("... on Wide").size.should eq(Gori::Import::Graphql::MAX_WIDTH)
+  end
+
+  it "keeps queries and mutations when the subscription root is dangling" do
+    doc = schema_doc
+    doc["data"]["__schema"].as_h["subscriptionType"] = JSON.parse(%({"name":"Missing"}))
+    result = parse_graphql(doc)
+    result.flows.size.should eq(5)
+    result.skipped.should eq(0)
+    result.notes.join.should contain("ignored subscriptionType: unknown GraphQL type Missing")
+  end
+
+  it "validates each input object once, not once per visit" do
+    # A 15-deep LIST chain on every leaf field, reached through 64×64 nullable input fields:
+    # re-validated per visit this was ~650k name checks per operation before the node budget
+    # threw it away, ~200 ms of a blocked scheduler each (P6).
+    deep = %({"kind":"SCALAR","name":"String"})
+    15.times { deep = %({"kind":"LIST","name":null,"ofType":#{deep}}) }
+    input = ->(n : String, ref : String) do
+      JSON.parse(%({"kind":"INPUT_OBJECT","name":"#{n}","inputFields":[#{(0...64).map { |i| %({"name":"f#{i}","type":#{ref}}) }.join(",")}]}))
+    end
+    doc = schema_doc
+    types = gql_types(doc)
+    types << input.call("DeepC", deep)
+    types << input.call("DeepB", %({"kind":"INPUT_OBJECT","name":"DeepC"}))
+    types << input.call("DeepA", %({"kind":"INPUT_OBJECT","name":"DeepB"}))
+    fields = types[5]["fields"].as_a
+    fields.clear
+    24.times { |i| fields << JSON.parse(%({"name":"q#{i}","args":[{"name":"x","type":{"kind":"INPUT_OBJECT","name":"DeepA"}}],"type":{"kind":"SCALAR","name":"String"}})) }
+    doc["data"]["__schema"].as_h["mutationType"] = JSON::Any.new(nil)
+    started = Time.instant
+    result = parse_graphql(doc)
+    elapsed = Time.instant - started
+    result.skipped.should eq(24)
+    result.notes.join.should contain("generated nodes")
+    # Main spent ~200 ms per operation here (~5 s); memoized it is tens of ms in all.
+    elapsed.should be < 2.seconds
   end
 
   it "limits acyclic output expansion by depth" do

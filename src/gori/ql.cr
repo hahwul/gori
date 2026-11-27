@@ -758,6 +758,11 @@ module Gori
     # a substring, and no `^` form of it can match anything. Negation is kept (`-host:cdn` pairs
     # with `-host~(?i)^cdn$`). A value with whitespace is quoted, or the anchor would split the
     # same way the term would.
+    #
+    # The `-` is the one the SOURCE carries, not the term's effective negation: the suggestion
+    # replaces the term as typed, and a `NOT` in front of it (`NOT host:a`, `NOT (-host:a)`) stays
+    # in the query and negates the replacement too. Re-parsing the source asks the one place that
+    # decides whether a leading `-` negates (`FilterAst.word_term`), so a quoted `"-x"` stays literal.
     def self.substring_terms(query : String) : Array({String, String})
       FilterAst.terms(FilterAst.parse(query)).compact_map do |term|
         next nil unless (s = split_field(term.text)) && s[2] == :field && s[0].in?(SUBSTRING_FIELDS)
@@ -768,7 +773,8 @@ module Gori
         tail = field == "host" ? "$" : "(\\?|$)"
         pattern = "(?i)^#{value.gsub(REGEX_META) { |c| "\\#{c}" }}#{tail}"
         pattern = %("#{pattern}") if pattern.matches?(/\s/)
-        {term.source, "#{term.negate? ? "-" : ""}#{field}~#{pattern}"}
+        typed_negate = FilterAst.terms(FilterAst.parse(term.source)).first?.try(&.negate?)
+        {term.source, "#{typed_negate ? "-" : ""}#{field}~#{pattern}"}
       end
     end
 

@@ -1,4 +1,5 @@
 require "./spec_helper"
+require "./support/mcp_harness"
 
 private def capture(store, host, method, target, status = nil)
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
@@ -1791,6 +1792,29 @@ describe "Gori::QL.substring_terms" do
         store.count_matching(Gori::QL.parse(anchored)).should eq(1), anchored
       end
     end
+  end
+
+  # The suggestion replaces the term AS TYPED, so a `NOT` in front of it stays and negates the
+  # replacement too. Signing it by the effective negation double-negated: `NOT host:a` was told
+  # `-host~…`, and substituting that flipped the query.
+  it "signs the exact form by the term as typed, so substituting it under a NOT keeps the sense" do
+    {"NOT host:shop.test", "NOT -host:shop.test", "NOT (-host:shop.test)",
+     "NOT (host:shop.test OR host:x.test)", "-(host:shop.test)", "NOT NOT host:shop.test"}.each do |q|
+      named, exact = Gori::QL.substring_terms(q).first
+      fixed = q.sub(named, exact)
+      # One host per store: with no `cdn.` host to over-match, the exact form answers each flow
+      # exactly as the substring did.
+      {"shop.test", "other.test"}.each do |host|
+        with_store do |store|
+          capture(store, host, "GET", "/", 200)
+          store.flush
+          store.count_matching(Gori::QL.parse(fixed)).should eq(store.count_matching(Gori::QL.parse(q))),
+            "#{q} -> #{fixed} on #{host}"
+        end
+      end
+    end
+    Gori::QL.substring_terms("NOT host:a.test").should eq([{"host:a.test", "host~(?i)^a\\.test$"}])
+    Gori::QL.substring_terms("NOT -host:a.test").should eq([{"-host:a.test", "-host~(?i)^a\\.test$"}])
   end
 end
 

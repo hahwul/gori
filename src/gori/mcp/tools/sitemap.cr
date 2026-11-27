@@ -251,7 +251,8 @@ module Gori
         # is folded onto it (`Store::SitemapEntry#sample_id`).
         getter query_flow_ids : Array(Int64)
         getter sample_id : Int64
-        # The row's own sample while its own target carries no query string. When variants fold
+        # The sample of the first query-less target in the group (the row's own, or one `fold!`
+        # met later). When variants fold
         # onto it, that target (`/search` itself) is counted in the row but is not one of
         # `query_targets`, so this is the only id it has.
         getter bare_id : Int64?
@@ -278,6 +279,10 @@ module Gori
         # Merge another transport-identical entry whose path matches, differing only by its
         # query string. Counts SUM, statuses union, the seen window widens — the row now
         # answers for every variant, which is what the fold claims.
+        #
+        # An entry with no query string is the bare path, not a variant, whichever row of the
+        # group came first: rows sort by RAW target, so an origin-form `/search?q=1` sorts ahead
+        # of the absolute-form `http://a.test/search` a browser sends a proxy over plain HTTP.
         def fold!(e : Store::SitemapEntry, path : String) : Nil
           @target = path
           @statuses = SitemapRow.merge_statuses(@statuses, e.statuses)
@@ -286,6 +291,10 @@ module Gori
           @errors += e.errors
           @first_seen = e.first_seen if e.first_seen < @first_seen
           @last_seen = e.last_seen if e.last_seen > @last_seen
+          unless Sitemap.tag_path(e.target).includes?('?')
+            @bare_id ||= e.sample_id
+            return
+          end
           @query_targets << e.target
           @query_flow_ids << e.sample_id
         end
