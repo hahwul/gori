@@ -8,7 +8,6 @@ module Gori::Import
     MAX_BYTES       = 8 * 1024 * 1024
     MAX_TYPES       = 4096
     MAX_OPERATIONS  = 1000
-    MAX_MEMBERS     =  256
     MAX_ARGS        =   64
     MAX_NAME        =  128
     MAX_REF_DEPTH   =   16
@@ -158,6 +157,14 @@ module Gori::Import
         values
       end
 
+      # The first `n` entries of a list the generator reads only the head of. An overlong list
+      # here (a 300-value country enum, a 300-field result type) costs nothing to slice, so it
+      # is not a reason to refuse the operation; every entry read is still validated.
+      private def head(node : JSON::Any?, key : String, n : Int32) : Array(JSON::Any)
+        values = Graphql.at(node, key).try(&.as_a?) || raise Gori::Error.new("GraphQL #{key} is not an array")
+        values.first(n)
+      end
+
       private def definition(n : String, kind : String) : JSON::Any
         type = @types[n]? || raise Gori::Error.new("unknown GraphQL type #{n}")
         raise Gori::Error.new("GraphQL type #{n} is not #{kind}") unless Graphql.at(type, "kind").try(&.as_s?) == kind
@@ -216,7 +223,7 @@ module Gori::Import
           else                     JSON::Any.new(label)
           end
         when "ENUM"
-          value = name(list(type, "enumValues", MAX_MEMBERS).first?)
+          value = name(head(type, "enumValues", 1).first?)
           raise Gori::Error.new("invalid GraphQL enum value") if {"true", "false", "null"}.includes?(value)
           JSON::Any.new(value)
         when "INPUT_OBJECT"
@@ -262,8 +269,12 @@ module Gori::Import
         end
       end
 
+      # A field with more arguments than an operation may declare is skipped like one with a
+      # required argument, rather than refusing the operation that selects it.
       private def requires_arguments?(field : JSON::Any) : Bool
-        list(field, "args", MAX_ARGS).any? do |arg|
+        args = Graphql.at(field, "args").try(&.as_a?) || raise Gori::Error.new("GraphQL args is not an array")
+        return true if args.size > MAX_ARGS
+        args.any? do |arg|
           Graphql.at(Graphql.at(arg, "type"), "kind").try(&.as_s?) == "NON_NULL" &&
             Graphql.at(arg, "defaultValue").try(&.as_s?).nil?
         end
@@ -282,7 +293,7 @@ module Gori::Import
         type = definition(n, kind)
         members = ["__typename"]
         if kind == "UNION"
-          list(type, "possibleTypes", MAX_MEMBERS).first(MAX_WIDTH).each_with_index do |member, i|
+          head(type, "possibleTypes", MAX_WIDTH).each_with_index do |member, i|
             break if @left <= 0
             m = name(member)
             definition(m, "OBJECT")
@@ -290,7 +301,7 @@ module Gori::Import
             members << "... on #{m}#{selection(member, chain + [n], depth + 1, "gori_#{i}")}"
           end
         else
-          list(type, "fields", MAX_MEMBERS).first(MAX_WIDTH).each do |field|
+          head(type, "fields", MAX_WIDTH).each do |field|
             break if @left <= 0
             f = name(field)
             next if requires_arguments?(field)
