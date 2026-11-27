@@ -65,7 +65,14 @@ module Gori::Import
         Builder.endpoint(endpoint) # reject a bad endpoint even when the schema has no operations
         pairs = [] of Builder::FlowPair
         skips = Skips.new
-        subscriptions = root_fields("subscriptionType").size
+        # Subscriptions are only counted, so a dangling or malformed subscriptionType is a note,
+        # not a reason to lose every query and mutation beside it.
+        subscriptions = begin
+          root_fields("subscriptionType").size
+        rescue ex : Gori::Error
+          skips.note("ignored subscriptionType: #{ex.message}")
+          0
+        end
         note = "skipped #{subscriptions} subscription operation(s): only query/mutation HTTP templates are imported"
         skips.note(note) if subscriptions > 0
         now = Time.utc.to_unix * 1_000_000
@@ -87,7 +94,7 @@ module Gori::Import
             rescue ex : Gori::Error
               # The aggregate budget is fatal: repeatedly retrying it must not grow notes/work.
               raise ex if total > MAX_TOTAL_BYTES
-              skips.add("#{kind} field #{i + 1}", ex)
+              skips.add("#{kind} field #{field_label(field, i)}", ex)
             end
             Fiber.yield
           end
@@ -128,10 +135,21 @@ module Gori::Import
 
       private def name(node : JSON::Any?) : String
         n = Graphql.at(node, "name").try(&.as_s?)
-        unless n && n.bytesize <= MAX_NAME && n.ascii_only? && /\A[_A-Za-z][_0-9A-Za-z]*\z/.matches?(n)
+        unless n && valid_name?(n)
           raise Gori::Error.new("invalid GraphQL name (expected at most #{MAX_NAME} ASCII name bytes)")
         end
         n
+      end
+
+      private def valid_name?(n : String) : Bool
+        n.bytesize <= MAX_NAME && n.ascii_only? && /\A[_A-Za-z][_0-9A-Za-z]*\z/.matches?(n)
+      end
+
+      # A skipped operation by its field name when that name is valid (it is the one the
+      # operator searches the schema for), by its position otherwise.
+      private def field_label(field : JSON::Any, i : Int32) : String
+        n = Graphql.at(field, "name").try(&.as_s?)
+        n && valid_name?(n) ? n : (i + 1).to_s
       end
 
       private def list(node : JSON::Any?, key : String, max : Int32) : Array(JSON::Any)

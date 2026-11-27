@@ -122,6 +122,8 @@ describe Gori::Import::Graphql do
     result.flows.size.should eq(4)
     result.skipped.should eq(1)
     result.notes.join.should contain("args is not an array")
+    # Named by the field once its name is valid, so the operator can find it in the schema.
+    result.notes.join.should contain("skipped query field me: ")
   end
 
   it "rejects malformed and overlong names before they reach generated syntax" do
@@ -131,6 +133,7 @@ describe Gori::Import::Graphql do
       result = parse_graphql(doc)
       result.flows.size.should eq(4)
       result.skipped.should eq(1)
+      result.notes.join.should contain("skipped query field 1: invalid GraphQL name")
     end
   end
 
@@ -195,6 +198,15 @@ describe Gori::Import::Graphql do
     result = parse_graphql(doc)
     result.flows.size.should eq(3)
     result.notes.join.should contain("generated nodes")
+  end
+
+  it "keeps queries and mutations when the subscription root is dangling" do
+    doc = schema_doc
+    doc["data"]["__schema"].as_h["subscriptionType"] = JSON.parse(%({"name":"Missing"}))
+    result = parse_graphql(doc)
+    result.flows.size.should eq(5)
+    result.skipped.should eq(0)
+    result.notes.join.should contain("ignored subscriptionType: unknown GraphQL type Missing")
   end
 
   it "validates each input object once, not once per visit" do
