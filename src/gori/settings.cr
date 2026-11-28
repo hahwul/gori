@@ -178,6 +178,7 @@ module Gori
     def self.load : Nil
       @@loaded_raw = nil
       @@loaded_preferences.clear
+      @@mcp_features_malformed = false
       @@load_corrupt = false
       @@load_partial = false
       @@load_unreadable = false
@@ -227,6 +228,7 @@ module Gori
         @@loaded_raw = serialize
         return
       end
+      @@mcp_features_malformed = malformed_mcp_features?(root.as_h?.try(&.["mcp_features"]?))
       begin
         apply_sections(root)
         # THE absence rule (see `parse_env` for why it cannot live there): a settings file read IN

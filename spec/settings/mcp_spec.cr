@@ -393,6 +393,34 @@ describe "Settings mcp section" do
       end
     end
 
+    it "merges independent feature disables from two windows" do
+      with_mcp_home do |dir|
+        File.write(File.join(dir, "settings.json"), "{}")
+        Gori::Settings.load
+        File.write(Gori::Settings.path, %({"mcp_features":{"jwt":false,"future":false}}))
+
+        Gori::Settings.set_mcp_feature_enabled("notes", false)
+        Gori::Settings.save.should be_true
+        Gori::Settings.load
+
+        Gori::Settings.mcp_disabled_features.should eq(Set{"jwt", "notes", "future"})
+      end
+    end
+
+    it "keeps a peer disable when re-enabling the last locally disabled feature" do
+      with_mcp_home do |dir|
+        File.write(File.join(dir, "settings.json"), %({"mcp_features":{"jwt":false}}))
+        Gori::Settings.load
+        File.write(Gori::Settings.path, %({"mcp_features":{"jwt":false,"notes":false}}))
+
+        Gori::Settings.set_mcp_feature_enabled("jwt", true)
+        Gori::Settings.save.should be_true
+        Gori::Settings.load
+
+        Gori::Settings.mcp_disabled_features.should eq(Set{"notes"})
+      end
+    end
+
     it "round-trips through save/load and treats an object as the whole set" do
       with_mcp_home do
         Gori::Settings.set_mcp_feature_enabled("cookie", false)
@@ -427,6 +455,21 @@ describe "Settings mcp section" do
         Gori::Settings.reset_to_factory.should eq(Gori::Settings::ResetResult::Saved)
         Gori::Settings.mcp_disabled_features.should be_empty
         Gori::Settings.document_keys.should_not contain("mcp_features")
+      end
+    end
+
+    it "fails closed on a malformed features section and recovers on the next load" do
+      with_mcp_home do |dir|
+        path = File.join(dir, "settings.json")
+        File.write(path, %({"mcp_features":[]}))
+        Gori::Settings.load
+        disabled, warning = Gori::Settings.mcp_enforced_disabled_features
+        disabled.should eq(Gori::Settings::MCP_FEATURE_KEYS.to_set)
+        warning.not_nil!.should contain("mcp_features must be an object")
+
+        File.write(path, %({"mcp_features":{}}))
+        Gori::Settings.load
+        Gori::Settings.mcp_enforced_disabled_features.should eq({Set(String).new, nil})
       end
     end
 
