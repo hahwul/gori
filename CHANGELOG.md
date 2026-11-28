@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- MCP / TUI: Preferences › AI › MCP features has a checkbox per workbench tab, so `gori mcp` can leave out the tabs an agent does not need while capture, project, scope and operator tools stay served; its prompts say which tabs and permission groups are off (#2030, #2031).
+- MCP / TUI: Preferences › AI › MCP features has a checkbox per workbench tab, and prompts list disabled tabs and permission groups. Independent checkbox edits are preserved across windows, and an invalid feature section leaves only Core tools available (#2030, #2031).
 
 - TUI: a response with one very long grapheme cluster (an emoji ZWJ chain or a run of joiners), `\uXXXX` decoding with `u`, a selection tint on a long non-ASCII line, a WebSocket frame packed with empty SignalR records, or a Sitemap folding thousands of query paths no longer freezes gori for seconds to hours; every hidden character is still revealed (#2029).
 
@@ -44,9 +44,9 @@
 
 - History: a response edited at Intercept is marked EDIT and keeps the origin's own response in ORIGINAL RESP, on HTTP/1.1 and HTTP/2, and the Match&Replace note points at the pane that holds the bytes a rule replaced (#2026).
 
-- TUI: with follow on, a verb run from the space menu, the palette or a confirm acts on the row it was opened over; a flow captured while the card was open no longer becomes the target (History, Sequencer samples, Project activity) (#2026).
+- TUI: with follow on, a verb run from the space menu, the palette or a confirm acts on the row it was opened over in History, Sequencer samples and Project activity. History keeps the selection even when a refresh would remove it from the filtered page (#2026).
 
-- History and Issues ask before a batch verb (`^R`, `y`, `Space H`, delete, Send to…, severity/status) acts on marks that are not on the list, naming the split and offering the cursor row alone (#2026).
+- History and Issues ask before a batch verb (`^R`, `y`, `Space H`, delete, Send to…, severity/status) acts on marks that are not on the list, with a separate cursor-row action and all choices visible on narrow terminals (#2026).
 
 - TUI: a tab's own key no longer falls through to a global one when its action can't run, so Evidence `c` on an empty list, `i` on an unlinked snapshot and Authorize `i` during a run say "not available" instead of stopping capture or holding all traffic (#2026).
 
@@ -80,7 +80,7 @@
 
 - MCP: `list_history` with `count_only` refuses a query with a dropped term, since the count would be of a broader query; pass `strict:false` to count it anyway (#2019).
 
-- MCP: `ql_explain` no longer lists terms the query tools refuse as applied, and notes the exact `~` form of a `host:`, `path:` or `url:` substring term. A field whose value was typed after whitespace (`path~` then `^/login`) is named as the free-text term it became, not a broadening drop, in `ql_explain`, MCP replies, `gori run` and the History and Sitemap empty states (#2020, #2024).
+- MCP: `ql_explain` no longer lists terms the query tools refuse as applied, and notes the exact `~` form of a `host:`, `path:` or `url:` substring term, including values with literal quotes and terms inside boolean groups. A field whose value was typed after whitespace (`path~` then `^/login`) is named as the free-text term it became, not a broadening drop, in `ql_explain`, MCP replies, `gori run` and the History and Sitemap empty states (#2020, #2024).
 
 - Proxy: a response a browser frames shorter than gori did (a non-chunked `Transfer-Encoding` with `Content-Length`, or a status line such as `HTTP/1.1  204` it reads as bodyless) is framed the browser's way and the connection closes behind it, so an origin can no longer answer a request it never received. A `101` nobody asked for gets a 502, and a rule or intercept edit that changes the method closes the client connection after the response (#2018).
 
