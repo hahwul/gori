@@ -1774,7 +1774,7 @@ describe "Gori::QL.substring_terms" do
     Gori::QL.substring_terms("-host:cdn").should eq([{"-host:cdn", "-host~(?i)^cdn$"}])
     {
       "path:/login"              => "path~(?i)^/login([?]|$)",
-      "url:https://a.test/x?y=1" => "url~(?i)^https://a\\.test/x\\?y=1([?]|$)",
+      "url:https://a.test/x?y=1" => "url~(?i)^https://a\\.test/x\\?y=1\\z",
     }.each do |query, pattern|
       named, exact = Gori::QL.substring_terms(query).first
       named.should eq(query)
@@ -1795,6 +1795,25 @@ describe "Gori::QL.substring_terms" do
       {"host:demo.test", "path:/login", "url:https://demo.test/login"}.each do |q|
         anchored = Gori::QL.substring_terms(q).first[1]
         store.count_matching(Gori::QL.parse(anchored)).should eq(1), anchored
+      end
+    end
+  end
+
+  it "consumes the entire target when the suggested exact value includes a query or fragment" do
+    with_store do |store|
+      query = mcp_seed_flow(store, "a.test", "GET", "/help?q=what", 200)
+      mcp_seed_flow(store, "a.test", "GET", "/help?q=what?ever", 200)
+      mcp_seed_flow(store, "a.test", "GET", "/help?q=what\n", 200)
+      fragment = mcp_seed_flow(store, "a.test", "GET", "/help#section", 200)
+      mcp_seed_flow(store, "a.test", "GET", "/help#section?extra", 200)
+      {
+        "path:/help?q=what"               => query,
+        "url:https://a.test/help?q=what"  => query,
+        "path:/help#section"              => fragment,
+        "url:https://a.test/help#section" => fragment,
+      }.each do |q, expected|
+        suggestion = Gori::QL.substring_terms(q).first[1]
+        store.search(Gori::QL.parse(suggestion), 10).map(&.id).should eq([expected]), suggestion
       end
     end
   end

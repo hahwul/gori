@@ -758,7 +758,8 @@ module Gori
     # a substring, and no `^` form of it can match anything. Negation is kept (`-host:cdn` pairs
     # with `-host~(?i)^cdn$`). A value with whitespace is quoted, or the anchor would split the
     # same way the term would. The lexer also quotes literal quotes and closing parentheses
-    # so the replacement works inside a boolean group.
+    # so the replacement works inside a boolean group. A target that includes a query or
+    # fragment anchors at the end of that value, where any further question mark is data.
     #
     # The `-` is the one the SOURCE carries, not the term's effective negation: the suggestion
     # replaces the term as typed, and a `NOT` in front of it (`NOT host:a`, `NOT (-host:a)`) stays
@@ -771,7 +772,11 @@ module Gori
         next nil if value.empty?
         next nil if field == "path" && !value.starts_with?('/')
         next nil if field == "url" && !value.matches?(%r{\A[a-z][a-z0-9+.-]*://}i)
-        tail = field == "host" ? "$" : "([?]|$)"
+        tail = case
+               when field == "host"        then "$"
+               when value.matches?(/[?#]/) then "\\z"
+               else                             "([?]|$)"
+               end
         pattern = "(?i)^#{value.gsub(REGEX_META) { |c| "\\#{c}" }}#{tail}"
         typed_negate = FilterAst.terms(FilterAst.parse(term.source)).first?.try(&.negate?)
         {term.source, "#{typed_negate ? "-" : ""}#{field}~#{FilterAst.quote(pattern)}"}
