@@ -418,6 +418,23 @@ describe "ConfirmDialog third button" do
     dlg.handle_key(cd_key(Termisu::Input::Key::Enter)).should eq(:cancel)
   end
 
+  it "keeps all three labeled buttons visible and clickable at the minimum terminal width" do
+    dlg = alt_dialog(danger: true)
+    area = Rect.new(2, 3, 36, 14) # the body of a 40-column terminal
+    backend = MemoryBackend.new(40, 20)
+    dlg.render(Screen.new(backend), area)
+    box = dlg.overlay_box(area)
+    confirm, cancel = dlg.button_rects(box)
+    alt = dlg.alt_rect(box).not_nil!
+
+    { {confirm, "[y] all 1", :commit}, {alt, "[c] cursor row", :commit}, {cancel, "[n] cancel", :cancel} }.each do |(rect, label, result)|
+      rect.x.should be > box.x
+      rect.right.should be < box.right
+      backend.row(rect.y)[rect.x, rect.w].should contain(label)
+      dlg.handle_click(area, rect.x, rect.y).should eq(result)
+    end
+  end
+
   it "commits the alt answer on a click on its button" do
     dlg = alt_dialog
     area = Rect.new(0, 0, 60, 20)
