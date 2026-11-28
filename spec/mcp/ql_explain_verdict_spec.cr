@@ -173,7 +173,7 @@ describe "MCP ql_explain verdict" do
       n.size.should eq(1)
       n[0].should contain("SUBSTRING")
       n[0].should contain("`host~(?i)^demo\\.test$`")
-      explain(store, "path:/a url:x")["notes"][0].as_s.should contain("`path~(?i)^/a(\\?|$)`")
+      explain(store, "path:/a url:x")["notes"][0].as_s.should contain(%(`path~"(?i)^/a([?]|$)"`))
       explain(store, "host~^demo\\.test$").as_h.has_key?("notes").should be_false
       explain(store, "status:200 path:login").as_h.has_key?("notes").should be_false
     end

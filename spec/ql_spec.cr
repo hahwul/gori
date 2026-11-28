@@ -1771,10 +1771,15 @@ end
 describe "Gori::QL.substring_terms" do
   it "spells a whole host/path/url value as its case-insensitive anchored regex, negation kept" do
     Gori::QL.substring_terms("host:demo.test").should eq([{"host:demo.test", "host~(?i)^demo\\.test$"}])
-    Gori::QL.substring_terms("path:/login").should eq([{"path:/login", "path~(?i)^/login(\\?|$)"}])
     Gori::QL.substring_terms("-host:cdn").should eq([{"-host:cdn", "-host~(?i)^cdn$"}])
-    Gori::QL.substring_terms("url:https://a.test/x?y=1").should eq(
-      [{"url:https://a.test/x?y=1", "url~(?i)^https://a\\.test/x\\?y=1(\\?|$)"}])
+    {
+      "path:/login"              => "path~(?i)^/login([?]|$)",
+      "url:https://a.test/x?y=1" => "url~(?i)^https://a\\.test/x\\?y=1([?]|$)",
+    }.each do |query, pattern|
+      named, exact = Gori::QL.substring_terms(query).first
+      named.should eq(query)
+      Gori::FilterAst.terms(Gori::FilterAst.parse(exact)).map(&.text).should eq([pattern])
+    end
   end
 
   it "names no regex term, no fragment, no other field and no empty value" do
@@ -1790,6 +1795,19 @@ describe "Gori::QL.substring_terms" do
       {"host:demo.test", "path:/login", "url:https://demo.test/login"}.each do |q|
         anchored = Gori::QL.substring_terms(q).first[1]
         store.count_matching(Gori::QL.parse(anchored)).should eq(1), anchored
+      end
+    end
+  end
+
+  it "keeps suggested patterns intact inside groups and with literal quotes" do
+    with_store do |store|
+      match = mcp_seed_flow(store, "a.test", "GET", %(/a"b?next=1), 200)
+      plain = mcp_seed_flow(store, "a.test", "GET", "/ab?next=1", 200)
+      {"path:\"/a\\\"b\"" => match, "(path:/ab OR status:404)" => plain, "(url:https://a.test/ab )" => plain}.each do |q, expected|
+        named, exact = Gori::QL.substring_terms(q).first
+        fixed = q.sub(named, exact)
+        Gori::QL.invalid_regex_terms(fixed).should be_empty, fixed
+        store.search(Gori::QL.parse(fixed), 10).map(&.id).should eq([expected]), fixed
       end
     end
   end
