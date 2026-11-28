@@ -80,7 +80,7 @@
 
 - MCP: `list_history` with `count_only` refuses a query with a dropped term, since the count would be of a broader query; pass `strict:false` to count it anyway (#2019).
 
-- MCP: `ql_explain` no longer lists terms the query tools refuse as applied, and notes the exact `~` form of a `host:`, `path:` or `url:` substring term, including values with literal quotes and terms inside boolean groups. A field whose value was typed after whitespace (`path~` then `^/login`) is named as the free-text term it became, not a broadening drop, in `ql_explain`, MCP replies, `gori run` and the History and Sitemap empty states (#2020, #2024).
+- MCP: `ql_explain` no longer lists terms the query tools refuse as applied, and notes the exact `~` form of a `host:`, `path:` or `url:` substring term, including quoted values and terms inside boolean groups. The suggested exact form matches the complete target when it includes a query or fragment, and a field value typed after whitespace (`path~` then `^/login`) is reported as free text in `ql_explain`, MCP replies, `gori run` and the History and Sitemap empty states (#2020, #2024).
 
 - Proxy: a response a browser frames shorter than gori did (a non-chunked `Transfer-Encoding` with `Content-Length`, or a status line such as `HTTP/1.1  204` it reads as bodyless) is framed the browser's way and the connection closes behind it, so an origin can no longer answer a request it never received. A `101` nobody asked for gets a 502, and a rule or intercept edit that changes the method closes the client connection after the response (#2018).
 
@@ -118,7 +118,7 @@
 
 - Probe: the request-smuggling rule adds the 0.CL-by-`Expect: 100-continue` desync (plain and obfuscated) as a High timing lead, sent as a complete POST so a conformant server answers fast and only a front-end/back-end split hangs; still off by default and behind unsafe (#1945).
 
-- Import GraphQL introspection JSON (`data.__schema` or top-level `__schema`) into unsent POST templates, one per query or mutation, with typed variables and bounded selections from the TUI, CLI and MCP; subscriptions are omitted with a count, and a skipped operation is named in the import notes (#1948, #2031).
+- Import GraphQL introspection JSON (`data.__schema` or top-level `__schema`) into unsent POST templates, one per query or mutation, with bounded selections and typed variables, including nullable recursive and OneOf inputs. Import works from the TUI, CLI and MCP and reports skipped operations and subscriptions (#1948, #2031).
 
 - GraphQL upload previews find the multipart boundary among adjacent media type parameters (#1968)
 

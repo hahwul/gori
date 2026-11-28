@@ -38,13 +38,20 @@ module Gori::Import
     end
 
     private class Generator
-      # One INPUT_OBJECT's fields as `input_sample` reads them, validated once per schema: the
-      # valid prefix, then the refusal that ended it (if any), which `input_sample` raises after
-      # sampling that prefix, exactly where an inline walk would. Without it every visit re-walked
-      # each field's 16-level wrapper chain, and a cut nullable field charges no node, so one
-      # operation could do ~650k name checks before the budget threw it away (P6).
-      private record InputField, name : String, ref : JSON::Any?, leaf : String, nullable : Bool
-      private record InputShape, fields : Array(InputField), error : String?
+      # Cache the fields or validation error. A recursive input can visit the
+      # same type many times within one operation (P6).
+      private record InputField, name : String, ref : JSON::Any?, nullable : Bool
+      private record InputShape, fields : Array(InputField), one_of : Bool, error : String?
+
+      # The outermost input object whose field may stop this expansion. A cycle
+      # starts at the repeated type. The depth limit can be handled at any level.
+      private class InputExpansionLimit < Gori::Error
+        getter cut_from : Int32
+
+        def initialize(name : String, @cut_from : Int32)
+          super("GraphQL required input cycle/depth at #{name}")
+        end
+      end
 
       @types = {} of String => JSON::Any
       @inputs = {} of String => InputShape
@@ -122,7 +129,7 @@ module Gori::Import
           ref = Graphql.at(arg, "type")
           declarations << "$#{a}: #{type_ref(ref)}"
           input_type!(ref)
-          variables[a] = sample(ref, a, [] of String, 0)
+          variables[a] = sample(ref, a, [] of String)
           "#{a}: $#{a}"
         end
         params = arguments.empty? ? "" : "(#{arguments.join(", ")})"
@@ -208,10 +215,10 @@ module Gori::Import
         raise Gori::Error.new("GraphQL argument is not an input type") unless {"SCALAR", "ENUM", "INPUT_OBJECT"}.includes?(kind)
       end
 
-      private def sample(ref : JSON::Any?, label : String, chain : Array(String), depth : Int32) : JSON::Any
+      private def sample(ref : JSON::Any?, label : String, chain : Array(String)) : JSON::Any
         charge
         kind = Graphql.at(ref, "kind").try(&.as_s?)
-        return sample(Graphql.at(ref, "ofType"), label, chain, depth) if kind == "NON_NULL"
+        return sample(Graphql.at(ref, "ofType"), label, chain) if kind == "NON_NULL"
         return JSON::Any.new([] of JSON::Any) if kind == "LIST"
         n = name(ref)
         type = definition(n, kind || "")
@@ -227,29 +234,54 @@ module Gori::Import
           raise Gori::Error.new("invalid GraphQL enum value") if {"true", "false", "null"}.includes?(value)
           JSON::Any.new(value)
         when "INPUT_OBJECT"
-          input_sample(type, n, chain, depth)
+          input_sample(type, n, chain)
         else
           raise Gori::Error.new("GraphQL argument #{label} is not an input type")
         end
       end
 
-      private def input_sample(type : JSON::Any, n : String, chain : Array(String), depth : Int32) : JSON::Any
-        raise Gori::Error.new("GraphQL required input cycle/depth at #{n}") if chain.includes?(n) || depth >= MAX_DEPTH
+      private def input_sample(type : JSON::Any, n : String, chain : Array(String)) : JSON::Any
+        if repeated_at = chain.index(n)
+          raise InputExpansionLimit.new(n, repeated_at)
+        end
+        raise InputExpansionLimit.new(n, 0) if chain.size >= MAX_DEPTH
         shape = input_shape(type, n)
+        shape.error.try { |why| raise Gori::Error.new(why) }
+        parents = chain + [n]
+        return one_of_sample(shape, parents) if shape.one_of
+
         values = {} of String => JSON::Any
         shape.fields.each do |field|
-          # Nullable recursion can stop at null; non-null recursion cannot produce a valid seed.
-          cut = chain.includes?(field.leaf) || field.leaf == n || depth + 1 >= MAX_DEPTH
-          values[field.name] = field.nullable && cut ? JSON::Any.new(nil) : sample(field.ref, field.name, chain + [n], depth + 1)
+          values[field.name] = input_field_sample(field, parents)
         end
-        shape.error.try { |why| raise Gori::Error.new(why) }
         JSON::Any.new(values)
+      end
+
+      private def input_field_sample(field : InputField, parents : Array(String)) : JSON::Any
+        sample(field.ref, field.name, parents)
+      rescue ex : InputExpansionLimit
+        # A nullable link on the cycle can end it, including one earlier in the
+        # chain. An outer nullable field cannot make an all-required cycle valid.
+        raise ex unless field.nullable && parents.size > ex.cut_from
+        JSON::Any.new(nil)
+      end
+
+      private def one_of_sample(shape : InputShape, parents : Array(String)) : JSON::Any
+        blocked = nil.as(InputExpansionLimit?)
+        shape.fields.each do |field|
+          return JSON::Any.new({field.name => sample(field.ref, field.name, parents)})
+        rescue ex : InputExpansionLimit
+          raise ex unless parents.size > ex.cut_from
+          blocked = ex if !blocked || ex.cut_from < blocked.cut_from
+        end
+        raise(blocked || Gori::Error.new("GraphQL OneOf input has no fields"))
       end
 
       private def input_shape(type : JSON::Any, n : String) : InputShape
         @inputs[n] ||= begin
           fields = [] of InputField
           seen = Set(String).new
+          one_of = Graphql.at(type, "isOneOf").try(&.as_bool?) == true
           error = nil
           begin
             list(type, "inputFields", MAX_ARGS).each do |field|
@@ -258,14 +290,17 @@ module Gori::Import
               ref = Graphql.at(field, "type")
               input_type!(ref)
               nullable = Graphql.at(ref, "kind").try(&.as_s?) != "NON_NULL"
-              fields << InputField.new(f, ref, name(named(ref)), nullable)
+              if one_of && (!nullable || !Graphql.at(field, "defaultValue").try(&.raw).nil?)
+                raise Gori::Error.new("GraphQL OneOf input field #{f} must be nullable without a default")
+              end
+              fields << InputField.new(f, ref, nullable)
             end
           rescue ex : Gori::Error
             error = ex.message || "invalid GraphQL input object #{n}"
           end
           # Each shape is built once, but one operation can reach many new ones.
           Fiber.yield
-          InputShape.new(fields, error)
+          InputShape.new(fields, one_of, error)
         end
       end
 

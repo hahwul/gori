@@ -176,6 +176,90 @@ describe Gori::Import::Graphql do
     parse_graphql(doc).notes.join.should contain("type reference exceeds")
   end
 
+  it "ends a recursive input at the nullable link or an empty list" do
+    doc = schema_doc
+    types = gql_types(doc)
+    filter = types.find! { |type| type["name"].as_s == "Filter" }
+    filter["inputFields"].as_a << JSON.parse(%({"name":"link","type":{"kind":"INPUT_OBJECT","name":"Link"}}))
+    filter["inputFields"].as_a << JSON.parse(%({"name":"optionalChildren","type":{"kind":"LIST","ofType":{"kind":"INPUT_OBJECT","name":"Filter"}}}))
+    types << JSON.parse(<<-JSON)
+      {"name":"Link","kind":"INPUT_OBJECT","inputFields":[
+        {"name":"parent","type":{"kind":"NON_NULL","ofType":{"kind":"INPUT_OBJECT","name":"Filter"}}}
+      ]}
+      JSON
+
+    result = parse_graphql(doc)
+    result.skipped.should eq(0)
+    envelope(result.flows.first)["variables"]["filter"]["link"].raw.should be_nil
+    envelope(result.flows.first)["variables"]["filter"]["optionalChildren"].as_a.should be_empty
+  end
+
+  it "reports an invalid reference before shortening a nullable cycle" do
+    doc = schema_doc
+    types = gql_types(doc)
+    filter = types.find! { |type| type["name"].as_s == "Filter" }
+    filter["inputFields"].as_a << JSON.parse(%({"name":"link","type":{"kind":"INPUT_OBJECT","name":"Link"}}))
+    types << JSON.parse(<<-JSON)
+      {"name":"Link","kind":"INPUT_OBJECT","inputFields":[
+        {"name":"parent","type":{"kind":"NON_NULL","ofType":{"kind":"INPUT_OBJECT","name":"Filter"}}},
+        {"name":"unknown","type":{"kind":"INPUT_OBJECT","name":"Missing"}}
+      ]}
+      JSON
+
+    result = parse_graphql(doc)
+    result.skipped.should eq(2)
+    result.notes.join.should contain("unknown GraphQL type Missing")
+  end
+
+  it "still refuses an all-required cycle behind an unrelated nullable field" do
+    doc = schema_doc
+    types = gql_types(doc)
+    filter = types.find! { |type| type["name"].as_s == "Filter" }
+    filter["inputFields"].as_a << JSON.parse(%({"name":"link","type":{"kind":"INPUT_OBJECT","name":"Link"}}))
+    types << JSON.parse(<<-JSON)
+      {"name":"Link","kind":"INPUT_OBJECT","inputFields":[
+        {"name":"next","type":{"kind":"NON_NULL","ofType":{"kind":"INPUT_OBJECT","name":"Link"}}}
+      ]}
+      JSON
+
+    result = parse_graphql(doc)
+    result.skipped.should eq(2)
+    result.notes.join.should contain("GraphQL required input cycle/depth at Link")
+  end
+
+  it "provides one non-null field for a OneOf input, trying past a recursive choice" do
+    doc = schema_doc
+    types = gql_types(doc)
+    types[5]["fields"][0]["args"].as_a << JSON.parse(%({"name":"choice","type":{"kind":"INPUT_OBJECT","name":"Choice"}}))
+    types << JSON.parse(<<-JSON)
+      {"name":"Choice","kind":"INPUT_OBJECT","isOneOf":true,"inputFields":[
+        {"name":"again","type":{"kind":"INPUT_OBJECT","name":"Choice"}},
+        {"name":"label","type":{"kind":"SCALAR","name":"String"}},
+        {"name":"count","type":{"kind":"SCALAR","name":"Int"}}
+      ]}
+      JSON
+
+    result = parse_graphql(doc)
+    result.skipped.should eq(0)
+    envelope(result.flows.first)["variables"]["choice"].should eq(JSON.parse(%({"label":"label"})))
+  end
+
+  it "names a malformed OneOf field even when an earlier choice could be sampled" do
+    doc = schema_doc
+    types = gql_types(doc)
+    types[5]["fields"][0]["args"].as_a << JSON.parse(%({"name":"choice","type":{"kind":"INPUT_OBJECT","name":"Choice"}}))
+    types << JSON.parse(<<-JSON)
+      {"name":"Choice","kind":"INPUT_OBJECT","isOneOf":true,"inputFields":[
+        {"name":"label","type":{"kind":"SCALAR","name":"String"}},
+        {"name":"count","type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"Int"}}}
+      ]}
+      JSON
+
+    result = parse_graphql(doc)
+    result.skipped.should eq(1)
+    result.notes.join.should contain("GraphQL OneOf input field count must be nullable without a default")
+  end
+
   it "bounds argument/input width and generated work per operation" do
     doc = schema_doc
     args = gql_types(doc)[5]["fields"].as_a[0]["args"].as_a
