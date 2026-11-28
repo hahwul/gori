@@ -274,6 +274,14 @@ module Gori::Settings
   # writes nothing. An unknown key with `false` (from a newer gori) is kept and written back.
   class_property mcp_disabled_features : Set(String) = Set(String).new
 
+  # Every default is represented by an absent key, even when other features are off.
+  # Merge checkbox edits independently so two windows can disable different toolsets.
+  PREFERENCE_DEFAULTS["mcp_features"] = {} of String => JSON::Any
+
+  # Only a full settings load records this. A profile import with a malformed section
+  # still leaves the current preferences alone.
+  @@mcp_features_malformed = false
+
   def self.mcp_feature(key : String) : McpFeature?
     MCP_FEATURES.find(&.key.==(key))
   end
@@ -293,21 +301,32 @@ module Gori::Settings
     self.mcp_disabled_features = disabled
   end
 
-  # The disabled feature keys `gori mcp` enforces. Mirrors `mcp_enforced_denials`: when the last
-  # `load` left sections at defaults (`load_degraded?`), re-read `"mcp_features"` on its own from
-  # the raw file, and fail closed (all optional tab features off, core tools still served) when
-  # even that is impossible.
+  # Latch the disabled feature keys at startup. If the load was degraded, recover the
+  # section from disk in isolation. A present section must be an object in either path.
   def self.mcp_enforced_disabled_features : {Set(String), String?}
-    return {mcp_disabled_features.dup, nil} unless load_degraded?
+    unless load_degraded?
+      return invalid_mcp_features("mcp_features must be an object") if @@mcp_features_malformed
+      return {mcp_disabled_features.dup, nil}
+    end
     root = begin
       JSON.parse(File.read(path))
     rescue
       nil
     end
     if root && (h = root.as_h?)
-      return {mcp_disabled_features_from(h["mcp_features"]?) || Set(String).new, nil}
+      node = h["mcp_features"]?
+      return invalid_mcp_features("mcp_features must be an object") if malformed_mcp_features?(node)
+      return {mcp_disabled_features_from(node) || Set(String).new, nil}
     end
-    {MCP_FEATURE_KEYS.to_set, "#{path} could not be read, so every optional MCP feature is off until it is fixed"}
+    invalid_mcp_features("settings could not be read")
+  end
+
+  private def self.malformed_mcp_features?(node : JSON::Any?) : Bool
+    !node.nil? && node.as_h?.nil?
+  end
+
+  private def self.invalid_mcp_features(reason : String) : {Set(String), String}
+    {MCP_FEATURE_KEYS.to_set, "#{path}: #{reason}, so every optional MCP feature is off until it is fixed"}
   end
 
   private def self.mcp_disabled_features_from(node : JSON::Any?) : Set(String)?

@@ -12,8 +12,12 @@ private alias Key = Termisu::Input::Key
 private class PasteWizard < SetupWizard
   getter? finished = false
 
-  def initialize(term : Termisu)
+  def initialize(term : Termisu, *, port : Int32 = 0)
     super(term)
+    # The ordinary wizard specs should reach Appearance regardless of local listeners.
+    @ip = "127.0.0.1"
+    @port = port.to_s
+    @cursor = @ip.size
     @backend = MemoryBackend.new(120, 40).as(Backend)
   end
 
@@ -101,10 +105,7 @@ describe "a bracketed paste at the setup wizard" do
   it "never hides an armed busy-port warning" do
     server = TCPServer.new("127.0.0.1", 0)
     port = server.local_address.port
-    host_was, port_was = Gori::Settings.bind_host, Gori::Settings.bind_port
     begin
-      Gori::Settings.bind_host = "127.0.0.1"
-      Gori::Settings.bind_port = port
       ref = [] of PasteWizard
       status = nil.as(String?)
       # ↵ ↵ pressed: to the port, then the busy warning that the next ↵ would answer.
@@ -112,14 +113,12 @@ describe "a bracketed paste at the setup wizard" do
       steps += pasted("\r")
       steps << -> { status = ref[0].status; nil }
       ScriptedTerminal.load(steps, WIZARD_EXIT)
-      wizard = PasteWizard.new(ScriptedTerminal.allocate)
+      wizard = PasteWizard.new(ScriptedTerminal.allocate, port: port)
       ref << wizard
       wizard.run
 
       status.should eq("port #{port} busy · ↵ keep")
     ensure
-      Gori::Settings.bind_host = host_was
-      Gori::Settings.bind_port = port_was
       server.close
     end
   end

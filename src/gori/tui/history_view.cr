@@ -157,7 +157,8 @@ module Gori::Tui
     getter? searching_shown : Bool = false
     @searching_since : Time::Instant? = nil
     getter search_error : String? = nil
-    @applied_question : {String, SavedViews::View?}? = nil # what the rows on screen answer — see `apply_search`
+    @applied_search : SearchIdentity? = nil # the search that produced the rows on screen
+    @filter_deferred = false
     @host_suggest_dirty = false
     @host_suggest_refresh_at = Time.instant
     @host_suggest_pending = false
@@ -908,6 +909,7 @@ module Gori::Tui
       @suggest_store = store
       @search_error = nil
       @filter_dirty = false
+      @filter_deferred = false
       @inc_prepared = nil
       @inc_updated.clear
       @inc_full = false
@@ -980,22 +982,28 @@ module Gori::Tui
         @inc_base = nil
         return
       end
+      prev_id = selected_id
+      identity = @inc_prepared.try(&.[2]) || search_identity
+      return if defer_held_search?(result.rows, prev_id, identity)
       @inc_base, @inc_prepared = @inc_prepared, nil
       @inc_capped = result.rows.size >= PAGE
-      prev_id = selected_id
       @rows = result.rows
       @rows_newest_first = Settings.history_newest_first?
       @query_note = result.note
       @rows.reverse! unless newest_first?
       @no_flows = result.no_flows
       @view_note = result.view_note
+      apply_search_selection(prev_id, identity)
+    end
+
+    private def apply_search_selection(prev_id : Int64?, identity : SearchIdentity) : Nil
       prev_selected = @selected
       # A NEW question (the bar or the view changed) whose answer dropped the selected flow
       # starts at the newest row: the old row INDEX means nothing in a different result. A
       # live refresh of the same question keeps clamping it, which holds the highlight still.
-      asked = {@query, active_view}
-      new_question = !@applied_question.nil? && asked != @applied_question # not the first load
-      @applied_question = asked
+      previous = @applied_search
+      new_question = previous && {identity[0], identity[3]} != {previous[0], previous[3]}
+      @applied_search = identity
       kept = prev_id ? index_of(prev_id) : nil
       # A card over the list holds a following cursor on its flow too (`cursor_hold`): a
       # filtered list under capture reloads here rather than in `on_event`.
@@ -1023,6 +1031,19 @@ module Gori::Tui
       # (`on_event`: `@selected += 1; @scroll += 1`). Without this a filtered list under
       # capture crept the highlight down one row per matching flow until it hit the edge.
       @scroll = {@scroll + (@selected - prev_selected), 0}.max
+    end
+
+    # A menu resolves its target from the cursor when the action runs. If a live refresh
+    # would remove that row, keep the current page until the menu closes. The next refresh
+    # must run the full search because the displayed page did not absorb the batch.
+    private def defer_held_search?(rows : Array(Store::FlowRow), selected : Int64?, identity : SearchIdentity) : Bool
+      return false unless selected && @cursor_hold.call && @applied_search == identity
+      return false if rows.any? { |row| row.id == selected }
+
+      @inc_prepared = nil
+      @inc_full = true
+      @filter_dirty = true
+      @filter_deferred = true
     end
 
     # A short note explaining a filter that matches nothing because it is INVALID (vs a
@@ -1208,6 +1229,7 @@ module Gori::Tui
     # Returns true if it actually reloaded (so the caller can mark the frame dirty).
     def flush_filter(store : Store) : Bool
       return false unless @filter_dirty && !@searching
+      return false if @filter_deferred && @cursor_hold.call
       now = Time.instant
       if (last = @last_filter_flush) && now - last < FILTER_FLUSH_INTERVAL
         return false
@@ -1811,6 +1833,7 @@ module Gori::Tui
       @preedit = ""
       popup_close
       @filter_dirty = true
+      @filter_deferred = false
     end
 
     # --- the opt-in completion dropdown (`↓`) ---------------------------------

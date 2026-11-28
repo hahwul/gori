@@ -219,8 +219,7 @@ module Gori::Tui
     def message_fits?(area : Rect) : Bool
       box = overlay_box(area)
       return false if box.empty?
-      room = {box.h - (CHROME_H - 1), 0}.max
-      display_lines(area).size <= room
+      display_lines(area).size <= message_room(box)
     end
 
     # Centered card over `area` (the body rect). The card sizes to the widest of
@@ -228,12 +227,13 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       @drawn = false
       @can_confirm = false
+      @message_room = 0
       box = overlay_box(area)
       return if box.empty?
       @drawn = true
       Frame.card(screen, box, @heading, border: Theme.border_focus)
       lines = display_lines(area)
-      @message_room = {box.h - (CHROME_H - 1), 0}.max
+      @message_room = message_room(box)
       @scroll_max = {lines.size - @message_room, 0}.max
       @scroll = Viewport.clamp_scroll(@scroll, @message_room, lines.size)
       @can_confirm = @message_room > 0 && @scroll == @scroll_max
@@ -249,15 +249,18 @@ module Gori::Tui
       # Empty when render would decline to draw (same guard as render): a click then
       # falls through dismiss_zone?/!contains? and closes instead of acting on a
       # phantom box (e.g. firing the destructive button on an undrawn modal).
-      return Rect.new(area.x, area.y, 0, 0) if area.w < 18 || area.h < MIN_H
+      return Rect.new(area.x, area.y, 0, 0) if area.w < 18
+      w_max = {area.w - 2, MAX_WIDTH}.min
+      extra = extra_button_rows(w_max)
+      return Rect.new(area.x, area.y, 0, 0) if area.h < MIN_H + extra
       lines = display_lines(area)
-      content = {longest(lines), Screen.draw_width(@heading) + 2, button_row_width}.max
+      content = {longest(lines), Screen.draw_width(@heading) + 2, button_row_width(buttons)}.max
       # The roomy height, capped by what there IS. The card used to demand its full height and
       # draw nothing at all below it — on an 80×12 terminal (body 6 rows) `⇧X Clear history`
       # armed a modal that showed no heading, no count and no warning, and `y` still wiped the
       # project's whole History. Short cards scroll the disclosure instead.
-      h = {lines.size + CHROME_H, area.h}.min
-      w = (content + TEXT_INSET).clamp(16, {area.w - 2, MAX_WIDTH}.min)
+      h = {lines.size + CHROME_H + extra, area.h}.min
+      w = (content + TEXT_INSET).clamp(16, w_max)
       area.center(w, h)
     end
 
@@ -297,80 +300,84 @@ module Gori::Tui
       "[#{key}] #{label}"
     end
 
-    private def button_row_width : Int32
-      w = btn_width(confirm_text) + 4 + btn_width(cancel_text)
-      (t = alt_text) ? w + btn_width(t) + 4 : w
+    BUTTON_GAP = 4
+
+    private def buttons : Array({Symbol, String})
+      labels = [{:confirm, ConfirmDialog.button_text(@confirm_label, CONFIRM_KEY)}]
+      if alt = @alt_label
+        labels << {:alt, ConfirmDialog.button_text(alt, ALT_KEY)}
+      end
+      labels << {:cancel, ConfirmDialog.button_text(@cancel_label, CANCEL_KEY)}
     end
 
-    private def alt_text : String?
-      @alt_label.try { |l| ConfirmDialog.button_text(l, ALT_KEY) }
-    end
-
-    private def confirm_text : String
-      ConfirmDialog.button_text(@confirm_label, CONFIRM_KEY)
-    end
-
-    private def cancel_text : String
-      ConfirmDialog.button_text(@cancel_label, CANCEL_KEY)
+    private def button_row_width(labels : Array({Symbol, String})) : Int32
+      labels.sum { |(_, text)| btn_width(text) } + BUTTON_GAP * (labels.size - 1)
     end
 
     private def btn_width(label : String) : Int32
       Screen.draw_width(label) + 2
     end
 
-    private def render_buttons(screen : Screen, box : Rect) : Nil
-      confirm_rect, cancel_rect = button_rects(box)
-      render_button(screen, confirm_rect.x, confirm_rect.y, confirm_text, @selected == :confirm, @danger)
-      if (r = alt_rect(box)) && (t = alt_text)
-        render_button(screen, r.x, r.y, t, @selected == :alt, false)
+    # Keep the full choice labels on narrow terminals by giving each its own row.
+    # The message loses only the rows the buttons need and stays scrollable.
+    private def extra_button_rows(width : Int32, labels = buttons) : Int32
+      button_row_width(labels) > width - 2 ? labels.size - 1 : 0
+    end
+
+    private def message_room(box : Rect) : Int32
+      {box.h - (CHROME_H - 1) - extra_button_rows(box.w), 0}.max
+    end
+
+    # Rendering and hit testing share the same bounded button rectangles.
+    private def button_layout(box : Rect) : Array({Symbol, String, Rect})
+      return [] of {Symbol, String, Rect} if box.empty?
+      labels = buttons
+      extra = extra_button_rows(box.w, labels)
+      y = box.bottom - 3 - extra
+      x = box.x + (box.w - button_row_width(labels)) // 2
+      labels.map do |(action, text)|
+        width = {btn_width(text), box.w - 2}.min
+        if extra > 0
+          rect = Rect.new(box.x + (box.w - width) // 2, y, width, 1)
+          y += 1
+        else
+          rect = Rect.new(x, y, width, 1)
+          x += width + BUTTON_GAP
+        end
+        {action, text, rect}
       end
-      render_button(screen, cancel_rect.x, cancel_rect.y, cancel_text, @selected == :cancel, false)
     end
 
-    # Inverts render_buttons' x/y placement: the {confirm, cancel} button rects
-    # in `box`. Shared by render and button_at so the click target = the drawn
-    # button. Each button is " label " wide; a 4-cell gap sits between them.
     def button_rects(box : Rect) : {Rect, Rect}
-      x = box.x + (box.w - button_row_width) // 2
-      y = box.bottom - 3
-      confirm = Rect.new(x, y, btn_width(confirm_text), 1)
-      left = (a = alt_rect(box)) ? a.right : confirm.right
-      cancel = Rect.new(left + 4, y, btn_width(cancel_text), 1)
-      {confirm, cancel}
+      layout = button_layout(box)
+      empty = Rect.new(box.x, box.y, 0, 0)
+      {layout.first?.try(&.[2]) || empty, layout.last?.try(&.[2]) || empty}
     end
 
-    # The third button, drawn between the two — nil on a two-button card.
     def alt_rect(box : Rect) : Rect?
-      return nil unless t = alt_text
-      x = box.x + (box.w - button_row_width) // 2
-      Rect.new(x + btn_width(confirm_text) + 4, box.bottom - 3, btn_width(t), 1)
+      button_layout(box).find { |(action, _, _)| action == :alt }.try(&.[2])
     end
 
-    # Maps a click to :confirm/:alt/:cancel when it lands on that button, else nil
-    # (gaps between/around buttons return nil).
     def button_at(box : Rect, mx : Int32, my : Int32) : Symbol?
-      confirm_rect, cancel_rect = button_rects(box)
-      return :confirm if confirm_rect.contains?(mx, my)
-      return :alt if alt_rect(box).try(&.contains?(mx, my))
-      return :cancel if cancel_rect.contains?(mx, my)
-      nil
+      button_layout(box).find { |(_, _, rect)| rect.contains?(mx, my) }.try(&.[0])
     end
 
-    # Draws ` label ` at (x, y); selected fills a band (RED for the danger button,
-    # accent otherwise), at rest the danger label stays red text. Returns the x
-    # just past the button so the next one can be placed.
-    private def render_button(screen : Screen, x : Int32, y : Int32, label : String,
-                              selected : Bool, danger : Bool) : Int32
+    private def render_buttons(screen : Screen, box : Rect) : Nil
+      button_layout(box).each do |(action, label, rect)|
+        render_button(screen, rect, label, @selected == action, @danger && action == :confirm)
+      end
+    end
+
+    private def render_button(screen : Screen, rect : Rect, label : String,
+                              selected : Bool, danger : Bool) : Nil
       text = " #{label} "
-      tw = Screen.draw_width(text)
       if selected
         bg = danger ? Theme.red : Theme.accent_bg
-        screen.fill(Rect.new(x, y, tw, 1), bg)
-        screen.text(x, y, text, Theme.text_bright, bg, attr: Attribute::Bold)
+        screen.fill(rect, bg)
+        screen.text(rect.x, rect.y, text, Theme.text_bright, bg, attr: Attribute::Bold, width: rect.w)
       else
-        screen.text(x, y, text, danger ? Theme.red : Theme.muted, Theme.panel)
+        screen.text(rect.x, rect.y, text, danger ? Theme.red : Theme.muted, Theme.panel, width: rect.w)
       end
-      x + tw
     end
   end
 end

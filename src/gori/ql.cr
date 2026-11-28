@@ -749,7 +749,7 @@ module Gori
     SUBSTRING_FIELDS = %w[host path url]
 
     # Each `host:`/`path:`/`url:` term in `query` that names a WHOLE value, with the `~` term that
-    # matches exactly that value: `host~(?i)^shop\.test$`, `path~(?i)^/login(\?|$)` (the path
+    # matches exactly that value: `host~(?i)^shop\.test$`, `path~"(?i)^/login([?]|$)"` (the path
     # column carries the query string, and the url one the whole target). `(?i)` because `:` is
     # case-insensitive and `~` is not, so the exact form must not also start comparing case.
     #
@@ -757,7 +757,8 @@ module Gori
     # `scheme://…`, so `path:login` or `url:a.test/x` is a FRAGMENT, a search that is meant to be
     # a substring, and no `^` form of it can match anything. Negation is kept (`-host:cdn` pairs
     # with `-host~(?i)^cdn$`). A value with whitespace is quoted, or the anchor would split the
-    # same way the term would.
+    # same way the term would. The lexer also quotes literal quotes and closing parentheses
+    # so the replacement works inside a boolean group.
     #
     # The `-` is the one the SOURCE carries, not the term's effective negation: the suggestion
     # replaces the term as typed, and a `NOT` in front of it (`NOT host:a`, `NOT (-host:a)`) stays
@@ -770,11 +771,10 @@ module Gori
         next nil if value.empty?
         next nil if field == "path" && !value.starts_with?('/')
         next nil if field == "url" && !value.matches?(%r{\A[a-z][a-z0-9+.-]*://}i)
-        tail = field == "host" ? "$" : "(\\?|$)"
+        tail = field == "host" ? "$" : "([?]|$)"
         pattern = "(?i)^#{value.gsub(REGEX_META) { |c| "\\#{c}" }}#{tail}"
-        pattern = %("#{pattern}") if pattern.matches?(/\s/)
         typed_negate = FilterAst.terms(FilterAst.parse(term.source)).first?.try(&.negate?)
-        {term.source, "#{typed_negate ? "-" : ""}#{field}~#{pattern}"}
+        {term.source, "#{typed_negate ? "-" : ""}#{field}~#{FilterAst.quote(pattern)}"}
       end
     end
 

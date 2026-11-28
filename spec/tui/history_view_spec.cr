@@ -1069,6 +1069,87 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "preserves the menu target when new matches push it off the filtered page" do
+    with_store do |store|
+      selected = add_flow(store, "GET", "/match/original")
+      view = HistoryView.new
+      held = false
+      view.cursor_hold = -> { held }
+      view.set_query("path:/match")
+      view.reload(store)
+      view.selected_id.should eq(selected)
+
+      held = true
+      HistoryView::PAGE.times do |i|
+        id = add_flow(store, "GET", "/match/#{i}")
+        view.on_event(Gori::Store::FlowEvent.new(id, :inserted), store)
+      end
+      sleep HistoryView::FILTER_FLUSH_INTERVAL
+      view.flush_filter(store).should be_true
+      view.selected_id.should eq(selected)
+
+      sleep HistoryView::FILTER_FLUSH_INTERVAL
+      view.flush_filter(store).should be_false
+      held = false
+      view.flush_filter(store).should be_true
+      view.selected_id.should eq(store.max_flow_id)
+      view.rows.size.should eq(HistoryView::PAGE)
+    end
+  end
+
+  it "preserves the menu target when a captured response removes it from the filter" do
+    with_store do |store|
+      other = add_flow(store, "GET", "/other", 200)
+      selected = add_flow(store, "GET", "/selected", 200)
+      view = HistoryView.new
+      held = false
+      view.cursor_hold = -> { held }
+      view.set_query("status:200")
+      view.reload(store)
+      view.selected_id.should eq(selected)
+
+      held = true
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: selected, status: 201, head: "HTTP/1.1 201 Created\r\n\r\n".to_slice))
+      view.on_event(Gori::Store::FlowEvent.new(selected, :updated), store)
+      sleep HistoryView::FILTER_FLUSH_INTERVAL
+      view.flush_filter(store).should be_true
+      view.selected_id.should eq(selected)
+
+      held = false
+      sleep HistoryView::FILTER_FLUSH_INTERVAL
+      view.flush_filter(store).should be_true
+      view.selected_id.should eq(other)
+    end
+  end
+
+  it "preserves the held selection on a retry after a failed filtered refresh" do
+    with_store do |store|
+      other = add_flow(store, "GET", "/other", 200)
+      selected = add_flow(store, "GET", "/selected", 200)
+      view = HistoryView.new
+      held = false
+      view.cursor_hold = -> { held }
+      view.set_query("status:200")
+      view.reload(store)
+
+      held = true
+      view.prepare_search(store)
+      view.apply_search(HistoryView::SearchResult.new([] of Gori::Store::FlowRow,
+        nil, false, nil, error: "temporary search failure"))
+      view.selected_id.should eq(selected)
+
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: selected, status: 201, head: "HTTP/1.1 201 Created\r\n\r\n".to_slice))
+      view.reload(store)
+      view.selected_id.should eq(selected)
+
+      held = false
+      view.reload(store)
+      view.selected_id.should eq(other)
+    end
+  end
+
   it "reports at_top? (drives the ↑-at-top → tab-bar focus flow)" do
     with_store do |store|
       3.times { |i| add_flow(store, "GET", "/#{i}", 200) }
